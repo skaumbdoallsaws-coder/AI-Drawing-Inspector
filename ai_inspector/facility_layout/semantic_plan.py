@@ -26,6 +26,7 @@ from .planner import (
 
 SEMANTIC_FACILITY_PLAN_VERSION = 1
 SEMANTIC_FACILITY_PREVIEW_TOOL = "build_facility_layout_preview"
+SEMANTIC_FACILITY_MOVE_TOOL = "preview_facility_move"
 MAXIMUM_SEMANTIC_ASSET_ITEMS = 500
 MAXIMUM_SEMANTIC_RECORDS = 1000
 
@@ -1243,6 +1244,7 @@ def _facility_layout_semantic_plan_schema() -> dict[str, Any]:
                     },
                     "preserveManual": {"type": "boolean", "const": True},
                     "preserveLocked": {"type": "boolean", "const": True},
+                    "replaceExistingContents": {"type": "boolean"},
                     "primaryFlow": nullable({
                         "type": "string",
                         "maxLength": 120,
@@ -1281,6 +1283,70 @@ def facility_layout_preview_tool_spec() -> dict[str, Any]:
                     ),
                     **_facility_layout_semantic_plan_schema(),
                 }
+            },
+        },
+    }
+
+
+def facility_layout_move_tool_spec() -> dict[str, Any]:
+    """Return the bounded Sage tool for one exact draft translation.
+
+    The model never supplies a destination coordinate or rotation. It names a
+    cardinal world direction and distance, while the browser resolves current
+    placement positions and the existing authoritative preview endpoint
+    validates the resulting unsaved transaction.
+    """
+
+    return {
+        "name": SEMANTIC_FACILITY_MOVE_TOOL,
+        "description": (
+            "Translate current Facility Layout placement selection or exact "
+            "resolved placement IDs by one cardinal world-space distance. "
+            "Use only for a direct request such as 'move the selected machine "
+            "10 ft east'. Direction maps to facility axes: east/west are "
+            "+X/-X, north/south are +Z/-Z, and up/down are +Y/-Y. Never "
+            "supply coordinates, screen pixels, camera actions, or rotation. "
+            "Rotation is preserved by construction. The result is a "
+            "server-validated unsaved draft edit with Undo available; it does "
+            "not save or approve the layout."
+        ),
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "direction",
+                "distance",
+                "unit",
+                "preserve_rotation",
+            ],
+            "properties": {
+                "use_current_selection": {
+                    "type": "boolean",
+                    "description": (
+                        "True when the user explicitly refers to the current "
+                        "selection."
+                    ),
+                },
+                "placement_ids": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "uniqueItems": True,
+                    "items": {"type": "string", "maxLength": 128},
+                    "description": (
+                        "Exact IDs returned by resolve_entities. Omit when "
+                        "using the current selection."
+                    ),
+                },
+                "direction": {
+                    "enum": ["east", "west", "north", "south", "up", "down"],
+                },
+                "distance": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1000000,
+                },
+                "unit": {"enum": ["mm", "cm", "m", "in", "ft"]},
+                "preserve_rotation": {"const": True},
             },
         },
     }
@@ -2066,6 +2132,26 @@ def validate_semantic_facility_plan(
                 "Semantic planning must preserve locked positions.",
             )
         )
+    replace_existing = layout_hints.get("replaceExistingContents", False)
+    if not isinstance(replace_existing, bool):
+        findings.append(
+            _finding(
+                "error",
+                "semantic_replacement_policy_invalid",
+                "layoutHints.replaceExistingContents must be boolean.",
+            )
+        )
+    elif replace_existing and objective != "place_and_cleanup":
+        findings.append(
+            _finding(
+                "error",
+                "semantic_replacement_objective_invalid",
+                (
+                    "Replacing existing contents requires the explicit "
+                    "place_and_cleanup objective."
+                ),
+            )
+        )
     if state.get("staleDependencies"):
         findings.append(
             _finding(
@@ -2134,6 +2220,178 @@ _QUANTITY_WORDS = {
     "nine": 9,
     "ten": 10,
 }
+
+_COMPLETE_FACTORY_MAXIMUM_INSTANCES = 120
+_COMPLETE_FACTORY_ZONE_TEMPLATES = (
+    {
+        "zoneRequestId": "zone-receiving-raw-material",
+        "zoneType": "receiving",
+        "label": "Receiving + Raw Material",
+        "stage": 0,
+        "selectors": (
+            {
+                "categories": ("storage",),
+                "preferredNames": ("pallet rack", "rack", "storage"),
+                "quantity": 6,
+            },
+            {
+                "categories": ("material handling",),
+                "preferredNames": ("forklift", "pallet truck", "cart"),
+                "quantity": 2,
+            },
+            {
+                "categories": ("storage",),
+                "preferredNames": ("pallet", "shipping container", "box"),
+                "quantity": 4,
+            },
+        ),
+    },
+    {
+        "zoneRequestId": "zone-machining-hall",
+        "zoneType": "workcell",
+        "label": "Machining Hall",
+        "stage": 1,
+        "selectors": (
+            {
+                "categories": ("machines",),
+                "preferredNames": ("cnc milling", "cnc", "milling"),
+                "quantity": 6,
+            },
+            {
+                "categories": ("machines",),
+                "preferredNames": ("lathe", "turning", "edm"),
+                "quantity": 4,
+            },
+            {
+                "categories": ("machines",),
+                "preferredNames": ("band saw", "grinder", "saw"),
+                "quantity": 3,
+            },
+            {
+                "categories": ("workstations",),
+                "preferredNames": ("workbench", "workstation"),
+                "quantity": 3,
+            },
+        ),
+    },
+    {
+        "zoneRequestId": "zone-automation-robot-cells",
+        "zoneType": "workcell",
+        "label": "Automation + Robot Cells",
+        "stage": 2,
+        "selectors": (
+            {
+                "categories": ("automation",),
+                "fallbackCategories": ("machines",),
+                "preferredNames": ("robot", "cnc"),
+                "quantity": 6,
+            },
+            {
+                "categories": ("conveyors",),
+                "fallbackCategories": ("material handling",),
+                "preferredNames": ("conveyor", "forklift", "cart"),
+                "quantity": 4,
+            },
+            {
+                "categories": ("safety",),
+                "fallbackCategories": ("storage",),
+                "preferredNames": ("machine guard", "guard", "rack"),
+                "quantity": 6,
+            },
+            {
+                "categories": ("people",),
+                "fallbackCategories": ("workstations",),
+                "preferredNames": ("operator", "workbench"),
+                "quantity": 4,
+            },
+        ),
+    },
+    {
+        "zoneRequestId": "zone-material-handling-maintenance",
+        # A Facility Layout service zone is an exclusion envelope, not an
+        # equipment-bearing maintenance department. Use an operational
+        # workcell so the planned support assets can legally occupy it.
+        "zoneType": "workcell",
+        "label": "Material Handling + Maintenance",
+        "stage": 3,
+        "selectors": (
+            {
+                "categories": ("material handling",),
+                "preferredNames": ("forklift", "pallet truck", "cart"),
+                "quantity": 4,
+            },
+            {
+                "categories": ("storage",),
+                "preferredNames": ("tooling", "cabinet", "shelves", "rack"),
+                "quantity": 4,
+            },
+            {
+                "categories": ("workstations",),
+                "preferredNames": ("workbench", "workstation"),
+                "quantity": 3,
+            },
+        ),
+    },
+    {
+        "zoneRequestId": "zone-assembly-kitting",
+        "zoneType": "workcell",
+        "label": "Assembly + Kitting",
+        "stage": 4,
+        "selectors": (
+            {
+                "categories": ("workstations",),
+                "preferredNames": ("assembly workbench", "workbench"),
+                "quantity": 8,
+            },
+            {
+                "categories": ("people",),
+                "fallbackCategories": ("storage",),
+                "preferredNames": ("operator", "cabinet", "rack"),
+                "quantity": 6,
+            },
+            {
+                "categories": ("storage",),
+                "preferredNames": ("tooling", "drawer", "cabinet", "rack"),
+                "quantity": 4,
+            },
+            {
+                "categories": ("material handling",),
+                "preferredNames": ("mobile cart", "pallet truck", "forklift"),
+                "quantity": 3,
+            },
+        ),
+    },
+    {
+        "zoneRequestId": "zone-inspection-packing-shipping",
+        "zoneType": "inspection",
+        "label": "Inspection + Packing + Finished Goods",
+        "stage": 5,
+        "selectors": (
+            {
+                "categories": ("laboratory",),
+                "fallbackCategories": ("workstations",),
+                "preferredNames": ("laboratory workstation", "workbench"),
+                "quantity": 4,
+            },
+            {
+                "categories": ("packaging",),
+                "fallbackCategories": ("machines",),
+                "preferredNames": ("filler", "packaging", "cnc"),
+                "quantity": 3,
+            },
+            {
+                "categories": ("storage",),
+                "preferredNames": ("pallet rack", "shipping container", "rack"),
+                "quantity": 6,
+            },
+            {
+                "categories": ("material handling",),
+                "preferredNames": ("pallet truck", "forklift", "cart"),
+                "quantity": 2,
+            },
+        ),
+    },
+)
 
 
 def _intent_tokens(value: Any) -> set[str]:
@@ -2273,6 +2531,459 @@ def _resource_role(asset: Mapping[str, Any]) -> str:
     return "machine"
 
 
+def _requests_complete_blank_factory(
+    raw_plan: Mapping[str, Any],
+    user_message: str,
+    state: TrustedFacilityContext,
+) -> bool:
+    """Return whether the user explicitly requested a full factory rebuild."""
+
+    # Unsaved browser geometry is intentionally not a trusted planning source.
+    # An explicit from-scratch request therefore compiles to a replacement
+    # ghost transaction against the saved revision, regardless of saved content.
+    has_saved_contents = any(
+        state.get(key)
+        for key in ("placements", "zones", "floorMarkings", "routes")
+    )
+    intent = " ".join(
+        value
+        for value in (
+            _text(raw_plan.get("intent"), 240),
+            _text(raw_plan.get("label"), 160),
+            _text(raw_plan.get("objective"), 80),
+            _text(user_message, 1000),
+        )
+        if value
+    ).lower()
+    tokens = _intent_tokens(intent)
+    creation_requested = bool(
+        tokens & {"build", "create", "design", "generate", "populate"}
+    )
+    facility_scope = bool(tokens & {"facility", "factory", "plant"})
+    complete_scope = bool(tokens & {"complete", "full"})
+    from_scratch = "from scratch" in intent or bool(
+        tokens & {"blank", "empty"}
+    )
+    return (
+        creation_requested
+        and facility_scope
+        and (from_scratch or (complete_scope and not has_saved_contents))
+    )
+
+
+def _factory_asset_rank(
+    asset: Mapping[str, Any],
+    selector: Mapping[str, Any],
+) -> tuple[int, int, int, str] | None:
+    category = str(asset.get("category") or "").strip().lower()
+    primary = tuple(selector.get("categories", ()))
+    fallback = tuple(selector.get("fallbackCategories", ()))
+    if category in primary:
+        category_tier = 0
+        category_rank = primary.index(category)
+    elif category in fallback:
+        category_tier = 1
+        category_rank = fallback.index(category)
+    else:
+        return None
+    name_tokens = _intent_tokens(asset.get("displayName"))
+    preferred = tuple(selector.get("preferredNames", ()))
+    phrase_rank = len(preferred)
+    for index, phrase in enumerate(preferred):
+        phrase_tokens = _intent_tokens(phrase)
+        if phrase_tokens and phrase_tokens <= name_tokens:
+            phrase_rank = index
+            break
+    return (
+        category_tier,
+        category_rank,
+        phrase_rank,
+        str(asset.get("assetId") or ""),
+    )
+
+
+def _select_factory_asset(
+    assets: Sequence[Mapping[str, Any]],
+    selector: Mapping[str, Any],
+    *,
+    used_asset_ids: set[str],
+) -> Mapping[str, Any] | None:
+    ranked = []
+    for asset in assets:
+        asset_id = str(asset.get("assetId") or "")
+        if not asset_id or asset_id in used_asset_ids:
+            continue
+        rank = _factory_asset_rank(asset, selector)
+        if rank is not None:
+            ranked.append((rank, asset))
+    if not ranked:
+        return None
+    return min(ranked, key=lambda item: item[0])[1]
+
+
+def _canonical_complete_factory_plan(
+    raw_plan: Mapping[str, Any],
+    *,
+    user_message: str,
+    state: TrustedFacilityContext,
+) -> dict[str, Any]:
+    """Build one bounded, catalog-driven starter factory semantic plan."""
+
+    assets = sorted(
+        (
+            item
+            for item in state.get("assets", [])
+            if isinstance(item, Mapping)
+            and item.get("planningReady") is True
+        ),
+        key=lambda item: (
+            str(item.get("category") or ""),
+            str(item.get("displayName") or ""),
+            str(item.get("assetId") or ""),
+        ),
+    )
+    if not assets:
+        raise SemanticFacilityPlanError(
+            "trusted_planning_assets_unavailable",
+            "No trusted planning-ready Facility Layout assets are available.",
+        )
+
+    identity = state["identity"]
+    dependencies = state["dependencyRevisions"]
+    assumption_id = "assumption-generic-factory-program"
+    selected_assets = []
+    required_zones = []
+    total_instances = 0
+    for template in _COMPLETE_FACTORY_ZONE_TEMPLATES:
+        member_ids = []
+        used_asset_ids: set[str] = set()
+        for selector_index, selector in enumerate(template["selectors"]):
+            asset = _select_factory_asset(
+                assets,
+                selector,
+                used_asset_ids=used_asset_ids,
+            )
+            if asset is None:
+                continue
+            quantity = int(selector["quantity"])
+            if (
+                total_instances + quantity
+                > _COMPLETE_FACTORY_MAXIMUM_INSTANCES
+            ):
+                continue
+            asset_id = str(asset["assetId"])
+            digest = hashlib.sha256(
+                asset_id.encode("utf-8")
+            ).hexdigest()[:10]
+            item_id = (
+                f"factory-resource-{int(template['stage']) + 1}-"
+                f"{selector_index + 1}-{digest}"
+            )
+            member_ids.append(item_id)
+            used_asset_ids.add(asset_id)
+            total_instances += quantity
+            selected_assets.append(
+                {
+                    "itemId": item_id,
+                    "assetId": asset_id,
+                    "assetDefinitionRevision": asset[
+                        "assetDefinitionRevision"
+                    ],
+                    "quantity": quantity,
+                    "resourceRole": _resource_role(asset),
+                    "stage": int(template["stage"]),
+                    "targetZoneRef": template["zoneRequestId"],
+                    "existingPlacementId": None,
+                    "knowledgeStatus": "inferred",
+                    "evidenceIds": [],
+                    "assumptionIds": [assumption_id],
+                }
+            )
+        if not member_ids:
+            continue
+        required_zones.append(
+            {
+                "zoneRequestId": template["zoneRequestId"],
+                "zoneType": template["zoneType"],
+                "label": template["label"],
+                "existingZoneId": None,
+                "memberItemIds": member_ids,
+                "paddingClass": "generous",
+                "knowledgeStatus": "inferred",
+                "evidenceIds": [],
+                "assumptionIds": [assumption_id],
+            }
+        )
+
+    if not selected_assets or not required_zones:
+        raise SemanticFacilityPlanError(
+            "factory_program_assets_unavailable",
+            "The trusted catalog cannot support a starter factory program.",
+        )
+    if total_instances > _COMPLETE_FACTORY_MAXIMUM_INSTANCES:
+        raise SemanticFacilityPlanError(
+            "factory_program_limit_exceeded",
+            "The starter factory program exceeded its bounded instance limit.",
+        )
+
+    plan_seed = {
+        "siteId": identity["siteId"],
+        "layoutId": identity["layoutId"],
+        "revision": identity["revision"],
+        "message": _text(user_message, 1000),
+        "zones": [
+            {
+                "zoneRequestId": item["zoneRequestId"],
+                "memberItemIds": item["memberItemIds"],
+            }
+            for item in required_zones
+        ],
+        "assets": [
+            {
+                "itemId": item["itemId"],
+                "assetId": item["assetId"],
+                "assetDefinitionRevision": item[
+                    "assetDefinitionRevision"
+                ],
+                "quantity": item["quantity"],
+            }
+            for item in selected_assets
+        ],
+    }
+    plan_id = (
+        "facility-plan-"
+        + semantic_facility_plan_fingerprint(plan_seed)[:20]
+    )
+    zone_ids = [item["zoneRequestId"] for item in required_zones]
+    relationships = [
+        {
+            "relationshipId": f"factory-flow-{index + 1}",
+            "relationshipType": "upstream_of",
+            "sourceRef": zone_ids[index],
+            "targetRef": zone_ids[index + 1],
+            "knowledgeStatus": "inferred",
+            "evidenceIds": [],
+            "assumptionIds": [assumption_id],
+        }
+        for index in range(len(zone_ids) - 1)
+    ]
+    subject_refs = [
+        item["itemId"] for item in selected_assets
+    ] + zone_ids
+    return {
+        "schemaVersion": SEMANTIC_FACILITY_PLAN_VERSION,
+        "planId": plan_id,
+        "scope": {
+            "siteId": identity["siteId"],
+            "layoutId": identity["layoutId"],
+            "label": _text(
+                raw_plan.get("intent")
+                or raw_plan.get("objective")
+                or user_message,
+                160,
+            ),
+        },
+        "objective": "place_and_cleanup",
+        "sourceRevisions": {
+            "layout": identity["revision"],
+            "shell": dependencies["shellRevision"],
+            "policy": dependencies["policySetRevision"],
+        },
+        "requiredCapabilities": [],
+        "selectedAssets": selected_assets,
+        "requiredZones": required_zones,
+        "placementRelationships": relationships,
+        "processBindings": [],
+        "flows": [],
+        "evidence": [],
+        "assumptions": [
+            {
+                "assumptionId": assumption_id,
+                "text": (
+                    "This is a generic departmental factory program derived "
+                    "from the available trusted asset catalog; operating "
+                    "constraints require engineering review."
+                ),
+                "subjectRefs": subject_refs,
+            }
+        ],
+        "unresolvedItems": [
+            {
+                "unresolvedId": "unresolved-floor-marking-review",
+                "code": "detailed_floor_markings_require_review",
+                "message": (
+                    "The deterministic preview provides inferred macro aisle "
+                    "markings; detailed departmental markings, labels, and "
+                    "paint standards still require engineering review."
+                ),
+                "subjectRefs": zone_ids,
+            },
+            {
+                "unresolvedId": "unresolved-safety-clearance-authority",
+                "code": "safety_clearances_require_review",
+                "message": (
+                    "Authoritative machine, guarding, pedestrian, and "
+                    "maintenance clearances require engineering review."
+                ),
+                "subjectRefs": zone_ids,
+            },
+            {
+                "unresolvedId": "unresolved-material-flow-endpoints",
+                "code": "material_flow_endpoints_require_review",
+                "message": (
+                    "Material-flow endpoints and route widths require "
+                    "authoritative process and vehicle evidence."
+                ),
+                "subjectRefs": zone_ids,
+            },
+        ],
+        "alternatives": [
+            {
+                "alternativeId": "alternative-flow",
+                "strategy": "flow_lanes",
+                "label": "Flow lanes",
+            },
+            {
+                "alternativeId": "alternative-balanced",
+                "strategy": "balanced_grid",
+                "label": "Balanced",
+            },
+        ],
+        "layoutHints": {
+            "density": "spacious",
+            "preserveManual": True,
+            "preserveLocked": True,
+            "replaceExistingContents": True,
+            "primaryFlow": "west_to_east_department_sequence",
+        },
+    }
+
+
+def _requests_existing_layout_cleanup(
+    raw_plan: Mapping[str, Any],
+    user_message: str,
+) -> bool:
+    objective = _text(raw_plan.get("objective"), 80).lower()
+    if objective in {"cleanup_layout", "place_and_cleanup"}:
+        return True
+    intent_text = " ".join(
+        value
+        for value in (
+            _text(raw_plan.get("intent"), 240),
+            _text(raw_plan.get("label"), 160),
+            _text(user_message, 1000),
+        )
+        if value
+    )
+    tokens = _intent_tokens(intent_text)
+    cleanup_actions = {
+        "cleanup",
+        "improve",
+        "optimize",
+        "rearrange",
+        "review",
+        "validate",
+    }
+    existing_scope = {
+        "cell",
+        "current",
+        "department",
+        "existing",
+        "facility",
+        "layout",
+        "workcell",
+    }
+    return bool(tokens & cleanup_actions) and bool(tokens & existing_scope)
+
+
+def _requests_asset_addition(user_message: str) -> bool:
+    """Return whether the user explicitly requested new layout resources."""
+
+    tokens = _intent_tokens(user_message)
+    return bool(
+        tokens
+        & {
+            "add",
+            "build",
+            "create",
+            "fill",
+            "include",
+            "insert",
+            "introduce",
+            "place",
+            "populate",
+        }
+    )
+
+
+def _canonical_cleanup_plan(
+    raw_plan: Mapping[str, Any],
+    *,
+    user_message: str,
+    state: TrustedFacilityContext,
+) -> dict[str, Any]:
+    identity = state["identity"]
+    dependencies = state["dependencyRevisions"]
+    plan_seed = {
+        "siteId": identity["siteId"],
+        "layoutId": identity["layoutId"],
+        "revision": identity["revision"],
+        "message": _text(user_message, 1000),
+        "objective": "cleanup_layout",
+    }
+    plan_id = (
+        "facility-plan-"
+        + semantic_facility_plan_fingerprint(plan_seed)[:20]
+    )
+    return {
+        "schemaVersion": SEMANTIC_FACILITY_PLAN_VERSION,
+        "planId": plan_id,
+        "scope": {
+            "siteId": identity["siteId"],
+            "layoutId": identity["layoutId"],
+            "label": _text(
+                raw_plan.get("intent")
+                or raw_plan.get("objective")
+                or user_message,
+                160,
+            ),
+        },
+        "objective": "cleanup_layout",
+        "sourceRevisions": {
+            "layout": identity["revision"],
+            "shell": dependencies["shellRevision"],
+            "policy": dependencies["policySetRevision"],
+        },
+        "requiredCapabilities": [],
+        "selectedAssets": [],
+        "requiredZones": [],
+        "placementRelationships": [],
+        "processBindings": [],
+        "flows": [],
+        "evidence": [],
+        "assumptions": [],
+        "unresolvedItems": [],
+        "alternatives": [
+            {
+                "alternativeId": "alternative-balanced",
+                "strategy": "balanced_grid",
+                "label": "Balanced",
+            },
+            {
+                "alternativeId": "alternative-flow",
+                "strategy": "flow_lanes",
+                "label": "Flow lanes",
+            },
+        ],
+        "layoutHints": {
+            "density": "balanced",
+            "preserveManual": True,
+            "preserveLocked": True,
+            "primaryFlow": None,
+        },
+    }
+
+
 def _canonical_plan_from_facility_intent(
     raw_plan: Mapping[str, Any],
     *,
@@ -2306,6 +3017,10 @@ def _canonical_plan_from_facility_intent(
         )
     requests = _intent_asset_phrases(raw_plan)
     message_tokens = _intent_tokens(user_message)
+    cleanup_requested = _requests_existing_layout_cleanup(
+        raw_plan,
+        user_message,
+    )
     resolved: dict[tuple[str, str], dict[str, Any]] = {}
 
     def resolve_phrase(
@@ -2334,6 +3049,18 @@ def _canonical_plan_from_facility_intent(
             if score[:2] == best
         ]
         if len(tied) != 1:
+            phrase_identity = tokens - _GENERIC_ASSET_WORDS
+            exact_display_matches = [
+                asset
+                for asset in tied
+                if (
+                    _intent_tokens(asset.get("displayName"))
+                    - _GENERIC_ASSET_WORDS
+                ) == phrase_identity
+            ]
+            if len(exact_display_matches) == 1:
+                tied = exact_display_matches
+        if len(tied) != 1:
             raise SemanticFacilityPlanError(
                 "semantic_asset_intent_ambiguous",
                 f"Resource intent '{_text(phrase)}' matches multiple assets.",
@@ -2360,19 +3087,30 @@ def _canonical_plan_from_facility_intent(
             request["quantity"],
             require_distinctive=True,
         )
-    for asset in assets:
-        score = _asset_match_score(message_tokens, asset)
-        if score[0] < 1 or score[1] < 2:
-            continue
-        key = (
-            str(asset["assetId"]),
-            str(asset["assetDefinitionRevision"]),
+    # Explicit model resource intent is the bounded selection authority. A
+    # second free-text catalog sweep would add every similarly named variant
+    # (for example, all workbench sizes) and can turn one requested resource
+    # into hundreds of unintended instances.
+    if not requests:
+        for asset in assets:
+            score = _asset_match_score(message_tokens, asset)
+            if score[0] < 1 or score[1] < 2:
+                continue
+            key = (
+                str(asset["assetId"]),
+                str(asset["assetDefinitionRevision"]),
+            )
+            if key not in resolved:
+                resolved[key] = {
+                    "asset": asset,
+                    "quantity": _quantity_near_asset(user_message, asset),
+                }
+    if not resolved and cleanup_requested:
+        return _canonical_cleanup_plan(
+            raw_plan,
+            user_message=user_message,
+            state=state,
         )
-        if key not in resolved:
-            resolved[key] = {
-                "asset": asset,
-                "quantity": _quantity_near_asset(user_message, asset),
-            }
     if not resolved:
         raise SemanticFacilityPlanError(
             "semantic_asset_intent_unresolved",
@@ -2464,7 +3202,11 @@ def _canonical_plan_from_facility_intent(
                 160,
             ),
         },
-        "objective": "place_asset_set",
+        "objective": (
+            "place_and_cleanup"
+            if cleanup_requested
+            else "place_asset_set"
+        ),
         "sourceRevisions": {
             "layout": identity["revision"],
             "shell": dependencies["shellRevision"],
@@ -2521,6 +3263,11 @@ def _canonical_plan_from_facility_intent(
             "primaryFlow": "inferred_resource_sequence",
         },
     }
+    if cleanup_requested and not any(
+        state.get(key)
+        for key in ("placements", "zones", "floorMarkings", "routes")
+    ):
+        plan["layoutHints"]["replaceExistingContents"] = True
     return plan
 
 
@@ -2533,23 +3280,59 @@ def canonicalize_semantic_facility_plan(
 ) -> tuple[dict[str, Any], bool]:
     """Return an exact valid Plan v1 and whether intent repair was required."""
 
+    if _requests_complete_blank_factory(raw_plan, user_message, state):
+        forbidden: list[dict[str, Any]] = []
+        _reject_forbidden_fields(raw_plan, "$.modelIntent", forbidden)
+        if forbidden:
+            raise SemanticFacilityPlanError(
+                forbidden[0]["code"],
+                forbidden[0]["message"],
+                findings=forbidden,
+            )
+        canonical = _canonical_complete_factory_plan(
+            raw_plan,
+            user_message=user_message,
+            state=state,
+        )
+        validated = validate_semantic_facility_plan(
+            canonical,
+            state=state,
+            evidence=evidence,
+        )
+        return validated["plan"], True
+
+    cleanup_only = (
+        _requests_existing_layout_cleanup(raw_plan, user_message)
+        and not _requests_asset_addition(user_message)
+    )
     try:
         validated = validate_semantic_facility_plan(
             raw_plan,
             state=state,
             evidence=evidence,
         )
-        return validated["plan"], False
     except SemanticFacilityPlanError as original:
         if original.code in {
             "semantic_plan_contains_raw_geometry",
             "semantic_plan_contains_approval_claim",
         }:
             raise
-    canonical = _canonical_plan_from_facility_intent(
-        raw_plan,
-        user_message=user_message,
-        state=state,
+    else:
+        if not cleanup_only:
+            return validated["plan"], False
+
+    canonical = (
+        _canonical_cleanup_plan(
+            raw_plan,
+            user_message=user_message,
+            state=state,
+        )
+        if cleanup_only
+        else _canonical_plan_from_facility_intent(
+            raw_plan,
+            user_message=user_message,
+            state=state,
+        )
     )
     validated = validate_semantic_facility_plan(
         canonical,
@@ -2662,9 +3445,19 @@ def compile_semantic_facility_plan(
                     item.get("label") or item["zoneRequestId"],
                     120,
                 ),
-                "allowedAssetCategories": [
-                    item for item in categories if item
-                ],
+                # Asset catalogs currently expose some category display
+                # labels (for example, "Material Handling") where the
+                # Facility Layout schema requires stable identifiers. A
+                # partial allowlist would reject the omitted member assets,
+                # and inventing slugs would not match their trusted category.
+                # Keep such generated zones unrestricted until the catalog
+                # publishes canonical category IDs.
+                "allowedAssetCategories": (
+                    categories
+                    if categories
+                    and all(_identifier(category) for category in categories)
+                    else []
+                ),
                 "evidence": sorted(
                     {
                         evidence_id
@@ -2769,6 +3562,14 @@ def compile_semantic_facility_plan(
         strategy = alternative["strategy"]
         if strategy not in strategies:
             strategies.append(strategy)
+    cleanup = {
+        "enabled": normalized["objective"]
+        in {"cleanup_layout", "place_and_cleanup"},
+        "moveAuto": True,
+        "movableManualPlacementIds": [],
+    }
+    if normalized["layoutHints"].get("replaceExistingContents") is True:
+        cleanup["replaceExistingContents"] = True
     planner_request = {
         "schemaVersion": FACILITY_LAYOUT_REQUEST_SCHEMA_VERSION,
         "requestId": f"request-p9-{plan_hash[:24]}",
@@ -2779,12 +3580,7 @@ def compile_semantic_facility_plan(
         "spacingMeters": _DENSITY_SPACING[
             normalized["layoutHints"]["density"]
         ],
-        "cleanup": {
-            "enabled": normalized["objective"]
-            in {"cleanup_layout", "place_and_cleanup"},
-            "moveAuto": True,
-            "movableManualPlacementIds": [],
-        },
+        "cleanup": cleanup,
         "zoneSizing": zone_sizing,
         "routes": routes,
         "sourceRevisions": source_revisions,
@@ -2867,11 +3663,13 @@ def compile_semantic_facility_plan(
 __all__ = [
     "EVIDENCE_STATUSES",
     "SEMANTIC_FACILITY_PLAN_VERSION",
+    "SEMANTIC_FACILITY_MOVE_TOOL",
     "SEMANTIC_FACILITY_PREVIEW_TOOL",
     "SemanticFacilityPlanError",
     "canonicalize_semantic_facility_plan",
     "compile_semantic_facility_plan",
     "facility_layout_preview_tool_spec",
+    "facility_layout_move_tool_spec",
     "semantic_facility_plan_fingerprint",
     "validate_semantic_facility_plan",
 ]

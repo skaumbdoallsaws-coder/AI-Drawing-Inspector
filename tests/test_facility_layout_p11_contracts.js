@@ -27,8 +27,9 @@ check('facility workspace exposes the static ARIA contract', () => {
     [
         "Facility layout workspace",
         "role: 'toolbar'",
-        "role: 'tree'",
-        "role: 'treeitem'",
+        "role: 'dialog'",
+        "role: 'list'",
+        "role: 'listitem'",
         "role: 'tablist'",
         "role: 'tabpanel'",
         "'aria-live': 'polite'",
@@ -120,6 +121,59 @@ check('V2 authoring does not depend on the legacy semantic fixture', () => {
     ));
 });
 
+check('integrated Facility Layout editing commands live in the main ribbon', () => {
+    const index = source('static/index.html');
+    assert.ok(index.includes('FACILITY_LAYOUT_RIBBON_CONFIG'));
+    assert.ok(index.includes('function _trainRenderFacilityLayoutRibbon'));
+    assert.ok(index.includes('externalCommandSurface: true'));
+    assert.ok(index.includes('20260807-viewport-recording'));
+    [
+        'Selection',
+        'Create',
+        'Arrange',
+        'History',
+        'Layout',
+        'Document',
+        'rectangle-zone',
+        'polygon-zone',
+        'auto-arrange',
+        'data-facility-ribbon-command',
+        'onCommandStateChange',
+    ].forEach(token => assert.ok(index.includes(token), token));
+
+    const css = source('static/facility_layout_workspace.css');
+    assert.ok(css.includes('#trainFacilityLayoutAuthoring > .ip-flw-toolbar'));
+    assert.ok(css.includes('--ip-flw-toolbar-height: 0px'));
+    assert.ok(css.includes(
+        'grid-template-rows: minmax(0, 1fr) var(--ip-flw-status-height)'
+    ));
+
+    const iconRoot = path.join(
+        ROOT,
+        'static',
+        'assets',
+        'facility-layout-ribbon-icons'
+    );
+    assert.ok(fs.existsSync(path.join(iconRoot, 'LICENSE.txt')));
+    [
+        'cursor-click', 'hand', 'rectangle', 'polygon', 'arrow-clockwise',
+        'copy', 'trash', 'lock-simple', 'arrow-u-up-left',
+        'arrow-u-up-right', 'corners-out', 'magic-wand', 'floppy-disk',
+    ].forEach(name => assert.ok(
+        fs.existsSync(path.join(iconRoot, 'svg', name + '.svg')),
+        name
+    ));
+    [
+        'sphere', 'magnifying-glass-minus', 'magnifying-glass-plus',
+        'bounding-box', 'cube-focus', 'cube', 'grid-four',
+    ].forEach(name => assert.ok(
+        fs.existsSync(path.join(iconRoot, 'svg', name + '.svg')),
+        name
+    ));
+    assert.ok(css.includes('.ip-flw-three-navigation'));
+    assert.ok(css.includes('.ip-flw-three-nav-button'));
+});
+
 check('pilot runbook carries the mandatory safety disclaimer', () => {
     const runbook = source('docs/facility-layout-p11-pilot-runbook.md');
     const disclaimer = [
@@ -130,4 +184,4 @@ check('pilot runbook carries the mandatory safety disclaimer', () => {
     assert.ok(runbook.replace(/\r?\n/g, ' ').includes(disclaimer));
 });
 
-console.log(`${passed}/5 facility layout P11 contract checks passed`);
+console.log(`${passed}/6 facility layout P11 contract checks passed`);

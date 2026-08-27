@@ -49,6 +49,7 @@ from .planner import (
     generate_layout_proposals,
     validate_layout_request,
 )
+from .plan_settings import shell_with_plan_boundary
 from .repository import FacilityLayoutRepository
 from .routing import (
     ROUTER_VERSION,
@@ -56,6 +57,7 @@ from .routing import (
     generate_connector_candidates,
     plan_forklift_route,
     resolve_endpoint,
+    validate_facility_aisle_route,
     validate_route,
     validate_utility_network,
 )
@@ -77,6 +79,10 @@ from .validate import validate_layout
 
 DependencyResolver = Callable[
     [FacilityPrincipal, str, str, str],
+    Mapping[str, Any] | bool | None,
+]
+CurrentAssetResolver = Callable[
+    [FacilityPrincipal, str, str],
     Mapping[str, Any] | bool | None,
 ]
 ProcessMapResolver = Callable[
@@ -269,6 +275,9 @@ class FacilityLayoutService:
         policy_repository: PolicySetRepository,
         vehicle_repository: VehicleProfileRepository,
         asset_definition_resolver: Optional[DependencyResolver] = None,
+        current_asset_definition_resolver: Optional[
+            CurrentAssetResolver
+        ] = None,
         process_map_resolver: Optional[ProcessMapResolver] = None,
         evidence_authority_resolver: Optional[
             EvidenceAuthorityResolver
@@ -283,6 +292,9 @@ class FacilityLayoutService:
         self.policy_repository = policy_repository
         self.vehicle_repository = vehicle_repository
         self.asset_definition_resolver = asset_definition_resolver
+        self.current_asset_definition_resolver = (
+            current_asset_definition_resolver
+        )
         self.process_map_resolver = process_map_resolver
         self.evidence_authority_resolver = evidence_authority_resolver
         self.spatial_executor = spatial_executor or FacilitySpatialExecutor()
@@ -489,6 +501,7 @@ class FacilityLayoutService:
             for value in resolved_assets.values()
             if isinstance(value[1], Mapping)
         ]
+        effective_shell = shell_with_plan_boundary(shell.document, document)
         evidence_values = [
             shell.document,
             policy.document,
@@ -505,7 +518,7 @@ class FacilityLayoutService:
                 trusted_validations.append(resolved_authority)
         authority = self._collect_evidence_authority(trusted_validations)
         return FacilitySpatialContext(
-            shell=deepcopy(shell.document),
+            shell=effective_shell,
             policy_set=deepcopy(policy.document),
             asset_definitions=definitions,
             evidence_authority=authority,
@@ -562,6 +575,9 @@ class FacilityLayoutService:
         cls,
         baseline: Mapping[str, Any],
         candidate: Mapping[str, Any],
+        *,
+        operations: list[Mapping[str, Any]] | None = None,
+        baseline_layout: Mapping[str, Any] | None = None,
     ) -> None:
         """Reject hard findings introduced by a proposed transaction.
 
@@ -585,14 +601,57 @@ class FacilityLayoutService:
                 and cls._spatial_error_key(item) not in baseline_keys
             )
         ]
-        if introduced:
+        # A populated legacy or manually authored layout may receive its first
+        # workcell zone after equipment has already been placed. Preserve the
+        # resulting containment findings in diagnostics, but do not make that
+        # incremental zone-authoring gesture impossible. The exception is
+        # intentionally narrow: it applies only to pre-existing placements and
+        # only to footprint containment introduced alongside add_zone. New
+        # placements, collisions, exclusion zones, height limits, and category
+        # rules remain hard failures.
+        has_added_zone = any(
+            isinstance(operation, Mapping)
+            and operation.get("op") == "add_zone"
+            for operation in (operations or [])
+        )
+        existing_placement_ids = {
+            str(placement.get("placementId") or "")
+            for placement in (
+                baseline_layout.get("placements", [])
+                if isinstance(baseline_layout, Mapping)
+                else []
+            )
+            if isinstance(placement, Mapping) and placement.get("placementId")
+        }
+
+        def is_incremental_zone_finding(finding: Mapping[str, Any]) -> bool:
+            details = finding.get("details")
+            refs = [
+                str(item)
+                for item in finding.get("subjectRefs", [])
+                if isinstance(item, str) and item
+            ]
+            return (
+                has_added_zone
+                and finding.get("code") == "zone_containment_violation"
+                and isinstance(details, Mapping)
+                and details.get("reason") == "footprint_or_setback"
+                and len(refs) == 1
+                and refs[0] in existing_placement_ids
+            )
+
+        blocking = [
+            item for item in introduced
+            if not is_incremental_zone_finding(item)
+        ]
+        if blocking:
             raise FacilityValidationError(
                 "spatial_validation_failed",
                 "Facility Layout transaction introduces authoritative spatial "
                 "constraint violations.",
                 details={
                     "safetyStatus": candidate.get("safetyStatus"),
-                    "findings": introduced,
+                    "findings": blocking,
                     "baselineErrorCount": len(baseline_keys),
                     "metrics": deepcopy(candidate.get("metrics", {})),
                 },
@@ -984,6 +1043,15 @@ class FacilityLayoutService:
             ),
             key=lambda item: str(item.get("routeId") or ""),
         ):
+            extensions = route.get("extensions")
+            if (
+                isinstance(extensions, Mapping)
+                and isinstance(extensions.get("facilityAisle"), Mapping)
+            ):
+                result = validate_facility_aisle_route(document, route)
+                route_results.append(result)
+                findings.extend(result["findings"])
+                continue
             vehicle_profile = None
             vehicle_ref = route.get("vehicleProfileRef")
             if isinstance(vehicle_ref, Mapping):
@@ -1815,6 +1883,11 @@ class FacilityLayoutService:
                 "proposal_payload_unavailable",
                 "Facility Layout proposal inputs are unavailable.",
             )
+        self._validate_current_proposal_asset_revisions(
+            principal,
+            site_id,
+            request,
+        )
         result = self._generate_layout_alternatives(
             principal,
             site_id,
@@ -1839,6 +1912,44 @@ class FacilityLayoutService:
             required_action=None,
         )
         return alternative, binding, prepared, dependencies
+
+    def _validate_current_proposal_asset_revisions(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        request: Mapping[str, Any],
+    ) -> None:
+        asset_set = request.get("assetSet")
+        if not isinstance(asset_set, list):
+            return
+        for raw in asset_set:
+            if not isinstance(raw, Mapping):
+                continue
+            asset_id = raw.get("assetId")
+            revision = raw.get("assetDefinitionRevision")
+            if not isinstance(asset_id, str) or not isinstance(revision, str):
+                continue
+            if self.current_asset_definition_resolver is not None:
+                resolved = self.current_asset_definition_resolver(
+                    principal,
+                    site_id,
+                    asset_id,
+                )
+            elif self.asset_definition_resolver is not None:
+                resolved = self.asset_definition_resolver(
+                    principal,
+                    site_id,
+                    asset_id,
+                    revision,
+                )
+            else:
+                _dependency_unavailable("asset_definition")
+            _require_resolved(
+                resolved,
+                kind="asset_definition",
+                identifier=asset_id,
+                revision=revision,
+            )
 
     @staticmethod
     def _layout_content_fingerprint(
@@ -2486,7 +2597,12 @@ class FacilityLayoutService:
             site_id,
             operation_result["document"],
         )
-        self._require_no_new_spatial_errors(baseline_spatial, spatial)
+        self._require_no_new_spatial_errors(
+            baseline_spatial,
+            spatial,
+            operations=operations,
+            baseline_layout=current["layout"],
+        )
         operation_result["spatialDiagnostics"] = spatial
         routing = self._diagnose_routing(
             principal,
@@ -2690,6 +2806,8 @@ class FacilityLayoutService:
         self._require_no_new_spatial_errors(
             baseline_spatial,
             draft_spatial,
+            operations=prior_operations,
+            baseline_layout=current["layout"],
         )
         result = self._candidate_set_for_layout(
             principal,

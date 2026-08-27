@@ -318,7 +318,13 @@ def test_maker_checker_pilot_gate_rejects_maker_and_applies_checker(
 
 def test_consolidated_verdict_is_derived_and_retains_external_gates(
     tmp_path: Path,
+    monkeypatch,
 ):
+    monkeypatch.setattr(
+        p11_verifier,
+        "REAL_SOAK_EVENT_LEDGER",
+        tmp_path / "missing-real-soak-events.json",
+    )
     result = generate_release_evidence(
         tmp_path / "evidence",
         run_suites=False,

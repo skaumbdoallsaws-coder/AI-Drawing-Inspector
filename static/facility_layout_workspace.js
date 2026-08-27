@@ -11,10 +11,231 @@
     const ASSET_MIME = 'application/x-inspectorpro-facility-asset';
     const DEFAULT_GRID_SIZE = 0.5;
     const DEFAULT_DUPLICATE_OFFSET = Object.freeze({ x: 1, y: 0, z: 1 });
-    const TOOL_MODES = Object.freeze(['select', 'pan', 'rectangle-zone', 'polygon-zone']);
+    const DUPLICATE_DRAG_THRESHOLD_PX = 4;
+    const DEFAULT_ASSET_CLEARANCE = 0.75;
+    const MAX_ASSET_BATCH_ITEMS = 48;
+    const METERS_TO_FEET = 3.280839895;
+    const PLAN_SETTINGS_EXTENSION_KEY = 'facilityPlan';
+    const DEFAULT_PLAN_WIDTH_METERS = 40;
+    const DEFAULT_PLAN_DEPTH_METERS = 30;
+    const DEFAULT_PLAN_GRID_METERS = 1;
+    const PLAN_SCALE_TARGET_PIXELS = 130;
+    const PLAN_VIEW_PREFERENCE_PREFIX = 'inspectorpro.facility-plan-view.';
+    const THREE_VIEWPOINT_PREFIX = 'inspectorpro.facility-viewpoints.';
+    const MAX_THREE_VIEWPOINTS = 20;
+    const SCALE_DISTANCES = Object.freeze({
+        m: [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100],
+        ft: [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500],
+    });
+    const VIEWPORT_ICON_ROOT =
+        '/static/assets/facility-layout-ribbon-icons/svg/';
+    const VIEW_ORIENTATION_ICON_ROOT =
+        '/static/assets/view-toolbar-icons/';
+    const THREE_VIEW_ORIENTATIONS = Object.freeze([
+        Object.freeze({ key: 'front', label: 'Front' }),
+        Object.freeze({ key: 'top', label: 'Top' }),
+        Object.freeze({ key: 'right', label: 'Right' }),
+        Object.freeze({ key: 'iso', label: 'Iso' }),
+    ]);
+    const DEFAULT_THREE_VISUAL_SETTINGS = Object.freeze({
+        ambient: 1.55,
+        directional: 2,
+        exposure: 1.22,
+        contrast: 1.02,
+        metalness: 0.04,
+        roughness: 0.7,
+        autoRotate: false,
+        wireframe: false,
+        background: 'auto',
+    });
+    const TOOL_MODES = Object.freeze([
+        'select',
+        'pan',
+        'rectangle-zone',
+        'polygon-zone',
+        'aisle',
+        'floor-marking',
+    ]);
+    const ZONE_PURPOSE_OPTIONS = Object.freeze([
+        Object.freeze({ value: 'workcell', label: 'Department / equipment area' }),
+        Object.freeze({ value: 'receiving', label: 'Receiving' }),
+        Object.freeze({ value: 'storage', label: 'Storage' }),
+        Object.freeze({ value: 'staging', label: 'Staging' }),
+        Object.freeze({ value: 'shipping', label: 'Shipping' }),
+        Object.freeze({ value: 'inspection', label: 'Inspection' }),
+        Object.freeze({ value: 'dock', label: 'Dock' }),
+        Object.freeze({ value: 'charging', label: 'Charging' }),
+        Object.freeze({ value: 'service', label: 'Service clearance - no equipment' }),
+        Object.freeze({ value: 'operator', label: 'Operator clearance - no equipment' }),
+        Object.freeze({ value: 'safety', label: 'Safety zone - no equipment' }),
+        Object.freeze({ value: 'exclusion', label: 'Exclusion zone - no equipment' }),
+        Object.freeze({ value: 'utility', label: 'Utility corridor - no equipment' }),
+        Object.freeze({ value: 'aisle', label: 'Aisle - no equipment' }),
+    ]);
     const VIEW_MODES = Object.freeze(['plan', '3d']);
-    let dragSequence = 0;
+    const WALKTHROUGH_CONTEXT_MODES = Object.freeze([
+        Object.freeze({ key: 'production', label: 'Production' }),
+        Object.freeze({ key: 'maintenance', label: 'Maintenance' }),
+        Object.freeze({ key: 'safety', label: 'Safety' }),
+        Object.freeze({ key: 'training', label: 'Training' }),
+        Object.freeze({ key: 'quality', label: 'Quality' }),
+    ]);
+    const WALKTHROUGH_CONTEXT_FIELDS = Object.freeze({
+        production: Object.freeze([
+            ['status', 'Status'],
+            ['processStep', 'Process step'],
+            ['cycleTime', 'Cycle time'],
+            ['taktTime', 'Takt time'],
+            ['throughput', 'Throughput'],
+            ['capacity', 'Capacity'],
+            ['batchSize', 'Batch size'],
+            ['operator', 'Operator'],
+            ['shift', 'Shift'],
+            ['upstream', 'Upstream'],
+            ['downstream', 'Downstream'],
+        ]),
+        maintenance: Object.freeze([
+            ['status', 'Status'],
+            ['lastMaintenance', 'Last maintenance'],
+            ['nextMaintenance', 'Next maintenance'],
+            ['maintenanceNotes', 'Maintenance notes'],
+            ['accessConstraints', 'Access constraints'],
+            ['serviceReference', 'Service reference'],
+        ]),
+        safety: Object.freeze([
+            ['ppe', 'Required PPE'],
+            ['safetyNotes', 'Safety notes'],
+            ['accessConstraints', 'Access constraints'],
+            ['clearanceRequirements', 'Clearance requirements'],
+            ['lockoutReference', 'Lockout reference'],
+        ]),
+        training: Object.freeze([
+            ['purpose', 'Purpose'],
+            ['processStep', 'Process step'],
+            ['workInstructionRef', 'Work instruction'],
+            ['trainingNotes', 'Training notes'],
+            ['capabilities', 'Capabilities'],
+        ]),
+        quality: Object.freeze([
+            ['inspectionRequirements', 'Inspection requirements'],
+            ['qualityNotes', 'Quality notes'],
+            ['commonDefects', 'Common defects'],
+            ['qualityReference', 'Quality reference'],
+        ]),
+    });
+    const RECORDING_PRESENTATION_MODES = Object.freeze([
+        Object.freeze({ key: 'clean', label: 'Clean presentation' }),
+        Object.freeze({ key: 'training', label: 'Training / demo' }),
+    ]);
+    const RECORDING_RESOLUTIONS = Object.freeze([
+        Object.freeze({ key: 'current', label: 'Current viewport' }),
+        Object.freeze({ key: '720p', label: '720p' }),
+        Object.freeze({ key: '1080p', label: '1080p' }),
+    ]);
+    const PRECISION_MODES = Object.freeze([
+        'align', 'distribute', 'relative', 'distance', 'offset',
+    ]);
+    const PATTERN_MODES = Object.freeze([
+        'linear-pattern', 'circular-pattern', 'perimeter-pattern',
+        'cell-layout', 'vertical-stack', 'surface-stack', 'mirror', 'swap',
+    ]);
+    const CELL_LAYOUT_PRESETS = Object.freeze([
+        Object.freeze({ value: 'line', label: 'Straight / I-line' }),
+        Object.freeze({ value: 'l', label: 'L-shaped cell' }),
+        Object.freeze({ value: 'u', label: 'U-shaped cell' }),
+        Object.freeze({ value: 'grid', label: 'Grid' }),
+        Object.freeze({ value: 'parallel', label: 'Parallel rows' }),
+        Object.freeze({ value: 'serpentine', label: 'Serpentine flow' }),
+        Object.freeze({ value: 'loop', label: 'Loop / closed cell' }),
+        Object.freeze({ value: 'spine', label: 'Spine and branch' }),
+        Object.freeze({ value: 'herringbone', label: 'Herringbone' }),
+        Object.freeze({ value: 'cluster', label: 'Cluster' }),
+    ]);
+    const SELECTION_TOOLBAR_COMMANDS = Object.freeze({
+        align: Object.freeze({ label: 'Align', icon: 'bounding-box' }),
+        distribute: Object.freeze({ label: 'Distribute', icon: 'grid-four' }),
+        relative: Object.freeze({ label: 'Relative position', icon: 'sphere' }),
+        distance: Object.freeze({ label: 'Measure or set distance', icon: 'corners-out' }),
+        offset: Object.freeze({ label: 'Offset', icon: 'cursor-click' }),
+        rotate: Object.freeze({ label: 'Rotate 90 degrees', icon: 'arrow-clockwise' }),
+        duplicate: Object.freeze({ label: 'Duplicate', icon: 'copy' }),
+        'vertical-stack': Object.freeze({ label: 'Stack', icon: 'stack' }),
+        'surface-stack': Object.freeze({ label: 'On surface', icon: 'stack' }),
+        mirror: Object.freeze({ label: 'Mirror', icon: 'mirror' }),
+        lock: Object.freeze({ label: 'Lock', icon: 'lock-simple' }),
+        delete: Object.freeze({ label: 'Delete', icon: 'trash' }),
+        'save-zone-name': Object.freeze({
+            label: 'Apply zone name', icon: 'floppy-disk',
+        }),
+        'delete-zone': Object.freeze({ label: 'Delete zone', icon: 'trash' }),
+        'save-floor-marking': Object.freeze({
+            label: 'Apply floor marking details', icon: 'floppy-disk',
+        }),
+    });
+    const FLOOR_MARKING_PRESETS = Object.freeze([
+        Object.freeze({
+            type: 'direction_arrow', label: 'Direction Arrow',
+            semanticRole: 'material_flow', width: 0.8, depth: 1.6,
+            fillColor: '#ffffff', strokeColor: '#1f2937', text: '',
+        }),
+        Object.freeze({
+            type: 'solid_line', label: 'Solid Line',
+            semanticRole: 'decorative', width: 0.12, depth: 2,
+            fillColor: '#ffffff', strokeColor: '#1f2937', text: '',
+        }),
+        Object.freeze({
+            type: 'dashed_line', label: 'Dashed Line',
+            semanticRole: 'pedestrian_lane', width: 0.12, depth: 2,
+            fillColor: '#facc15', strokeColor: '#1f2937', text: '',
+        }),
+        Object.freeze({
+            type: 'keep_clear', label: 'Keep Clear',
+            semanticRole: 'keep_clear', width: 2.4, depth: 1.5,
+            fillColor: '#facc15', strokeColor: '#111827', text: 'KEEP CLEAR',
+        }),
+        Object.freeze({
+            type: 'crosswalk', label: 'Crosswalk',
+            semanticRole: 'pedestrian_lane', width: 2.4, depth: 2,
+            fillColor: '#ffffff', strokeColor: '#1f2937', text: '',
+        }),
+        Object.freeze({
+            type: 'hazard_stripe', label: 'Hazard Stripe',
+            semanticRole: 'safety', width: 2.4, depth: 1,
+            fillColor: '#facc15', strokeColor: '#111827', text: '',
+        }),
+        Object.freeze({
+            type: 'floor_text', label: 'Floor Text',
+            semanticRole: 'decorative', width: 3, depth: 1,
+            fillColor: '#ffffff', strokeColor: '#1f2937', text: 'FLOOR TEXT',
+        }),
+        Object.freeze({
+            type: 'parking_box', label: 'Parking Box',
+            semanticRole: 'parking', width: 2, depth: 3,
+            fillColor: '#2563eb', strokeColor: '#ffffff', text: 'PARKING',
+        }),
+    ]);
+    const NON_PLACEMENT_ZONE_TYPES = Object.freeze(new Set([
+        'aisle', 'exclusion', 'operator', 'safety', 'service', 'utility',
+    ]));
     let autoArrangeSequence = 0;
+    let threeViewpointSequence = 0;
+
+    function selectionToolbarCommands(count) {
+        const total = Math.max(0, Math.floor(finite(count, 0)));
+        if (!total) return [];
+        if (total === 1) {
+            return [
+                'rotate', 'offset', 'duplicate', 'vertical-stack',
+                'mirror', 'lock', 'delete',
+            ];
+        }
+        const commands = ['align'];
+        if (total >= 3) commands.push('distribute');
+        commands.push('relative');
+        if (total === 2) commands.push('distance');
+        commands.push('offset', 'duplicate', 'surface-stack', 'mirror', 'lock', 'delete');
+        return commands;
+    }
 
     function clone(value) {
         if (value === undefined) return undefined;
@@ -26,10 +247,320 @@
         return Number.isFinite(number) ? number : fallback;
     }
 
+    function clamp(value, minimum, maximum, fallback) {
+        return Math.max(minimum, Math.min(maximum, finite(value, fallback)));
+    }
+
+    function compassHeading(value) {
+        const headingDegrees = (
+            finite(value, 0) % 360 + 360
+        ) % 360;
+        const names = [
+            'north', 'northeast', 'east', 'southeast',
+            'south', 'southwest', 'west', 'northwest',
+        ];
+        return {
+            headingDegrees: headingDegrees,
+            cardinal: names[Math.round(headingDegrees / 45) % names.length],
+        };
+    }
+
+    function normalizeThreeVisualSettings(value) {
+        const input = value && typeof value === 'object' ? value : {};
+        const background = typeof input.background === 'string'
+            && (/^#[0-9a-f]{6}$/i.test(input.background)
+                || input.background === 'auto')
+            ? input.background : DEFAULT_THREE_VISUAL_SETTINGS.background;
+        return {
+            ambient: clamp(input.ambient, 0, 3,
+                DEFAULT_THREE_VISUAL_SETTINGS.ambient),
+            directional: clamp(input.directional, 0, 5,
+                DEFAULT_THREE_VISUAL_SETTINGS.directional),
+            exposure: clamp(input.exposure, 0, 3,
+                DEFAULT_THREE_VISUAL_SETTINGS.exposure),
+            contrast: clamp(input.contrast, 0.5, 1.5,
+                DEFAULT_THREE_VISUAL_SETTINGS.contrast),
+            metalness: clamp(input.metalness, 0, 1,
+                DEFAULT_THREE_VISUAL_SETTINGS.metalness),
+            roughness: clamp(input.roughness, 0, 1,
+                DEFAULT_THREE_VISUAL_SETTINGS.roughness),
+            autoRotate: input.autoRotate === true,
+            wireframe: input.wireframe === true,
+            background: background,
+        };
+    }
+
     function cleanString(value, fallback) {
         return typeof value === 'string' && value.trim()
             ? value.trim()
             : fallback;
+    }
+
+    function recordingElapsedText(value) {
+        const totalSeconds = Math.max(0, Math.floor(finite(value, 0) / 1000));
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return String(minutes).padStart(2, '0') + ':'
+            + String(seconds).padStart(2, '0');
+    }
+
+    function threeViewIconSrc(view) {
+        const normalized = THREE_VIEW_ORIENTATIONS.some(function (item) {
+            return item.key === view;
+        }) ? view : 'iso';
+        return VIEW_ORIENTATION_ICON_ROOT + 'view-' + normalized + '.png';
+    }
+
+    function normalizedDistanceUnit(value) {
+        return value === 'ft' ? 'ft' : 'm';
+    }
+
+    function displayDistance(meters, unit) {
+        const value = finite(meters, 0);
+        return normalizedDistanceUnit(unit) === 'ft'
+            ? value * METERS_TO_FEET
+            : value;
+    }
+
+    function canonicalDistance(value, unit) {
+        const distance = Number(value);
+        if (!Number.isFinite(distance)) return NaN;
+        return normalizedDistanceUnit(unit) === 'ft'
+            ? distance / METERS_TO_FEET
+            : distance;
+    }
+
+    function formattedDistance(value) {
+        const absolute = Math.abs(finite(value, 0));
+        const decimals = absolute >= 100 ? 0 : (absolute >= 10 ? 1 : 2);
+        return Number(finite(value, 0).toFixed(decimals)).toString();
+    }
+
+    function normalizePlanPreferences(value) {
+        const source = value && typeof value === 'object' ? value : {};
+        return {
+            unit: normalizedDistanceUnit(source.unit),
+            showGrid: source.showGrid !== false,
+            snapToGrid: source.snapToGrid !== false,
+        };
+    }
+
+    function normalizePlanSettings(value, fallback) {
+        const base = fallback && typeof fallback === 'object' ? fallback : {};
+        const source = value && typeof value === 'object' ? value : {};
+        const widthMeters = clamp(
+            source.widthMeters,
+            0.5,
+            10000,
+            finite(base.widthMeters, DEFAULT_PLAN_WIDTH_METERS)
+        );
+        const depthMeters = clamp(
+            source.depthMeters,
+            0.5,
+            10000,
+            finite(base.depthMeters, DEFAULT_PLAN_DEPTH_METERS)
+        );
+        const maximumGrid = Math.max(widthMeters, depthMeters);
+        const gridSpacingMeters = clamp(
+            source.gridSpacingMeters,
+            0.05,
+            maximumGrid,
+            Math.min(
+                maximumGrid,
+                finite(base.gridSpacingMeters, DEFAULT_PLAN_GRID_METERS)
+            )
+        );
+        const maximumMultiple = Math.max(
+            1,
+            Math.floor(maximumGrid / gridSpacingMeters + 1e-9)
+        );
+        const requestedMajor = finite(
+            source.majorGridSpacingMeters,
+            finite(base.majorGridSpacingMeters, gridSpacingMeters * 5)
+        );
+        const majorMultiple = Math.max(1, Math.min(
+            maximumMultiple,
+            Math.round(requestedMajor / gridSpacingMeters)
+        ));
+        return {
+            widthMeters: widthMeters,
+            depthMeters: depthMeters,
+            gridSpacingMeters: gridSpacingMeters,
+            majorGridSpacingMeters: gridSpacingMeters * majorMultiple,
+        };
+    }
+
+    function planSettingsFromLayout(layout, fallback) {
+        const extensions = layout && layout.extensions;
+        const stored = extensions && extensions[PLAN_SETTINGS_EXTENSION_KEY];
+        return normalizePlanSettings(stored, fallback);
+    }
+
+    function worldBoundsFromPlanSettings(settings, fallback) {
+        const base = fallback && typeof fallback === 'object' ? fallback : {};
+        const normalized = normalizePlanSettings(settings);
+        const minX = finite(base.minX, 0);
+        const minZ = finite(base.minZ, 0);
+        return {
+            minX: minX,
+            minZ: minZ,
+            maxX: minX + normalized.widthMeters,
+            maxZ: minZ + normalized.depthMeters,
+            floorY: finite(base.floorY, 0),
+        };
+    }
+
+    function loadPlanPreferences(storage, key, fallback) {
+        if (!storage || typeof storage.getItem !== 'function') {
+            return normalizePlanPreferences(fallback);
+        }
+        try {
+            const stored = JSON.parse(storage.getItem(key) || 'null');
+            return normalizePlanPreferences(Object.assign({}, fallback, stored));
+        } catch (error) {
+            return normalizePlanPreferences(fallback);
+        }
+    }
+
+    function storePlanPreferences(storage, key, value) {
+        if (!storage || typeof storage.setItem !== 'function') return false;
+        try {
+            storage.setItem(key, JSON.stringify(normalizePlanPreferences(value)));
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function normalizedCameraPoint(value, includeW) {
+        const source = value && typeof value === 'object' ? value : {};
+        const keys = includeW ? ['x', 'y', 'z', 'w'] : ['x', 'y', 'z'];
+        if (!keys.every(function (key) {
+            return Number.isFinite(Number(source[key]));
+        })) return null;
+        const output = {
+            x: Number(source.x),
+            y: Number(source.y),
+            z: Number(source.z),
+        };
+        if (includeW) output.w = Number(source.w);
+        return output;
+    }
+
+    function normalizeThreeCameraView(value) {
+        const source = value && typeof value === 'object' ? value : {};
+        const position = normalizedCameraPoint(source.position, false);
+        const quaternion = normalizedCameraPoint(source.quaternion, true);
+        if (!position || !quaternion) return null;
+        const output = {
+            position: position,
+            quaternion: quaternion,
+            up: normalizedCameraPoint(source.up, false)
+                || { x: 0, y: 1, z: 0 },
+            target: normalizedCameraPoint(source.target, false),
+            near: Math.max(0.0001, finite(source.near, 0.01)),
+            far: Math.max(1, finite(source.far, 10000)),
+            navigationMode: source.navigationMode === 'pan' ? 'pan' : 'orbit',
+        };
+        return output;
+    }
+
+    function normalizeThreeViewpoints(value) {
+        const seen = new Set();
+        return (Array.isArray(value) ? value : []).map(function (item, index) {
+            const camera = normalizeThreeCameraView(item && item.camera);
+            if (!camera) return null;
+            let viewpointId = cleanString(
+                item && item.viewpointId,
+                'viewpoint-' + (index + 1)
+            );
+            if (seen.has(viewpointId)) {
+                viewpointId += '-' + (index + 1);
+            }
+            seen.add(viewpointId);
+            return {
+                viewpointId: viewpointId,
+                name: cleanString(item && item.name, 'Viewpoint ' + (index + 1))
+                    .slice(0, 60),
+                camera: camera,
+            };
+        }).filter(Boolean).slice(0, MAX_THREE_VIEWPOINTS);
+    }
+
+    function loadThreeViewpoints(storage, key) {
+        if (!storage || typeof storage.getItem !== 'function') return [];
+        try {
+            return normalizeThreeViewpoints(JSON.parse(
+                storage.getItem(key) || '[]'
+            ));
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function storeThreeViewpoints(storage, key, value) {
+        if (!storage || typeof storage.setItem !== 'function') return false;
+        try {
+            storage.setItem(key, JSON.stringify(normalizeThreeViewpoints(value)));
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function planWorldAtScreen(projection, screenX, screenY) {
+        return {
+            x: projection.minX
+                + (screenX - projection.offsetX) / projection.scale,
+            z: projection.maxZ
+                - (screenY - projection.offsetY) / projection.scale,
+        };
+    }
+
+    function planScreenForWorld(projection, worldX, worldZ) {
+        return {
+            x: projection.offsetX
+                + (worldX - projection.minX) * projection.scale,
+            y: projection.offsetY
+                + (projection.maxZ - worldZ) * projection.scale,
+        };
+    }
+
+    function alignedValues(minimum, maximum, spacing, maximumCount) {
+        if (!Number.isFinite(spacing) || spacing <= 0) return [];
+        const output = [];
+        const epsilon = spacing * 0.000001;
+        let value = Math.ceil((minimum - epsilon) / spacing) * spacing;
+        while (value <= maximum + epsilon
+                && output.length < (maximumCount || 300)) {
+            output.push(Number(value.toFixed(9)));
+            value += spacing;
+        }
+        return output;
+    }
+
+    function preferredScaleDistance(projectionScale, unit) {
+        const normalizedUnit = normalizedDistanceUnit(unit);
+        const metersPerUnit = normalizedUnit === 'ft'
+            ? 1 / METERS_TO_FEET : 1;
+        const candidates = SCALE_DISTANCES[normalizedUnit];
+        let best = candidates[0];
+        let bestDelta = Infinity;
+        candidates.forEach(function (distance) {
+            const pixels = distance * metersPerUnit * projectionScale;
+            const delta = Math.abs(pixels - 130)
+                + (pixels < 88 ? (88 - pixels) * 3 : 0)
+                + (pixels > 190 ? (pixels - 190) * 3 : 0);
+            if (delta < bestDelta) {
+                best = distance;
+                bestDelta = delta;
+            }
+        });
+        return {
+            displayDistance: best,
+            meters: best * metersPerUnit,
+            pixels: best * metersPerUnit * projectionScale,
+        };
     }
 
     function boundedText(value, maximum) {
@@ -204,6 +735,74 @@
         };
     }
 
+    function resizeFloorMarkingFromHandle(marking, handleIndex, worldPoint, gridSize) {
+        const source = assertObject(marking, 'floor marking');
+        const target = assertObject(worldPoint, 'resize point');
+        const index = Math.floor(finite(handleIndex, -1));
+        if (index < 0 || index > 3) {
+            throw new RangeError('floor marking resize handle must be 0 through 3');
+        }
+        const transform = source.transform && typeof source.transform === 'object'
+            ? source.transform : {};
+        const position = transform.position || {};
+        const center = {
+            x: finite(position.x, 0),
+            y: finite(position.y, 0),
+            z: finite(position.z, 0),
+        };
+        const width = Math.max(0.05, finite(source.width, 1));
+        const depth = Math.max(0.05, finite(source.depth, 1));
+        const degrees = finite(transform.rotationDegrees, 0);
+        const radians = degrees * Math.PI / 180;
+        const cosine = Math.cos(radians);
+        const sine = Math.sin(radians);
+        const corners = [
+            { x: -width / 2, z: -depth / 2 },
+            { x: width / 2, z: -depth / 2 },
+            { x: width / 2, z: depth / 2 },
+            { x: -width / 2, z: depth / 2 },
+        ];
+        const opposite = corners[(index + 2) % 4];
+        const fixed = {
+            x: center.x + opposite.x * cosine + opposite.z * sine,
+            z: center.z - opposite.x * sine + opposite.z * cosine,
+        };
+        const worldDelta = {
+            x: finite(target.x, fixed.x) - fixed.x,
+            z: finite(target.z, fixed.z) - fixed.z,
+        };
+        let localX = worldDelta.x * cosine - worldDelta.z * sine;
+        let localZ = worldDelta.x * sine + worldDelta.z * cosine;
+        const step = Math.max(0, finite(gridSize, 0));
+        if (step > 0) {
+            localX = Math.sign(localX || (index === 0 || index === 3 ? -1 : 1))
+                * Math.max(step, Math.abs(snapCoordinate(localX, step)));
+            localZ = Math.sign(localZ || (index === 0 || index === 1 ? -1 : 1))
+                * Math.max(step, Math.abs(snapCoordinate(localZ, step)));
+        }
+        const minimum = 0.05;
+        const fallbackX = index === 0 || index === 3 ? -1 : 1;
+        const fallbackZ = index === 0 || index === 1 ? -1 : 1;
+        if (Math.abs(localX) < minimum) localX = fallbackX * minimum;
+        if (Math.abs(localZ) < minimum) localZ = fallbackZ * minimum;
+        const halfLocal = { x: localX / 2, z: localZ / 2 };
+        const resized = clone(source);
+        resized.width = Number(Math.abs(localX).toFixed(9));
+        resized.depth = Number(Math.abs(localZ).toFixed(9));
+        resized.positionMode = 'manual';
+        resized.transform = Object.assign({}, clone(transform), {
+            position: {
+                x: Number((fixed.x + halfLocal.x * cosine
+                    + halfLocal.z * sine).toFixed(9)),
+                y: center.y,
+                z: Number((fixed.z - halfLocal.x * sine
+                    + halfLocal.z * cosine).toFixed(9)),
+            },
+            rotationDegrees: degrees,
+        });
+        return resized;
+    }
+
     function createAssetDragPayload(asset, dragSessionId) {
         const source = assertObject(asset, 'asset');
         const payload = {
@@ -269,9 +868,50 @@
 
     function normalizeCatalog(catalog) {
         return catalogArray(catalog).map(function (record) {
-            const definition = record.definition || record.assetDefinition || {};
+            const source = record.source || record;
+            const definition = record.definition
+                || record.assetDefinition
+                || source.definition
+                || source.assetDefinition
+                || {};
+            const geometry = definition.geometry || record.geometry || {};
+            const aabb = geometry.aabb || definition.aabb || record.aabb || {};
+            const minimum = aabb.minimum || aabb.min || {};
+            const maximum = aabb.maximum || aabb.max || {};
+            const dimensions = record.dimensions || definition.dimensions || {};
+            const width = finite(
+                record.width !== undefined ? record.width : dimensions.width,
+                finite(maximum.x, NaN) - finite(minimum.x, NaN)
+            );
+            const depth = finite(
+                record.depth !== undefined ? record.depth : dimensions.depth,
+                finite(maximum.z, NaN) - finite(minimum.z, NaN)
+            );
+            const height = finite(
+                record.height !== undefined ? record.height : dimensions.height,
+                finite(maximum.y, NaN) - finite(minimum.y, NaN)
+            );
+            const thumbnail = record.thumbnail
+                || source.thumbnail
+                || definition.thumbnail
+                || {};
+            const thumbnailUrl = cleanString(
+                record.thumbnailUrl
+                || record.previewImage
+                || source.thumbnailUrl
+                || source.previewImage
+                || (typeof thumbnail === 'string'
+                    ? thumbnail
+                    : thumbnail.path || thumbnail.url),
+                ''
+            );
+            const rawTags = record.tags || source.tags || definition.tags || [];
+            const supportSurfaces = record.supportSurfaces
+                || source.supportSurfaces
+                || definition.supportSurfaces
+                || [];
             return {
-                source: record,
+                source: source,
                 assetId: cleanString(record.assetId || definition.assetId, ''),
                 assetDefinitionRevision: cleanString(
                     record.assetDefinitionRevision
@@ -299,6 +939,21 @@
                     record.description || definition.description,
                     ''
                 ),
+                manufacturer: cleanString(
+                    record.manufacturer
+                    || source.manufacturer
+                    || definition.manufacturer,
+                    ''
+                ),
+                tags: Array.isArray(rawTags) ? rawTags.map(function (value) {
+                    return cleanString(value, '');
+                }).filter(Boolean) : [],
+                thumbnailUrl: thumbnailUrl,
+                width: Number.isFinite(width) && width > 0 ? width : 1.2,
+                depth: Number.isFinite(depth) && depth > 0 ? depth : 0.8,
+                height: Number.isFinite(height) && height > 0 ? height : 1,
+                supportSurfaces: Array.isArray(supportSurfaces)
+                    ? clone(supportSurfaces) : [],
             };
         }).filter(function (record) {
             return record.assetId && record.assetDefinitionRevision;
@@ -306,6 +961,717 @@
             return left.category.localeCompare(right.category)
                 || left.label.localeCompare(right.label)
                 || left.assetId.localeCompare(right.assetId);
+        });
+    }
+
+    function rectangleBounds(center, width, depth) {
+        return {
+            minX: center.x - width / 2,
+            maxX: center.x + width / 2,
+            minZ: center.z - depth / 2,
+            maxZ: center.z + depth / 2,
+        };
+    }
+
+    function boundsOverlap(left, right, clearance) {
+        const gap = Math.max(0, finite(clearance, 0));
+        return !(left.maxX + gap <= right.minX
+            || left.minX - gap >= right.maxX
+            || left.maxZ + gap <= right.minZ
+            || left.minZ - gap >= right.maxZ);
+    }
+
+    function boundsInsideWorld(value, worldBounds) {
+        if (!worldBounds || typeof worldBounds !== 'object') return true;
+        const minX = finite(worldBounds.minX, NaN);
+        const minZ = finite(worldBounds.minZ, NaN);
+        const maxX = finite(worldBounds.maxX, NaN);
+        const maxZ = finite(worldBounds.maxZ, NaN);
+        if (![minX, minZ, maxX, maxZ].every(Number.isFinite)) return true;
+        return value.minX >= minX && value.maxX <= maxX
+            && value.minZ >= minZ && value.maxZ <= maxZ;
+    }
+
+    function pointOnZoneBoundary(point, boundary) {
+        const epsilon = 1e-7;
+        for (let index = 0; index < boundary.length; index += 1) {
+            const start = boundary[index] || {};
+            const end = boundary[(index + 1) % boundary.length] || {};
+            const sx = finite(start.x, NaN);
+            const sz = finite(start.z, NaN);
+            const ex = finite(end.x, NaN);
+            const ez = finite(end.z, NaN);
+            if (![sx, sz, ex, ez].every(Number.isFinite)) continue;
+            const dx = ex - sx;
+            const dz = ez - sz;
+            const lengthSquared = dx * dx + dz * dz;
+            if (lengthSquared <= epsilon) continue;
+            const projection = ((point.x - sx) * dx + (point.z - sz) * dz)
+                / lengthSquared;
+            if (projection < -epsilon || projection > 1 + epsilon) continue;
+            const nearestX = sx + projection * dx;
+            const nearestZ = sz + projection * dz;
+            if (Math.hypot(point.x - nearestX, point.z - nearestZ) <= epsilon) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function pointInsideZone(point, boundary) {
+        if (!point || !Array.isArray(boundary) || boundary.length < 3) {
+            return false;
+        }
+        if (pointOnZoneBoundary(point, boundary)) return true;
+        let inside = false;
+        for (let index = 0, previous = boundary.length - 1;
+                index < boundary.length; previous = index, index += 1) {
+            const current = boundary[index] || {};
+            const prior = boundary[previous] || {};
+            const cx = finite(current.x, NaN);
+            const cz = finite(current.z, NaN);
+            const px = finite(prior.x, NaN);
+            const pz = finite(prior.z, NaN);
+            if (![cx, cz, px, pz].every(Number.isFinite)) continue;
+            const crosses = (cz > point.z) !== (pz > point.z)
+                && point.x < (px - cx) * (point.z - cz) / (pz - cz) + cx;
+            if (crosses) inside = !inside;
+        }
+        return inside;
+    }
+
+    function boundsInsideZone(value, zone) {
+        const boundary = zone && Array.isArray(zone.boundary)
+            ? zone.boundary : [];
+        if (boundary.length < 3) return false;
+        const setbackValues = zone.edgeSetbacks
+            && typeof zone.edgeSetbacks === 'object'
+            ? Object.keys(zone.edgeSetbacks).map(function (key) {
+                return Math.max(0, finite(zone.edgeSetbacks[key], 0));
+            }) : [];
+        const setback = setbackValues.length
+            ? Math.max.apply(null, setbackValues) : 0;
+        const candidate = {
+            minX: value.minX - setback,
+            maxX: value.maxX + setback,
+            minZ: value.minZ - setback,
+            maxZ: value.maxZ + setback,
+        };
+        return [
+            { x: candidate.minX, z: candidate.minZ },
+            { x: candidate.maxX, z: candidate.minZ },
+            { x: candidate.maxX, z: candidate.maxZ },
+            { x: candidate.minX, z: candidate.maxZ },
+            {
+                x: (candidate.minX + candidate.maxX) / 2,
+                z: (candidate.minZ + candidate.maxZ) / 2,
+            },
+        ].every(function (point) {
+            return pointInsideZone(point, boundary);
+        });
+    }
+
+    function operationalPlacementZones(layout) {
+        return ((layout && layout.zones) || []).filter(function (zone) {
+            return zone && !NON_PLACEMENT_ZONE_TYPES.has(
+                cleanString(zone.zoneType, '')
+            ) && Array.isArray(zone.boundary) && zone.boundary.length >= 3;
+        });
+    }
+
+    function zoneAllowsRecord(zone, record) {
+        const allowed = zone && zone.allowedAssetCategories;
+        return !Array.isArray(allowed) || !allowed.length
+            || allowed.includes(record.category);
+    }
+
+    function candidateFitsPlacementZone(candidate, zones) {
+        if (!zones.length) return true;
+        return zones.some(function (zone) {
+            return zoneAllowsRecord(zone, candidate.item.record)
+                && boundsInsideZone(candidate.bounds, zone);
+        });
+    }
+
+    function catalogRecord(catalog, assetId, revision) {
+        return catalog.find(function (record) {
+            return record.assetId === assetId
+                && (!revision || record.assetDefinitionRevision === revision);
+        }) || null;
+    }
+
+    function placementBounds(placement, catalog) {
+        const record = catalogRecord(
+            catalog,
+            placement.assetId,
+            placement.assetDefinitionRevision
+        );
+        const transform = placement.transform || {};
+        const position = transform.position || {};
+        const scale = Math.max(0.0001, finite(transform.scale, 1));
+        let width = (record ? record.width : 1.2) * scale;
+        let depth = (record ? record.depth : 0.8) * scale;
+        const quarterTurns = Math.round(
+            quaternionYawDegrees(transform.quaternion) / 90
+        ) % 4;
+        if (Math.abs(quarterTurns) % 2 === 1) {
+            const swap = width;
+            width = depth;
+            depth = swap;
+        }
+        return rectangleBounds({
+            x: finite(position.x, 0),
+            z: finite(position.z, 0),
+        }, width, depth);
+    }
+
+    function boundsCenter(bounds) {
+        return {
+            x: (finite(bounds.minX, 0) + finite(bounds.maxX, 0)) / 2,
+            z: (finite(bounds.minZ, 0) + finite(bounds.maxZ, 0)) / 2,
+        };
+    }
+
+    function unionBounds(values) {
+        if (!Array.isArray(values) || !values.length) {
+            throw new TypeError('at least one placement bound is required');
+        }
+        return values.reduce(function (result, value) {
+            return {
+                minX: Math.min(result.minX, value.minX),
+                minZ: Math.min(result.minZ, value.minZ),
+                maxX: Math.max(result.maxX, value.maxX),
+                maxZ: Math.max(result.maxZ, value.maxZ),
+            };
+        }, {
+            minX: Infinity,
+            minZ: Infinity,
+            maxX: -Infinity,
+            maxZ: -Infinity,
+        });
+    }
+
+    function precisionPlacements(layout, placementIds) {
+        const source = assertObject(layout, 'layout');
+        if (!Array.isArray(placementIds)) {
+            throw new TypeError('placementIds must be an array');
+        }
+        const index = new Map((source.placements || []).map(function (placement) {
+            return [placement.placementId, placement];
+        }));
+        const seen = new Set();
+        return placementIds.map(function (placementId, itemIndex) {
+            const identifier = cleanString(placementId, '');
+            if (!identifier || seen.has(identifier)) {
+                throw new TypeError(
+                    'placementIds[' + itemIndex + '] must be a unique placement ID'
+                );
+            }
+            seen.add(identifier);
+            const placement = index.get(identifier);
+            if (!placement) {
+                throw new TypeError("placement '" + identifier + "' does not exist");
+            }
+            return placement;
+        });
+    }
+
+    function placementUpdate(placement, deltaX, deltaZ) {
+        const position = placement.transform && placement.transform.position || {};
+        const dx = finite(deltaX, 0);
+        const dz = finite(deltaZ, 0);
+        if (placement.positionMode === 'locked'
+                && (Math.abs(dx) > 1e-9 || Math.abs(dz) > 1e-9)) {
+            throw new Error(
+                "Unlock '" + cleanString(
+                    placement.metadata && placement.metadata.instanceLabel,
+                    placement.placementId
+                ) + "' before repositioning it."
+            );
+        }
+        return {
+            placementId: placement.placementId,
+            position: {
+                x: finite(position.x, 0) + dx,
+                y: finite(position.y, 0),
+                z: finite(position.z, 0) + dz,
+            },
+        };
+    }
+
+    function changedPlacementUpdate(placement, deltaX, deltaZ) {
+        const dx = finite(deltaX, 0);
+        const dz = finite(deltaZ, 0);
+        if (Math.abs(dx) <= 1e-9 && Math.abs(dz) <= 1e-9) return null;
+        return placementUpdate(placement, dx, dz);
+    }
+
+    function buildAlignmentUpdates(layout, catalog, placementIds, mode, anchorId) {
+        const placements = precisionPlacements(layout, placementIds);
+        if (placements.length < 2) {
+            throw new TypeError('Select at least two equipment placements to align.');
+        }
+        const supported = [
+            'left', 'center-x', 'right', 'north', 'center-z', 'south',
+        ];
+        if (!supported.includes(mode)) {
+            throw new TypeError('alignment mode is unsupported');
+        }
+        const normalizedCatalog = normalizeCatalog(catalog || []);
+        const anchor = placements.find(function (placement) {
+            return placement.placementId === anchorId;
+        }) || placements[0];
+        const anchorBounds = placementBounds(anchor, normalizedCatalog);
+        const anchorCenter = boundsCenter(anchorBounds);
+        const target = {
+            left: anchorBounds.minX,
+            'center-x': anchorCenter.x,
+            right: anchorBounds.maxX,
+            north: anchorBounds.maxZ,
+            'center-z': anchorCenter.z,
+            south: anchorBounds.minZ,
+        }[mode];
+        const updates = placements.map(function (placement) {
+            if (placement.placementId === anchor.placementId) return null;
+            const bounds = placementBounds(placement, normalizedCatalog);
+            const center = boundsCenter(bounds);
+            let dx = 0;
+            let dz = 0;
+            if (mode === 'left') dx = target - bounds.minX;
+            else if (mode === 'center-x') dx = target - center.x;
+            else if (mode === 'right') dx = target - bounds.maxX;
+            else if (mode === 'north') dz = target - bounds.maxZ;
+            else if (mode === 'center-z') dz = target - center.z;
+            else dz = target - bounds.minZ;
+            return changedPlacementUpdate(placement, dx, dz);
+        }).filter(Boolean);
+        return {
+            mode: mode,
+            anchorPlacementId: anchor.placementId,
+            updates: updates,
+        };
+    }
+
+    function buildDistributionUpdates(
+        layout,
+        catalog,
+        placementIds,
+        axis,
+        method,
+        exactGap
+    ) {
+        const placements = precisionPlacements(layout, placementIds);
+        if (placements.length < 3) {
+            throw new TypeError('Select at least three equipment placements to distribute.');
+        }
+        if (axis !== 'x' && axis !== 'z') {
+            throw new TypeError('distribution axis must be x or z');
+        }
+        if (!['equal-gap', 'equal-center', 'fixed-gap'].includes(method)) {
+            throw new TypeError('distribution method is unsupported');
+        }
+        const normalizedCatalog = normalizeCatalog(catalog || []);
+        const records = placements.map(function (placement) {
+            const bounds = placementBounds(placement, normalizedCatalog);
+            const center = boundsCenter(bounds);
+            return {
+                placement: placement,
+                bounds: bounds,
+                center: center,
+                size: axis === 'x'
+                    ? bounds.maxX - bounds.minX
+                    : bounds.maxZ - bounds.minZ,
+            };
+        }).sort(function (left, right) {
+            const delta = left.center[axis] - right.center[axis];
+            return Math.abs(delta) > 1e-9
+                ? delta
+                : left.placement.placementId.localeCompare(
+                    right.placement.placementId
+                );
+        });
+        const first = records[0];
+        const last = records[records.length - 1];
+        const proposedCenters = new Map();
+        let gap = null;
+        if (method === 'equal-center') {
+            const interval = (last.center[axis] - first.center[axis])
+                / (records.length - 1);
+            records.forEach(function (record, index) {
+                proposedCenters.set(
+                    record.placement.placementId,
+                    first.center[axis] + interval * index
+                );
+            });
+        } else {
+            gap = method === 'fixed-gap'
+                ? finite(exactGap, NaN)
+                : ((axis === 'x' ? last.bounds.maxX : last.bounds.maxZ)
+                    - (axis === 'x' ? first.bounds.minX : first.bounds.minZ)
+                    - records.reduce(function (total, record) {
+                        return total + record.size;
+                    }, 0)) / (records.length - 1);
+            if (!Number.isFinite(gap) || gap < 0) {
+                throw new TypeError(
+                    method === 'fixed-gap'
+                        ? 'Exact clear gap must be zero or greater.'
+                        : 'The selected span is too small for equal clear gaps.'
+                );
+            }
+            let cursor = axis === 'x' ? first.bounds.minX : first.bounds.minZ;
+            records.forEach(function (record) {
+                proposedCenters.set(
+                    record.placement.placementId,
+                    cursor + record.size / 2
+                );
+                cursor += record.size + gap;
+            });
+        }
+        const updates = records.map(function (record) {
+            const delta = proposedCenters.get(record.placement.placementId)
+                - record.center[axis];
+            return changedPlacementUpdate(
+                record.placement,
+                axis === 'x' ? delta : 0,
+                axis === 'z' ? delta : 0
+            );
+        }).filter(Boolean);
+        return {
+            axis: axis,
+            method: method,
+            clearGap: gap,
+            updates: updates,
+        };
+    }
+
+    function buildRelativePositionUpdates(
+        layout,
+        catalog,
+        movingIds,
+        referenceId,
+        relation,
+        distance,
+        alignment
+    ) {
+        const moving = precisionPlacements(layout, movingIds);
+        if (!moving.length) throw new TypeError('Select equipment to reposition.');
+        const reference = precisionPlacements(layout, [referenceId])[0];
+        if (moving.some(function (placement) {
+            return placement.placementId === reference.placementId;
+        })) {
+            throw new TypeError('The reference cannot also be repositioned.');
+        }
+        if (!['east', 'west', 'north', 'south'].includes(relation)) {
+            throw new TypeError('relative relation is unsupported');
+        }
+        if (!['minimum', 'center', 'maximum'].includes(alignment)) {
+            throw new TypeError('relative alignment is unsupported');
+        }
+        const gap = finite(distance, NaN);
+        if (!Number.isFinite(gap) || gap < 0) {
+            throw new TypeError('Relative distance must be zero or greater.');
+        }
+        const normalizedCatalog = normalizeCatalog(catalog || []);
+        const referenceBounds = placementBounds(reference, normalizedCatalog);
+        const groupBounds = unionBounds(moving.map(function (placement) {
+            return placementBounds(placement, normalizedCatalog);
+        }));
+        const referenceCenter = boundsCenter(referenceBounds);
+        const groupCenter = boundsCenter(groupBounds);
+        let dx = 0;
+        let dz = 0;
+        if (relation === 'east') dx = referenceBounds.maxX + gap - groupBounds.minX;
+        else if (relation === 'west') dx = referenceBounds.minX - gap - groupBounds.maxX;
+        else if (relation === 'north') dz = referenceBounds.maxZ + gap - groupBounds.minZ;
+        else dz = referenceBounds.minZ - gap - groupBounds.maxZ;
+
+        if (relation === 'east' || relation === 'west') {
+            if (alignment === 'minimum') dz = referenceBounds.minZ - groupBounds.minZ;
+            else if (alignment === 'center') dz = referenceCenter.z - groupCenter.z;
+            else dz = referenceBounds.maxZ - groupBounds.maxZ;
+        } else if (alignment === 'minimum') {
+            dx = referenceBounds.minX - groupBounds.minX;
+        } else if (alignment === 'center') {
+            dx = referenceCenter.x - groupCenter.x;
+        } else {
+            dx = referenceBounds.maxX - groupBounds.maxX;
+        }
+        return {
+            referencePlacementId: reference.placementId,
+            relation: relation,
+            distance: gap,
+            alignment: alignment,
+            updates: moving.map(function (placement) {
+                return changedPlacementUpdate(placement, dx, dz);
+            }).filter(Boolean),
+        };
+    }
+
+    function measurePlacementDistance(layout, catalog, firstId, secondId, mode) {
+        const placements = precisionPlacements(layout, [firstId, secondId]);
+        const normalizedCatalog = normalizeCatalog(catalog || []);
+        const first = placementBounds(placements[0], normalizedCatalog);
+        const second = placementBounds(placements[1], normalizedCatalog);
+        const firstCenter = boundsCenter(first);
+        const secondCenter = boundsCenter(second);
+        const gapX = second.minX > first.maxX
+            ? second.minX - first.maxX
+            : first.minX > second.maxX
+                ? first.minX - second.maxX : 0;
+        const gapZ = second.minZ > first.maxZ
+            ? second.minZ - first.maxZ
+            : first.minZ > second.maxZ
+                ? first.minZ - second.maxZ : 0;
+        const values = {
+            'horizontal-gap': gapX,
+            'vertical-gap': gapZ,
+            'horizontal-center': Math.abs(secondCenter.x - firstCenter.x),
+            'vertical-center': Math.abs(secondCenter.z - firstCenter.z),
+            'center-distance': Math.hypot(
+                secondCenter.x - firstCenter.x,
+                secondCenter.z - firstCenter.z
+            ),
+            shortest: Math.hypot(gapX, gapZ),
+        };
+        if (!Object.prototype.hasOwnProperty.call(values, mode)) {
+            throw new TypeError('distance mode is unsupported');
+        }
+        return values[mode];
+    }
+
+    function buildDistanceUpdate(
+        layout,
+        catalog,
+        referenceId,
+        movingId,
+        mode,
+        requestedDistance
+    ) {
+        if (![
+            'horizontal-gap',
+            'vertical-gap',
+            'horizontal-center',
+            'vertical-center',
+            'center-distance',
+        ].includes(mode)) {
+            throw new TypeError('editable distance mode is unsupported');
+        }
+        const placements = precisionPlacements(layout, [referenceId, movingId]);
+        const reference = placements[0];
+        const moving = placements[1];
+        const distance = finite(requestedDistance, NaN);
+        if (!Number.isFinite(distance) || distance < 0) {
+            throw new TypeError('Distance must be zero or greater.');
+        }
+        const normalizedCatalog = normalizeCatalog(catalog || []);
+        const referenceBounds = placementBounds(reference, normalizedCatalog);
+        const movingBounds = placementBounds(moving, normalizedCatalog);
+        const referenceCenter = boundsCenter(referenceBounds);
+        const movingCenter = boundsCenter(movingBounds);
+        let dx = 0;
+        let dz = 0;
+        if (mode === 'horizontal-gap') {
+            const direction = movingCenter.x >= referenceCenter.x ? 1 : -1;
+            const target = direction > 0
+                ? referenceBounds.maxX + distance
+                    + (movingBounds.maxX - movingBounds.minX) / 2
+                : referenceBounds.minX - distance
+                    - (movingBounds.maxX - movingBounds.minX) / 2;
+            dx = target - movingCenter.x;
+        } else if (mode === 'vertical-gap') {
+            const direction = movingCenter.z >= referenceCenter.z ? 1 : -1;
+            const target = direction > 0
+                ? referenceBounds.maxZ + distance
+                    + (movingBounds.maxZ - movingBounds.minZ) / 2
+                : referenceBounds.minZ - distance
+                    - (movingBounds.maxZ - movingBounds.minZ) / 2;
+            dz = target - movingCenter.z;
+        } else if (mode === 'horizontal-center') {
+            const direction = movingCenter.x >= referenceCenter.x ? 1 : -1;
+            dx = referenceCenter.x + direction * distance - movingCenter.x;
+        } else if (mode === 'vertical-center') {
+            const direction = movingCenter.z >= referenceCenter.z ? 1 : -1;
+            dz = referenceCenter.z + direction * distance - movingCenter.z;
+        } else {
+            let vectorX = movingCenter.x - referenceCenter.x;
+            let vectorZ = movingCenter.z - referenceCenter.z;
+            const length = Math.hypot(vectorX, vectorZ);
+            if (length <= 1e-9) {
+                vectorX = 1;
+                vectorZ = 0;
+            } else {
+                vectorX /= length;
+                vectorZ /= length;
+            }
+            dx = referenceCenter.x + vectorX * distance - movingCenter.x;
+            dz = referenceCenter.z + vectorZ * distance - movingCenter.z;
+        }
+        return {
+            referencePlacementId: reference.placementId,
+            movingPlacementId: moving.placementId,
+            mode: mode,
+            distance: distance,
+            updates: [changedPlacementUpdate(moving, dx, dz)].filter(Boolean),
+        };
+    }
+
+    function squareRingOffsets(maximumRing) {
+        const offsets = [{ x: 0, z: 0 }];
+        for (let ring = 1; ring <= maximumRing; ring += 1) {
+            for (let x = -ring; x <= ring; x += 1) {
+                offsets.push({ x: x, z: -ring });
+                offsets.push({ x: x, z: ring });
+            }
+            for (let z = -ring + 1; z < ring; z += 1) {
+                offsets.push({ x: -ring, z: z });
+                offsets.push({ x: ring, z: z });
+            }
+        }
+        return offsets;
+    }
+
+    function buildAssetBatchPlacementRequests(
+        selection,
+        layout,
+        inputCatalog,
+        center,
+        inputOptions
+    ) {
+        const options = inputOptions || {};
+        const catalog = normalizeCatalog(inputCatalog || []);
+        const expanded = [];
+        (selection || []).forEach(function (selected) {
+            const quantity = Math.max(0, Math.floor(finite(selected.quantity, 0)));
+            const record = catalogRecord(
+                catalog,
+                cleanString(selected.assetId, ''),
+                cleanString(selected.assetDefinitionRevision, '')
+            );
+            if (!record || !quantity) return;
+            for (let instance = 0; instance < quantity; instance += 1) {
+                expanded.push({ record: record, instance: instance + 1 });
+            }
+        });
+        if (!expanded.length) {
+            throw new Error('Select at least one asset to add');
+        }
+        if (expanded.length > MAX_ASSET_BATCH_ITEMS) {
+            throw new Error(
+                'Add no more than ' + MAX_ASSET_BATCH_ITEMS
+                + ' assets in one batch'
+            );
+        }
+        const clearance = Math.max(
+            0,
+            finite(options.clearance, DEFAULT_ASSET_CLEARANCE)
+        );
+        const slotWidth = Math.max.apply(null, expanded.map(function (item) {
+            return item.record.width;
+        })) + clearance;
+        const slotDepth = Math.max.apply(null, expanded.map(function (item) {
+            return item.record.depth;
+        })) + clearance;
+        const columns = Math.min(expanded.length, Math.max(1, Math.ceil(
+            Math.sqrt(expanded.length * slotDepth / slotWidth)
+        )));
+        const rows = Math.ceil(expanded.length / columns);
+        const anchor = snapWorldPoint(center || { x: 0, y: 0, z: 0 },
+            finite(options.gridSize, DEFAULT_GRID_SIZE));
+        const placementZones = operationalPlacementZones(layout);
+        const zoneAnchors = placementZones.filter(function (zone) {
+            return expanded.every(function (item) {
+                return zoneAllowsRecord(zone, item.record);
+            });
+        }).map(function (zone) {
+            const dimensions = zoneDimensions(zone);
+            return dimensions && dimensions.center;
+        }).filter(Boolean).sort(function (left, right) {
+            const leftDistance = Math.hypot(left.x - anchor.x, left.z - anchor.z);
+            const rightDistance = Math.hypot(right.x - anchor.x, right.z - anchor.z);
+            return leftDistance - rightDistance;
+        });
+        const anchors = [anchor].concat(zoneAnchors).filter(function (value, index, list) {
+            return list.findIndex(function (candidate) {
+                return Math.abs(candidate.x - value.x) <= 1e-7
+                    && Math.abs(candidate.z - value.z) <= 1e-7;
+            }) === index;
+        });
+        const occupied = ((layout && layout.placements) || []).map(function (value) {
+            return placementBounds(value, catalog);
+        });
+        const offsets = squareRingOffsets(20);
+        let accepted = null;
+        for (let anchorIndex = 0;
+                anchorIndex < anchors.length && !accepted; anchorIndex += 1) {
+            const currentAnchor = anchors[anchorIndex];
+            const base = expanded.map(function (item, index) {
+                const column = index % columns;
+                const row = Math.floor(index / columns);
+                return {
+                    item: item,
+                    position: {
+                        x: currentAnchor.x
+                            + (column - (columns - 1) / 2) * slotWidth,
+                        y: finite(currentAnchor.y, anchor.y),
+                        z: currentAnchor.z
+                            + (row - (rows - 1) / 2) * slotDepth,
+                    },
+                };
+            });
+            for (let index = 0; index < offsets.length && !accepted; index += 1) {
+                const offset = offsets[index];
+                const proposal = base.map(function (candidate) {
+                    const position = snapWorldPoint({
+                        x: candidate.position.x + offset.x * slotWidth,
+                        y: candidate.position.y,
+                        z: candidate.position.z + offset.z * slotDepth,
+                    }, finite(options.gridSize, DEFAULT_GRID_SIZE));
+                    return {
+                        item: candidate.item,
+                        position: position,
+                        bounds: rectangleBounds(
+                            position,
+                            candidate.item.record.width,
+                            candidate.item.record.depth
+                        ),
+                    };
+                });
+                const inside = proposal.every(function (candidate) {
+                    return boundsInsideWorld(candidate.bounds, options.worldBounds)
+                        && candidateFitsPlacementZone(candidate, placementZones);
+                });
+                const clear = inside && proposal.every(function (
+                    candidate,
+                    itemIndex
+                ) {
+                    return !occupied.concat(proposal.slice(0, itemIndex).map(
+                        function (item) { return item.bounds; }
+                    )).some(function (bounds) {
+                        return boundsOverlap(candidate.bounds, bounds, clearance);
+                    });
+                });
+                if (clear) accepted = proposal;
+            }
+        }
+        if (!accepted) {
+            throw new Error(
+                'No collision-free area is available near the current view'
+            );
+        }
+        return accepted.map(function (candidate, index) {
+            const record = candidate.item.record;
+            return {
+                assetId: record.assetId,
+                assetDefinitionRevision: record.assetDefinitionRevision,
+                worldPosition: candidate.position,
+                positionMode: 'manual',
+                metadata: {
+                    instanceLabel: record.label,
+                    inputMethod: 'asset-browser',
+                    batchIndex: index,
+                    quantityInstance: candidate.item.instance,
+                },
+            };
         });
     }
 
@@ -683,6 +2049,10 @@
         });
         if (!Number.isFinite(minX)) return null;
         return {
+            minX: minX,
+            minZ: minZ,
+            maxX: maxX,
+            maxZ: maxZ,
             width: maxX - minX,
             depth: maxZ - minZ,
             center: {
@@ -726,10 +2096,16 @@
             || Boolean(target && target.isContentEditable);
     }
 
-    function createDragSessionId() {
-        dragSequence += 1;
-        return 'facility-drag-' + Date.now().toString(36)
-            + '-' + dragSequence.toString(36);
+    function isDialogDragControl(target, boundary) {
+        let current = target;
+        while (current && current !== boundary) {
+            const name = String(current.nodeName || '').toLowerCase();
+            if (name === 'button' || name === 'input' || name === 'select'
+                    || name === 'textarea' || name === 'a'
+                    || current.isContentEditable) return true;
+            current = current.parentNode;
+        }
+        return false;
     }
 
     function selectionRecord(layout, selection) {
@@ -742,7 +2118,15 @@
         const zone = layout.zones.find(function (item) {
             return item.zoneId === id;
         });
-        return zone ? { kind: 'zone', value: zone } : null;
+        if (zone) return { kind: 'zone', value: zone };
+        const marking = (layout.floorMarkings || []).find(function (item) {
+            return item.markingId === id;
+        });
+        if (marking) return { kind: 'floor-marking', value: marking };
+        const route = (layout.routes || []).find(function (item) {
+            return item.routeId === id;
+        });
+        return route ? { kind: 'aisle', value: route } : null;
     }
 
     function Workspace(inputOptions) {
@@ -774,6 +2158,7 @@
             fullLayoutProposals: true,
             atomicProposalApply: true,
         }, options.capabilities || {});
+        this.externalCommandSurface = options.externalCommandSurface === true;
         this.gridSize = finite(options.gridSize, DEFAULT_GRID_SIZE);
         if (this.gridSize <= 0) this.gridSize = DEFAULT_GRID_SIZE;
         this.eventToWorld = options.eventToWorld || options.worldPointFromPointer;
@@ -781,7 +2166,205 @@
             ? options.marqueeResolver : null;
         this.toolMode = 'select';
         this.viewMode = 'plan';
+        this.threeNavigationMode = 'orbit';
+        this.threeGridVisible = true;
+        this.threeCompassOrientation = compassHeading(0);
+        this.threeWalkthrough = {
+            supported: false,
+            active: false,
+            locked: false,
+            reason: null,
+            route: {
+                active: false,
+                reason: null,
+            },
+        };
+        this.threeDrone = {
+            supported: false,
+            active: false,
+            locked: false,
+            assistedFlight: true,
+            altitude: 0,
+            currentSpeed: 0,
+            nearestObstacleDistance: null,
+            reason: null,
+        };
+        this.walkthroughContextState = {
+            focus: null,
+            expanded: false,
+            pinned: false,
+            pinnedPlacementId: null,
+            mode: 'production',
+        };
+        this.recordingRuntime = options.recordingRuntime
+            || (root && root.InspectorProFacilityRecorder) || null;
+        this.patternRuntime = options.patternRuntime
+            || (root && root.InspectorProFacilityPatterns) || null;
+        this.recordingController = null;
+        this.recordingCountdownTimer = null;
+        this.recordingCountdownSeconds = Math.max(
+            0,
+            Math.min(10, Math.round(finite(
+                options.recordingCountdownSeconds,
+                3
+            )))
+        );
+        this.recordingCursor = { x: 0.5, y: 0.5, visible: false };
+        this.recordingState = {
+            status: 'idle',
+            panelOpen: false,
+            previewOpen: false,
+            countdown: 0,
+            elapsedMs: 0,
+            paused: false,
+            error: null,
+            format: null,
+            filename: null,
+            settings: {
+                presentationMode: 'clean',
+                resolution: 'current',
+                fps: 30,
+                microphone: false,
+                includeHud: false,
+                includeCursor: false,
+            },
+        };
+        this.threeSettingsOpen = false;
+        this.threeViewMenuOpen = false;
+        this.threeViewpointsOpen = false;
+        this.threeOrientation = 'iso';
+        this.threeVisualSettings = normalizeThreeVisualSettings(
+            options.threeVisualSettings
+        );
         this.state = this.session.getState();
+        let planPreferenceStorage = options.planPreferenceStorage || null;
+        if (!planPreferenceStorage) {
+            try {
+                planPreferenceStorage = root && root.sessionStorage;
+            } catch (error) {
+                planPreferenceStorage = null;
+            }
+        }
+        const layoutId = cleanString(
+            this.state && this.state.layout && this.state.layout.layoutId,
+            'default'
+        );
+        this.planPreferenceStorage = planPreferenceStorage;
+        this.planPreferenceKey = cleanString(
+            options.planPreferenceKey,
+            PLAN_VIEW_PREFERENCE_PREFIX + layoutId
+        );
+        this.threeViewpointKey = cleanString(
+            options.threeViewpointKey,
+            THREE_VIEWPOINT_PREFIX + layoutId
+        );
+        this.threeViewpoints = loadThreeViewpoints(
+            this.planPreferenceStorage,
+            this.threeViewpointKey
+        );
+        this.planPreferences = loadPlanPreferences(
+            this.planPreferenceStorage,
+            this.planPreferenceKey,
+            Object.assign({
+                unit: options.topPlanOptions
+                    && options.topPlanOptions.displayUnit,
+                showGrid: !options.topPlanOptions
+                    || options.topPlanOptions.showGrid !== false,
+                snapToGrid: true,
+            }, options.planPreferences || {})
+        );
+        const configuredBounds = options.topPlanOptions
+            && options.topPlanOptions.worldBounds || {};
+        const fallbackPlanSettings = normalizePlanSettings({
+            widthMeters: finite(configuredBounds.maxX, DEFAULT_PLAN_WIDTH_METERS)
+                - finite(configuredBounds.minX, 0),
+            depthMeters: finite(configuredBounds.maxZ, DEFAULT_PLAN_DEPTH_METERS)
+                - finite(configuredBounds.minZ, 0),
+            gridSpacingMeters: options.topPlanOptions
+                && options.topPlanOptions.floorGridSpacing !== undefined
+                ? options.topPlanOptions.floorGridSpacing
+                : options.gridSize,
+            majorGridSpacingMeters: options.topPlanOptions
+                && options.topPlanOptions.floorMajorGridSpacing,
+        });
+        this.planSettings = planSettingsFromLayout(
+            this.state && this.state.layout,
+            fallbackPlanSettings
+        );
+        this.planSettingsState = {
+            open: false,
+            applying: false,
+            focusField: 'widthMeters',
+            draft: clone(this.planSettings),
+            scaleDistanceMeters: null,
+            originalScale: null,
+        };
+        this.clearAllState = {
+            open: false,
+            applying: false,
+            focusReturn: null,
+        };
+        this.bulkZoneState = {
+            open: false,
+            applying: false,
+            focusReturn: null,
+            nextRowId: 2,
+            rows: [{
+                rowId: 'zone-row-1',
+                label: 'Zone 1',
+                zoneType: 'workcell',
+                minX: 0,
+                minZ: 0,
+                width: 10,
+                depth: 8,
+                color: '#4a90c2',
+            }],
+        };
+        this.cellGroupSequence = 0;
+        this.cellGroupState = {
+            open: false,
+            applying: false,
+            focusReturn: null,
+            baseName: 'Manufacturing Cell',
+            prefix: 'A',
+            start: 1,
+            numberPadding: 2,
+            envelopePadding: 1,
+            color: '#2f80b9',
+            gateSide: '',
+            loadingSide: '',
+            serviceSide: '',
+        };
+        this.aisleState = {
+            open: false,
+            drawing: false,
+            focusReturn: null,
+            sequence: 1,
+            label: 'Forklift Aisle 1',
+            aisleKind: 'forklift',
+            direction: 'two_way',
+            corridorWidth: 3.6,
+            color: '#d9a514',
+        };
+        this.gridSize = this.planSettings.gridSpacingMeters;
+        const initialEnvironment = {
+            worldBounds: worldBoundsFromPlanSettings(
+                this.planSettings,
+                configuredBounds
+            ),
+            floorGridSpacing: this.planSettings.gridSpacingMeters,
+            floorMajorGridSpacing: this.planSettings.majorGridSpacingMeters,
+        };
+        options.topPlanOptions = Object.assign(
+            {},
+            options.topPlanOptions || {},
+            initialEnvironment
+        );
+        options.threeOptions = Object.assign(
+            {},
+            options.threeOptions || {},
+            initialEnvironment
+        );
         this.destroyed = false;
         this.suspended = false;
         this.suspendedChildren = [];
@@ -800,6 +2383,7 @@
         this.polygonPoints = [];
         this.suppressAdapterSelection = null;
         this.lastLayoutFingerprint = null;
+        this.commandStates = {};
         this.unsubscribe = null;
         this.marqueeCleanup = null;
         this.createdTopAdapter = false;
@@ -807,7 +2391,93 @@
         this.ownsController = !options.controller;
         this.lastProposalVisualFingerprint = 'none';
         this.proposalFocusReturn = null;
+        this.lastPointerWorld = { x: 0, y: 0, z: 0 };
+        this.assetBrowserState = {
+            open: false,
+            query: '',
+            category: 'All',
+            selected: {},
+            selectionOrder: [],
+        };
+        this.assetBrowserSubmitting = false;
+        this.assetBrowserFocusReturn = null;
+        this.floorMarkingState = {
+            open: false,
+            type: 'direction_arrow',
+        };
+        this.geometryInspectorCollapsed = false;
+        this.precisionState = {
+            open: false,
+            mode: 'align',
+            alignMode: 'left',
+            anchorId: '',
+            distributeAxis: 'x',
+            distributeMethod: 'equal-gap',
+            distributeGap: 1,
+            referenceId: '',
+            movingId: '',
+            relation: 'east',
+            relativeAlignment: 'center',
+            relativeDistance: 1,
+            distanceMode: 'horizontal-gap',
+            requestedDistance: 1,
+            offsetX: 1,
+            offsetZ: 0,
+            createCopies: false,
+        };
+        this.precisionFocusReturn = null;
+        this.precisionMessage = '';
+        this.patternState = {
+            open: false,
+            mode: 'linear-pattern',
+            count: 3,
+            pitch: 4,
+            linearDirection: 'horizontal',
+            angleDegrees: 0,
+            centerX: 0,
+            centerZ: 0,
+            sweepDegrees: 360,
+            rotateWithPattern: false,
+            perimeterShape: 'rectangle',
+            perimeterWidthCount: 6,
+            perimeterDepthCount: 4,
+            perimeterClearGap: 0,
+            shape: 'u',
+            width: 10,
+            depth: 8,
+            gap: 1,
+            rows: 2,
+            orientation: 'preserve',
+            invertU: false,
+            stackCount: 3,
+            stackGap: 0,
+            surfaceSupportId: '',
+            surfaceId: 'derived-top',
+            surfaceSide: 'above',
+            surfaceGap: 0,
+            surfaceItemGap: 0.05,
+            surfaceInset: 0.05,
+            mirrorAxisMode: 'vertical',
+            mirrorAxisX: 0,
+            mirrorAxisZ: 0,
+            mirrorAxisStart: null,
+            mirrorAxisEnd: null,
+            mirrorPicking: false,
+            mirrorPickPoints: [],
+            applying: false,
+        };
+        this.patternPreview = null;
+        this.patternFocusReturn = null;
+        this.patternMessage = '';
+        this.movableDialogDrag = null;
+        this.floatingDom = options.floatingDom
+            || (root && root.FloatingUIDOM) || null;
+        this.selectionToolbarManager = null;
+        this.selectionToolbarElement = null;
+        this.selectionToolbarReference = null;
+        this.selectionToolbarKey = null;
         this._build();
+        this._initializeSelectionToolbar();
         this._connectRendering();
         this._connectEvents();
         this.unsubscribe = this.session.subscribe(this._handleSessionState.bind(this));
@@ -842,63 +2512,3989 @@
         return button;
     };
 
+    Workspace.prototype._initializeSelectionToolbar = function () {
+        const runtime = this.options.floatingSurfaceRuntime
+            || (root && root.InspectorProFloating) || null;
+        if (!runtime || typeof runtime.createSurfaceManager !== 'function'
+                || !this.floatingDom) return false;
+        const manager = runtime.createSurfaceManager({
+            document: this.document,
+            positioning: this.floatingDom,
+        });
+        if (!manager || manager.available === false) return false;
+        this.selectionToolbarManager = manager;
+        return true;
+    };
+
+    Workspace.prototype._selectedPlacementRecords = function () {
+        if (!this.state || !this.state.layout
+                || !Array.isArray(this.state.selection)) return [];
+        const placementIds = new Set(
+            (this.state.layout.placements || []).map(function (placement) {
+                return placement.placementId;
+            })
+        );
+        if (this.state.selection.some(function (identifier) {
+            return !placementIds.has(identifier);
+        })) return [];
+        const placements = precisionPlacements(
+            this.state.layout,
+            this.state.selection
+        );
+        return placements.length === this.state.selection.length
+            ? placements : [];
+    };
+
+    Workspace.prototype._selectedZoneRecord = function () {
+        if (!this.state || !this.state.layout
+                || !Array.isArray(this.state.selection)
+                || this.state.selection.length !== 1) return null;
+        const identifier = this.state.selection[0];
+        return (this.state.layout.zones || []).find(function (zone) {
+            return zone.zoneId === identifier;
+        }) || null;
+    };
+
+    Workspace.prototype._selectedFloorMarkingRecord = function () {
+        if (!this.state || !this.state.layout
+                || !Array.isArray(this.state.selection)
+                || this.state.selection.length !== 1) return null;
+        const identifier = this.state.selection[0];
+        return (this.state.layout.floorMarkings || []).find(function (marking) {
+            return marking.markingId === identifier;
+        }) || null;
+    };
+
+    Workspace.prototype._selectionToolbarCards = function (placementIds) {
+        if (!this.planView || typeof this.planView.querySelectorAll !== 'function') {
+            return [];
+        }
+        const identifiers = new Set(placementIds || []);
+        return Array.prototype.filter.call(
+            this.planView.querySelectorAll('.ip-flw-plan-card'),
+            function (card) {
+                return identifiers.has(card.getAttribute('data-placement-id'));
+            }
+        );
+    };
+
+    Workspace.prototype._selectionToolbarZoneElements = function (zoneId) {
+        if (!this.planView || typeof this.planView.querySelectorAll !== 'function') {
+            return [];
+        }
+        return Array.prototype.filter.call(
+            this.planView.querySelectorAll('[data-zone-id]'),
+            function (candidate) {
+                return candidate.getAttribute('data-zone-id') === zoneId;
+            }
+        );
+    };
+
+    Workspace.prototype._selectionToolbarFloorMarkingElements = function (
+        markingId
+    ) {
+        if (!this.planView || typeof this.planView.querySelectorAll !== 'function') {
+            return [];
+        }
+        return Array.prototype.filter.call(
+            this.planView.querySelectorAll('[data-floor-marking-id]'),
+            function (candidate) {
+                return candidate.getAttribute('data-floor-marking-id') === markingId;
+            }
+        );
+    };
+
+    Workspace.prototype._selectionToolbarVirtualReference = function (
+        placementIds
+    ) {
+        const workspace = this;
+        const identifiers = (placementIds || []).slice();
+        return {
+            contextElement: this.planView,
+            getBoundingClientRect: function () {
+                const cards = workspace._selectionToolbarCards(identifiers);
+                if (!cards.length) {
+                    return workspace.planView.getBoundingClientRect();
+                }
+                const bounds = cards.reduce(function (result, card) {
+                    const rect = card.getBoundingClientRect();
+                    const left = finite(rect.left, 0);
+                    const top = finite(rect.top, 0);
+                    const right = finite(rect.right, left + finite(rect.width, 0));
+                    const bottom = finite(rect.bottom, top + finite(rect.height, 0));
+                    return {
+                        left: Math.min(result.left, left),
+                        top: Math.min(result.top, top),
+                        right: Math.max(result.right, right),
+                        bottom: Math.max(result.bottom, bottom),
+                    };
+                }, {
+                    left: Infinity,
+                    top: Infinity,
+                    right: -Infinity,
+                    bottom: -Infinity,
+                });
+                return {
+                    x: bounds.left,
+                    y: bounds.top,
+                    left: bounds.left,
+                    top: bounds.top,
+                    right: bounds.right,
+                    bottom: bounds.bottom,
+                    width: Math.max(0, bounds.right - bounds.left),
+                    height: Math.max(0, bounds.bottom - bounds.top),
+                };
+            },
+        };
+    };
+
+    Workspace.prototype._zoneToolbarVirtualReference = function (zoneId) {
+        const workspace = this;
+        return {
+            contextElement: this.planView,
+            getBoundingClientRect: function () {
+                const elements = workspace._selectionToolbarZoneElements(zoneId);
+                return elements.length
+                    ? elements[0].getBoundingClientRect()
+                    : workspace.planView.getBoundingClientRect();
+            },
+        };
+    };
+
+    Workspace.prototype._floorMarkingToolbarVirtualReference = function (
+        markingId
+    ) {
+        const workspace = this;
+        return {
+            contextElement: this.planView,
+            getBoundingClientRect: function () {
+                const elements = workspace
+                    ._selectionToolbarFloorMarkingElements(markingId);
+                return elements.length
+                    ? elements[0].getBoundingClientRect()
+                    : workspace.planView.getBoundingClientRect();
+            },
+        };
+    };
+
+    Workspace.prototype._selectionToolbarMiddleware = function () {
+        if (!this.floatingDom) return [];
+        return [
+            this.floatingDom.offset(9),
+            this.floatingDom.flip({
+                boundary: this.planView,
+                fallbackPlacements: ['bottom'],
+            }),
+            this.floatingDom.shift({
+                boundary: this.planView,
+                padding: 12,
+            }),
+        ];
+    };
+
+    Workspace.prototype._selectionToolbarButton = function (command) {
+        const spec = SELECTION_TOOLBAR_COMMANDS[command];
+        const button = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-selection-command'
+                + (command === 'delete' || command === 'delete-zone'
+                    ? ' is-danger' : ''),
+            'data-selection-command': command,
+            'aria-label': spec.label,
+            title: spec.label,
+        });
+        button.appendChild(element(this.document, 'img', {
+            src: VIEWPORT_ICON_ROOT + spec.icon + '.svg',
+            alt: '',
+            draggable: 'false',
+            'aria-hidden': 'true',
+        }));
+        return button;
+    };
+
+    Workspace.prototype._buildSelectionToolbar = function (placements) {
+        const toolbar = element(this.document, 'div', {
+            className: 'ip-floating-surface ip-flw-selection-toolbar',
+            role: 'toolbar',
+            'aria-orientation': 'horizontal',
+            'aria-label': placements.length === 1
+                ? 'Selected equipment actions'
+                : placements.length + ' selected equipment actions',
+            'data-facility-selection-toolbar': '',
+        });
+        if (placements.length > 1) {
+            toolbar.appendChild(element(this.document, 'span', {
+                className: 'ip-flw-selection-count',
+                title: placements.length + ' equipment placements selected',
+                'aria-hidden': 'true',
+            }, String(placements.length)));
+        }
+        selectionToolbarCommands(placements.length).forEach(function (command) {
+            toolbar.appendChild(this._selectionToolbarButton(command));
+        }, this);
+        toolbar.addEventListener(
+            'click',
+            this._handleSelectionToolbarClick.bind(this)
+        );
+        return toolbar;
+    };
+
+    Workspace.prototype._buildZoneToolbar = function (zone) {
+        const toolbar = element(this.document, 'div', {
+            className: 'ip-floating-surface ip-flw-selection-toolbar ip-flw-zone-toolbar',
+            role: 'group',
+            'aria-label': 'Selected zone name and actions',
+            'data-facility-zone-toolbar': zone.zoneId,
+        });
+        const name = element(this.document, 'input', {
+            type: 'text',
+            className: 'ip-flw-zone-name-input',
+            value: cleanString(zone.label, zone.zoneId),
+            maxlength: '120',
+            'data-zone-name': zone.zoneId,
+            'aria-label': 'Zone name',
+            title: 'Zone name',
+        });
+        const apply = this._selectionToolbarButton('save-zone-name');
+        apply.setAttribute('data-zone-action', 'save-name');
+        apply.removeAttribute('data-selection-command');
+        const remove = this._selectionToolbarButton('delete-zone');
+        remove.setAttribute('data-zone-action', 'delete');
+        remove.removeAttribute('data-selection-command');
+        append(
+            toolbar,
+            name,
+            apply,
+            this._selectionToolbarButton('mirror'),
+            remove
+        );
+        toolbar.addEventListener('click', this._handleZoneToolbarClick.bind(this));
+        toolbar.addEventListener('keydown', this._handleZoneToolbarKeyDown.bind(this));
+        return toolbar;
+    };
+
+    Workspace.prototype._buildFloorMarkingToolbar = function (marking) {
+        const toolbar = element(this.document, 'div', {
+            className: 'ip-floating-surface ip-flw-selection-toolbar ip-flw-floor-marking-toolbar',
+            role: 'group',
+            'aria-label': 'Selected floor marking details and actions',
+            'data-facility-floor-marking-toolbar': marking.markingId,
+        });
+        const name = element(this.document, 'input', {
+            type: 'text',
+            className: 'ip-flw-floor-marking-text-input',
+            value: cleanString(marking.text, '')
+                || cleanString(marking.label, marking.markingId),
+            maxlength: '120',
+            'data-floor-marking-text': marking.markingId,
+            'aria-label': 'Floor marking label or text',
+            title: 'Floor marking label or text',
+        });
+        const fill = element(this.document, 'input', {
+            type: 'color',
+            className: 'ip-flw-floor-marking-color-input',
+            value: cleanString(marking.fillColor, '#ffffff'),
+            'data-floor-marking-color': 'fillColor',
+            'aria-label': 'Floor marking fill color',
+            title: 'Fill color',
+        });
+        const stroke = element(this.document, 'input', {
+            type: 'color',
+            className: 'ip-flw-floor-marking-color-input',
+            value: cleanString(marking.strokeColor, '#1f2937'),
+            'data-floor-marking-color': 'strokeColor',
+            'aria-label': 'Floor marking outline color',
+            title: 'Outline color',
+        });
+        const apply = this._selectionToolbarButton('save-floor-marking');
+        apply.setAttribute('data-floor-marking-action', 'save');
+        apply.removeAttribute('data-selection-command');
+        append(toolbar, name, fill, stroke, apply);
+        ['rotate', 'duplicate', 'mirror', 'lock', 'delete'].forEach(
+            function (command) {
+            toolbar.appendChild(this._selectionToolbarButton(command));
+            }, this
+        );
+        toolbar.addEventListener(
+            'click',
+            this._handleFloorMarkingToolbarClick.bind(this)
+        );
+        toolbar.addEventListener(
+            'change',
+            this._handleFloorMarkingToolbarChange.bind(this)
+        );
+        toolbar.addEventListener(
+            'keydown',
+            this._handleFloorMarkingToolbarKeyDown.bind(this)
+        );
+        return toolbar;
+    };
+
+    Workspace.prototype._applyFloorMarkingToolbar = function () {
+        if (!this.selectionToolbarElement) return false;
+        const marking = this._selectedFloorMarkingRecord();
+        const input = this.selectionToolbarElement.querySelector(
+            '[data-floor-marking-text]'
+        );
+        if (!marking || !input) return false;
+        const labelOrText = String(input.value || '').trim();
+        if (!labelOrText || labelOrText.length > 120) {
+            this._setError(new Error(
+                'Floor marking label must contain 1 to 120 characters'
+            ));
+            if (typeof input.focus === 'function') input.focus();
+            return false;
+        }
+        input.value = labelOrText;
+        const patch = { label: labelOrText };
+        if (['floor_text', 'keep_clear', 'parking_box'].includes(
+            marking.markingType
+        )) {
+            patch.text = labelOrText;
+        }
+        Array.prototype.forEach.call(
+            this.selectionToolbarElement.querySelectorAll(
+                '[data-floor-marking-color]'
+            ),
+            function (colorInput) {
+                const field = colorInput.getAttribute('data-floor-marking-color');
+                const value = String(colorInput.value || '').trim();
+                if (/^#[0-9a-f]{6}$/i.test(value)) patch[field] = value;
+            }
+        );
+        const changed = Object.keys(patch).some(function (field) {
+            return patch[field] !== marking[field];
+        });
+        if (!changed) return true;
+        this._invoke('Edit floor marking', function () {
+            return this.session.editFloorMarking(marking.markingId, patch);
+        }.bind(this));
+        return true;
+    };
+
+    Workspace.prototype._handleFloorMarkingToolbarClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-floor-marking-action',
+            this.selectionToolbarElement
+        );
+        if (action === 'save') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            if (typeof event.stopPropagation === 'function') event.stopPropagation();
+            this._applyFloorMarkingToolbar();
+            return;
+        }
+        this._handleSelectionToolbarClick(event);
+    };
+
+    Workspace.prototype._handleFloorMarkingToolbarChange = function (event) {
+        if (!targetDataId(
+            event.target,
+            'data-floor-marking-color',
+            this.selectionToolbarElement
+        )) return;
+        this._applyFloorMarkingToolbar();
+    };
+
+    Workspace.prototype._handleFloorMarkingToolbarKeyDown = function (event) {
+        if (!event || !targetDataId(
+            event.target,
+            'data-floor-marking-text',
+            this.selectionToolbarElement
+        )) return;
+        const key = String(event.key || '').toLowerCase();
+        if (key === 'enter') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._applyFloorMarkingToolbar();
+        } else if (key === 'escape') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            const marking = this._selectedFloorMarkingRecord();
+            if (marking) {
+                event.target.value = cleanString(marking.text, '')
+                    || cleanString(marking.label, marking.markingId);
+            }
+        }
+    };
+
+    Workspace.prototype._applyZoneToolbarName = function () {
+        if (!this.selectionToolbarElement) return false;
+        const zone = this._selectedZoneRecord();
+        const input = this.selectionToolbarElement.querySelector('[data-zone-name]');
+        if (!zone || !input) return false;
+        const label = String(input.value || '').trim();
+        if (!label) {
+            this._setError(new Error('Zone name cannot be empty'));
+            if (typeof input.focus === 'function') input.focus();
+            return false;
+        }
+        if (label.length > 120) {
+            this._setError(new Error('Zone name must be 120 characters or fewer'));
+            if (typeof input.focus === 'function') input.focus();
+            return false;
+        }
+        input.value = label;
+        if (label === zone.label) return true;
+        this._invoke('Rename zone', function () {
+            return this.session.editZoneLabel(zone.zoneId, label);
+        }.bind(this));
+        return true;
+    };
+
+    Workspace.prototype._handleZoneToolbarClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-zone-action',
+            this.selectionToolbarElement
+        );
+        if (!action) {
+            this._handleSelectionToolbarClick(event);
+            return;
+        }
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        if (action === 'save-name') this._applyZoneToolbarName();
+        else if (action === 'delete') this.executeCommand('delete');
+    };
+
+    Workspace.prototype._handleZoneToolbarKeyDown = function (event) {
+        if (!event || !targetDataId(
+            event.target,
+            'data-zone-name',
+            this.selectionToolbarElement
+        )) return;
+        const key = String(event.key || '').toLowerCase();
+        if (key === 'enter') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._applyZoneToolbarName();
+        } else if (key === 'escape') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            const zone = this._selectedZoneRecord();
+            if (zone) event.target.value = cleanString(zone.label, zone.zoneId);
+        }
+    };
+
+    Workspace.prototype._handleSelectionToolbarClick = function (event) {
+        const command = targetDataId(
+            event.target,
+            'data-selection-command',
+            this.selectionToolbarElement
+        );
+        if (!command) return;
+        const button = this.selectionToolbarElement.querySelector(
+            '[data-selection-command="' + command + '"]'
+        );
+        if (!button || button.disabled) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        this.executeCommand(command);
+    };
+
+    Workspace.prototype._refreshSelectionToolbar = function () {
+        if (!this.selectionToolbarElement) return false;
+        const zoneInput = this.selectionToolbarElement.querySelector(
+            '[data-zone-name]'
+        );
+        if (zoneInput) {
+            zoneInput.disabled = Boolean(this.state.busy);
+            Array.prototype.forEach.call(
+                this.selectionToolbarElement.querySelectorAll('[data-zone-action]'),
+                function (button) {
+                    button.disabled = Boolean(this.state.busy);
+                },
+                this
+            );
+            return true;
+        }
+        const markingInput = this.selectionToolbarElement.querySelector(
+            '[data-floor-marking-text]'
+        );
+        if (markingInput) {
+            const marking = this._selectedFloorMarkingRecord();
+            const active = this.document.activeElement;
+            if (marking && active !== markingInput) {
+                markingInput.value = cleanString(marking.text, '')
+                    || cleanString(marking.label, marking.markingId);
+            }
+            Array.prototype.forEach.call(
+                this.selectionToolbarElement.querySelectorAll(
+                    '[data-floor-marking-color]'
+                ),
+                function (input) {
+                    const field = input.getAttribute('data-floor-marking-color');
+                    if (marking && active !== input) {
+                        input.value = cleanString(marking[field], input.value);
+                    }
+                    input.disabled = Boolean(this.state.busy);
+                },
+                this
+            );
+            const apply = this.selectionToolbarElement.querySelector(
+                '[data-floor-marking-action]'
+            );
+            if (apply) apply.disabled = Boolean(this.state.busy);
+            markingInput.disabled = Boolean(this.state.busy);
+        }
+        Array.prototype.forEach.call(
+            this.selectionToolbarElement.querySelectorAll(
+                '[data-selection-command]'
+            ),
+            function (button) {
+                const command = button.getAttribute('data-selection-command');
+                const state = this.commandStates[command] || {};
+                const spec = SELECTION_TOOLBAR_COMMANDS[command];
+                const label = command === 'lock' && state.active
+                    ? 'Unlock' : spec.label;
+                button.disabled = Boolean(state.disabled || this.state.busy);
+                button.setAttribute('aria-label', label);
+                button.setAttribute('title', label);
+                if (command === 'lock') {
+                    button.setAttribute(
+                        'aria-pressed',
+                        state.active ? 'true' : 'false'
+                    );
+                }
+            },
+            this
+        );
+        return true;
+    };
+
+    Workspace.prototype._closeSelectionToolbar = function (
+        reason,
+        restoreFocus
+    ) {
+        if (!this.selectionToolbarManager) return false;
+        const closed = this.selectionToolbarManager.close(
+            reason || 'programmatic',
+            { restoreFocus: restoreFocus === true }
+        );
+        if (!this.selectionToolbarManager.isOpen()) {
+            this.selectionToolbarElement = null;
+            this.selectionToolbarReference = null;
+            this.selectionToolbarKey = null;
+        }
+        return closed;
+    };
+
+    Workspace.prototype._syncSelectionToolbar = function () {
+        if (!this.selectionToolbarManager) return false;
+        const placements = this._selectedPlacementRecords();
+        const zone = placements.length ? null : this._selectedZoneRecord();
+        const marking = placements.length || zone
+            ? null : this._selectedFloorMarkingRecord();
+        const unavailable = this.destroyed
+            || this.suspended
+            || this.viewMode !== 'plan'
+            || this.toolMode !== 'select'
+            || this.assetBrowserState.open
+            || this.precisionState.open
+            || this.bulkZoneState.open
+            || this.cellGroupState.open
+            || Boolean(this.state.conflict)
+            || Boolean(this.state.layoutProposal)
+            || Boolean(this.state.placementAlternatives)
+            || (!placements.length && !zone && !marking);
+        if (unavailable) {
+            this._closeSelectionToolbar('selection_unavailable', false);
+            return false;
+        }
+        const identifiers = zone ? [zone.zoneId]
+            : marking ? [marking.markingId]
+            : placements.map(function (placement) {
+                return placement.placementId;
+            });
+        const anchors = zone
+            ? this._selectionToolbarZoneElements(zone.zoneId)
+            : marking
+                ? this._selectionToolbarFloorMarkingElements(marking.markingId)
+                : this._selectionToolbarCards(identifiers);
+        if (anchors.length !== identifiers.length) {
+            this._closeSelectionToolbar('anchor_unavailable', false);
+            return false;
+        }
+        const key = (zone ? 'zone:' : marking ? 'marking:' : 'placements:')
+            + identifiers.join('|');
+        if (this.selectionToolbarManager.isOpen()
+                && this.selectionToolbarKey === key
+                && this.selectionToolbarElement) {
+            this._refreshSelectionToolbar();
+            this.selectionToolbarManager.reposition();
+            return true;
+        }
+        this._closeSelectionToolbar('selection_changed', false);
+        const toolbar = zone
+            ? this._buildZoneToolbar(zone)
+            : marking
+                ? this._buildFloorMarkingToolbar(marking)
+                : this._buildSelectionToolbar(placements);
+        const reference = zone
+            ? this._zoneToolbarVirtualReference(zone.zoneId)
+            : marking
+                ? this._floorMarkingToolbarVirtualReference(marking.markingId)
+                : this._selectionToolbarVirtualReference(identifiers);
+        this.selectionToolbarElement = toolbar;
+        this.selectionToolbarReference = reference;
+        this.selectionToolbarKey = key;
+        const opened = this.selectionToolbarManager.open({
+            key: key,
+            reference: reference,
+            floating: toolbar,
+            placement: 'top',
+            strategy: 'fixed',
+            middleware: this._selectionToolbarMiddleware(),
+            restoreFocusElement: anchors[0],
+            shouldCloseOnOutsidePointerDown: function (event) {
+                return !(event && this.planView.contains(event.target));
+            }.bind(this),
+            onClose: function () {
+                if (this.selectionToolbarElement === toolbar) {
+                    this.selectionToolbarElement = null;
+                    this.selectionToolbarReference = null;
+                    this.selectionToolbarKey = null;
+                }
+            }.bind(this),
+        });
+        if (!opened) {
+            if (typeof toolbar.remove === 'function') toolbar.remove();
+            this.selectionToolbarElement = null;
+            this.selectionToolbarReference = null;
+            this.selectionToolbarKey = null;
+        } else {
+            this._refreshSelectionToolbar();
+        }
+        return opened;
+    };
+
+    Workspace.prototype._planNavigationButton = function (
+        command,
+        label,
+        glyph
+    ) {
+        return element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-plan-nav-button',
+            'data-plan-command': command,
+            'aria-label': label,
+            title: label,
+        }, glyph);
+    };
+
+    Workspace.prototype._threeNavigationButton = function (
+        command,
+        label,
+        icon,
+        groupStart
+    ) {
+        const button = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-three-nav-button',
+            'data-three-command': command,
+            'data-group-start': groupStart ? 'true' : 'false',
+            'aria-label': label,
+            title: label,
+        });
+        const iconHost = element(this.document, 'span', {
+            className: 'ip-flw-three-nav-icon',
+            'aria-hidden': 'true',
+        });
+        const iconFactory = this.options.viewerToolbarIconMarkup
+            || (root && root.InspectorProViewerToolbarIconMarkup);
+        let markup = '';
+        if (typeof iconFactory === 'function') {
+            try {
+                markup = iconFactory(icon) || '';
+            } catch (error) {
+                markup = '';
+            }
+        }
+        if (icon === 'record') {
+            iconHost.appendChild(element(this.document, 'span', {
+                className: 'ip-flw-record-symbol',
+            }));
+            button.setAttribute('data-icon-source', 'record-symbol');
+        } else if (markup) {
+            iconHost.innerHTML = markup;
+            button.setAttribute('data-icon-source', 'cad-viewer');
+        } else {
+            const fallbackIcons = {
+                zoomfit: 'corners-out',
+                'zoom-out': 'magnifying-glass-minus',
+                'zoom-in': 'magnifying-glass-plus',
+                pan: 'hand',
+                orbit: 'sphere',
+                walkthrough: 'person-simple-walk',
+                drone: 'drone',
+                'switch-immersive': 'swap',
+                'walk-to-selected': 'navigation-arrow',
+                viewpoint: 'map-pin',
+                reset: 'bounding-box',
+                'view-top': 'cube-focus',
+                'view-iso': 'cube',
+                display: 'sphere',
+                grid: 'grid-four',
+            };
+            iconHost.appendChild(element(this.document, 'img', {
+                src: VIEWPORT_ICON_ROOT
+                    + (fallbackIcons[icon] || icon) + '.svg',
+                alt: '',
+                draggable: 'false',
+                'aria-hidden': 'true',
+            }));
+            button.setAttribute('data-icon-source', 'fallback');
+        }
+        button.appendChild(iconHost);
+        return button;
+    };
+
+    Workspace.prototype._threeViewOrientationControl = function () {
+        const wrapper = element(this.document, 'div', {
+            className: 'ip-flw-three-view-menu',
+        });
+        const trigger = this._threeNavigationButton(
+            'view-orientation',
+            'View orientation',
+            'view-iso',
+            true
+        );
+        trigger.className += ' ip-flw-three-view-trigger';
+        trigger.setAttribute('aria-haspopup', 'menu');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.appendChild(element(this.document, 'span', {
+            className: 'ip-flw-three-view-caret',
+            'aria-hidden': 'true',
+        }, '\u25be'));
+
+        const menu = element(this.document, 'div', {
+            className: 'ip-flw-three-view-popup',
+            role: 'menu',
+            'aria-label': 'View orientation',
+            hidden: true,
+        });
+        THREE_VIEW_ORIENTATIONS.forEach(function (view) {
+            const item = element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-three-view-option',
+                role: 'menuitem',
+                'data-three-view': view.key,
+                'aria-label': view.label + ' view',
+                title: view.label + ' view',
+            });
+            append(item,
+                element(this.document, 'img', {
+                    src: threeViewIconSrc(view.key),
+                    alt: '',
+                    draggable: 'false',
+                    'aria-hidden': 'true',
+                }),
+                element(this.document, 'span', {}, view.label)
+            );
+            menu.appendChild(item);
+        }, this);
+        append(wrapper, trigger, menu);
+        this.threeViewOrientationTrigger = trigger;
+        this.threeViewOrientationMenu = menu;
+        return wrapper;
+    };
+
+    Workspace.prototype._threeViewpointsControl = function () {
+        const wrapper = element(this.document, 'div', {
+            className: 'ip-flw-three-viewpoint-menu',
+        });
+        const trigger = this._threeNavigationButton(
+            'viewpoints',
+            'Named viewpoints',
+            'viewpoint',
+            false
+        );
+        trigger.className += ' ip-flw-three-viewpoint-trigger';
+        trigger.setAttribute('aria-haspopup', 'dialog');
+        trigger.setAttribute('aria-expanded', 'false');
+
+        const panel = element(this.document, 'section', {
+            className: 'ip-flw-three-viewpoint-popup',
+            role: 'dialog',
+            'aria-label': 'Named viewpoints',
+            hidden: true,
+        });
+        panel.appendChild(element(this.document, 'div', {
+            className: 'ip-flw-three-viewpoint-title',
+        }, 'Named viewpoints'));
+        const createRow = element(this.document, 'div', {
+            className: 'ip-flw-three-viewpoint-create',
+        });
+        const input = element(this.document, 'input', {
+            type: 'text',
+            maxlength: '60',
+            placeholder: 'Viewpoint name',
+            'aria-label': 'Viewpoint name',
+            'data-viewpoint-name': 'true',
+        });
+        const save = element(this.document, 'button', {
+            type: 'button',
+            'data-viewpoint-action': 'save',
+            title: 'Save current camera as a named viewpoint',
+        }, 'Save current');
+        append(createRow, input, save);
+        const list = element(this.document, 'div', {
+            className: 'ip-flw-three-viewpoint-list',
+            role: 'list',
+        });
+        append(panel, createRow, list);
+        append(wrapper, trigger, panel);
+        this.threeViewpointTrigger = trigger;
+        this.threeViewpointPanel = panel;
+        this.threeViewpointInput = input;
+        this.threeViewpointList = list;
+        this._renderThreeViewpoints();
+        return wrapper;
+    };
+
+    Workspace.prototype._threeSettingSlider = function (spec) {
+        const id = 'ip-flw-three-setting-' + spec.key;
+        const row = element(this.document, 'div', {
+            className: 'ip-flw-three-setting-row',
+        });
+        const label = element(this.document, 'label', { for: id });
+        append(label,
+            element(this.document, 'span', {}, spec.label),
+            element(this.document, 'span', {
+                className: 'ip-flw-three-setting-value',
+                'data-three-setting-value': spec.key,
+            })
+        );
+        append(row, label, element(this.document, 'input', {
+            id: id,
+            type: 'range',
+            min: spec.min,
+            max: spec.max,
+            step: spec.step,
+            value: this.threeVisualSettings[spec.key],
+            'data-three-setting': spec.key,
+            'aria-label': spec.label,
+        }));
+        return row;
+    };
+
+    Workspace.prototype._buildThreeSettingsPanel = function () {
+        const panel = element(this.document, 'section', {
+            className: 'ip-flw-three-settings',
+            'aria-label': '3D display settings',
+            hidden: true,
+        });
+        panel.appendChild(element(this.document, 'div', {
+            className: 'ip-flw-three-settings-title',
+        }, 'Display settings'));
+        [
+            { key: 'ambient', label: 'Ambient', min: 0, max: 3, step: 0.05 },
+            { key: 'directional', label: 'Directional', min: 0, max: 5, step: 0.1 },
+            { key: 'exposure', label: 'Exposure', min: 0, max: 3, step: 0.05 },
+            { key: 'contrast', label: 'Contrast', min: 0.5, max: 1.5, step: 0.05 },
+            { key: 'metalness', label: 'Metalness', min: 0, max: 1, step: 0.01 },
+            { key: 'roughness', label: 'Roughness', min: 0, max: 1, step: 0.01 },
+        ].forEach(function (spec) {
+            panel.appendChild(this._threeSettingSlider(spec));
+        }, this);
+        [
+            ['autoRotate', 'Auto Rotate'],
+            ['wireframe', 'Wireframe'],
+        ].forEach(function (spec) {
+            const id = 'ip-flw-three-setting-' + spec[0];
+            const row = element(this.document, 'div', {
+                className: 'ip-flw-three-setting-check',
+            });
+            const input = element(this.document, 'input', {
+                id: id,
+                type: 'checkbox',
+                'data-three-setting': spec[0],
+                'aria-label': spec[1],
+            });
+            input.checked = this.threeVisualSettings[spec[0]] === true;
+            append(row, input, element(this.document, 'label', {
+                for: id,
+            }, spec[1]));
+            panel.appendChild(row);
+        }, this);
+        const backgroundRow = element(this.document, 'div', {
+            className: 'ip-flw-three-setting-row',
+        });
+        append(backgroundRow,
+            element(this.document, 'label', {
+                for: 'ip-flw-three-setting-background',
+            }, 'Background'),
+            element(this.document, 'input', {
+                id: 'ip-flw-three-setting-background',
+                type: 'color',
+                value: this.threeVisualSettings.background === 'auto'
+                    ? '#dfe6eb' : this.threeVisualSettings.background,
+                'data-three-setting': 'background',
+                'aria-label': '3D background color',
+            })
+        );
+        panel.appendChild(backgroundRow);
+        panel.appendChild(element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-three-settings-reset',
+            'data-three-settings-action': 'reset',
+        }, 'Reset display'));
+        this.threeSettingsPanel = panel;
+        this._renderThreeVisualSettings();
+        return panel;
+    };
+
+    Workspace.prototype._buildAssetBrowser = function () {
+        this.assetBrowser = element(this.document, 'section', {
+            className: 'ip-flw-asset-browser',
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-label': 'Asset Library',
+            hidden: true,
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-asset-browser-header',
+        });
+        const heading = element(this.document, 'div', {
+            className: 'ip-flw-asset-browser-heading',
+        });
+        heading.appendChild(element(this.document, 'h2', {}, 'Asset Library'));
+        heading.appendChild(element(this.document, 'p', {},
+            'Select equipment and resources to add to the facility layout'));
+        this.assetBrowserClose = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-asset-browser-close',
+            'data-asset-browser-action': 'close',
+            'aria-label': 'Close asset library',
+            title: 'Close asset library',
+        }, 'X');
+        append(header, heading, this.assetBrowserClose);
+
+        const controls = element(this.document, 'div', {
+            className: 'ip-flw-asset-browser-controls',
+        });
+        const searchLabel = element(this.document, 'label', {
+            className: 'ip-flw-asset-browser-search',
+        });
+        searchLabel.appendChild(element(this.document, 'span', {
+            className: 'ip-flw-visually-hidden',
+        }, 'Search asset library'));
+        this.assetBrowserSearch = element(this.document, 'input', {
+            type: 'search',
+            placeholder: 'Search machines, material handling, storage, workstations...',
+            'aria-label': 'Search asset library',
+            autocomplete: 'off',
+        });
+        searchLabel.appendChild(this.assetBrowserSearch);
+        this.assetCategoryNav = element(this.document, 'div', {
+            className: 'ip-flw-asset-categories',
+            role: 'tablist',
+            'aria-label': 'Asset categories',
+        });
+        append(controls, searchLabel, this.assetCategoryNav);
+
+        this.assetGrid = element(this.document, 'div', {
+            className: 'ip-flw-asset-grid',
+            role: 'list',
+            'aria-label': 'Available facility assets',
+        });
+        this.assetBrowserEmpty = element(this.document, 'div', {
+            className: 'ip-flw-asset-browser-empty',
+            hidden: true,
+        });
+        this.assetBrowserEmpty.appendChild(element(
+            this.document,
+            'p',
+            {},
+            'No assets match your search.'
+        ));
+        this.assetBrowserEmpty.appendChild(element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-secondary-action',
+            'data-asset-browser-action': 'clear-filters',
+        }, 'Clear filters'));
+
+        const footer = element(this.document, 'footer', {
+            className: 'ip-flw-asset-browser-footer',
+        });
+        this.assetBrowserSelectionStatus = element(this.document, 'div', {
+            className: 'ip-flw-asset-selection-status',
+            role: 'status',
+            'aria-live': 'polite',
+            'aria-atomic': 'true',
+        }, 'No assets selected');
+        const actions = element(this.document, 'div', {
+            className: 'ip-flw-asset-browser-actions',
+        });
+        this.assetBrowserCancel = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-secondary-action',
+            'data-asset-browser-action': 'cancel',
+        }, 'Cancel');
+        this.assetBrowserAdd = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-primary-action',
+            'data-asset-browser-action': 'add',
+            disabled: true,
+        }, 'Add to Layout');
+        append(actions, this.assetBrowserCancel, this.assetBrowserAdd);
+        append(footer, this.assetBrowserSelectionStatus, actions);
+        append(
+            this.assetBrowser,
+            header,
+            controls,
+            this.assetGrid,
+            this.assetBrowserEmpty,
+            footer
+        );
+    };
+
+    Workspace.prototype._buildFloorMarkingPalette = function () {
+        this.floorMarkingPalette = element(this.document, 'section', {
+            className: 'ip-flw-floor-marking-palette',
+            role: 'dialog',
+            'aria-label': 'Floor markings',
+            hidden: true,
+            'aria-hidden': 'true',
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-floor-marking-palette-header',
+        });
+        append(header,
+            element(this.document, 'h3', {}, 'Floor Markings'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-floor-marking-close',
+                'data-floor-marking-action': 'close',
+                'aria-label': 'Close floor marking palette',
+                title: 'Close',
+            }, 'X')
+        );
+        const grid = element(this.document, 'div', {
+            className: 'ip-flw-floor-marking-grid',
+            role: 'list',
+        });
+        FLOOR_MARKING_PRESETS.forEach(function (preset) {
+            const button = element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-floor-marking-option',
+                'data-floor-marking-type': preset.type,
+                'aria-pressed': this.floorMarkingState.type === preset.type
+                    ? 'true' : 'false',
+                title: preset.label,
+            });
+            append(button,
+                element(this.document, 'span', {
+                    className: 'ip-flw-floor-marking-swatch',
+                    'data-marking-swatch': preset.type,
+                    'aria-hidden': 'true',
+                }),
+                element(this.document, 'span', {}, preset.label)
+            );
+            grid.appendChild(button);
+        }, this);
+        append(this.floorMarkingPalette, header, grid);
+    };
+
+    Workspace.prototype._floorMarkingPreset = function (type) {
+        return FLOOR_MARKING_PRESETS.find(function (preset) {
+            return preset.type === type;
+        }) || FLOOR_MARKING_PRESETS[0];
+    };
+
+    Workspace.prototype.openFloorMarkingPalette = function () {
+        if (!this.capabilities.manualAuthoring || this.viewMode !== 'plan') {
+            return false;
+        }
+        this.floorMarkingState.open = true;
+        this.floorMarkingPalette.hidden = false;
+        this.floorMarkingPalette.setAttribute('aria-hidden', 'false');
+        this._setToolMode('floor-marking');
+        return true;
+    };
+
+    Workspace.prototype.closeFloorMarkingPalette = function (selectTool) {
+        this.floorMarkingState.open = false;
+        this.floorMarkingPalette.hidden = true;
+        this.floorMarkingPalette.setAttribute('aria-hidden', 'true');
+        if (selectTool === true && this.toolMode === 'floor-marking') {
+            this._setToolMode('select');
+        }
+        return true;
+    };
+
+    Workspace.prototype._handleFloorMarkingPaletteClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-floor-marking-action',
+            this.floorMarkingPalette
+        );
+        if (action === 'close') {
+            this.closeFloorMarkingPalette(true);
+            return;
+        }
+        const type = targetDataId(
+            event.target,
+            'data-floor-marking-type',
+            this.floorMarkingPalette
+        );
+        if (!type) return;
+        const preset = this._floorMarkingPreset(type);
+        this.floorMarkingState.type = preset.type;
+        Array.prototype.forEach.call(
+            this.floorMarkingPalette.querySelectorAll('[data-floor-marking-type]'),
+            function (button) {
+                button.setAttribute(
+                    'aria-pressed',
+                    button.getAttribute('data-floor-marking-type') === preset.type
+                        ? 'true' : 'false'
+                );
+            }
+        );
+        this.closeFloorMarkingPalette(false);
+        this._setToolMode('floor-marking');
+        if (typeof this.planView.focus === 'function') this.planView.focus();
+    };
+
+    Workspace.prototype._floorMarkingFromGesture = function (start, end) {
+        const preset = this._floorMarkingPreset(this.floorMarkingState.type);
+        const dx = end.x - start.x;
+        const dz = end.z - start.z;
+        const lineLike = [
+            'direction_arrow', 'solid_line', 'dashed_line',
+        ].includes(preset.type);
+        const distance = Math.hypot(dx, dz);
+        const width = lineLike
+            ? preset.width : Math.max(Math.abs(dx), preset.width * 0.15);
+        const depth = lineLike
+            ? Math.max(distance, preset.depth * 0.2)
+            : Math.max(Math.abs(dz), preset.depth * 0.15);
+        const center = distance > 0.001 ? {
+            x: (start.x + end.x) / 2,
+            y: finite(start.y, 0),
+            z: (start.z + end.z) / 2,
+        } : {
+            x: start.x,
+            y: finite(start.y, 0),
+            z: start.z,
+        };
+        return {
+            markingType: preset.type,
+            label: preset.label,
+            semanticRole: preset.semanticRole,
+            transform: {
+                position: center,
+                rotationDegrees: lineLike && distance > 0.001
+                    ? Math.atan2(dx, dz) * 180 / Math.PI : 0,
+            },
+            width: distance > 0.001 ? width : preset.width,
+            depth: distance > 0.001 ? depth : preset.depth,
+            fillColor: preset.fillColor,
+            strokeColor: preset.strokeColor,
+            opacity: 1,
+            text: preset.text,
+            positionMode: 'manual',
+            metadata: { authoredIn: 'facility_plan' },
+            evidence: [],
+        };
+    };
+
+    Workspace.prototype._precisionSelectedPlacements = function () {
+        const layout = this.state && this.state.layout;
+        if (!layout || !Array.isArray(layout.placements)) return [];
+        const selection = new Set(this.state.selection || []);
+        return layout.placements.filter(function (placement) {
+            return selection.has(placement.placementId);
+        });
+    };
+
+    Workspace.prototype._precisionPlacementLabel = function (placement) {
+        return cleanString(
+            placement && placement.metadata
+                && placement.metadata.instanceLabel,
+            placement && placement.placementId || 'Placement'
+        );
+    };
+
+    Workspace.prototype._precisionSelect = function (label, field, values) {
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        const select = element(this.document, 'select', {
+            'data-precision-field': field,
+            'aria-label': label,
+        });
+        values.forEach(function (item) {
+            const option = element(this.document, 'option', {
+                value: item.value,
+            }, item.label);
+            if (String(item.value) === String(this.precisionState[field])) {
+                option.selected = true;
+                option.setAttribute('selected', 'selected');
+            }
+            select.appendChild(option);
+        }, this);
+        select.value = String(this.precisionState[field] || '');
+        wrapper.appendChild(select);
+        return wrapper;
+    };
+
+    Workspace.prototype._precisionNumber = function (label, field, value) {
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        wrapper.appendChild(element(this.document, 'input', {
+            type: 'number',
+            min: field === 'offsetX' || field === 'offsetZ' ? '' : '0',
+            step: this.planPreferences.unit === 'ft' ? '0.1' : '0.05',
+            value: String(Number(finite(value, 0).toFixed(4))),
+            'data-precision-field': field,
+            'aria-label': label,
+        }));
+        return wrapper;
+    };
+
+    Workspace.prototype._buildPrecisionDialog = function () {
+        this.precisionDialog = element(this.document, 'section', {
+            className: 'ip-flw-precision-dialog',
+            role: 'dialog',
+            'aria-modal': 'false',
+            'aria-labelledby': 'ip-flw-precision-title',
+            hidden: true,
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-precision-header',
+        });
+        this.precisionTitle = element(this.document, 'h2', {
+            id: 'ip-flw-precision-title',
+        }, 'Position equipment');
+        this.precisionClose = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-precision-close',
+            'data-precision-action': 'close',
+            'aria-label': 'Close positioning tools',
+            title: 'Close',
+        }, 'X');
+        append(header, this.precisionTitle, this.precisionClose);
+        this.precisionTabs = element(this.document, 'div', {
+            className: 'ip-flw-precision-tabs',
+            role: 'tablist',
+            'aria-label': 'Positioning tool',
+        });
+        [
+            ['align', 'Align'],
+            ['distribute', 'Distribute'],
+            ['relative', 'Relative'],
+            ['distance', 'Distance'],
+            ['offset', 'Offset'],
+        ].forEach(function (item) {
+            this.precisionTabs.appendChild(element(this.document, 'button', {
+                type: 'button',
+                role: 'tab',
+                'data-precision-mode': item[0],
+            }, item[1]));
+        }, this);
+        this.precisionBody = element(this.document, 'div', {
+            className: 'ip-flw-precision-body',
+        });
+        const footer = element(this.document, 'footer', {
+            className: 'ip-flw-precision-footer',
+        });
+        this.precisionStatus = element(this.document, 'div', {
+            className: 'ip-flw-precision-status',
+            role: 'status',
+            'aria-live': 'polite',
+        });
+        const actions = element(this.document, 'div', {
+            className: 'ip-flw-precision-actions',
+        });
+        this.precisionCancel = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-secondary-action',
+            'data-precision-action': 'cancel',
+        }, 'Cancel');
+        this.precisionApply = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-primary-action',
+            'data-precision-action': 'apply',
+        }, 'Apply');
+        append(actions, this.precisionCancel, this.precisionApply);
+        append(footer, this.precisionStatus, actions);
+        append(
+            this.precisionDialog,
+            header,
+            this.precisionTabs,
+            this.precisionBody,
+            footer
+        );
+    };
+
+    Workspace.prototype._patternSelect = function (label, field, options) {
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        const select = element(this.document, 'select', {
+            'data-pattern-field': field,
+            'aria-label': label,
+        });
+        (options || []).forEach(function (item) {
+            select.appendChild(element(this.document, 'option', {
+                value: item.value,
+            }, item.label));
+        }, this);
+        select.value = String(this.patternState[field] || '');
+        wrapper.appendChild(select);
+        return wrapper;
+    };
+
+    Workspace.prototype._patternNumber = function (label, field, value, options) {
+        const config = options || {};
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        wrapper.appendChild(element(this.document, 'input', {
+            type: 'number',
+            min: config.min === undefined ? '' : String(config.min),
+            max: config.max === undefined ? '' : String(config.max),
+            step: config.step === undefined ? '0.1' : String(config.step),
+            value: String(Number(finite(value, 0).toFixed(4))),
+            'data-pattern-field': field,
+            'aria-label': label,
+        }));
+        return wrapper;
+    };
+
+    Workspace.prototype._patternCheckbox = function (label, field) {
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-check',
+        });
+        const input = element(this.document, 'input', {
+            type: 'checkbox',
+            'data-pattern-field': field,
+        });
+        input.checked = this.patternState[field] === true;
+        append(wrapper, input, element(this.document, 'span', {}, label));
+        return wrapper;
+    };
+
+    Workspace.prototype._buildPatternDialog = function () {
+        this.patternDialog = element(this.document, 'section', {
+            className: 'ip-flw-precision-dialog ip-flw-pattern-dialog',
+            role: 'dialog',
+            'aria-modal': 'false',
+            'aria-labelledby': 'ip-flw-pattern-title',
+            hidden: true,
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-precision-header',
+        });
+        this.patternTitle = element(this.document, 'h2', {
+            id: 'ip-flw-pattern-title',
+        }, 'Create layout pattern');
+        this.patternClose = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-precision-close',
+            'data-pattern-action': 'close',
+            'aria-label': 'Close pattern tools',
+            title: 'Close',
+        }, 'X');
+        append(header, this.patternTitle, this.patternClose);
+        this.patternTabs = element(this.document, 'div', {
+            className: 'ip-flw-precision-tabs',
+            role: 'tablist',
+            'aria-label': 'Pattern tool',
+        });
+        [
+            ['linear-pattern', 'Linear'],
+            ['circular-pattern', 'Circular'],
+            ['perimeter-pattern', 'Perimeter'],
+            ['cell-layout', 'Cell Layout'],
+            ['vertical-stack', 'Stack'],
+            ['surface-stack', 'On Surface'],
+            ['mirror', 'Mirror'],
+            ['swap', 'Swap'],
+        ].forEach(function (item) {
+            this.patternTabs.appendChild(element(this.document, 'button', {
+                type: 'button',
+                role: 'tab',
+                'data-pattern-mode': item[0],
+            }, item[1]));
+        }, this);
+        this.patternBody = element(this.document, 'div', {
+            className: 'ip-flw-precision-body',
+        });
+        const footer = element(this.document, 'footer', {
+            className: 'ip-flw-precision-footer',
+        });
+        this.patternStatus = element(this.document, 'div', {
+            className: 'ip-flw-precision-status',
+            role: 'status',
+            'aria-live': 'polite',
+        });
+        const actions = element(this.document, 'div', {
+            className: 'ip-flw-precision-actions',
+        });
+        this.patternCancel = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-secondary-action',
+            'data-pattern-action': 'cancel',
+        }, 'Cancel');
+        this.patternApply = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-primary-action',
+            'data-pattern-action': 'apply',
+        }, 'Apply');
+        append(actions, this.patternCancel, this.patternApply);
+        append(footer, this.patternStatus, actions);
+        append(
+            this.patternDialog,
+            header,
+            this.patternTabs,
+            this.patternBody,
+            footer
+        );
+    };
+
+    Workspace.prototype._buildPlanSettingsDialog = function () {
+        this.planSettingsDialog = element(this.document, 'section', {
+            className: 'ip-flw-precision-dialog ip-flw-plan-settings-dialog',
+            role: 'dialog',
+            'aria-modal': 'false',
+            'aria-labelledby': 'ip-flw-plan-settings-title',
+            hidden: true,
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-precision-header',
+        });
+        this.planSettingsTitle = element(this.document, 'h2', {
+            id: 'ip-flw-plan-settings-title',
+        }, 'Facility plan settings');
+        const close = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-precision-close',
+            'data-plan-settings-action': 'cancel',
+            'aria-label': 'Close facility plan settings',
+            title: 'Close',
+        }, 'X');
+        append(header, this.planSettingsTitle, close);
+        this.planSettingsBody = element(this.document, 'div', {
+            className: 'ip-flw-precision-body',
+        });
+        const footer = element(this.document, 'footer', {
+            className: 'ip-flw-precision-footer',
+        });
+        this.planSettingsStatus = element(this.document, 'div', {
+            className: 'ip-flw-precision-status',
+            role: 'status',
+            'aria-live': 'polite',
+        });
+        const actions = element(this.document, 'div', {
+            className: 'ip-flw-precision-actions',
+        });
+        append(actions,
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-secondary-action',
+                'data-plan-settings-action': 'cancel',
+            }, 'Cancel'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-primary-action',
+                'data-plan-settings-action': 'apply',
+            }, 'Apply')
+        );
+        append(footer, this.planSettingsStatus, actions);
+        append(this.planSettingsDialog, header, this.planSettingsBody, footer);
+    };
+
+    Workspace.prototype._buildClearAllDialog = function () {
+        this.clearAllDialog = element(this.document, 'section', {
+            className: 'ip-flw-precision-dialog ip-flw-clear-all-dialog',
+            role: 'alertdialog',
+            'aria-modal': 'false',
+            'aria-labelledby': 'ip-flw-clear-all-title',
+            'aria-describedby': 'ip-flw-clear-all-description',
+            hidden: true,
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-precision-header',
+        });
+        append(header,
+            element(this.document, 'h2', {
+                id: 'ip-flw-clear-all-title',
+            }, 'Clear facility layout'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-precision-close',
+                'data-clear-all-action': 'cancel',
+                'aria-label': 'Close clear-layout confirmation',
+                title: 'Close',
+            }, 'X')
+        );
+        const body = element(this.document, 'div', {
+            className: 'ip-flw-precision-body',
+        });
+        body.appendChild(element(this.document, 'p', {
+            id: 'ip-flw-clear-all-description',
+            className: 'ip-flw-clear-all-warning',
+        }, 'Remove all equipment, cells, floor markings, routes, and utility '
+            + 'content from this layout? Facility dimensions and grid settings '
+            + 'will be preserved.'));
+        body.appendChild(element(this.document, 'p', {
+            className: 'ip-flw-precision-selection',
+        }, 'This action is recorded as one operation and can be undone.'));
+        const footer = element(this.document, 'footer', {
+            className: 'ip-flw-precision-footer',
+        });
+        const status = element(this.document, 'div', {
+            className: 'ip-flw-precision-status',
+            role: 'status',
+            'aria-live': 'polite',
+        });
+        this.clearAllStatus = status;
+        const actions = element(this.document, 'div', {
+            className: 'ip-flw-precision-actions',
+        });
+        append(actions,
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-secondary-action',
+                'data-clear-all-action': 'cancel',
+            }, 'Cancel'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-danger-action',
+                'data-clear-all-action': 'apply',
+            }, 'Clear layout')
+        );
+        append(footer, status, actions);
+        append(this.clearAllDialog, header, body, footer);
+    };
+
+    Workspace.prototype._buildBulkZoneDialog = function () {
+        this.bulkZoneDialog = element(this.document, 'section', {
+            className: 'ip-flw-precision-dialog ip-flw-bulk-zone-dialog',
+            role: 'dialog',
+            'aria-modal': 'false',
+            'aria-labelledby': 'ip-flw-bulk-zone-title',
+            hidden: true,
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-precision-header',
+        });
+        append(header,
+            element(this.document, 'h2', {
+                id: 'ip-flw-bulk-zone-title',
+            }, 'Create facility zones'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-precision-close',
+                'data-bulk-zone-action': 'cancel',
+                'aria-label': 'Close bulk zone editor',
+                title: 'Close',
+            }, 'X')
+        );
+        this.bulkZoneBody = element(this.document, 'div', {
+            className: 'ip-flw-bulk-zone-body',
+        });
+        const footer = element(this.document, 'footer', {
+            className: 'ip-flw-precision-footer',
+        });
+        this.bulkZoneStatus = element(this.document, 'div', {
+            className: 'ip-flw-precision-status',
+            role: 'status',
+            'aria-live': 'polite',
+        });
+        const actions = element(this.document, 'div', {
+            className: 'ip-flw-precision-actions',
+        });
+        append(actions,
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-secondary-action',
+                'data-bulk-zone-action': 'add-row',
+            }, 'Add zone'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-secondary-action',
+                'data-bulk-zone-action': 'cancel',
+            }, 'Cancel'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-primary-action',
+                'data-bulk-zone-action': 'apply',
+            }, 'Create zones')
+        );
+        append(footer, this.bulkZoneStatus, actions);
+        append(this.bulkZoneDialog, header, this.bulkZoneBody, footer);
+    };
+
+    Workspace.prototype._buildCellGroupDialog = function () {
+        this.cellGroupDialog = element(this.document, 'section', {
+            className: 'ip-flw-precision-dialog ip-flw-cell-group-dialog',
+            role: 'dialog',
+            'aria-modal': 'false',
+            'aria-labelledby': 'ip-flw-cell-group-title',
+            hidden: true,
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-precision-header',
+        });
+        append(header,
+            element(this.document, 'h2', {
+                id: 'ip-flw-cell-group-title',
+            }, 'Create manufacturing cell'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-precision-close',
+                'data-cell-group-action': 'cancel',
+                'aria-label': 'Close manufacturing cell panel',
+                title: 'Close',
+            }, 'X')
+        );
+        this.cellGroupBody = element(this.document, 'div', {
+            className: 'ip-flw-precision-body',
+        });
+        const footer = element(this.document, 'footer', {
+            className: 'ip-flw-precision-footer',
+        });
+        this.cellGroupStatus = element(this.document, 'div', {
+            className: 'ip-flw-precision-status',
+            role: 'status',
+            'aria-live': 'polite',
+        });
+        const actions = element(this.document, 'div', {
+            className: 'ip-flw-precision-actions',
+        });
+        append(actions,
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-secondary-action',
+                'data-cell-group-action': 'cancel',
+            }, 'Cancel'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-primary-action',
+                'data-cell-group-action': 'apply',
+            }, 'Create cell')
+        );
+        append(footer, this.cellGroupStatus, actions);
+        append(this.cellGroupDialog, header, this.cellGroupBody, footer);
+    };
+
+    Workspace.prototype._buildAisleDialog = function () {
+        this.aisleDialog = element(this.document, 'section', {
+            className: 'ip-flw-precision-dialog ip-flw-aisle-dialog',
+            role: 'dialog',
+            'aria-modal': 'false',
+            'aria-labelledby': 'ip-flw-aisle-title',
+            hidden: true,
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-precision-header',
+        });
+        append(header,
+            element(this.document, 'h2', {
+                id: 'ip-flw-aisle-title',
+            }, 'Create semantic aisle'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-precision-close',
+                'data-aisle-action': 'close',
+                'aria-label': 'Close aisle tool',
+                title: 'Close',
+            }, 'X')
+        );
+        this.aisleBody = element(this.document, 'div', {
+            className: 'ip-flw-precision-body',
+        });
+        const footer = element(this.document, 'footer', {
+            className: 'ip-flw-precision-footer',
+        });
+        this.aisleStatus = element(this.document, 'div', {
+            className: 'ip-flw-precision-status',
+            role: 'status',
+            'aria-live': 'polite',
+        });
+        const actions = element(this.document, 'div', {
+            className: 'ip-flw-precision-actions',
+        });
+        append(actions,
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-secondary-action',
+                'data-aisle-action': 'close',
+            }, 'Close'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-primary-action',
+                'data-aisle-action': 'draw',
+            }, 'Draw aisle')
+        );
+        append(footer, this.aisleStatus, actions);
+        append(this.aisleDialog, header, this.aisleBody, footer);
+    };
+
+    Workspace.prototype._planSettingsNumber = function (
+        label,
+        field,
+        value,
+        options
+    ) {
+        const config = options || {};
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        wrapper.appendChild(element(this.document, 'input', {
+            type: 'number',
+            min: config.min === undefined ? '' : String(config.min),
+            max: config.max === undefined ? '' : String(config.max),
+            step: config.step === undefined ? '0.1' : String(config.step),
+            value: String(Number(finite(value, 0).toFixed(4))),
+            'data-plan-settings-field': field,
+            'aria-label': label,
+        }));
+        return wrapper;
+    };
+
+    Workspace.prototype._currentPlanScaleDistance = function () {
+        const snapshot = this.topAdapter
+            && typeof this.topAdapter.getViewportState === 'function'
+            ? this.topAdapter.getViewportState() : null;
+        const scale = snapshot && snapshot.projection
+            ? finite(snapshot.projection.scale, 0) : 0;
+        if (!(scale > 0)) return 5;
+        const preferred = preferredScaleDistance(
+            scale,
+            this.planPreferences.unit
+        );
+        return canonicalDistance(
+            preferred.displayDistance,
+            this.planPreferences.unit
+        );
+    };
+
+    Workspace.prototype._renderPlanSettingsDialog = function () {
+        if (!this.planSettingsDialog) return;
+        this.planSettingsDialog.hidden = !this.planSettingsState.open;
+        if (!this.planSettingsState.open) return;
+        const unit = this.planPreferences.unit;
+        const draft = normalizePlanSettings(
+            this.planSettingsState.draft,
+            this.planSettings
+        );
+        this.planSettingsState.draft = draft;
+        clearElement(this.planSettingsBody);
+        append(
+            this.planSettingsBody,
+            this._planSettingsNumber(
+                'Facility width (' + unit + ')',
+                'widthMeters',
+                displayDistance(draft.widthMeters, unit),
+                { min: 0.5, max: 10000 }
+            ),
+            this._planSettingsNumber(
+                'Facility depth (' + unit + ')',
+                'depthMeters',
+                displayDistance(draft.depthMeters, unit),
+                { min: 0.5, max: 10000 }
+            ),
+            this._planSettingsNumber(
+                'Minor grid spacing (' + unit + ')',
+                'gridSpacingMeters',
+                displayDistance(draft.gridSpacingMeters, unit),
+                { min: 0.05, max: 10000, step: 0.05 }
+            ),
+            this._planSettingsNumber(
+                'Scale bar distance (' + unit + ')',
+                'scaleDistanceMeters',
+                displayDistance(
+                    this.planSettingsState.scaleDistanceMeters,
+                    unit
+                ),
+                { min: 0.01, max: 10000, step: 0.1 }
+            )
+        );
+        this.planSettingsBody.appendChild(element(this.document, 'p', {
+            className: 'ip-flw-precision-selection',
+        }, 'Major grid lines use five minor intervals when the facility allows. '
+            + 'Scale bar distance changes only the Plan camera zoom.'));
+        this.planSettingsStatus.textContent = formattedDistance(
+            displayDistance(draft.widthMeters, unit)
+        ) + ' x ' + formattedDistance(
+            displayDistance(draft.depthMeters, unit)
+        ) + ' ' + unit + ' | Grid '
+            + formattedDistance(displayDistance(
+                draft.gridSpacingMeters,
+                unit
+            )) + ' ' + unit;
+    };
+
+    Workspace.prototype._applyPlanEnvironment = function (settings) {
+        const normalized = normalizePlanSettings(settings, this.planSettings);
+        this.gridSize = normalized.gridSpacingMeters;
+        const currentBounds = this.options.topPlanOptions
+            && this.options.topPlanOptions.worldBounds || {};
+        const environment = {
+            worldBounds: worldBoundsFromPlanSettings(
+                normalized,
+                currentBounds
+            ),
+            floorGridSpacing: normalized.gridSpacingMeters,
+            floorMajorGridSpacing: normalized.majorGridSpacingMeters,
+        };
+        this.options.topPlanOptions = Object.assign(
+            {},
+            this.options.topPlanOptions || {},
+            environment
+        );
+        this.options.threeOptions = Object.assign(
+            {},
+            this.options.threeOptions || {},
+            environment
+        );
+        [this.topAdapter, this.threeAdapter].filter(Boolean).forEach(
+            function (adapter) {
+                if (typeof adapter.setEnvironmentSettings === 'function') {
+                    adapter.setEnvironmentSettings(environment);
+                }
+            }
+        );
+        this._renderPlanSpatialOverlays();
+        this._renderProperties();
+        return normalized;
+    };
+
+    Workspace.prototype._applyPlanScaleDistance = function (distanceMeters) {
+        const distance = Math.max(0.01, finite(distanceMeters, 0));
+        if (!this.topAdapter
+                || typeof this.topAdapter.setScaleAt !== 'function'
+                || !(distance > 0)) return false;
+        return this.topAdapter.setScaleAt(
+            this._planViewCenterEvent(),
+            PLAN_SCALE_TARGET_PIXELS / distance
+        );
+    };
+
+    Workspace.prototype.openPlanSettingsDialog = function (focusField) {
+        if (!this.capabilities.manualAuthoring
+                || this.state.busy
+                || this.state.conflict
+                || this.state.layoutProposal
+                || this.state.placementAlternatives) return false;
+        if (this.assetBrowserState.open) this.closeAssetBrowser(false);
+        if (this.precisionState.open) this.closePrecisionDialog(false);
+        if (this.patternState.open) this.closePatternDialog(false);
+        if (this.bulkZoneState.open) this.closeBulkZoneDialog(false);
+        this._closeSelectionToolbar('plan_settings_opened', false);
+        this.planSettingsFocusReturn = this.document.activeElement;
+        const snapshot = this.topAdapter
+            && typeof this.topAdapter.getViewportState === 'function'
+            ? this.topAdapter.getViewportState() : null;
+        this.planSettingsState.open = true;
+        this.planSettingsState.applying = false;
+        this.planSettingsState.focusField = focusField || 'widthMeters';
+        this.planSettingsState.draft = clone(this.planSettings);
+        this.planSettingsState.scaleDistanceMeters =
+            this._currentPlanScaleDistance();
+        this.planSettingsState.originalScale = snapshot && snapshot.projection
+            ? finite(snapshot.projection.scale, null) : null;
+        this.root.setAttribute('data-plan-settings-open', 'true');
+        this._renderPlanSettingsDialog();
+        const first = this.planSettingsBody.querySelector(
+            '[data-plan-settings-field="'
+                + this.planSettingsState.focusField + '"]'
+        ) || this.planSettingsBody.querySelector('[data-plan-settings-field]');
+        if (first && typeof first.focus === 'function') {
+            first.focus();
+            if (typeof first.select === 'function') first.select();
+        }
+        return true;
+    };
+
+    Workspace.prototype.closePlanSettingsDialog = function (
+        restoreFocus,
+        preservePreview
+    ) {
+        if (!this.planSettingsState.open) return false;
+        this._finishMovableDialogDrag(this.planSettingsDialog, true);
+        if (preservePreview !== true) {
+            this._applyPlanEnvironment(this.planSettings);
+            if (this.planSettingsState.originalScale
+                    && this.topAdapter
+                    && typeof this.topAdapter.setScaleAt === 'function') {
+                this.topAdapter.setScaleAt(
+                    this._planViewCenterEvent(),
+                    this.planSettingsState.originalScale
+                );
+            }
+        }
+        this.planSettingsState.open = false;
+        this.planSettingsState.applying = false;
+        this.planSettingsDialog.hidden = true;
+        this.root.removeAttribute('data-plan-settings-open');
+        const target = this.planSettingsFocusReturn;
+        this.planSettingsFocusReturn = null;
+        if (restoreFocus !== false && target
+                && typeof target.focus === 'function') target.focus();
+        this._syncSelectionToolbar();
+        return true;
+    };
+
+    Workspace.prototype._handlePlanSettingsChange = function (event) {
+        const field = targetDataId(
+            event.target,
+            'data-plan-settings-field',
+            this.planSettingsDialog
+        );
+        if (!field) return;
+        const displayValue = finite(event.target.value, NaN);
+        if (!Number.isFinite(displayValue) || !(displayValue > 0)) return;
+        const valueMeters = canonicalDistance(
+            displayValue,
+            this.planPreferences.unit
+        );
+        if (field === 'scaleDistanceMeters') {
+            this.planSettingsState.scaleDistanceMeters = valueMeters;
+            this._applyPlanScaleDistance(valueMeters);
+            return;
+        }
+        const draft = Object.assign({}, this.planSettingsState.draft, {
+            [field]: valueMeters,
+        });
+        const maximum = Math.max(
+            finite(draft.widthMeters, DEFAULT_PLAN_WIDTH_METERS),
+            finite(draft.depthMeters, DEFAULT_PLAN_DEPTH_METERS)
+        );
+        if (field === 'gridSpacingMeters') {
+            const multiple = Math.max(
+                1,
+                Math.min(5, Math.floor(maximum / valueMeters + 1e-9))
+            );
+            draft.majorGridSpacingMeters = valueMeters * multiple;
+        } else if (draft.majorGridSpacingMeters > maximum) {
+            const multiple = Math.max(
+                1,
+                Math.floor(maximum / draft.gridSpacingMeters + 1e-9)
+            );
+            draft.majorGridSpacingMeters = draft.gridSpacingMeters * multiple;
+        }
+        this.planSettingsState.draft = normalizePlanSettings(
+            draft,
+            this.planSettings
+        );
+        this._applyPlanEnvironment(this.planSettingsState.draft);
+        this.planSettingsStatus.textContent = 'Previewing updated facility plan.';
+    };
+
+    Workspace.prototype._handlePlanSettingsClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-plan-settings-action',
+            this.planSettingsDialog
+        );
+        if (action === 'cancel') {
+            this.closePlanSettingsDialog(true, false);
+        } else if (action === 'apply') {
+            this._applyPlanSettings();
+        }
+    };
+
+    Workspace.prototype._handlePlanSettingsKeyDown = function (event) {
+        const key = String(event && event.key || '').toLowerCase();
+        if (key === 'escape') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this.closePlanSettingsDialog(true, false);
+        } else if (key === 'enter') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._applyPlanSettings();
+        }
+    };
+
+    Workspace.prototype._applyPlanSettings = function () {
+        if (this.planSettingsState.applying) return Promise.resolve(undefined);
+        const settings = normalizePlanSettings(
+            this.planSettingsState.draft,
+            this.planSettings
+        );
+        const changed = JSON.stringify(settings) !== JSON.stringify(
+            this.planSettings
+        );
+        if (!changed) {
+            this.closePlanSettingsDialog(true, true);
+            return Promise.resolve(this.getState());
+        }
+        if (typeof this.session.setPlanSettings !== 'function') {
+            const error = new Error('Facility plan settings are unavailable.');
+            this._setError(error);
+            return Promise.resolve(undefined);
+        }
+        this.planSettingsState.applying = true;
+        this.planSettingsStatus.textContent = 'Applying facility plan settings...';
+        return this._invoke('Resize facility plan', function () {
+            return this.session.setPlanSettings(settings);
+        }.bind(this)).then(function (result) {
+            this.closePlanSettingsDialog(true, true);
+            return result;
+        }.bind(this), function (error) {
+            this.planSettingsState.applying = false;
+            this.planSettingsStatus.textContent = error && error.message
+                ? error.message : String(error);
+            return undefined;
+        }.bind(this));
+    };
+
+    Workspace.prototype._layoutContentCount = function () {
+        const layout = this.state && this.state.layout || {};
+        return [
+            'placements', 'zones', 'floorMarkings', 'routes',
+            'utilityNetworks', 'processBindings',
+        ].reduce(function (total, key) {
+            return total + (Array.isArray(layout[key]) ? layout[key].length : 0);
+        }, 0);
+    };
+
+    Workspace.prototype.openClearAllDialog = function () {
+        if (!this.capabilities.manualAuthoring
+                || typeof this.session.clearLayout !== 'function'
+                || this.state.busy
+                || this.state.conflict
+                || this.state.layoutProposal
+                || this.state.placementAlternatives
+                || this._layoutContentCount() === 0) return false;
+        if (this.assetBrowserState.open) this.closeAssetBrowser(false);
+        if (this.precisionState.open) this.closePrecisionDialog(false);
+        if (this.patternState.open) this.closePatternDialog(false);
+        if (this.planSettingsState.open) {
+            this.closePlanSettingsDialog(false, false);
+        }
+        this._closeSelectionToolbar('clear_all_opened', false);
+        this.clearAllState.focusReturn = this.document.activeElement;
+        this.clearAllState.open = true;
+        this.clearAllState.applying = false;
+        this.clearAllStatus.textContent = '';
+        this.clearAllDialog.hidden = false;
+        this.root.setAttribute('data-clear-all-open', 'true');
+        this._renderToolbarState();
+        const cancel = this.clearAllDialog.querySelector(
+            '[data-clear-all-action="cancel"]'
+        );
+        if (cancel && typeof cancel.focus === 'function') cancel.focus();
+        return true;
+    };
+
+    Workspace.prototype.closeClearAllDialog = function (restoreFocus) {
+        if (!this.clearAllState.open) return false;
+        this._finishMovableDialogDrag(this.clearAllDialog, true);
+        this.clearAllState.open = false;
+        this.clearAllState.applying = false;
+        this.clearAllDialog.hidden = true;
+        this.root.removeAttribute('data-clear-all-open');
+        const target = this.clearAllState.focusReturn;
+        this.clearAllState.focusReturn = null;
+        this._renderToolbarState();
+        if (restoreFocus !== false && target
+                && typeof target.focus === 'function') target.focus();
+        return true;
+    };
+
+    Workspace.prototype._handleClearAllClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-clear-all-action',
+            this.clearAllDialog
+        );
+        if (action === 'cancel') this.closeClearAllDialog(true);
+        else if (action === 'apply') this._applyClearAll();
+    };
+
+    Workspace.prototype._handleClearAllKeyDown = function (event) {
+        const key = String(event && event.key || '').toLowerCase();
+        if (key === 'escape') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this.closeClearAllDialog(true);
+        }
+    };
+
+    Workspace.prototype._applyClearAll = function () {
+        if (this.clearAllState.applying) return Promise.resolve(undefined);
+        this.clearAllState.applying = true;
+        this.clearAllStatus.textContent = 'Clearing facility layout...';
+        return this._invoke('Clear facility layout', function () {
+            return this.session.clearLayout();
+        }.bind(this)).then(function (result) {
+            this.closeClearAllDialog(true);
+            return result;
+        }.bind(this), function (error) {
+            this.clearAllState.applying = false;
+            this.clearAllStatus.textContent = error && error.message
+                ? error.message : String(error);
+            return undefined;
+        }.bind(this));
+    };
+
+    Workspace.prototype._renderBulkZoneDialog = function () {
+        if (!this.bulkZoneDialog) return;
+        this.bulkZoneDialog.hidden = !this.bulkZoneState.open;
+        if (!this.bulkZoneState.open) return;
+        const unit = this.planPreferences.unit;
+        clearElement(this.bulkZoneBody);
+        const table = element(this.document, 'table', {
+            className: 'ip-flw-bulk-zone-table',
+        });
+        const head = element(this.document, 'thead');
+        const headRow = element(this.document, 'tr');
+        [
+            'Name', 'Type', 'Min X (' + unit + ')', 'Min Z (' + unit + ')',
+            'Width (' + unit + ')', 'Depth (' + unit + ')', 'Color', '',
+        ].forEach(function (label) {
+            headRow.appendChild(element(this.document, 'th', {
+                scope: 'col',
+            }, label));
+        }, this);
+        head.appendChild(headRow);
+        const body = element(this.document, 'tbody');
+        this.bulkZoneState.rows.forEach(function (row) {
+            const tr = element(this.document, 'tr', {
+                'data-bulk-zone-row': row.rowId,
+            });
+            const textCell = element(this.document, 'td');
+            textCell.appendChild(element(this.document, 'input', {
+                type: 'text',
+                maxlength: '120',
+                value: row.label,
+                'data-bulk-zone-field': 'label',
+                'aria-label': 'Zone name',
+            }));
+            tr.appendChild(textCell);
+            const typeCell = element(this.document, 'td');
+            const typeSelect = element(this.document, 'select', {
+                'data-bulk-zone-field': 'zoneType',
+                'aria-label': 'Zone type',
+            });
+            [
+                ['workcell', 'Workcell'],
+                ['storage', 'Storage'],
+                ['staging', 'Staging'],
+                ['receiving', 'Receiving'],
+                ['shipping', 'Shipping'],
+                ['inspection', 'Inspection'],
+                ['service', 'Service'],
+                ['safety', 'Safety'],
+                ['exclusion', 'Exclusion'],
+            ].forEach(function (option) {
+                typeSelect.appendChild(element(this.document, 'option', {
+                    value: option[0],
+                }, option[1]));
+            }, this);
+            typeSelect.value = row.zoneType;
+            typeCell.appendChild(typeSelect);
+            tr.appendChild(typeCell);
+            ['minX', 'minZ', 'width', 'depth'].forEach(function (field) {
+                const cell = element(this.document, 'td');
+                cell.appendChild(element(this.document, 'input', {
+                    type: 'number',
+                    step: unit === 'ft' ? '0.1' : '0.05',
+                    min: field === 'width' || field === 'depth' ? '0.01' : '',
+                    value: String(Number(displayDistance(row[field], unit)
+                        .toFixed(3))),
+                    'data-bulk-zone-field': field,
+                    'aria-label': 'Zone ' + field,
+                }));
+                tr.appendChild(cell);
+            }, this);
+            const colorCell = element(this.document, 'td');
+            colorCell.appendChild(element(this.document, 'input', {
+                type: 'color',
+                value: row.color,
+                'data-bulk-zone-field': 'color',
+                'aria-label': 'Zone color',
+            }));
+            tr.appendChild(colorCell);
+            const removeCell = element(this.document, 'td');
+            removeCell.appendChild(element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-bulk-zone-remove',
+                'data-bulk-zone-action': 'remove-row',
+                'data-bulk-zone-row-id': row.rowId,
+                'aria-label': 'Remove ' + row.label,
+                title: 'Remove zone row',
+            }, 'X'));
+            tr.appendChild(removeCell);
+            body.appendChild(tr);
+        }, this);
+        append(table, head, body);
+        this.bulkZoneBody.appendChild(table);
+        this.bulkZoneBody.appendChild(element(this.document, 'p', {
+            className: 'ip-flw-precision-selection',
+        }, 'Coordinates use the lower-left corner. All zones are created in '
+            + 'one undoable transaction.'));
+        this.bulkZoneStatus.textContent = this.bulkZoneState.rows.length
+            + (this.bulkZoneState.rows.length === 1 ? ' zone' : ' zones');
+    };
+
+    Workspace.prototype.openBulkZoneDialog = function () {
+        if (!this.capabilities.manualAuthoring
+                || typeof this.session.createZones !== 'function'
+                || this.state.busy
+                || this.state.conflict
+                || this.state.layoutProposal
+                || this.state.placementAlternatives) return false;
+        if (this.assetBrowserState.open) this.closeAssetBrowser(false);
+        if (this.precisionState.open) this.closePrecisionDialog(false);
+        if (this.patternState.open) this.closePatternDialog(false);
+        if (this.planSettingsState.open) {
+            this.closePlanSettingsDialog(false, false);
+        }
+        if (this.clearAllState.open) this.closeClearAllDialog(false);
+        this._closeSelectionToolbar('bulk_zone_opened', false);
+        this.bulkZoneState.focusReturn = this.document.activeElement;
+        this.bulkZoneState.open = true;
+        this.bulkZoneState.applying = false;
+        this.bulkZoneDialog.hidden = false;
+        this.root.setAttribute('data-bulk-zone-open', 'true');
+        this._renderBulkZoneDialog();
+        this._renderToolbarState();
+        const first = this.bulkZoneBody.querySelector('[data-bulk-zone-field]');
+        if (first && typeof first.focus === 'function') first.focus();
+        return true;
+    };
+
+    Workspace.prototype.closeBulkZoneDialog = function (restoreFocus) {
+        if (!this.bulkZoneState.open) return false;
+        this._finishMovableDialogDrag(this.bulkZoneDialog, true);
+        this.bulkZoneState.open = false;
+        this.bulkZoneState.applying = false;
+        this.bulkZoneDialog.hidden = true;
+        this.root.removeAttribute('data-bulk-zone-open');
+        const target = this.bulkZoneState.focusReturn;
+        this.bulkZoneState.focusReturn = null;
+        this._renderToolbarState();
+        if (restoreFocus !== false && target
+                && typeof target.focus === 'function') target.focus();
+        return true;
+    };
+
+    Workspace.prototype._addBulkZoneRow = function () {
+        const previous = this.bulkZoneState.rows[
+            this.bulkZoneState.rows.length - 1
+        ] || { minX: 0, minZ: 0, width: 10, depth: 8 };
+        const sequence = this.bulkZoneState.nextRowId;
+        this.bulkZoneState.nextRowId += 1;
+        this.bulkZoneState.rows.push({
+            rowId: 'zone-row-' + sequence,
+            label: 'Zone ' + sequence,
+            zoneType: 'workcell',
+            minX: previous.minX + previous.width + 2,
+            minZ: previous.minZ,
+            width: previous.width,
+            depth: previous.depth,
+            color: '#4a90c2',
+        });
+        this._renderBulkZoneDialog();
+    };
+
+    Workspace.prototype._handleBulkZoneChange = function (event) {
+        const field = targetDataId(
+            event.target,
+            'data-bulk-zone-field',
+            this.bulkZoneDialog
+        );
+        if (!field) return;
+        const rowId = targetDataId(
+            event.target,
+            'data-bulk-zone-row',
+            this.bulkZoneDialog
+        );
+        const row = this.bulkZoneState.rows.find(function (item) {
+            return item.rowId === rowId;
+        });
+        if (!row) return;
+        if (['minX', 'minZ', 'width', 'depth'].includes(field)) {
+            const displayValue = finite(event.target.value, NaN);
+            if (!Number.isFinite(displayValue)) return;
+            row[field] = canonicalDistance(
+                displayValue,
+                this.planPreferences.unit
+            );
+        } else {
+            row[field] = String(event.target.value || '');
+        }
+    };
+
+    Workspace.prototype._handleBulkZoneClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-bulk-zone-action',
+            this.bulkZoneDialog
+        );
+        if (!action) return;
+        if (action === 'cancel') this.closeBulkZoneDialog(true);
+        else if (action === 'add-row') this._addBulkZoneRow();
+        else if (action === 'remove-row') {
+            const rowId = event.target.getAttribute('data-bulk-zone-row-id');
+            this.bulkZoneState.rows = this.bulkZoneState.rows.filter(
+                function (row) { return row.rowId !== rowId; }
+            );
+            if (!this.bulkZoneState.rows.length) this._addBulkZoneRow();
+            else this._renderBulkZoneDialog();
+        } else if (action === 'apply') this._applyBulkZones();
+    };
+
+    Workspace.prototype._handleBulkZoneKeyDown = function (event) {
+        const key = String(event && event.key || '').toLowerCase();
+        if (key === 'escape') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this.closeBulkZoneDialog(true);
+        } else if (key === 'enter' && event.ctrlKey) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._applyBulkZones();
+        }
+    };
+
+    Workspace.prototype._applyBulkZones = function () {
+        if (this.bulkZoneState.applying) return Promise.resolve(undefined);
+        let requests;
+        try {
+            requests = this.bulkZoneState.rows.map(function (row, index) {
+                const label = String(row.label || '').trim();
+                if (!label) throw new Error('Zone ' + (index + 1)
+                    + ' needs a name.');
+                if (!(row.width > 0) || !(row.depth > 0)) {
+                    throw new Error(label + ' needs positive width and depth.');
+                }
+                return {
+                    label: label,
+                    zoneType: row.zoneType,
+                    minX: row.minX,
+                    minZ: row.minZ,
+                    width: row.width,
+                    depth: row.depth,
+                    extensions: {
+                        style: {
+                            fillColor: row.color,
+                        },
+                    },
+                };
+            });
+        } catch (error) {
+            this.bulkZoneStatus.textContent = error.message;
+            return Promise.resolve(undefined);
+        }
+        this.bulkZoneState.applying = true;
+        this.bulkZoneStatus.textContent = 'Creating zones...';
+        return this._invoke('Create facility zones', function () {
+            return this.session.createZones(requests);
+        }.bind(this)).then(function (result) {
+            this.closeBulkZoneDialog(true);
+            return result;
+        }.bind(this), function (error) {
+            this.bulkZoneState.applying = false;
+            this.bulkZoneStatus.textContent = error && error.message
+                ? error.message : String(error);
+            return undefined;
+        }.bind(this));
+    };
+
+    Workspace.prototype._cellGroupSeed = function () {
+        if (!this.patternRuntime
+                || typeof this.patternRuntime.collectSelection !== 'function') {
+            return [];
+        }
+        return this.patternRuntime.collectSelection(
+            this.state.layout,
+            this.assetCatalog,
+            this.state.selection,
+            { expandZones: true, includeZones: false }
+        ).filter(function (item) {
+            return item.kind === 'placement' || item.kind === 'floor-marking';
+        });
+    };
+
+    Workspace.prototype._cellGroupField = function (
+        label,
+        field,
+        type,
+        value,
+        options
+    ) {
+        const config = options || {};
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        wrapper.appendChild(element(this.document, 'input', {
+            type: type || 'text',
+            value: String(value),
+            min: config.min === undefined ? '' : String(config.min),
+            max: config.max === undefined ? '' : String(config.max),
+            step: config.step === undefined ? '' : String(config.step),
+            maxlength: config.maxlength === undefined
+                ? '' : String(config.maxlength),
+            'data-cell-group-field': field,
+            'aria-label': label,
+        }));
+        return wrapper;
+    };
+
+    Workspace.prototype._cellGroupSelect = function (
+        label,
+        field,
+        value
+    ) {
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        const select = element(this.document, 'select', {
+            'data-cell-group-field': field,
+            'aria-label': label,
+        });
+        [
+            ['', 'Not specified'],
+            ['north', 'North'],
+            ['east', 'East'],
+            ['south', 'South'],
+            ['west', 'West'],
+        ].forEach(function (option) {
+            select.appendChild(element(this.document, 'option', {
+                value: option[0],
+                selected: option[0] === value,
+            }, option[1]));
+        }, this);
+        wrapper.appendChild(select);
+        return wrapper;
+    };
+
+    Workspace.prototype._renderCellGroupDialog = function () {
+        if (!this.cellGroupDialog) return;
+        this.cellGroupDialog.hidden = !this.cellGroupState.open;
+        if (!this.cellGroupState.open) return;
+        const seed = this._cellGroupSeed();
+        const unit = this.planPreferences.unit;
+        clearElement(this.cellGroupBody);
+        this.cellGroupBody.appendChild(element(this.document, 'p', {
+            className: 'ip-flw-precision-selection',
+        }, seed.length + (seed.length === 1 ? ' object' : ' objects')
+            + ' will become one persistent manufacturing cell.'));
+        append(this.cellGroupBody,
+            this._cellGroupField(
+                'Cell family name', 'baseName', 'text',
+                this.cellGroupState.baseName, { maxlength: 80 }
+            ),
+            this._cellGroupField(
+                'Series prefix', 'prefix', 'text',
+                this.cellGroupState.prefix, { maxlength: 12 }
+            ),
+            this._cellGroupField(
+                'Starting number', 'start', 'number',
+                this.cellGroupState.start, { min: 0, max: 999999, step: 1 }
+            ),
+            this._cellGroupField(
+                'Number digits', 'numberPadding', 'number',
+                this.cellGroupState.numberPadding, { min: 1, max: 6, step: 1 }
+            ),
+            this._cellGroupField(
+                'Envelope padding (' + unit + ')',
+                'envelopePadding',
+                'number',
+                displayDistance(this.cellGroupState.envelopePadding, unit),
+                { min: 0, max: 1000, step: unit === 'ft' ? 0.1 : 0.05 }
+            ),
+            this._cellGroupField(
+                'Cell color', 'color', 'color', this.cellGroupState.color
+            ),
+            this._cellGroupSelect(
+                'Gate / entrance side', 'gateSide',
+                this.cellGroupState.gateSide
+            ),
+            this._cellGroupSelect(
+                'Material loading side', 'loadingSide',
+                this.cellGroupState.loadingSide
+            ),
+            this._cellGroupSelect(
+                'Maintenance / service side', 'serviceSide',
+                this.cellGroupState.serviceSide
+            )
+        );
+        let summary = 'Select equipment or markings to create a cell.';
+        if (seed.length && this.patternRuntime
+                && typeof this.patternRuntime.selectionBounds === 'function') {
+            const bounds = this.patternRuntime.selectionBounds(seed);
+            summary = formattedDistance(displayDistance(bounds.width, unit))
+                + ' x ' + formattedDistance(displayDistance(bounds.depth, unit))
+                + ' ' + unit + ' before padding.';
+        }
+        this.cellGroupStatus.textContent = summary;
+        const apply = this.cellGroupDialog.querySelector(
+            '[data-cell-group-action="apply"]'
+        );
+        if (apply) apply.disabled = seed.length < 1;
+    };
+
+    Workspace.prototype.openCellGroupDialog = function () {
+        if (!this.capabilities.manualAuthoring
+                || typeof this.session.createCellGroup !== 'function'
+                || this.state.busy
+                || this.state.conflict
+                || this.state.layoutProposal
+                || this.state.placementAlternatives
+                || this._cellGroupSeed().length < 1) return false;
+        if (this.assetBrowserState.open) this.closeAssetBrowser(false);
+        if (this.precisionState.open) this.closePrecisionDialog(false);
+        if (this.patternState.open) this.closePatternDialog(false);
+        if (this.bulkZoneState.open) this.closeBulkZoneDialog(false);
+        this._closeSelectionToolbar('cell_group_opened', false);
+        this.cellGroupState.focusReturn = this.document.activeElement;
+        this.cellGroupState.open = true;
+        this.cellGroupState.applying = false;
+        this.cellGroupDialog.hidden = false;
+        this.root.setAttribute('data-cell-group-open', 'true');
+        this._renderCellGroupDialog();
+        this._renderToolbarState();
+        const first = this.cellGroupBody.querySelector('[data-cell-group-field]');
+        if (first && typeof first.focus === 'function') first.focus();
+        return true;
+    };
+
+    Workspace.prototype.closeCellGroupDialog = function (restoreFocus) {
+        if (!this.cellGroupState.open) return false;
+        this._finishMovableDialogDrag(this.cellGroupDialog, true);
+        this.cellGroupState.open = false;
+        this.cellGroupState.applying = false;
+        this.cellGroupDialog.hidden = true;
+        this.root.removeAttribute('data-cell-group-open');
+        const target = this.cellGroupState.focusReturn;
+        this.cellGroupState.focusReturn = null;
+        this._renderToolbarState();
+        if (restoreFocus !== false && target
+                && typeof target.focus === 'function') target.focus();
+        return true;
+    };
+
+    Workspace.prototype._handleCellGroupChange = function (event) {
+        const field = targetDataId(
+            event.target,
+            'data-cell-group-field',
+            this.cellGroupDialog
+        );
+        if (!field) return;
+        if (['start', 'numberPadding'].includes(field)) {
+            this.cellGroupState[field] = Math.round(finite(
+                event.target.value,
+                this.cellGroupState[field]
+            ));
+        } else if (field === 'envelopePadding') {
+            this.cellGroupState[field] = Math.max(0, canonicalDistance(
+                finite(event.target.value, 0),
+                this.planPreferences.unit
+            ));
+        } else {
+            this.cellGroupState[field] = String(event.target.value || '');
+        }
+    };
+
+    Workspace.prototype._handleCellGroupClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-cell-group-action',
+            this.cellGroupDialog
+        );
+        if (action === 'cancel') this.closeCellGroupDialog(true);
+        else if (action === 'apply') this._applyCellGroup();
+    };
+
+    Workspace.prototype._handleCellGroupKeyDown = function (event) {
+        const key = String(event && event.key || '').toLowerCase();
+        if (key === 'escape') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this.closeCellGroupDialog(true);
+        } else if (key === 'enter' && event.ctrlKey) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._applyCellGroup();
+        }
+    };
+
+    Workspace.prototype._applyCellGroup = function () {
+        if (this.cellGroupState.applying) return Promise.resolve(undefined);
+        const seed = this._cellGroupSeed();
+        if (!seed.length) return Promise.resolve(undefined);
+        const bounds = this.patternRuntime.selectionBounds(seed);
+        const padding = Math.max(0, this.cellGroupState.envelopePadding);
+        const baseName = String(this.cellGroupState.baseName || '').trim();
+        if (!baseName) {
+            this.cellGroupStatus.textContent = 'Cell family name is required.';
+            return Promise.resolve(undefined);
+        }
+        this.cellGroupSequence += 1;
+        const seriesId = 'cell-series-'
+            + Date.now().toString(36) + '-'
+            + this.cellGroupSequence.toString(36);
+        const request = {
+            baseName: baseName,
+            prefix: String(this.cellGroupState.prefix || '').trim(),
+            start: Math.max(0, Math.round(this.cellGroupState.start)),
+            numberPadding: Math.max(
+                1,
+                Math.min(6, Math.round(this.cellGroupState.numberPadding))
+            ),
+            envelopePadding: padding,
+            minX: bounds.minX - padding,
+            minZ: bounds.minZ - padding,
+            width: Math.max(0.01, bounds.width + 2 * padding),
+            depth: Math.max(0.01, bounds.depth + 2 * padding),
+            seriesId: seriesId,
+            functionalInterfaces: {
+                gate: this.cellGroupState.gateSide,
+                loading: this.cellGroupState.loadingSide,
+                service: this.cellGroupState.serviceSide,
+            },
+            extensions: {
+                style: { fillColor: this.cellGroupState.color },
+            },
+        };
+        this.cellGroupState.applying = true;
+        this.cellGroupStatus.textContent = 'Creating manufacturing cell...';
+        return this._invoke('Create manufacturing cell', function () {
+            return this.session.createCellGroup(request);
+        }.bind(this)).then(function (result) {
+            this.closeCellGroupDialog(true);
+            return result;
+        }.bind(this), function (error) {
+            this.cellGroupState.applying = false;
+            this.cellGroupStatus.textContent = error && error.message
+                ? error.message : String(error);
+            return undefined;
+        }.bind(this));
+    };
+
+    Workspace.prototype._ungroupSelectedCell = function () {
+        const zone = this._selectedZoneRecord();
+        const metadata = zone && zone.extensions && zone.extensions.cellGroup;
+        if (!zone || !metadata
+                || metadata.groupKind !== 'manufacturing_cell'
+                || typeof this.session.ungroupCell !== 'function') {
+            return Promise.resolve(this.getState());
+        }
+        return this._invoke('Ungroup manufacturing cell', function () {
+            return this.session.ungroupCell(zone.zoneId);
+        }.bind(this));
+    };
+
+    Workspace.prototype._aisleField = function (label, field, type, value) {
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        wrapper.appendChild(element(this.document, 'input', {
+            type: type || 'text',
+            value: String(value),
+            min: type === 'number' ? '0.01' : '',
+            step: type === 'number' ? '0.1' : '',
+            maxlength: type === 'text' ? '120' : '',
+            'data-aisle-field': field,
+            'aria-label': label,
+        }));
+        return wrapper;
+    };
+
+    Workspace.prototype._aisleSelect = function (label, field, options, value) {
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        const select = element(this.document, 'select', {
+            'data-aisle-field': field,
+            'aria-label': label,
+        });
+        options.forEach(function (option) {
+            select.appendChild(element(this.document, 'option', {
+                value: option[0],
+                selected: option[0] === value,
+            }, option[1]));
+        }, this);
+        wrapper.appendChild(select);
+        return wrapper;
+    };
+
+    Workspace.prototype._renderAisleDialog = function () {
+        if (!this.aisleDialog) return;
+        this.aisleDialog.hidden = !this.aisleState.open;
+        if (!this.aisleState.open) return;
+        const unit = this.planPreferences.unit;
+        clearElement(this.aisleBody);
+        append(
+            this.aisleBody,
+            this._aisleField('Aisle name', 'label', 'text', this.aisleState.label),
+            this._aisleSelect('Use', 'aisleKind', [
+                ['forklift', 'Forklift'],
+                ['pedestrian', 'Pedestrian'],
+                ['material', 'Material flow'],
+            ], this.aisleState.aisleKind),
+            this._aisleSelect('Direction', 'direction', [
+                ['two_way', 'Two way'],
+                ['one_way', 'One way'],
+            ], this.aisleState.direction),
+            this._aisleField(
+                'Corridor width (' + unit + ')',
+                'corridorWidth',
+                'number',
+                displayDistance(this.aisleState.corridorWidth, unit)
+            ),
+            this._aisleField('Display color', 'color', 'color', this.aisleState.color),
+            element(this.document, 'p', {
+                className: 'ip-flw-property-note',
+            }, 'The corridor is planning geometry. Safety clearance remains '
+                + 'unverified until authoritative evidence is attached.')
+        );
+        this.aisleStatus.textContent = this.aisleState.drawing
+            ? 'Drag from the aisle start to its end on the plan.'
+            : 'Set the aisle properties, then choose Draw aisle.';
+        const draw = this.aisleDialog.querySelector('[data-aisle-action="draw"]');
+        if (draw) draw.textContent = this.aisleState.drawing
+            ? 'Drawing active' : 'Draw aisle';
+    };
+
+    Workspace.prototype.openAisleDialog = function () {
+        if (!this.capabilities.manualAuthoring
+                || typeof this.session.createAisle !== 'function'
+                || this.state.busy || this.state.conflict) return false;
+        if (this.assetBrowserState.open) this.closeAssetBrowser(false);
+        if (this.precisionState.open) this.closePrecisionDialog(false);
+        if (this.patternState.open) this.closePatternDialog(false);
+        if (this.bulkZoneState.open) this.closeBulkZoneDialog(false);
+        if (this.cellGroupState.open) this.closeCellGroupDialog(false);
+        this._closeSelectionToolbar('aisle_opened', false);
+        this.aisleState.focusReturn = this.document.activeElement;
+        this.aisleState.open = true;
+        this.aisleDialog.hidden = false;
+        this.root.setAttribute('data-aisle-open', 'true');
+        this._renderAisleDialog();
+        this._renderToolbarState();
+        const first = this.aisleBody.querySelector('[data-aisle-field]');
+        if (first && typeof first.focus === 'function') first.focus();
+        return true;
+    };
+
+    Workspace.prototype.closeAisleDialog = function (restoreFocus) {
+        if (!this.aisleState.open) return false;
+        this._finishMovableDialogDrag(this.aisleDialog, true);
+        this.aisleState.open = false;
+        this.aisleState.drawing = false;
+        this.aisleDialog.hidden = true;
+        this.root.removeAttribute('data-aisle-open');
+        this._setAislePreview(null);
+        if (this.toolMode === 'aisle') this._setToolMode('select');
+        const target = this.aisleState.focusReturn;
+        this.aisleState.focusReturn = null;
+        this._renderToolbarState();
+        if (restoreFocus !== false && target
+                && typeof target.focus === 'function') target.focus();
+        return true;
+    };
+
+    Workspace.prototype._handleAisleChange = function (event) {
+        const field = targetDataId(
+            event.target,
+            'data-aisle-field',
+            this.aisleDialog
+        );
+        if (!field) return;
+        if (field === 'corridorWidth') {
+            const value = canonicalDistance(
+                finite(event.target.value, NaN),
+                this.planPreferences.unit
+            );
+            if (value > 0) this.aisleState.corridorWidth = value;
+        } else {
+            this.aisleState[field] = String(event.target.value || '');
+        }
+    };
+
+    Workspace.prototype._handleAisleClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-aisle-action',
+            this.aisleDialog
+        );
+        if (action === 'close') this.closeAisleDialog(true);
+        else if (action === 'draw') {
+            const label = String(this.aisleState.label || '').trim();
+            if (!label) {
+                this.aisleStatus.textContent = 'Aisle name is required.';
+                return;
+            }
+            this.aisleState.label = label;
+            this.aisleState.drawing = true;
+            this._setToolMode('aisle');
+            this._renderAisleDialog();
+        }
+    };
+
+    Workspace.prototype._handleAisleKeyDown = function (event) {
+        if (String(event && event.key || '').toLowerCase() !== 'escape') return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        this.closeAisleDialog(true);
+    };
+
+    Workspace.prototype._patternSeed = function (includeZones) {
+        if (!this.patternRuntime
+                || typeof this.patternRuntime.collectSelection !== 'function') {
+            throw new Error('Facility pattern tools are unavailable.');
+        }
+        return this.patternRuntime.collectSelection(
+            this.state.layout,
+            this.assetCatalog,
+            this.state.selection,
+            { expandZones: true, includeZones: includeZones !== false }
+        );
+    };
+
+    Workspace.prototype._initializePatternDefaults = function (mode) {
+        const seed = this._patternSeed(![
+            'cell-layout', 'perimeter-pattern', 'vertical-stack', 'surface-stack',
+        ].includes(mode));
+        if (!seed.length) throw new Error('Select equipment or a cell zone first.');
+        const bounds = this.patternRuntime.selectionBounds(seed);
+        const span = Math.max(bounds.width, bounds.depth, 1);
+        const gap = Math.max(0, finite(this.patternState.gap, 1));
+        const maxSpan = Math.max.apply(null, seed.map(function (item) {
+            return Math.max(finite(item.width, 1), finite(item.depth, 1));
+        }));
+        const maxRadius = Math.max.apply(null, seed.map(function (item) {
+            return Math.hypot(
+                finite(item.width, 1),
+                finite(item.depth, 1)
+            ) / 2;
+        }));
+        const boundaryInset = maxRadius + gap / 2;
+        const cellPitch = maxSpan + gap;
+        this.patternState.pitch = Math.max(1, Number((span + 1).toFixed(3)));
+        this.patternState.centerX = Number((bounds.center.x - span * 1.5).toFixed(3));
+        this.patternState.centerZ = Number(bounds.center.z.toFixed(3));
+        this.patternState.width = Math.max(
+            4,
+            Number((bounds.width + Math.max(2, seed.length - 1) * 1.5).toFixed(3)),
+            Number((boundaryInset * 2
+                + cellPitch * Math.max(2, Math.ceil(seed.length / 2))).toFixed(3))
+        );
+        this.patternState.depth = Math.max(
+            4,
+            Number((bounds.depth + 3).toFixed(3)),
+            Number((boundaryInset * 2 + cellPitch * 2).toFixed(3))
+        );
+        this.patternState.rows = Math.max(
+            2,
+            Math.min(seed.length, Math.round(Math.sqrt(seed.length)))
+        );
+        this.patternState.perimeterWidthCount = Math.max(
+            1,
+            Math.round(finite(this.patternState.perimeterWidthCount, 6))
+        );
+        this.patternState.perimeterDepthCount = Math.max(
+            1,
+            Math.round(finite(this.patternState.perimeterDepthCount, 4))
+        );
+        this.patternState.perimeterClearGap = Math.max(
+            0,
+            finite(this.patternState.perimeterClearGap, 0)
+        );
+        const worldBounds = this.options.topPlanOptions
+            && this.options.topPlanOptions.worldBounds || {};
+        const snap = Math.max(
+            0.000001,
+            this._activeSnapStep() || this.gridSize || DEFAULT_PLAN_GRID_METERS
+        );
+        this.patternState.mirrorAxisX = Number((
+            Math.ceil((bounds.maxX + Math.max(gap, snap)) / snap) * snap
+        ).toFixed(6));
+        this.patternState.mirrorAxisZ = Number((
+            Math.ceil((bounds.maxZ + Math.max(gap, snap)) / snap) * snap
+        ).toFixed(6));
+        this.patternState.mirrorAxisStart = {
+            x: this.patternState.mirrorAxisX,
+            z: finite(worldBounds.minZ, 0),
+        };
+        this.patternState.mirrorAxisEnd = {
+            x: this.patternState.mirrorAxisX,
+            z: finite(
+                worldBounds.maxZ,
+                this.planSettings.depthMeters
+            ),
+        };
+        this.patternState.mirrorPicking = false;
+        this.patternState.mirrorPickPoints = [];
+        if (mode === 'surface-stack') {
+            const placements = seed.filter(function (item) {
+                return item.kind === 'placement';
+            });
+            if (placements.length < 2) {
+                throw new Error(
+                    'Select one support and at least one item to place on it.'
+                );
+            }
+            const support = placements.slice().sort(function (left, right) {
+                const areaDelta = right.width * right.depth
+                    - left.width * left.depth;
+                return Math.abs(areaDelta) > 1e-9
+                    ? areaDelta : String(left.id).localeCompare(String(right.id));
+            })[0];
+            this.patternState.surfaceSupportId = support.id;
+            this.patternState.surfaceId = support.supportSurfaces
+                && support.supportSurfaces.length
+                ? support.supportSurfaces[0].surfaceId
+                : 'derived-top';
+        }
+        return seed;
+    };
+
+    Workspace.prototype._mirrorAxisPoints = function () {
+        const bounds = this.options.topPlanOptions
+            && this.options.topPlanOptions.worldBounds || {};
+        const minX = finite(bounds.minX, 0);
+        const minZ = finite(bounds.minZ, 0);
+        const maxX = finite(bounds.maxX, minX + this.planSettings.widthMeters);
+        const maxZ = finite(bounds.maxZ, minZ + this.planSettings.depthMeters);
+        if (this.patternState.mirrorAxisMode === 'vertical') {
+            return {
+                start: { x: this.patternState.mirrorAxisX, z: minZ },
+                end: { x: this.patternState.mirrorAxisX, z: maxZ },
+            };
+        }
+        if (this.patternState.mirrorAxisMode === 'horizontal') {
+            return {
+                start: { x: minX, z: this.patternState.mirrorAxisZ },
+                end: { x: maxX, z: this.patternState.mirrorAxisZ },
+            };
+        }
+        if (!this.patternState.mirrorAxisStart
+                || !this.patternState.mirrorAxisEnd) {
+            throw new Error('Pick two Plan points for the mirror construction line.');
+        }
+        return {
+            start: clone(this.patternState.mirrorAxisStart),
+            end: clone(this.patternState.mirrorAxisEnd),
+        };
+    };
+
+    Workspace.prototype._buildPatternResult = function () {
+        const mode = this.patternState.mode;
+        const seed = mode === 'swap' ? [] : this._patternSeed(![
+            'cell-layout', 'perimeter-pattern', 'vertical-stack', 'surface-stack',
+        ].includes(mode));
+        if (mode !== 'vertical-stack' && seed.some(function (item) {
+            return item.snapRelationship
+                && item.snapRelationship.family === 'vertical_stack';
+        })) {
+            throw new Error(
+                'Move, duplicate, or delete a completed stack as one unit. '
+                + 'Nested layout patterns are not supported yet.'
+            );
+        }
+        if (mode === 'linear-pattern') {
+            let angle = this.patternState.angleDegrees;
+            if (this.patternState.linearDirection === 'horizontal') angle = 0;
+            else if (this.patternState.linearDirection === 'vertical') angle = 90;
+            return this.patternRuntime.buildLinearPattern(seed, {
+                count: this.patternState.count,
+                pitch: this.patternState.pitch,
+                angleDegrees: angle,
+            });
+        }
+        if (mode === 'circular-pattern') {
+            return this.patternRuntime.buildCircularPattern(seed, {
+                count: this.patternState.count,
+                centerX: this.patternState.centerX,
+                centerZ: this.patternState.centerZ,
+                sweepDegrees: this.patternState.sweepDegrees,
+                rotateWithPattern: this.patternState.rotateWithPattern,
+            });
+        }
+        if (mode === 'vertical-stack') {
+            return this.patternRuntime.buildVerticalStack(seed, {
+                count: this.patternState.stackCount,
+                gap: this.patternState.stackGap,
+            });
+        }
+        if (mode === 'surface-stack') {
+            return this.patternRuntime.buildSurfaceStack(seed, {
+                supportPlacementId: this.patternState.surfaceSupportId,
+                surfaceId: this.patternState.surfaceId,
+                side: this.patternState.surfaceSide,
+                gap: this.patternState.surfaceGap,
+                itemGap: this.patternState.surfaceItemGap,
+                inset: this.patternState.surfaceInset,
+            });
+        }
+        if (mode === 'perimeter-pattern') {
+            return this.patternRuntime.buildRectangularPerimeter(seed, {
+                shape: this.patternState.perimeterShape,
+                widthCount: this.patternState.perimeterWidthCount,
+                depthCount: this.patternState.perimeterDepthCount,
+                clearGap: this.patternState.perimeterClearGap,
+                angleDegrees: this.patternState.angleDegrees,
+            });
+        }
+        if (mode === 'mirror') {
+            const axis = this._mirrorAxisPoints();
+            return this.patternRuntime.buildMirror(seed, {
+                axisStart: axis.start,
+                axisEnd: axis.end,
+            });
+        }
+        if (mode === 'swap') {
+            return this.patternRuntime.buildSwap(
+                this.state.layout,
+                this.assetCatalog,
+                this.state.selection
+            );
+        }
+        return this.patternRuntime.buildCellLayout(seed, {
+            shape: this.patternState.shape,
+            width: this.patternState.width,
+            depth: this.patternState.depth,
+            gap: this.patternState.gap,
+            rows: this.patternState.rows,
+            orientation: this.patternState.orientation,
+            angleDegrees: this.patternState.angleDegrees,
+            invertU: this.patternState.invertU,
+        });
+    };
+
+    Workspace.prototype._setPatternPreview = function (preview) {
+        this.patternPreview = preview ? clone(preview) : null;
+        if (!this.topAdapter
+                || typeof this.topAdapter.setTransientPatternPreview
+                    !== 'function') return false;
+        return this.topAdapter.setTransientPatternPreview(this.patternPreview);
+    };
+
+    Workspace.prototype._updatePatternPreview = function () {
+        if (!this.patternState.open || this.patternState.applying) {
+            this._setPatternPreview(null);
+            return null;
+        }
+        try {
+            const result = this._buildPatternResult();
+            this.patternMessage = result.mode === 'cell-layout'
+                ? result.seedCount + ' cell items will be repositioned.'
+                : result.mode === 'vertical-stack'
+                    ? result.count + ' items will form a '
+                        + formattedDistance(displayDistance(
+                            result.guide.totalHeightMeters,
+                            this.planPreferences.unit
+                        )) + ' ' + this.planPreferences.unit
+                        + ' vertical stack.'
+                : result.mode === 'surface-stack'
+                    ? result.count + ' item' + (result.count === 1 ? '' : 's')
+                        + ' will be placed ' + result.guide.side
+                        + ' the selected support surface.'
+                : result.mode === 'mirror'
+                    ? result.seedCount + ' mirrored cop'
+                        + (result.seedCount === 1 ? 'y' : 'ies')
+                        + ' will be created.'
+                : result.mode === 'perimeter'
+                    ? (result.count - 1) + ' perimeter module'
+                        + (result.count === 2 ? '' : 's')
+                        + ' will be created across '
+                        + result.guide.widthCount + ' width and '
+                        + result.guide.depthCount + ' depth positions per side.'
+                : result.mode === 'swap'
+                    ? result.seedCount
+                        + ' layout objects will exchange cell centers.'
+                : (result.count - 1) + ' new instance'
+                    + (result.count === 2 ? '' : 's') + ' of '
+                    + result.seedCount + ' seed item'
+                    + (result.seedCount === 1 ? '' : 's') + ' will be created.';
+            this._setPatternPreview(result);
+            return result;
+        } catch (error) {
+            this.patternMessage = error.message;
+            this._setPatternPreview(null);
+            return null;
+        }
+    };
+
+    Workspace.prototype._renderPatternDialog = function () {
+        if (!this.patternDialog) return;
+        const mode = this.patternState.mode;
+        this.patternDialog.hidden = !this.patternState.open;
+        this.patternTitle.textContent = {
+            'linear-pattern': 'Linear pattern',
+            'circular-pattern': 'Circular pattern',
+            'perimeter-pattern': 'Rectangular perimeter pattern',
+            'cell-layout': 'Arrange manufacturing cell',
+            'vertical-stack': 'Create vertical stack',
+            'surface-stack': 'Place equipment on a support surface',
+            mirror: 'Mirror layout selection',
+            swap: 'Swap layout positions',
+        }[mode] || 'Create layout pattern';
+        Array.prototype.forEach.call(
+            this.patternTabs.querySelectorAll('[data-pattern-mode]'),
+            function (button) {
+                const active = button.getAttribute('data-pattern-mode') === mode;
+                button.setAttribute('aria-selected', active ? 'true' : 'false');
+                button.setAttribute('tabindex', active ? '0' : '-1');
+            }
+        );
+        clearElement(this.patternBody);
+        let seed = [];
+        try {
+            seed = mode === 'swap' ? this.state.selection.map(function (id) {
+                return { id: id, kind: 'swap-selection' };
+            }) : this._patternSeed(![
+                'cell-layout', 'perimeter-pattern', 'vertical-stack', 'surface-stack',
+            ].includes(mode));
+        } catch (error) {
+            this.patternMessage = error.message;
+        }
+        const counts = seed.reduce(function (result, item) {
+            result[item.kind] = (result[item.kind] || 0) + 1;
+            return result;
+        }, {});
+        const summary = [];
+        if (counts.placement) summary.push(counts.placement + ' equipment');
+        if (counts['floor-marking']) {
+            summary.push(counts['floor-marking'] + ' floor marking'
+                + (counts['floor-marking'] === 1 ? '' : 's'));
+        }
+        if (counts.zone) summary.push(counts.zone + ' cell zone');
+        if (counts['swap-selection']) {
+            summary.push(counts['swap-selection'] + ' swap targets');
+        }
+        this.patternBody.appendChild(element(this.document, 'p', {
+            className: 'ip-flw-precision-selection',
+        }, summary.length ? summary.join(', ') + ' in seed'
+            : 'No pattern seed selected'));
+        const unit = this.planPreferences.unit;
+        if (mode === 'linear-pattern') {
+            append(this.patternBody,
+                this._patternSelect('Direction', 'linearDirection', [
+                    { value: 'horizontal', label: 'Horizontal (X)' },
+                    { value: 'vertical', label: 'Vertical (Z)' },
+                    { value: 'custom', label: 'Custom angle' },
+                ]),
+                this._patternNumber('Pitch (' + unit + ')', 'pitch',
+                    displayDistance(this.patternState.pitch, unit), {
+                        min: 0.01,
+                    }),
+                this._patternNumber('Total instances', 'count',
+                    this.patternState.count, { min: 2, max: 50, step: 1 })
+            );
+            if (this.patternState.linearDirection === 'custom') {
+                this.patternBody.appendChild(this._patternNumber(
+                    'Direction angle (degrees)',
+                    'angleDegrees',
+                    this.patternState.angleDegrees,
+                    { step: 1 }
+                ));
+            }
+        } else if (mode === 'circular-pattern') {
+            append(this.patternBody,
+                this._patternNumber('Center X (' + unit + ')', 'centerX',
+                    displayDistance(this.patternState.centerX, unit)),
+                this._patternNumber('Center Z (' + unit + ')', 'centerZ',
+                    displayDistance(this.patternState.centerZ, unit)),
+                this._patternNumber('Total instances', 'count',
+                    this.patternState.count, { min: 2, max: 50, step: 1 }),
+                this._patternNumber('Total angle (degrees)', 'sweepDegrees',
+                    this.patternState.sweepDegrees, {
+                        min: 0.1, max: 360, step: 1,
+                    }),
+                this._patternCheckbox(
+                    'Rotate instances with pattern',
+                    'rotateWithPattern'
+                )
+            );
+        } else if (mode === 'vertical-stack') {
+            append(this.patternBody,
+                this._patternNumber(
+                    'Total items', 'stackCount',
+                    this.patternState.stackCount,
+                    { min: 2, max: 50, step: 1 }
+                ),
+                this._patternNumber(
+                    'Vertical gap (' + unit + ')', 'stackGap',
+                    displayDistance(this.patternState.stackGap, unit),
+                    { min: 0 }
+                )
+            );
+            this.patternBody.appendChild(element(this.document, 'p', {
+                className: 'ip-flw-precision-selection',
+            }, 'The selected equipment is the base. Copies use authoritative '
+                + 'asset height and remain one movable stack. Load capacity and '
+                + 'stability remain unverified until approved evidence exists.'));
+        } else if (mode === 'surface-stack') {
+            const placements = seed.filter(function (item) {
+                return item.kind === 'placement';
+            });
+            const supportOptions = placements.map(function (item) {
+                return {
+                    value: item.id,
+                    label: cleanString(item.assetId, item.id) + ' - ' + item.id,
+                };
+            });
+            const selectedSupport = placements.find(function (item) {
+                return item.id === this.patternState.surfaceSupportId;
+            }, this) || placements[0];
+            const surfaceDefinitions = selectedSupport
+                && Array.isArray(selectedSupport.supportSurfaces)
+                ? selectedSupport.supportSurfaces : [];
+            const surfaceOptions = surfaceDefinitions.length
+                ? surfaceDefinitions.map(function (surface) {
+                    return {
+                        value: surface.surfaceId,
+                        label: cleanString(surface.label, surface.surfaceId),
+                    };
+                })
+                : [{ value: 'derived-top', label: 'Derived bounding-box surface' }];
+            if (!surfaceOptions.some(function (option) {
+                return option.value === this.patternState.surfaceId;
+            }, this)) {
+                this.patternState.surfaceId = surfaceOptions[0].value;
+            }
+            const selectedSurface = surfaceDefinitions.find(function (surface) {
+                return surface.surfaceId === this.patternState.surfaceId;
+            }, this);
+            const allowedSides = selectedSurface
+                && Array.isArray(selectedSurface.allowedSides)
+                && selectedSurface.allowedSides.length
+                ? selectedSurface.allowedSides : ['above', 'below'];
+            if (!allowedSides.includes(this.patternState.surfaceSide)) {
+                this.patternState.surfaceSide = allowedSides[0];
+            }
+            const sideOptions = allowedSides.map(function (side) {
+                return {
+                    value: side,
+                    label: side === 'below'
+                        ? 'Below / suspended' : 'Above / on top',
+                };
+            });
+            append(this.patternBody,
+                this._patternSelect(
+                    'Support equipment', 'surfaceSupportId', supportOptions
+                ),
+                this._patternSelect('Support surface', 'surfaceId', surfaceOptions),
+                this._patternSelect('Surface side', 'surfaceSide', sideOptions),
+                this._patternNumber(
+                    'Surface gap (' + unit + ')', 'surfaceGap',
+                    displayDistance(this.patternState.surfaceGap, unit),
+                    { min: 0 }
+                ),
+                this._patternNumber(
+                    'Item gap (' + unit + ')', 'surfaceItemGap',
+                    displayDistance(this.patternState.surfaceItemGap, unit),
+                    { min: 0 }
+                ),
+                this._patternNumber(
+                    'Edge inset (' + unit + ')', 'surfaceInset',
+                    displayDistance(this.patternState.surfaceInset, unit),
+                    { min: 0 }
+                )
+            );
+            this.patternBody.appendChild(element(this.document, 'p', {
+                className: 'ip-flw-precision-selection',
+            }, 'Each child receives an independent local X/Z coordinate on the '
+                + 'support. Moving the support carries every attached child. '
+                + 'Load capacity and attachment safety remain unverified.'));
+        } else if (mode === 'perimeter-pattern') {
+            append(this.patternBody,
+                this._patternSelect('Perimeter shape', 'perimeterShape', [
+                    { value: 'rectangle', label: 'Rectangle' },
+                    { value: 'square', label: 'Square' },
+                ]),
+                this._patternNumber(
+                    this.patternState.perimeterShape === 'square'
+                        ? 'Modules per side' : 'Modules along width',
+                    'perimeterWidthCount',
+                    this.patternState.perimeterWidthCount,
+                    { min: 1, max: 50, step: 1 }
+                )
+            );
+            if (this.patternState.perimeterShape !== 'square') {
+                this.patternBody.appendChild(this._patternNumber(
+                    'Modules along depth',
+                    'perimeterDepthCount',
+                    this.patternState.perimeterDepthCount,
+                    { min: 1, max: 50, step: 1 }
+                ));
+            }
+            append(this.patternBody,
+                this._patternNumber(
+                    'Clear gap (' + unit + ')',
+                    'perimeterClearGap',
+                    displayDistance(
+                        this.patternState.perimeterClearGap,
+                        unit
+                    ),
+                    { min: 0 }
+                ),
+                this._patternNumber(
+                    'Layout angle (degrees)',
+                    'angleDegrees',
+                    this.patternState.angleDegrees,
+                    { step: 1 }
+                )
+            );
+            this.patternBody.appendChild(element(this.document, 'p', {
+                className: 'ip-flw-precision-selection',
+            }, 'The selected module remains at the first corner. '
+                + 'Copies follow the four sides and remain independently editable.'));
+        } else if (mode === 'mirror') {
+            append(this.patternBody,
+                this._patternSelect('Mirror axis', 'mirrorAxisMode', [
+                    { value: 'vertical', label: 'Vertical grid line (X)' },
+                    { value: 'horizontal', label: 'Horizontal grid line (Z)' },
+                    { value: 'two-point', label: 'Two-point construction line' },
+                ])
+            );
+            if (this.patternState.mirrorAxisMode === 'vertical') {
+                this.patternBody.appendChild(this._patternNumber(
+                    'Axis X (' + unit + ')',
+                    'mirrorAxisX',
+                    displayDistance(this.patternState.mirrorAxisX, unit)
+                ));
+            } else if (this.patternState.mirrorAxisMode === 'horizontal') {
+                this.patternBody.appendChild(this._patternNumber(
+                    'Axis Z (' + unit + ')',
+                    'mirrorAxisZ',
+                    displayDistance(this.patternState.mirrorAxisZ, unit)
+                ));
+            } else {
+                const start = this.patternState.mirrorAxisStart;
+                const end = this.patternState.mirrorAxisEnd;
+                this.patternBody.appendChild(element(this.document, 'p', {
+                    className: 'ip-flw-precision-selection',
+                    'data-pattern-mirror-readout': '',
+                }, start && end
+                    ? 'Axis: (' + formattedDistance(displayDistance(
+                        start.x, unit
+                    )) + ', ' + formattedDistance(displayDistance(
+                        start.z, unit
+                    )) + ') to (' + formattedDistance(displayDistance(
+                        end.x, unit
+                    )) + ', ' + formattedDistance(displayDistance(
+                        end.z, unit
+                    )) + ') ' + unit
+                    : 'No construction line selected.'));
+            }
+            this.patternBody.appendChild(element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-secondary-action ip-flw-pattern-pick-axis',
+                'data-pattern-action': 'pick-mirror-axis',
+                'aria-pressed': this.patternState.mirrorPicking
+                    ? 'true' : 'false',
+            }, this.patternState.mirrorPicking
+                ? (this.patternState.mirrorAxisMode === 'two-point'
+                    && this.patternState.mirrorPickPoints.length === 1
+                    ? 'Pick second point in Plan'
+                    : 'Pick axis in Plan')
+                : 'Pick axis in Plan'));
+            this.patternBody.appendChild(element(this.document, 'p', {
+                className: 'ip-flw-precision-selection',
+            }, this.patternState.mirrorAxisMode === 'two-point'
+                ? 'Pick two points to define an arbitrary construction axis.'
+                : 'Pick one grid line in the Plan view.'));
+        } else if (mode === 'swap') {
+            this.patternBody.appendChild(element(this.document, 'p', {
+                className: 'ip-flw-precision-selection',
+            }, 'The two selected objects will exchange centers. Selected cell '
+                + 'zones carry their contained equipment and floor markings.'));
+        } else {
+            append(this.patternBody,
+                this._patternSelect('Cell arrangement', 'shape',
+                    CELL_LAYOUT_PRESETS),
+                this._patternNumber('Cell width (' + unit + ')', 'width',
+                    displayDistance(this.patternState.width, unit), {
+                        min: 0.01,
+                    }),
+                this._patternNumber('Cell depth (' + unit + ')', 'depth',
+                    displayDistance(this.patternState.depth, unit), {
+                        min: 0.01,
+                    }),
+                this._patternNumber('Preferred clear gap (' + unit + ')', 'gap',
+                    displayDistance(this.patternState.gap, unit), { min: 0 }),
+                this._patternNumber('Layout angle (degrees)', 'angleDegrees',
+                    this.patternState.angleDegrees, { step: 1 }),
+                this._patternSelect('Equipment orientation', 'orientation', [
+                    { value: 'preserve', label: 'Preserve current orientation' },
+                    { value: 'follow-path', label: 'Follow process path' },
+                    { value: 'face-center', label: 'Face cell center' },
+                    { value: 'face-outward', label: 'Face away from center' },
+                ])
+            );
+            if (this.patternState.shape === 'u') {
+                this.patternBody.appendChild(this._patternCheckbox(
+                    'Invert U opening',
+                    'invertU'
+                ));
+            }
+            if (['grid', 'parallel', 'serpentine'].includes(
+                this.patternState.shape
+            )) {
+                this.patternBody.appendChild(this._patternNumber(
+                    'Rows', 'rows', this.patternState.rows,
+                    { min: 1, max: Math.max(1, seed.length), step: 1 }
+                ));
+            }
+        }
+        const result = this._updatePatternPreview();
+        this.patternStatus.textContent = this.patternMessage;
+        this.patternApply.disabled = !result
+            || this.patternState.applying
+            || this.state.busy
+            || this.state.conflict;
+        this.patternApply.textContent = this.patternState.applying
+            ? 'Applying...' : 'Apply';
+    };
+
+    Workspace.prototype._syncPrecisionIdentities = function () {
+        const placements = this._precisionSelectedPlacements();
+        const ids = placements.map(function (placement) {
+            return placement.placementId;
+        });
+        if (!ids.includes(this.precisionState.anchorId)) {
+            this.precisionState.anchorId = ids[0] || '';
+        }
+        if (!ids.includes(this.precisionState.referenceId)) {
+            this.precisionState.referenceId = ids[0] || '';
+        }
+        if (!ids.includes(this.precisionState.movingId)
+                || this.precisionState.movingId
+                    === this.precisionState.referenceId) {
+            this.precisionState.movingId = ids.find(function (id) {
+                return id !== this.precisionState.referenceId;
+            }, this) || '';
+        }
+        return placements;
+    };
+
+    Workspace.prototype._renderPrecisionDialog = function () {
+        if (!this.precisionDialog) return;
+        const placements = this._syncPrecisionIdentities();
+        const mode = this.precisionState.mode;
+        this.precisionDialog.hidden = !this.precisionState.open;
+        this.precisionTitle.textContent = {
+            align: 'Align equipment',
+            distribute: 'Distribute equipment',
+            relative: 'Relative placement',
+            distance: 'Set distance',
+            offset: 'Offset equipment',
+        }[mode] || 'Position equipment';
+        Array.prototype.forEach.call(
+            this.precisionTabs.querySelectorAll('[data-precision-mode]'),
+            function (button) {
+                const active = button.getAttribute('data-precision-mode') === mode;
+                button.setAttribute('aria-selected', active ? 'true' : 'false');
+                button.setAttribute('tabindex', active ? '0' : '-1');
+            }
+        );
+        clearElement(this.precisionBody);
+        this.precisionBody.appendChild(element(this.document, 'p', {
+            className: 'ip-flw-precision-selection',
+        }, placements.length + ' equipment placement'
+            + (placements.length === 1 ? '' : 's') + ' selected'));
+        const placementOptions = placements.map(function (placement) {
+            return {
+                value: placement.placementId,
+                label: this._precisionPlacementLabel(placement),
+            };
+        }, this);
+        const unit = this.planPreferences.unit;
+        this.precisionMessage = '';
+        if (mode === 'align') {
+            append(this.precisionBody,
+                this._precisionSelect('Reference', 'anchorId', placementOptions),
+                this._precisionSelect('Align', 'alignMode', [
+                    { value: 'left', label: 'Left edges' },
+                    { value: 'center-x', label: 'Horizontal centers' },
+                    { value: 'right', label: 'Right edges' },
+                    { value: 'north', label: 'North edges' },
+                    { value: 'center-z', label: 'Vertical centers' },
+                    { value: 'south', label: 'South edges' },
+                ])
+            );
+            this.precisionMessage = 'The reference stays fixed.';
+        } else if (mode === 'distribute') {
+            append(this.precisionBody,
+                this._precisionSelect('Direction', 'distributeAxis', [
+                    { value: 'x', label: 'Horizontal (X)' },
+                    { value: 'z', label: 'Vertical (Z)' },
+                ]),
+                this._precisionSelect('Spacing', 'distributeMethod', [
+                    { value: 'equal-gap', label: 'Equal clear gaps' },
+                    { value: 'equal-center', label: 'Equal center spacing' },
+                    { value: 'fixed-gap', label: 'Exact clear gap' },
+                ])
+            );
+            if (this.precisionState.distributeMethod === 'fixed-gap') {
+                this.precisionBody.appendChild(this._precisionNumber(
+                    'Clear gap (' + unit + ')',
+                    'distributeGap',
+                    displayDistance(this.precisionState.distributeGap, unit)
+                ));
+            }
+            this.precisionMessage = 'Equipment is ordered by its current position.';
+        } else if (mode === 'relative') {
+            append(this.precisionBody,
+                this._precisionSelect('Reference', 'referenceId', placementOptions),
+                this._precisionSelect('Place selection', 'relation', [
+                    { value: 'east', label: 'East / right of reference' },
+                    { value: 'west', label: 'West / left of reference' },
+                    { value: 'north', label: 'North / above reference' },
+                    { value: 'south', label: 'South / below reference' },
+                ]),
+                this._precisionNumber(
+                    'Clear distance (' + unit + ')',
+                    'relativeDistance',
+                    displayDistance(this.precisionState.relativeDistance, unit)
+                ),
+                this._precisionSelect('Perpendicular alignment',
+                    'relativeAlignment', [
+                        { value: 'minimum', label: 'Minimum edges' },
+                        { value: 'center', label: 'Centers' },
+                        { value: 'maximum', label: 'Maximum edges' },
+                    ])
+            );
+            this.precisionMessage = Math.max(0, placements.length - 1)
+                + ' placement' + (placements.length === 2 ? '' : 's')
+                + ' will move as one group.';
+        } else if (mode === 'distance') {
+            const movingOptions = placementOptions.filter(function (item) {
+                return item.value !== this.precisionState.referenceId;
+            }, this);
+            append(this.precisionBody,
+                this._precisionSelect('Fixed reference', 'referenceId', placementOptions),
+                this._precisionSelect('Placement to move', 'movingId', movingOptions),
+                this._precisionSelect('Measurement', 'distanceMode', [
+                    { value: 'horizontal-gap', label: 'Horizontal edge gap' },
+                    { value: 'vertical-gap', label: 'Vertical edge gap' },
+                    { value: 'horizontal-center', label: 'Horizontal centers' },
+                    { value: 'vertical-center', label: 'Vertical centers' },
+                    { value: 'center-distance', label: 'Center-to-center distance' },
+                ]),
+                this._precisionNumber(
+                    'Requested distance (' + unit + ')',
+                    'requestedDistance',
+                    displayDistance(this.precisionState.requestedDistance, unit)
+                )
+            );
+            if (this.precisionState.referenceId && this.precisionState.movingId) {
+                try {
+                    const current = measurePlacementDistance(
+                        this.state.layout,
+                        this.assetCatalog,
+                        this.precisionState.referenceId,
+                        this.precisionState.movingId,
+                        this.precisionState.distanceMode
+                    );
+                    this.precisionMessage = 'Current: '
+                        + formattedDistance(displayDistance(current, unit))
+                        + ' ' + unit;
+                } catch (error) {
+                    this.precisionMessage = error.message;
+                }
+            }
+        } else {
+            append(this.precisionBody,
+                this._precisionNumber('X offset (' + unit + ')', 'offsetX',
+                    displayDistance(this.precisionState.offsetX, unit)),
+                this._precisionNumber('Z offset (' + unit + ')', 'offsetZ',
+                    displayDistance(this.precisionState.offsetZ, unit))
+            );
+            const copyLabel = element(this.document, 'label', {
+                className: 'ip-flw-precision-check',
+            });
+            const copyInput = element(this.document, 'input', {
+                type: 'checkbox',
+                'data-precision-field': 'createCopies',
+                'aria-label': 'Create copies at the offset',
+            });
+            copyInput.checked = this.precisionState.createCopies === true;
+            append(copyLabel, copyInput, element(this.document, 'span', {},
+                'Create copies'));
+            this.precisionBody.appendChild(copyLabel);
+            this.precisionMessage = this.precisionState.createCopies
+                ? 'Copies preserve the selected group arrangement.'
+                : 'The selected group moves by one exact offset.';
+        }
+        this.precisionStatus.textContent = this.precisionMessage;
+        const minimum = mode === 'distribute' ? 3
+            : mode === 'offset' ? 1 : 2;
+        this.precisionApply.disabled = placements.length < minimum
+            || Boolean(this.state.busy);
+    };
+
+    Workspace.prototype._buildWalkthroughContextUi = function () {
+        this.walkthroughContextPrompt = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-context-prompt',
+            'data-walkthrough-context-action': 'open',
+            'aria-label': 'Open focused equipment details',
+            hidden: true,
+        });
+        this.walkthroughContextPromptName = element(this.document, 'strong', {
+            className: 'ip-flw-context-prompt-name',
+        });
+        this.walkthroughContextPromptHint = element(this.document, 'span', {
+            className: 'ip-flw-context-prompt-hint',
+        }, 'E  Details');
+        append(
+            this.walkthroughContextPrompt,
+            this.walkthroughContextPromptName,
+            this.walkthroughContextPromptHint
+        );
+
+        this.walkthroughContextCard = element(this.document, 'aside', {
+            className: 'ip-flw-context-card',
+            'aria-label': 'Focused equipment details',
+            hidden: true,
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-context-card-header',
+        });
+        const identity = element(this.document, 'div', {
+            className: 'ip-flw-context-card-identity',
+        });
+        this.walkthroughContextTitle = element(this.document, 'h3');
+        this.walkthroughContextMeta = element(this.document, 'p');
+        append(identity, this.walkthroughContextTitle, this.walkthroughContextMeta);
+        const headerActions = element(this.document, 'div', {
+            className: 'ip-flw-context-card-header-actions',
+        });
+        const pin = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-context-icon-button',
+            'data-walkthrough-context-action': 'pin',
+            'aria-label': 'Pin equipment details',
+            'aria-pressed': 'false',
+            title: 'Pin details',
+        });
+        pin.appendChild(element(this.document, 'img', {
+            src: VIEWPORT_ICON_ROOT + 'map-pin.svg',
+            alt: '',
+            draggable: 'false',
+            'aria-hidden': 'true',
+        }));
+        const close = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-context-icon-button',
+            'data-walkthrough-context-action': 'close',
+            'aria-label': 'Close equipment details',
+            title: 'Close',
+        }, 'X');
+        append(headerActions, pin, close);
+        append(header, identity, headerActions);
+
+        const modeRow = element(this.document, 'label', {
+            className: 'ip-flw-context-mode',
+        });
+        modeRow.appendChild(element(this.document, 'span', {}, 'View'));
+        this.walkthroughContextMode = element(this.document, 'select', {
+            'data-walkthrough-context-mode': '',
+            'aria-label': 'Equipment information category',
+        });
+        WALKTHROUGH_CONTEXT_MODES.forEach(function (mode) {
+            this.walkthroughContextMode.appendChild(element(
+                this.document,
+                'option',
+                { value: mode.key },
+                mode.label
+            ));
+        }, this);
+        this.walkthroughContextMode.value = this.walkthroughContextState.mode;
+        modeRow.appendChild(this.walkthroughContextMode);
+        this.walkthroughContextBody = element(this.document, 'div', {
+            className: 'ip-flw-context-card-body',
+        });
+        const footer = element(this.document, 'footer', {
+            className: 'ip-flw-context-card-actions',
+        });
+        append(footer,
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-secondary',
+                'data-walkthrough-context-action': 'select',
+            }, 'Select in Layout'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-primary',
+                'data-walkthrough-context-action': 'walk-to',
+            }, 'Walk to Equipment')
+        );
+        append(
+            this.walkthroughContextCard,
+            header,
+            modeRow,
+            this.walkthroughContextBody,
+            footer
+        );
+    };
+
+    Workspace.prototype._buildThreeRecordingUi = function () {
+        const selectRow = function (label, attribute, options, value) {
+            const row = element(this.document, 'label', {
+                className: 'ip-flw-recording-field',
+            });
+            row.appendChild(element(this.document, 'span', {}, label));
+            const select = element(this.document, 'select', {
+                'data-recording-setting': attribute,
+                'aria-label': label,
+            });
+            options.forEach(function (option) {
+                select.appendChild(element(this.document, 'option', {
+                    value: option.key,
+                }, option.label));
+            }, this);
+            select.value = value;
+            row.appendChild(select);
+            return { row: row, input: select };
+        }.bind(this);
+        const checkRow = function (label, attribute, checked) {
+            const row = element(this.document, 'label', {
+                className: 'ip-flw-recording-check',
+            });
+            const input = element(this.document, 'input', {
+                type: 'checkbox',
+                'data-recording-setting': attribute,
+                'aria-label': label,
+            });
+            input.checked = checked === true;
+            append(row, input, element(this.document, 'span', {}, label));
+            return { row: row, input: input };
+        }.bind(this);
+
+        this.threeRecordingPanel = element(this.document, 'section', {
+            className: 'ip-flw-recording-panel',
+            role: 'dialog',
+            'aria-label': 'Record facility view',
+            hidden: true,
+        });
+        const panelHeader = element(this.document, 'header', {
+            className: 'ip-flw-recording-header',
+        });
+        const panelHeading = element(this.document, 'div');
+        append(panelHeading,
+            element(this.document, 'h3', {}, 'Record facility view'),
+            element(this.document, 'p', {}, 'Capture the 3D viewport only.')
+        );
+        append(panelHeader,
+            panelHeading,
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-recording-close',
+                'data-recording-action': 'cancel',
+                'aria-label': 'Close recording settings',
+                title: 'Close',
+            }, 'X')
+        );
+        const mode = selectRow(
+            'Presentation',
+            'presentationMode',
+            RECORDING_PRESENTATION_MODES,
+            this.recordingState.settings.presentationMode
+        );
+        const resolution = selectRow(
+            'Resolution',
+            'resolution',
+            RECORDING_RESOLUTIONS,
+            this.recordingState.settings.resolution
+        );
+        const fps = selectRow('Frame rate', 'fps', [
+            { key: '30', label: '30 FPS' },
+            { key: '60', label: '60 FPS' },
+        ], String(this.recordingState.settings.fps));
+        const microphone = checkRow(
+            'Microphone narration',
+            'microphone',
+            this.recordingState.settings.microphone
+        );
+        const includeHud = checkRow(
+            'Walkthrough status overlay',
+            'includeHud',
+            this.recordingState.settings.includeHud
+        );
+        const includeCursor = checkRow(
+            'Pointer indicator',
+            'includeCursor',
+            this.recordingState.settings.includeCursor
+        );
+        this.recordingPresentationInput = mode.input;
+        this.recordingResolutionInput = resolution.input;
+        this.recordingFpsInput = fps.input;
+        this.recordingMicrophoneInput = microphone.input;
+        this.recordingHudInput = includeHud.input;
+        this.recordingCursorInput = includeCursor.input;
+        this.recordingFormatText = element(this.document, 'p', {
+            className: 'ip-flw-recording-format',
+        }, 'Format is selected by browser capability.');
+        this.recordingErrorText = element(this.document, 'p', {
+            className: 'ip-flw-recording-error',
+            role: 'alert',
+            hidden: true,
+        });
+        const panelActions = element(this.document, 'footer', {
+            className: 'ip-flw-recording-actions',
+        });
+        append(panelActions,
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-secondary',
+                'data-recording-action': 'cancel',
+            }, 'Cancel'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-primary',
+                'data-recording-action': 'start',
+            }, 'Start recording')
+        );
+        append(this.threeRecordingPanel,
+            panelHeader,
+            mode.row,
+            resolution.row,
+            fps.row,
+            microphone.row,
+            includeHud.row,
+            includeCursor.row,
+            this.recordingFormatText,
+            this.recordingErrorText,
+            panelActions
+        );
+
+        this.threeRecordingCountdown = element(this.document, 'div', {
+            className: 'ip-flw-recording-countdown',
+            role: 'status',
+            'aria-live': 'assertive',
+            hidden: true,
+        });
+        this.threeRecordingMonitor = element(this.document, 'div', {
+            className: 'ip-flw-recording-monitor',
+            role: 'status',
+            'aria-live': 'polite',
+            hidden: true,
+        });
+        this.recordingTimerText = element(this.document, 'strong', {}, '00:00');
+        append(this.threeRecordingMonitor,
+            element(this.document, 'span', {
+                className: 'ip-flw-recording-live-dot',
+                'aria-hidden': 'true',
+            }),
+            element(this.document, 'span', {
+                className: 'ip-flw-recording-live-label',
+            }, 'REC'),
+            this.recordingTimerText,
+            element(this.document, 'button', {
+                type: 'button',
+                'data-recording-action': 'pause',
+            }, 'Pause'),
+            element(this.document, 'button', {
+                type: 'button',
+                'data-recording-action': 'stop',
+            }, 'Stop')
+        );
+
+        this.threeRecordingPreview = element(this.document, 'section', {
+            className: 'ip-flw-recording-preview',
+            role: 'dialog',
+            'aria-label': 'Recorded facility preview',
+            hidden: true,
+        });
+        this.recordingPreviewVideo = element(this.document, 'video', {
+            controls: true,
+            preload: 'metadata',
+            'aria-label': 'Recorded facility view preview',
+        });
+        this.recordingPreviewSummary = element(this.document, 'p', {
+            className: 'ip-flw-recording-preview-summary',
+        });
+        const previewActions = element(this.document, 'footer', {
+            className: 'ip-flw-recording-actions',
+        });
+        append(previewActions,
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-secondary',
+                'data-recording-action': 'discard',
+            }, 'Discard'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-primary',
+                'data-recording-action': 'download',
+            }, 'Save video')
+        );
+        append(this.threeRecordingPreview,
+            element(this.document, 'h3', {}, 'Review recording'),
+            this.recordingPreviewVideo,
+            this.recordingPreviewSummary,
+            previewActions
+        );
+    };
+
     Workspace.prototype._build = function () {
         clearElement(this.root);
         setClassToken(this.root, 'ip-flw-root', true);
+        setClassToken(
+            this.root,
+            'ip-flw-external-command-surface',
+            this.externalCommandSurface
+        );
         this.root.setAttribute('data-facility-workspace', '');
         this.root.setAttribute('aria-label', 'Facility layout workspace');
+        if (this.externalCommandSurface && this.root.style) {
+            this.root.style.setProperty('--ip-flw-toolbar-height', '0px');
+            this.root.style.gridTemplateRows =
+                'minmax(0, 1fr) var(--ip-flw-status-height)';
+        }
 
         this.toolbar = element(this.document, 'div', {
             className: 'ip-flw-toolbar',
             role: 'toolbar',
             'aria-label': 'Facility layout tools',
+            hidden: this.externalCommandSurface,
+            'aria-hidden': this.externalCommandSurface ? 'true' : 'false',
+            style: this.externalCommandSurface ? 'display:none' : '',
         });
         [
+            ['assets', 'Assets', ''],
             ['select', 'Select', 'V'],
             ['pan', 'Pan', 'H'],
             ['rectangle-zone', 'Rectangle zone', ''],
             ['polygon-zone', 'Polygon zone', ''],
+            ['bulk-zones', 'Bulk zones', ''],
+            ['aisle', 'Aisle', ''],
+            ['floor-marking', 'Floor marking', 'M'],
             ['rotate', 'Rotate 90', 'R'],
-            ['duplicate', 'Duplicate', 'Ctrl+D'],
+            ['duplicate', 'Duplicate', 'Ctrl+D or Ctrl+drag'],
             ['delete', 'Delete', 'Delete'],
             ['lock', 'Lock', 'L'],
+            ['align', 'Align', ''],
+            ['distribute', 'Distribute', ''],
+            ['relative', 'Relative', ''],
+            ['distance', 'Distance', ''],
+            ['offset', 'Offset', ''],
+            ['linear-pattern', 'Linear Pattern', ''],
+            ['circular-pattern', 'Circular Pattern', ''],
+            ['perimeter-pattern', 'Perimeter Pattern', ''],
+            ['cell-layout', 'Cell Layout', ''],
+            ['create-cell-group', 'Create Cell', ''],
+            ['ungroup-cell', 'Ungroup Cell', ''],
+            ['vertical-stack', 'Stack', ''],
+            ['surface-stack', 'On Surface', ''],
+            ['mirror', 'Mirror', ''],
+            ['swap', 'Swap Positions', ''],
             ['undo', 'Undo', 'Ctrl+Z'],
             ['redo', 'Redo', 'Ctrl+Y'],
-            ['fit', 'Fit', 'F'],
+            ['fit', 'Fit Facility', 'F'],
+            ['fit-layout', 'Fit Layout', 'Shift+F'],
+            ['top-view', 'Top View', 'T'],
             ['auto-arrange', 'Auto Arrange', ''],
+            ['clear-all', 'Clear All', ''],
             ['save', 'Save', 'Ctrl+S'],
         ].forEach(function (spec) {
             this.toolbar.appendChild(this._button(spec[0], spec[1], spec[2]));
         }, this);
-
-        this.assetPane = element(this.document, 'aside', {
-            className: 'ip-flw-assets',
-            'aria-label': 'Asset catalog',
-        });
-        const assetHeader = element(this.document, 'div', {
-            className: 'ip-flw-pane-header',
-        });
-        assetHeader.appendChild(element(this.document, 'h2', {}, 'Assets'));
-        const searchLabel = element(this.document, 'label', {
-            className: 'ip-flw-search',
-        });
-        searchLabel.appendChild(element(this.document, 'span', {
-            className: 'ip-flw-visually-hidden',
-        }, 'Search assets'));
-        this.assetSearch = element(this.document, 'input', {
-            type: 'search',
-            placeholder: 'Search assets',
-            'aria-label': 'Search assets',
-            autocomplete: 'off',
-        });
-        searchLabel.appendChild(this.assetSearch);
-        assetHeader.appendChild(searchLabel);
-        this.assetTree = element(this.document, 'div', {
-            className: 'ip-flw-asset-tree',
-            role: 'tree',
-            'aria-label': 'Available facility assets',
-        });
-        append(this.assetPane, assetHeader, this.assetTree);
 
         this.viewportPane = element(this.document, 'main', {
             className: 'ip-flw-viewport-pane',
@@ -934,6 +6530,87 @@
             'aria-label': 'Plan view',
             tabindex: '0',
         });
+        this.planRulerCorner = element(this.document, 'div', {
+            className: 'ip-flw-plan-ruler-corner',
+            'aria-hidden': 'true',
+        }, 'X/Z');
+        this.planTopRuler = element(this.document, 'div', {
+            className: 'ip-flw-plan-ruler ip-flw-plan-ruler-top',
+            'aria-hidden': 'true',
+            'data-plan-overlay': 'top-ruler',
+        });
+        this.planLeftRuler = element(this.document, 'div', {
+            className: 'ip-flw-plan-ruler ip-flw-plan-ruler-left',
+            'aria-hidden': 'true',
+            'data-plan-overlay': 'left-ruler',
+        });
+        this.planScaleBar = element(this.document, 'div', {
+            className: 'ip-flw-plan-scale',
+            'aria-label': 'Plan scale',
+            'data-plan-overlay': 'scale',
+            'data-plan-settings-trigger': 'scaleDistanceMeters',
+            role: 'button',
+            tabindex: '0',
+            title: 'Double-click to set the Plan scale',
+        });
+        this.planScaleLabel = element(this.document, 'div', {
+            className: 'ip-flw-plan-scale-label',
+        });
+        this.planScaleTrack = element(this.document, 'div', {
+            className: 'ip-flw-plan-scale-track',
+            'aria-hidden': 'true',
+        });
+        append(this.planScaleBar, this.planScaleLabel, this.planScaleTrack);
+        this.planCompass = element(this.document, 'div', {
+            className: 'ip-flw-plan-compass',
+            role: 'img',
+            'aria-label': 'Facility orientation: north is positive Z and east is positive X',
+            title: 'Facility orientation',
+            'data-plan-overlay': 'compass',
+        });
+        [
+            ['north', 'N'],
+            ['east', 'E'],
+            ['south', 'S'],
+            ['west', 'W'],
+            ['center', '+'],
+        ].forEach(function (item) {
+            this.planCompass.appendChild(element(this.document, 'span', {
+                'data-compass-direction': item[0],
+                'aria-hidden': 'true',
+            }, item[1]));
+        }, this);
+        this.planNavigation = element(this.document, 'div', {
+            className: 'ip-flw-plan-navigation',
+            role: 'toolbar',
+            'aria-label': 'Plan viewport navigation',
+            'data-plan-overlay': 'navigation',
+        });
+        [
+            ['select', 'Select and move assets', 'V'],
+            ['pan', 'Pan the Plan view', 'H'],
+            ['zoom-out', 'Zoom out', '-'],
+            ['zoom-in', 'Zoom in', '+'],
+            ['fit-facility', 'Fit facility', 'F'],
+            ['fit-layout', 'Fit placed assets', 'L'],
+            ['reset-view', 'Reset Plan view', 'R'],
+            ['grid', 'Show grid', 'G'],
+            ['snap', 'Snap to grid', '#'],
+            ['unit', 'Display distances in feet', 'm'],
+        ].forEach(function (item) {
+            this.planNavigation.appendChild(this._planNavigationButton(
+                item[0], item[1], item[2]
+            ));
+        }, this);
+        append(
+            this.planView,
+            this.planRulerCorner,
+            this.planTopRuler,
+            this.planLeftRuler,
+            this.planScaleBar,
+            this.planCompass,
+            this.planNavigation
+        );
         this.threeView = element(this.document, 'div', {
             id: 'ip-flw-three-view',
             className: 'ip-flw-view ip-flw-three-view',
@@ -941,6 +6618,184 @@
             'aria-label': '3D view',
             tabindex: '0',
         });
+        this.threeNavigation = element(this.document, 'div', {
+            className: 'ip-flw-three-navigation',
+            role: 'toolbar',
+            'aria-label': '3D viewport navigation',
+            'data-three-overlay': 'navigation',
+        });
+        this.threeCompass = element(this.document, 'div', {
+            className: 'ip-flw-three-compass',
+            role: 'img',
+            'aria-label': 'Facility orientation: north is positive Z and east is positive X',
+            title: 'Facility orientation',
+            'data-three-overlay': 'compass',
+            'data-heading-degrees': '0.0',
+            'data-heading-cardinal': 'north',
+        });
+        this.threeCompassRing = element(this.document, 'div', {
+            className: 'ip-flw-three-compass-ring',
+            'aria-hidden': 'true',
+        });
+        [
+            ['north', 'N'],
+            ['east', 'E'],
+            ['south', 'S'],
+            ['west', 'W'],
+            ['center', '+'],
+        ].forEach(function (item) {
+            this.threeCompassRing.appendChild(element(this.document, 'span', {
+                'data-compass-direction': item[0],
+            }, item[1]));
+        }, this);
+        this.threeCompass.appendChild(this.threeCompassRing);
+        [
+            ['fit-layout', 'Fit placed equipment', 'zoomfit', false],
+            ['zoom-out', 'Zoom out', 'zoom-out', false],
+            ['zoom-in', 'Zoom in', 'zoom-in', false],
+            ['pan', 'Pan view', 'pan', true],
+        ].forEach(function (item) {
+            this.threeNavigation.appendChild(this._threeNavigationButton(
+                item[0], item[1], item[2], item[3]
+            ));
+        }, this);
+        this.threeNavigation.appendChild(
+            this._threeViewOrientationControl()
+        );
+        [
+            ['display-settings', 'Display settings', 'display', false],
+            ['orbit', 'Orbit view', 'orbit', true],
+            [
+                'walkthrough',
+                'Walk through facility at human height',
+                'walkthrough',
+                false,
+            ],
+            [
+                'drone',
+                'Fly through facility in assisted Drone mode',
+                'drone',
+                false,
+            ],
+            [
+                'switch-immersive',
+                'Switch between Walkthrough and Drone mode (G)',
+                'switch-immersive',
+                false,
+            ],
+            [
+                'walk-to-selected',
+                'Walk to selected equipment',
+                'walk-to-selected',
+                false,
+            ],
+        ].forEach(function (item) {
+            this.threeNavigation.appendChild(this._threeNavigationButton(
+                item[0], item[1], item[2], item[3]
+            ));
+        }, this);
+        this.threeNavigation.appendChild(this._threeViewpointsControl());
+        [
+            ['record', 'Record facility view', 'record', true],
+            ['fit-facility', 'Fit facility floor', 'reset', false],
+            ['grid', 'Hide floor grid', 'grid', false],
+        ].forEach(function (item) {
+            this.threeNavigation.appendChild(this._threeNavigationButton(
+                item[0], item[1], item[2], item[3]
+            ));
+        }, this);
+        this.threeWalkthroughHud = element(this.document, 'div', {
+            className: 'ip-flw-walkthrough-hud',
+            role: 'status',
+            'aria-live': 'polite',
+            'aria-label': 'Walkthrough controls: W A S D move, click the floor target to navigate, Shift moves faster, G switches to Drone mode, Escape returns to overview',
+            hidden: true,
+        });
+        this.threeWalkthroughTitle = element(this.document, 'span', {
+            className: 'ip-flw-walkthrough-title',
+        }, 'Walkthrough');
+        const walkthroughKeys = element(this.document, 'span', {
+            className: 'ip-flw-walkthrough-keys',
+            'aria-hidden': 'true',
+        });
+        ['W', 'A', 'S', 'D', 'Shift', 'G Fly', 'Esc'].forEach(function (key) {
+            walkthroughKeys.appendChild(element(this.document, 'kbd', {}, key));
+        }, this);
+        walkthroughKeys.appendChild(element(this.document, 'span', {
+            className: 'ip-flw-walkthrough-click-hint',
+        }, 'Click floor to move'));
+        this.threeWalkthroughCrosshair = element(this.document, 'div', {
+            className: 'ip-flw-walkthrough-crosshair',
+            'aria-hidden': 'true',
+            hidden: true,
+        });
+        this.threeDroneHud = element(this.document, 'div', {
+            className: 'ip-flw-drone-hud',
+            role: 'status',
+            'aria-live': 'polite',
+            'aria-label': 'Drone controls: W A S D fly, Space ascends, Control descends, Shift boosts, G switches to Walkthrough mode, Escape returns to overview',
+            hidden: true,
+        });
+        this.threeDroneTitle = element(this.document, 'span', {
+            className: 'ip-flw-drone-title',
+        }, 'Drone');
+        this.threeDroneMetrics = element(this.document, 'span', {
+            className: 'ip-flw-drone-metrics',
+        });
+        this.threeDroneAltitude = element(this.document, 'span', {
+            className: 'ip-flw-drone-metric',
+        }, 'ALT 0.0 m');
+        this.threeDroneSpeed = element(this.document, 'span', {
+            className: 'ip-flw-drone-metric',
+        }, 'SPD 0.0 m/s');
+        this.threeDroneObstacle = element(this.document, 'span', {
+            className: 'ip-flw-drone-metric',
+        }, 'OBS clear');
+        append(
+            this.threeDroneMetrics,
+            this.threeDroneAltitude,
+            this.threeDroneSpeed,
+            this.threeDroneObstacle
+        );
+        const droneKeys = element(this.document, 'span', {
+            className: 'ip-flw-drone-keys',
+            'aria-hidden': 'true',
+        });
+        ['W', 'A', 'S', 'D', 'Space Up', 'Ctrl Down', 'Shift', 'G Walk', 'Esc']
+            .forEach(function (key) {
+                droneKeys.appendChild(element(this.document, 'kbd', {}, key));
+            }, this);
+        this.threeDroneAssist = element(this.document, 'span', {
+            className: 'ip-flw-drone-assist',
+        }, 'Assisted');
+        append(
+            this.threeDroneHud,
+            this.threeDroneTitle,
+            this.threeDroneMetrics,
+            droneKeys,
+            this.threeDroneAssist
+        );
+        this._buildWalkthroughContextUi();
+        this._buildThreeRecordingUi();
+        append(
+            this.threeWalkthroughHud,
+            this.threeWalkthroughTitle,
+            walkthroughKeys
+        );
+        append(this.threeView,
+            this.threeNavigation,
+            this.threeCompass,
+            this._buildThreeSettingsPanel(),
+            this.threeWalkthroughHud,
+            this.threeDroneHud,
+            this.threeWalkthroughCrosshair,
+            this.walkthroughContextPrompt,
+            this.walkthroughContextCard,
+            this.threeRecordingPanel,
+            this.threeRecordingCountdown,
+            this.threeRecordingMonitor,
+            this.threeRecordingPreview
+        );
         this.ghostOverlay = element(this.document, 'div', {
             className: 'ip-flw-ghost',
             hidden: true,
@@ -957,9 +6812,11 @@
             hidden: true,
             'aria-hidden': 'true',
         });
+        this._buildFloorMarkingPalette();
         append(this.viewportStack,
             this.planView,
             this.threeView,
+            this.floorMarkingPalette,
             this.ghostOverlay,
             this.advisoryLiveRegion,
             this.gestureOverlay
@@ -970,7 +6827,7 @@
         });
         this.validationNotice.appendChild(element(this.document, 'span', {
             className: 'ip-flw-advisory-authority',
-        }, 'Browser overlap feedback is advisory. The server validates every accepted placement.'));
+        }, 'Browser overlap feedback is advisory. Save performs authoritative server validation.'));
         this.candidateControls = element(this.document, 'div', {
             className: 'ip-flw-view-tabs ip-flw-candidate-controls',
             role: 'group',
@@ -1075,7 +6932,16 @@
         const propertyHeader = element(this.document, 'div', {
             className: 'ip-flw-pane-header',
         });
-        propertyHeader.appendChild(element(this.document, 'h2', {}, 'Properties'));
+        append(propertyHeader,
+            element(this.document, 'h2', {}, 'Geometry'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-geometry-toggle',
+                'data-geometry-action': 'toggle',
+                'aria-label': 'Collapse geometry inspector',
+                title: 'Collapse geometry inspector',
+            }, '-')
+        );
         this.propertiesBody = element(this.document, 'div', {
             className: 'ip-flw-properties-body',
         });
@@ -1092,17 +6958,44 @@
         this.coordinateText = element(this.document, 'div', {
             className: 'ip-flw-coordinates',
             'aria-label': 'Pointer world coordinates',
-        }, 'X 0.00  Z 0.00');
+        }, 'Cursor: X 0 ' + this.planPreferences.unit
+            + '  Z 0 ' + this.planPreferences.unit);
         append(this.statusBar, this.statusText, this.coordinateText);
 
         this.shell = element(this.document, 'div', {
             className: 'ip-flw-shell',
         });
-        append(this.shell, this.assetPane, this.viewportPane, this.propertiesPane);
-        append(this.root, this.toolbar, this.shell, this.statusBar);
-        this._renderAssetTree('');
+        append(this.shell, this.viewportPane, this.propertiesPane);
+        this._buildAssetBrowser();
+        this._buildPrecisionDialog();
+        this._buildPatternDialog();
+        this._buildPlanSettingsDialog();
+        this._buildBulkZoneDialog();
+        this._buildCellGroupDialog();
+        this._buildAisleDialog();
+        this._buildClearAllDialog();
+        append(
+            this.root,
+            this.toolbar,
+            this.shell,
+            this.assetBrowser,
+            this.precisionDialog,
+            this.patternDialog,
+            this.planSettingsDialog,
+            this.bulkZoneDialog,
+            this.cellGroupDialog,
+            this.aisleDialog,
+            this.clearAllDialog,
+            this.statusBar
+        );
+        this._renderAssetBrowser();
+        this._renderPrecisionDialog();
+        this._renderPatternDialog();
+        this._renderPlanSettingsDialog();
+        this._renderAisleDialog();
         this._setViewMode('plan');
         this._setToolMode('select');
+        this._renderThreeNavigationState();
     };
 
     Workspace.prototype._connectRendering = function () {
@@ -1113,6 +7006,8 @@
                 this.planView,
                 Object.assign({}, options.topPlanOptions || {}, {
                     assetCatalog: clone(options.assetCatalog || []),
+                    displayUnit: this.planPreferences.unit,
+                    showGrid: this.planPreferences.showGrid,
                 })
             );
             this.createdTopAdapter = true;
@@ -1130,6 +7025,91 @@
             const diagnostics = typeof this.threeAdapter.getDiagnostics === 'function'
                 ? this.threeAdapter.getDiagnostics() : {};
             if (!diagnostics.mounted) this.threeAdapter.mount(this.threeView);
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setNavigationMode === 'function') {
+            this.threeAdapter.setNavigationMode(this.threeNavigationMode);
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setWalkthroughStateHandler
+                    === 'function') {
+            this.threeAdapter.setWalkthroughStateHandler(function (value) {
+                this.threeWalkthrough = Object.assign(
+                    {},
+                    this.threeWalkthrough,
+                    value || {}
+                );
+                if (!this.threeWalkthrough.active
+                        && !this.threeDrone.active) {
+                    this.walkthroughContextState.focus = null;
+                    this.walkthroughContextState.expanded = false;
+                    this.walkthroughContextState.pinned = false;
+                    this.walkthroughContextState.pinnedPlacementId = null;
+                }
+                this._renderThreeNavigationState();
+            }.bind(this));
+        } else if (this.threeAdapter
+                && typeof this.threeAdapter.getWalkthroughState === 'function') {
+            this.threeWalkthrough = Object.assign(
+                {},
+                this.threeWalkthrough,
+                this.threeAdapter.getWalkthroughState()
+            );
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setDroneStateHandler
+                    === 'function') {
+            this.threeAdapter.setDroneStateHandler(function (value) {
+                this.threeDrone = Object.assign(
+                    {},
+                    this.threeDrone,
+                    value || {}
+                );
+                if (!this.threeDrone.active
+                        && !this.threeWalkthrough.active) {
+                    this.walkthroughContextState.focus = null;
+                    this.walkthroughContextState.expanded = false;
+                    this.walkthroughContextState.pinned = false;
+                    this.walkthroughContextState.pinnedPlacementId = null;
+                }
+                this._renderThreeNavigationState();
+            }.bind(this));
+        } else if (this.threeAdapter
+                && typeof this.threeAdapter.getDroneState === 'function') {
+            this.threeDrone = Object.assign(
+                {},
+                this.threeDrone,
+                this.threeAdapter.getDroneState()
+            );
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setWalkthroughContextHandler
+                    === 'function') {
+            this.threeAdapter.setWalkthroughContextHandler(function (value) {
+                this._setWalkthroughContextFocus(value);
+            }.bind(this));
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setCameraOrientationHandler
+                    === 'function') {
+            this.threeAdapter.setCameraOrientationHandler(function (value) {
+                this._renderThreeCompass(value);
+            }.bind(this));
+        } else if (this.threeAdapter
+                && typeof this.threeAdapter.getDiagnostics === 'function') {
+            const diagnostics = this.threeAdapter.getDiagnostics();
+            this._renderThreeCompass(diagnostics.cameraOrientation);
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setGridVisible === 'function') {
+            this.threeAdapter.setGridVisible(this.threeGridVisible);
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setVisualSettings === 'function') {
+            this.threeVisualSettings = normalizeThreeVisualSettings(
+                this.threeAdapter.setVisualSettings(this.threeVisualSettings)
+            );
+            this._renderThreeVisualSettings();
         }
         // _build() establishes the initial tab state before adapters exist.
         // Reconcile once mounting finishes so a real 3D adapter immediately
@@ -1151,6 +7131,26 @@
                 adapter.setSelectionHandler(selectionHandler);
             }
         });
+        if (this.topAdapter
+                && typeof this.topAdapter.setViewPreferences === 'function') {
+            this.topAdapter.setViewPreferences({
+                displayUnit: this.planPreferences.unit,
+                showGrid: this.planPreferences.showGrid,
+            });
+        }
+        if (this.topAdapter
+                && typeof this.topAdapter.setViewportChangeHandler
+                    === 'function') {
+            this.topAdapter.setViewportChangeHandler(
+                function (snapshot) {
+                    this._renderPlanSpatialOverlays(snapshot);
+                    if (this.selectionToolbarManager
+                            && this.selectionToolbarManager.isOpen()) {
+                        this.selectionToolbarManager.reposition();
+                    }
+                }.bind(this)
+            );
+        }
 
         if (typeof options.installPlanMarquee === 'function') {
             const cleanup = options.installPlanMarquee({
@@ -1163,20 +7163,445 @@
         }
     };
 
+    Workspace.prototype._movableDialogBounds = function (dialog) {
+        const rootRect = this.root.getBoundingClientRect();
+        const boundary = this.shell || this.root;
+        const boundaryRect = boundary.getBoundingClientRect();
+        const dialogRect = dialog.getBoundingClientRect();
+        const padding = 8;
+        const rootLeft = finite(rootRect.left, 0);
+        const rootTop = finite(rootRect.top, 0);
+        const boundaryLeft = finite(boundaryRect.left, rootLeft);
+        const boundaryTop = finite(boundaryRect.top, rootTop);
+        const boundaryRight = finite(
+            boundaryRect.right,
+            boundaryLeft + finite(boundaryRect.width, 0)
+        );
+        const boundaryBottom = finite(
+            boundaryRect.bottom,
+            boundaryTop + finite(boundaryRect.height, 0)
+        );
+        const minLeft = boundaryLeft - rootLeft + padding;
+        const minTop = boundaryTop - rootTop + padding;
+        return {
+            minLeft: minLeft,
+            minTop: minTop,
+            maxLeft: Math.max(
+                minLeft,
+                boundaryRight - rootLeft - finite(dialogRect.width, 0)
+                    - padding
+            ),
+            maxTop: Math.max(
+                minTop,
+                boundaryBottom - rootTop - finite(dialogRect.height, 0)
+                    - padding
+            ),
+            rootLeft: rootLeft,
+            rootTop: rootTop,
+            dialogRect: dialogRect,
+        };
+    };
+
+    Workspace.prototype._positionMovableDialog = function (
+        dialog,
+        requestedLeft,
+        requestedTop
+    ) {
+        if (!dialog || !dialog.style) return null;
+        const bounds = this._movableDialogBounds(dialog);
+        const left = clamp(
+            requestedLeft,
+            bounds.minLeft,
+            bounds.maxLeft,
+            bounds.minLeft
+        );
+        const top = clamp(
+            requestedTop,
+            bounds.minTop,
+            bounds.maxTop,
+            bounds.minTop
+        );
+        dialog.style.left = left + 'px';
+        dialog.style.top = top + 'px';
+        dialog.style.right = 'auto';
+        dialog.setAttribute('data-dialog-left', String(Number(left.toFixed(2))));
+        dialog.setAttribute('data-dialog-top', String(Number(top.toFixed(2))));
+        return { left: left, top: top };
+    };
+
+    Workspace.prototype._finishMovableDialogDrag = function (
+        dialog,
+        releaseCapture
+    ) {
+        const drag = this.movableDialogDrag;
+        if (!drag || (dialog && drag.dialog !== dialog)) return false;
+        this.movableDialogDrag = null;
+        drag.dialog.removeAttribute('data-dialog-dragging');
+        if (releaseCapture !== false
+                && drag.handle
+                && typeof drag.handle.hasPointerCapture === 'function'
+                && drag.handle.hasPointerCapture(drag.pointerId)
+                && typeof drag.handle.releasePointerCapture === 'function') {
+            drag.handle.releasePointerCapture(drag.pointerId);
+        }
+        return true;
+    };
+
+    Workspace.prototype._connectMovableDialog = function (dialog, label) {
+        if (!dialog) return;
+        const handle = dialog.querySelector('.ip-flw-precision-header');
+        if (!handle) return;
+        const name = String(label || 'command panel');
+        handle.setAttribute('data-dialog-drag-handle', 'true');
+        handle.setAttribute('tabindex', '0');
+        handle.setAttribute('aria-label', 'Move ' + name);
+        handle.setAttribute(
+            'title',
+            'Drag to move. Use arrow keys for precise movement.'
+        );
+        this._listen(handle, 'pointerdown', function (event) {
+            if (finite(event && event.button, 0) !== 0
+                    || isDialogDragControl(event && event.target, handle)) {
+                return;
+            }
+            this._finishMovableDialogDrag(null, true);
+            const bounds = this._movableDialogBounds(dialog);
+            const start = this._positionMovableDialog(
+                dialog,
+                finite(bounds.dialogRect.left, bounds.rootLeft)
+                    - bounds.rootLeft,
+                finite(bounds.dialogRect.top, bounds.rootTop)
+                    - bounds.rootTop
+            );
+            if (!start) return;
+            const pointerId = finite(event && event.pointerId, 0);
+            this.movableDialogDrag = {
+                dialog: dialog,
+                handle: handle,
+                pointerId: pointerId,
+                startClientX: finite(event && event.clientX, 0),
+                startClientY: finite(event && event.clientY, 0),
+                startLeft: start.left,
+                startTop: start.top,
+            };
+            dialog.setAttribute('data-dialog-dragging', 'true');
+            if (typeof handle.setPointerCapture === 'function') {
+                handle.setPointerCapture(pointerId);
+            }
+            if (typeof handle.focus === 'function') handle.focus();
+            if (event && typeof event.preventDefault === 'function') {
+                event.preventDefault();
+            }
+            if (event && typeof event.stopPropagation === 'function') {
+                event.stopPropagation();
+            }
+        }.bind(this));
+        this._listen(handle, 'pointermove', function (event) {
+            const drag = this.movableDialogDrag;
+            if (!drag || drag.dialog !== dialog
+                    || drag.pointerId !== finite(event && event.pointerId, 0)) {
+                return;
+            }
+            this._positionMovableDialog(
+                dialog,
+                drag.startLeft + finite(event && event.clientX, 0)
+                    - drag.startClientX,
+                drag.startTop + finite(event && event.clientY, 0)
+                    - drag.startClientY
+            );
+            if (event && typeof event.preventDefault === 'function') {
+                event.preventDefault();
+            }
+            if (event && typeof event.stopPropagation === 'function') {
+                event.stopPropagation();
+            }
+        }.bind(this));
+        ['pointerup', 'pointercancel'].forEach(function (type) {
+            this._listen(handle, type, function (event) {
+                const drag = this.movableDialogDrag;
+                if (!drag || drag.dialog !== dialog
+                        || drag.pointerId
+                            !== finite(event && event.pointerId, 0)) return;
+                this._finishMovableDialogDrag(dialog, true);
+                if (event && typeof event.preventDefault === 'function') {
+                    event.preventDefault();
+                }
+                if (event && typeof event.stopPropagation === 'function') {
+                    event.stopPropagation();
+                }
+            }.bind(this));
+        }, this);
+        this._listen(handle, 'lostpointercapture', function () {
+            this._finishMovableDialogDrag(dialog, false);
+        }.bind(this));
+        this._listen(handle, 'keydown', function (event) {
+            if (!event || event.target !== handle) return;
+            const key = String(event.key || '').toLowerCase();
+            const direction = {
+                arrowleft: [-1, 0],
+                arrowright: [1, 0],
+                arrowup: [0, -1],
+                arrowdown: [0, 1],
+            }[key];
+            if (!direction) return;
+            const bounds = this._movableDialogBounds(dialog);
+            const step = event.shiftKey ? 10 : 2;
+            this._positionMovableDialog(
+                dialog,
+                finite(bounds.dialogRect.left, bounds.rootLeft)
+                    - bounds.rootLeft + direction[0] * step,
+                finite(bounds.dialogRect.top, bounds.rootTop)
+                    - bounds.rootTop + direction[1] * step
+            );
+            if (typeof event.preventDefault === 'function') {
+                event.preventDefault();
+            }
+            if (typeof event.stopPropagation === 'function') {
+                event.stopPropagation();
+            }
+        }.bind(this));
+    };
+
     Workspace.prototype._connectEvents = function () {
         this._listen(this.toolbar, 'click', this._handleToolbarClick.bind(this));
+        this._listen(
+            this.planNavigation,
+            'click',
+            this._handlePlanNavigationClick.bind(this)
+        );
+        this._listen(
+            this.threeNavigation,
+            'click',
+            this._handleThreeNavigationClick.bind(this)
+        );
+        this._listen(
+            this.threeNavigation,
+            'keydown',
+            this._handleThreeNavigationKeyDown.bind(this)
+        );
+        this._listen(
+            this.threeSettingsPanel,
+            'input',
+            this._handleThreeSettingsInput.bind(this)
+        );
+        this._listen(
+            this.threeSettingsPanel,
+            'change',
+            this._handleThreeSettingsInput.bind(this)
+        );
+        this._listen(
+            this.threeSettingsPanel,
+            'click',
+            this._handleThreeSettingsClick.bind(this)
+        );
+        ['pointerdown', 'dblclick', 'wheel'].forEach(function (type) {
+            this._listen(this.planNavigation, type, function (event) {
+                if (typeof event.stopPropagation === 'function') {
+                    event.stopPropagation();
+                }
+            });
+        }, this);
+        ['pointerdown', 'dblclick', 'wheel'].forEach(function (type) {
+            this._listen(this.threeNavigation, type, function (event) {
+                if (typeof event.stopPropagation === 'function') {
+                    event.stopPropagation();
+                }
+            });
+        }, this);
         this._listen(this.viewTabs, 'click', this._handleViewTabClick.bind(this));
         this._listen(
             this.viewTabs,
             'keydown',
             this._handleViewTabKeyDown.bind(this)
         );
-        this._listen(this.assetSearch, 'input', function () {
-            this._renderAssetTree(this.assetSearch.value || '');
+        this._listen(this.assetBrowserSearch, 'input', function () {
+            this.assetBrowserState.query = this.assetBrowserSearch.value || '';
+            this._renderAssetBrowser();
         }.bind(this));
-        this._listen(this.assetTree, 'dragstart', this._handleAssetDragStart.bind(this));
-        this._listen(this.assetTree, 'dragend', this._cancelGhost.bind(this));
-        this._listen(this.assetTree, 'keydown', this._handleAssetKeyDown.bind(this));
+        this._listen(
+            this.assetBrowser,
+            'click',
+            this._handleAssetBrowserClick.bind(this)
+        );
+        this._listen(
+            this.assetBrowser,
+            'keydown',
+            this._handleAssetBrowserKeyDown.bind(this)
+        );
+        this._listen(
+            this.floorMarkingPalette,
+            'click',
+            this._handleFloorMarkingPaletteClick.bind(this)
+        );
+        this._listen(
+            this.threeView,
+            'click',
+            this._handleWalkthroughContextAction.bind(this)
+        );
+        this._listen(
+            this.threeView,
+            'click',
+            this._handleRecordingAction.bind(this)
+        );
+        this._listen(
+            this.threeRecordingPanel,
+            'change',
+            this._handleRecordingSetting.bind(this)
+        );
+        this._listen(
+            this.threeView,
+            'pointermove',
+            this._handleRecordingPointer.bind(this)
+        );
+        this._listen(this.threeView, 'pointerleave', function () {
+            this.recordingCursor.visible = false;
+        }.bind(this));
+        this._listen(
+            this.walkthroughContextMode,
+            'change',
+            this._handleWalkthroughContextMode.bind(this)
+        );
+        this._listen(
+            this.precisionDialog,
+            'click',
+            this._handlePrecisionClick.bind(this)
+        );
+        this._listen(
+            this.precisionDialog,
+            'input',
+            this._handlePrecisionChange.bind(this)
+        );
+        this._listen(
+            this.precisionDialog,
+            'change',
+            this._handlePrecisionChange.bind(this)
+        );
+        this._listen(
+            this.precisionDialog,
+            'keydown',
+            this._handlePrecisionKeyDown.bind(this)
+        );
+        this._listen(
+            this.patternDialog,
+            'click',
+            this._handlePatternClick.bind(this)
+        );
+        this._listen(
+            this.patternDialog,
+            'input',
+            this._handlePatternChange.bind(this)
+        );
+        this._listen(
+            this.patternDialog,
+            'change',
+            this._handlePatternChange.bind(this)
+        );
+        this._listen(
+            this.patternDialog,
+            'keydown',
+            this._handlePatternKeyDown.bind(this)
+        );
+        this._listen(
+            this.planSettingsDialog,
+            'click',
+            this._handlePlanSettingsClick.bind(this)
+        );
+        this._listen(
+            this.planSettingsDialog,
+            'input',
+            this._handlePlanSettingsChange.bind(this)
+        );
+        this._listen(
+            this.planSettingsDialog,
+            'change',
+            this._handlePlanSettingsChange.bind(this)
+        );
+        this._listen(
+            this.planSettingsDialog,
+            'keydown',
+            this._handlePlanSettingsKeyDown.bind(this)
+        );
+        this._listen(
+            this.clearAllDialog,
+            'click',
+            this._handleClearAllClick.bind(this)
+        );
+        this._listen(
+            this.clearAllDialog,
+            'keydown',
+            this._handleClearAllKeyDown.bind(this)
+        );
+        this._listen(
+            this.bulkZoneDialog,
+            'click',
+            this._handleBulkZoneClick.bind(this)
+        );
+        this._listen(
+            this.bulkZoneDialog,
+            'input',
+            this._handleBulkZoneChange.bind(this)
+        );
+        this._listen(
+            this.bulkZoneDialog,
+            'change',
+            this._handleBulkZoneChange.bind(this)
+        );
+        this._listen(
+            this.bulkZoneDialog,
+            'keydown',
+            this._handleBulkZoneKeyDown.bind(this)
+        );
+        this._listen(
+            this.cellGroupDialog,
+            'click',
+            this._handleCellGroupClick.bind(this)
+        );
+        this._listen(
+            this.cellGroupDialog,
+            'input',
+            this._handleCellGroupChange.bind(this)
+        );
+        this._listen(
+            this.cellGroupDialog,
+            'change',
+            this._handleCellGroupChange.bind(this)
+        );
+        this._listen(
+            this.cellGroupDialog,
+            'keydown',
+            this._handleCellGroupKeyDown.bind(this)
+        );
+        this._listen(
+            this.aisleDialog,
+            'click',
+            this._handleAisleClick.bind(this)
+        );
+        this._listen(
+            this.aisleDialog,
+            'input',
+            this._handleAisleChange.bind(this)
+        );
+        this._listen(
+            this.aisleDialog,
+            'change',
+            this._handleAisleChange.bind(this)
+        );
+        this._listen(
+            this.aisleDialog,
+            'keydown',
+            this._handleAisleKeyDown.bind(this)
+        );
+        [
+            [this.precisionDialog, 'positioning panel'],
+            [this.patternDialog, 'pattern panel'],
+            [this.planSettingsDialog, 'facility plan settings panel'],
+            [this.bulkZoneDialog, 'bulk zone editor'],
+            [this.cellGroupDialog, 'manufacturing cell panel'],
+            [this.aisleDialog, 'semantic aisle panel'],
+            [this.clearAllDialog, 'clear layout confirmation'],
+        ].forEach(function (item) {
+            this._connectMovableDialog(item[0], item[1]);
+        }, this);
         this._listen(this.viewportStack, 'dragover', this._handleDragOver.bind(this));
         this._listen(this.viewportStack, 'drop', this._handleDrop.bind(this));
         this._listen(this.viewportStack, 'dragleave', this._handleDragLeave.bind(this));
@@ -1199,105 +7624,996 @@
         });
         this._listen(this.planView, 'click', this._handlePlanClick.bind(this));
         this._listen(this.planView, 'dblclick', this._handlePlanDoubleClick.bind(this));
+        this._listen(this.planView, 'keydown', this._handlePlanOverlayKeyDown.bind(this));
+        this._listen(this.propertiesPane, 'click', function (event) {
+            const action = targetDataId(
+                event.target,
+                'data-geometry-action',
+                this.propertiesPane
+            );
+            if (action !== 'toggle') return;
+            this.geometryInspectorCollapsed = !this.geometryInspectorCollapsed;
+            this.propertiesPane.setAttribute(
+                'data-collapsed',
+                this.geometryInspectorCollapsed ? 'true' : 'false'
+            );
+            const button = this.propertiesPane.querySelector(
+                '[data-geometry-action="toggle"]'
+            );
+            if (button) {
+                button.textContent = this.geometryInspectorCollapsed ? '+' : '-';
+                button.setAttribute(
+                    'aria-label',
+                    this.geometryInspectorCollapsed
+                        ? 'Expand geometry inspector'
+                        : 'Collapse geometry inspector'
+                );
+            }
+        }.bind(this));
         this._listen(this.propertiesBody, 'change', this._handlePropertyChange.bind(this));
         this._listen(this.root, 'keydown', this._handleKeyDown.bind(this));
     };
 
-    Workspace.prototype._renderAssetTree = function (query) {
-        const needle = String(query || '').trim().toLowerCase();
-        const groups = new Map();
-        this.assetCatalog.forEach(function (record) {
-            const searchable = (
-                record.label + ' ' + record.assetId + ' '
-                + record.category + ' ' + record.description
-            ).toLowerCase();
-            if (needle && !searchable.includes(needle)) return;
-            if (!groups.has(record.category)) groups.set(record.category, []);
-            groups.get(record.category).push(record);
-        });
-        clearElement(this.assetTree);
-        if (!groups.size) {
-            this.assetTree.appendChild(element(this.document, 'p', {
-                className: 'ip-flw-empty',
-            }, 'No matching assets'));
+    Workspace.prototype.openPrecisionDialog = function (mode) {
+        if (!PRECISION_MODES.includes(mode)) {
+            throw new TypeError('precision positioning mode is unsupported');
+        }
+        if (this.assetBrowserState.open || this.state.layoutProposal
+                || this.state.placementAlternatives) return false;
+        if (this.patternState.open) this.closePatternDialog(false);
+        if (this.planSettingsState.open) {
+            this.closePlanSettingsDialog(false, false);
+        }
+        const active = this.document.activeElement;
+        const activeInToolbar = this.selectionToolbarElement
+            && this.selectionToolbarElement.contains(active);
+        const selectedCards = activeInToolbar
+            ? this._selectionToolbarCards(
+                this._selectedPlacementRecords().map(function (placement) {
+                    return placement.placementId;
+                })
+            ) : [];
+        this.precisionFocusReturn = selectedCards[0]
+            || (active && typeof active.focus === 'function' ? active : null);
+        this._closeSelectionToolbar('precision_dialog_opened', false);
+        this.precisionState.open = true;
+        this.precisionState.mode = mode;
+        this.precisionMessage = '';
+        this.root.setAttribute('data-precision-open', 'true');
+        this._syncPrecisionIdentities();
+        if (mode === 'distance' && this.precisionState.referenceId
+                && this.precisionState.movingId) {
+            try {
+                this.precisionState.requestedDistance = measurePlacementDistance(
+                    this.state.layout,
+                    this.assetCatalog,
+                    this.precisionState.referenceId,
+                    this.precisionState.movingId,
+                    this.precisionState.distanceMode
+                );
+            } catch (error) {
+                this.precisionMessage = error.message;
+            }
+        }
+        this._renderPrecisionDialog();
+        this._renderToolbarState();
+        const first = this.precisionBody.querySelector(
+            '[data-precision-field]'
+        );
+        if (first && typeof first.focus === 'function') first.focus();
+        return true;
+    };
+
+    Workspace.prototype.closePrecisionDialog = function (restoreFocus) {
+        if (!this.precisionState.open) return false;
+        this._finishMovableDialogDrag(this.precisionDialog, true);
+        this.precisionState.open = false;
+        this.precisionDialog.hidden = true;
+        this.root.removeAttribute('data-precision-open');
+        this._renderToolbarState();
+        const target = this.precisionFocusReturn;
+        this.precisionFocusReturn = null;
+        if (restoreFocus !== false && target
+                && typeof target.focus === 'function') {
+            target.focus();
+        }
+        this._syncSelectionToolbar();
+        return true;
+    };
+
+    Workspace.prototype._handlePrecisionChange = function (event) {
+        const field = targetDataId(
+            event.target,
+            'data-precision-field',
+            this.precisionDialog
+        );
+        if (!field || !Object.prototype.hasOwnProperty.call(
+            this.precisionState,
+            field
+        )) return;
+        const distanceFields = [
+            'distributeGap',
+            'relativeDistance',
+            'requestedDistance',
+            'offsetX',
+            'offsetZ',
+        ];
+        if (field === 'createCopies') {
+            this.precisionState[field] = event.target.checked === true;
+        } else if (distanceFields.includes(field)) {
+            const displayValue = finite(event.target.value, NaN);
+            if (Number.isFinite(displayValue)) {
+                this.precisionState[field] = canonicalDistance(
+                    displayValue,
+                    this.planPreferences.unit
+                );
+            }
+        } else {
+            this.precisionState[field] = String(event.target.value || '');
+        }
+        if (field === 'referenceId'
+                && this.precisionState.movingId
+                    === this.precisionState.referenceId) {
+            this.precisionState.movingId = '';
+        }
+        if (event.type === 'change'
+                || field === 'createCopies'
+                || !distanceFields.includes(field)) {
+            this._renderPrecisionDialog();
+        }
+    };
+
+    Workspace.prototype._handlePrecisionClick = function (event) {
+        const mode = targetDataId(
+            event.target,
+            'data-precision-mode',
+            this.precisionDialog
+        );
+        if (mode && PRECISION_MODES.includes(mode)) {
+            this.precisionState.mode = mode;
+            this._renderPrecisionDialog();
             return;
         }
-        Array.from(groups.keys()).sort().forEach(function (category) {
-            const group = element(this.document, 'section', {
-                className: 'ip-flw-asset-group',
-                role: 'group',
-                'aria-label': category,
-            });
-            group.appendChild(element(this.document, 'h3', {}, category));
-            groups.get(category).forEach(function (record) {
-                const row = element(this.document, 'div', {
-                    className: 'ip-flw-asset-row',
-                    role: 'treeitem',
-                    tabindex: '0',
-                    draggable: 'true',
-                    'aria-label': 'Place ' + record.label,
-                    title: 'Drag ' + record.label + ' into the layout',
-                    'data-asset-id': record.assetId,
-                    'data-asset-revision': record.assetDefinitionRevision,
-                });
-                append(row,
-                    element(this.document, 'span', {
-                        className: 'ip-flw-asset-symbol',
-                        'aria-hidden': 'true',
-                    }, 'A'),
-                    element(this.document, 'span', {
-                        className: 'ip-flw-asset-copy',
-                    }),
-                    element(this.document, 'span', {
-                        className: 'ip-flw-drag-grip',
-                        'aria-hidden': 'true',
-                    }, '::')
+        const action = targetDataId(
+            event.target,
+            'data-precision-action',
+            this.precisionDialog
+        );
+        if (action === 'close' || action === 'cancel') {
+            this.closePrecisionDialog(true);
+        } else if (action === 'apply') {
+            this._applyPrecisionPositioning();
+        }
+    };
+
+    Workspace.prototype._handlePrecisionKeyDown = function (event) {
+        const key = String(event && event.key || '').toLowerCase();
+        if (key === 'escape') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this.closePrecisionDialog(true);
+        } else if (key === 'enter'
+                && event.target !== this.precisionCancel
+                && event.target !== this.precisionClose) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._applyPrecisionPositioning();
+        }
+    };
+
+    Workspace.prototype._applyPrecisionPositioning = function () {
+        const placements = this._precisionSelectedPlacements();
+        const placementIds = placements.map(function (placement) {
+            return placement.placementId;
+        });
+        const mode = this.precisionState.mode;
+        let label = 'Position selection';
+        let action = null;
+        try {
+            if (mode === 'align') {
+                const result = buildAlignmentUpdates(
+                    this.state.layout,
+                    this.assetCatalog,
+                    placementIds,
+                    this.precisionState.alignMode,
+                    this.precisionState.anchorId
                 );
-                const copy = row.children[1];
-                copy.appendChild(element(this.document, 'strong', {}, record.label));
-                copy.appendChild(element(this.document, 'small', {}, record.assetId));
-                group.appendChild(row);
+                label = 'Align selection';
+                action = function () {
+                    return this.session.movePlacements(result.updates, label);
+                }.bind(this);
+            } else if (mode === 'distribute') {
+                const result = buildDistributionUpdates(
+                    this.state.layout,
+                    this.assetCatalog,
+                    placementIds,
+                    this.precisionState.distributeAxis,
+                    this.precisionState.distributeMethod,
+                    this.precisionState.distributeGap
+                );
+                label = 'Distribute selection';
+                action = function () {
+                    return this.session.movePlacements(result.updates, label);
+                }.bind(this);
+            } else if (mode === 'relative') {
+                const movingIds = placementIds.filter(function (placementId) {
+                    return placementId !== this.precisionState.referenceId;
+                }, this);
+                const result = buildRelativePositionUpdates(
+                    this.state.layout,
+                    this.assetCatalog,
+                    movingIds,
+                    this.precisionState.referenceId,
+                    this.precisionState.relation,
+                    this.precisionState.relativeDistance,
+                    this.precisionState.relativeAlignment
+                );
+                label = 'Position relative to reference';
+                action = function () {
+                    return this.session.movePlacements(result.updates, label);
+                }.bind(this);
+            } else if (mode === 'distance') {
+                const result = buildDistanceUpdate(
+                    this.state.layout,
+                    this.assetCatalog,
+                    this.precisionState.referenceId,
+                    this.precisionState.movingId,
+                    this.precisionState.distanceMode,
+                    this.precisionState.requestedDistance
+                );
+                label = 'Set placement distance';
+                action = function () {
+                    return this.session.movePlacements(result.updates, label);
+                }.bind(this);
+            } else {
+                const delta = {
+                    x: this.precisionState.offsetX,
+                    y: 0,
+                    z: this.precisionState.offsetZ,
+                };
+                if (this.precisionState.createCopies) {
+                    label = 'Offset copies';
+                    action = function () {
+                        return this.session.duplicatePlacements(
+                            placementIds,
+                            delta
+                        );
+                    }.bind(this);
+                } else {
+                    label = 'Offset selection';
+                    action = function () {
+                        return this.session.moveSelected(delta);
+                    }.bind(this);
+                }
+            }
+            if (!action) throw new Error('Positioning action is unavailable.');
+            if (typeof this.session.movePlacements !== 'function'
+                    && mode !== 'offset') {
+                throw new Error('Precise positioning is not available.');
+            }
+        } catch (error) {
+            this.precisionMessage = error.message;
+            this.precisionStatus.textContent = this.precisionMessage;
+            this._setError(error);
+            return Promise.resolve(undefined);
+        }
+        const run = this._invoke(label, action);
+        return run.then(function (result) {
+            this.closePrecisionDialog(true);
+            return result;
+        }.bind(this), function (error) {
+            this.precisionMessage = error && error.message
+                ? error.message : String(error);
+            this.precisionStatus.textContent = this.precisionMessage;
+            return undefined;
+        }.bind(this));
+    };
+
+    Workspace.prototype.openPatternDialog = function (mode) {
+        if (!PATTERN_MODES.includes(mode)) {
+            throw new TypeError('facility pattern mode is unsupported');
+        }
+        if (!this.capabilities.manualAuthoring
+                || !this.patternRuntime
+                || typeof this.session.applyPattern !== 'function'
+                || this.assetBrowserState.open
+                || this.state.busy
+                || this.state.conflict
+                || this.state.layoutProposal
+                || this.state.placementAlternatives) return false;
+        if (this.precisionState.open) this.closePrecisionDialog(false);
+        if (this.planSettingsState.open) {
+            this.closePlanSettingsDialog(false, false);
+        }
+        this._closeSelectionToolbar('pattern_dialog_opened', false);
+        this.patternFocusReturn = this.document.activeElement;
+        this.patternState.mode = mode;
+        this.patternState.open = true;
+        this.patternState.applying = false;
+        this.patternMessage = '';
+        try {
+            this._initializePatternDefaults(mode);
+        } catch (error) {
+            this.patternState.open = false;
+            this.patternMessage = error.message;
+            this._setError(error);
+            return false;
+        }
+        this._setToolMode('select');
+        this._setViewMode('plan');
+        this.root.setAttribute('data-pattern-open', 'true');
+        this._renderPatternDialog();
+        this._renderToolbarState();
+        const first = this.patternBody.querySelector('[data-pattern-field]');
+        if (first && typeof first.focus === 'function') first.focus();
+        return true;
+    };
+
+    Workspace.prototype.closePatternDialog = function (restoreFocus) {
+        if (!this.patternState.open) return false;
+        this._finishMovableDialogDrag(this.patternDialog, true);
+        this.patternState.open = false;
+        this.patternState.applying = false;
+        this.patternState.mirrorPicking = false;
+        this.patternState.mirrorPickPoints = [];
+        this.patternDialog.hidden = true;
+        this.root.removeAttribute('data-pattern-open');
+        this.root.removeAttribute('data-mirror-axis-picking');
+        this._setPatternPreview(null);
+        this._renderToolbarState();
+        const target = this.patternFocusReturn;
+        this.patternFocusReturn = null;
+        if (restoreFocus !== false && target
+                && typeof target.focus === 'function') {
+            target.focus();
+        }
+        this._syncSelectionToolbar();
+        return true;
+    };
+
+    Workspace.prototype._handlePatternChange = function (event) {
+        const field = targetDataId(
+            event.target,
+            'data-pattern-field',
+            this.patternDialog
+        );
+        if (!field || !Object.prototype.hasOwnProperty.call(
+            this.patternState,
+            field
+        )) return;
+        const distanceFields = [
+            'pitch', 'centerX', 'centerZ', 'width', 'depth', 'gap',
+            'perimeterClearGap', 'stackGap',
+            'surfaceGap', 'surfaceItemGap', 'surfaceInset',
+            'mirrorAxisX', 'mirrorAxisZ',
+        ];
+        const integerFields = [
+            'count', 'rows', 'perimeterWidthCount', 'perimeterDepthCount',
+            'stackCount',
+        ];
+        if (['rotateWithPattern', 'invertU'].includes(field)) {
+            this.patternState[field] = event.target.checked === true;
+        } else if (distanceFields.includes(field)) {
+            const value = finite(event.target.value, NaN);
+            if (Number.isFinite(value)) {
+                this.patternState[field] = canonicalDistance(
+                    value,
+                    this.planPreferences.unit
+                );
+            }
+        } else if (integerFields.includes(field)) {
+            const value = finite(event.target.value, NaN);
+            if (Number.isFinite(value)) {
+                this.patternState[field] = Math.round(value);
+            }
+        } else if (['angleDegrees', 'sweepDegrees'].includes(field)) {
+            const value = finite(event.target.value, NaN);
+            if (Number.isFinite(value)) this.patternState[field] = value;
+        } else {
+            this.patternState[field] = String(event.target.value || '');
+        }
+        if (field === 'surfaceSupportId') {
+            const support = this._patternSeed(false).find(function (item) {
+                return item.kind === 'placement'
+                    && item.id === this.patternState.surfaceSupportId;
             }, this);
-            this.assetTree.appendChild(group);
+            this.patternState.surfaceId = support
+                && support.supportSurfaces
+                && support.supportSurfaces.length
+                ? support.supportSurfaces[0].surfaceId
+                : 'derived-top';
+        }
+        const changesDialogShape = field === 'linearDirection'
+            || field === 'shape'
+            || field === 'perimeterShape'
+            || field === 'mirrorAxisMode'
+            || field === 'surfaceSupportId'
+            || field === 'surfaceId';
+        if (field === 'mirrorAxisMode') {
+            this.patternState.mirrorPicking = false;
+            this.patternState.mirrorPickPoints = [];
+            this.root.removeAttribute('data-mirror-axis-picking');
+            if (this.patternState.mirrorAxisMode === 'two-point') {
+                this.patternState.mirrorAxisStart = null;
+                this.patternState.mirrorAxisEnd = null;
+            }
+        }
+        if (changesDialogShape
+                || ['rotateWithPattern', 'invertU'].includes(field)) {
+            this._renderPatternDialog();
+            return;
+        }
+        const result = this._updatePatternPreview();
+        this.patternStatus.textContent = this.patternMessage;
+        this.patternApply.disabled = !result
+            || this.patternState.applying
+            || this.state.busy
+            || this.state.conflict;
+    };
+
+    Workspace.prototype._handlePatternClick = function (event) {
+        const mode = targetDataId(
+            event.target,
+            'data-pattern-mode',
+            this.patternDialog
+        );
+        if (mode && PATTERN_MODES.includes(mode)) {
+            this.patternState.mode = mode;
+            try {
+                this._initializePatternDefaults(mode);
+            } catch (error) {
+                this.patternMessage = error.message;
+            }
+            this._renderPatternDialog();
+            return;
+        }
+        const action = targetDataId(
+            event.target,
+            'data-pattern-action',
+            this.patternDialog
+        );
+        if (action === 'close' || action === 'cancel') {
+            this.closePatternDialog(true);
+        } else if (action === 'pick-mirror-axis') {
+            this.patternState.mirrorPicking = true;
+            this.patternState.mirrorPickPoints = [];
+            if (this.patternState.mirrorAxisMode === 'two-point') {
+                this.patternState.mirrorAxisStart = null;
+                this.patternState.mirrorAxisEnd = null;
+            }
+            this.root.setAttribute('data-mirror-axis-picking', 'true');
+            this.patternMessage = this.patternState.mirrorAxisMode === 'two-point'
+                ? 'Pick the first construction-line point in the Plan.'
+                : 'Pick the grid line to use as the mirror axis.';
+            this._renderPatternDialog();
+        } else if (action === 'apply') {
+            this._applyPattern();
+        }
+    };
+
+    Workspace.prototype._handlePatternKeyDown = function (event) {
+        const key = String(event && event.key || '').toLowerCase();
+        if (key === 'escape') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this.closePatternDialog(true);
+        } else if (key === 'enter'
+                && event.target !== this.patternCancel
+                && event.target !== this.patternClose) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._applyPattern();
+        }
+    };
+
+    Workspace.prototype._applyPattern = function () {
+        let result;
+        try {
+            result = this._buildPatternResult();
+        } catch (error) {
+            this.patternMessage = error.message;
+            this.patternStatus.textContent = this.patternMessage;
+            this._setError(error);
+            return Promise.resolve(undefined);
+        }
+        const cellPreset = CELL_LAYOUT_PRESETS.find(function (preset) {
+            return preset.value === this.patternState.shape;
+        }, this);
+        const label = {
+            'linear-pattern': 'Linear layout pattern',
+            'circular-pattern': 'Circular layout pattern',
+            'perimeter-pattern': 'Rectangular perimeter pattern',
+            'cell-layout': (cellPreset ? cellPreset.label : 'Manufacturing cell')
+                + ' layout',
+            'vertical-stack': 'Vertical equipment stack',
+            'surface-stack': 'Surface equipment stack',
+            mirror: 'Mirror layout selection',
+            swap: 'Swap layout positions',
+        }[this.patternState.mode] || 'Facility layout pattern';
+        this.patternState.applying = true;
+        this._setPatternPreview(null);
+        this._renderPatternDialog();
+        const run = this._invoke(label, function () {
+            return this.session.applyPattern(result, label);
+        }.bind(this));
+        return run.then(function (value) {
+            this.closePatternDialog(true);
+            return value;
+        }.bind(this), function (error) {
+            this.patternState.applying = false;
+            this.patternMessage = error && error.message
+                ? error.message : String(error);
+            this._renderPatternDialog();
+            return undefined;
+        }.bind(this));
+    };
+
+    Workspace.prototype._assetBrowserTotals = function () {
+        const selected = this.assetBrowserState.selected;
+        const assetTypes = Object.keys(selected).filter(function (assetId) {
+            return finite(selected[assetId], 0) > 0;
+        });
+        return {
+            assetTypes: assetTypes.length,
+            totalItems: assetTypes.reduce(function (total, assetId) {
+                return total + Math.floor(finite(selected[assetId], 0));
+            }, 0),
+        };
+    };
+
+    Workspace.prototype._removeAssetBrowserSelection = function (assetId) {
+        delete this.assetBrowserState.selected[assetId];
+        this.assetBrowserState.selectionOrder =
+            this.assetBrowserState.selectionOrder.filter(function (value) {
+                return value !== assetId;
+            });
+    };
+
+    Workspace.prototype._setAssetBrowserQuantity = function (assetId, quantity) {
+        const next = Math.max(0, Math.floor(finite(quantity, 0)));
+        if (!next) {
+            this._removeAssetBrowserSelection(assetId);
+            return;
+        }
+        if (!Object.prototype.hasOwnProperty.call(
+            this.assetBrowserState.selected,
+            assetId
+        )) {
+            this.assetBrowserState.selectionOrder.push(assetId);
+        }
+        this.assetBrowserState.selected[assetId] = Math.min(25, next);
+    };
+
+    Workspace.prototype._renderAssetBrowserCategories = function () {
+        const categories = ['All'].concat(Array.from(new Set(
+            this.assetCatalog.map(function (record) { return record.category; })
+        )).sort());
+        if (!categories.includes(this.assetBrowserState.category)) {
+            this.assetBrowserState.category = 'All';
+        }
+        clearElement(this.assetCategoryNav);
+        categories.forEach(function (category) {
+            const active = category === this.assetBrowserState.category;
+            this.assetCategoryNav.appendChild(element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-asset-category',
+                role: 'tab',
+                'aria-selected': active ? 'true' : 'false',
+                tabindex: active ? '0' : '-1',
+                'data-asset-category': category,
+            }, category));
         }, this);
     };
 
-    Workspace.prototype._assetFromRow = function (target) {
-        const assetId = targetDataId(target, 'data-asset-id', this.assetTree);
-        if (!assetId) return null;
-        return this.assetCatalog.find(function (record) {
-            return record.assetId === assetId;
-        }) || null;
+    Workspace.prototype._assetBrowserMatches = function (record) {
+        if (this.assetBrowserState.category !== 'All'
+                && record.category !== this.assetBrowserState.category) {
+            return false;
+        }
+        const needle = String(this.assetBrowserState.query || '')
+            .trim().toLowerCase();
+        if (!needle) return true;
+        return [
+            record.label,
+            record.assetId,
+            record.category,
+            record.description,
+            record.manufacturer,
+        ].concat(record.tags || []).join(' ').toLowerCase().includes(needle);
     };
 
-    Workspace.prototype._handleAssetDragStart = function (event) {
-        if (!this.capabilities.assetLibrary
-                || !this.capabilities.manualAuthoring) return;
-        const asset = this._assetFromRow(event.target);
-        if (!asset) return;
-        const dragSessionId = (typeof this.options.createDragSessionId === 'function'
-            ? this.options.createDragSessionId(asset)
-            : createDragSessionId());
-        const text = createAssetDragPayload(asset, dragSessionId);
-        const transfer = event.dataTransfer;
-        if (transfer && typeof transfer.setData === 'function') {
-            transfer.setData(ASSET_MIME, text);
-            transfer.setData('text/plain', text);
-            transfer.effectAllowed = 'copy';
-        }
-        this.activeDrag = {
-            payload: parseAssetDragPayload(text),
-            asset: asset,
-        };
-        this._clearDragAdvisory();
-        this.session.beginGhostPlacement({
-            assetId: asset.assetId,
-            assetDefinitionRevision: asset.assetDefinitionRevision,
-            metadata: {
-                instanceLabel: asset.label,
-                dragSessionId: dragSessionId,
-            },
+    Workspace.prototype._renderAssetBrowserCard = function (record) {
+        const quantity = Math.floor(finite(
+            this.assetBrowserState.selected[record.assetId],
+            0
+        ));
+        const selected = quantity > 0;
+        const card = element(this.document, 'article', {
+            className: 'ip-flw-asset-card' + (selected ? ' selected' : ''),
+            role: 'listitem',
+            'data-asset-id': record.assetId,
+            'data-asset-revision': record.assetDefinitionRevision,
         });
+        const toggle = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-asset-card-select',
+            'data-asset-browser-action': 'toggle',
+            'data-asset-id': record.assetId,
+            'aria-pressed': selected ? 'true' : 'false',
+            'aria-label': (selected ? 'Deselect ' : 'Select ') + record.label,
+        });
+        const visual = element(this.document, 'span', {
+            className: 'ip-flw-asset-card-visual',
+            'aria-hidden': 'true',
+        });
+        if (record.thumbnailUrl) {
+            visual.appendChild(element(this.document, 'img', {
+                src: record.thumbnailUrl,
+                alt: '',
+                loading: 'lazy',
+                decoding: 'async',
+            }));
+        } else {
+            visual.appendChild(element(this.document, 'span', {
+                className: 'ip-flw-asset-card-fallback',
+            }, record.category.charAt(0).toUpperCase()));
+        }
+        const copy = element(this.document, 'span', {
+            className: 'ip-flw-asset-card-copy',
+        });
+        copy.appendChild(element(this.document, 'strong', {}, record.label));
+        copy.appendChild(element(this.document, 'span', {}, record.category));
+        copy.appendChild(element(
+            this.document,
+            'small',
+            {},
+            Number(record.width.toFixed(2)) + ' x '
+                + Number(record.depth.toFixed(2)) + ' m'
+        ));
+        if (record.description) {
+            copy.appendChild(element(this.document, 'small', {
+                className: 'ip-flw-asset-card-description',
+            }, boundedText(record.description, 110)));
+        }
+        append(toggle, visual, copy);
+        if (selected) {
+            toggle.appendChild(element(this.document, 'span', {
+                className: 'ip-flw-asset-selected-badge',
+                'aria-hidden': 'true',
+            }, 'Selected'));
+        }
+        const stepper = element(this.document, 'div', {
+            className: 'ip-flw-asset-quantity',
+            role: 'group',
+            'aria-label': record.label + ' quantity',
+            hidden: !selected,
+        });
+        append(stepper,
+            element(this.document, 'button', {
+                type: 'button',
+                'data-asset-browser-action': 'decrement',
+                'data-asset-id': record.assetId,
+                'aria-label': 'Decrease ' + record.label + ' quantity',
+            }, '-'),
+            element(this.document, 'output', {
+                'aria-label': record.label + ' quantity',
+            }, String(quantity)),
+            element(this.document, 'button', {
+                type: 'button',
+                'data-asset-browser-action': 'increment',
+                'data-asset-id': record.assetId,
+                'aria-label': 'Increase ' + record.label + ' quantity',
+                disabled: this._assetBrowserTotals().totalItems
+                    >= MAX_ASSET_BATCH_ITEMS,
+            }, '+')
+        );
+        append(card, toggle, stepper);
+        return card;
+    };
+
+    Workspace.prototype._renderAssetBrowser = function () {
+        if (!this.assetGrid) return;
+        this._renderAssetBrowserCategories();
+        clearElement(this.assetGrid);
+        const matches = this.assetCatalog.filter(
+            this._assetBrowserMatches.bind(this)
+        );
+        matches.forEach(function (record) {
+            this.assetGrid.appendChild(this._renderAssetBrowserCard(record));
+        }, this);
+        this.assetGrid.hidden = matches.length === 0;
+        this.assetBrowserEmpty.hidden = matches.length !== 0;
+        const totals = this._assetBrowserTotals();
+        this.assetBrowserSelectionStatus.textContent =
+            this.assetBrowserSubmitting
+                ? 'Adding ' + totals.totalItems + ' asset'
+                    + (totals.totalItems === 1 ? '' : 's') + ' to the layout...'
+                : totals.totalItems
+                    ? totals.assetTypes + ' asset type'
+                + (totals.assetTypes === 1 ? '' : 's') + ' selected - '
+                + totals.totalItems + ' total item'
+                + (totals.totalItems === 1 ? '' : 's')
+                    : 'No assets selected';
+        this.assetBrowserAdd.textContent = this.assetBrowserSubmitting
+            ? 'Adding...' : 'Add to Layout';
+        this.assetBrowserAdd.setAttribute(
+            'aria-busy',
+            this.assetBrowserSubmitting ? 'true' : 'false'
+        );
+        this.assetBrowserAdd.disabled = this.assetBrowserSubmitting
+            || !totals.totalItems
+            || totals.totalItems > MAX_ASSET_BATCH_ITEMS
+            || this.state.busy
+            || !this.capabilities.manualAuthoring
+            || Boolean(this.state.conflict);
+    };
+
+    Workspace.prototype._focusAssetBrowserControl = function (action, assetId) {
+        const controls = Array.prototype.slice.call(
+            this.assetBrowser.querySelectorAll(
+                '[data-asset-browser-action="' + action + '"]'
+            )
+        );
+        const target = controls.find(function (control) {
+            return !assetId
+                || control.getAttribute('data-asset-id') === assetId;
+        });
+        if (target && typeof target.focus === 'function') target.focus();
+    };
+
+    Workspace.prototype.openAssetBrowser = function () {
+        if (!this.capabilities.assetLibrary
+                || this.state.busy
+                || this.state.conflict
+                || this.state.layoutProposal
+                || this.state.placementAlternatives) return false;
+        if (this.precisionState.open) this.closePrecisionDialog(false);
+        if (this.patternState.open) this.closePatternDialog(false);
+        this._closeSelectionToolbar('asset_browser_opened', false);
+        this.assetBrowserFocusReturn = this.document.activeElement;
+        this.assetBrowserState.open = true;
+        this.assetBrowser.hidden = false;
+        this.assetBrowser.setAttribute('aria-hidden', 'false');
+        this.shell.setAttribute('aria-hidden', 'true');
+        this.root.setAttribute('data-asset-browser-open', 'true');
+        this._renderAssetBrowser();
+        this._renderToolbarState();
+        if (typeof this.assetBrowserSearch.focus === 'function') {
+            this.assetBrowserSearch.focus();
+        }
+        if (typeof this.options.onAssetBrowserStateChange === 'function') {
+            this.options.onAssetBrowserStateChange(true);
+        }
+        return true;
+    };
+
+    Workspace.prototype.closeAssetBrowser = function (clearSelection) {
+        if (!this.assetBrowserState.open) return false;
+        if (this.assetBrowserSubmitting) return false;
+        if (clearSelection) {
+            this.assetBrowserState.selected = {};
+            this.assetBrowserState.selectionOrder = [];
+        }
+        this.assetBrowserState.open = false;
+        this.assetBrowser.hidden = true;
+        this.assetBrowser.setAttribute('aria-hidden', 'true');
+        this.shell.removeAttribute('aria-hidden');
+        this.root.removeAttribute('data-asset-browser-open');
+        this._renderAssetBrowser();
+        this._renderToolbarState();
+        const target = this.assetBrowserFocusReturn;
+        this.assetBrowserFocusReturn = null;
+        if (target && typeof target.focus === 'function'
+                && this.root.contains(target)) {
+            target.focus();
+        } else {
+            const assets = this.toolbar.querySelector('[data-command="assets"]');
+            if (assets && typeof assets.focus === 'function') assets.focus();
+        }
+        this._syncSelectionToolbar();
+        if (typeof this.options.onAssetBrowserStateChange === 'function') {
+            this.options.onAssetBrowserStateChange(false);
+        }
+        return true;
+    };
+
+    Workspace.prototype._selectedAssetBrowserEntries = function () {
+        return this.assetBrowserState.selectionOrder.map(function (assetId) {
+            const record = catalogRecord(this.assetCatalog, assetId, '');
+            return record ? {
+                assetId: record.assetId,
+                assetDefinitionRevision: record.assetDefinitionRevision,
+                quantity: this.assetBrowserState.selected[assetId],
+            } : null;
+        }, this).filter(Boolean);
+    };
+
+    Workspace.prototype._addAssetBrowserSelection = function () {
+        if (this.assetBrowserSubmitting) return this.pending;
+        if (typeof this.session.placeAssets !== 'function') {
+            this._setError(new Error('Batch asset placement is unavailable'));
+            return Promise.resolve(this.getState());
+        }
+        let requests;
+        try {
+            requests = buildAssetBatchPlacementRequests(
+                this._selectedAssetBrowserEntries(),
+                this.state.layout,
+                this.assetCatalog,
+                this._keyboardPlacementWorld(),
+                {
+                    gridSize: this.gridSize,
+                    worldBounds: this.options.topPlanOptions
+                        && this.options.topPlanOptions.worldBounds,
+                }
+            );
+        } catch (error) {
+            this._setError(error);
+            this._renderAssetBrowser();
+            this.assetBrowserSelectionStatus.textContent = error && error.message
+                ? error.message : String(error);
+            return Promise.resolve(this.getState());
+        }
+        const itemCount = requests.length;
+        this.assetBrowserSubmitting = true;
+        this._renderAssetBrowser();
+        const run = this._invoke('Add assets', function () {
+            return this.session.placeAssets(requests);
+        }.bind(this));
+        run.then(function () {
+            this.assetBrowserSubmitting = false;
+            this.closeAssetBrowser(true);
+            if (this.controller && typeof this.controller.fit === 'function') {
+                this.controller.fit();
+            }
+            this.advisoryLiveRegion.textContent = itemCount + ' asset'
+                + (itemCount === 1 ? '' : 's') + ' added to the layout.';
+            const select = this.toolbar.querySelector('[data-command="select"]');
+            if (select && typeof select.focus === 'function') select.focus();
+        }.bind(this)).catch(function (error) {
+            this.assetBrowserSubmitting = false;
+            this._renderAssetBrowser();
+            this.assetBrowserSelectionStatus.textContent = error && error.message
+                ? error.message : 'The selected assets could not be added.';
+        }.bind(this));
+        return run;
+    };
+
+    Workspace.prototype._handleAssetBrowserClick = function (event) {
+        const category = targetDataId(
+            event.target,
+            'data-asset-category',
+            this.assetBrowser
+        );
+        if (category) {
+            this.assetBrowserState.category = category;
+            this._renderAssetBrowser();
+            const active = Array.prototype.slice.call(
+                this.assetCategoryNav.querySelectorAll('[data-asset-category]')
+            ).find(function (control) {
+                return control.getAttribute('data-asset-category') === category;
+            });
+            if (active && typeof active.focus === 'function') active.focus();
+            return;
+        }
+        const action = targetDataId(
+            event.target,
+            'data-asset-browser-action',
+            this.assetBrowser
+        );
+        if (!action) return;
+        const assetId = targetDataId(
+            event.target,
+            'data-asset-id',
+            this.assetBrowser
+        );
+        if (action === 'toggle' && assetId) {
+            const current = finite(this.assetBrowserState.selected[assetId], 0);
+            if (current || this._assetBrowserTotals().totalItems
+                    < MAX_ASSET_BATCH_ITEMS) {
+                this._setAssetBrowserQuantity(assetId, current ? 0 : 1);
+            }
+            this._renderAssetBrowser();
+            this._focusAssetBrowserControl('toggle', assetId);
+        } else if (action === 'increment' && assetId) {
+            const totals = this._assetBrowserTotals();
+            if (totals.totalItems < MAX_ASSET_BATCH_ITEMS) {
+                this._setAssetBrowserQuantity(
+                    assetId,
+                    finite(this.assetBrowserState.selected[assetId], 0) + 1
+                );
+                this._renderAssetBrowser();
+                this._focusAssetBrowserControl('increment', assetId);
+            }
+        } else if (action === 'decrement' && assetId) {
+            const nextQuantity = Math.max(
+                0,
+                finite(this.assetBrowserState.selected[assetId], 0) - 1
+            );
+            this._setAssetBrowserQuantity(
+                assetId,
+                nextQuantity
+            );
+            this._renderAssetBrowser();
+            this._focusAssetBrowserControl(
+                nextQuantity ? 'decrement' : 'toggle',
+                assetId
+            );
+        } else if (action === 'clear-filters') {
+            this.assetBrowserState.query = '';
+            this.assetBrowserState.category = 'All';
+            this.assetBrowserSearch.value = '';
+            this._renderAssetBrowser();
+            if (typeof this.assetBrowserSearch.focus === 'function') {
+                this.assetBrowserSearch.focus();
+            }
+        } else if (action === 'add') {
+            this._addAssetBrowserSelection();
+        } else if (action === 'cancel') {
+            this.closeAssetBrowser(true);
+        } else if (action === 'close') {
+            this.closeAssetBrowser(false);
+        }
+    };
+
+    Workspace.prototype._handleAssetBrowserKeyDown = function (event) {
+        const key = String(event && event.key || '');
+        if (key === 'Escape') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            if (typeof event.stopPropagation === 'function') event.stopPropagation();
+            this.closeAssetBrowser(false);
+            return;
+        }
+        const category = targetDataId(
+            event.target,
+            'data-asset-category',
+            this.assetCategoryNav
+        );
+        if (category && ['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) {
+            const tabs = Array.prototype.slice.call(
+                this.assetCategoryNav.querySelectorAll('[data-asset-category]')
+            );
+            const current = tabs.indexOf(event.target);
+            if (current >= 0 && tabs.length) {
+                let next = current;
+                if (key === 'Home') next = 0;
+                else if (key === 'End') next = tabs.length - 1;
+                else if (key === 'ArrowRight') next = (current + 1) % tabs.length;
+                else next = (current - 1 + tabs.length) % tabs.length;
+                if (typeof event.preventDefault === 'function') {
+                    event.preventDefault();
+                }
+                this.assetBrowserState.category = tabs[next].getAttribute(
+                    'data-asset-category'
+                );
+                this._renderAssetBrowser();
+                const active = this.assetCategoryNav.querySelector(
+                    '[data-asset-category="'
+                        + this.assetBrowserState.category + '"]'
+                );
+                if (active && typeof active.focus === 'function') active.focus();
+            }
+            return;
+        }
+        if (key !== 'Tab') return;
+        const focusable = Array.prototype.slice.call(
+            this.assetBrowser.querySelectorAll('button,input')
+        )
+            .filter(function (node) {
+                if (node.disabled || node.hidden
+                        || node.getAttribute('tabindex') === '-1') return false;
+                let current = node.parentNode;
+                while (current && current !== this.assetBrowser) {
+                    if (current.hidden) return false;
+                    current = current.parentNode;
+                }
+                return true;
+            }, this);
+        if (!focusable.length) return;
+        const current = focusable.indexOf(this.document.activeElement);
+        if (!event.shiftKey && current === focusable.length - 1) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            focusable[0].focus();
+        } else if (event.shiftKey && current <= 0) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            focusable[focusable.length - 1].focus();
+        }
     };
 
     Workspace.prototype._payloadForEvent = function (event) {
@@ -1327,31 +8643,35 @@
         });
     };
 
-    Workspace.prototype._catalogAssetFromTarget = function (target) {
-        const assetId = targetDataId(target, 'data-asset-id', this.assetTree);
-        const revision = targetDataId(
-            target,
-            'data-asset-revision',
-            this.assetTree
-        );
-        if (!assetId || !revision) return null;
-        return this.assetCatalog.find(function (record) {
-            return record.assetId === assetId
-                && record.assetDefinitionRevision === revision;
-        }) || null;
-    };
-
     Workspace.prototype._keyboardPlacementWorld = function () {
+        const activeAdapter = this.viewMode === '3d'
+            ? this.threeAdapter : this.topAdapter;
         const configured = this.options.keyboardPlacementPoint;
         const supplied = typeof configured === 'function'
             ? configured({
                 viewMode: this.viewMode,
-                adapter: this.topAdapter,
+                adapter: activeAdapter,
                 workspace: this,
             })
             : configured;
         if (supplied && typeof supplied === 'object') {
-            return snapWorldPoint(supplied, this.gridSize);
+            return snapWorldPoint(supplied, this._activeSnapStep());
+        }
+        if (this.viewMode === '3d'
+                && this.threeAdapter
+                && typeof this.threeAdapter.worldPointOnFloor === 'function') {
+            const rect = typeof this.threeView.getBoundingClientRect === 'function'
+                ? this.threeView.getBoundingClientRect()
+                : null;
+            const width = finite(rect && rect.width, 0);
+            const height = finite(rect && rect.height, 0);
+            if (width > 0 && height > 0) {
+                const world = this.threeAdapter.worldPointOnFloor({
+                    clientX: finite(rect.left, 0) + width / 2,
+                    clientY: finite(rect.top, 0) + height / 2,
+                }, 0);
+                if (world) return snapWorldPoint(world, this._activeSnapStep());
+            }
         }
         if (this.topAdapter
                 && typeof this.topAdapter.clientToWorld === 'function') {
@@ -1373,34 +8693,9 @@
                 clientY: top + height / 2,
                 floorY: 0,
             });
-            if (world) return snapWorldPoint(world, this.gridSize);
+            if (world) return snapWorldPoint(world, this._activeSnapStep());
         }
         return { x: 0, y: 0, z: 0 };
-    };
-
-    Workspace.prototype._handleAssetKeyDown = function (event) {
-        const key = String(event && event.key || '').toLowerCase();
-        if (key !== 'enter' && key !== ' ') return;
-        const asset = this._catalogAssetFromTarget(event.target);
-        if (!asset) return;
-        if (typeof event.preventDefault === 'function') event.preventDefault();
-        if (this.state.busy || !this.capabilities.manualAuthoring) return;
-        const world = this._keyboardPlacementWorld();
-        this.session.beginGhostPlacement({
-            assetId: asset.assetId,
-            assetDefinitionRevision: asset.assetDefinitionRevision,
-            metadata: {
-                instanceLabel: asset.label,
-                inputMethod: 'keyboard',
-            },
-        });
-        this.session.updateGhostPlacement(world, true);
-        this._renderGhost(world, asset.assetId);
-        this._invoke('Place asset', function () {
-            return this.session.commitGhostPlacement({
-                positionMode: 'manual',
-            });
-        }.bind(this));
     };
 
     Workspace.prototype._eventWorld = function (event) {
@@ -1424,7 +8719,7 @@
         if (!result || typeof result !== 'object') {
             throw new Error('eventToWorld did not return a world point');
         }
-        return snapWorldPoint(result, this.gridSize);
+        return snapWorldPoint(result, this._activeSnapStep());
     };
 
     Workspace.prototype._tryEventWorld = function (event) {
@@ -1909,11 +9204,59 @@
     };
 
     Workspace.prototype._worldDelta = function (start, end) {
+        const snapStep = this._activeSnapStep();
         return {
-            x: snapCoordinate(end.x - start.x, this.gridSize),
+            x: snapCoordinate(end.x - start.x, snapStep),
             y: finite(end.y, 0) - finite(start.y, 0),
-            z: snapCoordinate(end.z - start.z, this.gridSize),
+            z: snapCoordinate(end.z - start.z, snapStep),
         };
+    };
+
+    Workspace.prototype._setPlacementMovePreview = function (ids, delta) {
+        if (!this.topAdapter
+                || typeof this.topAdapter.setTransientPlacementMove
+                    !== 'function') return false;
+        return this.topAdapter.setTransientPlacementMove(ids || [], delta || null);
+    };
+
+    Workspace.prototype._setPlacementDuplicatePreview = function (ids, delta) {
+        if (!this.topAdapter
+                || typeof this.topAdapter.setTransientPlacementDuplicate
+                    !== 'function') return false;
+        return this.topAdapter.setTransientPlacementDuplicate(
+            ids || [],
+            delta || null
+        );
+    };
+
+    Workspace.prototype._setZonePreview = function (points, options) {
+        if (!this.topAdapter
+                || typeof this.topAdapter.setTransientZonePreview
+                    !== 'function') return false;
+        return this.topAdapter.setTransientZonePreview(points || [], options || {});
+    };
+
+    Workspace.prototype._setFloorMarkingPreview = function (marking) {
+        if (!this.topAdapter
+                || typeof this.topAdapter.setTransientFloorMarkingPreview
+                    !== 'function') return false;
+        return this.topAdapter.setTransientFloorMarkingPreview(marking || null);
+    };
+
+    Workspace.prototype._setAislePreview = function (preview) {
+        if (!this.topAdapter
+                || typeof this.topAdapter.setTransientAislePreview
+                    !== 'function') return false;
+        return this.topAdapter.setTransientAislePreview(preview || null);
+    };
+
+    Workspace.prototype._rectangleZonePreviewPoints = function (start, end) {
+        return [
+            { x: start.x, z: start.z },
+            { x: end.x, z: start.z },
+            { x: end.x, z: end.z },
+            { x: start.x, z: end.z },
+        ];
     };
 
     Workspace.prototype._beginPointerCapture = function (event) {
@@ -1979,8 +9322,71 @@
         this._cancelPointerGesture();
     };
 
+    Workspace.prototype._handleMirrorAxisPick = function (event) {
+        if (!this.patternState.open
+                || this.patternState.mode !== 'mirror'
+                || !this.patternState.mirrorPicking) return false;
+        let world;
+        try {
+            world = this._eventWorld(event);
+        } catch (error) {
+            this.patternMessage = error.message;
+            this._renderPatternDialog();
+            return true;
+        }
+        const gridStep = Math.max(
+            0.000001,
+            this.gridSize || DEFAULT_PLAN_GRID_METERS
+        );
+        if (this.patternState.mirrorAxisMode === 'vertical') {
+            this.patternState.mirrorAxisX = snapCoordinate(world.x, gridStep);
+            this.patternState.mirrorPicking = false;
+            this.patternMessage = 'Vertical mirror axis selected.';
+        } else if (this.patternState.mirrorAxisMode === 'horizontal') {
+            this.patternState.mirrorAxisZ = snapCoordinate(world.z, gridStep);
+            this.patternState.mirrorPicking = false;
+            this.patternMessage = 'Horizontal mirror axis selected.';
+        } else {
+            const step = this._activeSnapStep();
+            const point = {
+                x: snapCoordinate(world.x, step),
+                z: snapCoordinate(world.z, step),
+            };
+            if (!this.patternState.mirrorPickPoints.length) {
+                this.patternState.mirrorPickPoints = [point];
+                this.patternState.mirrorAxisStart = point;
+                this.patternMessage = 'Pick the second construction-line point.';
+            } else {
+                const start = this.patternState.mirrorPickPoints[0];
+                if (Math.hypot(point.x - start.x, point.z - start.z) < 1e-6) {
+                    this.patternMessage = 'The second point must differ from the first.';
+                } else {
+                    this.patternState.mirrorAxisEnd = point;
+                    this.patternState.mirrorPicking = false;
+                    this.patternState.mirrorPickPoints = [];
+                    this.patternMessage = 'Construction-line mirror axis selected.';
+                }
+            }
+        }
+        if (!this.patternState.mirrorPicking) {
+            this.root.removeAttribute('data-mirror-axis-picking');
+        }
+        this._renderPatternDialog();
+        return true;
+    };
+
     Workspace.prototype._handlePlanPointerDown = function (event) {
-        if (this.toolMode === 'pan') {
+        if (targetDataId(
+            event.target,
+            'data-plan-settings-trigger',
+            this.planView
+        )) return;
+        if (this._handleMirrorAxisPick(event)) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            if (typeof event.stopPropagation === 'function') event.stopPropagation();
+            return;
+        }
+        if (this.toolMode === 'pan' || finite(event && event.button, 0) === 1) {
             if (typeof event.preventDefault === 'function') event.preventDefault();
             this.pointerGesture = {
                 kind: 'pan',
@@ -1997,17 +9403,108 @@
             this.planView
         );
         if (placementId && this.toolMode === 'select') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
             const additive = Boolean(event && (event.ctrlKey || event.metaKey));
+            const duplicateIntent = additive
+                && finite(event && event.button, 0) === 0;
             const alreadySelected = this.state.selection.includes(placementId);
-            if (additive || !alreadySelected) {
+            if (!duplicateIntent && (additive || !alreadySelected)) {
                 this.handleViewSelection(placementId, event);
             }
+            const sessionState = this.session.getState();
+            const placementIds = new Set(
+                sessionState.layout.placements.map(function (placement) {
+                    return placement.placementId;
+                })
+            );
+            const dragSelection = sessionState.selection.filter(
+                function (identifier) {
+                    return placementIds.has(identifier);
+                }
+            );
             this.suppressAdapterSelection = placementId;
             this.pointerGesture = {
                 kind: 'move',
                 placementId: placementId,
+                placementIds: duplicateIntent
+                    ? (alreadySelected && dragSelection.length
+                        ? dragSelection : [placementId])
+                    : (dragSelection.length ? dragSelection : [placementId]),
                 start: world,
                 last: world,
+                startClientX: finite(event.clientX, 0),
+                startClientY: finite(event.clientY, 0),
+                duplicateIntent: duplicateIntent,
+                duplicateActive: false,
+            };
+            this._beginPointerCapture(event);
+            return;
+        }
+        const markingId = targetDataId(
+            event.target,
+            'data-floor-marking-id',
+            this.planView
+        );
+        if (markingId && this.toolMode === 'select') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            const resizeHandle = targetDataId(
+                event.target,
+                'data-floor-marking-resize-handle',
+                this.planView
+            );
+            const sessionState = this.session.getState();
+            const marking = (sessionState.layout.floorMarkings || []).find(
+                function (item) { return item.markingId === markingId; }
+            );
+            if (resizeHandle !== null && resizeHandle !== undefined) {
+                if (!marking || marking.positionMode === 'locked') return;
+                if (!this.state.selection.includes(markingId)) {
+                    this.session.select(markingId);
+                }
+                this.suppressAdapterSelection = markingId;
+                this.pointerGesture = {
+                    kind: 'resize-floor-marking',
+                    markingId: markingId,
+                    handleIndex: Number(resizeHandle),
+                    sourceMarking: clone(marking),
+                    start: world,
+                    last: world,
+                };
+                this._beginPointerCapture(event);
+                return;
+            }
+            const additive = Boolean(event && (event.ctrlKey || event.metaKey));
+            const duplicateIntent = additive
+                && finite(event && event.button, 0) === 0;
+            const alreadySelected = this.state.selection.includes(markingId);
+            if (!duplicateIntent && (additive || !alreadySelected)) {
+                this.handleViewSelection(markingId, event);
+            }
+            const movableIds = new Set(
+                sessionState.layout.placements.map(function (placement) {
+                    return placement.placementId;
+                }).concat((sessionState.layout.floorMarkings || []).map(
+                    function (marking) { return marking.markingId; }
+                ))
+            );
+            const dragSelection = sessionState.selection.filter(
+                function (identifier) { return movableIds.has(identifier); }
+            );
+            this.suppressAdapterSelection = markingId;
+            if (marking && marking.positionMode === 'locked') return;
+            this.pointerGesture = {
+                kind: 'move',
+                placementId: markingId,
+                placementIds: duplicateIntent
+                    ? (alreadySelected && dragSelection.length
+                        ? dragSelection : [markingId])
+                    : (dragSelection.length ? dragSelection : [markingId]),
+                start: world,
+                last: world,
+                startClientX: finite(event.clientX, 0),
+                startClientY: finite(event.clientY, 0),
+                duplicateIntent: duplicateIntent,
+                duplicateActive: false,
             };
             this._beginPointerCapture(event);
             return;
@@ -2022,9 +9519,50 @@
             this.suppressAdapterSelection = zoneId;
             return;
         }
+        const routeId = targetDataId(
+            event.target,
+            'data-route-id',
+            this.planView
+        );
+        if (routeId && this.toolMode === 'select') {
+            this.handleViewSelection(routeId, event);
+            this.suppressAdapterSelection = routeId;
+            return;
+        }
+        if (this.toolMode === 'aisle' && this.aisleState.drawing) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this.pointerGesture = { kind: 'aisle', start: world, last: world };
+            this._setAislePreview({
+                points: [world, world],
+                corridorWidth: this.aisleState.corridorWidth,
+                color: this.aisleState.color,
+            });
+            this._showGesture('Draw ' + this.aisleState.label);
+            this._beginPointerCapture(event);
+            return;
+        }
         if (this.toolMode === 'rectangle-zone') {
             this.pointerGesture = { kind: 'rectangle-zone', start: world, last: world };
+            this._setZonePreview(
+                this._rectangleZonePreviewPoints(world, world),
+                { kind: 'rectangle', closed: true }
+            );
             this._showGesture('Zone: ' + world.x.toFixed(2) + ', ' + world.z.toFixed(2));
+            this._beginPointerCapture(event);
+            return;
+        }
+        if (this.toolMode === 'floor-marking') {
+            this.pointerGesture = {
+                kind: 'floor-marking',
+                start: world,
+                last: world,
+            };
+            this._setFloorMarkingPreview(
+                this._floorMarkingFromGesture(world, world)
+            );
+            this._showGesture(
+                this._floorMarkingPreset(this.floorMarkingState.type).label
+            );
             this._beginPointerCapture(event);
             return;
         }
@@ -2057,12 +9595,93 @@
             return;
         }
         this._setCoordinates(world);
-        if (!this.pointerGesture) return;
+        if (!this.pointerGesture) {
+            if (this.toolMode === 'polygon-zone' && this.polygonPoints.length) {
+                this._setZonePreview(
+                    this.polygonPoints.concat([world]),
+                    { kind: 'polygon', closed: false }
+                );
+            }
+            return;
+        }
         this.pointerGesture.last = world;
-        if (this.pointerGesture.kind === 'rectangle-zone') {
+        if (this.pointerGesture.kind === 'move') {
+            const delta = this._worldDelta(this.pointerGesture.start, world);
+            if (this.pointerGesture.duplicateIntent) {
+                const distance = Math.hypot(
+                    finite(event.clientX, this.pointerGesture.startClientX)
+                        - this.pointerGesture.startClientX,
+                    finite(event.clientY, this.pointerGesture.startClientY)
+                        - this.pointerGesture.startClientY
+                );
+                if (!this.pointerGesture.duplicateActive
+                        && distance < DUPLICATE_DRAG_THRESHOLD_PX) return;
+                this.pointerGesture.duplicateActive = true;
+                this._setPlacementDuplicatePreview(
+                    this.pointerGesture.placementIds,
+                    delta
+                );
+                this._showGesture(
+                    this.pointerGesture.placementIds.length === 1
+                        ? 'Duplicate placement'
+                        : 'Duplicate '
+                            + this.pointerGesture.placementIds.length
+                            + ' placements'
+                );
+            } else {
+                this._setPlacementMovePreview(
+                    this.pointerGesture.placementIds,
+                    delta
+                );
+            }
+        } else if (this.pointerGesture.kind === 'rectangle-zone') {
+            this._setZonePreview(
+                this._rectangleZonePreviewPoints(
+                    this.pointerGesture.start,
+                    world
+                ),
+                { kind: 'rectangle', closed: true }
+            );
             this._showGesture(
                 'Zone ' + Math.abs(world.x - this.pointerGesture.start.x).toFixed(2)
                 + ' x ' + Math.abs(world.z - this.pointerGesture.start.z).toFixed(2)
+            );
+        } else if (this.pointerGesture.kind === 'floor-marking') {
+            const marking = this._floorMarkingFromGesture(
+                this.pointerGesture.start,
+                world
+            );
+            this._setFloorMarkingPreview(marking);
+            this._showGesture(
+                marking.label + '  '
+                + marking.width.toFixed(2) + ' x '
+                + marking.depth.toFixed(2) + ' m'
+            );
+        } else if (this.pointerGesture.kind === 'aisle') {
+            this._setAislePreview({
+                points: [this.pointerGesture.start, world],
+                corridorWidth: this.aisleState.corridorWidth,
+                color: this.aisleState.color,
+            });
+            this._showGesture(
+                this.aisleState.label + '  '
+                + Math.hypot(
+                    world.x - this.pointerGesture.start.x,
+                    world.z - this.pointerGesture.start.z
+                ).toFixed(2) + ' m long'
+            );
+        } else if (this.pointerGesture.kind === 'resize-floor-marking') {
+            const marking = resizeFloorMarkingFromHandle(
+                this.pointerGesture.sourceMarking,
+                this.pointerGesture.handleIndex,
+                world,
+                this._activeSnapStep()
+            );
+            this.pointerGesture.preview = marking;
+            this._setFloorMarkingPreview(marking);
+            this._showGesture(
+                'Resize  ' + marking.width.toFixed(2) + ' x '
+                + marking.depth.toFixed(2) + ' m'
             );
         } else if (this.pointerGesture.kind === 'marquee') {
             this._showGesture('Selection region');
@@ -2079,14 +9698,58 @@
         const end = this._eventWorld(event);
         if (gesture.kind === 'move') {
             const delta = this._worldDelta(gesture.start, end);
+            if (gesture.duplicateIntent) {
+                if (!gesture.duplicateActive) {
+                    this._setPlacementDuplicatePreview([], null);
+                    this.handleViewSelection(gesture.placementId, {
+                        ctrlKey: true,
+                    });
+                    return;
+                }
+                if (delta.x || delta.y || delta.z) {
+                    this._invoke(
+                        gesture.placementIds.length === 1
+                            ? 'Duplicate placement' : 'Duplicate placements',
+                        function () {
+                            const duplicate = typeof this.session
+                                .duplicateItems === 'function'
+                                ? this.session.duplicateItems.bind(this.session)
+                                : (typeof this.session.duplicatePlacements === 'function'
+                                    ? this.session.duplicatePlacements.bind(
+                                        this.session
+                                    ) : null);
+                            if (!duplicate) {
+                                throw new Error(
+                                    'Targeted item duplication is unavailable'
+                                );
+                            }
+                            return Promise.resolve(duplicate(
+                                gesture.placementIds,
+                                delta
+                            )).finally(function () {
+                                this._setPlacementDuplicatePreview([], null);
+                            }.bind(this));
+                        }.bind(this)
+                    );
+                } else {
+                    this._setPlacementDuplicatePreview([], null);
+                }
+                return;
+            }
             if (delta.x || delta.y || delta.z) {
                 this._invoke('Move selection', function () {
-                    return this.session.moveSelected(delta);
+                    return Promise.resolve(this.session.moveSelected(delta))
+                        .finally(function () {
+                            this._setPlacementMovePreview([], null);
+                        }.bind(this));
                 }.bind(this));
+            } else {
+                this._setPlacementMovePreview([], null);
             }
             return;
         }
         if (gesture.kind === 'rectangle-zone') {
+            this._setZonePreview([], {});
             if (gesture.start.x !== end.x || gesture.start.z !== end.z) {
                 this._invoke('Create rectangle zone', function () {
                     return this.session.createRectangleZone(
@@ -2096,6 +9759,61 @@
                     );
                 }.bind(this));
             }
+            return;
+        }
+        if (gesture.kind === 'floor-marking') {
+            const marking = this._floorMarkingFromGesture(gesture.start, end);
+            this._setFloorMarkingPreview(null);
+            this._invoke('Create floor marking', function () {
+                return this.session.createFloorMarking(marking);
+            }.bind(this));
+            return;
+        }
+        if (gesture.kind === 'aisle') {
+            this._setAislePreview(null);
+            if (Math.hypot(end.x - gesture.start.x, end.z - gesture.start.z)
+                    <= 0.001) return;
+            const request = {
+                label: this.aisleState.label,
+                aisleKind: this.aisleState.aisleKind,
+                direction: this.aisleState.direction,
+                color: this.aisleState.color,
+                corridorWidth: this.aisleState.corridorWidth,
+                centerline: [
+                    { x: gesture.start.x, y: 0, z: gesture.start.z },
+                    { x: end.x, y: 0, z: end.z },
+                ],
+                clearanceEvidenceStatus: 'unverified',
+            };
+            this._invoke('Create facility aisle', function () {
+                return this.session.createAisle(request);
+            }.bind(this)).then(function () {
+                this.aisleState.sequence += 1;
+                const name = this.aisleState.aisleKind === 'forklift'
+                    ? 'Forklift Aisle'
+                    : (this.aisleState.aisleKind === 'pedestrian'
+                        ? 'Pedestrian Aisle' : 'Material Aisle');
+                this.aisleState.label = name + ' ' + this.aisleState.sequence;
+                this._renderAisleDialog();
+            }.bind(this));
+            return;
+        }
+        if (gesture.kind === 'resize-floor-marking') {
+            const marking = resizeFloorMarkingFromHandle(
+                gesture.sourceMarking,
+                gesture.handleIndex,
+                end,
+                this._activeSnapStep()
+            );
+            this._setFloorMarkingPreview(null);
+            this._invoke('Resize floor marking', function () {
+                return this.session.editFloorMarking(gesture.markingId, {
+                    width: marking.width,
+                    depth: marking.depth,
+                    transform: clone(marking.transform),
+                    positionMode: 'manual',
+                });
+            }.bind(this));
             return;
         }
         if (gesture.kind === 'marquee') {
@@ -2130,6 +9848,13 @@
     };
 
     Workspace.prototype._cancelPointerGesture = function () {
+        if (this.pointerGesture && this.pointerGesture.kind === 'move') {
+            this._setPlacementMovePreview([], null);
+            this._setPlacementDuplicatePreview([], null);
+        }
+        this._setZonePreview([], {});
+        this._setFloorMarkingPreview(null);
+        this._setAislePreview(null);
         this.pointerGesture = null;
         this._releasePointerCapture();
         this._hideGesture();
@@ -2139,20 +9864,54 @@
         if (this.toolMode !== 'polygon-zone') return;
         if (targetDataId(event.target, 'data-placement-id', this.planView)) return;
         const world = this._eventWorld(event);
-        this.polygonPoints.push(world);
+        const previous = this.polygonPoints[this.polygonPoints.length - 1];
+        if (!previous || previous.x !== world.x || previous.z !== world.z) {
+            this.polygonPoints.push(world);
+        }
+        this._setZonePreview(
+            this.polygonPoints,
+            { kind: 'polygon', closed: false }
+        );
         this._showGesture(this.polygonPoints.length + ' polygon points');
     };
 
     Workspace.prototype._handlePlanDoubleClick = function (event) {
-        if (this.toolMode !== 'polygon-zone') return;
+        const trigger = targetDataId(
+            event.target,
+            'data-plan-settings-trigger',
+            this.planView
+        );
+        if (trigger) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            if (typeof event.stopPropagation === 'function') {
+                event.stopPropagation();
+            }
+            this.openPlanSettingsDialog(trigger);
+            return;
+        }
+        if (this.toolMode === 'polygon-zone') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._finishPolygon();
+        }
+    };
+
+    Workspace.prototype._handlePlanOverlayKeyDown = function (event) {
+        const trigger = targetDataId(
+            event.target,
+            'data-plan-settings-trigger',
+            this.planView
+        );
+        if (!trigger || !['Enter', ' '].includes(String(event.key || ''))) return;
         if (typeof event.preventDefault === 'function') event.preventDefault();
-        this._finishPolygon();
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        this.openPlanSettingsDialog(trigger);
     };
 
     Workspace.prototype._finishPolygon = function () {
         if (this.polygonPoints.length < 3) return false;
         const points = this.polygonPoints.slice();
         this.polygonPoints = [];
+        this._setZonePreview([], {});
         this._hideGesture();
         this._invoke('Create polygon zone', function () {
             return this.session.createPolygonZone(
@@ -2173,9 +9932,1585 @@
         this.gestureOverlay.textContent = '';
     };
 
+    Workspace.prototype._activeSnapStep = function () {
+        if (!this.planPreferences.snapToGrid) return 0;
+        return this.planPreferences.unit === 'ft'
+            ? 1 / METERS_TO_FEET
+            : this.gridSize;
+    };
+
+    Workspace.prototype._storePlanPreferences = function () {
+        storePlanPreferences(
+            this.planPreferenceStorage,
+            this.planPreferenceKey,
+            this.planPreferences
+        );
+    };
+
+    Workspace.prototype._setPlanPreference = function (name, value) {
+        const next = normalizePlanPreferences(Object.assign(
+            {},
+            this.planPreferences,
+            { [name]: value }
+        ));
+        this.planPreferences = next;
+        this._storePlanPreferences();
+        if (this.topAdapter
+                && typeof this.topAdapter.setViewPreferences === 'function') {
+            this.topAdapter.setViewPreferences({
+                displayUnit: next.unit,
+                showGrid: next.showGrid,
+            });
+        } else {
+            this._renderPlanSpatialOverlays();
+        }
+        this._renderProperties();
+        this._renderPlanNavigationState();
+        this._setCoordinates(this.lastPointerWorld);
+        this._renderStatus();
+        return clone(next);
+    };
+
+    Workspace.prototype._renderPlanRulerTick = function (
+        parent,
+        orientation,
+        screenPosition,
+        value,
+        major
+    ) {
+        const tick = element(this.document, 'span', {
+            className: 'ip-flw-plan-ruler-tick'
+                + (major ? ' ip-flw-plan-ruler-tick-major' : ''),
+            style: (orientation === 'x' ? 'left:' : 'top:')
+                + Number(screenPosition.toFixed(2)) + 'px',
+            'data-ruler-value': Number(value.toFixed(6)),
+        });
+        if (major) {
+            tick.appendChild(element(this.document, 'span', {
+                className: 'ip-flw-plan-ruler-label',
+            }, formattedDistance(displayDistance(
+                value,
+                this.planPreferences.unit
+            ))));
+        }
+        parent.appendChild(tick);
+    };
+
+    Workspace.prototype._renderPlanSpatialOverlays = function (snapshot) {
+        if (this.destroyed) return false;
+        let current = snapshot;
+        if (!current && this.topAdapter
+                && typeof this.topAdapter.getViewportState === 'function') {
+            current = this.topAdapter.getViewportState();
+        }
+        const projection = current && current.projection;
+        const visible = Boolean(projection && finite(projection.scale, 0) > 0);
+        [
+            this.planRulerCorner,
+            this.planTopRuler,
+            this.planLeftRuler,
+            this.planScaleBar,
+            this.planCompass,
+            this.planNavigation,
+        ].forEach(function (node) {
+            if (node) node.hidden = !visible;
+        });
+        if (!visible) return false;
+
+        clearElement(this.planTopRuler);
+        clearElement(this.planLeftRuler);
+        const width = Math.max(1, finite(projection.width, 1));
+        const height = Math.max(1, finite(projection.height, 1));
+        const topLeft = planWorldAtScreen(projection, 0, 0);
+        const bottomRight = planWorldAtScreen(projection, width, height);
+        const grid = current.grid || { spacing: 1, majorSpacing: 5 };
+        let minorSpacing = Math.max(0.000001, finite(grid.spacing, 1));
+        while (minorSpacing * projection.scale < 12) minorSpacing *= 2;
+        const majorSpacing = Math.max(
+            minorSpacing,
+            finite(grid.majorSpacing, minorSpacing * 5)
+        );
+        const xValues = alignedValues(
+            Math.min(topLeft.x, bottomRight.x),
+            Math.max(topLeft.x, bottomRight.x),
+            minorSpacing,
+            320
+        );
+        const zValues = alignedValues(
+            Math.min(topLeft.z, bottomRight.z),
+            Math.max(topLeft.z, bottomRight.z),
+            minorSpacing,
+            320
+        );
+        const isMajor = function (value) {
+            const quotient = value / majorSpacing;
+            return Math.abs(quotient - Math.round(quotient)) < 0.000001;
+        };
+        xValues.forEach(function (value) {
+            const screen = planScreenForWorld(projection, value, 0);
+            this._renderPlanRulerTick(
+                this.planTopRuler,
+                'x',
+                screen.x,
+                value,
+                isMajor(value)
+            );
+        }, this);
+        zValues.forEach(function (value) {
+            const screen = planScreenForWorld(projection, 0, value);
+            this._renderPlanRulerTick(
+                this.planLeftRuler,
+                'z',
+                screen.y,
+                value,
+                isMajor(value)
+            );
+        }, this);
+
+        const scale = preferredScaleDistance(
+            projection.scale,
+            this.planPreferences.unit
+        );
+        const scaleWidth = Math.max(44, Math.min(220, scale.pixels));
+        this.planScaleTrack.setAttribute(
+            'style',
+            'width:' + Number(scaleWidth.toFixed(2)) + 'px'
+        );
+        this.planScaleLabel.textContent = formattedDistance(
+            scale.displayDistance
+        ) + ' ' + this.planPreferences.unit;
+        this.planScaleBar.setAttribute(
+            'aria-label',
+            'Plan scale: ' + this.planScaleLabel.textContent
+        );
+        this.planRulerCorner.textContent = 'X/Z ' + this.planPreferences.unit;
+        this._renderPlanNavigationState();
+        return true;
+    };
+
+    Workspace.prototype._renderPlanNavigationState = function () {
+        if (!this.planNavigation) return;
+        const state = {
+            select: this.toolMode === 'select',
+            pan: this.toolMode === 'pan',
+            grid: this.planPreferences.showGrid,
+            snap: this.planPreferences.snapToGrid,
+        };
+        Object.keys(state).forEach(function (command) {
+            const button = this.planNavigation.querySelector(
+                '[data-plan-command="' + command + '"]'
+            );
+            if (button) button.setAttribute(
+                'aria-pressed',
+                state[command] ? 'true' : 'false'
+            );
+        }, this);
+        const unit = this.planNavigation.querySelector(
+            '[data-plan-command="unit"]'
+        );
+        if (unit) {
+            unit.textContent = this.planPreferences.unit;
+            const next = this.planPreferences.unit === 'm' ? 'feet' : 'meters';
+            unit.setAttribute('aria-label', 'Display distances in ' + next);
+            unit.setAttribute('title', 'Display distances in ' + next);
+        }
+    };
+
+    Workspace.prototype._planViewCenterEvent = function () {
+        const rect = typeof this.planView.getBoundingClientRect === 'function'
+            ? this.planView.getBoundingClientRect() : null;
+        const width = Math.max(
+            1,
+            finite(rect && rect.width, this.planView.clientWidth || 1)
+        );
+        const height = Math.max(
+            1,
+            finite(rect && rect.height, this.planView.clientHeight || 1)
+        );
+        return {
+            clientX: finite(rect && rect.left, 0) + width / 2,
+            clientY: finite(rect && rect.top, 0) + height / 2,
+        };
+    };
+
+    Workspace.prototype._handlePlanNavigationClick = function (event) {
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        const command = targetDataId(
+            event.target,
+            'data-plan-command',
+            this.planNavigation
+        );
+        if (!command) return;
+        if (command === 'select' || command === 'pan') {
+            this.executeCommand(command);
+        } else if (command === 'zoom-in' || command === 'zoom-out') {
+            if (this.topAdapter
+                    && typeof this.topAdapter.zoomAt === 'function') {
+                this.topAdapter.zoomAt(
+                    this._planViewCenterEvent(),
+                    command === 'zoom-in' ? 1.25 : 0.8
+                );
+            }
+        } else if (command === 'fit-facility' || command === 'reset-view') {
+            this.executeCommand('fit');
+        } else if (command === 'fit-layout') {
+            this.executeCommand('fit-layout');
+        } else if (command === 'grid') {
+            this._setPlanPreference('showGrid', !this.planPreferences.showGrid);
+        } else if (command === 'snap') {
+            this._setPlanPreference(
+                'snapToGrid',
+                !this.planPreferences.snapToGrid
+            );
+        } else if (command === 'unit') {
+            this._setPlanPreference(
+                'unit',
+                this.planPreferences.unit === 'm' ? 'ft' : 'm'
+            );
+        }
+    };
+
+    Workspace.prototype._storeThreeViewpoints = function () {
+        return storeThreeViewpoints(
+            this.planPreferenceStorage,
+            this.threeViewpointKey,
+            this.threeViewpoints
+        );
+    };
+
+    Workspace.prototype._renderThreeViewpoints = function () {
+        if (!this.threeViewpointList) return;
+        clearElement(this.threeViewpointList);
+        if (!this.threeViewpoints.length) {
+            this.threeViewpointList.appendChild(element(this.document, 'p', {
+                className: 'ip-flw-three-viewpoint-empty',
+            }, 'No saved viewpoints.'));
+            return;
+        }
+        this.threeViewpoints.forEach(function (viewpoint) {
+            const row = element(this.document, 'div', {
+                className: 'ip-flw-three-viewpoint-row',
+                role: 'listitem',
+            });
+            const go = element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-three-viewpoint-go',
+                'data-viewpoint-action': 'apply',
+                'data-viewpoint-id': viewpoint.viewpointId,
+                title: 'Go to ' + viewpoint.name,
+            }, viewpoint.name);
+            const remove = element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-three-viewpoint-delete',
+                'data-viewpoint-action': 'delete',
+                'data-viewpoint-id': viewpoint.viewpointId,
+                'aria-label': 'Delete ' + viewpoint.name,
+                title: 'Delete ' + viewpoint.name,
+            }, 'X');
+            append(row, go, remove);
+            this.threeViewpointList.appendChild(row);
+        }, this);
+    };
+
+    Workspace.prototype._setThreeViewpointsOpen = function (open) {
+        this.threeViewpointsOpen = open === true;
+        if (this.threeViewpointsOpen) {
+            this.threeSettingsOpen = false;
+            this.threeViewMenuOpen = false;
+            if (this.threeSettingsPanel) this.threeSettingsPanel.hidden = true;
+        }
+        this._renderThreeNavigationState();
+        if (this.threeViewpointsOpen && this.threeViewpointInput
+                && typeof this.threeViewpointInput.focus === 'function') {
+            this.threeViewpointInput.focus();
+        }
+    };
+
+    Workspace.prototype._saveThreeViewpoint = function () {
+        if (!this.threeAdapter
+                || typeof this.threeAdapter.getCameraView !== 'function') {
+            return false;
+        }
+        const camera = normalizeThreeCameraView(
+            this.threeAdapter.getCameraView()
+        );
+        if (!camera) return false;
+        const existingNames = new Set(this.threeViewpoints.map(function (item) {
+            return item.name.toLowerCase();
+        }));
+        let name = cleanString(
+            this.threeViewpointInput && this.threeViewpointInput.value,
+            'Viewpoint ' + (this.threeViewpoints.length + 1)
+        ).slice(0, 60);
+        const baseName = name;
+        let suffix = 2;
+        while (existingNames.has(name.toLowerCase())) {
+            name = (baseName + ' ' + suffix).slice(0, 60);
+            suffix += 1;
+        }
+        let viewpointId = '';
+        do {
+            threeViewpointSequence += 1;
+            viewpointId = 'viewpoint-' + threeViewpointSequence;
+        } while (this.threeViewpoints.some(function (item) {
+            return item.viewpointId === viewpointId;
+        }));
+        this.threeViewpoints.push({
+            viewpointId: viewpointId,
+            name: name,
+            camera: camera,
+        });
+        this.threeViewpoints = normalizeThreeViewpoints(this.threeViewpoints);
+        this._storeThreeViewpoints();
+        if (this.threeViewpointInput) this.threeViewpointInput.value = '';
+        this._renderThreeViewpoints();
+        if (this.advisoryLiveRegion) {
+            this.advisoryLiveRegion.textContent = name + ' saved.';
+        }
+        return true;
+    };
+
+    Workspace.prototype._applyThreeViewpoint = function (viewpointId) {
+        const viewpoint = this.threeViewpoints.find(function (item) {
+            return item.viewpointId === viewpointId;
+        });
+        if (!viewpoint || !this.threeAdapter
+                || typeof this.threeAdapter.applyCameraView !== 'function') {
+            return false;
+        }
+        const applied = this.threeAdapter.applyCameraView(viewpoint.camera);
+        if (applied !== false) {
+            this.threeNavigationMode = viewpoint.camera.navigationMode;
+            this._setThreeViewpointsOpen(false);
+            if (this.advisoryLiveRegion) {
+                this.advisoryLiveRegion.textContent =
+                    'Moved to ' + viewpoint.name + '.';
+            }
+        }
+        return applied !== false;
+    };
+
+    Workspace.prototype._deleteThreeViewpoint = function (viewpointId) {
+        const before = this.threeViewpoints.length;
+        this.threeViewpoints = this.threeViewpoints.filter(function (item) {
+            return item.viewpointId !== viewpointId;
+        });
+        if (this.threeViewpoints.length === before) return false;
+        this._storeThreeViewpoints();
+        this._renderThreeViewpoints();
+        if (this.advisoryLiveRegion) {
+            this.advisoryLiveRegion.textContent = 'Viewpoint deleted.';
+        }
+        return true;
+    };
+
+    Workspace.prototype._renderThreeNavigationState = function () {
+        if (!this.threeNavigation) return;
+        ['orbit', 'pan'].forEach(function (command) {
+            const button = this.threeNavigation.querySelector(
+                '[data-three-command="' + command + '"]'
+            );
+            if (button) button.setAttribute(
+                'aria-pressed',
+                command === this.threeNavigationMode ? 'true' : 'false'
+            );
+        }, this);
+        const walkthrough = this.threeNavigation.querySelector(
+            '[data-three-command="walkthrough"]'
+        );
+        if (walkthrough) {
+            walkthrough.disabled = this.threeWalkthrough.supported === false;
+            walkthrough.setAttribute(
+                'aria-pressed',
+                this.threeWalkthrough.active ? 'true' : 'false'
+            );
+            const label = this.threeWalkthrough.active
+                ? 'Exit walkthrough and return to overview'
+                : 'Walk through facility at human height';
+            walkthrough.setAttribute('aria-label', label);
+            walkthrough.setAttribute('title', label);
+        }
+        const drone = this.threeNavigation.querySelector(
+            '[data-three-command="drone"]'
+        );
+        if (drone) {
+            drone.disabled = this.threeDrone.supported === false;
+            drone.setAttribute(
+                'aria-pressed',
+                this.threeDrone.active ? 'true' : 'false'
+            );
+            const label = this.threeDrone.active
+                ? 'Exit Drone mode and return to overview'
+                : 'Fly through facility in assisted Drone mode';
+            drone.setAttribute('aria-label', label);
+            drone.setAttribute('title', label);
+        }
+        const switchImmersive = this.threeNavigation.querySelector(
+            '[data-three-command="switch-immersive"]'
+        );
+        if (switchImmersive) {
+            const active = this.threeWalkthrough.active
+                || this.threeDrone.active;
+            switchImmersive.disabled = !active
+                || this.threeWalkthrough.supported === false
+                || this.threeDrone.supported === false;
+            const label = this.threeDrone.active
+                ? 'Continue from here in Walkthrough mode (G)'
+                : (this.threeWalkthrough.active
+                    ? 'Continue from here in Drone mode (G)'
+                    : 'Enter Walkthrough or Drone mode to switch navigation');
+            switchImmersive.setAttribute('aria-label', label);
+            switchImmersive.setAttribute('title', label);
+        }
+        const walkToSelected = this.threeNavigation.querySelector(
+            '[data-three-command="walk-to-selected"]'
+        );
+        if (walkToSelected) {
+            const selectedIds = new Set(
+                this.state && Array.isArray(this.state.selection)
+                    ? this.state.selection : []
+            );
+            const selected = this.state && this.state.layout
+                && Array.isArray(this.state.layout.placements)
+                ? this.state.layout.placements.filter(function (placement) {
+                    return selectedIds.has(placement.placementId);
+                }) : [];
+            walkToSelected.disabled = this.threeWalkthrough.supported === false
+                || selected.length !== 1;
+        }
+        if (this.threeWalkthroughHud) {
+            this.threeWalkthroughHud.hidden = !this.threeWalkthrough.active;
+            this.threeWalkthroughHud.setAttribute(
+                'data-pointer-locked',
+                this.threeWalkthrough.locked ? 'true' : 'false'
+            );
+        }
+        if (this.threeWalkthroughTitle) {
+            const route = this.threeWalkthrough.route || {};
+            this.threeWalkthroughTitle.textContent = route.active
+                ? 'Navigating' : 'Walkthrough';
+        }
+        if (this.threeDroneHud) {
+            this.threeDroneHud.hidden = !this.threeDrone.active;
+            this.threeDroneHud.setAttribute(
+                'data-pointer-locked',
+                this.threeDrone.locked ? 'true' : 'false'
+            );
+        }
+        const unit = normalizedDistanceUnit(
+            this.planPreferences && this.planPreferences.unit
+        );
+        if (this.threeDroneAltitude) {
+            this.threeDroneAltitude.textContent = 'ALT '
+                + formattedDistance(displayDistance(
+                    this.threeDrone.altitude,
+                    unit
+                )) + ' ' + unit;
+        }
+        if (this.threeDroneSpeed) {
+            this.threeDroneSpeed.textContent = 'SPD '
+                + formattedDistance(displayDistance(
+                    this.threeDrone.currentSpeed,
+                    unit
+                )) + ' ' + unit + '/s';
+        }
+        if (this.threeDroneObstacle) {
+            const obstacle = Number.isFinite(Number(
+                this.threeDrone.nearestObstacleDistance
+            ))
+                ? formattedDistance(displayDistance(
+                    this.threeDrone.nearestObstacleDistance,
+                    unit
+                )) + ' ' + unit
+                : 'clear';
+            this.threeDroneObstacle.textContent = 'OBS ' + obstacle;
+        }
+        if (this.threeDroneAssist) {
+            this.threeDroneAssist.textContent = this.threeDrone.assistedFlight
+                ? 'Assisted' : 'Free flight';
+            this.threeDroneAssist.setAttribute(
+                'data-enabled',
+                this.threeDrone.assistedFlight ? 'true' : 'false'
+            );
+        }
+        if (this.threeWalkthroughCrosshair) {
+            this.threeWalkthroughCrosshair.hidden =
+                !this.threeWalkthrough.active && !this.threeDrone.active;
+        }
+        if (this.root) {
+            this.root.setAttribute(
+                'data-walkthrough-active',
+                this.threeWalkthrough.active ? 'true' : 'false'
+            );
+            this.root.setAttribute(
+                'data-drone-active',
+                this.threeDrone.active ? 'true' : 'false'
+            );
+        }
+        const grid = this.threeNavigation.querySelector(
+            '[data-three-command="grid"]'
+        );
+        if (grid) {
+            grid.setAttribute(
+                'aria-pressed',
+                this.threeGridVisible ? 'true' : 'false'
+            );
+            const label = this.threeGridVisible
+                ? 'Hide floor grid' : 'Show floor grid';
+            grid.setAttribute('aria-label', label);
+            grid.setAttribute('title', label);
+        }
+        const display = this.threeNavigation.querySelector(
+            '[data-three-command="display-settings"]'
+        );
+        if (display) {
+            display.setAttribute(
+                'aria-pressed',
+                this.threeSettingsOpen ? 'true' : 'false'
+            );
+            display.setAttribute(
+                'aria-expanded',
+                this.threeSettingsOpen ? 'true' : 'false'
+            );
+        }
+        if (this.threeViewOrientationTrigger) {
+            this.threeViewOrientationTrigger.setAttribute(
+                'aria-expanded',
+                this.threeViewMenuOpen ? 'true' : 'false'
+            );
+            this.threeViewOrientationTrigger.setAttribute(
+                'aria-pressed',
+                this.threeViewMenuOpen ? 'true' : 'false'
+            );
+            this.threeViewOrientationTrigger.setAttribute(
+                'data-selected-view',
+                this.threeOrientation
+            );
+            const icon = this.threeViewOrientationTrigger.querySelector('img');
+            if (icon) icon.setAttribute('src', threeViewIconSrc(
+                this.threeOrientation
+            ));
+        }
+        if (this.threeViewOrientationMenu) {
+            this.threeViewOrientationMenu.hidden = !this.threeViewMenuOpen;
+            THREE_VIEW_ORIENTATIONS.forEach(function (view) {
+                const item = this.threeViewOrientationMenu.querySelector(
+                    '[data-three-view="' + view.key + '"]'
+                );
+                if (item) item.setAttribute(
+                    'aria-current',
+                    view.key === this.threeOrientation ? 'true' : 'false'
+                );
+            }, this);
+        }
+        if (this.threeViewpointTrigger) {
+            this.threeViewpointTrigger.setAttribute(
+                'aria-expanded',
+                this.threeViewpointsOpen ? 'true' : 'false'
+            );
+            this.threeViewpointTrigger.setAttribute(
+                'aria-pressed',
+                this.threeViewpointsOpen ? 'true' : 'false'
+            );
+        }
+        if (this.threeViewpointPanel) {
+            this.threeViewpointPanel.hidden = !this.threeViewpointsOpen;
+        }
+        this._renderWalkthroughContext();
+        this._renderRecordingState();
+    };
+
+    Workspace.prototype._renderThreeCompass = function (value) {
+        if (!this.threeCompass) return false;
+        const orientation = compassHeading(
+            value && value.headingDegrees
+        );
+        this.threeCompassOrientation = orientation;
+        const degrees = orientation.headingDegrees.toFixed(1);
+        const ringRotation = (-orientation.headingDegrees).toFixed(3) + 'deg';
+        const labelRotation = orientation.headingDegrees.toFixed(3) + 'deg';
+        this.threeCompass.setAttribute('data-heading-degrees', degrees);
+        this.threeCompass.setAttribute(
+            'data-heading-cardinal',
+            orientation.cardinal
+        );
+        const description = 'Facility orientation. North is positive Z and east is '
+            + 'positive X. The top of the view points '
+            + orientation.cardinal + ' at ' + degrees + ' degrees from north.';
+        this.threeCompass.setAttribute('aria-label', description);
+        this.threeCompass.setAttribute('title', description);
+        if (this.threeCompass.style
+                && typeof this.threeCompass.style.setProperty === 'function') {
+            this.threeCompass.style.setProperty(
+                '--ip-flw-three-compass-ring-rotation',
+                ringRotation
+            );
+            this.threeCompass.style.setProperty(
+                '--ip-flw-three-compass-label-rotation',
+                labelRotation
+            );
+        }
+        return true;
+    };
+
+    Workspace.prototype._walkthroughContextPlacement = function (placementId) {
+        if (!placementId || !this.state || !this.state.layout) return null;
+        return (this.state.layout.placements || []).find(function (placement) {
+            return placement.placementId === placementId;
+        }) || null;
+    };
+
+    Workspace.prototype._walkthroughContextCatalogRecord = function (placement) {
+        if (!placement) return null;
+        return this.assetCatalog.find(function (record) {
+            return record.assetId === placement.assetId
+                && record.assetDefinitionRevision
+                    === placement.assetDefinitionRevision;
+        }) || catalogRecord(
+            this.assetCatalog,
+            placement.assetId,
+            placement.assetDefinitionRevision
+        );
+    };
+
+    Workspace.prototype._walkthroughContextPayload = function (
+        placement,
+        catalog
+    ) {
+        const payload = {};
+        const source = catalog && catalog.source || {};
+        const definition = source.definition || source.assetDefinition || {};
+        const metadata = placement && placement.metadata || {};
+        const candidates = [
+            definition.contextCard,
+            definition.walkthroughContext,
+            source.contextCard,
+            source.walkthroughContext,
+            source.metadata && source.metadata.contextCard,
+            metadata,
+            metadata.contextCard,
+            metadata.walkthroughContext,
+        ];
+        candidates.forEach(function (candidate) {
+            if (!candidate || typeof candidate !== 'object'
+                    || Array.isArray(candidate)) return;
+            Object.keys(candidate).forEach(function (key) {
+                const value = candidate[key];
+                if (value !== undefined && value !== null && value !== '') {
+                    payload[key] = clone(value);
+                }
+            });
+        });
+        if (!payload.capabilities && source.capabilities) {
+            payload.capabilities = clone(source.capabilities);
+        }
+        return payload;
+    };
+
+    Workspace.prototype._walkthroughContextTargetId = function () {
+        if (this.walkthroughContextState.pinned
+                && this.walkthroughContextState.pinnedPlacementId) {
+            return this.walkthroughContextState.pinnedPlacementId;
+        }
+        const focus = this.walkthroughContextState.focus;
+        return focus && focus.placementId || null;
+    };
+
+    Workspace.prototype._threeImmersiveActive = function () {
+        return Boolean(
+            this.threeWalkthrough && this.threeWalkthrough.active
+        ) || Boolean(this.threeDrone && this.threeDrone.active);
+    };
+
+    Workspace.prototype._walkthroughContextValue = function (value) {
+        if (Array.isArray(value)) {
+            return value.map(function (item) {
+                return typeof item === 'object'
+                    ? cleanString(item.label || item.name || item.id, '')
+                    : cleanString(item, '');
+            }).filter(Boolean).join(', ');
+        }
+        if (value && typeof value === 'object') {
+            return cleanString(
+                value.label || value.name || value.id || value.reference,
+                ''
+            );
+        }
+        return cleanString(value, '');
+    };
+
+    Workspace.prototype._renderWalkthroughContext = function () {
+        if (!this.walkthroughContextPrompt || !this.walkthroughContextCard) {
+            return false;
+        }
+        const active = this.viewMode === '3d'
+            && this._threeImmersiveActive();
+        const focus = active ? this.walkthroughContextState.focus : null;
+        const focusPlacement = focus
+            ? this._walkthroughContextPlacement(focus.placementId) : null;
+        const focusCatalog = this._walkthroughContextCatalogRecord(focusPlacement);
+        const focusName = focusPlacement
+            ? cleanString(
+                focusPlacement.metadata
+                    && focusPlacement.metadata.instanceLabel,
+                focusCatalog && focusCatalog.label || focusPlacement.placementId
+            ) : '';
+        this.walkthroughContextPrompt.hidden = !focusPlacement
+            || (this.walkthroughContextState.expanded
+                && this._walkthroughContextTargetId() === focus.placementId);
+        if (focusPlacement) {
+            this.walkthroughContextPromptName.textContent = focusName;
+            this.walkthroughContextPromptHint.textContent = 'E  Details'
+                + (Number.isFinite(Number(focus.distanceMeters))
+                    ? '  ' + Number(focus.distanceMeters).toFixed(1) + ' m'
+                    : '');
+        }
+
+        const targetId = active && this.walkthroughContextState.expanded
+            ? this._walkthroughContextTargetId() : null;
+        const placement = this._walkthroughContextPlacement(targetId);
+        const catalog = this._walkthroughContextCatalogRecord(placement)
+            || (placement ? {
+                label: placement.assetId,
+                category: 'Equipment',
+                manufacturer: '',
+                source: {},
+            } : null);
+        if (!placement) {
+            this.walkthroughContextCard.hidden = true;
+            return Boolean(focusPlacement);
+        }
+        this.walkthroughContextCard.hidden = false;
+        const name = cleanString(
+            placement.metadata && placement.metadata.instanceLabel,
+            catalog.label || placement.placementId
+        );
+        this.walkthroughContextTitle.textContent = name;
+        this.walkthroughContextMeta.textContent = catalog.category
+            + (catalog.manufacturer ? ' | ' + catalog.manufacturer : '')
+            + ' | ' + placement.placementId;
+        this.walkthroughContextMode.value = this.walkthroughContextState.mode;
+        const pin = this.walkthroughContextCard.querySelector(
+            '[data-walkthrough-context-action="pin"]'
+        );
+        if (pin) {
+            pin.setAttribute(
+                'aria-pressed',
+                this.walkthroughContextState.pinned ? 'true' : 'false'
+            );
+            pin.setAttribute(
+                'title',
+                this.walkthroughContextState.pinned
+                    ? 'Unpin details' : 'Pin details'
+            );
+        }
+        const payload = this._walkthroughContextPayload(placement, catalog);
+        const fields = WALKTHROUGH_CONTEXT_FIELDS[
+            this.walkthroughContextState.mode
+        ] || [];
+        clearElement(this.walkthroughContextBody);
+        const facts = fields.map(function (definition) {
+            return {
+                label: definition[1],
+                value: this._walkthroughContextValue(payload[definition[0]]),
+            };
+        }, this).filter(function (fact) { return fact.value; });
+        if (!facts.length) {
+            this.walkthroughContextBody.appendChild(element(
+                this.document,
+                'p',
+                { className: 'ip-flw-context-empty' },
+                'No ' + this.walkthroughContextState.mode
+                    + ' data is attached to this equipment.'
+            ));
+        } else {
+            const list = element(this.document, 'dl', {
+                className: 'ip-flw-context-facts',
+            });
+            facts.forEach(function (fact) {
+                append(list,
+                    element(this.document, 'dt', {}, fact.label),
+                    element(this.document, 'dd', {}, fact.value)
+                );
+            }, this);
+            this.walkthroughContextBody.appendChild(list);
+        }
+        return true;
+    };
+
+    Workspace.prototype._setWalkthroughContextFocus = function (value) {
+        this.walkthroughContextState.focus = value && value.placementId
+            ? clone(value) : null;
+        if (!this.walkthroughContextState.focus
+                && !this.walkthroughContextState.pinned) {
+            this.walkthroughContextState.expanded = false;
+        }
+        this._renderWalkthroughContext();
+    };
+
+    Workspace.prototype._openWalkthroughContext = function () {
+        const focus = this.walkthroughContextState.focus;
+        if (!focus || !focus.placementId
+                || !this._threeImmersiveActive()) {
+            return false;
+        }
+        this.walkthroughContextState.expanded = true;
+        this.walkthroughContextState.pinned = false;
+        this.walkthroughContextState.pinnedPlacementId = null;
+        this._renderWalkthroughContext();
+        return true;
+    };
+
+    Workspace.prototype._closeWalkthroughContext = function () {
+        this.walkthroughContextState.expanded = false;
+        this.walkthroughContextState.pinned = false;
+        this.walkthroughContextState.pinnedPlacementId = null;
+        this._renderWalkthroughContext();
+        return true;
+    };
+
+    Workspace.prototype._handleWalkthroughContextAction = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-walkthrough-context-action',
+            this.threeView
+        );
+        if (!action) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (action === 'open') {
+            this._openWalkthroughContext();
+            return;
+        }
+        if (action === 'close') {
+            this._closeWalkthroughContext();
+            return;
+        }
+        const targetId = this._walkthroughContextTargetId();
+        if (action === 'pin') {
+            this.walkthroughContextState.pinned =
+                !this.walkthroughContextState.pinned;
+            this.walkthroughContextState.pinnedPlacementId =
+                this.walkthroughContextState.pinned ? targetId : null;
+            this._renderWalkthroughContext();
+        } else if (action === 'walk-to' && targetId && this.threeAdapter
+                && typeof this.threeAdapter.navigateWalkthroughToPlacement
+                    === 'function') {
+            this.threeAdapter.navigateWalkthroughToPlacement(targetId);
+        } else if (action === 'select' && targetId) {
+            if (this.threeAdapter
+                    && typeof this.threeAdapter.exitWalkthrough === 'function') {
+                this.threeAdapter.exitWalkthrough('context_select');
+            }
+            if (this.threeAdapter
+                    && typeof this.threeAdapter.exitDrone === 'function') {
+                this.threeAdapter.exitDrone('context_select');
+            }
+            this.session.select(targetId);
+            this._setViewMode('plan');
+            this._closeWalkthroughContext();
+        }
+    };
+
+    Workspace.prototype._handleWalkthroughContextMode = function (event) {
+        const value = cleanString(event && event.target && event.target.value, '');
+        if (!WALKTHROUGH_CONTEXT_MODES.some(function (mode) {
+            return mode.key === value;
+        })) return;
+        this.walkthroughContextState.mode = value;
+        this._renderWalkthroughContext();
+    };
+
+    Workspace.prototype._recordingCanvas = function () {
+        if (this.threeAdapter
+                && typeof this.threeAdapter.getRecordingCanvas === 'function') {
+            return this.threeAdapter.getRecordingCanvas();
+        }
+        return this.threeView && this.threeView.querySelector
+            ? this.threeView.querySelector('canvas') : null;
+    };
+
+    Workspace.prototype._prepareRecordingFrame = function () {
+        if (this.threeAdapter
+                && typeof this.threeAdapter.renderRecordingFrame === 'function') {
+            return this.threeAdapter.renderRecordingFrame();
+        }
+        if (this.threeAdapter && typeof this.threeAdapter.invalidate === 'function') {
+            this.threeAdapter.invalidate();
+        }
+        return this._recordingCanvas();
+    };
+
+    Workspace.prototype._recordingBackground = function () {
+        if (this.threeVisualSettings.background !== 'auto') {
+            return this.threeVisualSettings.background;
+        }
+        const rootElement = this.document && this.document.documentElement;
+        const theme = rootElement && typeof rootElement.getAttribute === 'function'
+            ? rootElement.getAttribute('data-theme') : '';
+        return theme === 'light' ? '#dfe6eb' : '#202b38';
+    };
+
+    Workspace.prototype._recordingFormat = function () {
+        if (!this.recordingRuntime
+                || typeof this.recordingRuntime.chooseRecordingFormat
+                    !== 'function') return null;
+        return this.recordingRuntime.chooseRecordingFormat(
+            this.options.MediaRecorder || (root && root.MediaRecorder)
+        );
+    };
+
+    Workspace.prototype._recordingAvailable = function () {
+        const canvas = this._recordingCanvas();
+        return Boolean(
+            this.recordingRuntime
+            && typeof this.recordingRuntime.createCanvasRecorder === 'function'
+            && this._recordingFormat()
+            && canvas
+            && typeof canvas.captureStream === 'function'
+        );
+    };
+
+    Workspace.prototype._ensureRecordingController = function () {
+        if (this.recordingController) return this.recordingController;
+        if (!this.recordingRuntime
+                || typeof this.recordingRuntime.createCanvasRecorder
+                    !== 'function') {
+            throw new Error('Viewport recording is unavailable.');
+        }
+        this.recordingController = this.recordingRuntime.createCanvasRecorder({
+            document: this.document,
+            MediaRecorder: this.options.MediaRecorder,
+            Blob: this.options.Blob,
+            URL: this.options.URL,
+            navigator: this.options.navigator,
+            requestAnimationFrame: this.options.recordingRequestAnimationFrame,
+            cancelAnimationFrame: this.options.recordingCancelAnimationFrame,
+            setInterval: this.options.recordingSetInterval,
+            clearInterval: this.options.recordingClearInterval,
+            now: this.options.recordingNow,
+            onStateChange: this._handleRecordingStateChange.bind(this),
+        });
+        return this.recordingController;
+    };
+
+    Workspace.prototype._handleRecordingStateChange = function (value) {
+        const snapshot = value && typeof value === 'object' ? value : {};
+        this.recordingState.status = cleanString(
+            snapshot.status,
+            this.recordingState.status
+        );
+        this.recordingState.elapsedMs = Math.max(
+            0,
+            finite(snapshot.elapsedMs, this.recordingState.elapsedMs)
+        );
+        this.recordingState.paused = snapshot.paused === true;
+        this.recordingState.error = snapshot.error || null;
+        this.recordingState.format = snapshot.format
+            ? clone(snapshot.format) : this.recordingState.format;
+        this.recordingState.filename = snapshot.filename || null;
+        if (snapshot.status === 'preview') {
+            this.recordingState.panelOpen = false;
+            this.recordingState.previewOpen = true;
+            this.recordingState.countdown = 0;
+        } else if (snapshot.status === 'error') {
+            this.recordingState.panelOpen = true;
+            this.recordingState.previewOpen = false;
+        }
+        this._renderRecordingState();
+    };
+
+    Workspace.prototype._setRecordingPanelOpen = function (open) {
+        const busy = ['countdown', 'preparing', 'recording', 'paused', 'stopping']
+            .includes(this.recordingState.status);
+        if (busy && open) return false;
+        this.recordingState.panelOpen = open === true;
+        if (open) {
+            this.recordingState.previewOpen = false;
+            this.recordingState.error = null;
+        }
+        this._renderRecordingState();
+        return true;
+    };
+
+    Workspace.prototype._handleRecordingSetting = function (event) {
+        const key = targetDataId(
+            event && event.target,
+            'data-recording-setting',
+            this.threeRecordingPanel
+        );
+        if (!key || !Object.prototype.hasOwnProperty.call(
+            this.recordingState.settings,
+            key
+        )) return;
+        const input = event.target;
+        if (key === 'microphone' || key === 'includeHud'
+                || key === 'includeCursor') {
+            this.recordingState.settings[key] = input.checked === true;
+        } else if (key === 'fps') {
+            this.recordingState.settings.fps = Number(input.value) === 60
+                ? 60 : 30;
+        } else {
+            this.recordingState.settings[key] = cleanString(input.value, '');
+        }
+        if (key === 'presentationMode') {
+            const training = this.recordingState.settings.presentationMode
+                === 'training';
+            this.recordingState.settings.includeHud = training;
+            this.recordingState.settings.includeCursor = training;
+        }
+        this._renderRecordingState();
+    };
+
+    Workspace.prototype._handleRecordingPointer = function (event) {
+        if (!this.threeView
+                || typeof this.threeView.getBoundingClientRect !== 'function') {
+            return;
+        }
+        const rect = this.threeView.getBoundingClientRect();
+        const width = Math.max(1, finite(rect.width, 1));
+        const height = Math.max(1, finite(rect.height, 1));
+        this.recordingCursor = {
+            x: Math.max(0, Math.min(1,
+                (finite(event && event.clientX, rect.left) - rect.left) / width
+            )),
+            y: Math.max(0, Math.min(1,
+                (finite(event && event.clientY, rect.top) - rect.top) / height
+            )),
+            visible: true,
+        };
+    };
+
+    Workspace.prototype._drawRecordingOverlay = function (frame) {
+        const context = frame && frame.context;
+        const settings = frame && frame.settings || {};
+        if (!context || (!settings.includeHud && !settings.includeCursor)) return;
+        const width = frame.width;
+        const height = frame.height;
+        if (typeof context.save === 'function') context.save();
+        if (settings.includeHud) {
+            const barHeight = Math.max(42, Math.round(height * 0.055));
+            context.fillStyle = 'rgba(15, 23, 42, 0.86)';
+            context.fillRect(0, height - barHeight, width, barHeight);
+            context.fillStyle = '#f8fafc';
+            context.font = '600 ' + Math.max(13, Math.round(height * 0.016))
+                + 'px Segoe UI, Arial, sans-serif';
+            const route = this.threeWalkthrough.route || {};
+            const stateLabel = route.active ? 'Guided navigation'
+                : this.threeDrone.active ? 'Assisted drone flythrough'
+                : this.threeWalkthrough.active ? 'Human walkthrough'
+                    : 'Facility overview';
+            context.fillText(
+                'InspectorPro  |  ' + stateLabel,
+                18,
+                height - Math.max(14, Math.round(barHeight * 0.35))
+            );
+            const focus = this.walkthroughContextState.focus;
+            const placement = focus
+                ? this._walkthroughContextPlacement(focus.placementId) : null;
+            if (placement) {
+                const catalog = this._walkthroughContextCatalogRecord(placement);
+                const name = cleanString(
+                    placement.metadata && placement.metadata.instanceLabel,
+                    catalog && catalog.label || placement.placementId
+                );
+                const textWidth = typeof context.measureText === 'function'
+                    ? context.measureText(name).width : name.length * 8;
+                context.fillStyle = '#f4b740';
+                context.fillText(
+                    name,
+                    Math.max(18, width - textWidth - 18),
+                    height - Math.max(14, Math.round(barHeight * 0.35))
+                );
+            }
+        }
+        if (settings.includeCursor && this.recordingCursor.visible) {
+            const x = this.recordingCursor.x * width;
+            const y = this.recordingCursor.y * height;
+            context.strokeStyle = '#f8fafc';
+            context.lineWidth = Math.max(1.5, width / 960);
+            if (typeof context.beginPath === 'function') context.beginPath();
+            if (typeof context.arc === 'function') {
+                context.arc(x, y, Math.max(5, width / 260), 0, Math.PI * 2);
+            }
+            if (typeof context.stroke === 'function') context.stroke();
+        }
+        if (typeof context.restore === 'function') context.restore();
+    };
+
+    Workspace.prototype._recordingFilename = function () {
+        const name = cleanString(
+            this.state && this.state.layout && this.state.layout.displayName,
+            'facility-layout'
+        );
+        const timestamp = new Date().toISOString()
+            .replace(/[:.]/g, '-')
+            .replace(/Z$/, 'Z');
+        return name + '-walkthrough-' + timestamp;
+    };
+
+    Workspace.prototype._startViewportRecording = async function () {
+        const controller = this._ensureRecordingController();
+        const canvas = this._recordingCanvas();
+        if (!canvas || typeof canvas.captureStream !== 'function') {
+            throw new Error('The 3D viewport is not ready to record.');
+        }
+        const settings = this.recordingState.settings;
+        const training = settings.presentationMode === 'training';
+        this.recordingState.panelOpen = false;
+        this.recordingState.previewOpen = false;
+        this.recordingState.countdown = 0;
+        this.recordingState.error = null;
+        await controller.start({
+            sourceCanvas: canvas,
+            prepareSourceFrame: this._prepareRecordingFrame.bind(this),
+            resolution: settings.resolution,
+            fps: settings.fps,
+            microphone: settings.microphone,
+            includeHud: training && settings.includeHud,
+            includeCursor: training && settings.includeCursor,
+            overlayRenderer: training
+                ? this._drawRecordingOverlay.bind(this) : null,
+            filename: this._recordingFilename(),
+            background: this._recordingBackground(),
+            videoBitsPerSecond: (settings.resolution === '1080p'
+                ? 12000000 : settings.resolution === '720p' ? 6000000 : 8000000)
+                * (settings.fps === 60 ? 1.5 : 1),
+        });
+    };
+
+    Workspace.prototype._cancelRecordingCountdown = function () {
+        if (this.recordingCountdownTimer !== null) {
+            const cancel = this.options.recordingClearTimeout
+                || (root && root.clearTimeout) || clearTimeout;
+            cancel(this.recordingCountdownTimer);
+        }
+        this.recordingCountdownTimer = null;
+        if (this.recordingState.status === 'countdown') {
+            this.recordingState.status = 'idle';
+            this.recordingState.countdown = 0;
+        }
+    };
+
+    Workspace.prototype._beginRecordingCountdown = function () {
+        if (!this._recordingAvailable()) {
+            this.recordingState.error = 'Viewport recording is unavailable in this browser.';
+            this.recordingState.panelOpen = true;
+            this._renderRecordingState();
+            return false;
+        }
+        this._cancelRecordingCountdown();
+        let remaining = this.recordingCountdownSeconds;
+        this.recordingState.status = 'countdown';
+        this.recordingState.panelOpen = false;
+        this.recordingState.countdown = remaining;
+        this._renderRecordingState();
+        const schedule = this.options.recordingSetTimeout
+            || (root && root.setTimeout) || setTimeout;
+        const tick = function () {
+            if (remaining <= 0) {
+                this.recordingCountdownTimer = null;
+                this._startViewportRecording().catch(function (error) {
+                    this.recordingState.status = 'error';
+                    this.recordingState.error = error.message;
+                    this.recordingState.panelOpen = true;
+                    this._renderRecordingState();
+                }.bind(this));
+                return;
+            }
+            this.recordingState.countdown = remaining;
+            this._renderRecordingState();
+            remaining -= 1;
+            this.recordingCountdownTimer = schedule(tick, 1000);
+        }.bind(this);
+        tick();
+        return true;
+    };
+
+    Workspace.prototype._handleRecordingAction = function (event) {
+        const action = targetDataId(
+            event && event.target,
+            'data-recording-action',
+            this.threeView
+        );
+        if (!action) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        if (action === 'cancel') {
+            this._cancelRecordingCountdown();
+            this._setRecordingPanelOpen(false);
+        } else if (action === 'start') {
+            this._beginRecordingCountdown();
+        } else if (action === 'pause' && this.recordingController) {
+            if (this.recordingState.status === 'paused') {
+                this.recordingController.resume();
+            } else {
+                this.recordingController.pause();
+            }
+        } else if (action === 'stop' && this.recordingController) {
+            this.recordingController.stop();
+        } else if (action === 'discard' && this.recordingController) {
+            this.recordingController.discard();
+            this.recordingState.previewOpen = false;
+            this.recordingPreviewVideo.removeAttribute('src');
+            this._renderRecordingState();
+        } else if (action === 'download' && this.recordingController) {
+            this.recordingController.download();
+        }
+    };
+
+    Workspace.prototype._renderRecordingState = function () {
+        if (!this.threeRecordingPanel) return;
+        const state = this.recordingState;
+        const settings = state.settings;
+        this.recordingPresentationInput.value = settings.presentationMode;
+        this.recordingResolutionInput.value = settings.resolution;
+        this.recordingFpsInput.value = String(settings.fps);
+        this.recordingMicrophoneInput.checked = settings.microphone;
+        this.recordingHudInput.checked = settings.includeHud;
+        this.recordingCursorInput.checked = settings.includeCursor;
+        const training = settings.presentationMode === 'training';
+        this.recordingHudInput.disabled = !training;
+        this.recordingCursorInput.disabled = !training;
+        const format = state.format || this._recordingFormat();
+        this.recordingFormatText.textContent = format
+            ? format.label + ' will be saved.'
+            : 'No supported video format is available.';
+        this.recordingErrorText.hidden = !state.error;
+        this.recordingErrorText.textContent = state.error || '';
+        this.threeRecordingPanel.hidden = !state.panelOpen;
+        this.threeRecordingCountdown.hidden = state.status !== 'countdown';
+        this.threeRecordingCountdown.textContent = state.countdown > 0
+            ? String(state.countdown) : 'Recording';
+        const monitorVisible = ['recording', 'paused', 'stopping']
+            .includes(state.status);
+        this.threeRecordingMonitor.hidden = !monitorVisible;
+        this.recordingTimerText.textContent = recordingElapsedText(state.elapsedMs);
+        const pause = this.threeRecordingMonitor.querySelector(
+            '[data-recording-action="pause"]'
+        );
+        if (pause) pause.textContent = state.status === 'paused' ? 'Resume' : 'Pause';
+        const result = this.recordingController
+            && this.recordingController.getResult
+            ? this.recordingController.getResult() : null;
+        this.threeRecordingPreview.hidden = !state.previewOpen || !result;
+        if (state.previewOpen && result) {
+            if (this.recordingPreviewVideo.getAttribute('src') !== result.url) {
+                this.recordingPreviewVideo.setAttribute('src', result.url || '');
+                if (typeof this.recordingPreviewVideo.load === 'function') {
+                    this.recordingPreviewVideo.load();
+                }
+            }
+            this.recordingPreviewSummary.textContent = result.width + ' x '
+                + result.height + ' | ' + result.fps + ' FPS | '
+                + recordingElapsedText(result.durationMs) + ' | '
+                + result.extension.toUpperCase();
+        }
+        const record = this.threeNavigation && this.threeNavigation.querySelector(
+            '[data-three-command="record"]'
+        );
+        if (record) {
+            const active = ['countdown', 'preparing', 'recording', 'paused', 'stopping']
+                .includes(state.status);
+            record.disabled = !this._recordingAvailable() && !active;
+            record.setAttribute('aria-pressed', active ? 'true' : 'false');
+            const label = active ? 'Facility view recording in progress'
+                : 'Record facility view';
+            record.setAttribute('aria-label', label);
+            record.setAttribute('title', label);
+        }
+        if (this.root) {
+            this.root.setAttribute('data-recording-state', state.status);
+        }
+    };
+
+    Workspace.prototype._setThreeViewMenuOpen = function (open) {
+        this.threeViewMenuOpen = open === true;
+        if (this.threeViewMenuOpen) {
+            this.threeSettingsOpen = false;
+            this.threeViewpointsOpen = false;
+            if (this.threeSettingsPanel) this.threeSettingsPanel.hidden = true;
+        }
+        this._renderThreeNavigationState();
+    };
+
+    Workspace.prototype._applyThreeOrientation = function (view) {
+        const method = {
+            front: 'frontView',
+            top: 'topView',
+            right: 'rightView',
+            iso: 'isometricView',
+        }[view];
+        if (!method || !this.threeAdapter
+                || typeof this.threeAdapter[method] !== 'function') {
+            return false;
+        }
+        const applied = this.threeAdapter[method]();
+        if (applied !== false) this.threeOrientation = view;
+        this._setThreeViewMenuOpen(false);
+        return applied !== false;
+    };
+
+    Workspace.prototype._handleThreeNavigationKeyDown = function (event) {
+        const key = String(event && event.key || '').toLowerCase();
+        if (key === 'enter' && event.target === this.threeViewpointInput) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._saveThreeViewpoint();
+            return;
+        }
+        if (key === 'escape' && this.threeViewpointsOpen) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._setThreeViewpointsOpen(false);
+            if (this.threeViewpointTrigger
+                    && typeof this.threeViewpointTrigger.focus === 'function') {
+                this.threeViewpointTrigger.focus();
+            }
+            return;
+        }
+        if (key === 'escape' && this.threeViewMenuOpen) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._setThreeViewMenuOpen(false);
+            if (this.threeViewOrientationTrigger
+                    && typeof this.threeViewOrientationTrigger.focus
+                        === 'function') {
+                this.threeViewOrientationTrigger.focus();
+            }
+            return;
+        }
+        const command = targetDataId(
+            event.target,
+            'data-three-command',
+            this.threeNavigation
+        );
+        if (key === 'arrowdown' && command === 'view-orientation') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._setThreeViewMenuOpen(true);
+            const first = this.threeViewOrientationMenu
+                && this.threeViewOrientationMenu.querySelector(
+                    '[data-three-view="front"]'
+                );
+            if (first && typeof first.focus === 'function') first.focus();
+        }
+    };
+
+    Workspace.prototype._renderThreeVisualSettings = function () {
+        if (!this.threeSettingsPanel) return;
+        const settings = this.threeVisualSettings;
+        Object.keys(settings).forEach(function (key) {
+            const input = this.threeSettingsPanel.querySelector(
+                '[data-three-setting="' + key + '"]'
+            );
+            if (input) {
+                if (key === 'autoRotate' || key === 'wireframe') {
+                    input.checked = settings[key] === true;
+                } else if (key === 'background') {
+                    input.value = settings[key] === 'auto'
+                        ? '#dfe6eb' : settings[key];
+                } else {
+                    input.value = String(settings[key]);
+                }
+            }
+            const output = this.threeSettingsPanel.querySelector(
+                '[data-three-setting-value="' + key + '"]'
+            );
+            if (output) output.textContent = Number(settings[key]).toFixed(2);
+        }, this);
+    };
+
+    Workspace.prototype._applyThreeVisualSettings = function () {
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setVisualSettings === 'function') {
+            this.threeVisualSettings = normalizeThreeVisualSettings(
+                this.threeAdapter.setVisualSettings(this.threeVisualSettings)
+            );
+        }
+        this._renderThreeVisualSettings();
+        this._renderThreeNavigationState();
+    };
+
+    Workspace.prototype._handleThreeSettingsInput = function (event) {
+        const key = targetDataId(
+            event.target,
+            'data-three-setting',
+            this.threeSettingsPanel
+        );
+        if (!key || !Object.prototype.hasOwnProperty.call(
+            this.threeVisualSettings,
+            key
+        )) return;
+        const before = JSON.stringify(this.threeVisualSettings);
+        if (key === 'autoRotate' || key === 'wireframe') {
+            this.threeVisualSettings[key] = event.target.checked === true;
+        } else if (key === 'background') {
+            this.threeVisualSettings.background = String(event.target.value);
+        } else {
+            this.threeVisualSettings[key] = Number(event.target.value);
+        }
+        this.threeVisualSettings = normalizeThreeVisualSettings(
+            this.threeVisualSettings
+        );
+        if (JSON.stringify(this.threeVisualSettings) === before) return;
+        this._applyThreeVisualSettings();
+    };
+
+    Workspace.prototype._handleThreeSettingsClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-three-settings-action',
+            this.threeSettingsPanel
+        );
+        if (action !== 'reset') return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        this.threeVisualSettings = normalizeThreeVisualSettings(
+            DEFAULT_THREE_VISUAL_SETTINGS
+        );
+        this._applyThreeVisualSettings();
+    };
+
+    Workspace.prototype._handleThreeNavigationClick = function (event) {
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        const viewpointAction = targetDataId(
+            event.target,
+            'data-viewpoint-action',
+            this.threeNavigation
+        );
+        if (viewpointAction) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            const viewpointId = targetDataId(
+                event.target,
+                'data-viewpoint-id',
+                this.threeNavigation
+            );
+            if (viewpointAction === 'save') this._saveThreeViewpoint();
+            else if (viewpointAction === 'apply') {
+                this._applyThreeViewpoint(viewpointId);
+            } else if (viewpointAction === 'delete') {
+                this._deleteThreeViewpoint(viewpointId);
+            }
+            return;
+        }
+        const view = targetDataId(
+            event.target,
+            'data-three-view',
+            this.threeNavigation
+        );
+        if (view) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this._applyThreeOrientation(view);
+            return;
+        }
+        const command = targetDataId(
+            event.target,
+            'data-three-command',
+            this.threeNavigation
+        );
+        if (!command) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (command === 'view-orientation') {
+            this._setThreeViewMenuOpen(!this.threeViewMenuOpen);
+            return;
+        }
+        if (command === 'viewpoints') {
+            this._setThreeViewpointsOpen(!this.threeViewpointsOpen);
+            return;
+        }
+        if (command === 'record') {
+            const result = this.recordingController
+                && this.recordingController.getResult
+                ? this.recordingController.getResult() : null;
+            if (result) {
+                this.recordingState.previewOpen = true;
+                this.recordingState.panelOpen = false;
+                this._renderRecordingState();
+            } else {
+                this._setRecordingPanelOpen(!this.recordingState.panelOpen);
+            }
+            return;
+        }
+        if (!this.threeAdapter) return;
+        this._setThreeViewMenuOpen(false);
+        if (command === 'walkthrough') {
+            if (this.threeWalkthrough.active
+                    && typeof this.threeAdapter.exitWalkthrough === 'function') {
+                this.threeAdapter.exitWalkthrough('toolbar_exit');
+            } else if (typeof this.threeAdapter.enterWalkthrough === 'function') {
+                const selected = this._selectedPlacementRecords();
+                this.threeAdapter.enterWalkthrough({
+                    placementId: selected.length === 1
+                        ? selected[0].placementId : undefined,
+                });
+            }
+        } else if (command === 'drone') {
+            if (this.threeDrone.active
+                    && typeof this.threeAdapter.exitDrone === 'function') {
+                this.threeAdapter.exitDrone('toolbar_exit');
+            } else if (typeof this.threeAdapter.enterDrone === 'function') {
+                const selected = this._selectedPlacementRecords();
+                this.threeAdapter.enterDrone({
+                    placementId: selected.length === 1
+                        ? selected[0].placementId : undefined,
+                });
+            }
+        } else if (command === 'switch-immersive') {
+            if (typeof this.threeAdapter.switchImmersiveMode === 'function') {
+                this.threeAdapter.switchImmersiveMode(
+                    this.threeDrone.active ? 'walkthrough' : 'drone'
+                );
+            }
+        } else if (command === 'walk-to-selected') {
+            const selected = this._selectedPlacementRecords();
+            if (selected.length === 1
+                    && typeof this.threeAdapter
+                        .navigateWalkthroughToPlacement === 'function') {
+                this.threeAdapter.navigateWalkthroughToPlacement(
+                    selected[0].placementId
+                );
+            }
+        } else if (command === 'orbit' || command === 'pan') {
+            this.threeNavigationMode = command;
+            if (typeof this.threeAdapter.setNavigationMode === 'function') {
+                this.threeAdapter.setNavigationMode(command);
+            }
+        } else if (command === 'zoom-in' || command === 'zoom-out') {
+            if (typeof this.threeAdapter.zoomBy === 'function') {
+                this.threeAdapter.zoomBy(command === 'zoom-in' ? 1.25 : 0.8);
+            }
+        } else if (command === 'fit-layout') {
+            if (typeof this.threeAdapter.fitLayout === 'function') {
+                this.threeAdapter.fitLayout();
+            } else if (typeof this.threeAdapter.fit === 'function') {
+                this.threeAdapter.fit();
+            }
+        } else if (command === 'fit-facility') {
+            if (typeof this.threeAdapter.fitFacility === 'function') {
+                this.threeAdapter.fitFacility();
+            } else if (typeof this.threeAdapter.fit === 'function') {
+                this.threeAdapter.fit();
+            }
+        } else if (command === 'display-settings') {
+            this.threeSettingsOpen = !this.threeSettingsOpen;
+            this.threeViewpointsOpen = false;
+            this.threeSettingsPanel.hidden = !this.threeSettingsOpen;
+        } else if (command === 'grid') {
+            this.threeGridVisible = !this.threeGridVisible;
+            if (typeof this.threeAdapter.setGridVisible === 'function') {
+                this.threeAdapter.setGridVisible(this.threeGridVisible);
+            }
+        }
+        this._renderThreeNavigationState();
+    };
+
     Workspace.prototype._setCoordinates = function (world) {
-        this.coordinateText.textContent = 'X ' + finite(world.x, 0).toFixed(2)
-            + '  Z ' + finite(world.z, 0).toFixed(2);
+        this.lastPointerWorld = {
+            x: finite(world && world.x, 0),
+            y: finite(world && world.y, 0),
+            z: finite(world && world.z, 0),
+        };
+        const unit = this.planPreferences.unit;
+        this.coordinateText.textContent = 'Cursor: X '
+            + formattedDistance(displayDistance(this.lastPointerWorld.x, unit))
+            + ' ' + unit + '  Z '
+            + formattedDistance(displayDistance(this.lastPointerWorld.z, unit))
+            + ' ' + unit;
     };
 
     Workspace.prototype._handleToolbarClick = function (event) {
@@ -2186,8 +11521,11 @@
 
     Workspace.prototype._rememberProposalFocus = function () {
         const active = this.document.activeElement;
+        const externalCommand = active
+            && typeof active.getAttribute === 'function'
+            && active.getAttribute('data-facility-ribbon-command');
         this.proposalFocusReturn = active
-            && this.root.contains(active)
+            && (this.root.contains(active) || externalCommand)
             && typeof active.focus === 'function'
             ? active
             : this.toolbar.querySelector('[data-command="auto-arrange"]');
@@ -2195,8 +11533,11 @@
 
     Workspace.prototype._restoreProposalFocus = function () {
         let target = this.proposalFocusReturn;
+        const externalCommand = target
+            && typeof target.getAttribute === 'function'
+            && target.getAttribute('data-facility-ribbon-command');
         if (!target || target.disabled || target.hidden
-                || !this.root.contains(target)
+                || (!this.root.contains(target) && !externalCommand)
                 || typeof target.focus !== 'function') {
             target = this.toolbar.querySelector(
                 '[data-command="auto-arrange"]'
@@ -2212,13 +11553,89 @@
     };
 
     Workspace.prototype.executeCommand = function (command) {
+        if (command === 'assets') {
+            if (this.assetBrowserState.open) this.closeAssetBrowser(false);
+            else this.openAssetBrowser();
+            return Promise.resolve(this.getState());
+        }
+        if (this.assetBrowserState.open) {
+            return Promise.resolve(this.getState());
+        }
+        if (command === 'floor-marking') {
+            if (this.floorMarkingState.open) {
+                this.closeFloorMarkingPalette(true);
+            } else {
+                this.openFloorMarkingPalette();
+            }
+            return Promise.resolve(this.getState());
+        }
+        if (command === 'aisle') {
+            if (this.aisleState.open) this.closeAisleDialog(true);
+            else this.openAisleDialog();
+            return Promise.resolve(this.getState());
+        }
+        if (PRECISION_MODES.includes(command)) {
+            if (!this.capabilities.manualAuthoring) {
+                return Promise.resolve(this.getState());
+            }
+            this.openPrecisionDialog(command);
+            return Promise.resolve(this.getState());
+        }
+        if (PATTERN_MODES.includes(command)) {
+            if (!this.capabilities.manualAuthoring) {
+                return Promise.resolve(this.getState());
+            }
+            this.openPatternDialog(command);
+            return Promise.resolve(this.getState());
+        }
+        if (command === 'clear-all') {
+            if (!this.capabilities.manualAuthoring) {
+                return Promise.resolve(this.getState());
+            }
+            this.openClearAllDialog();
+            return Promise.resolve(this.getState());
+        }
+        if (command === 'bulk-zones') {
+            if (!this.capabilities.manualAuthoring) {
+                return Promise.resolve(this.getState());
+            }
+            this.openBulkZoneDialog();
+            return Promise.resolve(this.getState());
+        }
+        if (command === 'create-cell-group') {
+            if (!this.capabilities.manualAuthoring) {
+                return Promise.resolve(this.getState());
+            }
+            this.openCellGroupDialog();
+            return Promise.resolve(this.getState());
+        }
+        if (command === 'ungroup-cell') {
+            return this._ungroupSelectedCell();
+        }
         const manualCommands = [
             'rectangle-zone',
             'polygon-zone',
+            'bulk-zones',
+            'create-cell-group',
+            'ungroup-cell',
+            'aisle',
+            'floor-marking',
             'rotate',
             'duplicate',
             'delete',
             'lock',
+            'align',
+            'distribute',
+            'relative',
+            'distance',
+            'offset',
+            'linear-pattern',
+            'circular-pattern',
+            'perimeter-pattern',
+            'cell-layout',
+            'mirror',
+            'swap',
+            'clear-all',
             'undo',
             'redo',
             'save',
@@ -2236,7 +11653,26 @@
             return Promise.resolve(this.getState());
         }
         if (command === 'fit') {
-            this.controller.fit();
+            if (typeof this.controller.fitFacility === 'function') {
+                this.controller.fitFacility();
+            } else {
+                this.controller.fit();
+            }
+            return Promise.resolve(this.getState());
+        }
+        if (command === 'fit-layout') {
+            if (typeof this.controller.fitLayout === 'function') {
+                this.controller.fitLayout();
+            } else {
+                this.controller.fit();
+            }
+            return Promise.resolve(this.getState());
+        }
+        if (command === 'top-view') {
+            this._setViewMode('3d');
+            if (typeof this.controller.topView === 'function') {
+                this.controller.topView();
+            }
             return Promise.resolve(this.getState());
         }
         const actions = {
@@ -2271,7 +11707,14 @@
                 const placements = this.state.layout.placements.filter(function (item) {
                     return this.state.selection.includes(item.placementId);
                 }, this);
-                const allLocked = placements.length > 0 && placements.every(
+                const markings = (this.state.layout.floorMarkings || []).filter(
+                    function (item) {
+                        return this.state.selection.includes(item.markingId);
+                    },
+                    this
+                );
+                const movable = placements.concat(markings);
+                const allLocked = movable.length > 0 && movable.every(
                     function (item) { return item.positionMode === 'locked'; }
                 );
                 return allLocked
@@ -2309,6 +11752,26 @@
     Workspace.prototype._setViewMode = function (mode) {
         if (!VIEW_MODES.includes(mode)) throw new TypeError('invalid view mode');
         if (mode === '3d' && !this.threeAdapter) mode = 'plan';
+        if (mode !== '3d') {
+            this._cancelRecordingCountdown();
+            if (this.recordingController
+                    && ['recording', 'paused'].includes(
+                        this.recordingState.status
+                    )) {
+                this.recordingController.stop();
+            }
+            this.recordingState.panelOpen = false;
+        }
+        if (mode !== '3d' && this.threeWalkthrough.active
+                && this.threeAdapter
+                && typeof this.threeAdapter.exitWalkthrough === 'function') {
+            this.threeAdapter.exitWalkthrough('view_changed');
+        }
+        if (mode !== '3d' && this.threeDrone.active
+                && this.threeAdapter
+                && typeof this.threeAdapter.exitDrone === 'function') {
+            this.threeAdapter.exitDrone('view_changed');
+        }
         this.viewMode = mode;
         const plan = mode === 'plan';
         this.planView.hidden = !plan;
@@ -2323,13 +11786,27 @@
                 && mode === '3d') {
             this.threeAdapter.invalidate();
         }
+        this._renderThreeNavigationState();
+        if (plan) this._renderPlanSpatialOverlays();
+        this._renderProperties();
         this._renderStatus();
+        this._syncSelectionToolbar();
         return mode;
     };
 
     Workspace.prototype._setToolMode = function (mode) {
         if (!TOOL_MODES.includes(mode)) throw new TypeError('invalid tool mode');
         this.toolMode = mode;
+        if (mode !== 'floor-marking' && this.floorMarkingPalette) {
+            this.floorMarkingState.open = false;
+            this.floorMarkingPalette.hidden = true;
+            this.floorMarkingPalette.setAttribute('aria-hidden', 'true');
+        }
+        if (mode !== 'aisle' && this.aisleState) {
+            this.aisleState.drawing = false;
+            this._setAislePreview(null);
+            if (this.aisleState.open) this._renderAisleDialog();
+        }
         this.polygonPoints = [];
         this._cancelPointerGesture();
         this.root.setAttribute('data-tool-mode', mode);
@@ -2347,7 +11824,10 @@
                 button.removeAttribute('aria-pressed');
             }
         });
+        this._renderToolbarState();
+        this._renderPlanNavigationState();
         this._renderStatus();
+        this._syncSelectionToolbar();
         return mode;
     };
 
@@ -2358,18 +11838,104 @@
             this.propertiesBody
         );
         if (!field) return;
+        if (this.state.selection.length > 1
+                && ['multi-x', 'multi-y', 'multi-z', 'multi-rotation'].includes(field)) {
+            const geometry = this._selectionGeometry();
+            if (!geometry) return;
+            const requested = finite(event.target.value, NaN);
+            if (!Number.isFinite(requested)) return;
+            if (field === 'multi-rotation') {
+                if (!Number.isFinite(geometry.rotation)) {
+                    this._setError(new Error(
+                        'Selected objects must share one rotation before setting it numerically'
+                    ));
+                    return;
+                }
+                const turns = Math.round((requested - geometry.rotation) / 90);
+                if (Math.abs(geometry.rotation + turns * 90 - requested) > 0.001) {
+                    this._setError(new Error('Rotation must use 90-degree increments'));
+                    return;
+                }
+                this._invoke('Rotate selection', function () {
+                    return this.session.rotateSelected90(turns);
+                }.bind(this));
+                return;
+            }
+            const canonical = canonicalDistance(
+                requested,
+                this.planPreferences.unit
+            );
+            const axis = field.slice(-1);
+            const current = axis === 'x'
+                ? geometry.center.x
+                : (axis === 'z' ? geometry.center.z : geometry.elevation);
+            const delta = { x: 0, y: 0, z: 0 };
+            delta[axis] = canonical - current;
+            this._invoke('Move selection', function () {
+                return this.session.moveSelected(delta);
+            }.bind(this));
+            return;
+        }
         const selected = selectionRecord(this.state.layout, this.state.selection);
         if (!selected) return;
-        if (selected.kind === 'zone' && (field === 'width' || field === 'depth')) {
-            const width = finite(
+        if (selected.kind === 'zone' && field === 'label') {
+            const label = String(event.target.value || '').trim();
+            if (!label || label.length > 120) {
+                this._setError(new Error(
+                    label ? 'Zone name must be 120 characters or fewer'
+                        : 'Zone name cannot be empty'
+                ));
+                return;
+            }
+            this._invoke('Rename zone', function () {
+                return this.session.editZoneLabel(selected.value.zoneId, label);
+            }.bind(this));
+            return;
+        }
+        if (selected.kind === 'zone' && field === 'zoneType') {
+            const zoneType = String(event.target.value || '').trim();
+            if (!ZONE_PURPOSE_OPTIONS.some(function (option) {
+                return option.value === zoneType;
+            })) return;
+            this._invoke('Change zone purpose', function () {
+                return this.session.editZoneType(
+                    selected.value.zoneId,
+                    zoneType
+                );
+            }.bind(this));
+            return;
+        }
+        if (selected.kind === 'zone'
+                && ['minX', 'minZ', 'width', 'depth'].includes(field)) {
+            const dimensions = zoneDimensions(selected.value);
+            if (!dimensions) return;
+            const read = function (name, fallback) {
+                const input = this.propertiesBody.querySelector(
+                    '[data-property="' + name + '"]'
+                );
+                if (!input) return fallback;
+                return canonicalDistance(
+                    finite(input.value, NaN),
+                    this.planPreferences.unit
+                );
+            }.bind(this);
+            const minX = read('minX', dimensions.minX);
+            const minZ = read('minZ', dimensions.minZ);
+            const width = canonicalDistance(finite(
                 this.propertiesBody.querySelector('[data-property="width"]').value,
                 NaN
-            );
-            const depth = finite(
+            ), this.planPreferences.unit);
+            const depth = canonicalDistance(finite(
                 this.propertiesBody.querySelector('[data-property="depth"]').value,
                 NaN
-            );
-            this._invoke('Resize zone', function () {
+            ), this.planPreferences.unit);
+            this._invoke('Edit zone geometry', function () {
+                if (typeof this.session.editZoneGeometry === 'function') {
+                    return this.session.editZoneGeometry(
+                        selected.value.zoneId,
+                        { minX: minX, minZ: minZ, width: width, depth: depth }
+                    );
+                }
                 return this.session.editZoneDimensions(
                     selected.value.zoneId,
                     { width: width, depth: depth }
@@ -2377,14 +11943,104 @@
             }.bind(this));
             return;
         }
+        if (selected.kind === 'aisle') {
+            const route = selected.value;
+            const patch = {};
+            if (field === 'label') {
+                const label = String(event.target.value || '').trim();
+                if (!label || label.length > 120) return;
+                patch.label = label;
+            } else if (field === 'corridorWidth') {
+                const width = canonicalDistance(
+                    finite(event.target.value, NaN),
+                    this.planPreferences.unit
+                );
+                if (!(width > 0)) return;
+                patch.corridorWidth = width;
+            } else if (field === 'direction' || field === 'color') {
+                patch[field] = String(event.target.value || '');
+            } else {
+                return;
+            }
+            this._invoke('Edit facility aisle', function () {
+                return this.session.editAisle(route.routeId, patch);
+            }.bind(this));
+            return;
+        }
+        if (selected.kind === 'floor-marking') {
+            const marking = selected.value;
+            const patch = {};
+            if (field === 'label') {
+                const label = String(event.target.value || '').trim();
+                if (!label || label.length > 120) {
+                    this._setError(new Error(
+                        'Floor marking name must contain 1 to 120 characters'
+                    ));
+                    return;
+                }
+                patch.label = label;
+            } else if (field === 'text') {
+                const text = String(event.target.value || '');
+                if (text.length > 120
+                        || (marking.markingType === 'floor_text' && !text)) {
+                    this._setError(new Error('Floor marking text is invalid'));
+                    return;
+                }
+                patch.text = text;
+            } else if (field === 'fillColor' || field === 'strokeColor') {
+                patch[field] = String(event.target.value || '');
+            } else if (field === 'opacity') {
+                const opacity = finite(event.target.value, NaN);
+                if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) return;
+                patch.opacity = opacity;
+            } else if (field === 'width' || field === 'depth') {
+                const value = canonicalDistance(
+                    finite(event.target.value, NaN),
+                    this.planPreferences.unit
+                );
+                if (!(value > 0)) return;
+                patch[field] = value;
+            } else if (['x', 'y', 'z', 'rotation'].includes(field)) {
+                const transform = clone(marking.transform || {});
+                transform.position = clone(transform.position || {
+                    x: 0, y: 0, z: 0,
+                });
+                if (field === 'rotation') {
+                    const rotation = finite(event.target.value, NaN);
+                    if (!Number.isFinite(rotation)) return;
+                    transform.rotationDegrees = rotation;
+                } else {
+                    const value = canonicalDistance(
+                        finite(event.target.value, NaN),
+                        this.planPreferences.unit
+                    );
+                    if (!Number.isFinite(value)) return;
+                    transform.position[field] = value;
+                }
+                patch.transform = transform;
+                patch.positionMode = 'manual';
+            } else {
+                return;
+            }
+            this._invoke('Edit floor marking', function () {
+                return this.session.editFloorMarking(marking.markingId, patch);
+            }.bind(this));
+            return;
+        }
         if (selected.kind !== 'placement') return;
         const placement = selected.value;
         if (['x', 'y', 'z'].includes(field)) {
             const current = placement.transform.position;
-            const next = finite(event.target.value, NaN);
+            const next = canonicalDistance(
+                finite(event.target.value, NaN),
+                this.planPreferences.unit
+            );
             if (!Number.isFinite(next)) return;
             const delta = { x: 0, y: 0, z: 0 };
-            delta[field] = snapCoordinate(next, field === 'y' ? 0 : this.gridSize)
+            delta[field] = snapCoordinate(
+                next,
+                field === 'y' ? 0 : this._activeSnapStep()
+            )
                 - finite(current[field], 0);
             this._invoke('Move selection', function () {
                 return this.session.moveSelected(delta);
@@ -2419,8 +12075,74 @@
         return wrapper;
     };
 
+    Workspace.prototype._textField = function (label, property, value, options) {
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-property-field ip-flw-property-field-wide',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        wrapper.appendChild(element(this.document, 'input', Object.assign({
+            type: 'text',
+            value: String(value || ''),
+            'data-property': property,
+            'aria-label': label,
+        }, options || {})));
+        return wrapper;
+    };
+
+    Workspace.prototype._colorField = function (label, property, value) {
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-property-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        wrapper.appendChild(element(this.document, 'input', {
+            type: 'color',
+            value: value,
+            'data-property': property,
+            'aria-label': label,
+        }));
+        return wrapper;
+    };
+
+    Workspace.prototype._selectionGeometry = function () {
+        if (!this.state.layout || !this.state.selection.length
+                || !this.patternRuntime
+                || typeof this.patternRuntime.collectSelection !== 'function') {
+            return null;
+        }
+        const items = this.patternRuntime.collectSelection(
+            this.state.layout,
+            this.assetCatalog,
+            this.state.selection,
+            { expandZones: false, includeZones: true }
+        );
+        if (!items.length) return null;
+        const bounds = this.patternRuntime.selectionBounds(items);
+        const elevations = items.map(function (item) {
+            return finite(item.position && item.position.y, 0);
+        });
+        const rotations = items.map(function (item) {
+            return finite(item.rotationDegrees, 0);
+        });
+        const sharedRotation = rotations.every(function (value) {
+            return Math.abs(value - rotations[0]) < 0.001;
+        }) ? rotations[0] : NaN;
+        return {
+            items: items,
+            center: bounds.center,
+            width: bounds.width,
+            depth: bounds.depth,
+            elevation: elevations.reduce(function (sum, value) {
+                return sum + value;
+            }, 0) / elevations.length,
+            rotation: sharedRotation,
+        };
+    };
+
     Workspace.prototype._renderProperties = function () {
         clearElement(this.propertiesBody);
+        this.propertiesPane.hidden = !this.state.loaded
+            || !this.state.selection.length
+            || this.viewMode !== 'plan';
         if (!this.state.loaded) {
             this.propertiesBody.appendChild(element(this.document, 'p', {
                 className: 'ip-flw-empty',
@@ -2434,9 +12156,35 @@
             return;
         }
         if (this.state.selection.length > 1) {
+            const geometry = this._selectionGeometry();
             this.propertiesBody.appendChild(element(this.document, 'div', {
                 className: 'ip-flw-selection-summary',
             }, this.state.selection.length + ' objects selected'));
+            if (geometry) {
+                const unit = this.planPreferences.unit;
+                const grid = element(this.document, 'div', {
+                    className: 'ip-flw-property-grid',
+                });
+                append(grid,
+                    this._field('Group center X (' + unit + ')', 'multi-x',
+                        displayDistance(geometry.center.x, unit), { step: '0.1' }),
+                    this._field('Group center Z (' + unit + ')', 'multi-z',
+                        displayDistance(geometry.center.z, unit), { step: '0.1' }),
+                    this._field('Elevation (' + unit + ')', 'multi-y',
+                        displayDistance(geometry.elevation, unit), { step: '0.1' }),
+                    this._field('Rotation (degrees)', 'multi-rotation',
+                        geometry.rotation, { step: '90' }),
+                    this._field('Envelope width (' + unit + ')', 'multi-width',
+                        displayDistance(geometry.width, unit), { readonly: 'readonly' }),
+                    this._field('Envelope depth (' + unit + ')', 'multi-depth',
+                        displayDistance(geometry.depth, unit), { readonly: 'readonly' })
+                );
+                this.propertiesBody.appendChild(grid);
+                this.propertiesBody.appendChild(element(this.document, 'p', {
+                    className: 'ip-flw-property-note',
+                }, 'Envelope dimensions are measured from the selected footprints. '
+                    + 'Equipment scaling is intentionally disabled.'));
+            }
             return;
         }
         const selected = selectionRecord(this.state.layout, this.state.selection);
@@ -2464,27 +12212,162 @@
             }, this);
             const transform = placement.transform || {};
             const position = transform.position || {};
+            const unit = this.planPreferences.unit;
+            const snapStep = this._activeSnapStep();
+            const displayStep = snapStep > 0
+                ? displayDistance(snapStep, unit) : 'any';
             const grid = element(this.document, 'div', {
                 className: 'ip-flw-property-grid',
             });
+            let footprint = null;
+            try {
+                const selectedGeometry = this._selectionGeometry();
+                footprint = selectedGeometry && selectedGeometry.items[0];
+            } catch (error) {
+                footprint = null;
+            }
             append(grid,
-                this._field('X position', 'x', finite(position.x, 0), {
-                    step: String(this.gridSize),
+                this._field('X position (' + unit + ')', 'x', displayDistance(
+                    finite(position.x, 0), unit
+                ), {
+                    step: String(displayStep),
                 }),
-                this._field('Y position', 'y', finite(position.y, 0), {
+                this._field('Y position (' + unit + ')', 'y', displayDistance(
+                    finite(position.y, 0), unit
+                ), {
                     step: '0.1',
                 }),
-                this._field('Z position', 'z', finite(position.z, 0), {
-                    step: String(this.gridSize),
+                this._field('Z position (' + unit + ')', 'z', displayDistance(
+                    finite(position.z, 0), unit
+                ), {
+                    step: String(displayStep),
                 }),
                 this._field(
                     'Rotation (degrees)',
                     'rotation',
                     quaternionYawDegrees(transform.quaternion),
                     { step: '90' }
-                )
+                ),
+                this._field('Footprint width (' + unit + ')', 'asset-width',
+                    footprint ? displayDistance(footprint.width, unit) : NaN,
+                    { readonly: 'readonly' }),
+                this._field('Footprint depth (' + unit + ')', 'asset-depth',
+                    footprint ? displayDistance(footprint.depth, unit) : NaN,
+                    { readonly: 'readonly' })
             );
             this.propertiesBody.appendChild(grid);
+        } else if (selected.kind === 'aisle') {
+            const route = selected.value;
+            const aisle = route.extensions && route.extensions.facilityAisle || {};
+            const unit = this.planPreferences.unit;
+            this.propertiesBody.appendChild(element(
+                this.document,
+                'h3',
+                {},
+                cleanString(route.label, route.routeId)
+            ));
+            this.propertiesBody.appendChild(element(
+                this.document,
+                'p',
+                { className: 'ip-flw-property-kind' },
+                cleanString(aisle.aisleKind, 'facility aisle').replace(/_/g, ' ')
+            ));
+            const grid = element(this.document, 'div', {
+                className: 'ip-flw-property-grid',
+            });
+            append(
+                grid,
+                this._textField('Aisle name', 'label', route.label, {
+                    maxlength: '120',
+                }),
+                this._field(
+                    'Corridor width (' + unit + ')',
+                    'corridorWidth',
+                    displayDistance(finite(route.corridorWidth, 1), unit),
+                    { min: '0.01', step: '0.1' }
+                ),
+                this._colorField('Display color', 'color',
+                    cleanString(aisle.color, '#d9a514'))
+            );
+            const direction = element(this.document, 'label', {
+                className: 'ip-flw-property-field',
+            });
+            direction.appendChild(element(this.document, 'span', {}, 'Direction'));
+            const select = element(this.document, 'select', {
+                'data-property': 'direction',
+                'aria-label': 'Direction',
+            });
+            [['two_way', 'Two way'], ['one_way', 'One way']].forEach(
+                function (item) {
+                    select.appendChild(element(this.document, 'option', {
+                        value: item[0],
+                        selected: aisle.direction === item[0],
+                    }, item[1]));
+                },
+                this
+            );
+            direction.appendChild(select);
+            grid.appendChild(direction);
+            this.propertiesBody.appendChild(grid);
+            this.propertiesBody.appendChild(element(this.document, 'p', {
+                className: 'ip-flw-property-note',
+            }, aisle.clearanceEvidenceStatus === 'unverified'
+                ? 'Clearance evidence is unverified.'
+                : 'Clearance evidence: ' + aisle.clearanceEvidenceStatus + '.'));
+        } else if (selected.kind === 'floor-marking') {
+            const marking = selected.value;
+            const position = marking.transform && marking.transform.position || {};
+            const unit = this.planPreferences.unit;
+            this.propertiesBody.appendChild(element(
+                this.document,
+                'h3',
+                {},
+                cleanString(marking.label, marking.markingId)
+            ));
+            this.propertiesBody.appendChild(element(
+                this.document,
+                'p',
+                { className: 'ip-flw-property-kind' },
+                String(marking.markingType || 'floor marking').replace(/_/g, ' ')
+            ));
+            const textGrid = element(this.document, 'div', {
+                className: 'ip-flw-property-grid',
+            });
+            append(textGrid,
+                this._textField('Name', 'label', marking.label, {
+                    maxlength: '120',
+                }),
+                this._textField('Floor text', 'text', marking.text, {
+                    maxlength: '120',
+                })
+            );
+            this.propertiesBody.appendChild(textGrid);
+            const geometryGrid = element(this.document, 'div', {
+                className: 'ip-flw-property-grid',
+            });
+            append(geometryGrid,
+                this._field('X position (' + unit + ')', 'x', displayDistance(
+                    finite(position.x, 0), unit
+                ), { step: '0.1' }),
+                this._field('Z position (' + unit + ')', 'z', displayDistance(
+                    finite(position.z, 0), unit
+                ), { step: '0.1' }),
+                this._field('Width (' + unit + ')', 'width', displayDistance(
+                    finite(marking.width, 1), unit
+                ), { min: '0.01', step: '0.1' }),
+                this._field('Depth (' + unit + ')', 'depth', displayDistance(
+                    finite(marking.depth, 1), unit
+                ), { min: '0.01', step: '0.1' }),
+                this._field('Rotation (degrees)', 'rotation', finite(
+                    marking.transform && marking.transform.rotationDegrees, 0
+                ), { step: '1' }),
+                this._field('Opacity', 'opacity', finite(marking.opacity, 1), {
+                    min: '0', max: '1', step: '0.05',
+                }),
+                this._colorField('Fill color', 'fillColor', marking.fillColor),
+                this._colorField('Outline color', 'strokeColor', marking.strokeColor)
+            );
+            this.propertiesBody.appendChild(geometryGrid);
         } else {
             const zone = selected.value;
             const dimensions = zoneDimensions(zone);
@@ -2500,18 +12383,63 @@
                 { className: 'ip-flw-property-kind' },
                 cleanString(zone.zoneType, 'zone')
             ));
+            const nameGrid = element(this.document, 'div', {
+                className: 'ip-flw-property-grid',
+            });
+            nameGrid.appendChild(this._textField(
+                'Zone name',
+                'label',
+                cleanString(zone.label, zone.zoneId),
+                { maxlength: '120' }
+            ));
+            const purposeField = element(this.document, 'label', {
+                className: 'ip-flw-property-field ip-flw-property-field-wide',
+            });
+            purposeField.appendChild(element(
+                this.document,
+                'span',
+                {},
+                'Zone purpose'
+            ));
+            const purposeSelect = element(this.document, 'select', {
+                'data-property': 'zoneType',
+                'aria-label': 'Zone purpose',
+            });
+            ZONE_PURPOSE_OPTIONS.forEach(function (option) {
+                purposeSelect.appendChild(element(this.document, 'option', {
+                    value: option.value,
+                    selected: option.value === zone.zoneType,
+                }, option.label));
+            }, this);
+            purposeField.appendChild(purposeSelect);
+            nameGrid.appendChild(purposeField);
+            this.propertiesBody.appendChild(nameGrid);
             if (dimensions) {
+                const unit = this.planPreferences.unit;
+                const snapStep = this._activeSnapStep();
+                const displayStep = snapStep > 0
+                    ? displayDistance(snapStep, unit) : 'any';
                 const grid = element(this.document, 'div', {
                     className: 'ip-flw-property-grid',
                 });
                 append(grid,
-                    this._field('Zone width', 'width', dimensions.width, {
-                        min: '0.01',
-                        step: String(this.gridSize),
+                    this._field('Minimum X (' + unit + ')', 'minX',
+                        displayDistance(dimensions.minX, unit), {
+                        step: String(displayStep),
                     }),
-                    this._field('Zone depth', 'depth', dimensions.depth, {
+                    this._field('Minimum Z (' + unit + ')', 'minZ',
+                        displayDistance(dimensions.minZ, unit), {
+                        step: String(displayStep),
+                    }),
+                    this._field('Zone width (' + unit + ')', 'width',
+                        displayDistance(dimensions.width, unit), {
                         min: '0.01',
-                        step: String(this.gridSize),
+                        step: String(displayStep),
+                    }),
+                    this._field('Zone depth (' + unit + ')', 'depth',
+                        displayDistance(dimensions.depth, unit), {
+                        min: '0.01',
+                        step: String(displayStep),
                     })
                 );
                 this.propertiesBody.appendChild(grid);
@@ -2526,39 +12454,225 @@
                 return this.state.selection.includes(placement.placementId);
             }, this)
             : [];
+        const selectedMarkings = this.state.layout
+            ? (this.state.layout.floorMarkings || []).filter(function (marking) {
+                return this.state.selection.includes(marking.markingId);
+            }, this)
+            : [];
+        const selectedZones = this.state.layout
+            ? (this.state.layout.zones || []).filter(function (zone) {
+                return this.state.selection.includes(zone.zoneId);
+            }, this)
+            : [];
+        const selectedCellZones = selectedZones.filter(function (zone) {
+            const metadata = zone.extensions && zone.extensions.cellGroup;
+            return metadata && metadata.groupKind === 'manufacturing_cell';
+        });
         const hasPlacement = selectedPlacements.length > 0;
+        const hasMovable = hasPlacement || selectedMarkings.length > 0
+            || selectedCellZones.length > 0;
+        const selectedMovable = selectedPlacements.concat(selectedMarkings);
+        let patternSeedCount = 0;
+        let cellSeedCount = 0;
+        if (this.patternRuntime
+                && typeof this.patternRuntime.collectSelection === 'function'
+                && this.state.layout) {
+            try {
+                patternSeedCount = this.patternRuntime.collectSelection(
+                    this.state.layout,
+                    this.assetCatalog,
+                    this.state.selection,
+                    { expandZones: true, includeZones: true }
+                ).length;
+                cellSeedCount = this.patternRuntime.collectSelection(
+                    this.state.layout,
+                    this.assetCatalog,
+                    this.state.selection,
+                    { expandZones: true, includeZones: false }
+                ).length;
+            } catch (error) {
+                patternSeedCount = 0;
+                cellSeedCount = 0;
+            }
+        }
+        const allLocked = selectedMovable.length > 0
+            && selectedMovable.every(function (item) {
+                return item.positionMode === 'locked';
+            });
+        const generatedDraftActive = Boolean(this.state.generatedDraft);
+        const manualEditingBlocked = !this.capabilities.manualAuthoring
+            || generatedDraftActive;
         const states = {
-            'rectangle-zone': !this.capabilities.manualAuthoring,
-            'polygon-zone': !this.capabilities.manualAuthoring,
+            assets: !this.capabilities.assetLibrary
+                || generatedDraftActive
+                || Boolean(this.state.conflict)
+                || Boolean(this.state.layoutProposal)
+                || Boolean(this.state.placementAlternatives),
+            'rectangle-zone': manualEditingBlocked,
+            'polygon-zone': manualEditingBlocked,
+            'bulk-zones': manualEditingBlocked
+                || typeof this.session.createZones !== 'function',
+            'create-cell-group': manualEditingBlocked
+                || typeof this.session.createCellGroup !== 'function'
+                || cellSeedCount < 1
+                || selectedCellZones.length > 0,
+            'ungroup-cell': manualEditingBlocked
+                || typeof this.session.ungroupCell !== 'function'
+                || this.state.selection.length !== 1
+                || selectedCellZones.length !== 1,
+            'floor-marking': manualEditingBlocked,
+            aisle: manualEditingBlocked
+                || typeof this.session.createAisle !== 'function',
             'auto-arrange': !this.capabilities.fullLayoutProposals
                 || typeof this.session.requestLayoutProposal
                     !== 'function'
                 || this.state.dirty
                 || Boolean(this.state.conflict),
-            rotate: !this.capabilities.manualAuthoring || !hasPlacement,
-            duplicate: !this.capabilities.manualAuthoring || !hasPlacement,
-            delete: !this.capabilities.manualAuthoring || !hasSelection,
-            lock: !this.capabilities.manualAuthoring || !hasPlacement,
+            'top-view': !this.threeAdapter,
+            rotate: manualEditingBlocked || !hasMovable,
+            duplicate: manualEditingBlocked || !hasMovable,
+            delete: manualEditingBlocked || !hasSelection,
+            lock: manualEditingBlocked || !hasMovable,
+            align: manualEditingBlocked
+                || selectedPlacements.length < 2,
+            distribute: manualEditingBlocked
+                || selectedPlacements.length < 3,
+            relative: manualEditingBlocked
+                || selectedPlacements.length < 2,
+            distance: manualEditingBlocked
+                || selectedPlacements.length !== 2,
+            offset: manualEditingBlocked || !hasPlacement,
+            'linear-pattern': manualEditingBlocked
+                || typeof this.session.applyPattern !== 'function'
+                || patternSeedCount < 1,
+            'circular-pattern': manualEditingBlocked
+                || typeof this.session.applyPattern !== 'function'
+                || patternSeedCount < 1,
+            'perimeter-pattern': manualEditingBlocked
+                || typeof this.session.applyPattern !== 'function'
+                || cellSeedCount < 1,
+            'cell-layout': manualEditingBlocked
+                || typeof this.session.applyPattern !== 'function'
+                || cellSeedCount < 2,
+            'vertical-stack': manualEditingBlocked
+                || typeof this.session.applyPattern !== 'function'
+                || selectedPlacements.length !== 1
+                || selectedPlacements[0].positionMode === 'locked'
+                || Boolean(selectedPlacements[0].snapRelationship
+                    && selectedPlacements[0].snapRelationship.family
+                        === 'vertical_stack'),
+            'surface-stack': manualEditingBlocked
+                || typeof this.session.applyPattern !== 'function'
+                || selectedPlacements.length < 2
+                || selectedPlacements.some(function (placement) {
+                    return placement.positionMode === 'locked';
+                }),
+            mirror: manualEditingBlocked
+                || typeof this.session.applyPattern !== 'function'
+                || patternSeedCount < 1,
+            swap: manualEditingBlocked
+                || typeof this.session.applyPattern !== 'function'
+                || this.state.selection.length !== 2,
+            'clear-all': manualEditingBlocked
+                || typeof this.session.clearLayout !== 'function'
+                || this._layoutContentCount() === 0,
             undo: !this.capabilities.manualAuthoring || !this.state.canUndo,
             redo: !this.capabilities.manualAuthoring || !this.state.canRedo,
-            save: !this.capabilities.manualAuthoring || !this.state.dirty,
+            save: !this.capabilities.manualAuthoring
+                || !this.state.dirty
+                || this.state.canSave === false,
         };
         Object.keys(states).forEach(function (command) {
             const button = this.toolbar.querySelector(
                 '[data-command="' + command + '"]'
             );
-            if (button) button.disabled = Boolean(states[command] || this.state.busy);
+            if (button) {
+                button.disabled = Boolean(
+                    states[command]
+                    || this.state.busy
+                    || (this.assetBrowserState.open && command !== 'assets')
+                    || (this.patternState.open
+                        && !PATTERN_MODES.includes(command))
+                    || (this.planSettingsState.open)
+                    || (this.bulkZoneState.open && command !== 'bulk-zones')
+                    || (this.cellGroupState.open
+                        && command !== 'create-cell-group')
+                    || (this.aisleState.open && command !== 'aisle')
+                    || (this.clearAllState.open && command !== 'clear-all')
+                );
+            }
         }, this);
+        const assets = this.toolbar.querySelector('[data-command="assets"]');
+        if (assets) {
+            assets.setAttribute(
+                'aria-pressed',
+                this.assetBrowserState.open ? 'true' : 'false'
+            );
+            assets.setAttribute(
+                'title',
+                this.assetBrowserState.open
+                    ? 'Close asset library'
+                    : 'Open asset library'
+            );
+            assets.setAttribute(
+                'aria-label',
+                this.assetBrowserState.open
+                    ? 'Close asset library'
+                    : 'Open asset library'
+            );
+        }
         const lock = this.toolbar.querySelector('[data-command="lock"]');
         if (lock) {
-            const allLocked = selectedPlacements.length > 0
-                && selectedPlacements.every(function (placement) {
-                    return placement.positionMode === 'locked';
-                });
             lock.setAttribute('aria-label', allLocked ? 'Unlock' : 'Lock');
             lock.setAttribute('title', (allLocked ? 'Unlock' : 'Lock') + ' (L)');
+            lock.setAttribute('aria-pressed', allLocked ? 'true' : 'false');
             const label = lock.querySelector('.ip-flw-command-label');
             if (label) label.textContent = allLocked ? 'Unlock' : 'Lock';
+        }
+        PRECISION_MODES.forEach(function (command) {
+            const button = this.toolbar.querySelector(
+                '[data-command="' + command + '"]'
+            );
+            if (button) {
+                button.setAttribute(
+                    'aria-pressed',
+                    this.precisionState.open
+                        && this.precisionState.mode === command
+                        ? 'true' : 'false'
+                );
+            }
+        }, this);
+        PATTERN_MODES.forEach(function (command) {
+            const button = this.toolbar.querySelector(
+                '[data-command="' + command + '"]'
+            );
+            if (button) {
+                button.setAttribute(
+                    'aria-pressed',
+                    this.patternState.open
+                        && this.patternState.mode === command
+                        ? 'true' : 'false'
+                );
+            }
+        }, this);
+        const commandStates = {};
+        const commandButtons = this.toolbar.querySelectorAll
+            ? this.toolbar.querySelectorAll('[data-command]')
+            : [];
+        Array.prototype.forEach.call(commandButtons, function (button) {
+            const command = button.getAttribute('data-command');
+            const label = button.querySelector('.ip-flw-command-label');
+            commandStates[command] = {
+                command: command,
+                disabled: Boolean(button.disabled),
+                active: button.getAttribute('aria-pressed') === 'true',
+                label: label ? label.textContent : button.getAttribute('aria-label'),
+                title: button.getAttribute('title') || button.getAttribute('aria-label'),
+            };
+        });
+        this.commandStates = commandStates;
+        if (typeof this.options.onCommandStateChange === 'function') {
+            this.options.onCommandStateChange(clone(commandStates));
         }
     };
 
@@ -2639,6 +12753,23 @@
         }
     };
 
+    Workspace.prototype._syncPlanSettingsFromLayout = function () {
+        const next = planSettingsFromLayout(
+            this.state && this.state.layout,
+            this.planSettings
+        );
+        const changed = JSON.stringify(next) !== JSON.stringify(
+            this.planSettings
+        );
+        if (!changed) return false;
+        this.planSettings = next;
+        this._applyPlanEnvironment(next);
+        if (this.planSettingsState.open && this.planSettingsState.applying) {
+            this.planSettingsState.draft = clone(next);
+        }
+        return true;
+    };
+
     Workspace.prototype._handleSessionState = function (state) {
         if (this.destroyed) return;
         const hadLayoutProposal = Boolean(
@@ -2651,6 +12782,7 @@
         } else {
             this.root.removeAttribute('data-full-layout-preview');
         }
+        this._syncPlanSettingsFromLayout();
         this._syncController();
         if (this.state.ghostPlacement
                 && this.state.ghostPlacement.worldPosition) {
@@ -2662,7 +12794,13 @@
             this._hideGhost();
         }
         this._renderProperties();
+        this._renderAssetBrowser();
+        if (this.precisionState.open) this._renderPrecisionDialog();
+        if (this.patternState.open) this._renderPatternDialog();
+        if (this.planSettingsState.open) this._renderPlanSettingsDialog();
         this._renderToolbarState();
+        this._renderThreeNavigationState();
+        this._syncSelectionToolbar();
         this._renderCandidateControls();
         this._renderStatus();
         if (hadLayoutProposal && !this.state.layoutProposal) {
@@ -2703,8 +12841,30 @@
 
     Workspace.prototype._handleKeyDown = function (event) {
         if (!event || isTypingTarget(event.target)) return;
+        if (this.assetBrowserState.open) return;
         const key = String(event.key || '').toLowerCase();
         const modifier = Boolean(event.ctrlKey || event.metaKey);
+        if (!modifier && key === 'e' && this._threeImmersiveActive()) {
+            if (this._openWalkthroughContext()) {
+                if (typeof event.preventDefault === 'function') {
+                    event.preventDefault();
+                }
+                if (typeof event.stopPropagation === 'function') {
+                    event.stopPropagation();
+                }
+            }
+            return;
+        }
+        if (key === 'escape' && this.walkthroughContextState.expanded) {
+            if (typeof event.preventDefault === 'function') {
+                event.preventDefault();
+            }
+            if (typeof event.stopPropagation === 'function') {
+                event.stopPropagation();
+            }
+            this._closeWalkthroughContext();
+            return;
+        }
         let command = null;
         if (modifier && key === 'z' && event.shiftKey) command = 'redo';
         else if (modifier && key === 'z') command = 'undo';
@@ -2714,9 +12874,13 @@
         else if (key === 'delete' || key === 'backspace') command = 'delete';
         else if (!modifier && key === 'r') command = 'rotate';
         else if (!modifier && key === 'l') command = 'lock';
-        else if (!modifier && key === 'f') command = 'fit';
+        else if (!modifier && event.shiftKey && key === 'f') {
+            command = 'fit-layout';
+        } else if (!modifier && key === 'f') command = 'fit';
+        else if (!modifier && key === 't') command = 'top-view';
         else if (!modifier && key === 'v') command = 'select';
         else if (!modifier && key === 'h') command = 'pan';
+        else if (!modifier && key === 'm') command = 'floor-marking';
         else if (key === 'enter' && this.toolMode === 'polygon-zone') {
             if (this._finishPolygon() && typeof event.preventDefault === 'function') {
                 event.preventDefault();
@@ -2751,6 +12915,12 @@
     };
 
     Workspace.prototype.getState = function () {
+        const topDiagnostics = this.topAdapter
+            && typeof this.topAdapter.getDiagnostics === 'function'
+            ? this.topAdapter.getDiagnostics() : {};
+        const threeDiagnostics = this.threeAdapter
+            && typeof this.threeAdapter.getDiagnostics === 'function'
+            ? this.threeAdapter.getDiagnostics() : {};
         return {
             apiVersion: API_VERSION,
             destroyed: this.destroyed,
@@ -2758,16 +12928,74 @@
             toolMode: this.toolMode,
             viewMode: this.viewMode,
             gridSize: this.gridSize,
+            planPreferences: clone(this.planPreferences),
+            planSettings: clone(this.planSettings),
+            planSettingsEditor: clone(this.planSettingsState),
+            bulkZones: clone(this.bulkZoneState),
+            cellGroup: clone(this.cellGroupState),
+            aisle: clone(this.aisleState),
+            floorMarking: clone(this.floorMarkingState),
+            recording: clone(this.recordingState),
+            threeNavigation: {
+                mode: this.threeNavigationMode,
+                gridVisible: this.threeGridVisible,
+                settingsOpen: this.threeSettingsOpen,
+                orientationMenuOpen: this.threeViewMenuOpen,
+                orientation: this.threeOrientation,
+                viewpointsOpen: this.threeViewpointsOpen,
+                viewpoints: clone(this.threeViewpoints),
+                visualSettings: clone(this.threeVisualSettings),
+                compass: clone(this.threeCompassOrientation),
+                walkthrough: clone(this.threeWalkthrough),
+                drone: clone(this.threeDrone),
+                contextCard: clone(this.walkthroughContextState),
+            },
+            renderConsistency: {
+                topPlan: clone(
+                    topDiagnostics.placementTransformAudit || null
+                ),
+                three: clone(
+                    threeDiagnostics.placementTransformAudit || null
+                ),
+            },
             session: clone(this.state),
             activeDrag: clone(this.activeDrag && this.activeDrag.payload),
             dragAdvisory: clone(this.dragAdvisory),
             polygonPointCount: this.polygonPoints.length,
+            assetBrowser: clone(this.assetBrowserState),
+            precisionPositioning: clone(this.precisionState),
+            pattern: clone(this.patternState),
+            selectionToolbar: {
+                open: Boolean(this.selectionToolbarManager
+                    && this.selectionToolbarManager.isOpen()),
+                key: this.selectionToolbarKey,
+            },
             lastError: this.lastError,
         };
     };
 
+    Workspace.prototype.getCommandStates = function () {
+        return clone(this.commandStates);
+    };
+
     Workspace.prototype.suspend = function () {
         if (this.destroyed || this.suspended) return false;
+        this._cancelRecordingCountdown();
+        if (this.recordingController
+                && ['recording', 'paused'].includes(
+                    this.recordingState.status
+                )) {
+            this.recordingController.stop();
+        }
+        if (this.threeWalkthrough.active && this.threeAdapter
+                && typeof this.threeAdapter.exitWalkthrough === 'function') {
+            this.threeAdapter.exitWalkthrough('workspace_suspended');
+        }
+        if (this.threeDrone.active && this.threeAdapter
+                && typeof this.threeAdapter.exitDrone === 'function') {
+            this.threeAdapter.exitDrone('workspace_suspended');
+        }
+        this._closeSelectionToolbar('workspace_suspended', false);
         this._releasePointerCapture();
         this._cancelAdvisoryRequest('Workspace suspended.');
         if (this.controller && typeof this.controller.suspend === 'function') {
@@ -2782,6 +13010,14 @@
         this.suspendedChildren = [
             this.toolbar,
             this.shell,
+            this.assetBrowser,
+            this.precisionDialog,
+            this.patternDialog,
+            this.planSettingsDialog,
+            this.bulkZoneDialog,
+            this.cellGroupDialog,
+            this.aisleDialog,
+            this.clearAllDialog,
             this.statusBar,
         ].filter(function (child) {
             return child && child.parentNode === this.root;
@@ -2793,7 +13029,17 @@
         this.root.removeAttribute('data-facility-workspace');
         this.root.removeAttribute('data-tool-mode');
         this.root.removeAttribute('data-view-mode');
+        this.root.removeAttribute('data-walkthrough-active');
+        this.root.removeAttribute('data-drone-active');
         this.root.removeAttribute('data-full-layout-preview');
+        this.root.removeAttribute('data-asset-browser-open');
+        this.root.removeAttribute('data-precision-open');
+        this.root.removeAttribute('data-pattern-open');
+        this.root.removeAttribute('data-plan-settings-open');
+        this.root.removeAttribute('data-bulk-zone-open');
+        this.root.removeAttribute('data-cell-group-open');
+        this.root.removeAttribute('data-aisle-open');
+        this.root.removeAttribute('data-clear-all-open');
         this.suspended = true;
         return true;
     };
@@ -2824,15 +13070,81 @@
         }
         this._setToolMode(this.toolMode);
         this._setViewMode(this.viewMode);
+        if (this.assetBrowserState.open) {
+            this.root.setAttribute('data-asset-browser-open', 'true');
+        }
+        if (this.precisionState.open) {
+            this.root.setAttribute('data-precision-open', 'true');
+        }
+        if (this.patternState.open) {
+            this.root.setAttribute('data-pattern-open', 'true');
+            this._renderPatternDialog();
+        }
+        if (this.planSettingsState.open) {
+            this.root.setAttribute('data-plan-settings-open', 'true');
+            this._renderPlanSettingsDialog();
+        }
+        if (this.bulkZoneState.open) {
+            this.root.setAttribute('data-bulk-zone-open', 'true');
+            this._renderBulkZoneDialog();
+        }
+        if (this.cellGroupState.open) {
+            this.root.setAttribute('data-cell-group-open', 'true');
+            this._renderCellGroupDialog();
+        }
+        if (this.aisleState.open) {
+            this.root.setAttribute('data-aisle-open', 'true');
+            this._renderAisleDialog();
+        }
+        if (this.clearAllState.open) {
+            this.root.setAttribute('data-clear-all-open', 'true');
+            this.clearAllDialog.hidden = false;
+        }
+        this._renderToolbarState();
         this._renderStatus();
+        this._syncSelectionToolbar();
         return true;
     };
 
     Workspace.prototype.destroy = function () {
         if (this.destroyed) return false;
         this.destroyed = true;
+        this._finishMovableDialogDrag(null, true);
+        this._cancelRecordingCountdown();
+        if (this.recordingController
+                && typeof this.recordingController.dispose === 'function') {
+            this.recordingController.dispose();
+        }
+        this.recordingController = null;
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setWalkthroughStateHandler
+                    === 'function') {
+            this.threeAdapter.setWalkthroughStateHandler(null);
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setDroneStateHandler
+                    === 'function') {
+            this.threeAdapter.setDroneStateHandler(null);
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setWalkthroughContextHandler
+                    === 'function') {
+            this.threeAdapter.setWalkthroughContextHandler(null);
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setCameraOrientationHandler
+                    === 'function') {
+            this.threeAdapter.setCameraOrientationHandler(null);
+        }
         if (this.unsubscribe) this.unsubscribe();
         this.unsubscribe = null;
+        if (this.selectionToolbarManager) {
+            this.selectionToolbarManager.destroy();
+        }
+        this.selectionToolbarManager = null;
+        this.selectionToolbarElement = null;
+        this.selectionToolbarReference = null;
+        this.selectionToolbarKey = null;
         if (this.marqueeCleanup) this.marqueeCleanup();
         this.marqueeCleanup = null;
         this._releasePointerCapture();
@@ -2858,6 +13170,10 @@
         }
         this._hideGhost();
         this.proposalFocusReturn = null;
+        this.assetBrowserFocusReturn = null;
+        this.precisionFocusReturn = null;
+        this.patternFocusReturn = null;
+        this._setPatternPreview(null);
         this.suspended = false;
         this.suspendedChildren = [];
         clearElement(this.root);
@@ -2865,7 +13181,12 @@
         this.root.removeAttribute('data-facility-workspace');
         this.root.removeAttribute('data-tool-mode');
         this.root.removeAttribute('data-view-mode');
+        this.root.removeAttribute('data-walkthrough-active');
+        this.root.removeAttribute('data-drone-active');
         this.root.removeAttribute('data-full-layout-preview');
+        this.root.removeAttribute('data-asset-browser-open');
+        this.root.removeAttribute('data-precision-open');
+        this.root.removeAttribute('data-pattern-open');
         return true;
     };
 
@@ -2879,6 +13200,10 @@
         DEFAULT_GRID_SIZE: DEFAULT_GRID_SIZE,
         TOOL_MODES: TOOL_MODES,
         VIEW_MODES: VIEW_MODES,
+        PRECISION_MODES: PRECISION_MODES,
+        PATTERN_MODES: PATTERN_MODES,
+        CELL_LAYOUT_PRESETS: CELL_LAYOUT_PRESETS,
+        selectionToolbarCommands: selectionToolbarCommands,
         Workspace: Workspace,
         createWorkspace: createWorkspace,
         createAssetDragPayload: createAssetDragPayload,
@@ -2886,9 +13211,16 @@
         snapWorldPoint: snapWorldPoint,
         quarterTurnQuaternion: quarterTurnQuaternion,
         normalizeCatalog: normalizeCatalog,
+        buildAssetBatchPlacementRequests: buildAssetBatchPlacementRequests,
+        buildAlignmentUpdates: buildAlignmentUpdates,
+        buildDistributionUpdates: buildDistributionUpdates,
+        buildRelativePositionUpdates: buildRelativePositionUpdates,
+        measurePlacementDistance: measurePlacementDistance,
+        buildDistanceUpdate: buildDistanceUpdate,
         zoneDimensions: zoneDimensions,
         buildAutoArrangeRequest: buildAutoArrangeRequest,
         buildLayoutProposalReview: buildLayoutProposalReview,
         proposalDiagnosticSummary: proposalDiagnosticSummary,
+        resizeFloorMarkingFromHandle: resizeFloorMarkingFromHandle,
     });
 }));

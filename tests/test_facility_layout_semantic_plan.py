@@ -19,9 +19,11 @@ from ai_inspector.facility_layout.observation import (
 )
 from ai_inspector.facility_layout.planner import validate_layout_request
 from ai_inspector.facility_layout.semantic_plan import (
+    SEMANTIC_FACILITY_MOVE_TOOL,
     SEMANTIC_FACILITY_PREVIEW_TOOL,
     SemanticFacilityPlanError,
     compile_semantic_facility_plan,
+    facility_layout_move_tool_spec,
     facility_layout_preview_tool_spec,
     validate_semantic_facility_plan,
 )
@@ -436,7 +438,7 @@ def test_browser_cannot_supply_geometry_evidence_revisions_or_receipts(
     assert state["recentReceipts"] == []
 
 
-def test_tool_surface_has_one_preview_mutation_and_bounded_read_tools() -> None:
+def test_tool_surface_has_bounded_preview_actions_and_read_tools() -> None:
     preview = facility_layout_preview_tool_spec()
     assert preview["name"] == SEMANTIC_FACILITY_PREVIEW_TOOL
     assert preview["input_schema"]["required"] == ["semantic_plan"]
@@ -474,6 +476,18 @@ def test_tool_surface_has_one_preview_mutation_and_bounded_read_tools() -> None:
         "preserveLocked"
     ] == {"type": "boolean", "const": True}
     assert "coordinates" in preview["description"]
+    move = facility_layout_move_tool_spec()
+    assert move["name"] == SEMANTIC_FACILITY_MOVE_TOOL
+    assert set(move["input_schema"]["required"]) == {
+        "direction",
+        "distance",
+        "unit",
+        "preserve_rotation",
+    }
+    assert move["input_schema"]["properties"]["preserve_rotation"] == {
+        "const": True,
+    }
+    assert "coordinates" in move["description"]
     read_specs = facility_layout_read_tool_specs()
     assert [item["name"] for item in read_specs] == [
         "search_industrial_assets",
@@ -481,13 +495,18 @@ def test_tool_surface_has_one_preview_mutation_and_bounded_read_tools() -> None:
         "inspect_facility_region",
         "inspect_facility_findings",
         "inspect_process_bindings",
+        "inspect_facility_semantics",
+        "inspect_pattern_provenance",
+        "inspect_cell_layout_provenance",
+        "analyze_facility_spatial",
+        "analyze_facility_fit",
     ]
     assert all(
         "coordinates" in item["description"]
         or "stable ID" in item["description"]
         for item in read_specs
     )
-    serialized = json.dumps([preview, *read_specs], sort_keys=True)
+    serialized = json.dumps([preview, move, *read_specs], sort_keys=True)
     assert "move_placement" not in serialized
     assert "apply" not in serialized.lower()
     exposed_names = {
@@ -510,13 +529,19 @@ def test_skill_package_loads_with_only_the_p9_tool_surface(
         "inspect_facility_region",
         "inspect_facility_findings",
         "inspect_process_bindings",
+        "inspect_facility_semantics",
+        "inspect_pattern_provenance",
+        "inspect_cell_layout_provenance",
+        "analyze_facility_spatial",
+        "analyze_facility_fit",
+        "preview_facility_move",
         "build_facility_layout_preview",
     }
     registry = SkillRegistry.from_roots(
         [root],
         workflow_ids={"facility-layout-generation"},
         known_agents={"sage"},
-        known_modes={"training"},
+        known_modes={"training", "facility_layout"},
         known_tools_by_agent={"sage": tool_names},
     )
     package = registry.get("generate-facility-layout")
@@ -525,6 +550,7 @@ def test_skill_package_loads_with_only_the_p9_tool_surface(
     assert package.contract is not None
     assert package.contract.side_effect_default == "prohibited"
     assert package.contract.explicit_request_tools == (
+        "preview_facility_move",
         "build_facility_layout_preview",
     )
     body = package.body.lower()

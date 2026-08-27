@@ -19,7 +19,7 @@ FACILITY_LAYOUT_FEATURE_FLAGS: tuple[str, ...] = (
     "INSPECTORPRO_FACILITY_LAYOUT_AGENT_WRITE",
 )
 
-_CAPABILITY_FLAGS: Mapping[str, str] = {
+FACILITY_LAYOUT_CAPABILITY_FLAGS: Mapping[str, str] = {
     "viewer_v2": FACILITY_LAYOUT_FEATURE_FLAGS[0],
     "asset_library": FACILITY_LAYOUT_FEATURE_FLAGS[1],
     "manual_edit": FACILITY_LAYOUT_FEATURE_FLAGS[2],
@@ -29,7 +29,7 @@ _CAPABILITY_FLAGS: Mapping[str, str] = {
     "agent_write": FACILITY_LAYOUT_FEATURE_FLAGS[6],
 }
 
-_DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
+FACILITY_LAYOUT_CAPABILITY_DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
     "viewer_v2": (),
     "asset_library": ("viewer_v2",),
     "manual_edit": ("asset_library",),
@@ -38,6 +38,10 @@ _DEPENDENCIES: Mapping[str, tuple[str, ...]] = {
     "agent_preview": ("routing",),
     "agent_write": ("agent_preview",),
 }
+
+# Compatibility aliases for the frozen KF0 verifier and existing local callers.
+_CAPABILITY_FLAGS = FACILITY_LAYOUT_CAPABILITY_FLAGS
+_DEPENDENCIES = FACILITY_LAYOUT_CAPABILITY_DEPENDENCIES
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"", "0", "false", "no", "off"})
@@ -80,18 +84,21 @@ class FacilityLayoutFeatureFlags:
         return dict(self.values).get(flag_name, False)
 
     def enabled(self, capability: str) -> bool:
-        if capability not in _CAPABILITY_FLAGS:
+        if capability not in FACILITY_LAYOUT_CAPABILITY_FLAGS:
             raise ValueError(
                 f"unknown Facility Layout capability: {capability}"
             )
-        if not self.configured(_CAPABILITY_FLAGS[capability]):
+        if not self.configured(FACILITY_LAYOUT_CAPABILITY_FLAGS[capability]):
             return False
-        return all(self.enabled(item) for item in _DEPENDENCIES[capability])
+        return all(
+            self.enabled(item)
+            for item in FACILITY_LAYOUT_CAPABILITY_DEPENDENCIES[capability]
+        )
 
     def require(self, capability: str) -> None:
         if self.enabled(capability):
             return
-        flag_name = _CAPABILITY_FLAGS.get(capability)
+        flag_name = FACILITY_LAYOUT_CAPABILITY_FLAGS.get(capability)
         if flag_name is None:
             raise ValueError(
                 f"unknown Facility Layout capability: {capability}"
@@ -113,13 +120,15 @@ class FacilityLayoutFeatureFlags:
             },
             "effective": {
                 capability: self.enabled(capability)
-                for capability in _CAPABILITY_FLAGS
+                for capability in FACILITY_LAYOUT_CAPABILITY_FLAGS
             },
             "invalid": list(self.invalid),
         }
 
 
 __all__ = [
+    "FACILITY_LAYOUT_CAPABILITY_DEPENDENCIES",
+    "FACILITY_LAYOUT_CAPABILITY_FLAGS",
     "FACILITY_LAYOUT_FEATURE_FLAGS",
     "FacilityLayoutFeatureFlags",
 ]

@@ -21,6 +21,7 @@ MAXIMUM_ABSOLUTE_WORLD_COORDINATE_METERS = 1_000_000
 
 LIMITS = {
     "zones": 500,
+    "floorMarkings": 5000,
     "placements": 5000,
     "routes": 2000,
     "utilityNetworks": 100,
@@ -48,6 +49,7 @@ REVISION_RE = re.compile(r"^[0-9a-f]{64}$")
 ID_PREFIXES = {
     "layoutId": "fl-",
     "zoneId": "zn-",
+    "markingId": "fm-",
     "anchorId": "za-",
     "placementId": "pl-",
     "routeId": "rt-",

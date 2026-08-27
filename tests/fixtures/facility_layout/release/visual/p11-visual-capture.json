@@ -1,10 +1,10 @@
 {
-  "appUrl": "http://127.0.0.1:8035/",
-  "bootstrapRevision": "46986407edc33b1d1329eb70799f5cf7902f51083913cf756e4650c5f74b24bc",
+  "appUrl": "http://127.0.0.1:8037/",
+  "bootstrapRevision": "ef91265f8540cf4c67540214ec291f639cef1fcfb3f722ba0927122de4e85033",
   "passed": true,
   "records": [
     {
-      "byteLength": 161987,
+      "byteLength": 221669,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -24,26 +24,26 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1920x1080-light.png",
-      "sampledColorCount": 889,
-      "sha256": "f8f0967fa87965f38ac935d9d3bc59b75db3c9f984d5e59cae5e6e5e07a062bd",
+      "sampledColorCount": 1301,
+      "sha256": "0a8c34ad20294b1311100c24d3b119f3eba5f3d27b14bf2d9085907e803a627f",
       "state": {
-        "assetRows": 4,
+        "assetCards": 39,
         "documentClientWidth": 1920,
         "documentScrollWidth": 1920,
-        "placementCount": 4,
+        "placementCount": 199,
         "planSvgs": 1,
         "rootRect": {
           "height": 893,
-          "width": 1220,
-          "x": 610,
+          "width": 1544,
+          "x": 330,
           "y": 165
         },
         "theme": "light",
         "viewportRect": {
-          "height": 815,
-          "width": 710,
-          "x": 850,
-          "y": 215
+          "height": 865,
+          "width": 1544,
+          "x": 330,
+          "y": 165
         }
       },
       "theme": "light",
@@ -54,7 +54,7 @@
       "width": 1920
     },
     {
-      "byteLength": 157345,
+      "byteLength": 204303,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -74,26 +74,26 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1920x1080-dark.png",
-      "sampledColorCount": 1305,
-      "sha256": "13caf69603f412425ee755ee7bfdc1b6fe343cc3c2cfd2b701084feb4239e9d5",
+      "sampledColorCount": 1315,
+      "sha256": "88fb51f31672f315478fcb22945a3dce60cf0090823233911b6a77f19818ed02",
       "state": {
-        "assetRows": 4,
+        "assetCards": 39,
         "documentClientWidth": 1920,
         "documentScrollWidth": 1920,
-        "placementCount": 4,
+        "placementCount": 199,
         "planSvgs": 1,
         "rootRect": {
           "height": 893,
-          "width": 1220,
-          "x": 610,
+          "width": 1544,
+          "x": 330,
           "y": 165
         },
         "theme": "dark",
         "viewportRect": {
-          "height": 815,
-          "width": 710,
-          "x": 850,
-          "y": 215
+          "height": 865,
+          "width": 1544,
+          "x": 330,
+          "y": 165
         }
       },
       "theme": "dark",
@@ -104,7 +104,7 @@
       "width": 1920
     },
     {
-      "byteLength": 153378,
+      "byteLength": 204046,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -124,26 +124,26 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1440x960-light.png",
-      "sampledColorCount": 1092,
-      "sha256": "97685075a7de07ca6268b6f854af1125e00ef3cf12cfa72d7554153a4afc885f",
+      "sampledColorCount": 1560,
+      "sha256": "5dc84ffa3af632f06c5e152199c2513427a299b20f8a5ddfd663dee9db0627b3",
       "state": {
-        "assetRows": 4,
+        "assetCards": 39,
         "documentClientWidth": 1440,
         "documentScrollWidth": 1440,
-        "placementCount": 4,
+        "placementCount": 199,
         "planSvgs": 1,
         "rootRect": {
           "height": 773,
-          "width": 740,
-          "x": 610,
+          "width": 1064,
+          "x": 330,
           "y": 165
         },
         "theme": "light",
         "viewportRect": {
-          "height": 695,
-          "width": 360,
-          "x": 790,
-          "y": 215
+          "height": 745,
+          "width": 1064,
+          "x": 330,
+          "y": 165
         }
       },
       "theme": "light",
@@ -154,7 +154,7 @@
       "width": 1440
     },
     {
-      "byteLength": 149313,
+      "byteLength": 187293,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -174,26 +174,26 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1440x960-dark.png",
-      "sampledColorCount": 1493,
-      "sha256": "7a1ba0a656e976cf17121366568c3c36b0da4d770b72c820c7bc61facba3a797",
+      "sampledColorCount": 1512,
+      "sha256": "7826e6b7328736fe95f92187d53c4e29aec0af1f44e0030b53c8c04c98d7e6c1",
       "state": {
-        "assetRows": 4,
+        "assetCards": 39,
         "documentClientWidth": 1440,
         "documentScrollWidth": 1440,
-        "placementCount": 4,
+        "placementCount": 199,
         "planSvgs": 1,
         "rootRect": {
           "height": 773,
-          "width": 740,
-          "x": 610,
+          "width": 1064,
+          "x": 330,
           "y": 165
         },
         "theme": "dark",
         "viewportRect": {
-          "height": 695,
-          "width": 360,
-          "x": 790,
-          "y": 215
+          "height": 745,
+          "width": 1064,
+          "x": 330,
+          "y": 165
         }
       },
       "theme": "dark",
@@ -204,7 +204,7 @@
       "width": 1440
     },
     {
-      "byteLength": 140102,
+      "byteLength": 183563,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -224,26 +224,26 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1366x768-light.png",
-      "sampledColorCount": 1210,
-      "sha256": "09c6367f90c420a8f04073ee6d823f162496dffc383677b123cea768bc15ea4d",
+      "sampledColorCount": 1723,
+      "sha256": "861b4787dd6866fdf4c0454b6b13c973f00be4211ae6ee5a101464dd2f676801",
       "state": {
-        "assetRows": 4,
+        "assetCards": 39,
         "documentClientWidth": 1366,
         "documentScrollWidth": 1366,
-        "placementCount": 4,
+        "placementCount": 199,
         "planSvgs": 1,
         "rootRect": {
           "height": 581,
-          "width": 666,
-          "x": 610,
+          "width": 990,
+          "x": 330,
           "y": 165
         },
         "theme": "light",
         "viewportRect": {
-          "height": 503,
-          "width": 360,
-          "x": 790,
-          "y": 215
+          "height": 553,
+          "width": 990,
+          "x": 330,
+          "y": 165
         }
       },
       "theme": "light",
@@ -254,7 +254,7 @@
       "width": 1366
     },
     {
-      "byteLength": 137713,
+      "byteLength": 170142,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -274,26 +274,26 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-1366x768-dark.png",
-      "sampledColorCount": 1644,
-      "sha256": "3b97fd80bd4594bc7a555d47796b174e03317d89216e58b3552cf2ece75d56f1",
+      "sampledColorCount": 1699,
+      "sha256": "78e839fa10c556258a5014a7b0b8d33fedada1627dd6b277c18f143ffc3f891f",
       "state": {
-        "assetRows": 4,
+        "assetCards": 39,
         "documentClientWidth": 1366,
         "documentScrollWidth": 1366,
-        "placementCount": 4,
+        "placementCount": 199,
         "planSvgs": 1,
         "rootRect": {
           "height": 581,
-          "width": 666,
-          "x": 610,
+          "width": 990,
+          "x": 330,
           "y": 165
         },
         "theme": "dark",
         "viewportRect": {
-          "height": 503,
-          "width": 360,
-          "x": 790,
-          "y": 215
+          "height": 553,
+          "width": 990,
+          "x": 330,
+          "y": 165
         }
       },
       "theme": "dark",
@@ -304,7 +304,7 @@
       "width": 1366
     },
     {
-      "byteLength": 39112,
+      "byteLength": 82510,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -324,13 +324,13 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-390x844-light.png",
-      "sampledColorCount": 1395,
-      "sha256": "68fe259b35f6cce7c200ee3c839e5e03f9e24ec6f229b530d94d32514af6a506",
+      "sampledColorCount": 2061,
+      "sha256": "b7e303c3f530c6dca60be8f67bf4f4f8cccc8146e6a862555dda6070448e33fe",
       "state": {
-        "assetRows": 4,
+        "assetCards": 39,
         "documentClientWidth": 390,
         "documentScrollWidth": 390,
-        "placementCount": 4,
+        "placementCount": 199,
         "planSvgs": 1,
         "rootRect": {
           "height": 642,
@@ -340,10 +340,10 @@
         },
         "theme": "light",
         "viewportRect": {
-          "height": 566,
-          "width": 249.609375,
-          "x": 140.390625,
-          "y": 228
+          "height": 614,
+          "width": 390,
+          "x": 0,
+          "y": 180
         }
       },
       "theme": "light",
@@ -354,7 +354,7 @@
       "width": 390
     },
     {
-      "byteLength": 39269,
+      "byteLength": 77503,
       "checks": {
         "assetCatalogRendered": true,
         "exactImageDimensions": true,
@@ -374,13 +374,13 @@
       "nonblank": true,
       "passed": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-390x844-dark.png",
-      "sampledColorCount": 1648,
-      "sha256": "b6e262597d0fdc6b047a8ccea11fd98a5cc13f6783f1cc219e4b5ba6d630fc86",
+      "sampledColorCount": 2124,
+      "sha256": "90a9eafa7eca11995797965b2165e195fbb18798fdab64d2bcfc7cde4af89a7a",
       "state": {
-        "assetRows": 4,
+        "assetCards": 39,
         "documentClientWidth": 390,
         "documentScrollWidth": 390,
-        "placementCount": 4,
+        "placementCount": 199,
         "planSvgs": 1,
         "rootRect": {
           "height": 642,
@@ -390,10 +390,10 @@
         },
         "theme": "dark",
         "viewportRect": {
-          "height": 566,
-          "width": 249.609375,
-          "x": 140.390625,
-          "y": 228
+          "height": 614,
+          "width": 390,
+          "x": 0,
+          "y": 180
         }
       },
       "theme": "dark",
@@ -407,23 +407,23 @@
   "schemaVersion": "facility-layout-p11-visual-capture-v2",
   "sourceBinding": {
     "aggregateAlgorithm": "sha256-canonical-json-v1",
-    "aggregateSha256": "5fd02d465b080855444261603701b45dca609f68a438c40d92b7b8622635933b",
+    "aggregateSha256": "1acb645418fb9df0582efe0d8193059015afb80a82bd3774253e9da36d5fe0a4",
     "algorithm": "sha256",
     "files": [
       {
-        "byteLength": 9447,
+        "byteLength": 9714,
         "path": "static/facility_layout_app.js",
-        "sha256": "9156e79d6ed390e23cce6fa2b63a3fbc15ce2c6bc478b900cf2d06544db846de"
+        "sha256": "83e4f3e17360c06ef08980a596423844fbca406298c844b8f3deb0e3f9a4b58b"
       },
       {
-        "byteLength": 54235,
+        "byteLength": 89428,
         "path": "static/facility_layout_editor.js",
-        "sha256": "9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24"
+        "sha256": "8b5960c7f34d6b0033ab62be689c46114c7b74c4b9f68729ebc8b688212da474"
       },
       {
-        "byteLength": 76935,
+        "byteLength": 80291,
         "path": "static/facility_layout_session.js",
-        "sha256": "7c30d4b433e5b2e2bec565fd51d8ac6aa55f5887f99f86bddbcb285be7eedf1a"
+        "sha256": "c498cd3d5f7094287828b05cd6f2cb65176c0b3b3bb110109fdf1194070cdb30"
       },
       {
         "byteLength": 7417,
@@ -436,9 +436,9 @@
         "sha256": "8213cea4565951c0a31954d12eb4e6a540d5f5c15ae1a2ae09ef4dac7ef04574"
       },
       {
-        "byteLength": 101827,
+        "byteLength": 207560,
         "path": "static/facility_layout_three_adapter.js",
-        "sha256": "049bfa0bd875751e2324229bbbe4da27252f0a6a5b05733d1ac2ed7cbf26a639"
+        "sha256": "9d71345d2ef287f4780cba16d8c2d6a2577d1893c131fc5a5fa9231a476e4d64"
       },
       {
         "byteLength": 15430,
@@ -446,19 +446,19 @@
         "sha256": "f6af5dc7bb9f255b4a3decf0ebc1c06cf31a783d91493eafecfbde637baeb5c6"
       },
       {
-        "byteLength": 16296,
+        "byteLength": 50786,
         "path": "static/facility_layout_workspace.css",
-        "sha256": "e815ed6ddb2268f5c3d41d51cbc4a58d06b47ef27aa8ff55303fa31affdf9eb2"
+        "sha256": "d3b5608f61ef426810a27d6e44c7fc4a8a6bf0866135e5cb809e2d0342476f8b"
       },
       {
-        "byteLength": 117766,
+        "byteLength": 278783,
         "path": "static/facility_layout_workspace.js",
-        "sha256": "f2686689b54b41d261d07109bfa97d2755fcdf046faefa50f2c1372eb5702878"
+        "sha256": "a73a141b3b920d22dbce0429719077686e7c6f87bf0d5813cce4edeafc614a55"
       },
       {
-        "byteLength": 2890429,
+        "byteLength": 3026059,
         "path": "static/index.html",
-        "sha256": "a1851a61a5a22fd9948251c8b70444aecc22257b9166ce527707ae4375263538"
+        "sha256": "301c5b9453ff523f51c39ee30da27ef5d1561162ca7b806f99877129f0ac6c9a"
       },
       {
         "byteLength": 603445,
@@ -466,9 +466,9 @@
         "sha256": "9274bbcec8d96168626c732b5d31c775aa8cfb7eaa0599bec0c175908a2c1ce2"
       },
       {
-        "byteLength": 19796,
+        "byteLength": 20678,
         "path": "tools/capture_facility_layout_p11_visuals.py",
-        "sha256": "16a6ff707ada55b69bebf38a9b852b62acf6fedcc0eac71bf79ea7c064a12867"
+        "sha256": "e348092177a1ec12b8396e6de243980cdd4c879e8593367adf8841e299b59db1"
       }
     ]
   },
@@ -477,7 +477,7 @@
     "after": {
       "contextLost": false,
       "placementCount": 4,
-      "renderedFrames": 5,
+      "renderedFrames": 6,
       "status": "ready"
     },
     "available": true,
@@ -504,12 +504,12 @@
     "passed": true,
     "restoredObserved": true,
     "screenshot": {
-      "byteLength": 150524,
+      "byteLength": 388194,
       "height": 960,
       "nonblank": true,
       "path": "tests/fixtures/facility_layout/release/visual/facility-layout-webgl-restored.png",
-      "sampledColorCount": 1506,
-      "sha256": "92ed86de1518f83eefd9e8c426183ed61b8cd7f0c67ba24c8f37fcfe1cd98e27",
+      "sampledColorCount": 1189,
+      "sha256": "47b3e2c68b45c1a3ca7ea88395444d4cc47cf855cbe452afa24edc9fa245faa2",
       "width": 1440
     }
   }

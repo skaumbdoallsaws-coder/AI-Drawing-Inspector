@@ -73,6 +73,13 @@
         "$ref": "#/$defs/zone"
       }
     },
+    "floorMarkings": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/floorMarking"
+      }
+    },
     "placements": {
       "type": "array",
       "maxItems": 5000,
@@ -466,6 +473,114 @@
           "items": {
             "$ref": "#/$defs/zoneAnchor"
           }
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceRefs"
+        }
+      },
+      "additionalProperties": true
+    },
+    "floorMarking": {
+      "type": "object",
+      "required": [
+        "markingId",
+        "markingType",
+        "label",
+        "semanticRole",
+        "transform",
+        "width",
+        "depth",
+        "fillColor",
+        "strokeColor",
+        "opacity",
+        "text",
+        "positionMode",
+        "metadata",
+        "evidence"
+      ],
+      "properties": {
+        "markingId": {
+          "type": "string",
+          "pattern": "^fm-[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "maxLength": 128
+        },
+        "markingType": {
+          "enum": [
+            "direction_arrow",
+            "solid_line",
+            "dashed_line",
+            "keep_clear",
+            "crosswalk",
+            "hazard_stripe",
+            "floor_text",
+            "parking_box"
+          ]
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        },
+        "semanticRole": {
+          "enum": [
+            "decorative",
+            "pedestrian_lane",
+            "forklift_lane",
+            "material_flow",
+            "keep_clear",
+            "staging",
+            "safety",
+            "parking"
+          ]
+        },
+        "transform": {
+          "type": "object",
+          "required": [
+            "position",
+            "rotationDegrees"
+          ],
+          "properties": {
+            "position": {
+              "$ref": "#/$defs/vector3"
+            },
+            "rotationDegrees": {
+              "$ref": "#/$defs/finiteNumber"
+            }
+          },
+          "additionalProperties": false
+        },
+        "width": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "depth": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "fillColor": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "strokeColor": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "positionMode": {
+          "enum": [
+            "auto",
+            "manual",
+            "locked"
+          ]
+        },
+        "metadata": {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": true
         },
         "evidence": {
           "$ref": "#/$defs/evidenceRefs"

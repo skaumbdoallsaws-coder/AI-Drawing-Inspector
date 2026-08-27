@@ -10,6 +10,10 @@
 
     const API_VERSION = 1;
     const DEFAULT_VIEW_PADDING = 24;
+    const DEFAULT_PLAN_GRID_SPACING = 1;
+    const DEFAULT_PLAN_MAJOR_GRID_SPACING = 5;
+    const METERS_TO_FEET = 3.280839895;
+    const MAX_PLAN_GRID_LINES = 512;
     const DEFAULT_FALLBACK_FOOTPRINT = Object.freeze([
         Object.freeze({ x: -0.6, z: -0.4 }),
         Object.freeze({ x: 0.6, z: -0.4 }),
@@ -52,6 +56,17 @@
                 throw new Error('duplicate placementId: ' + placementId);
             }
             placementIds.add(placementId);
+        });
+        const markingIds = new Set();
+        (layout.floorMarkings || []).forEach(function (marking) {
+            const markingId = marking && marking.markingId;
+            if (typeof markingId !== 'string' || !markingId) {
+                throw new TypeError('every floor marking requires a stable markingId');
+            }
+            if (markingIds.has(markingId)) {
+                throw new Error('duplicate markingId: ' + markingId);
+            }
+            markingIds.add(markingId);
         });
         return layout;
     }
@@ -116,6 +131,23 @@
         return null;
     }
 
+    function resolveCatalogEntry(placement, options) {
+        const catalog = options && options.assetCatalog;
+        const catalogEntries = Array.isArray(catalog)
+            ? catalog
+            : (catalog && (catalog.entries || catalog.assets));
+        if (!Array.isArray(catalogEntries)) return null;
+        return catalogEntries.find(function (entry) {
+            if (!entry || typeof entry !== 'object') return false;
+            const revision = entry.assetDefinitionRevision
+                || entry.publishedAssetDefinitionRevision
+                || entry.definitionRevision;
+            return entry.assetId === placement.assetId
+                && (!revision
+                    || revision === placement.assetDefinitionRevision);
+        }) || null;
+    }
+
     function resolveLocalFootprint(placement, options) {
         const resolver = options && options.resolveAssetBounds;
         if (typeof resolver === 'function') {
@@ -123,32 +155,18 @@
             if (resolved) return resolved;
         }
 
-        const catalog = options && options.assetCatalog;
-        const catalogEntries = Array.isArray(catalog)
-            ? catalog
-            : (catalog && (catalog.entries || catalog.assets));
-        if (Array.isArray(catalogEntries)) {
-            const catalogEntry = catalogEntries.find(function (entry) {
-                if (!entry || typeof entry !== 'object') return false;
-                const revision = entry.assetDefinitionRevision
-                    || entry.publishedAssetDefinitionRevision
-                    || entry.definitionRevision;
-                return entry.assetId === placement.assetId
-                    && (!revision
-                        || revision === placement.assetDefinitionRevision);
-            });
-            if (catalogEntry) {
-                const definition = catalogEntry.definition
-                    || catalogEntry.assetDefinition
-                    || {};
-                const catalogFootprint = footprintFromValue(catalogEntry)
-                    || footprintFromValue(definition)
-                    || footprintFromValue(definition.geometry)
-                    || footprintFromValue(
-                        definition.geometry && definition.geometry.aabb
-                    );
-                if (catalogFootprint) return catalogFootprint;
-            }
+        const catalogEntry = resolveCatalogEntry(placement, options);
+        if (catalogEntry) {
+            const definition = catalogEntry.definition
+                || catalogEntry.assetDefinition
+                || {};
+            const catalogFootprint = footprintFromValue(catalogEntry)
+                || footprintFromValue(definition)
+                || footprintFromValue(definition.geometry)
+                || footprintFromValue(
+                    definition.geometry && definition.geometry.aabb
+                );
+            if (catalogFootprint) return catalogFootprint;
         }
 
         const maps = options && [
@@ -213,10 +231,41 @@
         });
     }
 
+    function floorMarkingFootprint(marking) {
+        const transform = marking && marking.transform || {};
+        const position = transform.position || {};
+        const origin = {
+            x: finiteOr(position.x, 0),
+            z: finiteOr(position.z, 0),
+        };
+        const width = Math.max(0.01, finiteOr(marking && marking.width, 1));
+        const depth = Math.max(0.01, finiteOr(marking && marking.depth, 1));
+        const radians = finiteOr(transform.rotationDegrees, 0) * Math.PI / 180;
+        const cosine = Math.cos(radians);
+        const sine = Math.sin(radians);
+        return rectangleFromSize(width, depth).map(function (local) {
+            return {
+                x: origin.x + local.x * cosine + local.z * sine,
+                z: origin.z - local.x * sine + local.z * cosine,
+            };
+        });
+    }
+
+    function yawQuaternion(degrees) {
+        const radians = finiteOr(degrees, 0) * Math.PI / 180;
+        return {
+            x: 0,
+            y: Math.sin(radians / 2),
+            z: 0,
+            w: Math.cos(radians / 2),
+        };
+    }
+
     function collectTopPlanGeometry(layout, options) {
         assertLayout(layout);
         const geometry = {
             zones: [],
+            floorMarkings: [],
             routes: [],
             placements: [],
         };
@@ -227,6 +276,8 @@
                 zoneId: zone.zoneId,
                 zoneType: zone.zoneType,
                 label: zone.label,
+                fillColor: zone.extensions && zone.extensions.style
+                    && zone.extensions.style.fillColor,
                 points: polygon,
             });
         });
@@ -237,26 +288,136 @@
             if (points.length < 2) return;
             geometry.routes.push({
                 routeId: route.routeId,
+                label: route.label || route.routeId,
                 routeKind: route.routeKind,
                 corridorWidth: finiteOr(route.corridorWidth, 0),
+                extensions: clone(route.extensions || {}),
                 points: points,
             });
         });
+        (layout.floorMarkings || []).forEach(function (marking) {
+            if (!marking || !marking.markingId) return;
+            geometry.floorMarkings.push({
+                markingId: marking.markingId,
+                markingType: marking.markingType || 'solid_line',
+                label: marking.label || marking.markingId,
+                semanticRole: marking.semanticRole || 'decorative',
+                positionMode: marking.positionMode || 'manual',
+                transform: clone(marking.transform || {}),
+                width: Math.max(0.01, finiteOr(marking.width, 1)),
+                depth: Math.max(0.01, finiteOr(marking.depth, 1)),
+                fillColor: marking.fillColor || '#facc15',
+                strokeColor: marking.strokeColor || '#111827',
+                opacity: Math.max(0, Math.min(1, finiteOr(marking.opacity, 1))),
+                text: String(marking.text || ''),
+                points: floorMarkingFootprint(marking),
+            });
+        });
         layout.placements.forEach(function (placement) {
+            const points = placementFootprint(placement, options);
+            const bounds = geometryBounds(points);
+            const catalogEntry = resolveCatalogEntry(placement, options) || {};
+            const definition = catalogEntry.definition
+                || catalogEntry.assetDefinition
+                || {};
             geometry.placements.push({
                 placementId: placement.placementId,
                 assetId: placement.assetId,
                 positionMode: placement.positionMode,
+                transform: clone(placement.transform || {}),
+                position: clone(placement.transform
+                    && placement.transform.position || { x: 0, y: 0, z: 0 }),
+                snapRelationship: clone(placement.snapRelationship || null),
                 label: placement.metadata && (
                     placement.metadata.instanceLabel || placement.metadata.label
-                ) || placement.assetId || placement.placementId,
-                points: placementFootprint(placement, options),
+                ) || catalogEntry.displayName || definition.displayName
+                    || placement.assetId || placement.placementId,
+                category: catalogEntry.category || definition.category
+                    || 'Equipment',
+                width: Math.max(0, bounds.maxX - bounds.minX),
+                depth: Math.max(0, bounds.maxZ - bounds.minZ),
+                points: points,
             });
         });
         return geometry;
     }
 
-    function collectTopPlanBounds(layout, options) {
+    function normalizedPlanWorldBounds(options) {
+        const value = options && options.worldBounds;
+        if (!value
+                || !finite(value.minX) || !finite(value.minZ)
+                || !finite(value.maxX) || !finite(value.maxZ)
+                || value.maxX <= value.minX
+                || value.maxZ <= value.minZ) return null;
+        return {
+            minX: value.minX,
+            minZ: value.minZ,
+            maxX: value.maxX,
+            maxZ: value.maxZ,
+        };
+    }
+
+    function normalizedPlanGrid(options, worldBounds) {
+        if (!worldBounds) return null;
+        const width = worldBounds.maxX - worldBounds.minX;
+        const depth = worldBounds.maxZ - worldBounds.minZ;
+        const imperial = normalizedPlanDisplayUnit(options) === 'ft';
+        const requestedSpacing = Math.max(
+            0.05,
+            imperial
+                ? finiteOr(
+                    options && options.imperialGridSpacingFeet,
+                    5
+                ) / METERS_TO_FEET
+                : finiteOr(
+                    options && options.floorGridSpacing,
+                    DEFAULT_PLAN_GRID_SPACING
+                )
+        );
+        const minimumSpacing = Math.max(width, depth) / 240;
+        const spacing = Math.max(
+            requestedSpacing,
+            Math.ceil(minimumSpacing / requestedSpacing) * requestedSpacing
+        );
+        const requestedMajor = Math.max(
+            spacing,
+            imperial
+                ? finiteOr(
+                    options && options.imperialMajorGridSpacingFeet,
+                    25
+                ) / METERS_TO_FEET
+                : finiteOr(
+                    options && options.floorMajorGridSpacing,
+                    DEFAULT_PLAN_MAJOR_GRID_SPACING
+                )
+        );
+        return {
+            spacing: spacing,
+            majorSpacing: Math.max(
+                spacing,
+                Math.round(requestedMajor / spacing) * spacing
+            ),
+        };
+    }
+
+    function planGridCoordinateValues(minimum, maximum, spacing) {
+        const epsilon = spacing * 0.000001;
+        const output = [];
+        let value = Math.ceil((minimum - epsilon) / spacing) * spacing;
+        while (value <= maximum + epsilon
+                && output.length < MAX_PLAN_GRID_LINES) {
+            output.push(Number(value.toFixed(6)));
+            value += spacing;
+        }
+        return output;
+    }
+
+    function isPlanMajorGridCoordinate(value, majorSpacing) {
+        const quotient = value / majorSpacing;
+        return Math.abs(quotient - Math.round(quotient)) < 0.000001;
+    }
+
+    function collectTopPlanBounds(layout, options, includeWorldBounds) {
         const geometry = collectTopPlanGeometry(layout, options);
         let minX = Infinity;
         let minZ = Infinity;
@@ -268,16 +429,16 @@
             maxX = Math.max(maxX, value.x);
             maxZ = Math.max(maxZ, value.z);
         }
-        const worldBounds = options && options.worldBounds;
-        if (worldBounds
-                && finite(worldBounds.minX) && finite(worldBounds.minZ)
-                && finite(worldBounds.maxX) && finite(worldBounds.maxZ)
-                && worldBounds.maxX > worldBounds.minX
-                && worldBounds.maxZ > worldBounds.minZ) {
+        const worldBounds = includeWorldBounds === false
+            ? null : normalizedPlanWorldBounds(options);
+        if (worldBounds) {
             include({ x: worldBounds.minX, z: worldBounds.minZ });
             include({ x: worldBounds.maxX, z: worldBounds.maxZ });
         }
         geometry.zones.forEach(function (zone) { zone.points.forEach(include); });
+        geometry.floorMarkings.forEach(function (marking) {
+            marking.points.forEach(include);
+        });
         geometry.routes.forEach(function (route) {
             const half = route.corridorWidth / 2;
             route.points.forEach(function (value) {
@@ -303,6 +464,199 @@
             maxZ += 0.5;
         }
         return { minX: minX, minZ: minZ, maxX: maxX, maxZ: maxZ };
+    }
+
+    function appendFloorMarkingGraphic(document, layer, marking, projection, selected) {
+        const center = projectTopPlanPoint(
+            marking.transform && marking.transform.position || { x: 0, z: 0 },
+            projection
+        );
+        const width = Math.max(2, marking.width * projection.scale);
+        const depth = Math.max(2, marking.depth * projection.scale);
+        const halfWidth = width / 2;
+        const halfDepth = depth / 2;
+        const group = svgElement(document, 'g');
+        setAttributes(group, {
+            class: 'ip-flw-floor-marking',
+            tabindex: '0',
+            role: 'button',
+            'aria-label': marking.label + ', floor marking',
+            'aria-selected': selected ? 'true' : 'false',
+            'data-floor-marking-id': marking.markingId,
+            'data-floor-marking-type': marking.markingType,
+            'data-position-mode': marking.positionMode,
+        });
+        const tooltip = svgElement(document, 'title');
+        tooltip.textContent = marking.label;
+        group.appendChild(tooltip);
+
+        const hitArea = svgElement(document, 'polygon');
+        setAttributes(hitArea, {
+            points: pointString(marking.points, projection),
+            fill: marking.fillColor,
+            'fill-opacity': Math.max(0.04, marking.opacity * 0.08),
+            stroke: selected ? '#0878d1' : 'transparent',
+            'stroke-width': selected ? '3' : '8',
+            'stroke-opacity': selected ? '1' : '0',
+            'vector-effect': 'non-scaling-stroke',
+            'data-floor-marking-hit': marking.markingId,
+        });
+        group.appendChild(hitArea);
+
+        const visual = svgElement(document, 'g');
+        setAttributes(visual, {
+            transform: 'rotate('
+                + -finiteOr(marking.transform.rotationDegrees, 0) + ' '
+                + center.x + ' ' + center.y + ')',
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+            opacity: marking.opacity,
+        });
+        const rect = function (attributes) {
+            const shape = svgElement(document, 'rect');
+            setAttributes(shape, Object.assign({
+                x: center.x - halfWidth,
+                y: center.y - halfDepth,
+                width: width,
+                height: depth,
+            }, attributes || {}));
+            visual.appendChild(shape);
+            return shape;
+        };
+        const text = function (value, fontSize) {
+            appendSvgText(document, visual, {
+                x: center.x,
+                y: center.y,
+                fill: marking.strokeColor,
+                'font-size': fontSize,
+                'font-weight': '800',
+                'font-family': 'Segoe UI, Arial, sans-serif',
+                'text-anchor': 'middle',
+                'dominant-baseline': 'central',
+            }, value);
+        };
+
+        if (marking.markingType === 'direction_arrow') {
+            const arrow = svgElement(document, 'polygon');
+            setAttributes(arrow, {
+                points: [
+                    [center.x, center.y - halfDepth],
+                    [center.x + halfWidth, center.y - halfDepth * 0.12],
+                    [center.x + halfWidth * 0.38, center.y - halfDepth * 0.12],
+                    [center.x + halfWidth * 0.38, center.y + halfDepth],
+                    [center.x - halfWidth * 0.38, center.y + halfDepth],
+                    [center.x - halfWidth * 0.38, center.y - halfDepth * 0.12],
+                    [center.x - halfWidth, center.y - halfDepth * 0.12],
+                ].map(function (point) { return point.join(','); }).join(' '),
+                fill: marking.fillColor,
+                stroke: marking.strokeColor,
+                'stroke-width': '1.5',
+                'vector-effect': 'non-scaling-stroke',
+            });
+            visual.appendChild(arrow);
+        } else if (marking.markingType === 'dashed_line') {
+            const line = svgElement(document, 'line');
+            setAttributes(line, {
+                x1: center.x,
+                y1: center.y - halfDepth,
+                x2: center.x,
+                y2: center.y + halfDepth,
+                stroke: marking.fillColor,
+                'stroke-width': width,
+                'stroke-dasharray': Math.max(4, width * 1.4) + ' '
+                    + Math.max(3, width),
+                'stroke-linecap': 'butt',
+            });
+            visual.appendChild(line);
+        } else if (marking.markingType === 'crosswalk') {
+            rect({ fill: marking.strokeColor, 'fill-opacity': '0.08' });
+            const count = Math.max(3, Math.min(12, Math.floor(depth / 12)));
+            const stripeDepth = depth / (count * 1.8);
+            for (let index = 0; index < count; index += 1) {
+                const stripe = svgElement(document, 'rect');
+                setAttributes(stripe, {
+                    x: center.x - halfWidth,
+                    y: center.y - halfDepth
+                        + (index + 0.4) * depth / count,
+                    width: width,
+                    height: stripeDepth,
+                    fill: marking.fillColor,
+                });
+                visual.appendChild(stripe);
+            }
+        } else if (marking.markingType === 'hazard_stripe') {
+            const patternId = 'ip-flw-hazard-'
+                + String(marking.markingId).replace(/[^A-Za-z0-9_-]/g, '-');
+            const defs = svgElement(document, 'defs');
+            const pattern = svgElement(document, 'pattern');
+            setAttributes(pattern, {
+                id: patternId,
+                width: '14',
+                height: '14',
+                patternUnits: 'userSpaceOnUse',
+                patternTransform: 'rotate(45)',
+            });
+            const background = svgElement(document, 'rect');
+            setAttributes(background, {
+                width: '14', height: '14', fill: marking.fillColor,
+            });
+            const stripe = svgElement(document, 'rect');
+            setAttributes(stripe, {
+                width: '7', height: '14', fill: marking.strokeColor,
+            });
+            pattern.appendChild(background);
+            pattern.appendChild(stripe);
+            defs.appendChild(pattern);
+            visual.appendChild(defs);
+            rect({ fill: 'url(#' + patternId + ')' });
+        } else if (marking.markingType === 'keep_clear'
+                || marking.markingType === 'parking_box') {
+            rect({
+                fill: marking.fillColor,
+                'fill-opacity': marking.markingType === 'keep_clear'
+                    ? '0.10' : '0.06',
+                stroke: marking.fillColor,
+                'stroke-width': Math.max(2, Math.min(8, width * 0.06)),
+                'vector-effect': 'non-scaling-stroke',
+            });
+            text(marking.text || (marking.markingType === 'keep_clear'
+                ? 'KEEP CLEAR' : 'PARKING'), Math.max(7, Math.min(18, width / 7)));
+        } else if (marking.markingType === 'floor_text') {
+            text(marking.text, Math.max(8, Math.min(28, depth * 0.42)));
+        } else {
+            rect({ fill: marking.fillColor });
+        }
+        group.appendChild(visual);
+        if (selected) {
+            const handles = svgElement(document, 'g');
+            setAttributes(handles, {
+                class: 'ip-flw-floor-marking-resize-handles',
+                'aria-label': 'Resize floor marking',
+            });
+            marking.points.forEach(function (worldPoint, index) {
+                const handleCenter = projectTopPlanPoint(worldPoint, projection);
+                const handle = svgElement(document, 'rect');
+                setAttributes(handle, {
+                    class: 'ip-flw-floor-marking-resize-handle',
+                    x: handleCenter.x - 4.5,
+                    y: handleCenter.y - 4.5,
+                    width: '9',
+                    height: '9',
+                    rx: '1',
+                    role: 'button',
+                    'aria-label': 'Resize floor marking from corner '
+                        + String(index + 1),
+                    'data-floor-marking-id': marking.markingId,
+                    'data-floor-marking-resize-handle': String(index),
+                    'data-resize-axis': index % 2 === 0 ? 'nwse' : 'nesw',
+                    'vector-effect': 'non-scaling-stroke',
+                });
+                handles.appendChild(handle);
+            });
+            group.appendChild(handles);
+        }
+        layer.appendChild(group);
+        return group;
     }
 
     function createTopPlanProjection(bounds, viewport, padding) {
@@ -381,6 +735,10 @@
                 if (placementId) return placementId;
                 const zoneId = cursor.getAttribute('data-zone-id');
                 if (zoneId) return zoneId;
+                const markingId = cursor.getAttribute('data-floor-marking-id');
+                if (markingId) return markingId;
+                const routeId = cursor.getAttribute('data-route-id');
+                if (routeId) return routeId;
             }
             cursor = cursor.parentNode;
         }
@@ -424,8 +782,450 @@
             && left.minZ <= right.maxZ;
     }
 
-    function proposalReviewBounds(layout, proposalPreview, options) {
-        const bounds = collectTopPlanBounds(layout, options);
+    function projectedPointBounds(points, projection) {
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        (points || []).forEach(function (value) {
+            const projected = projectTopPlanPoint(value, projection);
+            minX = Math.min(minX, projected.x);
+            minY = Math.min(minY, projected.y);
+            maxX = Math.max(maxX, projected.x);
+            maxY = Math.max(maxY, projected.y);
+        });
+        return {
+            minX: minX,
+            minY: minY,
+            maxX: maxX,
+            maxY: maxY,
+            width: Math.max(0, maxX - minX),
+            height: Math.max(0, maxY - minY),
+        };
+    }
+
+    function screenRectIntersectionArea(left, right) {
+        const width = Math.max(
+            0,
+            Math.min(left.maxX, right.maxX) - Math.max(left.minX, right.minX)
+        );
+        const height = Math.max(
+            0,
+            Math.min(left.maxY, right.maxY) - Math.max(left.minY, right.minY)
+        );
+        return width * height;
+    }
+
+    function zoneLabelScreenRect(zone, projection, obstacles, occupied, size) {
+        const bounds = projectedPointBounds(zone.points, projection);
+        const width = size.width;
+        const height = size.height;
+        const viewportPadding = 5;
+        const minimumX = viewportPadding;
+        const maximumX = Math.max(
+            minimumX,
+            projection.width - width - viewportPadding
+        );
+        const minimumY = viewportPadding;
+        const maximumY = Math.max(
+            minimumY,
+            projection.height - height - viewportPadding
+        );
+        const xPositions = [
+            bounds.minX + 8,
+            (bounds.minX + bounds.maxX - width) / 2,
+            bounds.maxX - width - 8,
+        ];
+        const rows = [
+            { y: bounds.minY - height + 1, edge: 'top-outside' },
+            { y: bounds.maxY - 1, edge: 'bottom-outside' },
+            { y: bounds.minY + 5, edge: 'top-inside' },
+            { y: bounds.maxY - height - 5, edge: 'bottom-inside' },
+        ];
+        const candidates = [];
+        rows.forEach(function (row, rowIndex) {
+            xPositions.forEach(function (x, columnIndex) {
+                const minX = Math.max(minimumX, Math.min(maximumX, x));
+                const minY = Math.max(minimumY, Math.min(maximumY, row.y));
+                const rect = {
+                    minX: minX,
+                    minY: minY,
+                    maxX: minX + width,
+                    maxY: minY + height,
+                    width: width,
+                    height: height,
+                    edge: row.edge,
+                };
+                const equipmentOverlap = (obstacles || []).reduce(
+                    function (total, obstacle) {
+                        return total + screenRectIntersectionArea(rect, obstacle);
+                    },
+                    0
+                );
+                const labelOverlap = (occupied || []).reduce(
+                    function (total, labelRect) {
+                        return total + screenRectIntersectionArea(rect, labelRect);
+                    },
+                    0
+                );
+                const outsideClampPenalty = rowIndex < 2
+                    && Math.abs(minY - row.y) > 0.5 ? 1 : 0;
+                candidates.push({
+                    rect: rect,
+                    score: [
+                        equipmentOverlap > 0 || labelOverlap > 0 ? 1 : 0,
+                        equipmentOverlap,
+                        labelOverlap,
+                        outsideClampPenalty,
+                        rowIndex >= 2 ? 1 : 0,
+                        rowIndex,
+                        columnIndex,
+                    ],
+                });
+            });
+        });
+        candidates.sort(function (left, right) {
+            for (let index = 0; index < left.score.length; index += 1) {
+                if (left.score[index] !== right.score[index]) {
+                    return left.score[index] - right.score[index];
+                }
+            }
+            return 0;
+        });
+        return candidates[0].rect;
+    }
+
+    function categorySymbol(value) {
+        const words = String(value || 'Equipment').trim().split(/\s+/)
+            .filter(Boolean);
+        if (!words.length) return 'E';
+        if (words.length === 1) return words[0].slice(0, 1).toUpperCase();
+        return words.slice(0, 2).map(function (word) {
+            return word.slice(0, 1).toUpperCase();
+        }).join('');
+    }
+
+    function balancedLabelLines(value) {
+        const words = String(value || '').trim().split(/\s+/).filter(Boolean);
+        if (!words.length) return ['Equipment'];
+        if (words.length === 1) return [words[0]];
+        let bestIndex = 1;
+        let bestDifference = Infinity;
+        for (let index = 1; index < words.length; index += 1) {
+            const left = words.slice(0, index).join(' ');
+            const right = words.slice(index).join(' ');
+            const difference = Math.abs(left.length - right.length);
+            if (difference < bestDifference) {
+                bestDifference = difference;
+                bestIndex = index;
+            }
+        }
+        return [
+            words.slice(0, bestIndex).join(' '),
+            words.slice(bestIndex).join(' '),
+        ];
+    }
+
+    function metricDimension(value) {
+        const rounded = Math.round(finiteOr(value, 0) * 10) / 10;
+        return String(rounded).replace(/\.0$/, '');
+    }
+
+    function normalizedPlanDisplayUnit(options) {
+        return options && options.displayUnit === 'ft' ? 'ft' : 'm';
+    }
+
+    function planDisplayDistance(value, options) {
+        const meters = finiteOr(value, 0);
+        return normalizedPlanDisplayUnit(options) === 'ft'
+            ? meters * METERS_TO_FEET
+            : meters;
+    }
+
+    function planDisplayDimension(value, options) {
+        return metricDimension(planDisplayDistance(value, options));
+    }
+
+    function planDisplayUnitWord(options) {
+        return normalizedPlanDisplayUnit(options) === 'ft' ? 'feet' : 'metres';
+    }
+
+    function appendSvgText(documentRef, parent, attributes, value) {
+        const text = svgElement(documentRef, 'text');
+        setAttributes(text, attributes);
+        text.textContent = String(value || '');
+        parent.appendChild(text);
+        return text;
+    }
+
+    function appendPlanPath(documentRef, parent, className, segments) {
+        if (!segments.length) return null;
+        const path = svgElement(documentRef, 'path');
+        setAttributes(path, {
+            class: className,
+            d: segments.join(' '),
+            fill: 'none',
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+        });
+        parent.appendChild(path);
+        return path;
+    }
+
+    function appendPlanEnvironment(documentRef, parent, projection, options) {
+        const bounds = normalizedPlanWorldBounds(options);
+        const grid = normalizedPlanGrid(options, bounds);
+        if (!bounds || !grid) return null;
+        const topLeft = projectTopPlanPoint({
+            x: bounds.minX,
+            z: bounds.maxZ,
+        }, projection);
+        const bottomRight = projectTopPlanPoint({
+            x: bounds.maxX,
+            z: bounds.minZ,
+        }, projection);
+        const width = Math.max(0, bottomRight.x - topLeft.x);
+        const height = Math.max(0, bottomRight.y - topLeft.y);
+        const floor = svgElement(documentRef, 'rect');
+        setAttributes(floor, {
+            class: 'ip-flw-plan-floor',
+            x: topLeft.x,
+            y: topLeft.y,
+            width: width,
+            height: height,
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+            'data-facility-floor': 'true',
+        });
+        parent.appendChild(floor);
+
+        const minorSegments = [];
+        const majorSegments = [];
+        const xValues = planGridCoordinateValues(
+            bounds.minX,
+            bounds.maxX,
+            grid.spacing
+        );
+        const zValues = planGridCoordinateValues(
+            bounds.minZ,
+            bounds.maxZ,
+            grid.spacing
+        );
+        xValues.forEach(function (x) {
+            const start = projectTopPlanPoint({ x: x, z: bounds.minZ }, projection);
+            const end = projectTopPlanPoint({ x: x, z: bounds.maxZ }, projection);
+            const target = isPlanMajorGridCoordinate(x, grid.majorSpacing)
+                ? majorSegments : minorSegments;
+            target.push('M ' + start.x + ' ' + start.y
+                + ' L ' + end.x + ' ' + end.y);
+        });
+        zValues.forEach(function (z) {
+            const start = projectTopPlanPoint({ x: bounds.minX, z: z }, projection);
+            const end = projectTopPlanPoint({ x: bounds.maxX, z: z }, projection);
+            const target = isPlanMajorGridCoordinate(z, grid.majorSpacing)
+                ? majorSegments : minorSegments;
+            target.push('M ' + start.x + ' ' + start.y
+                + ' L ' + end.x + ' ' + end.y);
+        });
+        const gridVisible = !options || options.showGrid !== false;
+        if (gridVisible) {
+            appendPlanPath(
+                documentRef,
+                parent,
+                'ip-flw-plan-grid ip-flw-plan-grid-minor',
+                minorSegments
+            );
+            appendPlanPath(
+                documentRef,
+                parent,
+                'ip-flw-plan-grid ip-flw-plan-grid-major',
+                majorSegments
+            );
+        }
+
+        const center = {
+            x: (bounds.minX + bounds.maxX) / 2,
+            z: (bounds.minZ + bounds.maxZ) / 2,
+        };
+        const origin = options && options.originMode === 'center'
+            ? center : { x: bounds.minX, z: bounds.minZ };
+        const axisLength = Math.min(
+            bounds.maxX - bounds.minX,
+            bounds.maxZ - bounds.minZ,
+            grid.majorSpacing * 2
+        );
+        const originPoint = projectTopPlanPoint(origin, projection);
+        const xEnd = projectTopPlanPoint({
+            x: Math.min(bounds.maxX, origin.x + axisLength),
+            z: origin.z,
+        }, projection);
+        const zEnd = projectTopPlanPoint({
+            x: origin.x,
+            z: Math.min(bounds.maxZ, origin.z + axisLength),
+        }, projection);
+        appendPlanPath(documentRef, parent, 'ip-flw-plan-axis ip-flw-plan-axis-x', [
+            'M ' + originPoint.x + ' ' + originPoint.y
+                + ' L ' + xEnd.x + ' ' + xEnd.y,
+        ]);
+        appendPlanPath(documentRef, parent, 'ip-flw-plan-axis ip-flw-plan-axis-z', [
+            'M ' + originPoint.x + ' ' + originPoint.y
+                + ' L ' + zEnd.x + ' ' + zEnd.y,
+        ]);
+
+        const originMarker = svgElement(documentRef, 'circle');
+        setAttributes(originMarker, {
+            class: 'ip-flw-plan-origin',
+            cx: originPoint.x,
+            cy: originPoint.y,
+            r: '3.5',
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+            'data-facility-origin': 'true',
+        });
+        parent.appendChild(originMarker);
+        const centerPoint = projectTopPlanPoint(center, projection);
+        const centerSize = 5;
+        appendPlanPath(documentRef, parent, 'ip-flw-plan-center', [
+            'M ' + (centerPoint.x - centerSize) + ' ' + centerPoint.y
+                + ' L ' + (centerPoint.x + centerSize) + ' ' + centerPoint.y,
+            'M ' + centerPoint.x + ' ' + (centerPoint.y - centerSize)
+                + ' L ' + centerPoint.x + ' ' + (centerPoint.y + centerSize),
+        ]);
+
+        const labelClass = 'ip-flw-plan-coordinate-label';
+        if (gridVisible) {
+            xValues.filter(function (value) {
+                return isPlanMajorGridCoordinate(value, grid.majorSpacing);
+            }).forEach(function (x) {
+                const at = projectTopPlanPoint({ x: x, z: bounds.minZ }, projection);
+                appendSvgText(documentRef, parent, {
+                    class: labelClass,
+                    x: at.x,
+                    y: at.y + 15,
+                    'text-anchor': 'middle',
+                    'pointer-events': 'none',
+                    'aria-hidden': 'true',
+                }, planDisplayDimension(x, options));
+            });
+            zValues.filter(function (value) {
+                return isPlanMajorGridCoordinate(value, grid.majorSpacing);
+            }).forEach(function (z) {
+                const at = projectTopPlanPoint({ x: bounds.minX, z: z }, projection);
+                appendSvgText(documentRef, parent, {
+                    class: labelClass,
+                    x: at.x - 7,
+                    y: at.y + 3,
+                    'text-anchor': 'end',
+                    'pointer-events': 'none',
+                    'aria-hidden': 'true',
+                }, planDisplayDimension(z, options));
+            });
+        }
+        appendSvgText(documentRef, parent, {
+            class: 'ip-flw-plan-axis-label ip-flw-plan-axis-label-x',
+            x: xEnd.x + 5,
+            y: xEnd.y + 3,
+            'text-anchor': 'start',
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+        }, '+X');
+        appendSvgText(documentRef, parent, {
+            class: 'ip-flw-plan-axis-label ip-flw-plan-axis-label-z',
+            x: zEnd.x,
+            y: zEnd.y - 6,
+            'text-anchor': 'middle',
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+        }, '+Z');
+        appendSvgText(documentRef, parent, {
+            class: 'ip-flw-plan-grid-caption',
+            x: topLeft.x + 7,
+            y: topLeft.y + 14,
+            'text-anchor': 'start',
+            'pointer-events': 'auto',
+            role: 'button',
+            tabindex: '0',
+            'data-plan-settings-trigger': 'dimensions',
+            'aria-label': 'Edit facility dimensions and grid spacing',
+        }, planDisplayDimension(bounds.maxX - bounds.minX, options) + ' x '
+            + planDisplayDimension(bounds.maxZ - bounds.minZ, options) + ' '
+            + normalizedPlanDisplayUnit(options) + (gridVisible
+                ? ' | Grid ' + planDisplayDimension(grid.spacing, options)
+                    + ' ' + normalizedPlanDisplayUnit(options)
+                : ' | Grid hidden'));
+        return {
+            bounds: Object.assign({}, bounds),
+            spacing: grid.spacing,
+            majorSpacing: grid.majorSpacing,
+            minorLineCount: gridVisible ? minorSegments.length : 0,
+            majorLineCount: gridVisible ? majorSegments.length : 0,
+            origin: origin,
+            center: center,
+        };
+    }
+
+    function planCardDetailLevel(width, height, scale) {
+        const currentWidth = Math.max(0, width * scale);
+        const currentHeight = Math.max(0, height * scale);
+        const shortest = Math.min(currentWidth, currentHeight);
+        const longest = Math.max(currentWidth, currentHeight);
+        if (shortest >= 42 && longest >= 58) return 'full';
+        if (shortest >= 14 && longest >= 18) return 'compact';
+        return 'body';
+    }
+
+    function applyPlanCardContentVisibility(card, detailLevel) {
+        if (!card || !card.children) return;
+        Array.prototype.forEach.call(card.children, function (child) {
+            if (!child || typeof child.getAttribute !== 'function') return;
+            const className = child.getAttribute('class');
+            let visible = null;
+            if (className === 'ip-flw-plan-card-compact') {
+                visible = detailLevel === 'compact';
+            } else if (className === 'ip-flw-plan-card-detail') {
+                visible = detailLevel === 'full';
+            }
+            if (visible === null) return;
+            child.setAttribute('display', visible ? 'inline' : 'none');
+            child.setAttribute(
+                'style',
+                'display:' + (visible ? 'inline' : 'none')
+            );
+        });
+    }
+
+    function updatePlanCardDetailLevels(svg, scale) {
+        if (!svg || !svg.children) return;
+        let placementLayer = null;
+        Array.prototype.forEach.call(svg.children, function (layer) {
+            if (layer && typeof layer.getAttribute === 'function'
+                    && layer.getAttribute('data-layer') === 'placements') {
+                placementLayer = layer;
+            }
+        });
+        if (!placementLayer || !placementLayer.children) return;
+        Array.prototype.forEach.call(placementLayer.children, function (card) {
+            if (!card || typeof card.getAttribute !== 'function') return;
+            const width = Number(card.getAttribute('data-card-width'));
+            const height = Number(card.getAttribute('data-card-height'));
+            if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+            const detailLevel = planCardDetailLevel(width, height, scale);
+            card.setAttribute('data-card-detail-level', detailLevel);
+            applyPlanCardContentVisibility(card, detailLevel);
+        });
+    }
+
+    function proposalReviewBounds(
+        layout,
+        proposalPreview,
+        options,
+        includeWorldBounds
+    ) {
+        const bounds = collectTopPlanBounds(
+            layout,
+            options,
+            includeWorldBounds
+        );
         const beforePlacements = proposalPreview
             && Array.isArray(proposalPreview.beforePlacements)
             ? proposalPreview.beforePlacements : [];
@@ -490,13 +1290,21 @@
         this.type = 'top-plan';
         this.layout = null;
         this.geometry = null;
+        this.environmentDiagnostics = null;
         this.projection = null;
         this.renderProjection = null;
         this.ghostPlacement = null;
         this.proposalPreview = null;
+        this.transientPlacementMove = null;
+        this.transientPlacementDuplicate = null;
+        this.transientZonePreview = null;
+        this.transientFloorMarkingPreview = null;
+        this.transientAislePreview = null;
+        this.transientPatternPreview = null;
         this.selection = null;
         this.selections = new Set();
         this.selectionHandler = null;
+        this.viewportChangeHandler = null;
         this.renderCount = 0;
         this.observerCount = 0;
         this.disposed = false;
@@ -565,8 +1373,12 @@
         });
         removeChildren(this.svg);
         this.renderProjection = null;
+        this.environmentDiagnostics = null;
         this.renderCount += 1;
-        if (!this.layout) return;
+        if (!this.layout) {
+            this._notifyViewportChange();
+            return;
+        }
 
         this.geometry = collectTopPlanGeometry(this.layout, this.options);
         if (!this.projection
@@ -583,6 +1395,18 @@
             );
         }
 
+        const environmentLayer = svgElement(this.document, 'g');
+        environmentLayer.setAttribute('data-layer', 'environment');
+        environmentLayer.setAttribute('pointer-events', 'none');
+        environmentLayer.setAttribute('aria-hidden', 'true');
+        this.environmentDiagnostics = appendPlanEnvironment(
+            this.document,
+            environmentLayer,
+            this.projection,
+            this.options
+        );
+        this.svg.appendChild(environmentLayer);
+
         const zoneLayer = svgElement(this.document, 'g');
         zoneLayer.setAttribute('data-layer', 'zones');
         this.geometry.zones.forEach(function (zone) {
@@ -590,7 +1414,7 @@
             const polygon = svgElement(this.document, 'polygon');
             setAttributes(polygon, {
                 points: pointString(zone.points, this.projection),
-                fill: selected ? '#bfe3ff' : '#dcecf3',
+                fill: selected ? '#bfe3ff' : (zone.fillColor || '#dcecf3'),
                 'fill-opacity': '0.38',
                 stroke: selected ? '#0878d1' : '#4d7c8a',
                 'stroke-width': selected ? '3' : '1.5',
@@ -608,10 +1432,14 @@
         const routeLayer = svgElement(this.document, 'g');
         routeLayer.setAttribute('data-layer', 'routes');
         this.geometry.routes.forEach(function (route) {
+            const selected = this.selections.has(route.routeId);
+            const aisle = route.extensions && route.extensions.facilityAisle;
             const polyline = svgElement(this.document, 'polyline');
-            const routeColor = route.routeKind === 'forklift'
+            const routeColor = aisle && aisle.color
+                ? aisle.color
+                : (route.routeKind === 'forklift'
                 ? '#d97706'
-                : (route.routeKind === 'operator' ? '#2563eb' : '#5b6472');
+                : (route.routeKind === 'operator' ? '#2563eb' : '#5b6472'));
             setAttributes(polyline, {
                 points: pointString(route.points, this.projection),
                 fill: 'none',
@@ -620,14 +1448,66 @@
                     2,
                     route.corridorWidth * this.projection.scale
                 ),
-                'stroke-opacity': '0.58',
+                'stroke-opacity': selected ? '0.82' : '0.58',
                 'stroke-linejoin': 'round',
                 'stroke-linecap': 'round',
+                tabindex: '0',
+                role: 'button',
+                'aria-label': route.label + ', facility aisle',
+                'aria-selected': selected ? 'true' : 'false',
                 'data-route-id': route.routeId,
             });
             routeLayer.appendChild(polyline);
+            const centerline = svgElement(this.document, 'polyline');
+            setAttributes(centerline, {
+                points: pointString(route.points, this.projection),
+                fill: 'none',
+                stroke: selected ? '#0878d1' : routeColor,
+                'stroke-width': selected ? '3' : '1.5',
+                'stroke-opacity': '0.95',
+                'stroke-dasharray': aisle && aisle.direction === 'one_way'
+                    ? '10 6' : 'none',
+                'vector-effect': 'non-scaling-stroke',
+                'pointer-events': 'none',
+                'aria-hidden': 'true',
+            });
+            routeLayer.appendChild(centerline);
         }, this);
+        if (this.transientAislePreview
+                && this.transientAislePreview.points.length >= 2) {
+            const preview = this.transientAislePreview;
+            const polyline = svgElement(this.document, 'polyline');
+            setAttributes(polyline, {
+                points: pointString(preview.points, this.projection),
+                fill: 'none',
+                stroke: preview.color,
+                'stroke-width': Math.max(
+                    2,
+                    preview.corridorWidth * this.projection.scale
+                ),
+                'stroke-opacity': '0.42',
+                'stroke-dasharray': '10 6',
+                'stroke-linejoin': 'round',
+                'stroke-linecap': 'round',
+                'pointer-events': 'none',
+                'data-aisle-preview': 'true',
+            });
+            routeLayer.appendChild(polyline);
+        }
         this.svg.appendChild(routeLayer);
+
+        const markingLayer = svgElement(this.document, 'g');
+        markingLayer.setAttribute('data-layer', 'floor-markings');
+        this.geometry.floorMarkings.forEach(function (marking) {
+            appendFloorMarkingGraphic(
+                this.document,
+                markingLayer,
+                marking,
+                this.projection,
+                this.selections.has(marking.markingId)
+            );
+        }, this);
+        this.svg.appendChild(markingLayer);
 
         const newProposalIds = new Set(
             this.proposalPreview
@@ -704,14 +1584,120 @@
 
         const placementLayer = svgElement(this.document, 'g');
         placementLayer.setAttribute('data-layer', 'placements');
+        const stackGroups = new Map();
         this.geometry.placements.forEach(function (placement) {
-            const selected = this.selections.has(placement.placementId);
+            const relationship = placement.snapRelationship;
+            if (!relationship || relationship.family !== 'vertical_stack'
+                    || typeof relationship.stackId !== 'string') return;
+            if (!stackGroups.has(relationship.stackId)) {
+                stackGroups.set(relationship.stackId, []);
+            }
+            stackGroups.get(relationship.stackId).push(placement);
+        });
+        const stackInfoByPlacement = new Map();
+        stackGroups.forEach(function (members, stackId) {
+            members.sort(function (left, right) {
+                return finiteOr(
+                    left.snapRelationship && left.snapRelationship.level, 0
+                ) - finiteOr(
+                    right.snapRelationship && right.snapRelationship.level, 0
+                );
+            });
+            const base = members[0];
+            const relationship = base.snapRelationship || {};
+            const count = Math.max(
+                members.length,
+                Math.floor(finiteOr(relationship.count, members.length))
+            );
+            const itemHeight = Math.max(
+                0,
+                finiteOr(relationship.itemHeightMeters, 0)
+            );
+            const gap = Math.max(0, finiteOr(relationship.gapMeters, 0));
+            const info = {
+                stackId: stackId,
+                baseId: base.placementId,
+                memberIds: members.map(function (member) {
+                    return member.placementId;
+                }),
+                count: count,
+                totalHeight: itemHeight * count + gap * Math.max(0, count - 1),
+            };
+            members.forEach(function (member) {
+                stackInfoByPlacement.set(member.placementId, info);
+            });
+        });
+        this.geometry.placements.filter(function (placement) {
+            const info = stackInfoByPlacement.get(placement.placementId);
+            return !info || info.baseId === placement.placementId;
+        }).forEach(function (placement) {
+            const stackInfo = stackInfoByPlacement.get(placement.placementId);
+            const selected = stackInfo
+                ? stackInfo.memberIds.some(function (placementId) {
+                    return this.selections.has(placementId);
+                }, this)
+                : this.selections.has(placement.placementId);
             const proposalState = newProposalIds.has(placement.placementId)
                 ? 'new'
                 : (movedProposalIds.has(placement.placementId)
                     ? 'moved' : '');
+            const screenBounds = projectedPointBounds(
+                placement.points,
+                this.projection
+            );
+            const detailLevel = planCardDetailLevel(
+                screenBounds.width,
+                screenBounds.height,
+                1
+            );
+            const card = svgElement(this.document, 'g');
+            const displayUnitWord = planDisplayUnitWord(this.options);
+            let cardAriaLabel = placement.label + ', '
+                + planDisplayDimension(placement.width, this.options) + ' by '
+                + planDisplayDimension(placement.depth, this.options) + ' '
+                + displayUnitWord;
+            if (stackInfo) {
+                cardAriaLabel += ', stack of ' + stackInfo.count + ' items, '
+                    + planDisplayDimension(
+                        stackInfo.totalHeight, this.options
+                    ) + ' ' + displayUnitWord + ' high';
+            }
+            if (proposalState) {
+                cardAriaLabel += ' (' + proposalState + ' proposal)';
+            }
+            const cardAttributes = {
+                class: 'ip-flw-plan-card',
+                tabindex: proposalState ? '-1' : '0',
+                role: proposalState ? 'img' : 'button',
+                'aria-label': cardAriaLabel,
+                'aria-selected': selected ? 'true' : 'false',
+                'data-placement-id': placement.placementId,
+                'data-asset-id': placement.assetId || '',
+                'data-card-width': screenBounds.width,
+                'data-card-height': screenBounds.height,
+                'data-card-world-width': placement.width,
+                'data-card-world-depth': placement.depth,
+                'data-card-detail-level': detailLevel,
+            };
+            if (stackInfo) {
+                cardAttributes['data-stack-id'] = stackInfo.stackId;
+                cardAttributes['data-stack-count'] = stackInfo.count;
+            }
+            if (proposalState) {
+                cardAttributes['pointer-events'] = 'none';
+                cardAttributes['data-proposal-state'] = proposalState;
+            }
+            setAttributes(card, cardAttributes);
+            const tooltip = svgElement(this.document, 'title');
+            tooltip.textContent = placement.label + ' - '
+                + planDisplayDimension(placement.width, this.options) + ' x '
+                + planDisplayDimension(placement.depth, this.options) + ' '
+                + normalizedPlanDisplayUnit(this.options);
+            card.appendChild(tooltip);
+
             const polygon = svgElement(this.document, 'polygon');
             const attributes = {
+                class: 'ip-flw-plan-card-body',
                 points: pointString(placement.points, this.projection),
                 fill: proposalState === 'new'
                     ? '#0ea5e9'
@@ -725,27 +1711,227 @@
                         : (selected ? '#0878d1' : '#526273')),
                 'stroke-width': selected ? '3' : '1.5',
                 'vector-effect': 'non-scaling-stroke',
-                tabindex: proposalState ? '-1' : '0',
-                role: proposalState ? 'img' : 'button',
-                'aria-label': placement.label + (
-                    proposalState
-                        ? ' (' + proposalState + ' proposal)' : ''
-                ),
-                'aria-selected': selected ? 'true' : 'false',
-                'data-placement-id': placement.placementId,
-                'data-asset-id': placement.assetId || '',
+                'aria-hidden': 'true',
             };
             if (proposalState) {
                 attributes['fill-opacity'] = '0.24';
                 attributes['stroke-width'] = '2';
                 attributes['stroke-dasharray'] = '7 4';
-                attributes['pointer-events'] = 'none';
-                attributes['data-proposal-state'] = proposalState;
             }
             setAttributes(polygon, attributes);
-            placementLayer.appendChild(polygon);
+            card.appendChild(polygon);
+
+            if (stackInfo) {
+                const badgeWidth = Math.max(24, Math.min(42, screenBounds.width * 0.34));
+                const badgeHeight = Math.max(14, Math.min(20, screenBounds.height * 0.28));
+                const badge = svgElement(this.document, 'rect');
+                setAttributes(badge, {
+                    x: screenBounds.maxX - badgeWidth - 3,
+                    y: screenBounds.minY + 3,
+                    width: badgeWidth,
+                    height: badgeHeight,
+                    rx: 3,
+                    fill: '#0878d1',
+                    stroke: '#ffffff',
+                    'stroke-width': '1',
+                    'vector-effect': 'non-scaling-stroke',
+                    'pointer-events': 'none',
+                    'data-stack-badge': stackInfo.stackId,
+                });
+                card.appendChild(badge);
+                appendSvgText(this.document, card, {
+                    x: screenBounds.maxX - badgeWidth / 2 - 3,
+                    y: screenBounds.minY + badgeHeight / 2 + 3,
+                    fill: '#ffffff',
+                    'font-size': Math.max(8, Math.min(12, badgeHeight * 0.58)),
+                    'font-weight': '700',
+                    'text-anchor': 'middle',
+                    'dominant-baseline': 'central',
+                    'pointer-events': 'none',
+                }, 'x' + stackInfo.count);
+            }
+
+            const accent = svgElement(this.document, 'line');
+            setAttributes(accent, {
+                class: 'ip-flw-plan-card-accent',
+                x1: screenBounds.minX + 2,
+                y1: screenBounds.minY + 3,
+                x2: screenBounds.minX + 2,
+                y2: screenBounds.maxY - 3,
+                'stroke-width': Math.max(1.5, Math.min(3, screenBounds.width / 8)),
+                'stroke-linecap': 'round',
+                'pointer-events': 'none',
+                'aria-hidden': 'true',
+            });
+            card.appendChild(accent);
+
+            const compact = svgElement(this.document, 'g');
+            setAttributes(compact, {
+                class: 'ip-flw-plan-card-compact',
+                'data-card-content': 'compact',
+                'pointer-events': 'none',
+                'aria-hidden': 'true',
+            });
+            const compactSize = Math.max(
+                8,
+                Math.min(16, Math.min(screenBounds.width, screenBounds.height) * 0.52)
+            );
+            const compactX = (screenBounds.minX + screenBounds.maxX) / 2;
+            const compactY = (screenBounds.minY + screenBounds.maxY) / 2;
+            const compactTile = svgElement(this.document, 'rect');
+            setAttributes(compactTile, {
+                class: 'ip-flw-plan-card-symbol',
+                x: compactX - compactSize / 2,
+                y: compactY - compactSize / 2,
+                width: compactSize,
+                height: compactSize,
+                rx: Math.min(3, compactSize / 5),
+                fill: '#dceeff',
+                stroke: '#0878d1',
+            });
+            compact.appendChild(compactTile);
+            appendSvgText(this.document, compact, {
+                class: 'ip-flw-plan-card-symbol-text',
+                x: compactX,
+                y: compactY,
+                'font-size': Math.max(4, compactSize * 0.42),
+                'text-anchor': 'middle',
+                'dominant-baseline': 'central',
+            }, categorySymbol(placement.category));
+            card.appendChild(compact);
+
+            const full = svgElement(this.document, 'g');
+            setAttributes(full, {
+                class: 'ip-flw-plan-card-detail',
+                'data-card-content': 'full',
+                'pointer-events': 'none',
+                'aria-hidden': 'true',
+            });
+            const centerX = (screenBounds.minX + screenBounds.maxX) / 2;
+            const centerY = (screenBounds.minY + screenBounds.maxY) / 2;
+            const shortest = Math.min(screenBounds.width, screenBounds.height);
+            const fontSize = Math.max(4, Math.min(8, shortest * 0.14));
+            appendSvgText(this.document, full, {
+                class: 'ip-flw-plan-card-category',
+                x: centerX,
+                y: screenBounds.minY + Math.max(6, fontSize * 1.05),
+                'font-size': Math.max(3.5, fontSize * 0.64),
+                'text-anchor': 'middle',
+            }, String(placement.category || 'Equipment').toUpperCase());
+            const labelLines = balancedLabelLines(placement.label);
+            const labelStartY = centerY
+                - ((labelLines.length - 1) * fontSize * 0.55);
+            labelLines.forEach(function (line, lineIndex) {
+                const estimatedWidth = line.length * fontSize * 0.56;
+                const availableWidth = Math.max(4, screenBounds.width - 12);
+                const textAttributes = {
+                    class: 'ip-flw-plan-card-title',
+                    x: centerX,
+                    y: labelStartY + lineIndex * fontSize * 1.1,
+                    'font-size': fontSize,
+                    'font-weight': '700',
+                    'text-anchor': 'middle',
+                    'dominant-baseline': 'central',
+                };
+                if (estimatedWidth > availableWidth) {
+                    textAttributes.textLength = availableWidth;
+                    textAttributes.lengthAdjust = 'spacingAndGlyphs';
+                }
+                appendSvgText(
+                    this.document,
+                    full,
+                    textAttributes,
+                    line
+                );
+            }, this);
+            appendSvgText(this.document, full, {
+                class: 'ip-flw-plan-card-dimensions',
+                x: centerX,
+                y: screenBounds.maxY - Math.max(4, fontSize * 0.55),
+                'font-size': Math.max(3.5, fontSize * 0.62),
+                'text-anchor': 'middle',
+            }, planDisplayDimension(placement.width, this.options) + ' x '
+                + planDisplayDimension(placement.depth, this.options) + ' '
+                + normalizedPlanDisplayUnit(this.options));
+            card.appendChild(full);
+            applyPlanCardContentVisibility(card, detailLevel);
+            placementLayer.appendChild(card);
         }, this);
         this.svg.appendChild(placementLayer);
+
+        const zoneLabelLayer = svgElement(this.document, 'g');
+        zoneLabelLayer.setAttribute('data-layer', 'zone-labels');
+        zoneLabelLayer.setAttribute('pointer-events', 'none');
+        zoneLabelLayer.setAttribute('aria-hidden', 'true');
+        const labelObstacles = this.geometry.placements.map(function (placement) {
+            const bounds = projectedPointBounds(placement.points, this.projection);
+            return {
+                minX: bounds.minX - 3,
+                minY: bounds.minY - 3,
+                maxX: bounds.maxX + 3,
+                maxY: bounds.maxY + 3,
+            };
+        }, this);
+        const occupiedLabels = [];
+        this.geometry.zones.forEach(function (zone) {
+            const selected = this.selections.has(zone.zoneId);
+            const fullLabel = String(zone.label || zone.zoneId || 'Zone');
+            const displayLabel = fullLabel.length > 42
+                ? fullLabel.slice(0, 39) + '...' : fullLabel;
+            const labelSize = {
+                width: Math.max(
+                    72,
+                    Math.min(236, displayLabel.length * 6.5 + 22)
+                ),
+                height: 23,
+            };
+            const labelRect = zoneLabelScreenRect(
+                zone,
+                this.projection,
+                labelObstacles,
+                occupiedLabels,
+                labelSize
+            );
+            occupiedLabels.push(labelRect);
+            const labelGroup = svgElement(this.document, 'g');
+            setAttributes(labelGroup, {
+                'data-zone-label-for': zone.zoneId,
+                'data-zone-label-edge': labelRect.edge,
+            });
+            const labelBackground = svgElement(this.document, 'rect');
+            setAttributes(labelBackground, {
+                'data-zone-label-box-for': zone.zoneId,
+                x: labelRect.minX,
+                y: labelRect.minY,
+                width: labelRect.width,
+                height: labelRect.height,
+                rx: 3,
+                fill: selected ? '#0878d1' : '#f7fafc',
+                'fill-opacity': selected ? '0.97' : '0.95',
+                stroke: selected ? '#0878d1' : '#4d7c8a',
+                'stroke-width': '1',
+                'vector-effect': 'non-scaling-stroke',
+            });
+            const labelText = svgElement(this.document, 'text');
+            setAttributes(labelText, {
+                x: labelRect.minX + 11,
+                y: labelRect.minY + 15.5,
+                fill: selected ? '#ffffff' : '#173042',
+                'font-family': 'Segoe UI, Arial, sans-serif',
+                'font-size': '11',
+                'font-weight': '700',
+            });
+            labelText.textContent = displayLabel;
+            labelGroup.appendChild(labelBackground);
+            labelGroup.appendChild(labelText);
+            zoneLabelLayer.appendChild(labelGroup);
+        }, this);
+        this.svg.appendChild(zoneLabelLayer);
+        this._applyTransientPlacementMove();
+        this._applyTransientPlacementDuplicate();
+        this._applyTransientZonePreview();
+        this._applyTransientFloorMarkingPreview();
+        this._applyTransientPatternPreview();
 
         if (this.ghostPlacement) {
             const ghostLayer = svgElement(this.document, 'g');
@@ -772,6 +1958,7 @@
             {},
             this.projection
         ));
+        this._notifyViewportChange();
     };
 
     TopPlanAdapter.prototype._applyProjectionTransform = function () {
@@ -797,7 +1984,560 @@
                 layer.setAttribute('transform', transform);
             }
         });
+        updatePlanCardDetailLevels(this.svg, scale);
         this.renderCount += 1;
+        return true;
+    };
+
+    TopPlanAdapter.prototype._applyTransientPlacementMove = function () {
+        if (!this.svg || !this.svg.children) return false;
+        const movableLayers = [];
+        Array.prototype.forEach.call(this.svg.children, function (layer) {
+            if (layer && typeof layer.getAttribute === 'function'
+                    && ['placements', 'floor-markings'].includes(
+                        layer.getAttribute('data-layer')
+                    )) {
+                movableLayers.push(layer);
+            }
+        });
+        if (!movableLayers.length) return false;
+        const preview = this.transientPlacementMove;
+        const identifiers = new Set(preview ? preview.placementIds : []);
+        const projection = this.renderProjection || this.projection;
+        const scale = projection && finite(projection.scale)
+            ? projection.scale : 1;
+        const delta = preview ? preview.delta : { x: 0, z: 0 };
+        const transform = 'translate('
+            + finiteOr(delta.x, 0) * scale + ' '
+            + -finiteOr(delta.z, 0) * scale + ')';
+        movableLayers.forEach(function (movableLayer) {
+            Array.prototype.forEach.call(movableLayer.children, function (card) {
+                if (!card || typeof card.getAttribute !== 'function') return;
+                const identifier = card.getAttribute('data-placement-id')
+                    || card.getAttribute('data-floor-marking-id');
+                const active = identifiers.has(identifier);
+                card.setAttribute('transform', active ? transform : '');
+                card.setAttribute('data-drag-preview', active ? 'true' : 'false');
+            });
+        });
+        return true;
+    };
+
+    TopPlanAdapter.prototype._removeTransientFloorMarkingPreview = function () {
+        if (!this.svg || !this.svg.children) return false;
+        let removed = false;
+        Array.prototype.slice.call(this.svg.children).forEach(function (layer) {
+            if (layer && typeof layer.getAttribute === 'function'
+                    && layer.getAttribute('data-layer')
+                        === 'transient-floor-marking-preview') {
+                this.svg.removeChild(layer);
+                removed = true;
+            }
+        }, this);
+        return removed;
+    };
+
+    TopPlanAdapter.prototype._applyTransientFloorMarkingPreview = function () {
+        this._removeTransientFloorMarkingPreview();
+        const marking = this.transientFloorMarkingPreview;
+        const projection = this.renderProjection || this.projection;
+        if (!marking || !projection) return true;
+        const layer = svgElement(this.document, 'g');
+        setAttributes(layer, {
+            'data-layer': 'transient-floor-marking-preview',
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+            opacity: '0.72',
+        });
+        let referenceLayer = null;
+        Array.prototype.forEach.call(this.svg.children, function (candidate) {
+            if (candidate && typeof candidate.getAttribute === 'function'
+                    && candidate.getAttribute('data-layer')
+                        === 'floor-markings') {
+                referenceLayer = candidate;
+            }
+        });
+        const projectionTransform = referenceLayer
+            && referenceLayer.getAttribute('transform');
+        if (projectionTransform) layer.setAttribute(
+            'transform',
+            projectionTransform
+        );
+        appendFloorMarkingGraphic(
+            this.document,
+            layer,
+            marking,
+            projection,
+            true
+        );
+        this.svg.appendChild(layer);
+        return true;
+    };
+
+    TopPlanAdapter.prototype._removeTransientZonePreview = function () {
+        if (!this.svg || !this.svg.children) return false;
+        let removed = false;
+        Array.prototype.slice.call(this.svg.children).forEach(function (layer) {
+            if (layer && typeof layer.getAttribute === 'function'
+                    && layer.getAttribute('data-layer')
+                        === 'transient-zone-preview') {
+                this.svg.removeChild(layer);
+                removed = true;
+            }
+        }, this);
+        return removed;
+    };
+
+    TopPlanAdapter.prototype._applyTransientZonePreview = function () {
+        this._removeTransientZonePreview();
+        const preview = this.transientZonePreview;
+        const projection = this.renderProjection || this.projection;
+        if (!preview || !preview.points.length || !projection) return true;
+        const layer = svgElement(this.document, 'g');
+        setAttributes(layer, {
+            'data-layer': 'transient-zone-preview',
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+        });
+        let referenceLayer = null;
+        Array.prototype.forEach.call(this.svg.children, function (candidate) {
+            if (candidate && typeof candidate.getAttribute === 'function'
+                    && candidate.getAttribute('data-layer') === 'zones') {
+                referenceLayer = candidate;
+            }
+        });
+        const projectionTransform = referenceLayer
+            && referenceLayer.getAttribute('transform');
+        if (projectionTransform) layer.setAttribute(
+            'transform',
+            projectionTransform
+        );
+
+        const shape = svgElement(
+            this.document,
+            preview.closed && preview.points.length >= 3
+                ? 'polygon' : 'polyline'
+        );
+        setAttributes(shape, {
+            points: pointString(preview.points, projection),
+            fill: preview.closed ? '#38a3db' : 'none',
+            'fill-opacity': preview.closed ? '0.16' : '0',
+            stroke: '#0878d1',
+            'stroke-width': '2',
+            'stroke-dasharray': '7 4',
+            'stroke-linejoin': 'round',
+            'stroke-linecap': 'round',
+            'vector-effect': 'non-scaling-stroke',
+            'data-facility-zone-preview': preview.kind,
+        });
+        layer.appendChild(shape);
+        preview.points.forEach(function (point, index) {
+            const screen = projectTopPlanPoint(point, projection);
+            const vertex = svgElement(this.document, 'circle');
+            setAttributes(vertex, {
+                cx: screen.x,
+                cy: screen.y,
+                r: '3.5',
+                fill: '#ffffff',
+                stroke: '#0878d1',
+                'stroke-width': '1.5',
+                'vector-effect': 'non-scaling-stroke',
+                'data-zone-preview-vertex': String(index),
+            });
+            layer.appendChild(vertex);
+        }, this);
+        this.svg.appendChild(layer);
+        return true;
+    };
+
+    TopPlanAdapter.prototype._removeTransientPlacementDuplicate = function () {
+        if (!this.svg || !this.svg.children) return false;
+        let removed = false;
+        Array.prototype.slice.call(this.svg.children).forEach(function (layer) {
+            if (layer && typeof layer.getAttribute === 'function'
+                    && layer.getAttribute('data-layer')
+                        === 'placement-duplicate-preview') {
+                this.svg.removeChild(layer);
+                removed = true;
+            }
+        }, this);
+        return removed;
+    };
+
+    TopPlanAdapter.prototype._applyTransientPlacementDuplicate = function () {
+        this._removeTransientPlacementDuplicate();
+        const preview = this.transientPlacementDuplicate;
+        if (!preview || !preview.placementIds.length || !this.geometry) return true;
+        const projection = this.renderProjection || this.projection;
+        if (!projection) return false;
+        const identifiers = new Set(preview.placementIds);
+        const scale = finiteOr(projection.scale, 1);
+        const transform = 'translate('
+            + finiteOr(preview.delta.x, 0) * scale + ' '
+            + -finiteOr(preview.delta.z, 0) * scale + ')';
+        const layer = svgElement(this.document, 'g');
+        setAttributes(layer, {
+            'data-layer': 'placement-duplicate-preview',
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+        });
+        let placementLayer = null;
+        Array.prototype.forEach.call(this.svg.children, function (candidate) {
+            if (candidate && typeof candidate.getAttribute === 'function'
+                    && ['placements', 'floor-markings'].includes(
+                        candidate.getAttribute('data-layer')
+                    )) {
+                placementLayer = candidate;
+            }
+        });
+        const projectionTransform = placementLayer
+            && placementLayer.getAttribute('transform');
+        if (projectionTransform) layer.setAttribute('transform', projectionTransform);
+        this.geometry.placements.forEach(function (placement) {
+            if (!identifiers.has(placement.placementId)) return;
+            const copy = svgElement(this.document, 'g');
+            setAttributes(copy, {
+                transform: transform,
+                'data-duplicate-preview-id': placement.placementId,
+            });
+            const footprint = svgElement(this.document, 'polygon');
+            setAttributes(footprint, {
+                class: 'ip-flw-plan-duplicate-preview',
+                points: pointString(placement.points, projection),
+                'vector-effect': 'non-scaling-stroke',
+            });
+            copy.appendChild(footprint);
+            const bounds = projectedPointBounds(placement.points, projection);
+            appendSvgText(this.document, copy, {
+                class: 'ip-flw-plan-duplicate-preview-mark',
+                x: (bounds.minX + bounds.maxX) / 2,
+                y: (bounds.minY + bounds.maxY) / 2,
+                'font-size': Math.max(8, Math.min(14, bounds.height * 0.28)),
+                'font-weight': '700',
+                'text-anchor': 'middle',
+                'dominant-baseline': 'central',
+            }, '+');
+            layer.appendChild(copy);
+        }, this);
+        this.geometry.floorMarkings.forEach(function (marking) {
+            if (!identifiers.has(marking.markingId)) return;
+            const copy = svgElement(this.document, 'g');
+            setAttributes(copy, {
+                transform: transform,
+                opacity: '0.72',
+                'data-duplicate-preview-id': marking.markingId,
+            });
+            appendFloorMarkingGraphic(
+                this.document,
+                copy,
+                marking,
+                projection,
+                false
+            );
+            layer.appendChild(copy);
+        }, this);
+        this.svg.appendChild(layer);
+        return true;
+    };
+
+    TopPlanAdapter.prototype._removeTransientPatternPreview = function () {
+        if (!this.svg || !this.svg.children) return false;
+        let removed = false;
+        Array.prototype.slice.call(this.svg.children).forEach(function (layer) {
+            if (layer && typeof layer.getAttribute === 'function'
+                    && layer.getAttribute('data-layer')
+                        === 'pattern-preview') {
+                this.svg.removeChild(layer);
+                removed = true;
+            }
+        }, this);
+        return removed;
+    };
+
+    TopPlanAdapter.prototype._applyTransientPatternPreview = function () {
+        this._removeTransientPatternPreview();
+        const preview = this.transientPatternPreview;
+        const projection = this.renderProjection || this.projection;
+        if (!preview || !projection || !this.layout) return true;
+        const layer = svgElement(this.document, 'g');
+        setAttributes(layer, {
+            'data-layer': 'pattern-preview',
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+        });
+        let referenceLayer = null;
+        Array.prototype.forEach.call(this.svg.children, function (candidate) {
+            if (candidate && typeof candidate.getAttribute === 'function'
+                    && candidate.getAttribute('data-layer') === 'placements') {
+                referenceLayer = candidate;
+            }
+        });
+        const projectionTransform = referenceLayer
+            && referenceLayer.getAttribute('transform');
+        if (projectionTransform) layer.setAttribute(
+            'transform', projectionTransform
+        );
+
+        const targets = preview.mode === 'vertical-stack'
+            ? []
+            : (preview.copies || []).concat(preview.moves || []);
+        targets.forEach(function (target, index) {
+            const sourceId = target && target.sourceId;
+            const placement = this.layout.placements.find(function (item) {
+                return item.placementId === sourceId;
+            });
+            const marking = (this.layout.floorMarkings || []).find(
+                function (item) { return item.markingId === sourceId; }
+            );
+            const zone = this.layout.zones.find(function (item) {
+                return item.zoneId === sourceId;
+            });
+            if (placement && target.kind === 'placement') {
+                const value = clone(placement);
+                value.transform = clone(value.transform || {});
+                value.transform.position = clone(target.position || {});
+                value.transform.quaternion = yawQuaternion(
+                    target.rotationDegrees
+                );
+                const polygon = svgElement(this.document, 'polygon');
+                setAttributes(polygon, {
+                    class: 'ip-flw-plan-pattern-preview',
+                    points: pointString(
+                        placementFootprint(value, this.options),
+                        projection
+                    ),
+                    fill: preview.mode === 'cell-layout'
+                        ? '#0ea5e9' : '#8b5cf6',
+                    'fill-opacity': '0.2',
+                    stroke: preview.mode === 'cell-layout'
+                        ? '#0284c7' : '#7c3aed',
+                    'stroke-width': '2',
+                    'stroke-dasharray': '7 4',
+                    'vector-effect': 'non-scaling-stroke',
+                    'data-pattern-preview-source': sourceId,
+                    'data-pattern-preview-index': String(index),
+                });
+                layer.appendChild(polygon);
+                return;
+            }
+            if (marking && target.kind === 'floor-marking') {
+                const value = clone(marking);
+                value.transform = {
+                    position: clone(target.position || {}),
+                    rotationDegrees: finiteOr(target.rotationDegrees, 0),
+                };
+                value.points = floorMarkingFootprint(value);
+                const group = svgElement(this.document, 'g');
+                setAttributes(group, {
+                    opacity: '0.64',
+                    'data-pattern-preview-source': sourceId,
+                    'data-pattern-preview-index': String(index),
+                });
+                appendFloorMarkingGraphic(
+                    this.document,
+                    group,
+                    value,
+                    projection,
+                    false
+                );
+                layer.appendChild(group);
+                return;
+            }
+            if (zone && target.kind === 'zone'
+                    && Array.isArray(target.boundary)) {
+                const polygon = svgElement(this.document, 'polygon');
+                setAttributes(polygon, {
+                    points: pointString(target.boundary, projection),
+                    fill: '#8b5cf6',
+                    'fill-opacity': '0.08',
+                    stroke: '#7c3aed',
+                    'stroke-width': '2',
+                    'stroke-dasharray': '7 4',
+                    'vector-effect': 'non-scaling-stroke',
+                    'data-pattern-preview-source': sourceId,
+                    'data-pattern-preview-index': String(index),
+                });
+                layer.appendChild(polygon);
+            }
+        }, this);
+
+        const guide = preview.guide || {};
+        if (guide.kind === 'vertical-stack' && guide.position) {
+            const sourceId = preview.relationships
+                && preview.relationships[0]
+                && preview.relationships[0].sourceId;
+            const placement = this.layout.placements.find(function (item) {
+                return item.placementId === sourceId;
+            });
+            if (placement) {
+                const points = placementFootprint(placement, this.options);
+                const outline = svgElement(this.document, 'polygon');
+                setAttributes(outline, {
+                    points: pointString(points, projection),
+                    fill: '#8b5cf6',
+                    'fill-opacity': '0.18',
+                    stroke: '#7c3aed',
+                    'stroke-width': '2',
+                    'stroke-dasharray': '7 4',
+                    'vector-effect': 'non-scaling-stroke',
+                    'data-pattern-guide': 'vertical-stack',
+                });
+                layer.appendChild(outline);
+                const bounds = projectedPointBounds(points, projection);
+                const badgeWidth = Math.max(
+                    24, Math.min(42, bounds.width * 0.34)
+                );
+                const badgeHeight = Math.max(
+                    14, Math.min(20, bounds.height * 0.28)
+                );
+                const badge = svgElement(this.document, 'rect');
+                setAttributes(badge, {
+                    x: bounds.maxX - badgeWidth - 3,
+                    y: bounds.minY + 3,
+                    width: badgeWidth,
+                    height: badgeHeight,
+                    rx: 3,
+                    fill: '#7c3aed',
+                    stroke: '#ffffff',
+                    'stroke-width': '1',
+                    'vector-effect': 'non-scaling-stroke',
+                    'pointer-events': 'none',
+                    'aria-hidden': 'true',
+                });
+                layer.appendChild(badge);
+                appendSvgText(this.document, layer, {
+                    x: bounds.maxX - badgeWidth / 2 - 3,
+                    y: bounds.minY + badgeHeight / 2 + 3,
+                    fill: '#ffffff',
+                    'font-size': Math.max(
+                        8, Math.min(12, badgeHeight * 0.58)
+                    ),
+                    'font-weight': '700',
+                    'text-anchor': 'middle',
+                    'dominant-baseline': 'central',
+                    'pointer-events': 'none',
+                }, 'x' + Math.max(2, finiteOr(guide.count, 2)));
+            }
+        } else if (guide.kind === 'linear' && guide.start && guide.end) {
+            const start = projectTopPlanPoint(guide.start, projection);
+            const end = projectTopPlanPoint(guide.end, projection);
+            const line = svgElement(this.document, 'line');
+            setAttributes(line, {
+                x1: start.x,
+                y1: start.y,
+                x2: end.x,
+                y2: end.y,
+                stroke: '#7c3aed',
+                'stroke-width': '1.5',
+                'stroke-dasharray': '3 4',
+                'vector-effect': 'non-scaling-stroke',
+                'data-pattern-guide': 'linear',
+            });
+            layer.appendChild(line);
+        } else if (guide.kind === 'perimeter'
+                && Array.isArray(guide.points)
+                && guide.points.length >= 4) {
+            const outline = svgElement(this.document, 'polygon');
+            setAttributes(outline, {
+                points: pointString(guide.points, projection),
+                fill: 'none',
+                stroke: '#7c3aed',
+                'stroke-width': '1.5',
+                'stroke-dasharray': '5 4',
+                'vector-effect': 'non-scaling-stroke',
+                'data-pattern-guide': 'perimeter',
+            });
+            layer.appendChild(outline);
+        } else if (guide.kind === 'swap' && guide.start && guide.end) {
+            const start = projectTopPlanPoint(guide.start, projection);
+            const end = projectTopPlanPoint(guide.end, projection);
+            const line = svgElement(this.document, 'line');
+            setAttributes(line, {
+                x1: start.x,
+                y1: start.y,
+                x2: end.x,
+                y2: end.y,
+                stroke: '#0891b2',
+                'stroke-width': '2',
+                'stroke-dasharray': '6 4',
+                'vector-effect': 'non-scaling-stroke',
+                'data-pattern-guide': 'swap',
+            });
+            layer.appendChild(line);
+            [start, end].forEach(function (point) {
+                const marker = svgElement(this.document, 'circle');
+                setAttributes(marker, {
+                    cx: point.x,
+                    cy: point.y,
+                    r: 4,
+                    fill: '#ecfeff',
+                    stroke: '#0891b2',
+                    'stroke-width': '2',
+                    'vector-effect': 'non-scaling-stroke',
+                });
+                layer.appendChild(marker);
+            }, this);
+        } else if (guide.kind === 'mirror' && guide.start && guide.end) {
+            const start = projectTopPlanPoint(guide.start, projection);
+            const end = projectTopPlanPoint(guide.end, projection);
+            const line = svgElement(this.document, 'line');
+            setAttributes(line, {
+                x1: start.x,
+                y1: start.y,
+                x2: end.x,
+                y2: end.y,
+                stroke: '#0891b2',
+                'stroke-width': '2',
+                'stroke-dasharray': '10 5 2 5',
+                'vector-effect': 'non-scaling-stroke',
+                'data-pattern-guide': 'mirror',
+            });
+            layer.appendChild(line);
+        } else if (guide.kind === 'circular' && guide.center) {
+            const center = projectTopPlanPoint(guide.center, projection);
+            const circle = svgElement(this.document, 'circle');
+            setAttributes(circle, {
+                cx: center.x,
+                cy: center.y,
+                r: Math.max(1, finiteOr(guide.radius, 0) * projection.scale),
+                fill: 'none',
+                stroke: '#7c3aed',
+                'stroke-width': '1.5',
+                'stroke-dasharray': '3 4',
+                'vector-effect': 'non-scaling-stroke',
+                'data-pattern-guide': 'circular',
+            });
+            layer.appendChild(circle);
+        } else if (guide.kind === 'cell-layout' && guide.center) {
+            const halfWidth = finiteOr(guide.width, 0) / 2;
+            const halfDepth = finiteOr(guide.depth, 0) / 2;
+            const radians = finiteOr(guide.angleDegrees, 0) * Math.PI / 180;
+            const cosine = Math.cos(radians);
+            const sine = Math.sin(radians);
+            const points = [
+                { x: -halfWidth, z: -halfDepth },
+                { x: halfWidth, z: -halfDepth },
+                { x: halfWidth, z: halfDepth },
+                { x: -halfWidth, z: halfDepth },
+            ].map(function (point) {
+                return {
+                    x: guide.center.x + point.x * cosine + point.z * sine,
+                    z: guide.center.z - point.x * sine + point.z * cosine,
+                };
+            });
+            const outline = svgElement(this.document, 'polygon');
+            setAttributes(outline, {
+                points: pointString(points, projection),
+                fill: 'none',
+                stroke: '#0284c7',
+                'stroke-width': '1.5',
+                'stroke-dasharray': '3 4',
+                'vector-effect': 'non-scaling-stroke',
+                'data-pattern-guide': 'cell-layout',
+            });
+            layer.appendChild(outline);
+        }
+        this.svg.appendChild(layer);
         return true;
     };
 
@@ -819,9 +2559,85 @@
         this.selectionHandler = typeof handler === 'function' ? handler : null;
     };
 
+    TopPlanAdapter.prototype.getViewportState = function () {
+        if (this.disposed || !this.projection) return null;
+        const bounds = normalizedPlanWorldBounds(this.options);
+        const grid = normalizedPlanGrid(this.options, bounds);
+        return {
+            projection: clone(this.projection),
+            worldBounds: bounds ? clone(bounds) : null,
+            grid: grid ? clone(grid) : null,
+            displayUnit: normalizedPlanDisplayUnit(this.options),
+            showGrid: this.options.showGrid !== false,
+        };
+    };
+
+    TopPlanAdapter.prototype._notifyViewportChange = function () {
+        if (!this.viewportChangeHandler) return;
+        this.viewportChangeHandler(this.getViewportState(), this);
+    };
+
+    TopPlanAdapter.prototype.setViewportChangeHandler = function (handler) {
+        this.viewportChangeHandler = typeof handler === 'function'
+            ? handler : null;
+        this._notifyViewportChange();
+    };
+
+    TopPlanAdapter.prototype.setViewPreferences = function (preferences) {
+        if (this.disposed) return false;
+        const source = preferences && typeof preferences === 'object'
+            ? preferences : {};
+        let changed = false;
+        if (source.displayUnit === 'm' || source.displayUnit === 'ft') {
+            if (this.options.displayUnit !== source.displayUnit) {
+                this.options.displayUnit = source.displayUnit;
+                changed = true;
+            }
+        }
+        if (typeof source.showGrid === 'boolean'
+                && this.options.showGrid !== source.showGrid) {
+            this.options.showGrid = source.showGrid;
+            changed = true;
+        }
+        if (changed) this._render();
+        else this._notifyViewportChange();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.setEnvironmentSettings = function (settings) {
+        if (this.disposed) return false;
+        const source = settings && typeof settings === 'object' ? settings : {};
+        const previousBounds = JSON.stringify(
+            normalizedPlanWorldBounds(this.options)
+        );
+        if (source.worldBounds) this.options.worldBounds = clone(source.worldBounds);
+        if (finite(source.floorGridSpacing)) {
+            this.options.floorGridSpacing = Number(source.floorGridSpacing);
+        }
+        if (finite(source.floorMajorGridSpacing)) {
+            this.options.floorMajorGridSpacing = Number(
+                source.floorMajorGridSpacing
+            );
+        }
+        const nextBounds = JSON.stringify(normalizedPlanWorldBounds(this.options));
+        if (this.layout && previousBounds !== nextBounds) {
+            this.fitFacility();
+        } else if (this.layout) {
+            this._render();
+        } else {
+            this._notifyViewportChange();
+        }
+        return true;
+    };
+
     TopPlanAdapter.prototype.setLayout = function (layout) {
         if (this.disposed) return false;
         const hadLayout = Boolean(this.layout);
+        this.transientPlacementMove = null;
+        this.transientPlacementDuplicate = null;
+        this.transientFloorMarkingPreview = null;
+        this.transientAislePreview = null;
+        this.transientPatternPreview = null;
         this.layout = layout ? clone(assertLayout(layout)) : null;
         if (this.selection && this.layout) {
             const selectedExists = this.layout.placements.some(
@@ -832,6 +2648,14 @@
             ) || this.layout.zones.some(
                 function (zone) { return zone.zoneId === this.selection; },
                 this
+            ) || (this.layout.floorMarkings || []).some(
+                function (marking) {
+                    return marking.markingId === this.selection;
+                },
+                this
+            ) || (this.layout.routes || []).some(
+                function (route) { return route.routeId === this.selection; },
+                this
             );
             if (!selectedExists) this.selection = null;
         }
@@ -841,6 +2665,10 @@
                     return placement.placementId;
                 }).concat(this.layout.zones.map(function (zone) {
                     return zone.zoneId;
+                })).concat((this.layout.floorMarkings || []).map(function (marking) {
+                    return marking.markingId;
+                })).concat((this.layout.routes || []).map(function (route) {
+                    return route.routeId;
                 }))
             );
             this.selections = new Set(Array.from(this.selections).filter(
@@ -885,10 +2713,154 @@
 
     TopPlanAdapter.prototype.setProposalPreview = function (preview) {
         if (this.disposed) return false;
+        this.transientPlacementMove = null;
+        this.transientPlacementDuplicate = null;
         this.proposalPreview = normalizeProposalPreview(preview);
         this.projection = null;
         this._render();
         return true;
+    };
+
+    TopPlanAdapter.prototype.setTransientPlacementMove = function (
+        placementIds,
+        delta
+    ) {
+        if (this.disposed || this.suspended) return false;
+        this.transientPlacementDuplicate = null;
+        this._removeTransientPlacementDuplicate();
+        const identifiers = Array.from(new Set(
+            (Array.isArray(placementIds) ? placementIds : []).filter(
+                function (identifier) {
+                    return typeof identifier === 'string' && identifier;
+                }
+            )
+        ));
+        if (!identifiers.length || !delta) {
+            this.transientPlacementMove = null;
+        } else {
+            this.transientPlacementMove = {
+                placementIds: identifiers,
+                delta: {
+                    x: finiteOr(delta.x, 0),
+                    y: finiteOr(delta.y, 0),
+                    z: finiteOr(delta.z, 0),
+                },
+            };
+        }
+        const applied = this._applyTransientPlacementMove();
+        if (applied) this.renderCount += 1;
+        return applied;
+    };
+
+    TopPlanAdapter.prototype.setTransientPlacementDuplicate = function (
+        placementIds,
+        delta
+    ) {
+        if (this.disposed || this.suspended) return false;
+        this.transientPlacementMove = null;
+        this._applyTransientPlacementMove();
+        const identifiers = Array.from(new Set(
+            (Array.isArray(placementIds) ? placementIds : []).filter(
+                function (identifier) {
+                    return typeof identifier === 'string' && identifier;
+                }
+            )
+        ));
+        if (!identifiers.length || !delta) {
+            this.transientPlacementDuplicate = null;
+        } else {
+            this.transientPlacementDuplicate = {
+                placementIds: identifiers,
+                delta: {
+                    x: finiteOr(delta.x, 0),
+                    y: finiteOr(delta.y, 0),
+                    z: finiteOr(delta.z, 0),
+                },
+            };
+        }
+        const applied = this._applyTransientPlacementDuplicate();
+        if (applied) this.renderCount += 1;
+        return applied;
+    };
+
+    TopPlanAdapter.prototype.setTransientZonePreview = function (
+        points,
+        options
+    ) {
+        if (this.disposed || this.suspended) return false;
+        const normalized = (Array.isArray(points) ? points : []).filter(
+            function (point) {
+                return point && finite(point.x) && finite(point.z);
+            }
+        ).map(function (point) {
+            return { x: point.x, z: point.z };
+        });
+        if (!normalized.length) {
+            this.transientZonePreview = null;
+        } else {
+            const source = options && typeof options === 'object'
+                ? options : {};
+            this.transientZonePreview = {
+                points: normalized,
+                closed: source.closed === true,
+                kind: source.kind === 'polygon' ? 'polygon' : 'rectangle',
+            };
+        }
+        const applied = this._applyTransientZonePreview();
+        if (applied) this.renderCount += 1;
+        return applied;
+    };
+
+    TopPlanAdapter.prototype.setTransientFloorMarkingPreview = function (marking) {
+        if (this.disposed || this.suspended) return false;
+        if (!marking) {
+            this.transientFloorMarkingPreview = null;
+        } else {
+            const normalized = clone(marking);
+            normalized.markingId = normalized.markingId
+                || 'fm-transient-preview';
+            normalized.transform = normalized.transform || {};
+            normalized.transform.position = normalized.transform.position || {
+                x: 0, y: 0, z: 0,
+            };
+            normalized.points = floorMarkingFootprint(normalized);
+            this.transientFloorMarkingPreview = normalized;
+        }
+        const applied = this._applyTransientFloorMarkingPreview();
+        if (applied) this.renderCount += 1;
+        return applied;
+    };
+
+    TopPlanAdapter.prototype.setTransientAislePreview = function (preview) {
+        if (this.disposed || this.suspended) return false;
+        if (!preview) {
+            this.transientAislePreview = null;
+        } else {
+            const points = Array.isArray(preview.points)
+                ? preview.points.filter(function (point) {
+                    return point && finite(point.x) && finite(point.z);
+                }).map(function (point) {
+                    return { x: point.x, z: point.z };
+                }) : [];
+            this.transientAislePreview = {
+                points: points,
+                corridorWidth: Math.max(
+                    0.01,
+                    finiteOr(preview.corridorWidth, 1)
+                ),
+                color: preview.color || '#d9a514',
+            };
+        }
+        this._render();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.setTransientPatternPreview = function (preview) {
+        if (this.disposed || this.suspended) return false;
+        this.transientPatternPreview = preview ? clone(preview) : null;
+        const applied = this._applyTransientPatternPreview();
+        if (applied) this.renderCount += 1;
+        return applied;
     };
 
     TopPlanAdapter.prototype.setSelection = function (placementId) {
@@ -920,6 +2892,10 @@
             return placement.placementId === identifier;
         }) || this.layout.zones.some(function (zone) {
             return zone.zoneId === identifier;
+        }) || (this.layout.floorMarkings || []).some(function (marking) {
+            return marking.markingId === identifier;
+        }) || (this.layout.routes || []).some(function (route) {
+            return route.routeId === identifier;
         });
         if (!exists) return false;
         if (this.selectionHandler) this.selectionHandler(identifier, this);
@@ -927,19 +2903,39 @@
         return true;
     };
 
-    TopPlanAdapter.prototype.fit = function () {
+    TopPlanAdapter.prototype._fit = function (includeWorldBounds) {
         if (this.disposed || !this.layout) return null;
+        const hasLayoutContent = Boolean(
+            this.layout.placements.length
+            || this.layout.zones.length
+            || this.layout.routes.length
+            || (this.proposalPreview
+                && this.proposalPreview.beforePlacements.length)
+        );
         this.projection = createTopPlanProjection(
             proposalReviewBounds(
                 this.layout,
                 this.proposalPreview,
-                this.options
+                this.options,
+                includeWorldBounds !== false || !hasLayoutContent
             ),
             this._measure(),
             this.options.padding
         );
         this._render();
         return clone(this.projection);
+    };
+
+    TopPlanAdapter.prototype.fitFacility = function () {
+        return this._fit(true);
+    };
+
+    TopPlanAdapter.prototype.fitLayout = function () {
+        return this._fit(false);
+    };
+
+    TopPlanAdapter.prototype.fit = function () {
+        return this.fitFacility();
     };
 
     TopPlanAdapter.prototype.clientToWorld = function (input) {
@@ -975,6 +2971,7 @@
             offsetY: this.projection.offsetY + finiteOr(deltaY, 0),
         }));
         if (!this._applyProjectionTransform()) this._render();
+        else this._notifyViewportChange();
         return true;
     };
 
@@ -996,6 +2993,26 @@
             offsetY: planPoint.y - (this.projection.maxZ - world.z) * scale,
         }));
         if (!this._applyProjectionTransform()) this._render();
+        else this._notifyViewportChange();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.setScaleAt = function (input, requestedScale) {
+        if (this.disposed || !this.layout) return false;
+        if (!this.projection) this.fit();
+        const scale = Math.max(1e-6, Math.min(1e6,
+            finiteOr(requestedScale, this.projection.scale)
+        ));
+        const planPoint = clientPlanPoint(input, this.svg, this.projection);
+        if (!planPoint) return false;
+        const world = unprojectTopPlanPoint(planPoint, this.projection);
+        this.projection = Object.freeze(Object.assign({}, this.projection, {
+            scale: scale,
+            offsetX: planPoint.x - (world.x - this.projection.minX) * scale,
+            offsetY: planPoint.y - (this.projection.maxZ - world.z) * scale,
+        }));
+        if (!this._applyProjectionTransform()) this._render();
+        else this._notifyViewportChange();
         return true;
     };
 
@@ -1025,10 +3042,42 @@
                 ids.push(zone.zoneId);
             }
         });
+        geometry.floorMarkings.forEach(function (marking) {
+            if (boundsTouch(query, geometryBounds(marking.points))) {
+                ids.push(marking.markingId);
+            }
+        });
         return ids.sort();
     };
 
     TopPlanAdapter.prototype.getDiagnostics = function () {
+        const expectedById = new Map(
+            (this.layout && this.layout.placements || []).map(
+                function (placement) {
+                    return [placement.placementId, placement.transform || {}];
+                }
+            )
+        );
+        const geometryById = new Map(
+            (this.geometry && this.geometry.placements || []).map(
+                function (placement) {
+                    return [placement.placementId, placement.transform || {}];
+                }
+            )
+        );
+        const transformMismatchIds = [];
+        expectedById.forEach(function (expected, placementId) {
+            const actual = geometryById.get(placementId);
+            if (!actual || JSON.stringify(actual) !== JSON.stringify(expected)) {
+                transformMismatchIds.push(placementId);
+            }
+        });
+        const unexpectedPlacementIds = Array.from(geometryById.keys()).filter(
+            function (placementId) { return !expectedById.has(placementId); }
+        ).sort();
+        const missingPlacementIds = Array.from(expectedById.keys()).filter(
+            function (placementId) { return !geometryById.has(placementId); }
+        ).sort();
         return {
             id: this.id,
             type: this.type,
@@ -1047,12 +3096,54 @@
                 ? this.proposalPreview.newPlacementIds.length : 0,
             proposalMovedCount: this.proposalPreview
                 ? this.proposalPreview.movedPlacementIds.length : 0,
+            transientPlacementMove: this.transientPlacementMove
+                ? clone(this.transientPlacementMove) : null,
+            transientPlacementDuplicate: this.transientPlacementDuplicate
+                ? clone(this.transientPlacementDuplicate) : null,
+            transientZonePreview: this.transientZonePreview
+                ? clone(this.transientZonePreview) : null,
+            transientFloorMarkingPreview: this.transientFloorMarkingPreview
+                ? clone(this.transientFloorMarkingPreview) : null,
+            transientPatternPreview: this.transientPatternPreview
+                ? clone(this.transientPatternPreview) : null,
+            environment: this.environmentDiagnostics
+                ? clone(this.environmentDiagnostics) : null,
             projection: this.projection ? clone(this.projection) : null,
             placementIds: this.layout
                 ? this.layout.placements.map(function (placement) {
                     return placement.placementId;
                 })
                 : [],
+            floorMarkingIds: this.layout
+                ? (this.layout.floorMarkings || []).map(function (marking) {
+                    return marking.markingId;
+                })
+                : [],
+            placementTransformAudit: {
+                adapter: 'top_plan',
+                status: (
+                    !this.layout || !this.geometry
+                        ? 'unavailable'
+                        : transformMismatchIds.length
+                            || missingPlacementIds.length
+                            || unexpectedPlacementIds.length
+                            ? 'mismatch' : 'match'
+                ),
+                expectedPlacementCount: expectedById.size,
+                auditedPlacementCount: geometryById.size,
+                transformMismatchCount: transformMismatchIds.length,
+                transformMismatchIds: transformMismatchIds.sort().slice(0, 20),
+                missingPlacementCount: missingPlacementIds.length,
+                missingPlacementIds: missingPlacementIds.slice(0, 20),
+                unexpectedPlacementCount: unexpectedPlacementIds.length,
+                unexpectedPlacementIds: unexpectedPlacementIds.slice(0, 20),
+                evidenceStatus: this.layout && this.geometry
+                    ? 'derived' : 'unknown',
+                qualification: (
+                    'Compares persisted placement transforms with the world-space '
+                    + 'geometry backing the rendered 2D plan.'
+                ),
+            },
         };
     };
 
@@ -1087,13 +3178,21 @@
             if (this.svg.parentNode) this.svg.parentNode.removeChild(this.svg);
         }
         this.selectionHandler = null;
+        this.viewportChangeHandler = null;
         this.selections.clear();
         this.layout = null;
         this.geometry = null;
+        this.environmentDiagnostics = null;
         this.projection = null;
         this.renderProjection = null;
         this.ghostPlacement = null;
         this.proposalPreview = null;
+        this.transientPlacementMove = null;
+        this.transientPlacementDuplicate = null;
+        this.transientZonePreview = null;
+        this.transientPatternPreview = null;
+        this.transientFloorMarkingPreview = null;
+        this.transientAislePreview = null;
     };
 
     function parseControllerArguments(layoutOrOptions, maybeOptions) {
@@ -1245,16 +3344,39 @@
         return true;
     };
 
-    FacilityLayoutEditorController.prototype.fit = function () {
+    FacilityLayoutEditorController.prototype._invokeViewCommand = function (
+        command,
+        fallback
+    ) {
         this._assertActive();
         if (this.suspended) return [];
         const results = [];
         this.views.forEach(function (entry) {
-            if (typeof entry.adapter.fit === 'function') {
-                results.push(entry.adapter.fit());
+            let action = entry.adapter[command];
+            if (typeof action !== 'function' && fallback) {
+                action = entry.adapter[fallback];
+            }
+            if (typeof action === 'function') {
+                results.push(action.call(entry.adapter));
             }
         });
         return results;
+    };
+
+    FacilityLayoutEditorController.prototype.fitFacility = function () {
+        return this._invokeViewCommand('fitFacility', 'fit');
+    };
+
+    FacilityLayoutEditorController.prototype.fitLayout = function () {
+        return this._invokeViewCommand('fitLayout', 'fit');
+    };
+
+    FacilityLayoutEditorController.prototype.topView = function () {
+        return this._invokeViewCommand('topView');
+    };
+
+    FacilityLayoutEditorController.prototype.fit = function () {
+        return this.fitFacility();
     };
 
     FacilityLayoutEditorController.prototype.suspend = function () {

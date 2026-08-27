@@ -1,0 +1,81 @@
+{
+  "allK1ThroughK10Classified": true,
+  "generatedAtUtc": "2026-08-26T22:22:28Z",
+  "records": [
+    {
+      "blocksGateG1": true,
+      "capabilityId": "K1",
+      "closureMilestone": "KF1",
+      "gap": "The 39 commands have descriptive semantics, but one versioned contract does not yet own inputs, defaults, prohibitions, failures, receipts, and handler identity.",
+      "status": "partial"
+    },
+    {
+      "blocksGateG1": false,
+      "capabilityId": "K2",
+      "closureMilestone": "KF1",
+      "gap": "All ten geometric strategies exist; full structured strategy inputs, outputs, assumptions, evidence, and failure contracts are not canonical.",
+      "status": "partial"
+    },
+    {
+      "blocksGateG1": true,
+      "capabilityId": "K3",
+      "closureMilestone": "KF1-KF2",
+      "gap": "UI commands, Python semantics, feature gates, and agent tools are separate registries with no generated parity owner.",
+      "status": "missing"
+    },
+    {
+      "blocksGateG1": true,
+      "capabilityId": "K4",
+      "closureMilestone": "KF2-KF5",
+      "gap": "Semantic Plan v1 cannot author a general facility envelope and arbitrary labeled department partition from intent.",
+      "status": "missing"
+    },
+    {
+      "blocksGateG1": true,
+      "capabilityId": "K5",
+      "closureMilestone": "KF1-KF5",
+      "gap": "There is no restart-safe staged generation graph, durable receipt chain, invalidation model, or cumulative save proposal.",
+      "status": "missing"
+    },
+    {
+      "blocksGateG1": false,
+      "capabilityId": "K6",
+      "closureMilestone": "KF3",
+      "gap": "Physical footprints are usable, but many assets lack authored sides, access envelopes, utilities, clearances, and planning-readiness evidence.",
+      "status": "partial"
+    },
+    {
+      "blocksGateG1": false,
+      "capabilityId": "K7",
+      "closureMilestone": "KF1-KF4",
+      "gap": "Ten strategies are implemented, but no canonical recipe registry composes manufacturing concepts and four structured strategy field groups remain missing.",
+      "status": "partial"
+    },
+    {
+      "blocksGateG1": false,
+      "capabilityId": "K8",
+      "closureMilestone": "KF4",
+      "gap": "The bounded server analyzer compares line, L, and U only while the browser implements ten strategy families.",
+      "status": "partial"
+    },
+    {
+      "blocksGateG1": false,
+      "capabilityId": "K9",
+      "closureMilestone": "KF6",
+      "gap": "The 827-placement reference factory is not represented as intent, semantic tool selection, receipt, validation, and correction traces.",
+      "status": "missing"
+    },
+    {
+      "blocksGateG1": true,
+      "capabilityId": "K10",
+      "closureMilestone": "KF2-KF5",
+      "gap": "The generation skill is revision-bound and bounded but assumes one complete preview and has no stage-sliced command knowledge or durable resume context.",
+      "status": "partial"
+    }
+  ],
+  "schemaVersion": "facility-layout-kf0-capability-gaps-v1",
+  "summary": {
+    "missing": 4,
+    "partial": 6
+  }
+}

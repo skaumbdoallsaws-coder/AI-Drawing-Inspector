@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import os
 import threading
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
@@ -35,10 +38,26 @@ from .agent_runtime import (
 )
 from .errors import FacilityLayoutError, FacilityNotFoundError
 from .feature_flags import FacilityLayoutFeatureFlags
+from .generation_run_repository import FacilityGenerationRunRepository
+from .generation_coordinator import (
+    FacilityGenerationCoordinator,
+    FacilityGenerationCoordinatorError,
+)
+from .generation_run_repository import FacilityGenerationRunRepositoryError
 from .identity import FacilityPrincipalResolver
 from .operations import create_layout_document
-from .repository import FacilityLayoutRepository
+from .plan_settings import (
+    default_plan_settings,
+    plan_settings_from_layout,
+    plan_world_bounds,
+)
+from .repository import (
+    FacilityLayoutIntegrityError,
+    FacilityLayoutRepository,
+)
 from .service import FacilityLayoutService, coordinate_frame_fingerprint
+from .knowledge_foundation import FacilityKnowledgeContractError
+from .provider_config import FacilityProviderConfigurationError
 from .transaction_adapter import FacilityLayoutTransactionRuntime
 
 
@@ -46,6 +65,10 @@ LOCAL_SITE_ID = "site-local"
 LOCAL_LAYOUT_ID = "fl-main"
 LOCAL_SHELL_ID = "shell-local"
 LOCAL_POLICY_ID = "policy-local"
+PRIVATE_ASSET_ENV = "INSPECTORPRO_FACILITY_PRIVATE_ASSETS"
+PRIVATE_ASSET_MANIFEST = Path(
+    "generated/industrial_assets/local_library/catalog.json"
+)
 
 
 def _timestamp() -> str:
@@ -122,6 +145,7 @@ def _asset(
     return {
         "assetId": asset_id,
         "assetDefinitionRevision": _revision(definition),
+        "previewPlanningEligible": True,
         "displayName": display_name,
         "category": category,
         "description": description,
@@ -167,6 +191,386 @@ LOCAL_ASSET_CATALOG: tuple[dict[str, Any], ...] = (
         description="Generic electric counterbalance forklift envelope.",
     ),
 )
+
+
+_PRIVATE_LOCAL_ASSET_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "asset_id": "asset-cnc-mill",
+        "display_name": "CNC Milling Machine",
+        "category": "Machines",
+        "width": 3.0,
+        "depth": 3.718252,
+        "height": 2.7,
+        "description": "Private local CNC vertical machining center model.",
+        "artifact": (
+            "generated/industrial_assets/p0_spike/cnc_vmc/"
+            "User Library-CNC Milling machine_colored.glb"
+        ),
+        "source_to_canonical": (
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 1.159126, 1.0,
+        ),
+    },
+    {
+        "asset_id": "asset-pallet-rack",
+        "display_name": "Pallet Rack",
+        "category": "Storage",
+        "width": 1.227199912,
+        "depth": 2.528399944,
+        "height": 4.87680006,
+        "description": "Private local selective pallet-rack model.",
+        "artifact": (
+            "generated/industrial_assets/p0_spike/rack_prototypes/"
+            "Pallet Racking_colored.glb"
+        ),
+        "source_to_canonical": (
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ),
+    },
+    {
+        "asset_id": "asset-workbench",
+        "display_name": "Assembly Workbench",
+        "category": "Workstations",
+        "width": 1.2192002062,
+        "depth": 1.0541,
+        "height": 0.8636001031,
+        "description": "Private local WA01 assembly workstation model.",
+        "artifact": (
+            "generated/industrial_assets/p0_spike/wa01_workstation/"
+            "RF--WA01-W48-D36-H34-T0_375-UF-F0-P5002_colored.glb"
+        ),
+        "source_to_canonical": (
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.8540751031, 0.0, 1.0,
+        ),
+    },
+    {
+        "asset_id": "asset-forklift",
+        "display_name": "Electric Forklift",
+        "category": "Material Handling",
+        "width": 1.130300046,
+        "depth": 1.962149978,
+        "height": 2.501774646,
+        "description": "Private local Toyota electric forklift model.",
+        "artifact": (
+            "generated/industrial_assets/p0_spike/toyota_forklift/"
+            "User Library-Toyota Forklift_colored.glb"
+        ),
+        "source_to_canonical": (
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.076074697, -0.981074989, 1.0,
+        ),
+    },
+)
+
+
+def _private_manifest_specs(root: Path) -> tuple[dict[str, Any], ...]:
+    """Load bounded local-only catalog records generated from private CAD."""
+
+    manifest_path = root / PRIVATE_ASSET_MANIFEST
+    if not manifest_path.is_file():
+        return ()
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"Private asset manifest is unreadable: {manifest_path}"
+        ) from exc
+    if not isinstance(payload, dict) or payload.get("schemaVersion") != 1:
+        raise ValueError("Private asset manifest schemaVersion must be 1")
+    assets = payload.get("assets")
+    if not isinstance(assets, list):
+        raise ValueError("Private asset manifest assets must be an array")
+
+    specs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    reserved = {
+        str(item["asset_id"])
+        for item in _PRIVATE_LOCAL_ASSET_SPECS
+    }
+    for index, raw in enumerate(assets):
+        if not isinstance(raw, dict):
+            raise ValueError(f"Private asset manifest entry {index} is invalid")
+        asset_id = str(raw.get("assetId", "")).strip()
+        if (
+            not asset_id.startswith("asset-")
+            or asset_id in seen
+            or asset_id in reserved
+        ):
+            raise ValueError(
+                f"Private asset manifest assetId is invalid: {asset_id!r}"
+            )
+        seen.add(asset_id)
+        display_name = str(raw.get("displayName", "")).strip()
+        category = str(raw.get("category", "")).strip()
+        description = str(raw.get("description", "")).strip()
+        if not display_name or not category or not description:
+            raise ValueError(
+                f"Private asset manifest metadata is incomplete: {asset_id}"
+            )
+        dimensions = raw.get("dimensions")
+        if not isinstance(dimensions, dict):
+            raise ValueError(
+                f"Private asset manifest dimensions are missing: {asset_id}"
+            )
+        measured = []
+        for field in ("width", "depth", "height"):
+            value = dimensions.get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(
+                    f"Private asset manifest {field} is invalid: {asset_id}"
+                )
+            number = float(value)
+            if not math.isfinite(number) or number <= 0:
+                raise ValueError(
+                    f"Private asset manifest {field} is invalid: {asset_id}"
+                )
+            measured.append(number)
+
+        artifact = Path(str(raw.get("artifact", "")))
+        if (
+            artifact.is_absolute()
+            or ".." in artifact.parts
+            or artifact.suffix.lower() != ".glb"
+        ):
+            raise ValueError(
+                f"Private asset manifest artifact is invalid: {asset_id}"
+            )
+        matrix = raw.get("sourceToCanonical")
+        if (
+            not isinstance(matrix, list)
+            or len(matrix) != 16
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                for value in matrix
+            )
+        ):
+            raise ValueError(
+                f"Private asset manifest transform is invalid: {asset_id}"
+            )
+        tags = raw.get("tags", [])
+        if not isinstance(tags, list) or any(
+            not isinstance(value, str) or not value.strip()
+            for value in tags
+        ):
+            raise ValueError(
+                f"Private asset manifest tags are invalid: {asset_id}"
+            )
+        raw_surfaces = raw.get("supportSurfaces", [])
+        if not isinstance(raw_surfaces, list):
+            raise ValueError(
+                f"Private asset support surfaces are invalid: {asset_id}"
+            )
+        support_surfaces: list[dict[str, Any]] = []
+        surface_ids: set[str] = set()
+        for surface_index, raw_surface in enumerate(raw_surfaces):
+            if not isinstance(raw_surface, dict):
+                raise ValueError(
+                    f"Private asset support surface is invalid: {asset_id}"
+                )
+            fields = {
+                "surfaceId",
+                "label",
+                "localFrame",
+                "bounds",
+                "allowedSides",
+                "evidenceStatus",
+            }
+            if set(raw_surface) != fields:
+                raise ValueError(
+                    f"Private asset support surface fields are invalid: {asset_id}"
+                )
+            surface_id = str(raw_surface.get("surfaceId", "") or "").strip()
+            label = str(raw_surface.get("label", "") or "").strip()
+            if not surface_id or surface_id in surface_ids or not label:
+                raise ValueError(
+                    f"Private asset support surface identity is invalid: {asset_id}"
+                )
+            surface_ids.add(surface_id)
+            frame = raw_surface.get("localFrame")
+            bounds = raw_surface.get("bounds")
+            if not isinstance(frame, dict) or set(frame) != {
+                "origin", "xAxis", "zAxis", "normal"
+            }:
+                raise ValueError(
+                    f"Private asset support surface frame is invalid: {asset_id}"
+                )
+            normalized_frame: dict[str, dict[str, float]] = {}
+            for vector_name in ("origin", "xAxis", "zAxis", "normal"):
+                vector = frame.get(vector_name)
+                if not isinstance(vector, dict) or set(vector) != {"x", "y", "z"}:
+                    raise ValueError(
+                        f"Private asset support surface vector is invalid: {asset_id}"
+                    )
+                normalized_vector = {}
+                for axis in ("x", "y", "z"):
+                    value = vector.get(axis)
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        raise ValueError(
+                            f"Private asset support surface vector is invalid: {asset_id}"
+                        )
+                    number = float(value)
+                    if not math.isfinite(number):
+                        raise ValueError(
+                            f"Private asset support surface vector is invalid: {asset_id}"
+                        )
+                    normalized_vector[axis] = number
+                normalized_frame[vector_name] = normalized_vector
+            bound_fields = {"minimumX", "maximumX", "minimumZ", "maximumZ"}
+            if not isinstance(bounds, dict) or set(bounds) != bound_fields:
+                raise ValueError(
+                    f"Private asset support surface bounds are invalid: {asset_id}"
+                )
+            normalized_bounds = {}
+            for field in sorted(bound_fields):
+                value = bounds.get(field)
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValueError(
+                        f"Private asset support surface bounds are invalid: {asset_id}"
+                    )
+                number = float(value)
+                if not math.isfinite(number):
+                    raise ValueError(
+                        f"Private asset support surface bounds are invalid: {asset_id}"
+                    )
+                normalized_bounds[field] = number
+            if (
+                normalized_bounds["minimumX"] >= normalized_bounds["maximumX"]
+                or normalized_bounds["minimumZ"] >= normalized_bounds["maximumZ"]
+            ):
+                raise ValueError(
+                    f"Private asset support surface bounds are empty: {asset_id}"
+                )
+            allowed_sides = raw_surface.get("allowedSides")
+            if (
+                not isinstance(allowed_sides, list)
+                or not allowed_sides
+                or len(allowed_sides) != len(set(allowed_sides))
+                or any(side not in {"above", "below"} for side in allowed_sides)
+            ):
+                raise ValueError(
+                    f"Private asset support surface sides are invalid: {asset_id}"
+                )
+            evidence_status = str(
+                raw_surface.get("evidenceStatus", "") or ""
+            ).strip()
+            if evidence_status not in {
+                "authored", "derived", "inferred", "unverified", "unknown"
+            }:
+                raise ValueError(
+                    f"Private asset support surface evidence is invalid: {asset_id}"
+                )
+            support_surfaces.append({
+                "surfaceId": surface_id,
+                "label": label,
+                "localFrame": normalized_frame,
+                "bounds": normalized_bounds,
+                "allowedSides": list(allowed_sides),
+                "evidenceStatus": evidence_status,
+            })
+        specs.append({
+            "asset_id": asset_id,
+            "display_name": display_name,
+            "category": category,
+            "width": measured[0],
+            "depth": measured[1],
+            "height": measured[2],
+            "description": description,
+            "artifact": artifact.as_posix(),
+            "source_to_canonical": tuple(float(value) for value in matrix),
+            "tags": tuple(value.strip() for value in tags),
+            "support_surfaces": tuple(support_surfaces),
+        })
+    return tuple(specs)
+
+
+def _environment_enabled(name: str) -> bool:
+    return str(os.getenv(name, "") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def build_private_local_asset_catalog(
+    project_root: str | Path | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """Bind private local GLBs without exposing protected source paths."""
+
+    root = (
+        Path(project_root).resolve()
+        if project_root is not None
+        else Path(__file__).resolve().parents[2]
+    )
+    catalog: list[dict[str, Any]] = []
+    specs = (*_PRIVATE_LOCAL_ASSET_SPECS, *_private_manifest_specs(root))
+    for spec in specs:
+        entry = _asset(
+            asset_id=str(spec["asset_id"]),
+            display_name=str(spec["display_name"]),
+            category=str(spec["category"]),
+            width=float(spec["width"]),
+            depth=float(spec["depth"]),
+            height=float(spec["height"]),
+            description=str(spec["description"]),
+        )
+        matrix = [float(value) for value in spec["source_to_canonical"]]
+        entry["definition"]["coordinateFrame"] = {
+            "units": "m",
+            "handedness": "right",
+            "upAxis": "+Y",
+            "sourceToCanonical": matrix,
+        }
+        support_surfaces = [
+            deepcopy(surface)
+            for surface in spec.get("support_surfaces", ())
+        ]
+        if support_surfaces:
+            entry["supportSurfaces"] = support_surfaces
+            entry["definition"]["supportSurfaces"] = support_surfaces
+        entry["assetDefinitionRevision"] = _revision(entry["definition"])
+        tags = [str(value) for value in spec.get("tags", ())]
+        if tags:
+            entry["tags"] = tags
+            entry["definition"]["tags"] = tags
+            entry["assetDefinitionRevision"] = _revision(entry["definition"])
+
+        relative = Path(str(spec["artifact"]))
+        artifact_path = root / relative
+        available = artifact_path.is_file()
+        entry["privateLocalVisual"] = {
+            "enabled": True,
+            "available": available,
+        }
+        if available:
+            entry["overview"] = {
+                "path": "/" + quote(relative.as_posix(), safe="/"),
+                "byteSize": artifact_path.stat().st_size,
+                "sourceToCanonical": matrix,
+                "instancingEligible": True,
+            }
+        thumbnail_relative = relative.parent / "thumbnail.webp"
+        if (root / thumbnail_relative).is_file():
+            entry["thumbnail"] = {
+                "path": "/" + quote(
+                    thumbnail_relative.as_posix(), safe="/"
+                ),
+                "mediaType": "image/webp",
+            }
+        catalog.append(entry)
+    return tuple(catalog)
 
 
 def _shell_document() -> dict[str, Any]:
@@ -245,6 +649,8 @@ class LocalFacilityLayoutHost:
         *,
         process_map_root: str | Path | None = None,
         feature_flags: FacilityLayoutFeatureFlags | None = None,
+        private_assets: bool | None = None,
+        private_asset_root: str | Path | None = None,
         require_distinct_approver: bool = False,
         principal_resolver: (
             Callable[[Request], FacilityPrincipal] | None
@@ -284,6 +690,13 @@ class LocalFacilityLayoutHost:
         )
         authority_root = self.root / "authorities"
         self.layout_repository = FacilityLayoutRepository(self.root / "layouts")
+        self.generation_run_repository = FacilityGenerationRunRepository(
+            self.root
+        )
+        self.generation_coordinator = FacilityGenerationCoordinator(
+            self.generation_run_repository,
+            feature_flags=self.feature_flags,
+        )
         self.shell_repository = FacilityShellRepository(
             authority_root / "shells"
         )
@@ -293,9 +706,27 @@ class LocalFacilityLayoutHost:
         self.vehicle_repository = VehicleProfileRepository(
             authority_root / "vehicles"
         )
+        use_private_assets = (
+            _environment_enabled(PRIVATE_ASSET_ENV)
+            if private_assets is None
+            else bool(private_assets)
+        )
+        catalog_source = (
+            build_private_local_asset_catalog(private_asset_root)
+            if use_private_assets
+            else LOCAL_ASSET_CATALOG
+        )
         self._catalog = {
             item["assetId"]: deepcopy(item)
-            for item in LOCAL_ASSET_CATALOG
+            for item in catalog_source
+        }
+        # Private visual definitions are new immutable revisions, not
+        # replacements for revisions already referenced by saved layouts.
+        # Keep both so existing placements remain verifiable while the asset
+        # browser offers the current private definition for new placements.
+        self._asset_versions = {
+            (item["assetId"], item["assetDefinitionRevision"]): deepcopy(item)
+            for item in (*LOCAL_ASSET_CATALOG, *catalog_source)
         }
         self.transaction_runtime = FacilityLayoutTransactionRuntime(
             receipt_root=self.root / "transactions",
@@ -307,6 +738,9 @@ class LocalFacilityLayoutHost:
             policy_repository=self.policy_repository,
             vehicle_repository=self.vehicle_repository,
             asset_definition_resolver=self._resolve_asset_definition,
+            current_asset_definition_resolver=(
+                self._resolve_current_asset_definition
+            ),
             process_map_resolver=(
                 self._resolve_process_map
                 if self.process_map_root is not None
@@ -341,6 +775,22 @@ class LocalFacilityLayoutHost:
         _site_id: str,
         asset_id: str,
         revision: str,
+    ) -> Mapping[str, Any] | None:
+        entry = self._asset_versions.get((asset_id, revision))
+        if entry is None:
+            entry = self._catalog.get(asset_id)
+        if entry is None:
+            return None
+        return {
+            "revision": entry["assetDefinitionRevision"],
+            "definition": deepcopy(entry["definition"]),
+        }
+
+    def _resolve_current_asset_definition(
+        self,
+        _principal: FacilityPrincipal,
+        _site_id: str,
+        asset_id: str,
     ) -> Mapping[str, Any] | None:
         entry = self._catalog.get(asset_id)
         if entry is None:
@@ -428,6 +878,34 @@ class LocalFacilityLayoutHost:
             ):
                 continue
             document = resolved["document"]
+            precedence_edges = []
+            for edge in document.get("canvasEdges", []):
+                if not isinstance(edge, Mapping):
+                    continue
+                from_ref = edge.get("from")
+                from_ref = from_ref if isinstance(from_ref, Mapping) else {}
+                to_ref = edge.get("to")
+                to_ref = to_ref if isinstance(to_ref, Mapping) else {}
+                from_node_id = str(
+                    edge.get("fromNodeId")
+                    or from_ref.get("nodeId")
+                    or ""
+                )
+                to_node_id = str(
+                    edge.get("toNodeId")
+                    or to_ref.get("nodeId")
+                    or ""
+                )
+                edge_id = str(edge.get("edgeId") or edge.get("id") or "")
+                if not edge_id or not from_node_id or not to_node_id:
+                    continue
+                precedence_edges.append({
+                    "edgeId": edge_id,
+                    "fromNodeId": from_node_id,
+                    "toNodeId": to_node_id,
+                    "edgeKind": str(edge.get("kind") or "precedence"),
+                    "evidenceStatus": "authored",
+                })
             result.append(
                 {
                     "productId": key[0],
@@ -438,17 +916,24 @@ class LocalFacilityLayoutHost:
                     ),
                     "nodeIds": sorted(
                         {
-                            str(item.get("id"))
+                            str(item.get("nodeId") or item.get("id"))
                             for item in document.get("canvasNodes", [])
-                            if isinstance(item, Mapping) and item.get("id")
+                            if isinstance(item, Mapping)
+                            and (item.get("nodeId") or item.get("id"))
                         }
                     ),
                     "edgeIds": sorted(
                         {
-                            str(item.get("id"))
+                            str(item.get("edgeId") or item.get("id"))
                             for item in document.get("canvasEdges", [])
-                            if isinstance(item, Mapping) and item.get("id")
+                            if isinstance(item, Mapping)
+                            and (item.get("edgeId") or item.get("id"))
                         }
+                    ),
+                    "graphTopologyLoaded": True,
+                    "precedenceEdges": sorted(
+                        precedence_edges,
+                        key=lambda item: item["edgeId"],
                     ),
                 }
             )
@@ -514,6 +999,54 @@ class LocalFacilityLayoutHost:
                 }
             },
         )
+
+    @staticmethod
+    def _generation_error(error: Exception) -> HTTPException:
+        code = str(getattr(error, "code", "facility_generation_failed"))
+        details = deepcopy(dict(getattr(error, "details", {}) or {}))
+        status_code = 409 if any(
+            token in code
+            for token in (
+                "conflict",
+                "stale",
+                "changed",
+                "blocked",
+                "expired",
+                "mismatch",
+                "not_save_eligible",
+            )
+        ) else 422
+        return HTTPException(
+            status_code=status_code,
+            detail={
+                "error": {
+                    "code": code,
+                    "message": str(error),
+                    "details": details,
+                }
+            },
+        )
+
+    @staticmethod
+    def _generation_session_id(request: Request) -> str:
+        value = str(
+            request.headers.get("X-InspectorPro-Session") or ""
+        ).strip()
+        if not value or len(value) > 128:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": {
+                        "code": "invalid_session_id",
+                        "message": (
+                            "X-InspectorPro-Session is required for Facility "
+                            "generation runs."
+                        ),
+                        "details": {},
+                    }
+                },
+            )
+        return value
 
     def _ensure_published(
         self,
@@ -585,6 +1118,19 @@ class LocalFacilityLayoutHost:
                     LOCAL_SITE_ID,
                     LOCAL_LAYOUT_ID,
                 )
+            except FacilityLayoutIntegrityError as error:
+                if error.code != "layout_asset_not_canonical":
+                    raise
+                self.layout_repository.normalize_current_layout_storage(
+                    principal,
+                    LOCAL_SITE_ID,
+                    LOCAL_LAYOUT_ID,
+                )
+                layout_receipt = self.service.get_layout(
+                    principal,
+                    LOCAL_SITE_ID,
+                    LOCAL_LAYOUT_ID,
+                )
             except FacilityNotFoundError:
                 frame = deepcopy(shell.document["coordinateFrame"])
                 layout = create_layout_document(
@@ -612,6 +1158,17 @@ class LocalFacilityLayoutHost:
                     make_default=True,
                 )
             self._bootstrapped = True
+            saved_layout = layout_receipt.get("layout", {})
+            saved_plan_settings = plan_settings_from_layout(saved_layout)
+            plan_settings = saved_plan_settings
+            if plan_settings is None:
+                plan_settings = default_plan_settings()
+            world_bounds = plan_world_bounds(
+                plan_settings,
+                floor_y=float(
+                    shell.document["coordinateFrame"].get("floorElevation", 0)
+                ),
+            )
             return {
                 "schemaVersion": 1,
                 "siteId": LOCAL_SITE_ID,
@@ -622,17 +1179,17 @@ class LocalFacilityLayoutHost:
                     if self.feature_flags.enabled("asset_library")
                     else []
                 ),
-                "worldBounds": {
-                    "minX": 0,
-                    "minZ": 0,
-                    "maxX": 40,
-                    "maxZ": 30,
-                    "floorY": float(
-                        shell.document["coordinateFrame"].get(
-                            "floorElevation",
-                            0,
-                        )
+                "worldBounds": world_bounds,
+                "grid": {
+                    "units": "m",
+                    "originMode": "corner",
+                    "snapSpacing": (
+                        plan_settings["gridSpacingMeters"]
+                        if saved_plan_settings is not None
+                        else 0.5
                     ),
+                    "minorSpacing": plan_settings["gridSpacingMeters"],
+                    "majorSpacing": plan_settings["majorGridSpacingMeters"],
                 },
                 "capabilities": {
                     "viewerV2": self.feature_flags.enabled("viewer_v2"),
@@ -652,6 +1209,9 @@ class LocalFacilityLayoutHost:
                     "candidateSnapping": self.feature_flags.enabled(
                         "constraints"
                     ),
+                    # Manual drag/drop is direct and undoable. Candidate
+                    # previews remain available to planners and agents.
+                    "manualPlacementApproval": False,
                     "coarseAdvisoryWorker": self.feature_flags.enabled(
                         "constraints"
                     ),
@@ -854,6 +1414,277 @@ class LocalFacilityLayoutHost:
             except FacilityLayoutAgentRuntimeError as error:
                 raise self._agent_error(error) from error
 
+        @router.get(
+            "/api/facility-layout-agent/{site_id}/{layout_id}/runs/{run_id}"
+        )
+        async def facility_agent_workflow_run(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+        ):
+            self._require_feature("agent_preview")
+            principal = self.resolve_principal(request)
+            try:
+                return self.agent_runtime.get_workflow_run(
+                    principal,
+                    site_id=site_id,
+                    layout_id=layout_id,
+                    run_id=run_id,
+                )
+            except FacilityLayoutAgentRuntimeError as error:
+                raise self._agent_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/g1"
+        )
+        async def start_facility_generation_g1(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            body: dict[str, Any],
+        ):
+            execution_mode = str(
+                body.get("executionMode") or "authorized_draft_run"
+            )
+            action = (
+                "proposal.create"
+                if execution_mode == "preview_only"
+                else "proposal.apply"
+            )
+            principal = self._require_request_action(request, action)
+            session_id = self._generation_session_id(request)
+            if body.get("prototypeMode") is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "explicit_prototype_mode_required",
+                            "message": (
+                                "Gate G1 generation requires prototypeMode=true."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            envelope = body.get("facilityEnvelope")
+            departments = body.get("departments")
+            if not isinstance(envelope, Mapping) or not isinstance(
+                departments, Mapping
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "g1_intent_incomplete",
+                            "message": (
+                                "facilityEnvelope and departments must be objects."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            current = self.service.get_layout(principal, site_id, layout_id)
+            try:
+                return self.generation_coordinator.start_g1_run(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    workspace_id=str(
+                        body.get("workspaceId") or "workspace-facility-layout"
+                    ),
+                    layout_id=layout_id,
+                    user_id=principal.principal_id,
+                    session_id=session_id,
+                    base_layout=current["layout"],
+                    base_layout_revision=current["revision"],
+                    envelope_request=envelope,
+                    department_request=departments,
+                    execution_mode=execution_mode,
+                    prototype_mode=True,
+                )
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"
+            "{run_id}/continue"
+        )
+        async def continue_facility_generation(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+            body: dict[str, Any],
+        ):
+            try:
+                principal = self._require_request_action(
+                    request, "proposal.create"
+                )
+                run_view = self.generation_coordinator.get_run(
+                    principal.tenant_id, site_id, run_id
+                )
+                if run_view["draftLayout"]["layoutId"] != layout_id:
+                    raise HTTPException(status_code=404, detail="Not found")
+                if run_view["writable"]:
+                    principal = self._require_request_action(
+                        request, "proposal.apply"
+                    )
+                current = self.service.get_layout(
+                    principal, site_id, layout_id
+                )
+                return self.generation_coordinator.continue_run(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                    current_base_layout=current["layout"],
+                    current_base_revision=current["revision"],
+                    explicit_stage_acceptance=(
+                        body.get("explicitStageAcceptance") is True
+                    ),
+                )
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.get(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"
+            "{run_id}"
+        )
+        async def get_facility_generation_run(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+        ):
+            principal = self._require_request_action(request, "layout.read")
+            try:
+                result = self.generation_coordinator.get_run(
+                    principal.tenant_id, site_id, run_id
+                )
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+            if result["draftLayout"]["layoutId"] != layout_id:
+                raise HTTPException(status_code=404, detail="Not found")
+            return result
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"
+            "{run_id}/invalidate"
+        )
+        async def invalidate_facility_generation(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(request, "proposal.apply")
+            try:
+                return self.generation_coordinator.invalidate_from_stage(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                    upstream_stage_id=str(body.get("upstreamStageId") or ""),
+                    reason=str(
+                        body.get("reason") or "upstream_dependency_changed"
+                    ),
+                    dependency_fingerprint_after=str(
+                        body.get("dependencyFingerprintAfter") or ""
+                    ),
+                )
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"
+            "{run_id}/undo"
+        )
+        async def undo_facility_generation(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+        ):
+            principal = self._require_request_action(request, "proposal.apply")
+            try:
+                return self.generation_coordinator.undo_to_base(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                )
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"
+            "{run_id}/save"
+        )
+        async def save_facility_generation(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(request, "layout.edit")
+            current = self.service.get_layout(principal, site_id, layout_id)
+            try:
+                return self.generation_coordinator.save_run(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                    current_base_layout=current["layout"],
+                    current_base_revision=current["revision"],
+                    expected_cumulative_diff_hash=str(
+                        body.get("cumulativeDiffHash") or ""
+                    ),
+                    explicit_approval=body.get("explicitApproval") is True,
+                    approved_by=principal.principal_id,
+                    persist=lambda document, base_revision: (
+                        self.service.save_layout(
+                            principal,
+                            site_id,
+                            layout_id,
+                            document,
+                            base_revision,
+                        )
+                    ),
+                )
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
         router.include_router(
             create_facility_layout_router(
                 service=self.service,
@@ -887,6 +1718,8 @@ __all__ = [
     "LOCAL_ASSET_CATALOG",
     "LOCAL_LAYOUT_ID",
     "LOCAL_SITE_ID",
+    "PRIVATE_ASSET_ENV",
     "LocalFacilityLayoutHost",
+    "build_private_local_asset_catalog",
     "create_local_facility_layout_router",
 ]

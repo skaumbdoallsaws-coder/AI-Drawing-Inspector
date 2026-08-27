@@ -173,6 +173,7 @@
         const motion = (after && after.motion) || {};
         const rotation = (after && after.rotation) || {};
         const processMapSelection = after && after.process_map_selection;
+        const processMapFocus = after && after.process_map_focus;
         switch (action.type) {
             case 'set_process_map_part_scope':
                 return processMapSelection
@@ -184,6 +185,36 @@
                 return processMapSelection == null
                     ? { ok: true }
                     : { ok: false, error: 'process_map_scope_not_cleared' };
+            case 'set_process_map_focus': {
+                const requestedNodeIds = []
+                    .concat(action.target_node_id || [])
+                    .concat(action.target_node_ids || []);
+                const requestedOccurrenceIds = []
+                    .concat(action.target_occurrence_id || [])
+                    .concat(action.target_occurrence_ids || []);
+                const appliedNodeIds = processMapFocus
+                    && Array.isArray(processMapFocus.target_node_ids)
+                    ? processMapFocus.target_node_ids : [];
+                const appliedOccurrenceIds = processMapFocus
+                    && Array.isArray(processMapFocus.target_occurrence_ids)
+                    ? processMapFocus.target_occurrence_ids
+                    : processMapFocus && processMapFocus.target_occurrence_id
+                        ? [processMapFocus.target_occurrence_id] : [];
+                const targetMatches = !!processMapFocus
+                    && requestedNodeIds.every(id => appliedNodeIds.includes(id))
+                    && requestedOccurrenceIds.every(
+                        id => appliedOccurrenceIds.includes(id)
+                    );
+                return targetMatches
+                    && Array.isArray(processMapFocus.node_ids)
+                    && processMapFocus.node_ids.length > 0
+                    ? { ok: true }
+                    : { ok: false, error: 'process_map_focus_not_applied' };
+            }
+            case 'clear_process_map_focus':
+                return processMapFocus == null
+                    ? { ok: true }
+                    : { ok: false, error: 'process_map_focus_not_cleared' };
             case 'play_motion':
                 return motion.playing ? { ok: true } : { ok: false, error: 'motion_not_playing' };
             case 'pause_motion':

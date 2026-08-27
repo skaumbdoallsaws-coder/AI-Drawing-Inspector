@@ -1,0 +1,136 @@
+{
+  "checks": {
+    "all_screenshots_nonblank": true,
+    "exact_department_labels": true,
+    "exact_facility_dimensions": true,
+    "exact_stage_order": true,
+    "explicit_save_persists_exact_draft": true,
+    "g1_scope_remains_bounded": true,
+    "no_console_errors": true,
+    "no_failed_responses": true,
+    "no_page_errors": true,
+    "production_tool_dispatch_succeeded": true,
+    "reload_preserves_saved_geometry": true,
+    "review_draft_is_unsaved_and_actionable": true,
+    "saved_layout_untouched_before_approval": true,
+    "second_run_is_deterministic": true,
+    "started_from_empty_layout": true,
+    "ten_revision_bound_receipts": true,
+    "undo_restores_exact_empty_base": true
+  },
+  "errors": {
+    "console": [],
+    "page": []
+  },
+  "generation": {
+    "cumulativeDiffHash": "306a3d76d82f005119ea01939ca628d2e146e469eba39afb60f33b6dab9dff40",
+    "departmentLabels": [
+      "Receiving and Stores",
+      "Machining",
+      "Assembly",
+      "Inspection and Shipping"
+    ],
+    "executionMode": "authorized_draft_run",
+    "facility": {
+      "depthMeters": 80,
+      "widthMeters": 100
+    },
+    "firstRunId": "fgr-12f6118f057e4d7ca8ad82aa7e264f3d",
+    "prototypeMode": true,
+    "receiptCount": 10,
+    "savedRevision": "34321f73ba828e780ff1991ebdbf680ef0693facf727dd70b5e27a8a770dc634",
+    "secondRunId": "fgr-4cea4be46a6443b6ba32bebafe3475d7",
+    "stages": [
+      "facility_envelope",
+      "macro_departments",
+      "primary_circulation",
+      "department_subdivisions",
+      "department_resources",
+      "seed_cells",
+      "repeated_modules",
+      "floor_communication",
+      "deterministic_validation",
+      "review_and_save"
+    ],
+    "tool": "generate_facility_departments_draft"
+  },
+  "network": {
+    "failedResponses": []
+  },
+  "passed": true,
+  "schemaVersion": "facility-layout-g1-browser-evidence-v1",
+  "screenshots": {
+    "departments_light": {
+      "bytes": 259255,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/knowledge_foundation/g1-departments-light.png",
+      "sha256": "12b4512392d26deafda6ee6f24e22af3efa1674361e50587a70485536c078b73",
+      "width": 1920
+    },
+    "envelope_light": {
+      "bytes": 262231,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/knowledge_foundation/g1-envelope-light.png",
+      "sha256": "70f372fe2fd1dafcccd24a4c83df5a8dfa827dc51526967596f23cee4541b68a",
+      "width": 1920
+    },
+    "plan_dark": {
+      "bytes": 235313,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/knowledge_foundation/g1-plan-dark.png",
+      "sha256": "1e69a5a61ccbd75ab0ae8518452ad54df70bc8e0f28d7a1b4be2aa727a87c4e2",
+      "width": 1920
+    },
+    "plan_light": {
+      "bytes": 259274,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/knowledge_foundation/g1-plan-light.png",
+      "sha256": "663514e690bf65ca20dda604ffddf13d5d5aa0374816c864aa3f99cf89883b73",
+      "width": 1920
+    },
+    "saved_reload": {
+      "bytes": 236549,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/knowledge_foundation/g1-saved-reload.png",
+      "sha256": "fc703eb6d60217ea1a9d1551b8249b8bbc67ce25dadd567306b4fc974f4714d9",
+      "width": 1920
+    },
+    "three_dark": {
+      "bytes": 592512,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/knowledge_foundation/g1-three-dark.png",
+      "sha256": "36bbfa3b6143d13e756866868c7bbca169ed0728420b48888249608a68389e39",
+      "width": 1920
+    },
+    "three_light": {
+      "bytes": 623903,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/knowledge_foundation/g1-three-light.png",
+      "sha256": "8224dad8660f393764fa3d18fc888753012460c5237548bd2f0db35a4bdc3f17",
+      "width": 1920
+    },
+    "undo_empty": {
+      "bytes": 241369,
+      "height": 1080,
+      "nonblank": true,
+      "path": "tests/fixtures/facility_layout/knowledge_foundation/g1-undo-empty.png",
+      "sha256": "6affa0d244c618938cea095a7aa3cc4610cd1147c7d251bb2afb4816bb805932",
+      "width": 1920
+    }
+  },
+  "source": {
+    "coordinatorSha256": "5b8e58c379b50e45807efb05af141e011e8644f99f198bde2e5e4aab427f95d8",
+    "hostSha256": "11fce360e30cc86978e908dcee692a26f172ea4324f62dc7fc8a92b7ce1573fd",
+    "indexSha256": "4b6e1b7dd42c91ba14017ebdc3ece14d26d69e9de34b09b9dc4c1e6992c3e458",
+    "runRepositorySha256": "23ccc367691cfe0c6c6efad81f1cffd1a4620726eca82f369e848606b3e2f643",
+    "sessionSha256": "e84446ecfe8b6b0b460fc3a5bc8b261c8fb1d3b3e44817a53ef877e1aacefea1",
+    "verifierSha256": "ab5b1a5bf3cef860c355c5a154cd4dc59c8f59ee198bbb8b3ab9b91a4f4f7390"
+  }
+}

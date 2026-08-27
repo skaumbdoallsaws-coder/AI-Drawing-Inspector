@@ -255,6 +255,9 @@ function mockAdapter(id) {
         layouts: [],
         selections: [],
         fitCount: 0,
+        fitFacilityCount: 0,
+        fitLayoutCount: 0,
+        topViewCount: 0,
         disposed: false,
         suspended: false,
         handler: null,
@@ -262,6 +265,19 @@ function mockAdapter(id) {
         setLayout(value) { this.layouts.push(value); },
         setSelection(value) { this.selections.push(value); },
         fit() { this.fitCount += 1; return { id: this.id }; },
+        fitFacility() {
+            this.fitCount += 1;
+            this.fitFacilityCount += 1;
+            return { id: this.id, mode: 'facility' };
+        },
+        fitLayout() {
+            this.fitLayoutCount += 1;
+            return { id: this.id, mode: 'layout' };
+        },
+        topView() {
+            this.topViewCount += 1;
+            return { id: this.id, mode: 'top' };
+        },
         suspend() { this.suspended = true; return true; },
         resume() { this.suspended = false; return true; },
         dispose() { this.disposed = true; },
@@ -341,6 +357,303 @@ check('authored shell bounds keep sparse layouts in a stable world frame', () =>
     );
 });
 
+check('top plan renders the measured facility floor grid axes and origin', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const source = layout();
+    const before = JSON.stringify(source);
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+        floorGridSpacing: 1,
+        floorMajorGridSpacing: 5,
+        units: 'm',
+        originMode: 'corner',
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(source);
+    assert.strictEqual(
+        host.findByAttribute('data-layer', 'environment').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-facility-floor', 'true').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-facility-origin', 'true').length,
+        1
+    );
+    assert.deepStrictEqual(adapter.getDiagnostics().environment, {
+        bounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+        spacing: 1,
+        majorSpacing: 5,
+        minorLineCount: 56,
+        majorLineCount: 16,
+        origin: { x: 0, z: 0 },
+        center: { x: 20, z: 15 },
+    });
+    const facilityProjection = adapter.fitFacility();
+    const layoutProjection = adapter.fitLayout();
+    assert(layoutProjection.scale > facilityProjection.scale);
+    assert.strictEqual(JSON.stringify(source), before);
+    adapter.dispose();
+});
+
+check('top plan updates dimensions grid rulers and view-only scale together', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const source = layout();
+    const before = JSON.stringify(source);
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+        floorGridSpacing: 1,
+        floorMajorGridSpacing: 5,
+        units: 'm',
+        originMode: 'corner',
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(source);
+    adapter.setEnvironmentSettings({
+        worldBounds: { minX: 0, minZ: 0, maxX: 55, maxZ: 36 },
+        floorGridSpacing: 2,
+        floorMajorGridSpacing: 10,
+    });
+    const environment = adapter.getDiagnostics().environment;
+    assert.deepStrictEqual(environment.bounds, {
+        minX: 0, minZ: 0, maxX: 55, maxZ: 36,
+    });
+    assert.strictEqual(environment.spacing, 2);
+    assert.strictEqual(environment.majorSpacing, 10);
+    const caption = host.findByAttribute(
+        'data-plan-settings-trigger',
+        'dimensions'
+    )[0];
+    assert.strictEqual(caption.textContent, '55 x 36 m | Grid 2 m');
+    const originalScale = adapter.getViewportState().projection.scale;
+    assert.strictEqual(
+        adapter.setScaleAt({ clientX: 450, clientY: 325 }, originalScale * 1.5),
+        true
+    );
+    assert.ok(Math.abs(
+        adapter.getViewportState().projection.scale - originalScale * 1.5
+    ) < 1e-6);
+    assert.strictEqual(JSON.stringify(source), before);
+    adapter.dispose();
+});
+
+check('top plan publishes projection changes and applies view-only preferences', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const source = layout();
+    const before = JSON.stringify(source);
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+        floorGridSpacing: 1,
+        floorMajorGridSpacing: 5,
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    const snapshots = [];
+    adapter.setViewportChangeHandler(value => snapshots.push(value));
+    adapter.setLayout(source);
+    const countAfterLayout = snapshots.length;
+    adapter.panByPixels(12, -7);
+    adapter.zoomAt({ clientX: 450, clientY: 325 }, 1.25);
+    assert.ok(snapshots.length >= countAfterLayout + 2);
+    adapter.setViewPreferences({ displayUnit: 'ft', showGrid: false });
+    const state = adapter.getViewportState();
+    assert.strictEqual(state.displayUnit, 'ft');
+    assert.strictEqual(state.showGrid, false);
+    assert.strictEqual(adapter.getDiagnostics().environment.minorLineCount, 0);
+    assert.strictEqual(adapter.getDiagnostics().environment.majorLineCount, 0);
+    const card = host.findByAttribute('data-placement-id', 'pl-machine')[0];
+    assert.ok(card.getAttribute('aria-label').includes('feet'));
+    assert.strictEqual(JSON.stringify(source), before);
+    adapter.dispose();
+});
+
+check('top plan renders and clears transient zone drawing previews', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(layout());
+    adapter.setTransientZonePreview([
+        { x: 2, z: 3 },
+        { x: 8, z: 3 },
+        { x: 8, z: 7 },
+        { x: 2, z: 7 },
+    ], { kind: 'rectangle', closed: true });
+    assert.strictEqual(
+        host.findByAttribute('data-layer', 'transient-zone-preview').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-facility-zone-preview',
+            'rectangle'
+        )[0].nodeName,
+        'polygon'
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-zone-preview-vertex', '0').length,
+        1
+    );
+    assert.strictEqual(
+        adapter.getDiagnostics().transientZonePreview.closed,
+        true
+    );
+
+    adapter.setTransientZonePreview([
+        { x: 1, z: 1 },
+        { x: 4, z: 1 },
+    ], { kind: 'polygon', closed: false });
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-facility-zone-preview',
+            'polygon'
+        )[0].nodeName,
+        'polyline'
+    );
+    adapter.setTransientZonePreview([], {});
+    assert.strictEqual(
+        host.findByAttribute('data-layer', 'transient-zone-preview').length,
+        0
+    );
+    assert.strictEqual(adapter.getDiagnostics().transientZonePreview, null);
+    adapter.dispose();
+});
+
+check('top plan renders mixed pattern ghosts and deterministic guides', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const source = layout();
+    source.floorMarkings = [{
+        markingId: 'fm-flow',
+        markingType: 'direction_arrow',
+        label: 'Material flow',
+        semanticRole: 'material_flow',
+        transform: {
+            position: { x: 4, y: 0, z: 4 },
+            rotationDegrees: 0,
+        },
+        width: 1.5,
+        depth: 0.75,
+        fillColor: '#facc15',
+        strokeColor: '#111827',
+        opacity: 1,
+        positionMode: 'manual',
+    }];
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        assetBounds: {
+            'asset-machine': { width: 2, depth: 1 },
+            'asset-rack': { width: 3, depth: 1.2 },
+        },
+        worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(source);
+    adapter.setTransientPatternPreview({
+        mode: 'linear',
+        copies: [
+            {
+                sourceId: 'pl-machine',
+                kind: 'placement',
+                position: { x: 12, y: 0, z: 4 },
+                rotationDegrees: 0,
+            },
+            {
+                sourceId: 'fm-flow',
+                kind: 'floor-marking',
+                position: { x: 14, y: 0, z: 4 },
+                rotationDegrees: 90,
+            },
+            {
+                sourceId: 'zn-cell',
+                kind: 'zone',
+                position: { x: 16, y: 0, z: 4 },
+                rotationDegrees: 0,
+                boundary: [
+                    { x: 15, z: 3 },
+                    { x: 17, z: 3 },
+                    { x: 17, z: 5 },
+                    { x: 15, z: 5 },
+                ],
+            },
+        ],
+        moves: [],
+        guide: {
+            kind: 'linear',
+            start: { x: 4, z: 4 },
+            end: { x: 16, z: 4 },
+        },
+    });
+    assert.strictEqual(
+        host.findByAttribute('data-layer', 'pattern-preview').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-pattern-preview-source', 'pl-machine').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-pattern-preview-source', 'fm-flow').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-pattern-preview-source', 'zn-cell').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-pattern-guide', 'linear').length,
+        1
+    );
+    assert.strictEqual(
+        adapter.getDiagnostics().transientPatternPreview.mode,
+        'linear'
+    );
+    adapter.setTransientPatternPreview({
+        mode: 'mirror',
+        copies: [{
+            sourceId: 'pl-machine',
+            kind: 'placement',
+            position: { x: 20, y: 0, z: 4 },
+            rotationDegrees: 180,
+        }],
+        moves: [],
+        guide: {
+            kind: 'mirror',
+            start: { x: 12, z: 0 },
+            end: { x: 12, z: 30 },
+        },
+    });
+    assert.strictEqual(
+        host.findByAttribute('data-pattern-guide', 'mirror').length,
+        1
+    );
+    assert.strictEqual(
+        adapter.getDiagnostics().transientPatternPreview.mode,
+        'mirror'
+    );
+    adapter.setTransientPatternPreview(null);
+    assert.strictEqual(
+        host.findByAttribute('data-layer', 'pattern-preview').length,
+        0
+    );
+    adapter.dispose();
+});
+
 check('top plan renders zones routes and placements with stable IDs', () => {
     FakeResizeObserver.reset();
     const { documentRef, host } = makeHost();
@@ -352,10 +665,49 @@ check('top plan renders zones routes and placements with stable IDs', () => {
             'asset-rack': { width: 3, depth: 1.2 },
         },
     });
-    adapter.setLayout(layout());
+    const markedLayout = layout();
+    markedLayout.floorMarkings = [{
+        markingId: 'fm-keep-clear',
+        markingType: 'keep_clear',
+        label: 'CNC keep clear',
+        semanticRole: 'keep_clear',
+        transform: {
+            position: { x: 6, y: 0, z: 4 },
+            rotationDegrees: 15,
+        },
+        width: 3,
+        depth: 2,
+        fillColor: '#facc15',
+        strokeColor: '#111827',
+        opacity: 0.9,
+        text: 'KEEP CLEAR',
+        positionMode: 'manual',
+        metadata: {},
+        evidence: [],
+    }];
+    adapter.setLayout(markedLayout);
     assert.strictEqual(host.children.length, 1);
     assert.strictEqual(host.findByAttribute('data-zone-id', 'zn-cell').length, 1);
+    const zoneLabel = host.findByAttribute(
+        'data-zone-label-for',
+        'zn-cell'
+    );
+    assert.strictEqual(zoneLabel.length, 1);
+    assert.strictEqual(zoneLabel[0].nodeName, 'g');
+    assert.strictEqual(zoneLabel[0].children[1].textContent, 'Cell');
     assert.strictEqual(host.findByAttribute('data-route-id', 'rt-material').length, 1);
+    const floorMarking = host.findByAttribute(
+        'data-floor-marking-id',
+        'fm-keep-clear'
+    );
+    assert.strictEqual(floorMarking.length, 1);
+    assert.strictEqual(
+        floorMarking[0].getAttribute('data-floor-marking-type'),
+        'keep_clear'
+    );
+    assert.ok(floorMarking[0].getAttribute('aria-label').includes(
+        'CNC keep clear'
+    ));
     assert.strictEqual(
         host.findByAttribute('data-placement-id', 'pl-machine').length,
         1
@@ -364,7 +716,191 @@ check('top plan renders zones routes and placements with stable IDs', () => {
         host.findByAttribute('data-placement-id', 'pl-rack').length,
         1
     );
+    const machineCard = host.findByAttribute(
+        'data-placement-id',
+        'pl-machine'
+    )[0];
+    assert.strictEqual(machineCard.nodeName, 'g');
+    assert.strictEqual(machineCard.getAttribute('class'), 'ip-flw-plan-card');
+    assert.strictEqual(machineCard.getAttribute('data-card-world-width'), '2');
+    assert.strictEqual(machineCard.getAttribute('data-card-world-depth'), '1');
+    assert(machineCard.getAttribute('aria-label').includes('2 by 1 metres'));
+    assert.strictEqual(
+        machineCard.findByAttribute('class', 'ip-flw-plan-card-body').length,
+        1
+    );
+    assert.strictEqual(
+        machineCard.findByAttribute('data-card-content', 'compact').length,
+        1
+    );
+    assert.strictEqual(
+        machineCard.findByAttribute('data-card-content', 'full').length,
+        1
+    );
+    const detailLevel = machineCard.getAttribute('data-card-detail-level');
+    const compactContent = machineCard.findByAttribute(
+        'data-card-content', 'compact'
+    )[0];
+    const fullContent = machineCard.findByAttribute(
+        'data-card-content', 'full'
+    )[0];
+    assert.strictEqual(
+        compactContent.getAttribute('display'),
+        detailLevel === 'compact' ? 'inline' : 'none'
+    );
+    assert.strictEqual(
+        fullContent.getAttribute('display'),
+        detailLevel === 'full' ? 'inline' : 'none'
+    );
+    assert.strictEqual(
+        compactContent.findByAttribute(
+            'class', 'ip-flw-plan-card-symbol'
+        )[0].getAttribute('fill'),
+        '#dceeff'
+    );
+    adapter.setSelection('fm-keep-clear');
+    assert.strictEqual(
+        host.findByAttribute(
+            'class', 'ip-flw-floor-marking-resize-handle'
+        ).length,
+        4
+    );
+    [0, 1, 2, 3].forEach(index => {
+        assert.strictEqual(
+            host.findByAttribute(
+                'data-floor-marking-resize-handle',
+                String(index)
+            ).length,
+            1
+        );
+    });
     assert.ok(adapter.getDiagnostics().renderCount >= 1);
+    adapter.dispose();
+});
+
+check('top plan collapses a vertical stack into one counted footprint', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const members = [0, 1, 2].map(level => {
+        const item = placement(
+            `pl-stack-${level}`,
+            'asset-machine',
+            4,
+            4
+        );
+        item.transform.position.y = level * 0.2;
+        item.snapRelationship = {
+            family: 'vertical_stack',
+            stackId: 'stack-editor-a',
+            level,
+            count: 3,
+            gapMeters: 0,
+            itemHeightMeters: 0.2,
+            evidenceStatus: 'unverified',
+        };
+        return item;
+    });
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        assetBounds: { 'asset-machine': { width: 2, depth: 1 } },
+    });
+    adapter.setLayout(layout(members));
+    assert.strictEqual(
+        host.findByAttribute('data-placement-id', 'pl-stack-0').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-placement-id', 'pl-stack-1').length,
+        0
+    );
+    const badge = host.findByAttribute('data-stack-badge', 'stack-editor-a');
+    assert.strictEqual(badge.length, 1);
+    const card = host.findByAttribute('data-stack-id', 'stack-editor-a')[0];
+    assert.strictEqual(card.getAttribute('data-stack-count'), '3');
+    assert.ok(card.getAttribute('aria-label').includes('stack of 3 items'));
+    adapter.dispose();
+});
+
+check('zone header tabs avoid equipment occupying the upper-left corner', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const source = layout([
+        placement('pl-machine', 'asset-machine', 1, 7.5),
+    ]);
+    source.routes = [];
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        assetBounds: {
+            'asset-machine': { width: 2, depth: 1 },
+        },
+    });
+    adapter.setLayout(source);
+    const label = host.findByAttribute(
+        'data-zone-label-box-for',
+        'zn-cell'
+    )[0];
+    const card = host.findByAttribute(
+        'class',
+        'ip-flw-plan-card-body'
+    )[0];
+    const labelBounds = {
+        minX: Number(label.getAttribute('x')),
+        minY: Number(label.getAttribute('y')),
+        maxX: Number(label.getAttribute('x'))
+            + Number(label.getAttribute('width')),
+        maxY: Number(label.getAttribute('y'))
+            + Number(label.getAttribute('height')),
+    };
+    const points = card.getAttribute('points').split(' ').map(value => {
+        const pair = value.split(',').map(Number);
+        return { x: pair[0], y: pair[1] };
+    });
+    const cardBounds = {
+        minX: Math.min(...points.map(point => point.x)),
+        minY: Math.min(...points.map(point => point.y)),
+        maxX: Math.max(...points.map(point => point.x)),
+        maxY: Math.max(...points.map(point => point.y)),
+    };
+    const overlapWidth = Math.max(
+        0,
+        Math.min(labelBounds.maxX, cardBounds.maxX)
+            - Math.max(labelBounds.minX, cardBounds.minX)
+    );
+    const overlapHeight = Math.max(
+        0,
+        Math.min(labelBounds.maxY, cardBounds.maxY)
+            - Math.max(labelBounds.minY, cardBounds.minY)
+    );
+    assert.strictEqual(overlapWidth * overlapHeight, 0);
+    assert.strictEqual(
+        host.findByAttribute('data-zone-label-for', 'zn-cell')[0]
+            .getAttribute('data-zone-label-edge'),
+        'top-inside'
+    );
+    adapter.dispose();
+});
+
+check('zone labels at the plan boundary avoid a clamped top-outside slot', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const source = layout([]);
+    source.routes = [];
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        worldBounds: { minX: 0, minZ: 0, maxX: 12, maxZ: 8 },
+    });
+    adapter.setLayout(source);
+    const label = host.findByAttribute(
+        'data-zone-label-for',
+        'zn-cell'
+    )[0];
+    assert.notStrictEqual(
+        label.getAttribute('data-zone-label-edge'),
+        'top-outside'
+    );
     adapter.dispose();
 });
 
@@ -389,6 +925,80 @@ check('plan picking synchronizes one stable selection to every view', () => {
     controller.clearSelection();
     assert.strictEqual(top.getDiagnostics().selection, null);
     controller.dispose();
+});
+
+check('plan placement drag preview moves cards transiently without mutating layout',
+    () => {
+        FakeResizeObserver.reset();
+        const { documentRef, host } = makeHost();
+        const source = layout();
+        const before = JSON.stringify(source);
+        const adapter = facility.createTopPlanAdapter(host, {
+            document: documentRef,
+            ResizeObserver: FakeResizeObserver,
+            assetBounds: {
+                'asset-machine': { width: 2, depth: 1 },
+                'asset-rack': { width: 3, depth: 1.2 },
+            },
+        });
+        adapter.setLayout(source);
+        const card = host.findByAttribute(
+            'data-placement-id',
+            'pl-machine'
+        )[0];
+        assert.strictEqual(adapter.setTransientPlacementMove(
+            ['pl-machine'],
+            { x: 2, y: 0, z: -1 }
+        ), true);
+        assert(card.getAttribute('transform').startsWith('translate('));
+        assert.strictEqual(card.getAttribute('data-drag-preview'), 'true');
+        assert.strictEqual(JSON.stringify(source), before);
+        assert.strictEqual(adapter.setTransientPlacementMove([], null), true);
+        assert.strictEqual(card.getAttribute('transform'), '');
+        assert.strictEqual(card.getAttribute('data-drag-preview'), 'false');
+        assert.strictEqual(JSON.stringify(source), before);
+        adapter.dispose();
+    });
+
+check('plan duplicate drag previews a copy while the source remains fixed', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const source = layout();
+    const before = JSON.stringify(source);
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        assetBounds: {
+            'asset-machine': { width: 2, depth: 1 },
+            'asset-rack': { width: 3, depth: 1.2 },
+        },
+    });
+    adapter.setLayout(source);
+    const card = host.findByAttribute('data-placement-id', 'pl-machine')[0];
+    assert.strictEqual(adapter.setTransientPlacementDuplicate(
+        ['pl-machine'],
+        { x: 2, y: 0, z: -1 }
+    ), true);
+    assert.strictEqual(card.getAttribute('transform'), '');
+    assert.strictEqual(card.getAttribute('data-drag-preview'), 'false');
+    const previews = host.findByAttribute(
+        'data-duplicate-preview-id',
+        'pl-machine'
+    );
+    assert.strictEqual(previews.length, 1);
+    assert.ok(previews[0].getAttribute('transform').startsWith('translate('));
+    assert.deepStrictEqual(adapter.getDiagnostics().transientPlacementDuplicate, {
+        placementIds: ['pl-machine'],
+        delta: { x: 2, y: 0, z: -1 },
+    });
+    assert.strictEqual(JSON.stringify(source), before);
+    assert.strictEqual(adapter.setTransientPlacementDuplicate([], null), true);
+    assert.strictEqual(
+        host.findByAttribute('data-layer', 'placement-duplicate-preview').length,
+        0
+    );
+    assert.strictEqual(JSON.stringify(source), before);
+    adapter.dispose();
 });
 
 check('zones and placements are mouse and keyboard selectable', () => {
@@ -431,6 +1041,11 @@ check('fit delegates to views and leaves authoritative layout byte-identical', (
     const results = controller.fit();
     assert.strictEqual(results.length, 2);
     assert.strictEqual(peer.fitCount, 1);
+    assert.strictEqual(peer.fitFacilityCount, 1);
+    assert.strictEqual(controller.fitLayout().length, 2);
+    assert.strictEqual(peer.fitLayoutCount, 1);
+    assert.strictEqual(controller.topView().length, 1);
+    assert.strictEqual(peer.topViewCount, 1);
     assert.strictEqual(JSON.stringify(source), before);
     assert.strictEqual(JSON.stringify(controller.getState().layout), before);
     controller.dispose();
@@ -659,6 +1274,9 @@ check('plan authoring projection preserves world intent through pan zoom and lay
             'data-placement-id',
             'pl-machine'
         )[0];
+        const initialDetailLevel = machineElement.getAttribute(
+            'data-card-detail-level'
+        );
         const firstClient = adapter.worldToClient(intended);
         const firstRoundTrip = adapter.clientToWorld({
             clientX: firstClient.x,
@@ -682,6 +1300,29 @@ check('plan authoring projection preserves world intent through pan zoom and lay
         assert.strictEqual(
             host.findByAttribute('data-placement-id', 'pl-machine')[0],
             machineElement
+        );
+        assert.notStrictEqual(
+            machineElement.getAttribute('data-card-detail-level'),
+            'body'
+        );
+        assert.notStrictEqual(
+            machineElement.getAttribute('data-card-detail-level'),
+            initialDetailLevel
+        );
+        const zoomedDetailLevel = machineElement.getAttribute(
+            'data-card-detail-level'
+        );
+        assert.strictEqual(
+            machineElement.findByAttribute(
+                'data-card-content', 'compact'
+            )[0].getAttribute('display'),
+            zoomedDetailLevel === 'compact' ? 'inline' : 'none'
+        );
+        assert.strictEqual(
+            machineElement.findByAttribute(
+                'data-card-content', 'full'
+            )[0].getAttribute('display'),
+            zoomedDetailLevel === 'full' ? 'inline' : 'none'
         );
         const zoomRoundTrip = adapter.clientToWorld({
             clientX: pannedClient.x,

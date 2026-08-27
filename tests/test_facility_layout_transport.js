@@ -329,6 +329,71 @@ test('validates stable identity and revision inputs before fetch', async () => {
     );
 });
 
+test('binds resumable G1 generation and explicit Save to one session', async () => {
+    const calls = [];
+    const transport = Transport.createHttpTransport({
+        siteId: 'site a',
+        layoutId: 'layout/one',
+        sessionId: 'facility-generation-session-001',
+        fetch: async (url, init) => {
+            calls.push({ url, init });
+            return response(200, { ok: true });
+        },
+    });
+    await transport.startG1Generation({
+        prototypeMode: true,
+        executionMode: 'authorized_draft_run',
+        facilityEnvelope: {
+            width: 100,
+            depth: 80,
+            sourceUnit: 'm',
+            displayName: 'Generated Facility',
+        },
+        departments: {
+            count: 2,
+            labels: ['Receiving', 'Assembly'],
+            proportions: null,
+            arrangement: 'columns',
+            orientation: 'auto',
+        },
+    });
+    await transport.continueGenerationRun({
+        runId: 'fgr-run-001',
+        explicitStageAcceptance: false,
+    });
+    await transport.getGenerationRun({ runId: 'fgr-run-001' });
+    await transport.undoGenerationRun({ runId: 'fgr-run-001' });
+    await transport.saveGenerationRun({
+        runId: 'fgr-run-001',
+        cumulativeDiffHash: 'a'.repeat(64),
+        explicitApproval: true,
+    });
+    const root = '/api/facility-layout-generation/site%20a/layout%2Fone';
+    assert.deepStrictEqual(calls.map(item => item.url), [
+        root + '/g1',
+        root + '/runs/fgr-run-001/continue',
+        root + '/runs/fgr-run-001',
+        root + '/runs/fgr-run-001/undo',
+        root + '/runs/fgr-run-001/save',
+    ]);
+    assert.deepStrictEqual(calls.map(item => item.init.method), [
+        'POST', 'POST', 'GET', 'POST', 'POST',
+    ]);
+    calls.forEach(item => {
+        assert.strictEqual(
+            item.init.headers['X-InspectorPro-Session'],
+            'facility-generation-session-001'
+        );
+    });
+    assert.deepStrictEqual(JSON.parse(calls[1].init.body), {
+        explicitStageAcceptance: false,
+    });
+    assert.deepStrictEqual(JSON.parse(calls[4].init.body), {
+        cumulativeDiffHash: 'a'.repeat(64),
+        explicitApproval: true,
+    });
+});
+
 (async () => {
     let passed = 0;
     for (const item of tests) {

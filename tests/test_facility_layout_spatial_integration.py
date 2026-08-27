@@ -284,13 +284,39 @@ def test_direct_collision_and_zone_escape_are_rejected_before_draft(tmp_path):
         "anchors": [],
         "evidence": [],
     }
+    zone_preview = host.service.preview_operations(
+        principal,
+        LOCAL_SITE_ID,
+        LOCAL_LAYOUT_ID,
+        current_revision,
+        [{"op": "add_zone", "zone": zone}],
+    )
+    assert any(
+        item["code"] == "zone_containment_violation"
+        for item in zone_preview["spatialDiagnostics"]["findings"]
+    )
+    assert _snapshot(host.root) == before
+
+    # Existing equipment is grandfathered so a zone can be authored
+    # incrementally. Equipment introduced by the same draft still has to be
+    # contained by that zone.
     with pytest.raises(FacilityValidationError) as outside:
         host.service.preview_operations(
             principal,
             LOCAL_SITE_ID,
             LOCAL_LAYOUT_ID,
             current_revision,
-            [{"op": "add_zone", "zone": zone}],
+            [
+                {"op": "add_zone", "zone": zone},
+                {
+                    "op": "duplicate_placement",
+                    "sourcePlacementId": first["operation"]["placement"][
+                        "placementId"
+                    ],
+                    "position": {"x": 20, "y": 0, "z": 20},
+                    "positionMode": "manual",
+                },
+            ],
         )
     assert outside.value.code == "spatial_validation_failed"
     assert any(

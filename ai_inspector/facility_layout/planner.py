@@ -442,6 +442,20 @@ def _normalized_request(request: Mapping[str, Any]) -> dict[str, Any]:
             "invalid_planner_request",
             "cleanup.movableManualPlacementIds must contain stable IDs.",
         )
+    replace_existing = cleanup.get("replaceExistingContents", False)
+    if not isinstance(replace_existing, bool):
+        _fail(
+            "invalid_planner_request",
+            "cleanup.replaceExistingContents must be boolean.",
+        )
+    if replace_existing and objective != "place_and_cleanup":
+        _fail(
+            "invalid_planner_request",
+            (
+                "cleanup.replaceExistingContents requires the explicit "
+                "place_and_cleanup objective."
+            ),
+        )
     zone_sizing = value.get("zoneSizing", [])
     if not isinstance(zone_sizing, list):
         _fail("invalid_planner_request", "zoneSizing must be an array.")
@@ -453,6 +467,13 @@ def _normalized_request(request: Mapping[str, Any]) -> dict[str, Any]:
         _fail("invalid_planner_request", "sourceRevisions must be an object.")
     for key, revision in source_revisions.items():
         _revision(revision, f"sourceRevisions.{key}")
+    normalized_cleanup = {
+        "enabled": bool(cleanup.get("enabled", objective != "place_asset_set")),
+        "moveAuto": bool(cleanup.get("moveAuto", True)),
+        "movableManualPlacementIds": sorted(set(movable_manual)),
+    }
+    if replace_existing:
+        normalized_cleanup["replaceExistingContents"] = True
     return {
         **value,
         "requestId": request_id,
@@ -461,11 +482,7 @@ def _normalized_request(request: Mapping[str, Any]) -> dict[str, Any]:
         "maximumAlternatives": maximum_alternatives,
         "spacingMeters": spacing,
         "assetSet": normalized_assets,
-        "cleanup": {
-            "enabled": bool(cleanup.get("enabled", objective != "place_asset_set")),
-            "moveAuto": bool(cleanup.get("moveAuto", True)),
-            "movableManualPlacementIds": sorted(set(movable_manual)),
-        },
+        "cleanup": normalized_cleanup,
         "zoneSizing": deepcopy(zone_sizing),
         "routes": deepcopy(routes),
         "sourceRevisions": deepcopy(dict(source_revisions)),
@@ -664,7 +681,10 @@ def _strategy_seeds(
     instances: Sequence[Mapping[str, Any]],
     regions: Mapping[str, Mapping[str, Any]],
     spacing: float,
+    *,
+    centered_region_ids: Iterable[str] = (),
 ) -> dict[str, tuple[float, float, float]]:
+    centered_regions = set(centered_region_ids)
     by_region: dict[str, list[Mapping[str, Any]]] = {}
     for item in instances:
         by_region.setdefault(str(item["regionId"]), []).append(item)
@@ -690,17 +710,67 @@ def _strategy_seeds(
             columns = max(1, math.ceil(math.sqrt(len(items))))
             cell_x = 2.0 * maximum_half_x + spacing
             cell_z = 2.0 * maximum_half_z + spacing
+            rows = max(1, math.ceil(len(items) / columns))
+            start_x = usable_min_x
+            start_z = usable_min_z
+            if region_id in centered_regions:
+                occupied_x = min(
+                    usable_max_x - usable_min_x,
+                    max(0, columns - 1) * cell_x,
+                )
+                occupied_z = min(
+                    usable_max_z - usable_min_z,
+                    max(0, rows - 1) * cell_z,
+                )
+                start_x += (
+                    usable_max_x - usable_min_x - occupied_x
+                ) / 2.0
+                start_z += (
+                    usable_max_z - usable_min_z - occupied_z
+                ) / 2.0
             for index, item in enumerate(items):
                 column = index % columns
                 row = index // columns
-                x = usable_min_x + column * cell_x
-                z = usable_min_z + row * cell_z
+                x = start_x + column * cell_x
+                z = start_z + row * cell_z
                 result[str(item["instanceKey"])] = (
                     min(x, usable_max_x),
                     float(region["floorElevation"]),
                     min(z, usable_max_z),
                 )
         elif strategy == "flow_lanes":
+            if region_id in centered_regions:
+                columns = max(1, math.ceil(math.sqrt(len(items) * 2.0)))
+                rows = max(1, math.ceil(len(items) / columns))
+                cell_x = 2.0 * maximum_half_x + spacing
+                cell_z = 2.0 * maximum_half_z + spacing
+                occupied_x = min(
+                    usable_max_x - usable_min_x,
+                    max(0, columns - 1) * cell_x,
+                )
+                occupied_z = min(
+                    usable_max_z - usable_min_z,
+                    max(0, rows - 1) * cell_z,
+                )
+                start_x = usable_min_x + (
+                    usable_max_x - usable_min_x - occupied_x
+                ) / 2.0
+                start_z = usable_min_z + (
+                    usable_max_z - usable_min_z - occupied_z
+                ) / 2.0
+                for index, item in enumerate(items):
+                    result[str(item["instanceKey"])] = (
+                        min(
+                            start_x + (index % columns) * cell_x,
+                            usable_max_x,
+                        ),
+                        float(region["floorElevation"]),
+                        min(
+                            start_z + (index // columns) * cell_z,
+                            usable_max_z,
+                        ),
+                    )
+                continue
             stages = sorted({int(item.get("stage", 0)) for item in items})
             stage_columns = {
                 stage: (
@@ -795,12 +865,340 @@ def _catalog_documents(
 def _apply_increment(
     layout: Mapping[str, Any],
     operation: Mapping[str, Any],
+    *,
+    base_revision: str | None = None,
 ) -> dict[str, Any]:
     return apply_facility_layout_operations(
         layout,
         [operation],
-        base_revision=layout_revision(layout),
+        base_revision=base_revision or layout_revision(layout),
     )["document"]
+
+
+def _preallocate_replacement_zones(
+    layout: Mapping[str, Any],
+    *,
+    request: Mapping[str, Any],
+    floor_region: Mapping[str, Any],
+    transaction_base_revision: str,
+) -> tuple[
+    list[dict[str, Any]],
+    dict[str, Any],
+    dict[str, str],
+    set[str],
+]:
+    """Create deterministic macro regions before placing replacement assets."""
+
+    if request["cleanup"].get("replaceExistingContents") is not True:
+        return [], deepcopy(dict(layout)), {}, set()
+    stage_by_item = {
+        str(item["itemId"]): int(item.get("stage", 0))
+        for item in request["assetSet"]
+    }
+    candidates = []
+    for index, raw in enumerate(request["zoneSizing"]):
+        if not isinstance(raw, Mapping):
+            continue
+        new_zone = raw.get("newZone")
+        member_ids = raw.get("memberItemIds")
+        if not isinstance(new_zone, Mapping) or not isinstance(member_ids, list):
+            continue
+        zone_id = str(new_zone.get("zoneId") or "")
+        if not zone_id or not member_ids:
+            continue
+        stages = [
+            stage_by_item[str(item_id)]
+            for item_id in member_ids
+            if str(item_id) in stage_by_item
+        ]
+        candidates.append(
+            {
+                "sourceIndex": index,
+                "stage": min(stages) if stages else index,
+                "zoneId": zone_id,
+                "newZone": deepcopy(dict(new_zone)),
+                "memberItemIds": [str(item_id) for item_id in member_ids],
+            }
+        )
+    if not candidates:
+        return [], deepcopy(dict(layout)), {}, set()
+    candidates.sort(
+        key=lambda item: (
+            int(item["stage"]),
+            int(item["sourceIndex"]),
+            str(item["zoneId"]),
+        )
+    )
+    minimum_x, minimum_z, maximum_x, maximum_z = _polygon_bounds(
+        floor_region["boundary"]
+    )
+    width = maximum_x - minimum_x
+    depth = maximum_z - minimum_z
+    if width <= 0.0 or depth <= 0.0:
+        _fail(
+            "planning_region_unavailable",
+            "The replacement floor boundary has no usable area.",
+        )
+    count = len(candidates)
+    aspect = max(0.25, min(4.0, width / depth))
+    columns = max(1, min(count, math.ceil(math.sqrt(count * aspect))))
+    rows = max(1, math.ceil(count / columns))
+    spacing = float(request["spacingMeters"])
+    minimum_extent = min(width, depth)
+    margin = min(
+        minimum_extent * 0.1,
+        max(spacing * 2.0, minimum_extent * 0.025),
+    )
+    gutter = margin
+    cell_width = (
+        width - 2.0 * margin - max(0, columns - 1) * gutter
+    ) / columns
+    cell_depth = (
+        depth - 2.0 * margin - max(0, rows - 1) * gutter
+    ) / rows
+    if cell_width <= spacing * 2.0 or cell_depth <= spacing * 2.0:
+        _fail(
+            "planning_region_too_small",
+            "The replacement floor cannot hold the requested department grid.",
+        )
+
+    operations: list[dict[str, Any]] = []
+    current = deepcopy(dict(layout))
+    item_zones: dict[str, str] = {}
+    zone_ids: set[str] = set()
+    for position, candidate in enumerate(candidates):
+        row = position // columns
+        column = position % columns
+        cell_min_x = minimum_x + margin + column * (cell_width + gutter)
+        cell_max_x = cell_min_x + cell_width
+        cell_max_z = maximum_z - margin - row * (cell_depth + gutter)
+        cell_min_z = cell_max_z - cell_depth
+        zone_id = str(candidate["zoneId"])
+        zone = deepcopy(candidate["newZone"])
+        zone.update(
+            {
+                "zoneId": zone_id,
+                "zoneType": str(zone.get("zoneType") or "workcell"),
+                "label": str(zone.get("label") or f"Planned zone {position + 1}"),
+                "boundary": [
+                    {"x": cell_min_x, "z": cell_min_z},
+                    {"x": cell_max_x, "z": cell_min_z},
+                    {"x": cell_max_x, "z": cell_max_z},
+                    {"x": cell_min_x, "z": cell_max_z},
+                ],
+                "floorElevation": float(floor_region["floorElevation"]),
+                "anchors": deepcopy(zone.get("anchors", [])),
+                "evidence": deepcopy(zone.get("evidence", [])),
+            }
+        )
+        operation = {"op": "add_zone", "zone": zone}
+        current = _apply_increment(
+            current,
+            operation,
+            base_revision=transaction_base_revision,
+        )
+        operations.append(operation)
+        zone_ids.add(zone_id)
+        for item_id in candidate["memberItemIds"]:
+            previous = item_zones.get(item_id)
+            if previous is not None and previous != zone_id:
+                _fail(
+                    "zone_sizing_member_ambiguous",
+                    f"Planner item '{item_id}' belongs to multiple new zones.",
+                )
+            item_zones[item_id] = zone_id
+
+    horizontal_corridors = [
+        maximum_z
+        - margin
+        - row * cell_depth
+        - (row - 0.5) * gutter
+        for row in range(1, rows)
+    ]
+    vertical_corridors = [
+        minimum_x
+        + margin
+        + column * cell_width
+        + (column - 0.5) * gutter
+        for column in range(1, columns)
+    ]
+    floor_y = float(floor_region["floorElevation"])
+    forklift_width = max(1.0, min(gutter * 0.75, 4.0))
+    pedestrian_width = max(1.0, min(gutter * 0.4, 2.0))
+
+    for index, z in enumerate(horizontal_corridors):
+        operation = {
+            "op": "add_aisle",
+            "routeId": _stable_id(
+                "rt-p8-",
+                {
+                    "requestId": request["requestId"],
+                    "kind": "primary-material-flow",
+                    "index": index,
+                },
+                20,
+            ),
+            "aisle": {
+                "label": (
+                    "Primary Material Flow"
+                    if index == 0
+                    else f"Material Flow {index + 1}"
+                ),
+                "aisleKind": "forklift",
+                "direction": "two_way",
+                "color": "#facc15",
+                "corridorWidth": forklift_width,
+                "centerline": [
+                    {"x": minimum_x + margin, "y": floor_y, "z": z},
+                    {"x": maximum_x - margin, "y": floor_y, "z": z},
+                ],
+                "clearanceEvidenceStatus": "unverified",
+            },
+        }
+        current = _apply_increment(
+            current,
+            operation,
+            base_revision=transaction_base_revision,
+        )
+        operations.append(operation)
+
+    for index, x in enumerate(vertical_corridors):
+        operation = {
+            "op": "add_aisle",
+            "routeId": _stable_id(
+                "rt-p8-",
+                {
+                    "requestId": request["requestId"],
+                    "kind": "pedestrian-cross-aisle",
+                    "index": index,
+                },
+                20,
+            ),
+            "aisle": {
+                "label": f"Pedestrian Cross-Aisle {index + 1}",
+                "aisleKind": "pedestrian",
+                "direction": "two_way",
+                "color": "#38bdf8",
+                "corridorWidth": pedestrian_width,
+                "centerline": [
+                    {"x": x, "y": floor_y, "z": minimum_z + margin},
+                    {"x": x, "y": floor_y, "z": maximum_z - margin},
+                ],
+                "clearanceEvidenceStatus": "unverified",
+            },
+        }
+        current = _apply_increment(
+            current,
+            operation,
+            base_revision=transaction_base_revision,
+        )
+        operations.append(operation)
+
+    def add_marking(
+        *,
+        identity: Mapping[str, Any],
+        marking_type: str,
+        label: str,
+        semantic_role: str,
+        x: float,
+        z: float,
+        rotation_degrees: float,
+        width: float,
+        depth: float,
+        fill_color: str,
+        stroke_color: str,
+        text: str = "",
+    ) -> None:
+        nonlocal current
+        operation = {
+            "op": "add_floor_marking",
+            "floorMarking": {
+                "markingId": _stable_id(
+                    "fm-p8-",
+                    {
+                        "requestId": request["requestId"],
+                        **dict(identity),
+                    },
+                    20,
+                ),
+                "markingType": marking_type,
+                "label": label,
+                "semanticRole": semantic_role,
+                "transform": {
+                    "position": {"x": x, "y": floor_y, "z": z},
+                    "rotationDegrees": rotation_degrees,
+                },
+                "width": width,
+                "depth": depth,
+                "fillColor": fill_color,
+                "strokeColor": stroke_color,
+                "opacity": 1.0,
+                "text": text,
+                "positionMode": "auto",
+                "metadata": {
+                    "plannedBy": "facility-layout-planner",
+                    "plannerRequestId": request["requestId"],
+                    "evidenceStatus": "unverified",
+                },
+                "evidence": [],
+            },
+        }
+        current = _apply_increment(
+            current,
+            operation,
+            base_revision=transaction_base_revision,
+        )
+        operations.append(operation)
+
+    for aisle_index, z in enumerate(horizontal_corridors):
+        for column in range(columns):
+            x = (
+                minimum_x
+                + margin
+                + column * (cell_width + gutter)
+                + cell_width / 2.0
+            )
+            for direction_index, (offset, rotation) in enumerate(
+                ((-forklift_width * 0.22, 90.0),
+                 (forklift_width * 0.22, -90.0))
+            ):
+                add_marking(
+                    identity={
+                        "kind": "material-direction",
+                        "aisle": aisle_index,
+                        "column": column,
+                        "direction": direction_index,
+                    },
+                    marking_type="direction_arrow",
+                    label="Material flow direction",
+                    semantic_role="material_flow",
+                    x=x,
+                    z=z + offset,
+                    rotation_degrees=rotation,
+                    width=min(1.2, forklift_width * 0.3),
+                    depth=min(2.4, cell_width * 0.08),
+                    fill_color="#facc15",
+                    stroke_color="#1f2937",
+                )
+        for crosswalk_index, x in enumerate(vertical_corridors):
+            add_marking(
+                identity={
+                    "kind": "crosswalk",
+                    "aisle": aisle_index,
+                    "crosswalk": crosswalk_index,
+                },
+                marking_type="crosswalk",
+                label="Pedestrian crossing",
+                semantic_role="pedestrian_lane",
+                x=x,
+                z=z,
+                rotation_degrees=0.0,
+                width=pedestrian_width,
+                depth=max(2.0, forklift_width * 0.9),
+                fill_color="#ffffff",
+                stroke_color="#1f2937",
+            )
+    return operations, current, item_zones, zone_ids
 
 
 def _candidate_operation(
@@ -1003,15 +1401,22 @@ def _size_zones(
     request: Mapping[str, Any],
     instance_placements: Mapping[str, str],
     catalog: Mapping[str, Mapping[str, Any]],
+    preserved_zone_ids: Iterable[str] = (),
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     current = deepcopy(dict(layout))
     operations: list[dict[str, Any]] = []
+    preserved = set(preserved_zone_ids)
     for index, raw in enumerate(request["zoneSizing"]):
         if not isinstance(raw, Mapping):
             _fail(
                 "invalid_planner_request",
                 f"zoneSizing[{index}] must be an object.",
             )
+        requested_zone_id = raw.get("zoneId")
+        if requested_zone_id is None and isinstance(raw.get("newZone"), Mapping):
+            requested_zone_id = raw["newZone"].get("zoneId")
+        if str(requested_zone_id or "") in preserved:
+            continue
         member_item_ids = raw.get("memberItemIds")
         if not isinstance(member_item_ids, list) or not member_item_ids:
             _fail(
@@ -1642,27 +2047,48 @@ def _build_alternative(
     dependency_fingerprint: str,
     obstacle_fingerprint: str,
 ) -> dict[str, Any]:
-    operations, current, displacement = _cleanup_collisions(
-        base_layout,
-        request=request,
-        catalog=catalog,
-        shell=shell,
-        policy_set=policy_set,
-        evidence_authority=evidence_authority,
-    )
+    if request["cleanup"].get("replaceExistingContents") is True:
+        clear_operation = {"op": "clear_layout_contents"}
+        operations = [clear_operation]
+        current = _apply_increment(base_layout, clear_operation)
+        displacement = {"auto": 0.0, "manual": 0.0}
+    else:
+        operations, current, displacement = _cleanup_collisions(
+            base_layout,
+            request=request,
+            catalog=catalog,
+            shell=shell,
+            policy_set=policy_set,
+            evidence_authority=evidence_authority,
+        )
     default_region = _default_region(current, shell)
+    zone_operations, current, item_zones, preallocated_zone_ids = (
+        _preallocate_replacement_zones(
+            current,
+            request=request,
+            floor_region=default_region,
+            transaction_base_revision=layout_revision(base_layout),
+        )
+    )
+    operations.extend(zone_operations)
     regions: dict[str, dict[str, Any]] = {}
     enriched_instances = []
     for instance in instances:
-        region = _region_for_item(instance, current, default_region)
+        enriched = deepcopy(dict(instance))
+        if not enriched.get("targetZoneId"):
+            target_zone_id = item_zones.get(str(enriched.get("itemId") or ""))
+            if target_zone_id:
+                enriched["targetZoneId"] = target_zone_id
+        region = _region_for_item(enriched, current, default_region)
         region_id = str(region["regionId"])
         regions[region_id] = region
-        enriched_instances.append({**deepcopy(instance), "regionId": region_id})
+        enriched_instances.append({**enriched, "regionId": region_id})
     seeds = _strategy_seeds(
         strategy,
         enriched_instances,
         regions,
         float(request["spacingMeters"]),
+        centered_region_ids=preallocated_zone_ids,
     )
     instance_placements: dict[str, str] = {}
     for item in enriched_instances:
@@ -1762,6 +2188,7 @@ def _build_alternative(
         request=request,
         instance_placements=instance_placements,
         catalog=catalog,
+        preserved_zone_ids=preallocated_zone_ids,
     )
     operations.extend(zone_operations)
     final_receipt = apply_facility_layout_operations(

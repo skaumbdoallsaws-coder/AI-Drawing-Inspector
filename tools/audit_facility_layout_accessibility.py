@@ -421,7 +421,9 @@ rootSelector => {
         expanded: element.getAttribute('aria-expanded'),
         tabIndex: element.tabIndex,
     }));
-    const tabs = Array.from(root.querySelectorAll('[role="tab"]')).map(
+    const tabs = Array.from(root.querySelectorAll(
+        '.ip-flw-view-tabs [role="tab"]'
+    )).map(
         element => ({
             name: name(element),
             selected: element.getAttribute('aria-selected'),
@@ -429,14 +431,22 @@ rootSelector => {
             disabled: Boolean(element.disabled),
         })
     );
+    const categoryTabs = Array.from(root.querySelectorAll(
+        '.ip-flw-asset-categories [role="tab"]'
+    )).map(element => ({
+        name: name(element),
+        selected: element.getAttribute('aria-selected'),
+        tabIndex: element.tabIndex,
+        disabled: Boolean(element.disabled),
+    }));
     const ids = Array.from(root.querySelectorAll('[id]'))
         .map(element => element.id);
     const duplicates = Array.from(new Set(
         ids.filter((id, index) => ids.indexOf(id) !== index)
     )).sort();
-    const treeItems = Array.from(
-        root.querySelectorAll('[role="treeitem"]')
-    ).filter(visible).map(element => name(element));
+    const assetCards = Array.from(root.querySelectorAll(
+        '.ip-flw-asset-card-select[data-asset-id]'
+    )).map(element => name(element));
     const panels = Array.from(
         root.querySelectorAll('[role="tabpanel"]')
     ).map(element => ({
@@ -454,19 +464,24 @@ rootSelector => {
         })
     );
     const toolbar = root.querySelector('[role="toolbar"]');
-    const tree = root.querySelector('[role="tree"]');
+    const assetBrowser = root.querySelector('.ip-flw-asset-browser');
+    const assetList = root.querySelector('.ip-flw-asset-grid[role="list"]');
     const tablist = root.querySelector('[role="tablist"]');
     return {
         workspaceName: name(root),
         workspaceAriaBusy: root.getAttribute('aria-busy'),
         toolbar: toolbar ? { name: name(toolbar), role: role(toolbar) } : null,
-        tree: tree ? { name: name(tree), role: role(tree) } : null,
+        assetBrowser: assetBrowser
+            ? { name: name(assetBrowser), role: role(assetBrowser) } : null,
+        assetList: assetList
+            ? { name: name(assetList), role: role(assetList) } : null,
         tablist: tablist
             ? { name: name(tablist), role: role(tablist) } : null,
         controls,
         tabs,
+        categoryTabs,
         panels,
-        treeItems,
+        assetCards,
         liveRegions,
         duplicateIds: duplicates,
     };
@@ -1030,13 +1045,28 @@ def _open_facility(page: Page, timeout_ms: int) -> None:
     )
     page.evaluate(
         """() => {
-            const previous = trainingState.type;
-            trainingState.type = 'facility_layout';
-            trainingState.viewportMode = 'facility_layout';
-            _trainApplyTrainingTypeDefaults(previous);
+            trainingState.type = 'assembly';
+            trainingState.viewportMode = 'process_flow';
             switchTab('training');
         }"""
     )
+    page.wait_for_selector(
+        "#trainingTypeRibbonSelect",
+        state="visible",
+        timeout=timeout_ms,
+    )
+    page.locator("#trainingTypeRibbonSelect").select_option(
+        "facility_layout"
+    )
+    page.wait_for_selector(
+        "#trainFacilityLayoutAssets",
+        state="visible",
+        timeout=timeout_ms,
+    )
+    if page.locator("#trainLeftRailSetup").count():
+        raise AssertionError(
+            "Facility Layout retained the Training Setup rail control"
+        )
     page.wait_for_selector(
         "#trainFacilityLayoutAuthoring.ip-flw-root",
         state="visible",
@@ -1049,7 +1079,7 @@ def _open_facility(page: Page, timeout_ms: int) -> None:
             && !_trainFacilityLayoutAuthoringApp.session.getState().busy
             && document.querySelectorAll(
                 '#trainFacilityLayoutAuthoring '
-                + '.ip-flw-asset-row[data-asset-id]'
+                + '.ip-flw-asset-card[data-asset-id]'
             ).length >= 1
         )""",
         timeout=timeout_ms,
@@ -1072,7 +1102,14 @@ def _blur(page: Page) -> None:
                 document.activeElement.blur();
             }
             if (document.body && typeof document.body.focus === 'function') {
+                const previous = document.body.getAttribute('tabindex');
+                document.body.setAttribute('tabindex', '-1');
                 document.body.focus();
+                if (previous === null) {
+                    document.body.removeAttribute('tabindex');
+                } else {
+                    document.body.setAttribute('tabindex', previous);
+                }
             }
         }"""
     )
@@ -1339,7 +1376,7 @@ def _keyboard_audit(
     _blur(page)
     shortcut_entry, shortcut_sequence = _tab_until(
         page,
-        '#trainFacilityLayoutAuthoring [data-command="select"]',
+        '#trainFacilityLayoutAuthoring [data-view="plan"]',
         maximum_tabs=maximum_tabs,
     )
     shortcut = {
@@ -1408,16 +1445,31 @@ def _keyboard_audit(
 
     safe_point = _set_safe_keyboard_point(page)
     _blur(page)
+    library_reached, library_sequence = _tab_until(
+        page,
+        '#trainFacilityLayoutAssets',
+        maximum_tabs=maximum_tabs,
+    )
+    if library_reached:
+        page.keyboard.press("Enter")
+        page.wait_for_selector(
+            "#trainFacilityLayoutAuthoring .ip-flw-asset-browser",
+            state="visible",
+            timeout=60_000,
+        )
     asset_reached, asset_sequence = _tab_until(
         page,
         "#trainFacilityLayoutAuthoring "
-        '.ip-flw-asset-row[data-asset-id]',
+        '.ip-flw-asset-card-select[data-asset-id]',
         maximum_tabs=maximum_tabs,
-    )
+    ) if library_reached else (False, [])
     asset_action: dict[str, Any] = {
-        "rowReachedByTab": asset_reached,
-        "sequence": asset_sequence,
+        "libraryReachedByTab": library_reached,
+        "librarySequence": library_sequence,
+        "cardReachedByTab": asset_reached,
+        "cardSequence": asset_sequence,
         "safeWorldPoint": safe_point,
+        "addReachedByTab": False,
         "placementAdded": False,
         "selectionUpdated": False,
         "dirtyAfterAction": False,
@@ -1426,14 +1478,24 @@ def _keyboard_audit(
     }
     if asset_reached:
         page.keyboard.press("Enter")
-        page.evaluate(
-            "() => _trainFacilityLayoutAuthoringApp.workspace.whenIdle()"
+        add_reached, add_sequence = _tab_until(
+            page,
+            "#trainFacilityLayoutAuthoring "
+            '[data-asset-browser-action="add"]',
+            maximum_tabs=maximum_tabs,
         )
-        page.wait_for_function(
-            """() => !_trainFacilityLayoutAuthoringApp
-                .session.getState().busy""",
-            timeout=60_000,
-        )
+        asset_action["addReachedByTab"] = add_reached
+        asset_action["addSequence"] = add_sequence
+        if add_reached:
+            page.keyboard.press("Enter")
+            page.evaluate(
+                "() => _trainFacilityLayoutAuthoringApp.workspace.whenIdle()"
+            )
+            page.wait_for_function(
+                """() => !_trainFacilityLayoutAuthoringApp
+                    .session.getState().busy""",
+                timeout=60_000,
+            )
         after_action = page.evaluate(
             """() => {
                 const state = _trainFacilityLayoutAuthoringApp
@@ -1459,6 +1521,10 @@ def _keyboard_audit(
                 "dirtyAfterAction": after_action["dirty"] is True,
             }
         )
+        page.locator(
+            '#trainFacilityLayoutAuthoring [data-view="plan"]'
+        ).focus()
+        asset_action["undoFocus"] = _active(page)
         page.keyboard.press("Control+z")
         page.evaluate(
             "() => _trainFacilityLayoutAuthoringApp.workspace.whenIdle()"
@@ -1557,12 +1623,20 @@ def _semantics_checks(
     control_list = controls if isinstance(controls, list) else []
     tabs = semantics.get("tabs")
     tab_list = tabs if isinstance(tabs, list) else []
+    category_tabs = semantics.get("categoryTabs")
+    category_tab_list = (
+        category_tabs if isinstance(category_tabs, list) else []
+    )
     panels = semantics.get("panels")
     panel_list = panels if isinstance(panels, list) else []
-    tree_items = semantics.get("treeItems")
-    item_list = tree_items if isinstance(tree_items, list) else []
+    asset_cards = semantics.get("assetCards")
+    item_list = asset_cards if isinstance(asset_cards, list) else []
     selected_tabs = [
         item for item in tab_list
+        if isinstance(item, Mapping) and item.get("selected") == "true"
+    ]
+    selected_category_tabs = [
+        item for item in category_tab_list
         if isinstance(item, Mapping) and item.get("selected") == "true"
     ]
     pressed = [
@@ -1578,10 +1652,17 @@ def _semantics_checks(
             "name": "Facility layout tools",
             "role": "toolbar",
         },
-        "treeNamed": semantics.get("tree") == {
-            "name": "Available facility assets",
-            "role": "tree",
-        },
+        # These legacy report keys now cover the replacement asset browser.
+        "treeNamed": (
+            semantics.get("assetBrowser") == {
+                "name": "Asset Library",
+                "role": "dialog",
+            }
+            and semantics.get("assetList") == {
+                "name": "Available facility assets",
+                "role": "list",
+            }
+        ),
         "treeItemsNamed": (
             bool(item_list)
             and all(isinstance(item, str) and bool(item) for item in item_list)
@@ -1592,6 +1673,11 @@ def _semantics_checks(
                 isinstance(item, Mapping) and bool(item.get("name"))
                 for item in tab_list
             )
+            and bool(category_tab_list)
+            and all(
+                isinstance(item, Mapping) and bool(item.get("name"))
+                for item in category_tab_list
+            )
         ),
         "tabStateValid": (
             len(selected_tabs) == 1
@@ -1600,6 +1686,13 @@ def _semantics_checks(
                 item.get("tabIndex") == -1
                 for item in tab_list
                 if item is not selected_tabs[0]
+            )
+            and len(selected_category_tabs) == 1
+            and selected_category_tabs[0].get("tabIndex") == 0
+            and all(
+                item.get("tabIndex") == -1
+                for item in category_tab_list
+                if item is not selected_category_tabs[0]
             )
         ),
         "panelsNamed": (
@@ -1745,7 +1838,7 @@ def _theme_run(
     _blur(page)
     focus_reached, focus_sequence = _tab_until(
         page,
-        '#trainFacilityLayoutAuthoring [data-command="pan"]',
+        '#trainFacilityLayoutAuthoring [data-view="plan"]',
         maximum_tabs=180 if smoke else 360,
     )
     focus = _focus_indicator(page) if focus_reached else {}

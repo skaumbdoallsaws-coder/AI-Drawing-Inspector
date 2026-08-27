@@ -74,6 +74,140 @@ def test_all_frozen_v1_layouts_validate_and_canonicalize_deterministically():
         assert layout_revision(document) == hashlib.sha256(first).hexdigest()
 
 
+def test_optional_floor_markings_validate_and_canonicalize_world_geometry():
+    document = _load("empty_cell.json")
+    document["floorMarkings"] = [{
+        "markingId": "fm-keep-clear-01",
+        "markingType": "keep_clear",
+        "label": "Electrical panel clearance",
+        "semanticRole": "keep_clear",
+        "transform": {
+            "position": {"x": 1.0000005, "y": -0.0, "z": 2.0},
+            "rotationDegrees": 90.0000005,
+        },
+        "width": 1.2000005,
+        "depth": 2.4000005,
+        "fillColor": "#FACC15",
+        "strokeColor": "#111827",
+        "opacity": 0.3500005,
+        "text": "KEEP CLEAR",
+        "positionMode": "manual",
+        "metadata": {},
+        "evidence": [],
+    }]
+
+    canonical = canonicalize_layout(document)
+    validate_layout(canonical, require_canonical=True)
+    marking = canonical["floorMarkings"][0]
+    assert marking["transform"]["position"] == {"x": 1, "y": 0, "z": 2}
+    assert marking["transform"]["rotationDegrees"] == 90
+    assert marking["width"] == 1.2
+    assert marking["depth"] == 2.4
+    assert marking["opacity"] == 0.35
+
+
+def test_manufacturing_cell_interfaces_validate_and_canonicalize():
+    document = _load("two_asset_cell.json")
+    document["zones"][0]["extensions"] = {
+        "cellGroup": {
+            "schemaVersion": 1,
+            "groupKind": "manufacturing_cell",
+            "membership": "geometric",
+            "envelopePadding": 0.5000005,
+            "autoNumber": {
+                "seriesId": "cell-series-a",
+                "baseName": "Machine Cell",
+                "prefix": "A",
+                "start": 1,
+                "padding": 2,
+                "sequence": 1,
+            },
+            "functionalInterfaces": {
+                "gate": {
+                    "side": "south",
+                    "openingWidthMeters": 2.0000006,
+                    "approachDepthMeters": 1.5000006,
+                    "position": {"x": 6.0000006, "z": 0.0},
+                    "accessEnvelope": [
+                        {"x": 5.0, "z": -1.5},
+                        {"x": 7.0, "z": -1.5},
+                        {"x": 7.0, "z": 0.0},
+                        {"x": 5.0, "z": 0.0},
+                    ],
+                    "evidenceStatus": "authored",
+                },
+                "service": {
+                    "facing": {"x": 0.70710678, "z": 0.70710678},
+                    "evidenceStatus": "derived",
+                },
+            },
+        },
+    }
+
+    assert validate_layout(document) is document
+    canonical = canonicalize_layout(document)
+    interfaces = canonical["zones"][0]["extensions"]["cellGroup"][
+        "functionalInterfaces"
+    ]
+    assert interfaces["gate"]["openingWidthMeters"] == 2.000001
+    assert interfaces["gate"]["position"] == {"x": 6.000001, "z": 0}
+    assert interfaces["service"]["facing"] == {
+        "x": 0.707107,
+        "z": 0.707107,
+    }
+
+    missing_direction = deepcopy(document)
+    missing_direction["zones"][0]["extensions"]["cellGroup"][
+        "functionalInterfaces"
+    ]["gate"].pop("side")
+    assert _error_code(missing_direction) == "invalid_layout_shape"
+
+    zero_facing = deepcopy(document)
+    zero_facing["zones"][0]["extensions"]["cellGroup"][
+        "functionalInterfaces"
+    ]["service"]["facing"] = {"x": 0, "z": 0}
+    assert _error_code(zero_facing) == "invalid_layout_shape"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("markingType", "unknown"),
+        ("fillColor", "yellow"),
+        ("width", 0),
+        ("opacity", 1.1),
+        ("positionMode", "screen"),
+    ),
+)
+def test_floor_marking_invalid_values_fail_closed(field: str, value: object):
+    document = _load("empty_cell.json")
+    marking = {
+        "markingId": "fm-invalid",
+        "markingType": "solid_line",
+        "label": "Line",
+        "semanticRole": "decorative",
+        "transform": {
+            "position": {"x": 0, "y": 0, "z": 0},
+            "rotationDegrees": 0,
+        },
+        "width": 0.1,
+        "depth": 2,
+        "fillColor": "#ffffff",
+        "strokeColor": "#111827",
+        "opacity": 1,
+        "text": "",
+        "positionMode": "manual",
+        "metadata": {},
+        "evidence": [],
+    }
+    marking[field] = value
+    document["floorMarkings"] = [marking]
+    assert _error_code(document) in {
+        "invalid_layout_shape",
+        "non_finite_transform",
+    }
+
+
 def test_canonical_numeric_forms_use_half_even_and_remove_negative_zero():
     document = _load("empty_cell.json")
     document["coordinateFrame"]["floorElevation"] = -0.0
@@ -273,6 +407,40 @@ def test_repeated_asset_definitions_remain_independent_placements():
     assert first["assetDefinitionRevision"] == second["assetDefinitionRevision"]
     assert first["placementId"] != second["placementId"]
     assert first["transform"] != second["transform"]
+
+
+def test_surface_attachment_contract_is_closed_and_revision_safe():
+    document = _load("repeated_assets.json")
+    support, child = document["placements"]
+    child["snapRelationship"] = {
+        "family": "surface_attachment",
+        "attachmentId": "surface-rack-a-top",
+        "supportPlacementId": support["placementId"],
+        "surfaceId": "derived-top",
+        "side": "above",
+        "localPosition": {"x": 0.25, "z": -0.1},
+        "localRotationDegrees": 0,
+        "normalOffsetMeters": 0,
+        "surfaceSource": "derived_aabb",
+        "evidenceStatus": "unverified",
+    }
+    validate_layout(document)
+
+    negative = deepcopy(document)
+    negative["placements"][1]["snapRelationship"][
+        "normalOffsetMeters"
+    ] = -0.01
+    assert _error_code(negative) == "non_finite_transform"
+
+    dangling = deepcopy(document)
+    dangling["placements"][1]["snapRelationship"][
+        "supportPlacementId"
+    ] = "pl-missing"
+    assert _error_code(dangling) == "dangling_reference"
+
+    extra = deepcopy(document)
+    extra["placements"][1]["snapRelationship"]["browserPixels"] = 10
+    assert _error_code(extra) == "invalid_layout_shape"
 
 
 def test_future_schema_is_read_only_and_original_bytes_are_preserved():

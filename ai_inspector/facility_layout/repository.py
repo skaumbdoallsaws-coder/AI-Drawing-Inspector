@@ -852,6 +852,126 @@ class FacilityLayoutRepository:
                 changed=False,
             )
 
+    def normalize_current_layout_storage(
+        self,
+        principal: Any,
+        site_id: str,
+        layout_id: str,
+    ) -> dict[str, Any]:
+        """Atomically upgrade valid current-schema bytes to canonical storage.
+
+        This is an explicit maintenance operation rather than a read-path
+        side effect. The exact previous bytes remain addressable by their
+        original revision, and every identity, scope, registry, schema, and
+        validation invariant is checked before storage changes.
+        """
+
+        tenant_id, safe_site_id = _authorize(
+            principal,
+            site_id,
+            "layout.edit",
+        )
+        safe_layout_id = _validate_layout_id(layout_id)
+        with _WRITE_LOCK:
+            registry = self._load_registry(tenant_id, safe_site_id)
+            summary = self._summary_for(registry, safe_layout_id)
+            asset = self._layout_path(
+                tenant_id,
+                safe_site_id,
+                safe_layout_id,
+            )
+            document, stored_payload = _read_json_object(asset)
+            current_revision = _hash_bytes(stored_payload)
+            if current_revision != summary["currentRevision"]:
+                raise FacilityLayoutIntegrityError(
+                    "layout_registry_revision_mismatch",
+                    "Facility Layout bytes do not match the authoritative registry.",
+                )
+            if document.get("layoutId") != safe_layout_id:
+                raise FacilityLayoutIntegrityError(
+                    "layout_identity_mismatch",
+                    "Facility Layout identity does not match its registry entry.",
+                )
+            association = document.get("association")
+            if (
+                not isinstance(association, Mapping)
+                or association.get("siteId") != safe_site_id
+            ):
+                raise FacilityLayoutIntegrityError(
+                    "layout_scope_mismatch",
+                    "Facility Layout scope does not match its registry.",
+                )
+            if document.get("schemaVersion") != FACILITY_LAYOUT_SCHEMA_VERSION:
+                raise FacilityLayoutReadOnlyError(
+                    "unsupported_schema_version_read_only",
+                    "Future Facility Layout schemas are read-only.",
+                )
+            try:
+                candidate = canonicalize_layout(document)
+                findings = self._validate(candidate)
+                next_payload = canonical_layout_bytes(candidate)
+            except FacilityLayoutError as exc:
+                raise FacilityLayoutIntegrityError(
+                    "layout_asset_invalid",
+                    "Stored Facility Layout failed validation.",
+                ) from exc
+            if next_payload == stored_payload:
+                return self._record(
+                    candidate,
+                    current_revision,
+                    registry["defaultLayoutId"],
+                    findings,
+                    changed=False,
+                )
+
+            next_revision = _hash_bytes(next_payload)
+            next_registry = self._with_summary(
+                registry,
+                self._summary(candidate, next_revision),
+            )
+            backup = self._backup_path(
+                tenant_id,
+                safe_site_id,
+                safe_layout_id,
+                current_revision,
+            )
+            backup_created = False
+            layout_replaced = False
+            try:
+                backup_created = self._write_backup(backup, stored_payload)
+                self._atomic_write(asset, next_payload)
+                layout_replaced = True
+                self._write_registry(
+                    tenant_id,
+                    safe_site_id,
+                    next_registry,
+                )
+            except FacilityLayoutRepositoryError:
+                rollback_error: Optional[BaseException] = None
+                if layout_replaced:
+                    try:
+                        self._atomic_write(asset, stored_payload)
+                    except BaseException as exc:
+                        rollback_error = exc
+                if backup_created:
+                    try:
+                        self._remove_file(backup)
+                    except FacilityLayoutRepositoryError as exc:
+                        rollback_error = rollback_error or exc
+                if rollback_error is not None:
+                    raise FacilityLayoutIntegrityError(
+                        "layout_rollback_failed",
+                        "Facility Layout normalization rollback failed.",
+                    ) from rollback_error
+                raise
+            return self._record(
+                candidate,
+                next_revision,
+                next_registry["defaultLayoutId"],
+                findings,
+                changed=True,
+            )
+
     def get_layout_revision(
         self,
         principal: Any,

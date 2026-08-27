@@ -13,9 +13,16 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import re
 from typing import Any, Iterable, Mapping, Sequence
 
 from .canonical import layout_revision
+from .semantic_model import CELL_FEASIBILITY_STRATEGIES
+from .spatial import (
+    SpatialRecord,
+    placement_clearance_records,
+    placement_spatial_records,
+)
 
 
 FACILITY_LAYOUT_STATE_CONTRACT_VERSION = 1
@@ -48,6 +55,11 @@ _READ_TOOL_NAMES = (
     "inspect_facility_region",
     "inspect_facility_findings",
     "inspect_process_bindings",
+    "inspect_facility_semantics",
+    "inspect_pattern_provenance",
+    "inspect_cell_layout_provenance",
+    "analyze_facility_spatial",
+    "analyze_facility_fit",
 )
 
 
@@ -365,6 +377,162 @@ def _asset_dimensions(asset: Mapping[str, Any]) -> dict[str, float] | None:
     return None
 
 
+def _asset_footprint(asset: Mapping[str, Any]) -> dict[str, Any] | None:
+    geometry = asset.get("geometry")
+    if not isinstance(geometry, Mapping):
+        return None
+    polygons = geometry.get("footprintPolygons")
+    polygon_areas = []
+    if isinstance(polygons, list):
+        for raw_polygon in polygons:
+            if not isinstance(raw_polygon, list) or len(raw_polygon) < 3:
+                continue
+            points = []
+            try:
+                for point in raw_polygon:
+                    if not isinstance(point, Mapping):
+                        raise TypeError
+                    points.append((float(point["x"]), float(point["z"])))
+            except (KeyError, TypeError, ValueError):
+                continue
+            area = abs(
+                0.5
+                * sum(
+                    points[index][0]
+                    * points[(index + 1) % len(points)][1]
+                    - points[(index + 1) % len(points)][0]
+                    * points[index][1]
+                    for index in range(len(points))
+                )
+            )
+            if area > 0:
+                polygon_areas.append(area)
+    if polygon_areas:
+        return {
+            "areaSquareMeters": round(sum(polygon_areas), 6),
+            "polygonCount": len(polygon_areas),
+            "method": "sum_geometry_footprint_polygons",
+            "evidenceStatus": "derived",
+            "qualification": (
+                "Gross footprint area; overlapping source polygons are not "
+                "unioned."
+            ),
+        }
+    dimensions = _asset_dimensions(asset)
+    if dimensions and dimensions["x"] > 0 and dimensions["z"] > 0:
+        return {
+            "areaSquareMeters": round(
+                dimensions["x"] * dimensions["z"],
+                6,
+            ),
+            "polygonCount": 0,
+            "method": "geometry_aabb_rectangle",
+            "evidenceStatus": "derived",
+            "qualification": "Conservative rectangular AABB footprint.",
+        }
+    return None
+
+
+def _asset_facility_semantics(asset: Mapping[str, Any]) -> dict[str, Any]:
+    value = asset.get("facilitySemantics")
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, Any] = {}
+    semantic_type = _clean_id(value.get("semanticType"))
+    if semantic_type:
+        result["semanticType"] = semantic_type
+    roles = sorted(
+        {
+            _clean_id(item)
+            for item in value.get("operationalRoles", [])
+            if _clean_id(item)
+        }
+    )
+    if roles:
+        result["operationalRoles"] = roles
+    functional_sides = value.get("functionalSides")
+    if isinstance(functional_sides, Mapping):
+        normalized_sides = {}
+        for role, raw in functional_sides.items():
+            role_id = _clean_id(role)
+            if role_id not in {
+                "operator", "service", "material_input", "material_output",
+                "loading", "gate", "front", "rear",
+            }:
+                continue
+            record = raw if isinstance(raw, Mapping) else {"side": raw}
+            side = _clean_id(record.get("side"))
+            if side not in {"north", "east", "south", "west", "top", "bottom"}:
+                continue
+            evidence_status = record.get("evidenceStatus")
+            if evidence_status not in {
+                "authored", "derived", "inferred", "unknown",
+            }:
+                evidence_status = "authored"
+            normalized_sides[role_id] = {
+                "side": side,
+                "evidenceStatus": evidence_status,
+            }
+        if normalized_sides:
+            result["functionalSides"] = dict(sorted(normalized_sides.items()))
+    evidence_status = value.get("evidenceStatus")
+    if evidence_status in {
+        "authored",
+        "derived",
+        "inferred",
+        "unknown",
+    }:
+        result["evidenceStatus"] = evidence_status
+    return result
+
+
+def _asset_mounting_surfaces(asset: Mapping[str, Any]) -> list[str]:
+    coordinate_frame = asset.get("coordinateFrame")
+    if not isinstance(coordinate_frame, Mapping):
+        return []
+    return sorted(
+        {
+            _clean_id(item)
+            for item in coordinate_frame.get("allowedMountingSurfaces", [])
+            if _clean_id(item)
+        }
+    )
+
+
+def _asset_utility_kinds(asset: Mapping[str, Any]) -> list[str]:
+    utilities = asset.get("utilities")
+    if not isinstance(utilities, Mapping):
+        return []
+    return sorted(
+        _clean_id(key)
+        for key, value in utilities.items()
+        if _clean_id(key) and value not in (None, False, [], {})
+    )
+
+
+def _readiness_gate(
+    readiness: Mapping[str, Any],
+    *names: str,
+) -> tuple[bool, list[str]]:
+    raw = None
+    for name in names:
+        if name in readiness:
+            raw = readiness[name]
+            break
+    if isinstance(raw, Mapping):
+        blockers = sorted(
+            {
+                _clean_id(item)
+                for item in raw.get("blockers", [])
+                if _clean_id(item)
+            }
+        )
+        return raw.get("value") is True and not blockers, blockers
+    if isinstance(raw, bool):
+        return raw, [] if raw else ["planning_readiness_false"]
+    return False, ["planning_readiness_missing"]
+
+
 def _asset_catalog(source: TrustedFacilitySource) -> list[dict[str, Any]]:
     values = _records(source.document, plural_key="assets")
     result = []
@@ -383,6 +551,36 @@ def _asset_catalog(source: TrustedFacilitySource) -> list[dict[str, Any]]:
         seen.add(key)
         readiness = document.get("readiness")
         readiness = readiness if isinstance(readiness, Mapping) else {}
+        nested_definition = document.get("definition")
+        nested_definition = (
+            nested_definition
+            if isinstance(nested_definition, Mapping)
+            else {}
+        )
+        nested_readiness = nested_definition.get("readiness")
+        nested_readiness = (
+            nested_readiness
+            if isinstance(nested_readiness, Mapping)
+            else {}
+        )
+        if readiness:
+            planning_evidence_complete, planning_blockers = _readiness_gate(
+                readiness,
+                "planningReady",
+                "planning_ready",
+            )
+        else:
+            planning_evidence_complete, planning_blockers = _readiness_gate(
+                nested_readiness,
+                "planningReady",
+                "planning_ready",
+            )
+        preview_planning_eligible = (
+            value.get("previewPlanningEligible") is True
+        )
+        planning_ready = (
+            planning_evidence_complete or preview_planning_eligible
+        )
         result.append(
             {
                 "assetId": asset_id,
@@ -395,16 +593,44 @@ def _asset_catalog(source: TrustedFacilitySource) -> list[dict[str, Any]]:
                     document.get("category") or "unknown",
                     80,
                 ),
+                "description": _clean_text(
+                    document.get("description"),
+                    320,
+                ),
+                "tags": sorted(
+                    {
+                        _clean_id(item)
+                        for item in document.get("tags", [])
+                        if _clean_id(item)
+                    }
+                )[:32],
                 "familyId": _clean_id(document.get("familyId")),
                 "variantId": _clean_id(document.get("variantId")),
                 "capabilityIds": _capability_ids(document),
                 "connectors": _connector_records(document),
                 "dimensions": _asset_dimensions(document),
-                "planningReady": bool(
-                    readiness.get("planningReady")
-                    if "planningReady" in readiness
-                    else readiness.get("planning_ready", True)
+                "footprint": _asset_footprint(document),
+                "mobilityClassification": _clean_id(
+                    document.get("mobility", {}).get("classification")
+                    if isinstance(document.get("mobility"), Mapping)
+                    else None
                 ),
+                "allowedMountingSurfaces": _asset_mounting_surfaces(
+                    document
+                ),
+                "utilityKinds": _asset_utility_kinds(document),
+                "facilitySemantics": _asset_facility_semantics(document),
+                "clearanceRecordCount": len(
+                    document.get("clearances", [])
+                    if isinstance(document.get("clearances"), list)
+                    else []
+                ),
+                "planningReady": planning_ready,
+                "previewPlanningEligible": preview_planning_eligible,
+                "planningReadinessEvidenceComplete": (
+                    planning_evidence_complete
+                ),
+                "planningReadinessBlockers": planning_blockers,
                 "evidenceIds": sorted(
                     {
                         _clean_id(item)
@@ -421,6 +647,161 @@ def _asset_catalog(source: TrustedFacilitySource) -> list[dict[str, Any]]:
             item["assetDefinitionRevision"],
         ),
     )
+
+
+def _asset_document_index(
+    source: TrustedFacilitySource,
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Return exact revisioned definitions for server-side geometry work."""
+
+    result: dict[tuple[str, str], dict[str, Any]] = {}
+    for value in _records(source.document, plural_key="assets"):
+        document, revision = _asset_document(value)
+        asset_id = _clean_id(document.get("assetId"))
+        if asset_id:
+            result[(asset_id, revision)] = document
+    return result
+
+
+def _spatial_record_projection(record: SpatialRecord) -> dict[str, Any]:
+    return {
+        "recordId": record.record_id,
+        "polygon": [
+            {"x": round(point[0], 9), "z": round(point[1], 9)}
+            for point in record.polygon
+        ],
+        "minimumY": round(record.minimum_y, 9),
+        "maximumY": round(record.maximum_y, 9),
+        "recordKind": record.record_kind,
+        "clearanceId": record.clearance_id,
+        "clearanceKind": record.clearance_kind,
+        "enforcement": record.enforcement,
+        "evidenceStatus": record.evidence_status,
+        "authoritative": record.authoritative,
+    }
+
+
+def _evidence_refs_authoritative(
+    evidence_ids: Any,
+    evidence_authority: Mapping[str, Mapping[str, Any]],
+) -> bool:
+    return bool(
+        isinstance(evidence_ids, list)
+        and evidence_ids
+        and all(
+            evidence_authority.get(str(evidence_id), {}).get("current") is True
+            and evidence_authority.get(str(evidence_id), {}).get(
+                "authoritative"
+            ) is True
+            and not evidence_authority.get(str(evidence_id), {}).get(
+                "blockers"
+            )
+            for evidence_id in evidence_ids
+        )
+    )
+
+
+def _shell_semantic_projection(
+    source: TrustedFacilitySource,
+    evidence_authority: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    document = source.document
+    document = document if isinstance(document, Mapping) else {}
+    floor_surfaces = []
+    obstacle_count = 0
+    for feature in document.get("features", []):
+        if not isinstance(feature, Mapping):
+            continue
+        kind = _clean_id(feature.get("featureKind"))
+        if kind == "floor_surface":
+            geometry = feature.get("geometry")
+            geometry = geometry if isinstance(geometry, Mapping) else {}
+            boundary = geometry.get("boundary")
+            if isinstance(boundary, list):
+                evidence_ids = sorted(
+                    _clean_id(item)
+                    for item in feature.get("evidence", [])
+                    if _clean_id(item)
+                )
+                floor_surfaces.append({
+                    "featureId": _clean_id(feature.get("featureId")),
+                    "boundary": deepcopy(boundary),
+                    "elevation": geometry.get("elevation"),
+                    "evidenceIds": evidence_ids,
+                    "evidenceAuthoritative": _evidence_refs_authoritative(
+                        evidence_ids,
+                        evidence_authority,
+                    ),
+                })
+        elif kind:
+            obstacle_count += 1
+    return {
+        "shellId": _clean_id(document.get("shellId")),
+        "shellRevision": source.revision,
+        "status": _clean_id(document.get("status")),
+        "floorSurfaces": sorted(
+            floor_surfaces,
+            key=lambda item: item["featureId"],
+        ),
+        "obstacleFeatureCount": obstacle_count,
+        "floorGeometryAuthoritative": bool(
+            floor_surfaces
+            and all(
+                item["evidenceAuthoritative"] for item in floor_surfaces
+            )
+        ),
+        "unresolvedItems": deepcopy(
+            document.get("unresolvedItems", [])
+            if isinstance(document.get("unresolvedItems"), list)
+            else []
+        ),
+    }
+
+
+def _policy_semantic_projection(
+    source: TrustedFacilitySource,
+    evidence_authority: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    document = source.document
+    document = document if isinstance(document, Mapping) else {}
+    rules = []
+    for raw in document.get("deterministicRules", []):
+        if not isinstance(raw, Mapping):
+            continue
+        evidence_ids = sorted(
+            _clean_id(item)
+            for item in raw.get("evidence", [])
+            if _clean_id(item)
+        )
+        rules.append({
+            "ruleId": _clean_id(raw.get("ruleId")),
+            "ruleType": _clean_id(raw.get("ruleType")),
+            "severity": _clean_id(raw.get("severity")),
+            "applicability": deepcopy(raw.get("applicability")),
+            "parameters": deepcopy(raw.get("parameters")),
+            "evidenceIds": evidence_ids,
+            "evidenceAuthoritative": _evidence_refs_authoritative(
+                evidence_ids,
+                evidence_authority,
+            ),
+        })
+    return {
+        "policySetId": _clean_id(document.get("policySetId")),
+        "policySetRevision": source.revision,
+        "status": _clean_id(document.get("status")),
+        "deterministicRules": sorted(
+            rules,
+            key=lambda item: (item["ruleType"], item["ruleId"]),
+        ),
+        "rulesAuthoritative": all(
+            item["evidenceAuthoritative"] for item in rules
+        ),
+        "unresolvedItems": deepcopy(
+            document.get("unresolvedItems", [])
+            if isinstance(document.get("unresolvedItems"), list)
+            else []
+        ),
+    }
 
 
 def _vehicle_catalog(
@@ -486,6 +867,33 @@ def _process_catalog(
         revision = value.get("processMapRevision") or value.get("revision")
         if not process_map_id or not _is_revision(revision):
             continue
+        raw_edges = value.get("precedenceEdges")
+        graph_topology_loaded = bool(value.get("graphTopologyLoaded")) or (
+            isinstance(raw_edges, list)
+        )
+        precedence_edges = []
+        for edge in raw_edges if isinstance(raw_edges, list) else []:
+            if not isinstance(edge, Mapping):
+                continue
+            edge_id = _clean_id(edge.get("edgeId") or edge.get("id"))
+            from_node_id = _clean_id(
+                edge.get("fromNodeId") or edge.get("sourceNodeId")
+            )
+            to_node_id = _clean_id(
+                edge.get("toNodeId") or edge.get("targetNodeId")
+            )
+            if not edge_id or not from_node_id or not to_node_id:
+                continue
+            precedence_edges.append({
+                "edgeId": edge_id,
+                "fromNodeId": from_node_id,
+                "toNodeId": to_node_id,
+                "edgeKind": _clean_text(
+                    edge.get("edgeKind") or edge.get("kind") or "precedence",
+                    40,
+                ),
+                "evidenceStatus": "authored",
+            })
         result.append(
             {
                 "productId": _clean_id(value.get("productId")),
@@ -508,6 +916,11 @@ def _process_catalog(
                         for item in value.get("edgeIds", [])
                         if _clean_id(item)
                     }
+                ),
+                "graphTopologyLoaded": graph_topology_loaded,
+                "precedenceEdges": sorted(
+                    precedence_edges,
+                    key=lambda item: item["edgeId"],
                 ),
             }
         )
@@ -676,6 +1089,11 @@ def _known_ids(layout: Mapping[str, Any]) -> dict[str, set[str]]:
             for item in layout.get("zones", [])
             if isinstance(item, Mapping) and item.get("zoneId")
         },
+        "floorMarkingIds": {
+            str(item.get("markingId"))
+            for item in layout.get("floorMarkings", [])
+            if isinstance(item, Mapping) and item.get("markingId")
+        },
         "routeIds": {
             str(item.get("routeId"))
             for item in layout.get("routes", [])
@@ -720,6 +1138,95 @@ def sanitize_facility_layout_live_facts(
         else {}
     )
     viewport_mode = source.get("viewportMode")
+    navigation = source.get("navigationCapabilities")
+    navigation = navigation if isinstance(navigation, Mapping) else {}
+    walkthrough = navigation.get("walkthrough")
+    walkthrough = walkthrough if isinstance(walkthrough, Mapping) else {}
+    drone = navigation.get("drone")
+    drone = drone if isinstance(drone, Mapping) else {}
+    render_consistency = source.get("renderConsistency")
+    render_consistency = (
+        render_consistency
+        if isinstance(render_consistency, Mapping)
+        else {}
+    )
+    generation_draft = source.get("generationDraft")
+    generation_draft = (
+        generation_draft if isinstance(generation_draft, Mapping) else {}
+    )
+    generation_status = str(generation_draft.get("status") or "")
+    if generation_status not in {
+        "pending",
+        "running",
+        "blocked",
+        "complete",
+        "saved",
+        "cancelled",
+        "expired",
+        "stale",
+    }:
+        generation_status = "unknown"
+    generation_stage = str(generation_draft.get("currentStageId") or "")
+    if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", generation_stage) is None:
+        generation_stage = ""
+    save_eligibility = str(generation_draft.get("saveEligibility") or "")
+    if save_eligibility not in {"eligible", "blocked", "pending"}:
+        save_eligibility = "unknown"
+
+    def bounded_number(raw: Any, minimum: float, maximum: float) -> float | None:
+        if isinstance(raw, bool):
+            return None
+        try:
+            parsed = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(parsed):
+            return None
+        return min(maximum, max(minimum, parsed))
+
+    def sanitize_transform_audit(raw: Any) -> dict[str, Any]:
+        audit = raw if isinstance(raw, Mapping) else {}
+        known_placements = known_ids.get("placementIds", set())
+        status = audit.get("status")
+        if status not in {"match", "mismatch", "incomplete", "unavailable"}:
+            status = "unavailable"
+        result = {
+            "status": status,
+            "expectedPlacementCount": bounded_number(
+                audit.get("expectedPlacementCount"), 0, 1_000_000
+            ),
+            "auditedPlacementCount": bounded_number(
+                audit.get("auditedPlacementCount"), 0, 1_000_000
+            ),
+            "transformMismatchIds": _selected_ids(
+                audit.get("transformMismatchIds"), known_placements
+            ),
+            "missingPlacementIds": _selected_ids(
+                audit.get("missingPlacementIds"), known_placements
+            ),
+            "unexpectedPlacementIds": _selected_ids(
+                audit.get("unexpectedPlacementIds"), known_placements
+            ),
+            "unavailablePlacementIds": _selected_ids(
+                audit.get("unavailablePlacementIds"), known_placements
+            ),
+            "visibilityOrPendingPlacementIds": _selected_ids(
+                audit.get("visibilityOrPendingPlacementIds"),
+                known_placements,
+            ),
+            "evidenceStatus": "browser_ephemeral",
+        }
+        result["reportedIssueCount"] = sum(
+            len(result[key])
+            for key in (
+                "transformMismatchIds",
+                "missingPlacementIds",
+                "unexpectedPlacementIds",
+                "unavailablePlacementIds",
+            )
+        )
+        return result
+
     return {
         "dirty": bool(source.get("dirty")),
         "conflict": bool(source.get("conflict")),
@@ -727,11 +1234,73 @@ def sanitize_facility_layout_live_facts(
         "viewportMode": (
             viewport_mode if viewport_mode in _VIEWPORT_MODES else "plan"
         ),
+        "generationDraft": {
+            "active": generation_draft.get("active") is True,
+            "status": generation_status,
+            "currentStageId": generation_stage or None,
+            "saveEligibility": save_eligibility,
+            "writable": generation_draft.get("writable") is True,
+            "evidenceStatus": "browser_ephemeral",
+            "qualification": (
+                "This reports the current editor draft lifecycle only. It is "
+                "not saved layout geometry, approval, or persistence evidence."
+            ),
+        },
+        "navigationCapabilities": {
+            "activeMode": (
+                navigation.get("activeMode")
+                if navigation.get("activeMode") in {
+                    "orbit", "walkthrough", "drone"
+                }
+                else "orbit"
+            ),
+            "walkthrough": {
+                "supported": walkthrough.get("supported") is True,
+                "active": walkthrough.get("active") is True,
+            },
+            "drone": {
+                "supported": drone.get("supported") is True,
+                "active": drone.get("active") is True,
+                "assistedFlight": drone.get("assistedFlight") is True,
+                "colliderRadiusMeters": bounded_number(
+                    drone.get("colliderRadiusMeters"), 0.01, 25.0
+                ),
+                "obstacleCount": bounded_number(
+                    drone.get("obstacleCount"), 0.0, 1_000_000.0
+                ),
+                "altitudeMeters": bounded_number(
+                    drone.get("altitudeMeters"), -1_000.0, 100_000.0
+                ),
+                "nearestObstacleDistanceMeters": bounded_number(
+                    drone.get("nearestObstacleDistanceMeters"), 0.0, 100_000.0
+                ),
+            },
+            "evidenceStatus": "browser_ephemeral",
+            "qualification": (
+                "This reports the mounted viewer capability and current "
+                "navigation state. It is not saved layout authority."
+            ),
+        },
+        "renderConsistency": {
+            "topPlan": sanitize_transform_audit(
+                render_consistency.get("topPlan")
+            ),
+            "three": sanitize_transform_audit(
+                render_consistency.get("three")
+            ),
+            "evidenceStatus": "browser_ephemeral",
+            "qualification": (
+                "Mounted renderer diagnostics are bounded ephemeral evidence. "
+                "They are compared with the server-authoritative placement "
+                "count but do not replace persisted layout authority."
+            ),
+        },
         "selection": {
             key: _selected_ids(selection.get(key), known_ids.get(key, set()))
             for key in (
                 "placementIds",
                 "zoneIds",
+                "floorMarkingIds",
                 "routeIds",
                 "utilityNetworkIds",
                 "processBindingIds",
@@ -960,6 +1529,13 @@ def build_facility_layout_observation(
         (item["assetId"], item["assetDefinitionRevision"]): item
         for item in assets
     }
+    asset_document_index = _asset_document_index(asset_catalog_source)
+    evidence = _evidence_context(evidence_source)
+    evidence_authority = {
+        str(item.get("evidenceId")): item
+        for item in evidence.get("records", [])
+        if isinstance(item, Mapping) and item.get("evidenceId")
+    }
     zones = sorted(
         [
             deepcopy(dict(item))
@@ -983,6 +1559,7 @@ def build_facility_layout_observation(
             str(raw.get("assetDefinitionRevision") or ""),
         )
         asset = asset_index.get(asset_key)
+        asset_document = asset_document_index.get(asset_key)
         if asset is None:
             stale_dependencies.append(
                 {
@@ -1013,6 +1590,28 @@ def build_facility_layout_observation(
             ]
         except (KeyError, TypeError, ValueError):
             pass
+        physical_geometry = []
+        clearance_geometry = []
+        geometry_error = None
+        if asset_document is not None:
+            try:
+                physical_geometry = [
+                    _spatial_record_projection(record)
+                    for record in placement_spatial_records(
+                        raw,
+                        asset_document,
+                    )
+                ]
+                clearance_geometry = [
+                    _spatial_record_projection(record)
+                    for record in placement_clearance_records(
+                        raw,
+                        asset_document,
+                        evidence_authority=evidence_authority,
+                    )
+                ]
+            except (TypeError, ValueError) as exc:
+                geometry_error = _clean_text(exc, 240)
         placements.append(
             {
                 "placementId": str(raw["placementId"]),
@@ -1030,8 +1629,49 @@ def build_facility_layout_observation(
                 "positionMode": raw.get("positionMode"),
                 "dimensions": deepcopy(asset.get("dimensions"))
                 if asset else None,
+                "footprint": deepcopy(asset.get("footprint"))
+                if asset else None,
                 "connectors": deepcopy(asset.get("connectors", []))
                 if asset else [],
+                "mobilityClassification": (
+                    asset.get("mobilityClassification") if asset else None
+                ),
+                "allowedMountingSurfaces": (
+                    deepcopy(asset.get("allowedMountingSurfaces", []))
+                    if asset else []
+                ),
+                "utilityKinds": (
+                    deepcopy(asset.get("utilityKinds", []))
+                    if asset else []
+                ),
+                "facilitySemantics": (
+                    deepcopy(asset.get("facilitySemantics", {}))
+                    if asset else {}
+                ),
+                "clearanceRecordCount": (
+                    int(asset.get("clearanceRecordCount") or 0)
+                    if asset else 0
+                ),
+                "planningReady": (
+                    asset.get("planningReady") is True
+                    if asset else False
+                ),
+                "planningReadinessBlockers": (
+                    deepcopy(asset.get("planningReadinessBlockers", []))
+                    if asset else ["asset_definition_unavailable"]
+                ),
+                "planningReadinessEvidenceComplete": (
+                    asset.get("planningReadinessEvidenceComplete") is True
+                    if asset else False
+                ),
+                "physicalGeometry": physical_geometry,
+                "clearanceGeometry": clearance_geometry,
+                "geometryEvidenceStatus": (
+                    "derived"
+                    if physical_geometry
+                    else "unknown"
+                ),
+                "geometryProjectionError": geometry_error,
                 "zoneIds": sorted(zone_ids),
                 "metadata": deepcopy(raw.get("metadata"))
                 if isinstance(raw.get("metadata"), Mapping)
@@ -1044,7 +1684,6 @@ def build_facility_layout_observation(
         known_ids=known_ids,
     )
     diagnostics = _diagnostics(diagnostics_source)
-    evidence = _evidence_context(evidence_source)
     vehicles = _vehicle_catalog(vehicle_source)
     process_maps = _process_catalog(process_source)
     capabilities = {}
@@ -1121,14 +1760,82 @@ def build_facility_layout_observation(
                 "conflict": live["conflict"],
                 "editable": live["editable"],
                 "viewportMode": live["viewportMode"],
+                "generationDraft": live["generationDraft"],
+                "navigationCapabilities": live[
+                    "navigationCapabilities"
+                ],
+                "renderConsistency": live["renderConsistency"],
             },
             "selection": live["selection"],
             "coordinateFrame": deepcopy(layout.get("coordinateFrame")),
+            "facilityShell": _shell_semantic_projection(
+                shell_source,
+                evidence_authority,
+            ),
+            "facilityPolicy": _policy_semantic_projection(
+                policy_source,
+                evidence_authority,
+            ),
             "zones": zones,
+            "floorMarkings": sorted(
+                [
+                    {
+                        **deepcopy(dict(item)),
+                        "evidenceAuthoritative": bool(
+                            isinstance(item.get("evidence"), list)
+                            and bool(item.get("evidence"))
+                            and all(
+                                evidence_authority.get(
+                                    str(evidence_id), {}
+                                ).get("current") is True
+                                and evidence_authority.get(
+                                    str(evidence_id), {}
+                                ).get("authoritative") is True
+                                and not evidence_authority.get(
+                                    str(evidence_id), {}
+                                ).get("blockers")
+                                for evidence_id in item.get("evidence", [])
+                            )
+                        ),
+                    }
+                    for item in layout.get("floorMarkings", [])
+                    if isinstance(item, Mapping) and item.get("markingId")
+                ],
+                key=lambda item: str(item.get("markingId")),
+            ),
             "placements": placements,
             "routes": sorted(
                 [
-                    deepcopy(dict(item))
+                    {
+                        **deepcopy(dict(item)),
+                        "clearanceAuthoritative": bool(
+                            isinstance(item.get("extensions"), Mapping)
+                            and isinstance(
+                                item.get("extensions", {}).get(
+                                    "facilityAisle"
+                                ),
+                                Mapping,
+                            )
+                            and item.get("extensions", {}).get(
+                                "facilityAisle", {}
+                            ).get("clearanceEvidenceStatus")
+                            in {"authored", "derived"}
+                            and isinstance(item.get("evidence"), list)
+                            and bool(item.get("evidence"))
+                            and all(
+                                evidence_authority.get(
+                                    str(evidence_id), {}
+                                ).get("current") is True
+                                and evidence_authority.get(
+                                    str(evidence_id), {}
+                                ).get("authoritative") is True
+                                and not evidence_authority.get(
+                                    str(evidence_id), {}
+                                ).get("blockers")
+                                for evidence_id in item.get("evidence", [])
+                            )
+                        ),
+                    }
                     for item in layout.get("routes", [])
                     if isinstance(item, Mapping) and item.get("routeId")
                 ],
@@ -1227,7 +1934,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
         {
             "name": "inspect_facility_entities",
             "description": (
-                "Inspect placements, zones, routes, or utility networks by "
+                "Inspect placements, zones, floor markings, routes, or utility networks by "
                 "stable ID. " + common_response
             ),
             "input_schema": {
@@ -1239,6 +1946,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "enum": [
                             "placement",
                             "zone",
+                            "floor_marking",
                             "route",
                             "utility_network",
                         ]
@@ -1317,6 +2025,325 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "maximum": MAXIMUM_READ_PAGE_SIZE,
                     },
                     "cursor": {"type": "string", "maxLength": 2048},
+                },
+            },
+        },
+        {
+            "name": "inspect_facility_semantics",
+            "description": (
+                "Inspect the revision-bound semantic facility map, exact "
+                "derived geometry metrics, asset operational roles, Facility "
+                "Layout command meaning, or manufacturing-cell strategy "
+                "knowledge. Use this before declaring a value unavailable "
+                "when it may be deterministically derived. Inferred planning "
+                "priors never satisfy safety or policy requirements. "
+                + common_response
+            ),
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["view"],
+                "properties": {
+                    "view": {
+                        "enum": [
+                            "overview",
+                            "departments",
+                            "department_metrics",
+                            "zones",
+                            "assets",
+                            "placements",
+                            "routes",
+                            "route_crossings",
+                            "floor_markings",
+                            "process_bindings",
+                            "layout_patterns",
+                            "commands",
+                            "cell_layout_strategies",
+                            "derived_metrics",
+                        ]
+                    },
+                    "ids": {
+                        "type": "array",
+                        "maxItems": MAXIMUM_READ_IDS,
+                        "items": {"type": "string", "maxLength": 128},
+                    },
+                    "query": {
+                        "type": "string",
+                        "maxLength": 120,
+                    },
+                    "pageSize": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAXIMUM_READ_PAGE_SIZE,
+                    },
+                    "cursor": {"type": "string", "maxLength": 2048},
+                },
+            },
+        },
+        {
+            "name": "inspect_pattern_provenance",
+            "description": (
+                "Inspect authored linear, circular, perimeter, or other "
+                "Facility Layout pattern provenance without creating a "
+                "pattern. Returns seed IDs, parameters, membership, and "
+                "manual drift from the active revision. " + common_response
+            ),
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "maxItems": MAXIMUM_READ_IDS,
+                        "items": {"type": "string", "maxLength": 128},
+                    },
+                    "query": {"type": "string", "maxLength": 120},
+                    "pageSize": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAXIMUM_READ_PAGE_SIZE,
+                    },
+                    "cursor": {"type": "string", "maxLength": 2048},
+                },
+            },
+        },
+        {
+            "name": "inspect_cell_layout_provenance",
+            "description": (
+                "Inspect authored manufacturing-cell layout provenance and "
+                "current geometric conformance without arranging or "
+                "previewing a cell. Returns strategy, parameters, members, "
+                "manual-edit state, and current classification. "
+                + common_response
+            ),
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "maxItems": MAXIMUM_READ_IDS,
+                        "items": {"type": "string", "maxLength": 128},
+                    },
+                    "query": {"type": "string", "maxLength": 120},
+                    "pageSize": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAXIMUM_READ_PAGE_SIZE,
+                    },
+                    "cursor": {"type": "string", "maxLength": 2048},
+                },
+            },
+        },
+        {
+            "name": "analyze_facility_spatial",
+            "description": (
+                "Run one focused, bounded, read-only Facility analysis. Use "
+                "resolve_entities for human labels or current selection; "
+                "clearances for actual edge-to-edge distances; "
+                "protected_intrusions for footprint overlap with routes, "
+                "keep-clear, pedestrian, or material areas; and "
+                "route_crossings for physical crossings and crosswalk "
+                "coverage; route_widths for authored and narrowest known "
+                "usable corridor widths after physical obstructions; "
+                "free_space for exact connected open regions; "
+                "layout_provenance for authored pattern/cell parameters and "
+                "drift; cell_alternatives for all ten registered, validated "
+                "cell-strategy comparisons; route_access for "
+                "geometry-derived paths between "
+                "zones; module_fit for complete authored cell-envelope fit "
+                "lower bounds between a source cell and target zone; "
+                "and operator_travel for authored process travel or "
+                "an explicitly labelled geometric proxy; cell_access for "
+                "authored gate, loading, and service interface geometry; "
+                "asset_access for authored machine operator, service, "
+                "loading, input, output, front, or rear approach geometry; "
+                "drone_clearance for static 3D passage margins using the "
+                "mounted Drone collider; render_consistency "
+                "for mounted 2D/3D transform audits. Actual geometry is "
+                "reported separately from "
+                "policy adequacy, and the tool never mutates the layout."
+                " Scopes and returned entities use stable IDs."
+            ),
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["analysis"],
+                "properties": {
+                    "analysis": {
+                        "enum": [
+                            "resolve_entities",
+                            "clearances",
+                            "protected_intrusions",
+                            "route_crossings",
+                            "free_space",
+                            "layout_provenance",
+                            "route_access",
+                            "route_widths",
+                            "cell_alternatives",
+                            "module_fit",
+                            "operator_travel",
+                            "asset_access",
+                            "cell_access",
+                            "drone_clearance",
+                            "render_consistency",
+                        ]
+                    },
+                    "query": {"type": "string", "maxLength": 120},
+                    "entityKinds": {
+                        "type": "array",
+                        "maxItems": 6,
+                        "uniqueItems": True,
+                        "items": {
+                            "enum": [
+                                "placement",
+                                "zone",
+                                "asset",
+                                "route",
+                                "floor_marking",
+                                "layout_pattern",
+                            ]
+                        },
+                    },
+                    "useCurrentSelection": {"type": "boolean"},
+                    "scopeIds": {
+                        "type": "array",
+                        "maxItems": MAXIMUM_READ_IDS,
+                        "uniqueItems": True,
+                        "items": {"type": "string", "maxLength": 128},
+                    },
+                    "unitMode": {
+                        "enum": ["operational_units", "placements"]
+                    },
+                    "interfaceRole": {
+                        "enum": [
+                            "service",
+                            "operator",
+                            "loading",
+                            "material_input",
+                            "material_output",
+                            "front",
+                            "rear",
+                        ]
+                    },
+                    "freeSpaceMetric": {
+                        "enum": [
+                            "geometric",
+                            "known_planning",
+                            "operational",
+                        ]
+                    },
+                    "sourceQuery": {
+                        "type": "string",
+                        "maxLength": 120,
+                    },
+                    "targetQuery": {
+                        "type": "string",
+                        "maxLength": 120,
+                    },
+                    "sourceZoneIds": {
+                        "type": "array",
+                        "maxItems": MAXIMUM_READ_IDS,
+                        "uniqueItems": True,
+                        "items": {"type": "string", "maxLength": 128},
+                    },
+                    "targetZoneIds": {
+                        "type": "array",
+                        "maxItems": MAXIMUM_READ_IDS,
+                        "uniqueItems": True,
+                        "items": {"type": "string", "maxLength": 128},
+                    },
+                    "movementClass": {
+                        "enum": [
+                            "material",
+                            "pedestrian",
+                            "conveyor",
+                            "any",
+                        ]
+                    },
+                    "cellStrategies": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": len(CELL_FEASIBILITY_STRATEGIES),
+                        "uniqueItems": True,
+                        "items": {
+                            "enum": list(CELL_FEASIBILITY_STRATEGIES)
+                        },
+                    },
+                    "preferredGapMeters": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 20,
+                    },
+                    "invertU": {"type": "boolean"},
+                    "orientationsDegrees": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 4,
+                        "uniqueItems": True,
+                        "items": {"enum": [0, 90, 180, 270]},
+                    },
+                    "moduleGapMeters": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100,
+                    },
+                    "altitudeMeters": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100000,
+                    },
+                    "maximumResults": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                    },
+                },
+            },
+        },
+        {
+            "name": "analyze_facility_fit",
+            "description": (
+                "Run a bounded, read-only deterministic fit search for one "
+                "current asset inside one authored zone. Resolve the asset "
+                "from an existing placement, current selection, human name, "
+                "or an exact internal asset/revision pair; resolve the target "
+                "zone by stable ID or human label. The server "
+                "chooses probe coordinates and validates footprint, named "
+                "clearance, protected-route, marking, shell, and policy "
+                "constraints. Use this for 'can this asset fit?' questions. "
+                "It does not estimate maximum quantity or production "
+                "capacity, and it never mutates the layout."
+            ),
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "assetId": {"type": "string", "maxLength": 128},
+                    "assetDefinitionRevision": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                    },
+                    "assetQuery": {"type": "string", "maxLength": 120},
+                    "sourcePlacementId": {
+                        "type": "string",
+                        "maxLength": 128,
+                    },
+                    "useSelectedPlacement": {"type": "boolean"},
+                    "zoneId": {"type": "string", "maxLength": 128},
+                    "zoneQuery": {"type": "string", "maxLength": 120},
+                    "orientationsDegrees": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 4,
+                        "uniqueItems": True,
+                        "items": {"enum": [0, 90, 180, 270]},
+                    },
+                    "maximumResults": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 8,
+                    },
                 },
             },
         },

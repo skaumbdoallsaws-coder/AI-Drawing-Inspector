@@ -19,13 +19,37 @@
         "scope_occurrence_id": {"type": "string", "max_length": 160},
         "label": {"type": "string", "max_length": 160}
       },
-      "preserves": ["highlight", "display", "motion", "rotation"]
+      "preserves": ["highlight", "display", "motion", "rotation", "process_map_focus"]
     },
     "clear_process_map_part_scope": {
       "effect": "process_map_selection",
       "required": [],
       "fields": {},
-      "preserves": ["highlight", "display", "motion", "rotation"]
+      "preserves": ["highlight", "display", "motion", "rotation", "process_map_focus"]
+    },
+    "set_process_map_focus": {
+      "effect": "process_map_focus",
+      "required": [],
+      "require_any": ["target_node_id", "target_occurrence_id", "target_node_ids", "target_occurrence_ids"],
+      "fields": {
+        "target_node_id": {"type": "string", "max_length": 160},
+        "target_occurrence_id": {"type": "string", "max_length": 160},
+        "target_node_ids": {"type": "string_array", "max_items": 8},
+        "target_occurrence_ids": {"type": "string_array", "max_items": 8},
+        "labels": {"type": "string_array", "max_items": 8},
+        "label": {"type": "string", "max_length": 160},
+        "direction": {"type": "enum", "values": ["target", "upstream", "downstream", "both"]},
+        "include_routes": {"type": "boolean"},
+        "fit_view": {"type": "boolean"},
+        "dim_others": {"type": "boolean"}
+      },
+      "preserves": ["highlight", "display", "motion", "rotation", "process_map_selection"]
+    },
+    "clear_process_map_focus": {
+      "effect": "process_map_focus",
+      "required": [],
+      "fields": {},
+      "preserves": ["highlight", "display", "motion", "rotation", "process_map_selection"]
     },
     "set_compare_revisions": {
       "effect": "compare",

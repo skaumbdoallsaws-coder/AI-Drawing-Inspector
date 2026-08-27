@@ -36,6 +36,12 @@ _SEVERITY_PRIORITY = {
 _DESCRIPTOR_CONFIG = (
     ("placements", "placementId", "placement", "inspect_facility_entities"),
     ("zones", "zoneId", "zone", "inspect_facility_entities"),
+    (
+        "floorMarkings",
+        "markingId",
+        "floor_marking",
+        "inspect_facility_entities",
+    ),
     ("routes", "routeId", "route", "inspect_facility_entities"),
     (
         "utilityNetworks",
@@ -250,6 +256,8 @@ def _entity_summary(
                 "category",
                 "positionMode",
                 "zoneType",
+                "markingType",
+                "semanticRole",
                 "routeKind",
                 "networkKind",
                 "bindingRole",
@@ -454,6 +462,40 @@ def _bounded_unresolved(
     return values[:40], max(0, len(values) - 40)
 
 
+def _bounded_stale_dependencies(
+    state: Mapping[str, Any],
+    *,
+    limit: int = 40,
+) -> tuple[list[dict[str, Any]], int]:
+    counts: Counter[tuple[str, str, str, str, str]] = Counter()
+    for item in state.get("staleDependencies", []):
+        if not isinstance(item, Mapping):
+            continue
+        key = (
+            str(item.get("kind") or "unknown"),
+            str(item.get("id") or ""),
+            str(item.get("expectedRevision") or ""),
+            str(item.get("currentRevision") or ""),
+            str(item.get("reason") or "unknown"),
+        )
+        counts[key] += 1
+
+    records = []
+    for key in sorted(counts):
+        record = {
+            "kind": key[0],
+            "id": key[1],
+            "expectedRevision": key[2],
+            "reason": key[4],
+        }
+        if key[3]:
+            record["currentRevision"] = key[3]
+        if counts[key] > 1:
+            record["affectedCount"] = counts[key]
+        records.append(record)
+    return records[:limit], max(0, len(records) - limit)
+
+
 def _set_size_fields(digest: dict[str, Any]) -> None:
     digest["canonicalUtf8Bytes"] = 0
     digest["estimatedTokens"] = 0
@@ -482,8 +524,9 @@ def _fit_bounds(
         (1, result, "findingDetails", "findingDetails"),
         (2, result, "zoneSummaries", "zoneSummaries"),
         (2, result, "assetUsage", "assetUsage"),
+        (2, result, "staleDependencies", "staleDependencies"),
         (1, result, "unresolvedAuthorityGaps", "unresolvedAuthorityGaps"),
-        (3, result, "readDescriptors", "readDescriptors"),
+        (0, result, "readDescriptors", "readDescriptors"),
     ]
     while True:
         _set_size_fields(result)
@@ -579,6 +622,9 @@ def build_facility_layout_digest(
     zones, omitted_zones = _zone_summaries(state)
     asset_usage, omitted_assets = _asset_usage(state)
     unresolved, omitted_unresolved = _bounded_unresolved(evidence)
+    stale_dependencies, omitted_stale_dependencies = (
+        _bounded_stale_dependencies(state)
+    )
     position_modes, _ = _counter_records(
         [
             str(item.get("positionMode") or "unknown")
@@ -657,6 +703,7 @@ def build_facility_layout_digest(
         "counts": {
             "placements": len(state.get("placements", [])),
             "zones": len(state.get("zones", [])),
+            "floorMarkings": len(state.get("floorMarkings", [])),
             "routes": len(state.get("routes", [])),
             "utilityNetworks": len(state.get("utilityNetworks", [])),
             "processBindings": len(state.get("processBindings", [])),
@@ -690,9 +737,7 @@ def build_facility_layout_digest(
         "selectedEntities": selected_entities,
         "activeProposal": deepcopy(state.get("activeProposal")),
         "unresolvedAuthorityGaps": unresolved,
-        "staleDependencies": deepcopy(
-            state.get("staleDependencies", [])
-        ),
+        "staleDependencies": stale_dependencies,
         "capabilitiesAvailable": deepcopy(
             state.get("capabilities", {})
         ),
@@ -726,6 +771,11 @@ def build_facility_layout_digest(
         truncation["unresolvedAuthorityGaps"] = {
             "returnedCount": len(unresolved),
             "omittedCount": omitted_unresolved,
+        }
+    if omitted_stale_dependencies:
+        truncation["staleDependencies"] = {
+            "returnedCount": len(stale_dependencies),
+            "omittedCount": omitted_stale_dependencies,
         }
     if truncation:
         digest["truncation"] = truncation

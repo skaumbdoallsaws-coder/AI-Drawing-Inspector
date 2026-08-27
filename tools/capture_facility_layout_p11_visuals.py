@@ -243,6 +243,29 @@ def _capture_webgl_context_recovery(
             else None
         ),
     )
+
+    def bounded_recovery_bootstrap(route: Any) -> None:
+        response = route.fetch()
+        payload = response.json()
+        layout_receipt = payload.get("layout", {})
+        layout = layout_receipt.get("layout", layout_receipt)
+        # Context recovery validates renderer identity, not large-layout load
+        # time. Bound the real scene so a user's saved factory size cannot
+        # turn the fixed recovery window into a false failure.
+        layout["placements"] = list(layout.get("placements", []))[:4]
+        route.fulfill(
+            response=response,
+            body=json.dumps(payload, ensure_ascii=True),
+            headers={
+                **response.headers,
+                "content-type": "application/json",
+            },
+        )
+
+    page.route(
+        "**/api/facility-layout-bootstrap",
+        bounded_recovery_bootstrap,
+    )
     page.goto(app_url, wait_until="load", timeout=120_000)
     _open_facility(page)
     root = page.locator("#trainFacilityLayoutAuthoring")
@@ -426,8 +449,8 @@ def capture(
                             theme: document.documentElement.dataset.theme,
                             placementCount:
                                 app.session.getState().layout.placements.length,
-                            assetRows: root.querySelectorAll(
-                                '.ip-flw-asset-row[data-asset-id]'
+                            assetCards: root.querySelectorAll(
+                                '.ip-flw-asset-card-select[data-asset-id]'
                             ).length,
                             planSvgs: root.querySelectorAll(
                                 'svg[data-facility-layout-view="top-plan"]'
@@ -462,7 +485,7 @@ def capture(
                     "fixturePlacementsRendered": (
                         state["placementCount"] >= 4
                     ),
-                    "assetCatalogRendered": state["assetRows"] >= 4,
+                    "assetCatalogRendered": state["assetCards"] >= 4,
                     "onePlanSurface": state["planSvgs"] == 1,
                     "workspaceVisible": (
                         state["rootRect"]["width"] > 0

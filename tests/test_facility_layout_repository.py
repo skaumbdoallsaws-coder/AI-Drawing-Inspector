@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -21,6 +22,7 @@ from ai_inspector.facility_layout.repository import (
     FacilityLayoutRepository,
     FacilityLayoutValidationError,
     FacilityLayoutWriteError,
+    _read_bytes,
 )
 
 
@@ -73,10 +75,43 @@ def _document(
 
 def _all_files(root: Path) -> dict[str, bytes]:
     return {
-        str(path.relative_to(root)): path.read_bytes()
+        str(path.relative_to(root)): _read_bytes(path)
         for path in sorted(root.rglob("*"))
         if path.is_file()
     }
+
+
+def _replace_with_noncanonical_current(
+    repository: FacilityLayoutRepository,
+    created: Mapping[str, Any],
+) -> tuple[bytes, str]:
+    scope = repository.root / "tenant-a" / "site-a" / "layouts"
+    asset = scope / "fl-empty-cell.json"
+    registry_path = scope / "registry.json"
+    noncanonical = deepcopy(created["layout"])
+    noncanonical["coordinateFrame"]["floorElevation"] = -0.0
+    payload = json.dumps(
+        noncanonical,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("ascii")
+    assert payload != canonical_layout_bytes(noncanonical)
+    revision = hashlib.sha256(payload).hexdigest()
+    registry = json.loads(registry_path.read_text(encoding="ascii"))
+    registry["layouts"][0]["currentRevision"] = revision
+    repository._atomic_write(asset, payload)
+    repository._atomic_write(
+        registry_path,
+        json.dumps(
+            registry,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii"),
+    )
+    return payload, revision
 
 
 def test_create_stamps_server_time_and_establishes_default(tmp_path: Path) -> None:
@@ -719,3 +754,71 @@ def test_noncanonical_input_is_normalized_before_persistence(
 
     assert created["layout"] == canonicalize_layout(created["layout"])
     assert created["layout"]["coordinateFrame"]["floorElevation"] == 0
+
+
+def test_explicit_storage_normalization_preserves_exact_prior_revision(
+    tmp_path: Path,
+) -> None:
+    repository = _repo(tmp_path)
+    principal = _principal()
+    created = repository.create_layout(principal, "site-a", _document())
+    prior_payload, prior_revision = _replace_with_noncanonical_current(
+        repository,
+        created,
+    )
+
+    with pytest.raises(FacilityLayoutIntegrityError) as caught:
+        repository.get_layout(principal, "site-a", "fl-empty-cell")
+    assert caught.value.code == "layout_asset_not_canonical"
+
+    normalized = repository.normalize_current_layout_storage(
+        principal,
+        "site-a",
+        "fl-empty-cell",
+    )
+    scope = repository.root / "tenant-a" / "site-a" / "layouts"
+    backup = scope / "backups" / "fl-empty-cell" / f"{prior_revision}.json"
+
+    assert normalized["changed"] is True
+    assert normalized["revision"] == created["revision"]
+    assert normalized["layout"] == created["layout"]
+    assert (scope / "fl-empty-cell.json").read_bytes() == (
+        canonical_layout_bytes(created["layout"])
+    )
+    assert _read_bytes(backup) == prior_payload
+    assert repository.get_layout_revision(
+        principal,
+        "site-a",
+        "fl-empty-cell",
+        prior_revision,
+    )["revision"] == prior_revision
+
+    before_repeat = _all_files(repository.root)
+    repeated = repository.normalize_current_layout_storage(
+        principal,
+        "site-a",
+        "fl-empty-cell",
+    )
+    assert repeated["changed"] is False
+    assert _all_files(repository.root) == before_repeat
+
+
+def test_storage_normalization_rolls_back_exactly_after_registry_failure(
+    tmp_path: Path,
+) -> None:
+    repository = _AfterRegistryWriteRepository(tmp_path / "facility")
+    principal = _principal()
+    created = repository.create_layout(principal, "site-a", _document())
+    _replace_with_noncanonical_current(repository, created)
+    before = _all_files(repository.root)
+    repository.fail_after_registry_write = True
+
+    with pytest.raises(FacilityLayoutWriteError) as caught:
+        repository.normalize_current_layout_storage(
+            principal,
+            "site-a",
+            "fl-empty-cell",
+        )
+
+    assert caught.value.code == "injected_after_registry_failure"
+    assert _all_files(repository.root) == before

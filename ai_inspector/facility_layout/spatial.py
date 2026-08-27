@@ -1386,8 +1386,615 @@ def _record_pair_intersects(
     )
 
 
+def _vertical_stack_relationship(
+    placement: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    relationship = placement.get("snapRelationship")
+    if not isinstance(relationship, Mapping):
+        return None
+    if relationship.get("family") != "vertical_stack":
+        return None
+    return relationship
+
+
+def _vertical_stack_checks(
+    placements: Mapping[str, Mapping[str, Any]],
+    records_by_placement: Mapping[str, tuple[SpatialRecord, ...]],
+) -> tuple[list[dict[str, Any]], set[tuple[str, str]], set[str]]:
+    groups: dict[str, list[tuple[Mapping[str, Any], Mapping[str, Any]]]] = {}
+    findings: list[dict[str, Any]] = []
+    support_pairs: set[tuple[str, str]] = set()
+    upper_placements: set[str] = set()
+    for placement_id in sorted(placements):
+        placement = placements[placement_id]
+        relationship = _vertical_stack_relationship(placement)
+        if relationship is None:
+            continue
+        stack_id = relationship.get("stackId")
+        if not isinstance(stack_id, str) or not stack_id.strip():
+            findings.append(
+                _finding(
+                    "invalid_vertical_stack",
+                    "error",
+                    "Vertical stack relationship has no stable stack ID.",
+                    subject_refs=(placement_id,),
+                    details={"reason": "missing_stack_id"},
+                )
+            )
+            continue
+        groups.setdefault(stack_id, []).append((placement, relationship))
+
+    tolerance = 1.0e-6
+    for stack_id in sorted(groups):
+        members = groups[stack_id]
+        member_ids = tuple(sorted(
+            str(placement.get("placementId") or "")
+            for placement, _ in members
+        ))
+
+        def reject(reason: str, message: str) -> None:
+            findings.append(
+                _finding(
+                    "invalid_vertical_stack",
+                    "error",
+                    message,
+                    subject_refs=member_ids,
+                    details={"stackId": stack_id, "reason": reason},
+                )
+            )
+
+        try:
+            declared_counts = {
+                int(relationship.get("count"))
+                for _, relationship in members
+                if not isinstance(relationship.get("count"), bool)
+            }
+            levels = {
+                int(relationship.get("level"))
+                for _, relationship in members
+                if not isinstance(relationship.get("level"), bool)
+            }
+        except (TypeError, ValueError, OverflowError):
+            reject("invalid_level_or_count", "Vertical stack levels are invalid.")
+            continue
+        if len(declared_counts) != 1:
+            reject("count_mismatch", "Vertical stack members disagree on count.")
+            continue
+        count = next(iter(declared_counts))
+        if count < 2 or count != len(members) or levels != set(range(count)):
+            reject(
+                "incomplete_levels",
+                "Vertical stack must contain every declared level exactly once.",
+            )
+            continue
+        by_level = {
+            int(relationship.get("level")): (placement, relationship)
+            for placement, relationship in members
+        }
+        base, base_relationship = by_level[0]
+        base_id = str(base.get("placementId") or "")
+        base_records = records_by_placement.get(base_id, ())
+        if not base_records:
+            reject("missing_geometry", "Vertical stack geometry is unavailable.")
+            continue
+        try:
+            gap = _number(
+                base_relationship.get("gapMeters", 0),
+                "snapRelationship.gapMeters",
+            )
+            declared_height = _number(
+                base_relationship.get("itemHeightMeters"),
+                "snapRelationship.itemHeightMeters",
+            )
+        except (TypeError, ValueError):
+            reject("invalid_dimensions", "Vertical stack dimensions are invalid.")
+            continue
+        if gap < 0 or declared_height <= 0:
+            reject("invalid_dimensions", "Vertical stack dimensions are invalid.")
+            continue
+        base_minimum = min(record.minimum_y for record in base_records)
+        base_maximum = max(record.maximum_y for record in base_records)
+        actual_height = base_maximum - base_minimum
+        if abs(actual_height - declared_height) > tolerance:
+            reject(
+                "height_mismatch",
+                "Vertical stack height does not match authoritative asset geometry.",
+            )
+            continue
+        base_transform = base.get("transform")
+        base_position = (
+            base_transform.get("position")
+            if isinstance(base_transform, Mapping)
+            else None
+        )
+        base_quaternion = (
+            base_transform.get("quaternion")
+            if isinstance(base_transform, Mapping)
+            else None
+        )
+        if not isinstance(base_position, Mapping) or not isinstance(
+            base_quaternion, Mapping
+        ):
+            reject("missing_transform", "Vertical stack transform is unavailable.")
+            continue
+        valid = True
+        ordered_ids = [base_id]
+        for level in range(count):
+            placement, relationship = by_level[level]
+            placement_id = str(placement.get("placementId") or "")
+            records = records_by_placement.get(placement_id, ())
+            transform = placement.get("transform")
+            position = (
+                transform.get("position") if isinstance(transform, Mapping) else None
+            )
+            quaternion = (
+                transform.get("quaternion")
+                if isinstance(transform, Mapping)
+                else None
+            )
+            if not records or not isinstance(position, Mapping) or not isinstance(
+                quaternion, Mapping
+            ):
+                valid = False
+                break
+            if placement.get("assetId") != base.get("assetId") or placement.get(
+                "assetDefinitionRevision"
+            ) != base.get("assetDefinitionRevision"):
+                valid = False
+                break
+            try:
+                member_gap = _number(
+                    relationship.get("gapMeters", 0),
+                    "snapRelationship.gapMeters",
+                )
+                member_height = _number(
+                    relationship.get("itemHeightMeters"),
+                    "snapRelationship.itemHeightMeters",
+                )
+                aligned = all(
+                    abs(_number(position.get(axis), f"position.{axis}")
+                        - _number(base_position.get(axis), f"base.position.{axis}"))
+                    <= tolerance
+                    for axis in ("x", "z")
+                )
+                oriented = all(
+                    abs(_number(quaternion.get(axis), f"quaternion.{axis}")
+                        - _number(base_quaternion.get(axis), f"base.quaternion.{axis}"))
+                    <= tolerance
+                    for axis in ("x", "y", "z", "w")
+                )
+            except (TypeError, ValueError):
+                valid = False
+                break
+            minimum = min(record.minimum_y for record in records)
+            expected_minimum = base_minimum + level * (actual_height + gap)
+            if (
+                abs(member_gap - gap) > tolerance
+                or abs(member_height - declared_height) > tolerance
+                or not aligned
+                or not oriented
+                or abs(minimum - expected_minimum) > tolerance
+            ):
+                valid = False
+                break
+            if level:
+                previous_id = ordered_ids[-1]
+                support_pairs.add(tuple(sorted((previous_id, placement_id))))
+                upper_placements.add(placement_id)
+                ordered_ids.append(placement_id)
+        if not valid:
+            for placement_id in member_ids:
+                upper_placements.discard(placement_id)
+            support_pairs.difference_update({
+                pair for pair in support_pairs
+                if pair[0] in member_ids or pair[1] in member_ids
+            })
+            reject(
+                "geometry_or_alignment_mismatch",
+                "Vertical stack members must share one asset, alignment, and rotation.",
+            )
+            continue
+        findings.append(
+            _finding(
+                "vertical_stack_safety_unverified",
+                "unverified",
+                "Stack geometry is valid, but load capacity and stability are unverified.",
+                subject_refs=member_ids,
+                details={
+                    "stackId": stack_id,
+                    "count": count,
+                    "totalHeightMeters": _rounded(
+                        actual_height * count + gap * (count - 1)
+                    ),
+                },
+            )
+        )
+    return findings, support_pairs, upper_placements
+
+
+def _surface_attachment_relationship(
+    placement: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    relationship = placement.get("snapRelationship")
+    if not isinstance(relationship, Mapping):
+        return None
+    if relationship.get("family") != "surface_attachment":
+        return None
+    return relationship
+
+
+def _surface_attachment_checks(
+    placements: Mapping[str, Mapping[str, Any]],
+    records_by_placement: Mapping[str, tuple[SpatialRecord, ...]],
+    catalog: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], set[tuple[str, str]], set[str]]:
+    relationships = {
+        placement_id: relationship
+        for placement_id, placement in placements.items()
+        for relationship in (_surface_attachment_relationship(placement),)
+        if relationship is not None
+    }
+    findings: list[dict[str, Any]] = []
+    support_pairs: set[tuple[str, str]] = set()
+    attached_placements: set[str] = set()
+    tolerance = 1.0e-6
+
+    def reject(
+        placement_id: str,
+        support_id: str,
+        reason: str,
+        message: str,
+    ) -> None:
+        findings.append(
+            _finding(
+                "invalid_surface_attachment",
+                "error",
+                message,
+                subject_refs=tuple(filter(None, (placement_id, support_id))),
+                details={"reason": reason},
+            )
+        )
+
+    for placement_id in sorted(relationships):
+        relationship = relationships[placement_id]
+        support_id = str(relationship.get("supportPlacementId") or "")
+        if not support_id or support_id not in placements:
+            reject(
+                placement_id,
+                support_id,
+                "missing_support",
+                "Surface attachment support is unavailable.",
+            )
+            continue
+        trail = {placement_id}
+        cursor = support_id
+        cyclic = False
+        while cursor in relationships:
+            if cursor in trail:
+                cyclic = True
+                break
+            trail.add(cursor)
+            cursor = str(
+                relationships[cursor].get("supportPlacementId") or ""
+            )
+        if cyclic:
+            reject(
+                placement_id,
+                support_id,
+                "attachment_cycle",
+                "Surface attachment relationships cannot form a cycle.",
+            )
+            continue
+
+        placement = placements[placement_id]
+        support = placements[support_id]
+        child_records = records_by_placement.get(placement_id, ())
+        support_records = records_by_placement.get(support_id, ())
+        if not child_records or not support_records:
+            reject(
+                placement_id,
+                support_id,
+                "missing_geometry",
+                "Surface attachment geometry is unavailable.",
+            )
+            continue
+        child_transform = placement.get("transform")
+        support_transform = support.get("transform")
+        if not isinstance(child_transform, Mapping) or not isinstance(
+            support_transform,
+            Mapping,
+        ):
+            reject(
+                placement_id,
+                support_id,
+                "missing_transform",
+                "Surface attachment transforms are unavailable.",
+            )
+            continue
+        try:
+            child_position = _point3(
+                child_transform.get("position"),
+                "child.transform.position",
+            )
+            child_quaternion = _quaternion(child_transform.get("quaternion"))
+            support_position = _point3(
+                support_transform.get("position"),
+                "support.transform.position",
+            )
+            support_quaternion = _quaternion(
+                support_transform.get("quaternion")
+            )
+            local = relationship.get("localPosition")
+            if not isinstance(local, Mapping):
+                raise ValueError("snapRelationship.localPosition must be an object")
+            local_x = _number(local.get("x"), "snapRelationship.localPosition.x")
+            local_z = _number(local.get("z"), "snapRelationship.localPosition.z")
+            local_rotation = math.radians(
+                _number(
+                    relationship.get("localRotationDegrees"),
+                    "snapRelationship.localRotationDegrees",
+                )
+            )
+            normal_offset = _number(
+                relationship.get("normalOffsetMeters"),
+                "snapRelationship.normalOffsetMeters",
+            )
+            if normal_offset < 0:
+                raise ValueError("surface normal offset cannot be negative")
+            side = str(relationship.get("side") or "")
+            if side not in {"above", "below"}:
+                raise ValueError("surface attachment side is invalid")
+        except (TypeError, ValueError) as exc:
+            reject(
+                placement_id,
+                support_id,
+                "invalid_relationship",
+                f"Surface attachment relationship is invalid: {exc}",
+            )
+            continue
+
+        surface_source = str(relationship.get("surfaceSource") or "")
+        surface_id = str(relationship.get("surfaceId") or "")
+        if surface_source == "asset_definition":
+            support_asset = _catalog_asset(
+                catalog,
+                str(support.get("assetId") or ""),
+                str(support.get("assetDefinitionRevision") or ""),
+            )
+            raw_surfaces = (
+                _asset_field(support_asset, "supportSurfaces", [])
+                if support_asset is not None
+                else []
+            )
+            matching_surfaces = [
+                surface
+                for surface in raw_surfaces
+                if isinstance(surface, Mapping)
+                and str(surface.get("surfaceId") or "") == surface_id
+            ] if isinstance(raw_surfaces, list) else []
+            if len(matching_surfaces) != 1:
+                reject(
+                    placement_id,
+                    support_id,
+                    "missing_surface_definition",
+                    "The named support surface is unavailable for this asset revision.",
+                )
+                continue
+            surface = matching_surfaces[0]
+            allowed_sides = surface.get("allowedSides")
+            if (
+                not isinstance(allowed_sides, list)
+                or side not in allowed_sides
+            ):
+                reject(
+                    placement_id,
+                    support_id,
+                    "surface_side_not_allowed",
+                    "The named support surface does not allow attachment on this side.",
+                )
+                continue
+            try:
+                frame = surface.get("localFrame")
+                bounds = surface.get("bounds")
+                if not isinstance(frame, Mapping) or not isinstance(
+                    bounds,
+                    Mapping,
+                ):
+                    raise ValueError("support surface frame and bounds are required")
+                origin = _point3(frame.get("origin"), "supportSurface.origin")
+                x_axis = _point3(frame.get("xAxis"), "supportSurface.xAxis")
+                z_axis = _point3(frame.get("zAxis"), "supportSurface.zAxis")
+                normal = _point3(frame.get("normal"), "supportSurface.normal")
+                x_length = math.sqrt(sum(value * value for value in x_axis))
+                z_length = math.sqrt(sum(value * value for value in z_axis))
+                axis_dot = sum(
+                    left * right for left, right in zip(x_axis, z_axis)
+                )
+                upward_cross = (
+                    z_axis[2] * x_axis[0] - z_axis[0] * x_axis[2]
+                )
+                if (
+                    abs(x_axis[1]) > tolerance
+                    or abs(z_axis[1]) > tolerance
+                    or abs(normal[0]) > tolerance
+                    or abs(normal[2]) > tolerance
+                    or normal[1] < 1.0 - tolerance
+                    or abs(x_length - 1.0) > tolerance
+                    or abs(z_length - 1.0) > tolerance
+                    or abs(axis_dot) > tolerance
+                    or upward_cross < 1.0 - tolerance
+                ):
+                    raise ValueError(
+                        "support surface requires a horizontal orthonormal frame"
+                    )
+                minimum_x = _number(
+                    bounds.get("minimumX"),
+                    "supportSurface.bounds.minimumX",
+                )
+                maximum_x = _number(
+                    bounds.get("maximumX"),
+                    "supportSurface.bounds.maximumX",
+                )
+                minimum_z = _number(
+                    bounds.get("minimumZ"),
+                    "supportSurface.bounds.minimumZ",
+                )
+                maximum_z = _number(
+                    bounds.get("maximumZ"),
+                    "supportSurface.bounds.maximumZ",
+                )
+                if minimum_x >= maximum_x or minimum_z >= maximum_z:
+                    raise ValueError("support surface bounds are empty")
+                world_normal = _rotate_vector(normal, support_quaternion)
+                if (
+                    abs(world_normal[0]) > tolerance
+                    or abs(world_normal[2]) > tolerance
+                    or world_normal[1] < 1.0 - tolerance
+                ):
+                    raise ValueError("support surface must remain horizontal and face up")
+                world_origin_offset = _rotate_vector(origin, support_quaternion)
+                support_plane = support_position[1] + world_origin_offset[1]
+                local_surface_polygon = (
+                    (minimum_x, minimum_z),
+                    (maximum_x, minimum_z),
+                    (maximum_x, maximum_z),
+                    (minimum_x, maximum_z),
+                )
+                support_polygon = tuple(
+                    (
+                        support_position[0] + rotated[0],
+                        support_position[2] + rotated[2],
+                    )
+                    for surface_x, surface_z in local_surface_polygon
+                    for rotated in (
+                        _rotate_vector(
+                            (
+                                origin[0]
+                                + x_axis[0] * surface_x
+                                + z_axis[0] * surface_z,
+                                origin[1],
+                                origin[2]
+                                + x_axis[2] * surface_x
+                                + z_axis[2] * surface_z,
+                            ),
+                            support_quaternion,
+                        ),
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                reject(
+                    placement_id,
+                    support_id,
+                    "invalid_surface_definition",
+                    f"The named support surface is invalid: {exc}",
+                )
+                continue
+        elif surface_source == "derived_aabb":
+            if surface_id != "derived-top":
+                reject(
+                    placement_id,
+                    support_id,
+                    "invalid_derived_surface",
+                    "Derived attachments must reference the derived-top surface.",
+                )
+                continue
+            support_plane = max(record.maximum_y for record in support_records)
+            support_polygon = _convex_hull(
+                point for record in support_records for point in record.polygon
+            )
+        else:
+            reject(
+                placement_id,
+                support_id,
+                "unsupported_surface_source",
+                "Surface attachment provenance is unavailable or unsupported.",
+            )
+            continue
+
+        world_offset = _rotate_vector(
+            (local_x, 0.0, local_z),
+            support_quaternion,
+        )
+        expected_x = support_position[0] + world_offset[0]
+        expected_z = support_position[2] + world_offset[2]
+        support_yaw = math.atan2(
+            2.0 * (
+                support_quaternion[3] * support_quaternion[1]
+                + support_quaternion[0] * support_quaternion[2]
+            ),
+            1.0 - 2.0 * (
+                support_quaternion[1] ** 2 + support_quaternion[2] ** 2
+            ),
+        )
+        child_yaw = math.atan2(
+            2.0 * (
+                child_quaternion[3] * child_quaternion[1]
+                + child_quaternion[0] * child_quaternion[2]
+            ),
+            1.0 - 2.0 * (
+                child_quaternion[1] ** 2 + child_quaternion[2] ** 2
+            ),
+        )
+        yaw_delta = (
+            child_yaw - support_yaw - local_rotation + math.pi
+        ) % (2.0 * math.pi) - math.pi
+        child_minimum = min(record.minimum_y for record in child_records)
+        child_maximum = max(record.maximum_y for record in child_records)
+        expected_surface_edge = (
+            support_plane + normal_offset
+            if side == "above"
+            else support_plane - normal_offset
+        )
+        child_surface_edge = (
+            child_minimum if side == "above" else child_maximum
+        )
+        child_polygon = _convex_hull(
+            point for record in child_records for point in record.polygon
+        )
+        if (
+            abs(child_position[0] - expected_x) > tolerance
+            or abs(child_position[2] - expected_z) > tolerance
+            or abs(child_surface_edge - expected_surface_edge) > tolerance
+            or abs(yaw_delta) > tolerance
+            or len(support_polygon) < 3
+            or len(child_polygon) < 3
+            or not polygon_contains_polygon(support_polygon, child_polygon)
+        ):
+            reject(
+                placement_id,
+                support_id,
+                "geometry_or_alignment_mismatch",
+                "Attached equipment must remain inside and aligned to its support surface.",
+            )
+            continue
+
+        support_pairs.add(tuple(sorted((placement_id, support_id))))
+        attached_placements.add(placement_id)
+        findings.append(
+            _finding(
+                "surface_attachment_safety_unverified",
+                "unverified",
+                "Surface placement is geometrically valid, but support load and attachment safety are unverified.",
+                subject_refs=(support_id, placement_id),
+                details={
+                    "attachmentId": str(
+                        relationship.get("attachmentId") or ""
+                    ),
+                    "surfaceId": str(relationship.get("surfaceId") or ""),
+                    "side": side,
+                    "surfaceSource": str(
+                        relationship.get("surfaceSource") or ""
+                    ),
+                },
+            )
+        )
+    return findings, support_pairs, attached_placements
+
+
 def _placement_collisions(
     records_by_placement: Mapping[str, tuple[SpatialRecord, ...]],
+    *,
+    allowed_contact_pairs: set[tuple[str, str]] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     records = tuple(
         record
@@ -1406,6 +2013,8 @@ def _placement_collisions(
             if pair in pair_hits:
                 continue
             if _record_pair_intersects(record, other):
+                if pair in (allowed_contact_pairs or set()):
+                    continue
                 pair_hits.add(pair)
     findings = [
         _finding(
@@ -2710,6 +3319,137 @@ def _authority_gap_checks(
     return findings
 
 
+def _aisle_segment_polygon(
+    start: Point2,
+    end: Point2,
+    corridor_width: float,
+) -> tuple[Point2, ...] | None:
+    delta_x = end[0] - start[0]
+    delta_z = end[1] - start[1]
+    length = math.hypot(delta_x, delta_z)
+    if length <= GEOMETRY_EPSILON or corridor_width <= GEOMETRY_EPSILON:
+        return None
+    half_width = corridor_width / 2.0
+    normal_x = -delta_z / length * half_width
+    normal_z = delta_x / length * half_width
+    return (
+        (start[0] + normal_x, start[1] + normal_z),
+        (end[0] + normal_x, end[1] + normal_z),
+        (end[0] - normal_x, end[1] - normal_z),
+        (start[0] - normal_x, start[1] - normal_z),
+    )
+
+
+def _aisle_checks(
+    layout: Mapping[str, Any],
+    records_by_placement: Mapping[str, Sequence[SpatialRecord]],
+) -> tuple[list[dict[str, Any]], int, int, int]:
+    findings: list[dict[str, Any]] = []
+    aisle_count = 0
+    obstructed_routes: set[str] = set()
+    unverified_count = 0
+    for raw_route in layout.get("routes", []):
+        if not isinstance(raw_route, Mapping):
+            continue
+        extensions = raw_route.get("extensions")
+        aisle = (
+            extensions.get("facilityAisle")
+            if isinstance(extensions, Mapping)
+            and isinstance(extensions.get("facilityAisle"), Mapping)
+            else None
+        )
+        if aisle is None:
+            continue
+        route_id = str(raw_route.get("routeId") or "")
+        if not route_id:
+            continue
+        aisle_count += 1
+        label = str(raw_route.get("label") or route_id)
+        status = str(aisle.get("clearanceEvidenceStatus") or "unverified")
+        evidence = raw_route.get("evidence")
+        clearance_authoritative = (
+            status in _AUTHORITATIVE_EVIDENCE_STATES
+            and isinstance(evidence, list)
+            and bool(evidence)
+        )
+        if not clearance_authoritative:
+            unverified_count += 1
+            findings.append(
+                _finding(
+                    "aisle_clearance_unverified",
+                    "unverified",
+                    f"Aisle '{label}' has no authoritative clearance evidence.",
+                    subject_refs=(route_id,),
+                    details={
+                        "aisleKind": str(aisle.get("aisleKind") or ""),
+                        "clearanceEvidenceStatus": status,
+                        "corridorWidth": raw_route.get("corridorWidth"),
+                    },
+                )
+            )
+        centerline = raw_route.get("centerline")
+        if not isinstance(centerline, Sequence) or isinstance(
+            centerline, (str, bytes)
+        ):
+            continue
+        try:
+            points = tuple(
+                (
+                    _number(point.get("x"), "route.centerline.x"),
+                    _number(point.get("z"), "route.centerline.z"),
+                )
+                for point in centerline
+                if isinstance(point, Mapping)
+            )
+            corridor_width = _number(
+                raw_route.get("corridorWidth"),
+                "route.corridorWidth",
+            )
+        except ValueError:
+            continue
+        if len(points) < 2 or corridor_width <= GEOMETRY_EPSILON:
+            continue
+        segment_polygons = tuple(
+            polygon
+            for polygon in (
+                _aisle_segment_polygon(points[index], points[index + 1], corridor_width)
+                for index in range(len(points) - 1)
+            )
+            if polygon is not None
+        )
+        for placement_id in sorted(records_by_placement):
+            physical_records = tuple(
+                record
+                for record in records_by_placement[placement_id]
+                if record.record_kind == "physical"
+            )
+            blocked_segments = [
+                index
+                for index, corridor in enumerate(segment_polygons)
+                if any(
+                    polygons_intersect(corridor, record.polygon)
+                    for record in physical_records
+                )
+            ]
+            if not blocked_segments:
+                continue
+            obstructed_routes.add(route_id)
+            findings.append(
+                _finding(
+                    "aisle_obstructed",
+                    "warning",
+                    f"Placement '{placement_id}' intersects aisle '{label}'.",
+                    subject_refs=(route_id, placement_id),
+                    details={
+                        "aisleKind": str(aisle.get("aisleKind") or ""),
+                        "corridorWidth": corridor_width,
+                        "segmentIndexes": blocked_segments,
+                    },
+                )
+            )
+    return findings, aisle_count, len(obstructed_routes), unverified_count
+
+
 def diagnose_layout(
     layout: Mapping[str, Any],
     asset_definitions: Mapping[str, Any] | Sequence[Mapping[str, Any]],
@@ -2727,18 +3467,29 @@ def diagnose_layout(
     catalog = _asset_catalog(asset_definitions)
     authority = _normalized_authority(evidence_authority)
     records_by_placement, findings = _layout_placement_records(layout, catalog)
-    collision_findings, collision_count = _placement_collisions(records_by_placement)
+    placements = {
+        str(item.get("placementId")): item
+        for item in layout.get("placements", [])
+        if isinstance(item, Mapping) and item.get("placementId")
+    }
+    stack_findings, stack_contact_pairs, stacked_upper_placements = (
+        _vertical_stack_checks(placements, records_by_placement)
+    )
+    findings.extend(stack_findings)
+    attachment_findings, attachment_contact_pairs, attached_placements = (
+        _surface_attachment_checks(placements, records_by_placement, catalog)
+    )
+    findings.extend(attachment_findings)
+    collision_findings, collision_count = _placement_collisions(
+        records_by_placement,
+        allowed_contact_pairs=stack_contact_pairs | attachment_contact_pairs,
+    )
     findings.extend(collision_findings)
     shell_findings, shell_collision_count = _shell_obstacle_collisions(
         records_by_placement,
         shell,
     )
     findings.extend(shell_findings)
-    placements = {
-        str(item.get("placementId")): item
-        for item in layout.get("placements", [])
-        if isinstance(item, Mapping) and item.get("placementId")
-    }
     prepared_zones = _prepared_zones or _prepare_zones(layout)
     zone_by_id = {
         str(zone.get("zoneId")): zone
@@ -2770,15 +3521,16 @@ def diagnose_layout(
         )
         findings.extend(zone_findings)
         zone_membership[placement_id] = zone_ids
-        findings.extend(
-            _mounting_checks(
-                placement,
-                asset,
-                records_by_placement[placement_id],
-                shell,
-                prepared_surfaces=prepared_surfaces,
+        if placement_id not in stacked_upper_placements | attached_placements:
+            findings.extend(
+                _mounting_checks(
+                    placement,
+                    asset,
+                    records_by_placement[placement_id],
+                    shell,
+                    prepared_surfaces=prepared_surfaces,
+                )
             )
-        )
         findings.extend(
             _floor_load_checks(
                 placement,
@@ -2815,6 +3567,10 @@ def diagnose_layout(
             policy_set=policy_set,
         )
     )
+    aisle_findings, aisle_count, obstructed_aisle_count, aisle_unverified_count = (
+        _aisle_checks(layout, records_by_placement)
+    )
+    findings.extend(aisle_findings)
     ordered = sort_findings(findings)
     status = _safety_status(ordered)
     return {
@@ -2834,6 +3590,9 @@ def diagnose_layout(
             "placementCollisions": collision_count,
             "shellObstacleCollisions": shell_collision_count,
             "clearanceConflicts": clearance_count,
+            "aisleCount": aisle_count,
+            "obstructedAisleCount": obstructed_aisle_count,
+            "aisleClearanceUnverifiedCount": aisle_unverified_count,
             "errorCount": sum(item["severity"] == "error" for item in ordered),
             "unverifiedCount": sum(
                 item["severity"] == "unverified" for item in ordered
@@ -3582,7 +4341,7 @@ def _candidate_cross_findings(
     return findings
 
 
-def _candidate_asset_fingerprint(
+def _candidate_asset_definition_fingerprint(
     placements: Sequence[Mapping[str, Any]],
     catalog: Mapping[tuple[str, str], Mapping[str, Any]],
 ) -> str:
@@ -3675,13 +4434,13 @@ def _candidate_obstacle_scene(
     authority: Mapping[str, str],
     obstacle_fingerprint: str,
     target_placement_id: str | None,
-    asset_fingerprint: str,
+    asset_definition_fingerprint: str,
     authority_fingerprint: str,
 ) -> _CandidateObstacleScene:
     key = (
         obstacle_fingerprint,
         str(target_placement_id or ""),
-        asset_fingerprint,
+        asset_definition_fingerprint,
         authority_fingerprint,
     )
     with _CANDIDATE_OBSTACLE_CACHE_LOCK:
@@ -3709,7 +4468,7 @@ def _candidate_result_cache_key(
     *,
     base_layout_fingerprint: str,
     obstacle_fingerprint: str,
-    base_asset_fingerprint: str,
+    base_asset_definition_fingerprint: str,
     asset_definition: Mapping[str, Any],
     zones: Any,
     shell: Mapping[str, Any] | None,
@@ -3728,7 +4487,7 @@ def _candidate_result_cache_key(
             "assetDefinition": asset_definition,
             "assetDefinitionRevision": asset_definition_revision,
             "authority": authority,
-            "baseAssetFingerprint": base_asset_fingerprint,
+            "baseAssetFingerprint": base_asset_definition_fingerprint,
             "candidatePolicyVersion": CANDIDATE_POLICY_VERSION,
             "enabledFamilies": sorted(enabled_families),
             "layoutFingerprint": base_layout_fingerprint,
@@ -3886,7 +4645,7 @@ def generate_placement_candidates(
         ),
         key=lambda item: str(item.get("placementId") or ""),
     ))
-    base_asset_fingerprint = _candidate_asset_fingerprint(
+    base_asset_definition_fingerprint = _candidate_asset_definition_fingerprint(
         base_placements,
         catalog,
     )
@@ -3894,7 +4653,7 @@ def generate_placement_candidates(
     result_cache_key = _candidate_result_cache_key(
         base_layout_fingerprint=base_layout_fingerprint,
         obstacle_fingerprint=obstacle_fingerprint,
-        base_asset_fingerprint=base_asset_fingerprint,
+        base_asset_definition_fingerprint=base_asset_definition_fingerprint,
         asset_definition=asset_definition,
         zones=layout.get("zones"),
         shell=shell,
@@ -3918,7 +4677,7 @@ def generate_placement_candidates(
         authority=authority,
         obstacle_fingerprint=obstacle_fingerprint,
         target_placement_id=target_placement_id,
-        asset_fingerprint=base_asset_fingerprint,
+        asset_definition_fingerprint=base_asset_definition_fingerprint,
         authority_fingerprint=authority_fingerprint,
     )
     base_physical_index = obstacle_scene.physical_index

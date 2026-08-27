@@ -107,6 +107,34 @@ def _asset(golden: dict, asset_id: str) -> dict:
     )
 
 
+def _box_asset(asset_id: str, width: float, depth: float, height: float) -> dict:
+    half_width = width / 2.0
+    half_depth = depth / 2.0
+    footprint = [
+        {"x": -half_width, "z": -half_depth},
+        {"x": half_width, "z": -half_depth},
+        {"x": half_width, "z": half_depth},
+        {"x": -half_width, "z": half_depth},
+    ]
+    return {
+        "assetId": asset_id,
+        "category": "workstation",
+        "coordinateFrame": {
+            "allowedMountingSurfaces": ["floor"],
+            "floorAnchor": {"x": 0, "y": 0, "z": 0},
+        },
+        "geometry": {
+            "footprintPolygons": [footprint],
+            "heightInterval": {"minimumY": 0, "maximumY": height},
+        },
+        "collision": {
+            "geometry": {"footprintIndex": 0},
+            "verticalInterval": {"minimumY": 0, "maximumY": height},
+        },
+        "clearances": [],
+    }
+
+
 def _layout_with_machine(
     golden: dict,
     x: float,
@@ -549,6 +577,378 @@ def test_same_plan_footprint_at_separate_heights_has_no_narrow_collision(
     assert not height_intervals_intersect(lower.interval, upper.interval)
 
 
+def test_declared_vertical_stack_allows_support_contact_but_stays_unverified(
+    golden: dict,
+) -> None:
+    layout = deepcopy(golden["baseLayout"])
+    relationship = {
+        "family": "vertical_stack",
+        "stackId": "stack-machine-a",
+        "count": 3,
+        "gapMeters": 0,
+        "itemHeightMeters": 2,
+        "evidenceStatus": "unverified",
+    }
+    for level, y in enumerate((0.0, 2.0, 4.0)):
+        layout["placements"].append(
+            _placement(
+                f"pl-stack-{level}",
+                "asset-machine-golden",
+                2.0,
+                5.0,
+                y=y,
+                snap_relationship={**relationship, "level": level},
+            )
+        )
+    assets = deepcopy(golden["assetDefinitions"])
+    for asset in assets:
+        if asset["assetId"] == "asset-machine-golden":
+            asset["clearances"] = []
+    result = diagnose_layout(
+        layout,
+        assets,
+        shell=golden["shell"],
+        policy_set=golden["policySet"],
+        evidence_authority=golden["authority"],
+    )
+    assert "placement_collision" not in _codes(result, "error")
+    assert "invalid_vertical_stack" not in _codes(result, "error")
+    assert "vertical_stack_safety_unverified" in _codes(result, "unverified")
+    assert result["valid"] is True
+    assert result["safe"] is False
+
+
+def test_misaligned_vertical_stack_fails_closed(golden: dict) -> None:
+    layout = deepcopy(golden["baseLayout"])
+    relationship = {
+        "family": "vertical_stack",
+        "stackId": "stack-machine-b",
+        "count": 2,
+        "gapMeters": 0,
+        "itemHeightMeters": 2,
+        "evidenceStatus": "unverified",
+    }
+    layout["placements"].extend([
+        _placement(
+            "pl-stack-base", "asset-machine-golden", 2.0, 5.0,
+            snap_relationship={**relationship, "level": 0},
+        ),
+        _placement(
+            "pl-stack-bad", "asset-machine-golden", 2.1, 5.0, y=2.0,
+            snap_relationship={**relationship, "level": 1},
+        ),
+    ])
+    result = diagnose_layout(
+        layout,
+        golden["assetDefinitions"],
+        shell=golden["shell"],
+        policy_set=golden["policySet"],
+        evidence_authority=golden["authority"],
+    )
+    assert "invalid_vertical_stack" in _codes(result, "error")
+    assert result["valid"] is False
+
+
+def _surface_relationship(
+    support_id: str,
+    local_x: float,
+    local_z: float,
+    *,
+    side: str = "above",
+    surface_id: str = "derived-top",
+    surface_source: str = "derived_aabb",
+    local_rotation: float = 0,
+) -> dict:
+    return {
+        "family": "surface_attachment",
+        "attachmentId": "surface-table-worktop",
+        "supportPlacementId": support_id,
+        "surfaceId": surface_id,
+        "side": side,
+        "localPosition": {"x": local_x, "z": local_z},
+        "localRotationDegrees": local_rotation,
+        "normalOffsetMeters": 0,
+        "surfaceSource": surface_source,
+        "evidenceStatus": "unverified",
+    }
+
+
+def test_surface_support_holds_three_distinct_items_without_false_collision(
+    golden: dict,
+) -> None:
+    layout = deepcopy(golden["baseLayout"])
+    layout["zones"] = []
+    layout["placements"] = [
+        _placement("pl-table", "asset-table", 0, 0),
+        _placement(
+            "pl-computer",
+            "asset-computer",
+            -1,
+            0,
+            y=0.8,
+            snap_relationship=_surface_relationship("pl-table", -1, 0),
+        ),
+        _placement(
+            "pl-keyboard",
+            "asset-keyboard",
+            0,
+            0,
+            y=0.8,
+            snap_relationship=_surface_relationship("pl-table", 0, 0),
+        ),
+        _placement(
+            "pl-mouse",
+            "asset-mouse",
+            1,
+            0,
+            y=0.8,
+            snap_relationship=_surface_relationship("pl-table", 1, 0),
+        ),
+    ]
+    assets = [
+        _box_asset("asset-table", 4, 3, 0.8),
+        _box_asset("asset-computer", 0.5, 0.5, 0.5),
+        _box_asset("asset-keyboard", 0.6, 0.25, 0.05),
+        _box_asset("asset-mouse", 0.15, 0.1, 0.05),
+    ]
+    result = diagnose_layout(layout, assets)
+    assert "invalid_surface_attachment" not in _codes(result, "error")
+    assert "placement_collision" not in _codes(result, "error")
+    assert _codes(result, "unverified").count(
+        "surface_attachment_safety_unverified"
+    ) == 3
+
+
+def test_surface_attachment_outside_support_footprint_fails_closed(
+    golden: dict,
+) -> None:
+    layout = deepcopy(golden["baseLayout"])
+    layout["zones"] = []
+    layout["placements"] = [
+        _placement("pl-table", "asset-table", 0, 0),
+        _placement(
+            "pl-device",
+            "asset-device",
+            1.9,
+            0,
+            y=0.8,
+            snap_relationship=_surface_relationship("pl-table", 1.9, 0),
+        ),
+    ]
+    result = diagnose_layout(
+        layout,
+        [
+            _box_asset("asset-table", 4, 3, 0.8),
+            _box_asset("asset-device", 0.5, 0.5, 0.5),
+        ],
+    )
+    assert "invalid_surface_attachment" in _codes(result, "error")
+    assert result["valid"] is False
+
+
+def _named_worktop_asset(*, allowed_sides: list[str] | None = None) -> dict:
+    asset = _box_asset("asset-tall-workstation", 4, 3, 2)
+    asset["supportSurfaces"] = [{
+        "surfaceId": "worktop",
+        "label": "Worktop",
+        "localFrame": {
+            "origin": {"x": 0, "y": 0.8, "z": 0},
+            "xAxis": {"x": 1, "y": 0, "z": 0},
+            "zAxis": {"x": 0, "y": 0, "z": 1},
+            "normal": {"x": 0, "y": 1, "z": 0},
+        },
+        "bounds": {
+            "minimumX": -1.5,
+            "maximumX": 1.5,
+            "minimumZ": -1,
+            "maximumZ": 1,
+        },
+        "allowedSides": allowed_sides or ["above", "below"],
+        "evidenceStatus": "derived",
+    }]
+    return asset
+
+
+def test_named_surface_uses_authored_elevation_below_asset_top(
+    golden: dict,
+) -> None:
+    layout = deepcopy(golden["baseLayout"])
+    layout["zones"] = []
+    layout["placements"] = [
+        _placement("pl-support", "asset-tall-workstation", 0, 0),
+        _placement(
+            "pl-device",
+            "asset-device",
+            0,
+            0,
+            y=0.8,
+            snap_relationship=_surface_relationship(
+                "pl-support",
+                0,
+                0,
+                surface_id="worktop",
+                surface_source="asset_definition",
+            ),
+        ),
+    ]
+    result = diagnose_layout(
+        layout,
+        [
+            _named_worktop_asset(),
+            _box_asset("asset-device", 0.5, 0.5, 0.25),
+        ],
+    )
+    assert "invalid_surface_attachment" not in _codes(result, "error")
+    assert "surface_attachment_safety_unverified" in _codes(
+        result,
+        "unverified",
+    )
+    assert result["valid"] is True
+
+
+def test_named_surface_accepts_a_rotated_horizontal_local_frame(
+    golden: dict,
+) -> None:
+    support_asset = _named_worktop_asset()
+    surface = support_asset["supportSurfaces"][0]
+    surface["localFrame"] = {
+        "origin": {"x": 0.5, "y": 0.8, "z": -0.25},
+        "xAxis": {"x": 0, "y": 0, "z": -1},
+        "zAxis": {"x": 1, "y": 0, "z": 0},
+        "normal": {"x": 0, "y": 1, "z": 0},
+    }
+    surface["bounds"] = {
+        "minimumX": -0.6,
+        "maximumX": 0.6,
+        "minimumZ": -0.3,
+        "maximumZ": 0.3,
+    }
+    layout = deepcopy(golden["baseLayout"])
+    layout["zones"] = []
+    layout["placements"] = [
+        _placement("pl-support", "asset-tall-workstation", 10, 8),
+        _placement(
+            "pl-device",
+            "asset-device",
+            10.35,
+            8.1,
+            y=0.8,
+            quaternion=_yaw_quaternion(90),
+            snap_relationship=_surface_relationship(
+                "pl-support",
+                0.35,
+                0.1,
+                surface_id="worktop",
+                surface_source="asset_definition",
+                local_rotation=90,
+            ),
+        ),
+    ]
+    result = diagnose_layout(
+        layout,
+        [support_asset, _box_asset("asset-device", 0.4, 0.2, 0.25)],
+    )
+    assert "invalid_surface_attachment" not in _codes(result, "error")
+    assert result["valid"] is True
+
+
+def test_named_surface_missing_from_bound_asset_revision_fails_closed(
+    golden: dict,
+) -> None:
+    layout = deepcopy(golden["baseLayout"])
+    layout["zones"] = []
+    layout["placements"] = [
+        _placement("pl-support", "asset-tall-workstation", 0, 0),
+        _placement(
+            "pl-device",
+            "asset-device",
+            0,
+            0,
+            y=0.8,
+            snap_relationship=_surface_relationship(
+                "pl-support",
+                0,
+                0,
+                surface_id="missing-worktop",
+                surface_source="asset_definition",
+            ),
+        ),
+    ]
+    result = diagnose_layout(
+        layout,
+        [
+            _named_worktop_asset(),
+            _box_asset("asset-device", 0.5, 0.5, 0.25),
+        ],
+    )
+    assert "invalid_surface_attachment" in _codes(result, "error")
+    assert result["valid"] is False
+
+
+def test_named_surface_forbidden_side_fails_closed(golden: dict) -> None:
+    layout = deepcopy(golden["baseLayout"])
+    layout["zones"] = []
+    layout["placements"] = [
+        _placement("pl-support", "asset-tall-workstation", 0, 0),
+        _placement(
+            "pl-device",
+            "asset-device",
+            0,
+            0,
+            y=0.55,
+            snap_relationship=_surface_relationship(
+                "pl-support",
+                0,
+                0,
+                side="below",
+                surface_id="worktop",
+                surface_source="asset_definition",
+            ),
+        ),
+    ]
+    result = diagnose_layout(
+        layout,
+        [
+            _named_worktop_asset(allowed_sides=["above"]),
+            _box_asset("asset-device", 0.5, 0.5, 0.25),
+        ],
+    )
+    assert "invalid_surface_attachment" in _codes(result, "error")
+    assert result["valid"] is False
+
+
+def test_surface_attachment_cycle_fails_closed(golden: dict) -> None:
+    layout = deepcopy(golden["baseLayout"])
+    layout["zones"] = []
+    layout["placements"] = [
+        _placement(
+            "pl-a",
+            "asset-a",
+            0,
+            0,
+            y=0.5,
+            snap_relationship=_surface_relationship("pl-b", 0, 0),
+        ),
+        _placement(
+            "pl-b",
+            "asset-b",
+            0,
+            0,
+            y=0.5,
+            snap_relationship=_surface_relationship("pl-a", 0, 0),
+        ),
+    ]
+    result = diagnose_layout(
+        layout,
+        [
+            _box_asset("asset-a", 1, 1, 0.5),
+            _box_asset("asset-b", 1, 1, 0.5),
+        ],
+    )
+    assert "invalid_surface_attachment" in _codes(result, "error")
+    assert result["valid"] is False
+
+
 def test_touching_physical_boundaries_are_conservatively_collisions(
     golden: dict,
 ) -> None:
@@ -765,6 +1165,52 @@ def test_floor_load_exceeded_requires_authoritative_inputs(golden: dict) -> None
         evidence_authority=golden["authority"],
     )
     assert "floor_load_exceeded" in _codes(result, "error")
+
+
+def test_semantic_aisle_reports_obstruction_and_unverified_clearance(
+    golden: dict,
+) -> None:
+    layout = _layout_with_machine(golden, 2.0, 5.0)
+    layout["routes"] = [{
+        "routeId": "rt-main-forklift",
+        "label": "Main Forklift Boulevard",
+        "routeKind": "forklift",
+        "sourceEndpoint": {
+            "kind": "world_point",
+            "position": {"x": 0.0, "y": 0.0, "z": 5.0},
+        },
+        "targetEndpoint": {
+            "kind": "world_point",
+            "position": {"x": 6.0, "y": 0.0, "z": 5.0},
+        },
+        "routingMode": "vehicle",
+        "centerline": [
+            {"x": 0.0, "y": 0.0, "z": 5.0},
+            {"x": 6.0, "y": 0.0, "z": 5.0},
+        ],
+        "corridorWidth": 2.0,
+        "routeFingerprint": "7" * 64,
+        "sourceRevisions": {"layoutBaseRevision": "8" * 64},
+        "requirements": [],
+        "evidence": [],
+        "extensions": {
+            "facilityAisle": {
+                "schemaVersion": 1,
+                "aisleKind": "forklift",
+                "direction": "two_way",
+                "color": "#d9a514",
+                "clearanceEvidenceStatus": "unverified",
+            },
+        },
+    }]
+
+    result = diagnose_layout(layout, golden["assetDefinitions"])
+
+    assert "aisle_obstructed" in _codes(result, "warning")
+    assert "aisle_clearance_unverified" in _codes(result, "unverified")
+    assert result["metrics"]["aisleCount"] == 1
+    assert result["metrics"]["obstructedAisleCount"] == 1
+    assert result["metrics"]["aisleClearanceUnverifiedCount"] == 1
 
 
 def test_floor_load_without_evidence_is_unverified_not_exceeded(golden: dict) -> None:

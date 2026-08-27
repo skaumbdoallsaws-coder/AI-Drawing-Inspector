@@ -8,6 +8,11 @@ const vm = require('vm');
 const ROOT = path.resolve(__dirname, '..');
 const MODULE_PATH = path.join(ROOT, 'static', 'facility_layout_session.js');
 const facilitySession = require(MODULE_PATH);
+const facilityPatterns = require(path.join(
+    ROOT,
+    'static',
+    'facility_layout_patterns.js'
+));
 const SPATIAL_FIXTURE = JSON.parse(fs.readFileSync(path.join(
     ROOT,
     'tests',
@@ -69,6 +74,7 @@ function layout() {
             policySetRevision: 'c'.repeat(64),
         },
         zones: [],
+        floorMarkings: [],
         placements: [
             placement('pl-a', 'asset-a', 1, 1, 'auto'),
             placement('pl-b', 'asset-b', 4, 2, 'auto'),
@@ -97,6 +103,20 @@ function generatedId(prefix, index) {
 function findPlacement(document, placementId) {
     const result = document.placements.find(item => item.placementId === placementId);
     if (!result) throw operationError('unknown_placement', 'Unknown placement');
+    return result;
+}
+
+function findFloorMarking(document, markingId) {
+    const result = (document.floorMarkings || []).find(
+        item => item.markingId === markingId
+    );
+    if (!result) throw operationError('unknown_floor_marking', 'Unknown floor marking');
+    return result;
+}
+
+function findRoute(document, routeId) {
+    const result = (document.routes || []).find(item => item.routeId === routeId);
+    if (!result) throw operationError('unknown_route', 'Unknown route');
     return result;
 }
 
@@ -142,8 +162,19 @@ function applyFakeOperations(base, operations) {
             source.placementId = operation.newPlacementId || generatedId('pl', index);
             source.positionMode = operation.positionMode || 'manual';
             source.snapRelationship = null;
+            if (Object.prototype.hasOwnProperty.call(
+                operation, 'snapRelationship'
+            )) {
+                source.snapRelationship = clone(operation.snapRelationship);
+            }
             if (operation.position) source.transform.position = clone(operation.position);
             if (operation.quaternion) source.transform.quaternion = clone(operation.quaternion);
+            if (operation.layoutProvenance) {
+                source.metadata = source.metadata || {};
+                source.metadata.layoutProvenance = clone(
+                    operation.layoutProvenance
+                );
+            }
             document.placements.push(source);
             createdIds.push(source.placementId);
             break;
@@ -157,6 +188,10 @@ function applyFakeOperations(base, operations) {
         case 'set_position_mode':
             findPlacement(document, operation.placementId).positionMode =
                 operation.positionMode;
+            break;
+        case 'set_snap_relationship':
+            findPlacement(document, operation.placementId).snapRelationship =
+                clone(operation.snapRelationship);
             break;
         case 'add_zone': {
             const zone = clone(operation.zone);
@@ -179,9 +214,127 @@ function applyFakeOperations(base, operations) {
                 item => item.zoneId !== operation.zoneId
             );
             break;
+        case 'add_floor_marking': {
+            const value = clone(operation.floorMarking);
+            value.markingId = value.markingId || generatedId('fm', index);
+            document.floorMarkings = document.floorMarkings || [];
+            document.floorMarkings.push(value);
+            createdIds.push(value.markingId);
+            break;
+        }
+        case 'edit_floor_marking': {
+            const value = findFloorMarking(document, operation.markingId);
+            Object.assign(value, clone(operation.patch));
+            break;
+        }
+        case 'delete_floor_marking':
+            findFloorMarking(document, operation.markingId);
+            document.floorMarkings = document.floorMarkings.filter(
+                item => item.markingId !== operation.markingId
+            );
+            break;
+        case 'add_aisle': {
+            const aisle = clone(operation.aisle);
+            const routeId = operation.routeId || generatedId('rt', index);
+            const routeKind = aisle.aisleKind === 'pedestrian'
+                ? 'operator' : aisle.aisleKind;
+            document.routes.push({
+                routeId,
+                label: aisle.label,
+                routeKind,
+                sourceEndpoint: {
+                    kind: 'world_point',
+                    position: clone(aisle.centerline[0]),
+                },
+                targetEndpoint: {
+                    kind: 'world_point',
+                    position: clone(aisle.centerline[aisle.centerline.length - 1]),
+                },
+                routingMode: aisle.aisleKind === 'forklift'
+                    ? 'vehicle' : 'polyline',
+                centerline: clone(aisle.centerline),
+                corridorWidth: aisle.corridorWidth,
+                routeFingerprint: 'f'.repeat(64),
+                sourceRevisions: { layoutBaseRevision: 'a'.repeat(64) },
+                requirements: [],
+                evidence: [],
+                extensions: {
+                    facilityAisle: {
+                        schemaVersion: 1,
+                        aisleKind: aisle.aisleKind,
+                        direction: aisle.direction,
+                        color: aisle.color,
+                        clearanceEvidenceStatus:
+                            aisle.clearanceEvidenceStatus || 'unverified',
+                    },
+                },
+            });
+            createdIds.push(routeId);
+            break;
+        }
+        case 'edit_aisle': {
+            const route = findRoute(document, operation.routeId);
+            const patch = clone(operation.patch);
+            if (patch.label !== undefined) route.label = patch.label;
+            if (patch.centerline !== undefined) {
+                route.centerline = patch.centerline;
+                route.sourceEndpoint.position = clone(patch.centerline[0]);
+                route.targetEndpoint.position = clone(
+                    patch.centerline[patch.centerline.length - 1]
+                );
+            }
+            if (patch.corridorWidth !== undefined) {
+                route.corridorWidth = patch.corridorWidth;
+            }
+            ['aisleKind', 'direction', 'color', 'clearanceEvidenceStatus']
+                .forEach(key => {
+                    if (patch[key] !== undefined) {
+                        route.extensions.facilityAisle[key] = patch[key];
+                    }
+                });
+            route.routeFingerprint = 'e'.repeat(64);
+            break;
+        }
+        case 'delete_route':
+            findRoute(document, operation.routeId);
+            document.routes = document.routes.filter(
+                item => item.routeId !== operation.routeId
+            );
+            break;
+        case 'set_plan_settings':
+            document.extensions = document.extensions || {};
+            document.extensions.facilityPlan = clone(operation.planSettings);
+            break;
+        case 'clear_layout_contents':
+            document.zones = [];
+            document.floorMarkings = [];
+            document.placements = [];
+            document.routes = [];
+            document.utilityNetworks = [];
+            document.processBindings = [];
+            document.dismissedSuggestions = [];
+            break;
         default:
             throw operationError('unknown_operation', operation.op);
         }
+        (operation.layoutProvenanceSeedEntityIds || []).forEach(entityId => {
+            const placementValue = document.placements.find(
+                item => item.placementId === entityId
+            );
+            const zoneValue = document.zones.find(
+                item => item.zoneId === entityId
+            );
+            const markingValue = (document.floorMarkings || []).find(
+                item => item.markingId === entityId
+            );
+            const target = placementValue || zoneValue || markingValue;
+            if (!target) throw operationError('unknown_entity', 'Unknown entity');
+            const container = zoneValue ? 'extensions' : 'metadata';
+            target[container] = target[container] || {};
+            target[container].layoutProvenance = clone(
+                operation.layoutProvenance
+            );
+        });
     });
     return { document, createdIds };
 }
@@ -259,6 +412,8 @@ function fakeAuthority(initialLayout, options) {
                 cancelLayoutProposal: config.cancelLayoutProposal,
                 approveLayoutProposal: config.approveLayoutProposal,
                 applyLayoutProposal: config.applyLayoutProposal,
+                undoGenerationDraft: config.undoGenerationDraft,
+                saveGenerationDraft: config.saveGenerationDraft,
                 createIdempotencyKey: config.createIdempotencyKey,
                 placementCandidatePreview: async request => {
                     candidatePreviewCalls.push(clone(request));
@@ -391,6 +546,40 @@ function fullLayoutProposalReceipt(base, revision) {
     };
 }
 
+function replacementLayoutProposalReceipt(base, revision) {
+    const previewLayout = clone(base);
+    previewLayout.zones = [];
+    previewLayout.floorMarkings = [];
+    previewLayout.placements = [];
+    previewLayout.routes = [];
+    previewLayout.utilityNetworks = [];
+    previewLayout.processBindings = [];
+    previewLayout.dismissedSuggestions = [];
+    const alternative = {
+        proposalId: 'proposal-replacement-1',
+        alternativeId: 'alternative-replacement-1',
+        strategy: 'balanced_grid',
+        operations: [{ op: 'clear_layout_contents' }],
+        ghostPreview: {
+            layout: previewLayout,
+            routeProposals: [],
+        },
+        metrics: {
+            placementCollisions: 0,
+            movedAutoCount: 0,
+        },
+        transactionBinding: layoutBinding(revision, 'b'),
+        createdAt: 1785283200,
+        expiresAt: 1785283800,
+    };
+    return {
+        previewPure: true,
+        layoutRevision: revision,
+        selectedProposalId: alternative.proposalId,
+        alternatives: [alternative],
+    };
+}
+
 function fullLayoutRequest() {
     return {
         schemaVersion: 1,
@@ -480,6 +669,41 @@ async function main() {
             await session.redo();
             assert.deepStrictEqual(byId(session.getState().layout, createdId).transform.position,
                 { x: 12.5, y: 0, z: -3.25 });
+        });
+
+    await check('asset browser batch placement is one atomic undoable gesture',
+        async () => {
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.placeAssets([
+                {
+                    assetId: 'asset-rack',
+                    assetDefinitionRevision: 'asset-rack-rev',
+                    worldPosition: { x: 8, y: 0, z: 7 },
+                    metadata: { inputMethod: 'asset-browser' },
+                },
+                {
+                    assetId: 'asset-machine',
+                    assetDefinitionRevision: 'asset-machine-rev',
+                    worldPosition: { x: 12, y: 0, z: 7 },
+                    metadata: { inputMethod: 'asset-browser' },
+                },
+            ]);
+            const state = session.getState();
+            assert.strictEqual(state.history.length, 1);
+            assert.strictEqual(state.history[0].label, 'Add assets');
+            assert.strictEqual(state.history[0].operationCount, 2);
+            assert.strictEqual(state.selection.length, 2);
+            assert.strictEqual(state.operations.length, 2);
+            assert.ok(state.operations.every(operation =>
+                operation.op === 'place_asset'
+                && operation.placement.metadata.inputMethod === 'asset-browser'
+            ));
+            await session.undo();
+            assert.strictEqual(session.getState().layout.placements.length, 3);
+            await session.redo();
+            assert.strictEqual(session.getState().layout.placements.length, 5);
         });
 
     await check('ghost placement is transient and invalid cancellation changes nothing',
@@ -740,6 +964,40 @@ async function main() {
             assert.strictEqual(byId(session.getState().layout, 'pl-a').transform.position.x, 3);
         });
 
+    await check('precise per-placement positions commit as one undo entry',
+        async () => {
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            session.selectMany(['pl-a', 'pl-b']);
+            await session.movePlacements([
+                {
+                    placementId: 'pl-a',
+                    position: { x: 2.5, y: 0, z: 4 },
+                },
+                {
+                    placementId: 'pl-b',
+                    position: { x: 8, y: 0, z: 4 },
+                },
+            ], 'Align north edges');
+            const state = session.getState();
+            assert.deepStrictEqual(
+                byId(state.layout, 'pl-a').transform.position,
+                { x: 2.5, y: 0, z: 4 }
+            );
+            assert.deepStrictEqual(
+                byId(state.layout, 'pl-b').transform.position,
+                { x: 8, y: 0, z: 4 }
+            );
+            assert.strictEqual(state.history.length, 1);
+            assert.strictEqual(state.history[0].operationCount, 2);
+            assert.strictEqual(state.operations.length, 2);
+            assert.ok(state.operations.every(function (operation) {
+                return operation.op === 'move_placement'
+                    && operation.movementKind === 'user';
+            }));
+        });
+
     await check('locked movement failure preserves draft history and selection',
         async () => {
             const authority = fakeAuthority(layout());
@@ -841,6 +1099,62 @@ async function main() {
             assert.strictEqual(session.getState().history.length, 4);
         });
 
+    await check('targeted duplication copies the requested placement in one gesture',
+        async () => {
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            session.select('pl-b');
+            await session.duplicatePlacements(['pl-a'], { x: 2, y: 0, z: 3 });
+            const state = session.getState();
+            const duplicateId = state.selection[0];
+            assert.strictEqual(duplicateId, 'pl-server-000');
+            assert.deepStrictEqual(
+                byId(state.layout, duplicateId).transform.position,
+                { x: 3, y: 0, z: 4 }
+            );
+            assert.deepStrictEqual(
+                byId(state.layout, 'pl-a').transform.position,
+                { x: 1, y: 0, z: 1 }
+            );
+            assert.strictEqual(state.history.length, 1);
+            assert.strictEqual(state.history[0].operationCount, 1);
+            assert.strictEqual(state.operations[0].op, 'duplicate_placement');
+            assert.strictEqual(state.operations[0].sourcePlacementId, 'pl-a');
+        });
+
+    await check('group duplication creates all copies atomically', async () => {
+        const authority = fakeAuthority(layout());
+        const session = authority.makeSession();
+        session.load(authority.initialReceipt());
+        await session.duplicatePlacements(
+            ['pl-a', 'pl-b'],
+            { x: 2, y: 0, z: 3 }
+        );
+        const state = session.getState();
+        assert.deepStrictEqual(
+            state.selection,
+            ['pl-server-000', 'pl-server-001']
+        );
+        assert.deepStrictEqual(
+            state.selection.map(function (placementId) {
+                return byId(state.layout, placementId).transform.position;
+            }),
+            [
+                { x: 3, y: 0, z: 4 },
+                { x: 6, y: 0, z: 5 },
+            ]
+        );
+        assert.strictEqual(state.history.length, 1);
+        assert.strictEqual(state.history[0].operationCount, 2);
+        assert.deepStrictEqual(
+            state.operations.map(function (operation) {
+                return operation.sourcePlacementId;
+            }),
+            ['pl-a', 'pl-b']
+        );
+    });
+
     await check('delete selected handles placements and zones in one gesture',
         async () => {
             const authority = fakeAuthority(layout());
@@ -873,6 +1187,32 @@ async function main() {
             );
             const rectangleId = session.getState().selection[0];
             assert.strictEqual(rectangleId, 'zn-server-000');
+            await session.editZoneLabel(rectangleId, 'Lathe Cell');
+            assert.strictEqual(
+                session.getState().layout.zones[0].label,
+                'Lathe Cell'
+            );
+            assert.deepStrictEqual(
+                session.getState().operations[1],
+                {
+                    op: 'edit_zone',
+                    zoneId: rectangleId,
+                    patch: { label: 'Lathe Cell' },
+                }
+            );
+            await session.editZoneType(rectangleId, 'storage');
+            assert.strictEqual(
+                session.getState().layout.zones[0].zoneType,
+                'storage'
+            );
+            assert.deepStrictEqual(
+                session.getState().operations[2],
+                {
+                    op: 'edit_zone',
+                    zoneId: rectangleId,
+                    patch: { zoneType: 'storage' },
+                }
+            );
             await session.editZoneDimensions(rectangleId, { width: 10, depth: 8 });
             const resized = session.getState().layout.zones[0].boundary;
             assert.deepStrictEqual(resized, [
@@ -901,6 +1241,956 @@ async function main() {
             const zs = scaled.map(point => point.z);
             assert.ok(Math.abs(Math.max(...xs) - Math.min(...xs) - 8) < 1e-9);
             assert.ok(Math.abs(Math.max(...zs) - Math.min(...zs) - 6) < 1e-9);
+        });
+
+    await check('bulk zones commit atomically with exact geometry and styling',
+        async () => {
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.createZones([
+                {
+                    label: 'Machining',
+                    zoneType: 'workcell',
+                    minX: 12,
+                    minZ: 8,
+                    width: 30,
+                    depth: 20,
+                    extensions: { style: { fillColor: '#336699' } },
+                },
+                {
+                    label: 'Shipping',
+                    zoneType: 'shipping',
+                    minX: 50,
+                    minZ: 8,
+                    width: 15,
+                    depth: 20,
+                },
+            ]);
+            const state = session.getState();
+            assert.strictEqual(state.layout.zones.length, 2);
+            assert.strictEqual(state.history.length, 1);
+            assert.strictEqual(state.history[0].operationCount, 2);
+            assert.strictEqual(state.selection.length, 2);
+            assert.deepStrictEqual(state.layout.zones[0].boundary, [
+                { x: 12, z: 8 },
+                { x: 42, z: 8 },
+                { x: 42, z: 28 },
+                { x: 12, z: 28 },
+            ]);
+            assert.strictEqual(
+                state.layout.zones[0].extensions.style.fillColor,
+                '#336699'
+            );
+            await session.undo();
+            assert.strictEqual(session.getState().layout.zones.length, 0);
+        });
+
+    await check('persistent manufacturing cells duplicate and number as one unit',
+        async () => {
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            session.selectMany(['pl-a', 'pl-b']);
+            await session.createCellGroup({
+                baseName: 'Robot Cell',
+                prefix: 'A',
+                start: 1,
+                numberPadding: 2,
+                envelopePadding: 0.5,
+                minX: 0,
+                minZ: 0,
+                width: 6,
+                depth: 4,
+                seriesId: 'cell-series-robot-a',
+                functionalInterfaces: {
+                    gate: 'south',
+                    loading: 'east',
+                    service: 'north',
+                },
+                extensions: { style: { fillColor: '#225588' } },
+            });
+            const originalZoneId = session.getState().selection[0];
+            assert.strictEqual(
+                session.getState().layout.zones[0].label,
+                'Robot Cell A01'
+            );
+            assert.strictEqual(
+                session.getState().layout.zones[0].extensions.cellGroup
+                    .functionalInterfaces.gate.side,
+                'south'
+            );
+            await session.duplicateSelected({ x: 10, y: 0, z: 0 });
+            let state = session.getState();
+            assert.strictEqual(state.layout.placements.length, 5);
+            assert.strictEqual(state.layout.zones.length, 2);
+            assert.strictEqual(state.layout.zones[1].label, 'Robot Cell A02');
+            assert.strictEqual(
+                state.layout.zones[1].extensions.cellGroup.membership,
+                'geometric'
+            );
+            assert.deepStrictEqual(
+                Object.fromEntries(Object.entries(
+                    state.layout.zones[1].extensions.cellGroup
+                        .functionalInterfaces
+                ).map(function (entry) {
+                    return [entry[0], entry[1].side];
+                })),
+                { gate: 'south', loading: 'east', service: 'north' }
+            );
+            assert.ok(Object.values(
+                state.layout.zones[1].extensions.cellGroup.functionalInterfaces
+            ).every(function (record) {
+                return record.evidenceStatus === 'derived';
+            }));
+            session.select(originalZoneId);
+            await session.deleteSelected();
+            state = session.getState();
+            assert.strictEqual(state.layout.zones.length, 1);
+            assert.strictEqual(state.layout.placements.length, 3);
+            assert.strictEqual(state.layout.zones[0].label, 'Robot Cell A02');
+            await session.ungroupCell(state.layout.zones[0].zoneId);
+            state = session.getState();
+            assert.strictEqual(state.layout.zones.length, 0);
+            assert.strictEqual(state.layout.placements.length, 3);
+        });
+
+    await check('floor markings persist as atomic semantic layout objects',
+        async () => {
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.createFloorMarking({
+                markingType: 'keep_clear',
+                label: 'Keep clear at CNC-04',
+                semanticRole: 'keep_clear',
+                transform: {
+                    position: { x: 6, y: 0, z: 4 },
+                    rotationDegrees: 0,
+                },
+                width: 3,
+                depth: 2,
+                fillColor: '#facc15',
+                strokeColor: '#111827',
+                opacity: 0.9,
+                text: 'KEEP CLEAR',
+                positionMode: 'manual',
+                metadata: { authoredIn: 'facility_plan' },
+                evidence: [],
+            });
+            const markingId = session.getState().selection[0];
+            assert.strictEqual(markingId, 'fm-server-000');
+            assert.strictEqual(
+                session.getState().layout.floorMarkings[0].semanticRole,
+                'keep_clear'
+            );
+            await session.editFloorMarking(markingId, {
+                label: 'CNC loading clearance',
+                text: 'KEEP CLEAR',
+                fillColor: '#ef4444',
+            });
+            await session.rotateSelected90();
+            let state = session.getState();
+            assert.strictEqual(
+                state.layout.floorMarkings[0].transform.rotationDegrees,
+                90
+            );
+            assert.strictEqual(state.layout.floorMarkings[0].fillColor, '#ef4444');
+            await session.duplicateItems([markingId], { x: 4, y: 0, z: 0 });
+            state = session.getState();
+            assert.strictEqual(state.layout.floorMarkings.length, 2);
+            assert.strictEqual(state.history.at(-1).operationCount, 1);
+            assert.deepStrictEqual(
+                state.layout.floorMarkings[0].transform.position,
+                { x: 6, y: 0, z: 4 }
+            );
+            assert.deepStrictEqual(
+                state.layout.floorMarkings[1].transform.position,
+                { x: 10, y: 0, z: 4 }
+            );
+            assert.strictEqual(state.layout.floorMarkings[1].positionMode, 'manual');
+            await session.deleteSelected();
+            state = session.getState();
+            assert.strictEqual(state.layout.floorMarkings.length, 1);
+            await session.save();
+            assert.strictEqual(authority.layout.floorMarkings.length, 1);
+            assert.strictEqual(session.getState().dirty, false);
+        });
+
+    await check('semantic aisles create, edit, select, and delete atomically',
+        async () => {
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.createAisle({
+                label: 'Main Forklift Boulevard',
+                aisleKind: 'forklift',
+                direction: 'two_way',
+                color: '#d9a514',
+                corridorWidth: 10.668,
+                centerline: [
+                    { x: 0, y: 0, z: 12 },
+                    { x: 40, y: 0, z: 12 },
+                ],
+                clearanceEvidenceStatus: 'unverified',
+            });
+            let state = session.getState();
+            const routeId = state.selection[0];
+            assert.strictEqual(routeId, 'rt-server-000');
+            assert.strictEqual(state.layout.routes[0].label, 'Main Forklift Boulevard');
+            assert.strictEqual(state.history[0].operationCount, 1);
+            await session.editAisle(routeId, {
+                corridorWidth: 12,
+                direction: 'one_way',
+            });
+            state = session.getState();
+            assert.strictEqual(state.layout.routes[0].corridorWidth, 12);
+            assert.strictEqual(
+                state.layout.routes[0].extensions.facilityAisle.direction,
+                'one_way'
+            );
+            await session.deleteSelected();
+            assert.strictEqual(session.getState().layout.routes.length, 0);
+        });
+
+    await check('mixed equipment cell pattern is one atomic undoable gesture',
+        async () => {
+            const initial = layout();
+            initial.floorMarkings.push({
+                markingId: 'fm-flow',
+                markingType: 'direction_arrow',
+                label: 'Cell flow',
+                semanticRole: 'material_flow',
+                transform: {
+                    position: { x: 2, y: 0, z: 2 },
+                    rotationDegrees: 0,
+                },
+                width: 0.8,
+                depth: 1.6,
+                fillColor: '#facc15',
+                strokeColor: '#111827',
+                opacity: 1,
+                text: '',
+                positionMode: 'manual',
+                metadata: {},
+                evidence: [],
+            });
+            initial.zones.push({
+                zoneId: 'zn-cell',
+                zoneType: 'workcell',
+                label: 'Machining cell',
+                boundary: [
+                    { x: 0, z: 0 },
+                    { x: 5, z: 0 },
+                    { x: 5, z: 4 },
+                    { x: 0, z: 4 },
+                ],
+                floorElevation: 0,
+                anchors: [{
+                    anchorId: 'za-in',
+                    anchorKind: 'material',
+                    position: { x: 0, y: 0, z: 2 },
+                    facing: { x: 1, y: 0, z: 0 },
+                    allowedRouteKinds: ['material'],
+                    evidence: [],
+                }],
+                evidence: [],
+                extensions: {
+                    cellGroup: {
+                        schemaVersion: 1,
+                        groupKind: 'manufacturing_cell',
+                        membership: 'geometric',
+                        envelopePadding: 0,
+                        autoNumber: {
+                            seriesId: 'cell-series-mirror',
+                            baseName: 'Machining Cell',
+                            prefix: 'A',
+                            start: 1,
+                            padding: 2,
+                            sequence: 1,
+                        },
+                        functionalInterfaces: {
+                            gate: {
+                                side: 'east',
+                                position: { x: 5, z: 2 },
+                                accessEnvelope: [
+                                    { x: 5, z: 1.5 },
+                                    { x: 6, z: 1.5 },
+                                    { x: 6, z: 2.5 },
+                                    { x: 5, z: 2.5 },
+                                ],
+                                evidenceStatus: 'authored',
+                            },
+                        },
+                    },
+                },
+            });
+            const authority = fakeAuthority(initial);
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.applyPattern({
+                mode: 'linear',
+                copies: [{
+                    sourceId: 'pl-a',
+                    kind: 'placement',
+                    position: { x: 11, y: 0, z: 1 },
+                    rotationDegrees: 0,
+                    rotationDeltaDegrees: 0,
+                    sourceAnchor: { x: 2.5, z: 2 },
+                    targetAnchor: { x: 12.5, z: 2 },
+                }, {
+                    sourceId: 'fm-flow',
+                    kind: 'floor-marking',
+                    position: { x: 12, y: 0, z: 2 },
+                    rotationDegrees: 90,
+                    rotationDeltaDegrees: 90,
+                    sourceAnchor: { x: 2.5, z: 2 },
+                    targetAnchor: { x: 12.5, z: 2 },
+                }, {
+                    sourceId: 'zn-cell',
+                    kind: 'zone',
+                    position: { x: 12.5, y: 0, z: 2 },
+                    rotationDegrees: 90,
+                    rotationDeltaDegrees: 90,
+                    sourceAnchor: { x: 2.5, z: 2 },
+                    targetAnchor: { x: 12.5, z: 2 },
+                    boundary: [
+                        { x: 10.5, z: 4.5 },
+                        { x: 10.5, z: -0.5 },
+                        { x: 14.5, z: -0.5 },
+                        { x: 14.5, z: 4.5 },
+                    ],
+                }],
+                moves: [],
+            }, 'Linear cell pattern');
+            let state = session.getState();
+            assert.strictEqual(state.layout.placements.length, 4);
+            assert.strictEqual(state.layout.floorMarkings.length, 2);
+            assert.strictEqual(state.layout.zones.length, 2);
+            assert.strictEqual(state.history.at(-1).operationCount, 3);
+            assert.strictEqual(state.selection.length, 3);
+            const copiedZone = state.layout.zones[1];
+            assert.deepStrictEqual(
+                copiedZone.anchors[0].position,
+                { x: 12.5, y: 0, z: 4.5 }
+            );
+            assert.deepStrictEqual(
+                copiedZone.anchors[0].facing,
+                { x: 0, y: 0, z: -1 }
+            );
+            assert.strictEqual(
+                copiedZone.extensions.cellGroup.functionalInterfaces.gate.side,
+                'south'
+            );
+            assert.deepStrictEqual(
+                copiedZone.extensions.cellGroup.functionalInterfaces.gate.position,
+                { x: 12.5, z: -0.5 }
+            );
+            await session.undo();
+            state = session.getState();
+            assert.strictEqual(state.layout.placements.length, 3);
+            assert.strictEqual(state.layout.floorMarkings.length, 1);
+            assert.strictEqual(state.layout.zones.length, 1);
+        });
+
+    await check('cell pattern remaps copied surface children to copied supports',
+        async () => {
+            const initial = layout();
+            const support = placement(
+                'pl-support', 'asset-support', 2, 2, 'manual'
+            );
+            const child = placement(
+                'pl-surface-child', 'asset-surface-child', 2, 2, 'manual'
+            );
+            child.transform.position.y = 1.2;
+            child.snapRelationship = {
+                family: 'surface_attachment',
+                attachmentId: 'attachment-original',
+                supportPlacementId: support.placementId,
+                surfaceId: 'worktop',
+                side: 'above',
+                localPosition: { x: 0, y: 0, z: 0 },
+                localRotationDegrees: 0,
+                gap: 0,
+            };
+            initial.placements = [support, child];
+            const authority = fakeAuthority(initial);
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+
+            await session.applyPattern({
+                mode: 'linear',
+                copies: [{
+                    sourceId: support.placementId,
+                    kind: 'placement',
+                    instanceIndex: 1,
+                    position: { x: 12, y: 0, z: 2 },
+                    rotationDegrees: 0,
+                    rotationDeltaDegrees: 0,
+                }, {
+                    sourceId: child.placementId,
+                    kind: 'placement',
+                    instanceIndex: 1,
+                    position: { x: 12, y: 1.2, z: 2 },
+                    rotationDegrees: 0,
+                    rotationDeltaDegrees: 0,
+                }],
+                moves: [],
+            }, 'Linear surface-attached cell pattern');
+
+            const state = session.getState();
+            const copiedSupport = state.layout.placements.find(item => (
+                item.assetId === support.assetId
+                && item.placementId !== support.placementId
+            ));
+            const copiedChild = state.layout.placements.find(item => (
+                item.assetId === child.assetId
+                && item.placementId !== child.placementId
+            ));
+            assert.ok(copiedSupport);
+            assert.ok(copiedChild);
+            assert.notStrictEqual(
+                copiedChild.snapRelationship.attachmentId,
+                child.snapRelationship.attachmentId
+            );
+            assert.strictEqual(
+                copiedChild.snapRelationship.supportPlacementId,
+                copiedSupport.placementId
+            );
+            assert.notStrictEqual(
+                copiedChild.snapRelationship.supportPlacementId,
+                support.placementId
+            );
+            assert.strictEqual(state.history.at(-1).operationCount, 2);
+        });
+
+    await check('mirrored mixed cell is one atomic undoable gesture',
+        async () => {
+            const initial = layout();
+            initial.floorMarkings.push({
+                markingId: 'fm-flow',
+                markingType: 'direction_arrow',
+                label: 'Cell flow',
+                semanticRole: 'material_flow',
+                transform: {
+                    position: { x: 2, y: 0, z: 2 },
+                    rotationDegrees: 0,
+                },
+                width: 0.8,
+                depth: 1.6,
+                fillColor: '#facc15',
+                strokeColor: '#111827',
+                opacity: 1,
+                text: '',
+                positionMode: 'manual',
+                metadata: {},
+                evidence: [],
+            });
+            initial.zones.push({
+                zoneId: 'zn-cell',
+                zoneType: 'workcell',
+                label: 'Machining cell',
+                boundary: [
+                    { x: 0, z: 0 },
+                    { x: 6, z: 0 },
+                    { x: 6, z: 5 },
+                    { x: 0, z: 5 },
+                ],
+                floorElevation: 0,
+                anchors: [{
+                    anchorId: 'za-in',
+                    anchorKind: 'material',
+                    position: { x: 0, y: 0, z: 2 },
+                    facing: { x: 1, y: 0, z: 0 },
+                    allowedRouteKinds: ['material'],
+                    evidence: [],
+                }],
+                evidence: [],
+                extensions: {
+                    cellGroup: {
+                        schemaVersion: 1,
+                        groupKind: 'manufacturing_cell',
+                        membership: 'geometric',
+                        envelopePadding: 0,
+                        autoNumber: {
+                            seriesId: 'cell-series-mirror',
+                            baseName: 'Machining Cell',
+                            prefix: 'A',
+                            start: 1,
+                            padding: 2,
+                            sequence: 1,
+                        },
+                        functionalInterfaces: {
+                            gate: {
+                                side: 'east',
+                                position: { x: 6, z: 2.5 },
+                                accessEnvelope: [
+                                    { x: 6, z: 2 },
+                                    { x: 7, z: 2 },
+                                    { x: 7, z: 3 },
+                                    { x: 6, z: 3 },
+                                ],
+                                evidenceStatus: 'authored',
+                            },
+                        },
+                    },
+                },
+            });
+            const catalog = initial.placements.map(item => ({
+                assetId: item.assetId,
+                assetDefinitionRevision: item.assetDefinitionRevision,
+                width: 2,
+                depth: 2,
+            }));
+            const seed = facilityPatterns.collectSelection(
+                initial,
+                catalog,
+                ['zn-cell'],
+                { expandZones: true, includeZones: true }
+            );
+            const mirror = facilityPatterns.buildMirror(seed, {
+                axisStart: { x: 10, z: 0 },
+                axisEnd: { x: 10, z: 10 },
+            });
+            const authority = fakeAuthority(initial);
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.applyPattern(mirror, 'Mirror machining cell');
+            let state = session.getState();
+            assert.strictEqual(state.layout.placements.length, 5);
+            assert.strictEqual(state.layout.floorMarkings.length, 2);
+            assert.strictEqual(state.layout.zones.length, 2);
+            assert.strictEqual(state.history.at(-1).operationCount, 4);
+            assert.strictEqual(state.selection.length, 4);
+            assert.strictEqual(state.layout.placements[3].transform.position.x, 19);
+            assert.ok(Math.abs(state.layout.placements[3].transform.quaternion.y - 1) < 1e-6);
+            assert.ok(Math.abs(state.layout.placements[3].transform.quaternion.w) < 1e-6);
+            const copiedZone = state.layout.zones[1];
+            assert.deepStrictEqual(
+                copiedZone.anchors[0].position,
+                { x: 20, y: 0, z: 2 }
+            );
+            assert.deepStrictEqual(
+                copiedZone.anchors[0].facing,
+                { x: -1, y: 0, z: 0 }
+            );
+            assert.strictEqual(
+                copiedZone.extensions.cellGroup.functionalInterfaces.gate.side,
+                'west'
+            );
+            assert.deepStrictEqual(
+                copiedZone.extensions.cellGroup.functionalInterfaces.gate.position,
+                { x: 14, z: 2.5 }
+            );
+            assert.deepStrictEqual(
+                copiedZone.extensions.cellGroup.functionalInterfaces.gate
+                    .accessEnvelope,
+                [
+                    { x: 14, z: 3 },
+                    { x: 13, z: 3 },
+                    { x: 13, z: 2 },
+                    { x: 14, z: 2 },
+                ]
+            );
+            await session.undo();
+            state = session.getState();
+            assert.strictEqual(state.layout.placements.length, 3);
+            assert.strictEqual(state.layout.floorMarkings.length, 1);
+            assert.strictEqual(state.layout.zones.length, 1);
+        });
+
+    await check('perimeter pattern creates independently editable guarding panels',
+        async () => {
+            const initial = layout();
+            const catalog = initial.placements.map(item => ({
+                assetId: item.assetId,
+                assetDefinitionRevision: item.assetDefinitionRevision,
+                width: 1,
+                depth: 0.1,
+            }));
+            const seed = facilityPatterns.collectSelection(
+                initial,
+                catalog,
+                ['pl-a'],
+                { includeZones: false }
+            );
+            const perimeter = facilityPatterns.buildRectangularPerimeter(seed, {
+                widthCount: 3,
+                depthCount: 2,
+                clearGap: 0,
+            });
+            const authority = fakeAuthority(initial);
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.applyPattern(perimeter, 'Guarding perimeter');
+            let state = session.getState();
+            assert.strictEqual(state.layout.placements.length, 12);
+            assert.strictEqual(state.selection.length, 9);
+            assert.strictEqual(state.history.at(-1).operationCount, 9);
+            const removableId = state.selection[0];
+            session.select(removableId);
+            await session.deleteSelected();
+            state = session.getState();
+            assert.strictEqual(state.layout.placements.length, 11);
+            await session.undo();
+            assert.strictEqual(session.getState().layout.placements.length, 12);
+        });
+
+    await check('vertical stack is atomic movable duplicable and undoable',
+        async () => {
+            const initial = layout();
+            const catalog = initial.placements.map(item => ({
+                assetId: item.assetId,
+                assetDefinitionRevision: item.assetDefinitionRevision,
+                width: 1,
+                depth: 1,
+                height: 0.2,
+            }));
+            const seed = facilityPatterns.collectSelection(
+                initial,
+                catalog,
+                ['pl-a'],
+                { includeZones: false }
+            );
+            const stack = facilityPatterns.buildVerticalStack(seed, {
+                count: 3,
+                gap: 0,
+                stackId: 'stack-session-a',
+            });
+            const authority = fakeAuthority(initial);
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            session.select('pl-a');
+            await session.applyPattern(stack, 'Vertical stack');
+            let state = session.getState();
+            assert.strictEqual(state.layout.placements.length, 5);
+            assert.deepStrictEqual(
+                state.layout.placements.slice(0, 1).concat(
+                    state.layout.placements.slice(3)
+                ).map(item => item.transform.position.y),
+                [0, 0.2, 0.4]
+            );
+            assert.ok(state.layout.placements.filter(item => (
+                item.snapRelationship
+                && item.snapRelationship.stackId === 'stack-session-a'
+            )).every(item => item.snapRelationship.count === 3));
+            await session.moveSelected({ x: 2, y: 0, z: 1 });
+            state = session.getState();
+            assert.deepStrictEqual(
+                state.layout.placements.filter(item => (
+                    item.snapRelationship
+                    && item.snapRelationship.stackId === 'stack-session-a'
+                )).map(item => item.transform.position.x),
+                [3, 3, 3]
+            );
+            await session.duplicateSelected({ x: 4, y: 0, z: 0 });
+            state = session.getState();
+            assert.strictEqual(state.layout.placements.length, 8);
+            const copied = state.layout.placements.filter(item => (
+                item.snapRelationship
+                && item.snapRelationship.stackId !== 'stack-session-a'
+            ));
+            assert.strictEqual(copied.length, 3);
+            assert.strictEqual(new Set(copied.map(item => (
+                item.snapRelationship.stackId
+            ))).size, 1);
+            await session.undo();
+            assert.strictEqual(session.getState().layout.placements.length, 5);
+        });
+
+    await check('surface attachments move rotate edit and duplicate with their support',
+        async () => {
+            const initial = layout();
+            const table = placement('pl-table', 'asset-table', 10, 10, 'manual');
+            const computer = placement(
+                'pl-computer', 'asset-computer', 0, 0, 'manual'
+            );
+            const keyboard = placement(
+                'pl-keyboard', 'asset-keyboard', 0, 0, 'manual'
+            );
+            const mouse = placement('pl-mouse', 'asset-mouse', 0, 0, 'manual');
+            initial.placements.push(table, computer, keyboard, mouse);
+            const dimensions = {
+                'asset-table': { width: 3.2, depth: 1.8, height: 0.8 },
+                'asset-computer': { width: 0.45, depth: 0.35, height: 0.5 },
+                'asset-keyboard': { width: 0.55, depth: 0.2, height: 0.04 },
+                'asset-mouse': { width: 0.12, depth: 0.08, height: 0.04 },
+            };
+            const catalog = initial.placements.map(item => Object.assign({
+                assetId: item.assetId,
+                assetDefinitionRevision: item.assetDefinitionRevision,
+            }, dimensions[item.assetId] || { width: 1, depth: 1, height: 1 }));
+            const selected = [
+                'pl-table', 'pl-computer', 'pl-keyboard', 'pl-mouse',
+            ];
+            const surface = facilityPatterns.buildSurfaceStack(
+                facilityPatterns.collectSelection(
+                    initial,
+                    catalog,
+                    selected,
+                    { includeZones: false }
+                ),
+                {
+                    supportPlacementId: 'pl-table',
+                    side: 'above',
+                    gap: 0,
+                    itemGap: 0.1,
+                    inset: 0.1,
+                    attachmentId: 'surface-session-table',
+                }
+            );
+            const authority = fakeAuthority(initial);
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            session.selectMany(selected);
+            await session.applyPattern(surface, 'Place desktop equipment');
+            let state = session.getState();
+            const attached = state.layout.placements.filter(item => (
+                item.snapRelationship
+                && item.snapRelationship.family === 'surface_attachment'
+            ));
+            assert.strictEqual(attached.length, 3);
+            assert.ok(attached.every(item => item.transform.position.y === 0.8));
+
+            const originalLocal = clone(
+                attached[0].snapRelationship.localPosition
+            );
+            session.select('pl-table');
+            await session.moveSelected({ x: 2, y: 0, z: 1 });
+            state = session.getState();
+            assert.deepStrictEqual(
+                byId(state.layout, attached[0].placementId)
+                    .snapRelationship.localPosition,
+                originalLocal
+            );
+            assert.strictEqual(
+                byId(state.layout, attached[0].placementId).transform.position.x,
+                attached[0].transform.position.x + 2
+            );
+
+            session.select('pl-table');
+            await session.rotateSelected90();
+            state = session.getState();
+            const rotatedChild = byId(state.layout, attached[0].placementId);
+            assert.deepStrictEqual(
+                rotatedChild.snapRelationship.localPosition,
+                originalLocal
+            );
+
+            session.select(rotatedChild.placementId);
+            await session.movePlacements([{
+                placementId: rotatedChild.placementId,
+                position: Object.assign({}, rotatedChild.transform.position, {
+                    x: rotatedChild.transform.position.x + 0.2,
+                }),
+            }]);
+            state = session.getState();
+            assert.notDeepStrictEqual(
+                byId(state.layout, rotatedChild.placementId)
+                    .snapRelationship.localPosition,
+                originalLocal
+            );
+
+            session.select('pl-table');
+            await session.duplicateSelected({ x: 5, y: 0, z: 0 });
+            state = session.getState();
+            assert.strictEqual(state.layout.placements.length, 11);
+            const copied = state.layout.placements.filter(item => (
+                item.snapRelationship
+                && item.snapRelationship.family === 'surface_attachment'
+                && item.snapRelationship.attachmentId !== 'surface-session-table'
+            ));
+            assert.strictEqual(copied.length, 3);
+            assert.strictEqual(new Set(copied.map(item => (
+                item.snapRelationship.supportPlacementId
+            ))).size, 1);
+            assert.notStrictEqual(
+                copied[0].snapRelationship.supportPlacementId,
+                'pl-table'
+            );
+        });
+
+    await check('two complete cells swap positions in one atomic gesture',
+        async () => {
+            const initial = layout();
+            initial.zones.push({
+                zoneId: 'zn-left',
+                zoneType: 'workcell',
+                label: 'Left cell',
+                boundary: [
+                    { x: 0, z: 0 }, { x: 3, z: 0 },
+                    { x: 3, z: 3 }, { x: 0, z: 3 },
+                ],
+                floorElevation: 0,
+                anchors: [],
+                evidence: [],
+            }, {
+                zoneId: 'zn-right',
+                zoneType: 'workcell',
+                label: 'Right cell',
+                boundary: [
+                    { x: 8, z: 0 }, { x: 11, z: 0 },
+                    { x: 11, z: 3 }, { x: 8, z: 3 },
+                ],
+                floorElevation: 0,
+                anchors: [],
+                evidence: [],
+            });
+            initial.placements[0].transform.position = { x: 1, y: 0, z: 1 };
+            initial.placements[1].transform.position = { x: 9, y: 0, z: 1 };
+            initial.placements[2].transform.position = { x: 20, y: 0, z: 1 };
+            const catalog = initial.placements.map(item => ({
+                assetId: item.assetId,
+                assetDefinitionRevision: item.assetDefinitionRevision,
+                width: 1,
+                depth: 1,
+            }));
+            const swap = facilityPatterns.buildSwap(
+                initial,
+                catalog,
+                ['zn-left', 'zn-right']
+            );
+            const authority = fakeAuthority(initial);
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.applyPattern(swap, 'Swap cells');
+            const state = session.getState();
+            assert.strictEqual(state.history.at(-1).operationCount, 6);
+            assert.strictEqual(
+                state.layout.placements.find(item => item.placementId === 'pl-a')
+                    .transform.position.x,
+                9
+            );
+            assert.strictEqual(
+                state.layout.placements.find(item => item.placementId === 'pl-b')
+                    .transform.position.x,
+                1
+            );
+            assert.deepStrictEqual(
+                state.layout.zones.find(item => item.zoneId === 'zn-left')
+                    .boundary[0],
+                { x: 8, z: 0 }
+            );
+        });
+
+    await check('plan settings are persisted as one undoable operation',
+        async () => {
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.setPlanSettings({
+                widthMeters: 55,
+                depthMeters: 36,
+                minorGridMeters: 2,
+                majorGridMeters: 10,
+            });
+            let state = session.getState();
+            assert.deepStrictEqual(
+                state.layout.extensions.facilityPlan,
+                {
+                    widthMeters: 55,
+                    depthMeters: 36,
+                    minorGridMeters: 2,
+                    majorGridMeters: 10,
+                }
+            );
+            assert.strictEqual(state.history.at(-1).operationCount, 1);
+            await session.undo();
+            state = session.getState();
+            assert.strictEqual(state.layout.extensions, undefined);
+        });
+
+    await check('Clear All removes map content atomically and preserves plan settings',
+        async () => {
+            const initial = layout();
+            initial.extensions = {
+                facilityPlan: {
+                    widthMeters: 40,
+                    depthMeters: 30,
+                    minorGridMeters: 1,
+                    majorGridMeters: 5,
+                },
+            };
+            initial.zones.push({
+                zoneId: 'zn-clear',
+                zoneType: 'workcell',
+                label: 'Cell',
+                boundary: [
+                    { x: 0, z: 0 }, { x: 2, z: 0 },
+                    { x: 2, z: 2 }, { x: 0, z: 2 },
+                ],
+                floorElevation: 0,
+                anchors: [],
+                evidence: [],
+            });
+            const authority = fakeAuthority(initial);
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.clearLayout();
+            let state = session.getState();
+            assert.deepStrictEqual(state.layout.placements, []);
+            assert.deepStrictEqual(state.layout.zones, []);
+            assert.deepStrictEqual(state.layout.extensions, initial.extensions);
+            assert.deepStrictEqual(state.selection, []);
+            assert.strictEqual(state.history.at(-1).operationCount, 1);
+            await session.undo();
+            state = session.getState();
+            assert.strictEqual(state.layout.placements.length, 3);
+            assert.strictEqual(state.layout.zones.length, 1);
+            assert.deepStrictEqual(state.layout.extensions, initial.extensions);
+        });
+
+    await check('cell layout repositions mixed selected items atomically',
+        async () => {
+            const initial = layout();
+            initial.floorMarkings.push({
+                markingId: 'fm-flow',
+                markingType: 'solid_line',
+                label: 'Flow',
+                semanticRole: 'material_flow',
+                transform: {
+                    position: { x: 3, y: 0, z: 3 },
+                    rotationDegrees: 0,
+                },
+                width: 0.2,
+                depth: 2,
+                fillColor: '#ffffff',
+                strokeColor: '#111827',
+                opacity: 1,
+                text: '',
+                positionMode: 'manual',
+                metadata: {},
+                evidence: [],
+            });
+            const authority = fakeAuthority(initial);
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            session.selectMany(['pl-a', 'pl-b', 'fm-flow']);
+            await session.applyPattern({
+                mode: 'cell-layout',
+                copies: [],
+                moves: [{
+                    sourceId: 'pl-a', kind: 'placement',
+                    position: { x: 0, y: 0, z: 0 }, rotationDegrees: 90,
+                }, {
+                    sourceId: 'pl-b', kind: 'placement',
+                    position: { x: 5, y: 0, z: 5 }, rotationDegrees: 180,
+                }, {
+                    sourceId: 'fm-flow', kind: 'floor-marking',
+                    position: { x: 2.5, y: 0, z: 5 }, rotationDegrees: 90,
+                }],
+            }, 'U-cell layout');
+            const state = session.getState();
+            assert.strictEqual(state.history.at(-1).operationCount, 5);
+            assert.deepStrictEqual(state.selection, ['pl-a', 'pl-b', 'fm-flow']);
+            assert.deepStrictEqual(
+                state.layout.placements[0].transform.position,
+                { x: 0, y: 0, z: 0 }
+            );
+            assert.strictEqual(
+                state.layout.floorMarkings[0].transform.rotationDegrees,
+                90
+            );
         });
 
     await check('new gesture after undo truncates redo history', async () => {
@@ -1051,6 +2341,51 @@ async function main() {
                 'proposal-1',
                 'proposal-2',
             ]);
+        });
+
+    await check('replacement proposal overlays a dirty draft without mutating it',
+        async () => {
+            const initial = layout();
+            const cancelled = [];
+            const authority = fakeAuthority(initial, {
+                cancelLayoutProposal: async request => {
+                    cancelled.push(request.proposalId);
+                    return { cancelled: true };
+                },
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            session.select('pl-a');
+            await session.moveSelected({ x: 2, y: 0, z: 0 });
+            const dirty = session.getState();
+            const receipt = replacementLayoutProposalReceipt(
+                initial,
+                dirty.baseRevision
+            );
+
+            session.installLayoutProposal(receipt, {
+                ...fullLayoutRequest(),
+                cleanup: {
+                    ...fullLayoutRequest().cleanup,
+                    replaceExistingContents: true,
+                },
+            });
+            let state = session.getState();
+            assert.ok(state.layoutProposal);
+            assert.strictEqual(state.dirty, true);
+            assert.deepStrictEqual(state.layout, dirty.layout);
+            assert.strictEqual(
+                state.layoutProposal.alternatives[0]
+                    .ghostPreview.layout.placements.length,
+                0
+            );
+
+            await session.dismissLayoutProposal();
+            state = session.getState();
+            assert.strictEqual(state.layoutProposal, null);
+            assert.strictEqual(state.dirty, true);
+            assert.deepStrictEqual(state.layout, dirty.layout);
+            assert.deepStrictEqual(cancelled, ['proposal-replacement-1']);
         });
 
     await check('full-layout approval revalidates and applies with one key',
@@ -1235,6 +2570,135 @@ async function main() {
                 conflictSession.requestLayoutProposal(fullLayoutRequest()),
                 error => error.code === 'layout_proposal_conflict'
             );
+        });
+
+    await check('generated draft is review-only until exact Save or Undo',
+        async () => {
+            const base = layout();
+            const generated = clone(base);
+            generated.displayName = 'Generated Facility';
+            generated.zones.push({
+                zoneId: 'zone-generated-01',
+                label: 'Assembly',
+                zoneType: 'workcell',
+                boundary: [
+                    { x: 0, z: 0 },
+                    { x: 10, z: 0 },
+                    { x: 10, z: 10 },
+                    { x: 0, z: 10 },
+                ],
+                metadata: {},
+                extensions: {},
+            });
+            const saveCalls = [];
+            const authority = fakeAuthority(base, {
+                saveGenerationDraft: async request => {
+                    saveCalls.push(clone(request));
+                    return {
+                        run: { status: 'saved' },
+                        savedLayout: {
+                            layout: clone(generated),
+                            revision: 'rev-generated-2',
+                        },
+                        saveReceipt: {
+                            saveReceiptId: 'save-generated-01',
+                        },
+                    };
+                },
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            session.installGenerationDraft({
+                runId: 'fgr-generated-01',
+                status: 'complete',
+                currentStageId: null,
+                completedStageId: 'review_and_save',
+                baseLayoutRevision: 'rev-1',
+                draftLayoutRevision: 'draft-generated-1',
+                draftLayout: generated,
+                cumulativeProposal: {
+                    cumulativeDiffHash: 'a'.repeat(64),
+                },
+                saveEligibility: 'eligible',
+                writable: true,
+                prototypeMode: true,
+                receiptChain: ['stage-receipt-1'],
+            });
+            const review = session.getState();
+            assert.strictEqual(review.dirty, true);
+            assert.strictEqual(review.canUndo, true);
+            assert.strictEqual(review.canSave, true);
+            assert.strictEqual(review.generatedDraft.runId, 'fgr-generated-01');
+            assert.strictEqual(review.layout.zones.length, 1);
+            await assert.rejects(
+                session.createRectangleZone(
+                    { x: 0, z: 0 },
+                    { x: 2, z: 2 },
+                    { label: 'Unapproved edit' }
+                ),
+                error => error.code === 'generated_draft_review_required'
+            );
+            const saved = await session.save();
+            assert.strictEqual(saveCalls.length, 1);
+            assert.deepStrictEqual(saveCalls[0], {
+                runId: 'fgr-generated-01',
+                cumulativeDiffHash: 'a'.repeat(64),
+                explicitApproval: true,
+            });
+            assert.strictEqual(saved.state.dirty, false);
+            assert.strictEqual(saved.state.generatedDraft, null);
+            assert.strictEqual(saved.state.baseRevision, 'rev-generated-2');
+        });
+
+    await check('generated draft Undo restores the exact immutable base',
+        async () => {
+            const base = layout();
+            const generated = clone(base);
+            generated.displayName = 'Generated Facility';
+            generated.zones = [{
+                zoneId: 'zone-generated-01',
+                label: 'Receiving',
+                zoneType: 'receiving',
+                boundary: [
+                    { x: 0, z: 0 },
+                    { x: 4, z: 0 },
+                    { x: 4, z: 4 },
+                    { x: 0, z: 4 },
+                ],
+                metadata: {},
+                extensions: {},
+            }];
+            const undoCalls = [];
+            const authority = fakeAuthority(base, {
+                undoGenerationDraft: async request => {
+                    undoCalls.push(clone(request));
+                    return { restoredLayout: clone(base) };
+                },
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            session.installGenerationDraft({
+                runId: 'fgr-generated-undo',
+                status: 'running',
+                currentStageId: 'primary_circulation',
+                completedStageId: 'macro_departments',
+                baseLayoutRevision: 'rev-1',
+                draftLayoutRevision: 'draft-generated-2',
+                draftLayout: generated,
+                cumulativeProposal: null,
+                saveEligibility: 'blocked',
+                writable: true,
+                prototypeMode: true,
+                receiptChain: ['stage-receipt-1', 'stage-receipt-2'],
+            });
+            assert.strictEqual(session.getState().canSave, false);
+            const undone = await session.undo();
+            assert.deepStrictEqual(undoCalls, [
+                { runId: 'fgr-generated-undo' },
+            ]);
+            assert.deepStrictEqual(undone.layout, base);
+            assert.strictEqual(undone.dirty, false);
+            assert.strictEqual(undone.generatedDraft, null);
         });
 
     process.stdout.write(`${checks}/${checks} facility layout session checks passed\n`);

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import re
 from typing import Any, Iterable, Mapping, Sequence
 
 from .canonical import (
@@ -30,6 +31,7 @@ from .schema_v1 import (
 
 _LAYOUT_FIELDS = REQUIRED_LAYOUT_FIELDS | {
     "catalogSnapshotRevision",
+    "floorMarkings",
     "extensions",
 }
 _ZONE_FIELDS = {
@@ -67,8 +69,26 @@ _PLACEMENT_FIELDS = {
     "metadata",
     "extensions",
 }
+_FLOOR_MARKING_FIELDS = {
+    "markingId",
+    "markingType",
+    "label",
+    "semanticRole",
+    "transform",
+    "width",
+    "depth",
+    "fillColor",
+    "strokeColor",
+    "opacity",
+    "text",
+    "positionMode",
+    "metadata",
+    "evidence",
+    "extensions",
+}
 _ROUTE_FIELDS = {
     "routeId",
+    "label",
     "routeKind",
     "sourceEndpoint",
     "targetEndpoint",
@@ -276,6 +296,20 @@ def _string(
     return value
 
 
+def _hex_color(value: Any, path: str) -> str:
+    color = _string(value, path, minimum=7, maximum=7)
+    if color[0] != "#" or any(
+        character not in "0123456789abcdefABCDEF"
+        for character in color[1:]
+    ):
+        _fail(
+            "invalid_layout_shape",
+            "Expected a six-digit hexadecimal color.",
+            path,
+        )
+    return color
+
+
 def _number(
     value: Any,
     path: str,
@@ -410,6 +444,90 @@ def _mapping_with_max_properties(
     return result
 
 
+def _surface_attachment_relationship(
+    value: Any,
+    path: str,
+    *,
+    placement_id: str,
+    placement_ids: set[str],
+) -> Mapping[str, Any]:
+    relationship = _object(value, path)
+    fields = {
+        "family",
+        "attachmentId",
+        "supportPlacementId",
+        "surfaceId",
+        "side",
+        "localPosition",
+        "localRotationDegrees",
+        "normalOffsetMeters",
+        "surfaceSource",
+        "evidenceStatus",
+    }
+    _required(relationship, fields, path)
+    _closed(relationship, fields, path)
+    if relationship["family"] != "surface_attachment":
+        _fail(
+            "invalid_layout_shape",
+            "Surface attachment family is invalid.",
+            f"{path}.family",
+        )
+    _string(relationship["attachmentId"], f"{path}.attachmentId", minimum=1, maximum=160)
+    support_id = _stable_id(
+        relationship["supportPlacementId"],
+        f"{path}.supportPlacementId",
+        prefix=ID_PREFIXES["placementId"],
+    )
+    if support_id == placement_id:
+        _fail(
+            "invalid_layout_shape",
+            "A placement cannot be attached to itself.",
+            f"{path}.supportPlacementId",
+        )
+    if support_id not in placement_ids:
+        _fail(
+            "dangling_reference",
+            "Surface attachment support does not exist.",
+            f"{path}.supportPlacementId",
+        )
+    _string(relationship["surfaceId"], f"{path}.surfaceId", minimum=1, maximum=120)
+    if relationship["side"] not in {"above", "below"}:
+        _fail(
+            "invalid_layout_shape",
+            "Surface attachment side must be above or below.",
+            f"{path}.side",
+        )
+    _vector2(relationship["localPosition"], f"{path}.localPosition")
+    _number(
+        relationship["localRotationDegrees"],
+        f"{path}.localRotationDegrees",
+    )
+    _number(
+        relationship["normalOffsetMeters"],
+        f"{path}.normalOffsetMeters",
+        minimum=0,
+    )
+    if relationship["surfaceSource"] not in {"asset_definition", "derived_aabb"}:
+        _fail(
+            "invalid_layout_shape",
+            "Surface attachment source is unsupported.",
+            f"{path}.surfaceSource",
+        )
+    if relationship["evidenceStatus"] not in {
+        "authored",
+        "derived",
+        "inferred",
+        "unverified",
+        "unknown",
+    }:
+        _fail(
+            "invalid_layout_shape",
+            "Surface attachment evidence status is unsupported.",
+            f"{path}.evidenceStatus",
+        )
+    return relationship
+
+
 def _typed_ids(
     items: Sequence[Mapping[str, Any]],
     key: str,
@@ -427,6 +545,213 @@ def _typed_ids(
             )
         result.add(identifier)
     return result
+
+
+def _cell_group_extension(zone: Mapping[str, Any], path: str) -> None:
+    raw_extensions = zone.get("extensions")
+    if raw_extensions is None:
+        return
+    zone_extensions = _object(raw_extensions, f"{path}.extensions")
+    raw_group = zone_extensions.get("cellGroup")
+    if raw_group is None:
+        return
+    group_path = f"{path}.extensions.cellGroup"
+    group = _object(raw_group, group_path)
+    required_group_fields = {
+        "schemaVersion",
+        "groupKind",
+        "membership",
+        "envelopePadding",
+        "autoNumber",
+    }
+    group_fields = required_group_fields | {"functionalInterfaces"}
+    _required(group, required_group_fields, group_path)
+    _closed(group, group_fields, group_path)
+    if group.get("schemaVersion") != 1:
+        _fail(
+            "invalid_layout_shape",
+            "Manufacturing cell schemaVersion must be 1.",
+            f"{group_path}.schemaVersion",
+        )
+    if group.get("groupKind") != "manufacturing_cell":
+        _fail(
+            "invalid_layout_shape",
+            "Cell group kind is unsupported.",
+            f"{group_path}.groupKind",
+        )
+    if group.get("membership") != "geometric":
+        _fail(
+            "persisted_zone_membership_forbidden",
+            "Manufacturing cell membership must be derived geometrically.",
+            f"{group_path}.membership",
+        )
+    _number(group["envelopePadding"], f"{group_path}.envelopePadding", minimum=0)
+    auto_path = f"{group_path}.autoNumber"
+    auto_number = _object(group["autoNumber"], auto_path)
+    auto_fields = {
+        "seriesId", "baseName", "prefix", "start", "padding", "sequence",
+    }
+    _required(auto_number, auto_fields, auto_path)
+    _closed(auto_number, auto_fields, auto_path)
+    _stable_id(auto_number["seriesId"], f"{auto_path}.seriesId")
+    _string(auto_number["baseName"], f"{auto_path}.baseName", minimum=1, maximum=80)
+    _string(auto_number["prefix"], f"{auto_path}.prefix", minimum=0, maximum=12)
+    for field, maximum in (("start", 999999), ("sequence", 999999)):
+        number = _number(
+            auto_number[field],
+            f"{auto_path}.{field}",
+            minimum=0,
+            maximum=maximum,
+        )
+        if not float(number).is_integer():
+            _fail(
+                "invalid_layout_shape",
+                "Cell numbering values must be integers.",
+                f"{auto_path}.{field}",
+            )
+    padding = _number(
+        auto_number["padding"],
+        f"{auto_path}.padding",
+        minimum=1,
+        maximum=6,
+    )
+    if not float(padding).is_integer():
+        _fail(
+            "invalid_layout_shape",
+            "Cell number padding must be an integer.",
+            f"{auto_path}.padding",
+        )
+    if "functionalInterfaces" in group:
+        interfaces_path = f"{group_path}.functionalInterfaces"
+        interfaces = _object(
+            group["functionalInterfaces"], interfaces_path
+        )
+        interface_roles = {"gate", "loading", "service"}
+        _closed(interfaces, interface_roles, interfaces_path)
+        for role, raw_interface in interfaces.items():
+            interface_path = f"{interfaces_path}.{role}"
+            interface = _object(raw_interface, interface_path)
+            required_interface_fields = {"evidenceStatus"}
+            interface_fields = required_interface_fields | {
+                "side",
+                "facing",
+                "openingWidthMeters",
+                "approachDepthMeters",
+                "position",
+                "accessEnvelope",
+            }
+            _required(
+                interface, required_interface_fields, interface_path
+            )
+            _closed(interface, interface_fields, interface_path)
+            if "side" not in interface and "facing" not in interface:
+                _fail(
+                    "invalid_layout_shape",
+                    "Manufacturing cell interfaces require side or facing.",
+                    interface_path,
+                )
+            if "side" in interface and interface["side"] not in {
+                "north", "east", "south", "west",
+            }:
+                _fail(
+                    "invalid_layout_shape",
+                    "Manufacturing cell interface side is unsupported.",
+                    f"{interface_path}.side",
+                )
+            if "facing" in interface:
+                facing = _vector2(
+                    interface["facing"],
+                    f"{interface_path}.facing",
+                )
+                magnitude = math.hypot(
+                    float(facing["x"]), float(facing["z"])
+                )
+                if magnitude <= 1e-9:
+                    _fail(
+                        "invalid_layout_shape",
+                        "Manufacturing cell interface facing cannot be zero.",
+                        f"{interface_path}.facing",
+                    )
+            if interface["evidenceStatus"] not in {
+                "authored", "derived", "inferred", "unknown",
+            }:
+                _fail(
+                    "invalid_layout_shape",
+                    "Manufacturing cell interface evidence is unsupported.",
+                    f"{interface_path}.evidenceStatus",
+                )
+            for field in ("openingWidthMeters", "approachDepthMeters"):
+                if field in interface:
+                    _number(
+                        interface[field],
+                        f"{interface_path}.{field}",
+                        minimum=0,
+                        exclusive_minimum=True,
+                    )
+            if "position" in interface:
+                _vector2(
+                    interface["position"],
+                    f"{interface_path}.position",
+                )
+            if "accessEnvelope" in interface:
+                _polygon(
+                    interface["accessEnvelope"],
+                    f"{interface_path}.accessEnvelope",
+                )
+
+
+def _facility_aisle_extension(route: Mapping[str, Any], path: str) -> None:
+    raw_extensions = route.get("extensions")
+    if raw_extensions is None:
+        return
+    route_extensions = _object(raw_extensions, f"{path}.extensions")
+    raw_aisle = route_extensions.get("facilityAisle")
+    if raw_aisle is None:
+        return
+    aisle_path = f"{path}.extensions.facilityAisle"
+    aisle = _object(raw_aisle, aisle_path)
+    fields = {
+        "schemaVersion",
+        "aisleKind",
+        "direction",
+        "color",
+        "clearanceEvidenceStatus",
+    }
+    _required(aisle, fields, aisle_path)
+    _closed(aisle, fields, aisle_path)
+    if aisle.get("schemaVersion") != 1:
+        _fail(
+            "invalid_layout_shape",
+            "Facility aisle schemaVersion must be 1.",
+            f"{aisle_path}.schemaVersion",
+        )
+    if aisle.get("aisleKind") not in {"forklift", "pedestrian", "material"}:
+        _fail(
+            "invalid_layout_shape",
+            "Facility aisle kind is unsupported.",
+            f"{aisle_path}.aisleKind",
+        )
+    if aisle.get("direction") not in {"one_way", "two_way"}:
+        _fail(
+            "invalid_layout_shape",
+            "Facility aisle direction is unsupported.",
+            f"{aisle_path}.direction",
+        )
+    color = _string(aisle["color"], f"{aisle_path}.color", minimum=7, maximum=7)
+    if re.fullmatch(r"#[0-9A-Fa-f]{6}", color) is None:
+        _fail(
+            "invalid_layout_shape",
+            "Facility aisle color must be a six-digit hex color.",
+            f"{aisle_path}.color",
+        )
+    if aisle.get("clearanceEvidenceStatus") not in {
+        "authored", "derived", "inferred", "unknown", "unverified",
+    }:
+        _fail(
+            "invalid_layout_shape",
+            "Facility aisle clearance evidence status is unsupported.",
+            f"{aisle_path}.clearanceEvidenceStatus",
+        )
 
 
 def _polygon(value: Any, path: str) -> list[Any]:
@@ -543,6 +868,12 @@ def _endpoint(
                 "Route endpoint references an unknown qualified zone anchor.",
                 path,
             )
+        return endpoint
+    if kind == "world_point":
+        expected = {"kind", "position"}
+        _required(endpoint, expected, path)
+        _closed(endpoint, expected, path)
+        _vector3(endpoint["position"], f"{path}.position")
         return endpoint
     _fail(
         "invalid_layout_shape",
@@ -674,12 +1005,17 @@ def validate_layout(
         _revision(layout["catalogSnapshotRevision"], "$.catalogSnapshotRevision")
 
     zones = _array(layout["zones"], "$.zones")
+    floor_markings = _array(
+        layout.get("floorMarkings", []),
+        "$.floorMarkings",
+    )
     placements = _array(layout["placements"], "$.placements")
     routes = _array(layout["routes"], "$.routes")
     networks = _array(layout["utilityNetworks"], "$.utilityNetworks")
     bindings = _array(layout["processBindings"], "$.processBindings")
     collection_limits = (
         ("zones", zones),
+        ("floorMarkings", floor_markings),
         ("placements", placements),
         ("routes", routes),
         ("utilityNetworks", networks),
@@ -698,6 +1034,11 @@ def validate_layout(
             _object(value, f"$.{field}[{index}]")
 
     zone_ids = _typed_ids(zones, "zoneId", "$.zones")
+    floor_marking_ids = _typed_ids(
+        floor_markings,
+        "markingId",
+        "$.floorMarkings",
+    )
     placement_ids = _typed_ids(placements, "placementId", "$.placements")
     route_ids = _typed_ids(routes, "routeId", "$.routes")
     network_ids = _typed_ids(
@@ -710,7 +1051,14 @@ def validate_layout(
         "processBindingId",
         "$.processBindings",
     )
-    top_level_ids = [zone_ids, placement_ids, route_ids, network_ids, binding_ids]
+    top_level_ids = [
+        zone_ids,
+        floor_marking_ids,
+        placement_ids,
+        route_ids,
+        network_ids,
+        binding_ids,
+    ]
     if len(set().union(*top_level_ids)) != sum(len(items) for items in top_level_ids):
         _fail("duplicate_id", "Top-level Facility Layout IDs must be unique.", "$")
 
@@ -748,6 +1096,7 @@ def validate_layout(
         }
         _required(zone, required, path)
         extensions.add_open_object(zone, _ZONE_FIELDS, path)
+        _cell_group_extension(zone, path)
         if zone["zoneType"] not in zone_types:
             _fail("invalid_layout_shape", "Zone type is unsupported.", f"{path}.zoneType")
         _string(zone["label"], f"{path}.label", minimum=1, maximum=120)
@@ -853,6 +1202,112 @@ def validate_layout(
             "$.zones",
         )
 
+    marking_types = {
+        "direction_arrow",
+        "solid_line",
+        "dashed_line",
+        "keep_clear",
+        "crosswalk",
+        "hazard_stripe",
+        "floor_text",
+        "parking_box",
+    }
+    semantic_roles = {
+        "decorative",
+        "pedestrian_lane",
+        "forklift_lane",
+        "material_flow",
+        "keep_clear",
+        "staging",
+        "safety",
+        "parking",
+    }
+    for marking_index, raw_marking in enumerate(floor_markings):
+        path = f"$.floorMarkings[{marking_index}]"
+        marking = _object(raw_marking, path)
+        required = {
+            "markingId",
+            "markingType",
+            "label",
+            "semanticRole",
+            "transform",
+            "width",
+            "depth",
+            "fillColor",
+            "strokeColor",
+            "opacity",
+            "text",
+            "positionMode",
+            "metadata",
+            "evidence",
+        }
+        _required(marking, required, path)
+        extensions.add_open_object(marking, _FLOOR_MARKING_FIELDS, path)
+        _stable_id(
+            marking["markingId"],
+            f"{path}.markingId",
+            prefix=ID_PREFIXES["markingId"],
+        )
+        if marking["markingType"] not in marking_types:
+            _fail(
+                "invalid_layout_shape",
+                "Floor marking type is unsupported.",
+                f"{path}.markingType",
+            )
+        _string(marking["label"], f"{path}.label", minimum=1, maximum=120)
+        if marking["semanticRole"] not in semantic_roles:
+            _fail(
+                "invalid_layout_shape",
+                "Floor marking semantic role is unsupported.",
+                f"{path}.semanticRole",
+            )
+        transform = _object(marking["transform"], f"{path}.transform")
+        transform_fields = {"position", "rotationDegrees"}
+        _required(transform, transform_fields, f"{path}.transform")
+        _closed(transform, transform_fields, f"{path}.transform")
+        _vector3(transform["position"], f"{path}.transform.position")
+        _number(
+            transform["rotationDegrees"],
+            f"{path}.transform.rotationDegrees",
+            minimum=-360_000,
+            maximum=360_000,
+        )
+        _number(
+            marking["width"],
+            f"{path}.width",
+            minimum=0,
+            exclusive_minimum=True,
+        )
+        _number(
+            marking["depth"],
+            f"{path}.depth",
+            minimum=0,
+            exclusive_minimum=True,
+        )
+        _hex_color(marking["fillColor"], f"{path}.fillColor")
+        _hex_color(marking["strokeColor"], f"{path}.strokeColor")
+        _number(marking["opacity"], f"{path}.opacity", minimum=0, maximum=1)
+        _string(marking["text"], f"{path}.text", maximum=120)
+        if marking["markingType"] == "floor_text" and not marking["text"]:
+            _fail(
+                "invalid_layout_shape",
+                "Floor text markings require text.",
+                f"{path}.text",
+            )
+        if marking["positionMode"] not in {"auto", "manual", "locked"}:
+            _fail(
+                "invalid_layout_shape",
+                "Floor marking position mode is unsupported.",
+                f"{path}.positionMode",
+            )
+        _mapping_with_max_properties(
+            marking["metadata"],
+            f"{path}.metadata",
+            maximum=32,
+            extensions=extensions,
+        )
+        _evidence(marking["evidence"], f"{path}.evidence")
+
     for placement_index, raw_placement in enumerate(placements):
         path = f"$.placements[{placement_index}]"
         placement = _object(raw_placement, path)
@@ -903,12 +1358,19 @@ def validate_layout(
                 f"{path}.positionMode",
             )
         if placement["snapRelationship"] is not None:
-            _mapping_with_max_properties(
+            relationship = _mapping_with_max_properties(
                 placement["snapRelationship"],
                 f"{path}.snapRelationship",
                 maximum=16,
                 extensions=extensions,
             )
+            if relationship.get("family") == "surface_attachment":
+                _surface_attachment_relationship(
+                    relationship,
+                    f"{path}.snapRelationship",
+                    placement_id=str(placement["placementId"]),
+                    placement_ids=placement_ids,
+                )
         _mapping_with_max_properties(
             placement["metadata"],
             f"{path}.metadata",
@@ -935,6 +1397,9 @@ def validate_layout(
         }
         _required(route, required, path)
         extensions.add_open_object(route, _ROUTE_FIELDS, path)
+        if "label" in route:
+            _string(route["label"], f"{path}.label", minimum=1, maximum=120)
+        _facility_aisle_extension(route, path)
         if route["routeKind"] not in route_kinds:
             _fail("invalid_layout_shape", "Route kind is unsupported.", f"{path}.routeKind")
         _endpoint(

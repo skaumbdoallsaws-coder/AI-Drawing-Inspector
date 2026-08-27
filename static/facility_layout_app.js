@@ -115,6 +115,8 @@
                 approveLayoutProposal: transport.approveLayoutProposal,
                 applyLayoutProposal: transport.applyLayoutProposal,
                 getLayoutReceipt: transport.getLayoutReceipt,
+                undoGenerationDraft: transport.undoGenerationRun,
+                saveGenerationDraft: transport.saveGenerationRun,
             });
 
         let workspace = null;
@@ -155,6 +157,8 @@
                 layoutRuntime: Layout,
                 assetCatalog: options.assetCatalog || [],
                 capabilities: options.capabilities || {},
+                externalCommandSurface:
+                    options.externalCommandSurface === true,
                 gridSize: options.gridSize,
                 topPlanOptions: options.topPlanOptions,
                 threeRuntime: options.threeRuntime
@@ -168,6 +172,9 @@
                 ownsSpatialAdvisor: false,
                 useAuthoritativePlacementCandidates:
                     options.useAuthoritativePlacementCandidates === true,
+                onAssetBrowserStateChange:
+                    options.onAssetBrowserStateChange,
+                onCommandStateChange: options.onCommandStateChange,
                 onStateChange: options.onStateChange,
                 onError: options.onError,
             });

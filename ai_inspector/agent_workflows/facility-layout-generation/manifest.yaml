@@ -6,7 +6,7 @@ agents:
   - sage
 entry_signals:
   - build, generate, arrange, or optimize a warehouse or manufacturing-cell layout
-  - inspect assets, zones, routes, findings, or process bindings in the active Facility Layout
+  - add, move, resize, rotate, remove, or reorganize spatial entities in the active Facility Layout
 required_assets:
   - facility_layout
 optional_assets:

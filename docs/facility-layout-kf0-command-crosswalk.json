@@ -1,0 +1,1749 @@
+{
+  "agentToolRegistry": {
+    "canonicalSha256": "bfa5518982539247c9a1ade5d3fbe8a4d0a684c96f8effc0dea22b45202d26a3",
+    "count": 14,
+    "tools": [
+      {
+        "agentAvailability": "sage_read",
+        "commandId": "search_industrial_assets",
+        "deterministicOwner": "observation.asset_catalog_read",
+        "effect": "read",
+        "group": "agent_read",
+        "label": "Search industrial assets",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "catalog",
+        "semanticUse": "Find trusted planning-ready assets by category, capability, or text.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_read",
+        "commandId": "inspect_facility_entities",
+        "deterministicOwner": "observation.entity_read",
+        "effect": "read",
+        "group": "agent_read",
+        "label": "Inspect facility entities",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "layout",
+        "semanticUse": "Read exact revision-bound placements, zones, markings, routes, or utilities.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_read",
+        "commandId": "inspect_facility_region",
+        "deterministicOwner": "observation.region_read",
+        "effect": "read",
+        "group": "agent_read",
+        "label": "Inspect facility region",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "region",
+        "semanticUse": "Read one stable zone or shell feature without model-authored geometry.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_read",
+        "commandId": "inspect_facility_findings",
+        "deterministicOwner": "observation.findings_read",
+        "effect": "read",
+        "group": "agent_read",
+        "label": "Inspect facility findings",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "diagnostics",
+        "semanticUse": "Read deterministic validation findings by stable ID or code.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_read",
+        "commandId": "inspect_process_bindings",
+        "deterministicOwner": "observation.process_binding_read",
+        "effect": "read",
+        "group": "agent_read",
+        "label": "Inspect process bindings",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "process_binding",
+        "semanticUse": "Read authored process-to-resource relationships without inferring process order from proximity.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_read",
+        "commandId": "inspect_facility_semantics",
+        "deterministicOwner": "semantic_model.semantic_projection",
+        "effect": "read",
+        "group": "agent_read",
+        "label": "Inspect facility semantics",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "semantic_map",
+        "semanticUse": "Read deterministic facility meaning, derived metrics, command knowledge, and cell strategy knowledge.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_read",
+        "commandId": "inspect_pattern_provenance",
+        "deterministicOwner": "observation.pattern_provenance_read",
+        "effect": "read",
+        "group": "agent_read",
+        "label": "Inspect pattern provenance",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "pattern_provenance",
+        "semanticUse": "Read authored linear, circular, or perimeter pattern seeds, parameters, members, and subsequent deviations without changing the layout.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_read",
+        "commandId": "inspect_cell_layout_provenance",
+        "deterministicOwner": "observation.cell_provenance_read",
+        "effect": "read",
+        "group": "agent_read",
+        "label": "Inspect cell-layout provenance",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "cell_layout_provenance",
+        "semanticUse": "Read an authored cell-layout strategy, creation parameters, members, edit history, and current geometric classification without changing the layout.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_read",
+        "commandId": "analyze_facility_spatial",
+        "deterministicOwner": "spatial.deterministic_analysis",
+        "effect": "read",
+        "group": "agent_read",
+        "label": "Analyze facility spatial state",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "spatial_analysis",
+        "semanticUse": "Resolve human entities and calculate exact clearances, protected-area intrusions, route crossings and access, known usable route-width profiles, connected free regions, layout provenance, operator travel, authored asset/cell access, Drone passage clearance, and mounted 2D/3D transform consistency.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_read",
+        "commandId": "analyze_facility_fit",
+        "deterministicOwner": "fit_analysis.bounded_fit_analysis",
+        "effect": "read",
+        "group": "agent_read",
+        "label": "Analyze facility fit",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "spatial_fit",
+        "semanticUse": "Test one exact revisioned asset in one authored zone with bounded deterministic placement and validation; never represent this as maximum or production capacity.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_preview",
+        "commandId": "preview_facility_move",
+        "deterministicOwner": "agent_runtime.exact_move_preview",
+        "effect": "preview",
+        "group": "agent_preview",
+        "label": "Preview exact Facility move",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "agent_preview"
+        ],
+        "scope": "selection",
+        "semanticUse": "Translate selected or exactly resolved placements by a cardinal distance in an authoritative validated unsaved draft while preserving rotation.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_preview",
+        "commandId": "build_facility_layout_preview",
+        "deterministicOwner": "semantic_plan.semantic_preview_compiler",
+        "effect": "preview",
+        "group": "agent_preview",
+        "label": "Build Facility Layout preview",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "agent_preview"
+        ],
+        "scope": "layout",
+        "semanticUse": "Compile one semantic plan into a synchronized, validated 2D/3D ghost preview.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_presentation",
+        "commandId": "present_chat_visualization",
+        "deterministicOwner": "chat_content.validated_visualization",
+        "effect": "read",
+        "group": "presentation",
+        "label": "Present visualization",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "chat",
+        "semanticUse": "Render an InspectorPro-owned chart from exact supplied values.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      },
+      {
+        "agentAvailability": "sage_presentation",
+        "commandId": "present_chat_table",
+        "deterministicOwner": "chat_content.validated_table",
+        "effect": "read",
+        "group": "presentation",
+        "label": "Present table",
+        "preconditions": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "chat",
+        "semanticUse": "Render an InspectorPro-owned structured table from exact supplied values.",
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_agent_runtime.py",
+          "tests/test_facility_layout_intelligence_evaluation.py"
+        ]
+      }
+    ]
+  },
+  "classification": {
+    "allAgentToolsClassified": true,
+    "allCommandsClassified": true,
+    "allEffectsClassified": true,
+    "allFeatureFlagsClassified": true,
+    "unclassifiedAgentToolIds": [],
+    "unclassifiedCommandIds": []
+  },
+  "commandRegistry": {
+    "canonicalSha256": "94b27f82c4e7f02d518cc9f41cc8cf789312ae680931aa47a74958acbd5d3c7f",
+    "commands": [
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "assets",
+        "deterministicOwner": "facility.workspace_and_renderer",
+        "effect": "read",
+        "group": "create",
+        "label": "Assets",
+        "operationKernelApplicability": "not_applicable",
+        "operationKernelHandlers": [],
+        "preconditions": [],
+        "relatedAgentTools": [
+          "search_industrial_assets"
+        ],
+        "requiredCapabilities": [
+          "asset_library"
+        ],
+        "scope": "catalog",
+        "semanticUse": "Browse authorized layout resources.",
+        "sessionHandlers": [],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "asset_browser"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "select",
+        "deterministicOwner": "facility.workspace_and_renderer",
+        "effect": "viewport",
+        "group": "selection",
+        "label": "Select",
+        "operationKernelApplicability": "not_applicable",
+        "operationKernelHandlers": [],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "selection",
+        "semanticUse": "Select and move authored layout entities.",
+        "sessionHandlers": [],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "pan",
+        "deterministicOwner": "facility.workspace_and_renderer",
+        "effect": "viewport",
+        "group": "selection",
+        "label": "Pan",
+        "operationKernelApplicability": "not_applicable",
+        "operationKernelHandlers": [],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "viewport",
+        "semanticUse": "Navigate the Plan view without changing world geometry.",
+        "sessionHandlers": [],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "rectangle-zone",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "create",
+        "label": "Rectangle Zone",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "add_zone"
+        ],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "zone",
+        "semanticUse": "Author a rectangular operating or support region.",
+        "sessionHandlers": [
+          "FacilitySession.createRectangleZone"
+        ],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "polygon-zone",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "create",
+        "label": "Polygon Zone",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "add_zone"
+        ],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "zone",
+        "semanticUse": "Author an irregular operating or support region.",
+        "sessionHandlers": [
+          "FacilitySession.createPolygonZone"
+        ],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "bulk-zones",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "create",
+        "label": "Bulk Zones",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "add_zone"
+        ],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "zone_set",
+        "semanticUse": "Create several named zones from exact dimensions.",
+        "sessionHandlers": [
+          "FacilitySession.createZones"
+        ],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "aisle",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "create",
+        "label": "Aisle",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "add_aisle"
+        ],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit",
+          "routing"
+        ],
+        "scope": "route",
+        "semanticUse": "Author a semantic corridor with a centerline, width, and traffic role.",
+        "sessionHandlers": [
+          "FacilitySession.createAisle"
+        ],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "floor-marking",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "create",
+        "label": "Floor Marking",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "add_floor_marking"
+        ],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "marking",
+        "semanticUse": "Author communication paint such as arrows, lanes, crossings, or keep-clear markings.",
+        "sessionHandlers": [
+          "FacilitySession.createFloorMarking"
+        ],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "rotate",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "arrange",
+        "label": "Rotate 90",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "rotate_placement"
+        ],
+        "preconditions": [
+          "one or more unlocked placements"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Rotate selected placements by a quarter turn.",
+        "sessionHandlers": [
+          "FacilitySession.rotateSelected90"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "duplicate",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "arrange",
+        "label": "Duplicate",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "duplicate_placement",
+          "add_zone",
+          "add_floor_marking"
+        ],
+        "preconditions": [
+          "one or more duplicable entities"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Create independent copies while preserving relative geometry for a group.",
+        "sessionHandlers": [
+          "FacilitySession.duplicateSelected"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "delete",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "arrange",
+        "label": "Delete",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "delete_placement",
+          "delete_zone",
+          "delete_floor_marking"
+        ],
+        "preconditions": [
+          "selection is not protected by references"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Remove selected authored entities after reference checks.",
+        "sessionHandlers": [
+          "FacilitySession.deleteSelected"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "clear-all",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "arrange",
+        "label": "Clear All",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "clear_layout_contents"
+        ],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "layout",
+        "semanticUse": "Remove all authored layout content after explicit confirmation.",
+        "sessionHandlers": [
+          "FacilitySession.clearLayout"
+        ],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "lock",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "arrange",
+        "label": "Lock",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "set_position_mode"
+        ],
+        "preconditions": [
+          "one or more placements"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Prevent automatic or direct movement of selected placements.",
+        "sessionHandlers": [
+          "FacilitySession.lockSelected",
+          "FacilitySession.unlockSelected"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "align",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "position",
+        "label": "Align",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "move_placement"
+        ],
+        "preconditions": [
+          "at least two placements"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Align selected footprint edges or centers.",
+        "sessionHandlers": [
+          "FacilitySession.movePlacements"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "distribute",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "position",
+        "label": "Distribute",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "move_placement"
+        ],
+        "preconditions": [
+          "at least three placements"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Create equal center spacing or equal clear gaps among selected placements.",
+        "sessionHandlers": [
+          "FacilitySession.movePlacements"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "relative",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "position",
+        "label": "Relative",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "move_placement"
+        ],
+        "preconditions": [
+          "reference and moving placements"
+        ],
+        "relatedAgentTools": [
+          "preview_facility_move"
+        ],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Position one placement relative to a reference placement.",
+        "sessionHandlers": [
+          "FacilitySession.movePlacements"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "distance",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "position",
+        "label": "Distance",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "move_placement"
+        ],
+        "preconditions": [
+          "exactly two placements"
+        ],
+        "relatedAgentTools": [
+          "preview_facility_move"
+        ],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Measure or set edge or center distance between two placements.",
+        "sessionHandlers": [
+          "FacilitySession.movePlacements"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "offset",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "position",
+        "label": "Offset",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "move_placement",
+          "duplicate_placement"
+        ],
+        "preconditions": [
+          "one or more placements"
+        ],
+        "relatedAgentTools": [
+          "preview_facility_move"
+        ],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Move or copy a selection by an exact world-space offset.",
+        "sessionHandlers": [
+          "FacilitySession.movePlacements",
+          "FacilitySession.duplicatePlacements"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "linear-pattern",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "pattern",
+        "label": "Linear Pattern",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "duplicate_placement",
+          "move_placement"
+        ],
+        "preconditions": [
+          "one or more seed entities"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Repeat one asset or a complete seed group along a direction.",
+        "sessionHandlers": [
+          "FacilitySession.applyPattern"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "circular-pattern",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "pattern",
+        "label": "Circular Pattern",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "duplicate_placement",
+          "move_placement"
+        ],
+        "preconditions": [
+          "one or more seed entities and a center"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Repeat one asset or a complete seed group around a center.",
+        "sessionHandlers": [
+          "FacilitySession.applyPattern"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "perimeter-pattern",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "pattern",
+        "label": "Perimeter",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "duplicate_placement",
+          "move_placement"
+        ],
+        "preconditions": [
+          "one or more seed entities and perimeter dimensions"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Repeat guarding or another module around a rectangular perimeter.",
+        "sessionHandlers": [
+          "FacilitySession.applyPattern"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "cell-layout",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "pattern",
+        "label": "Cell Layout",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "move_placement"
+        ],
+        "preconditions": [
+          "selected resources and target dimensions"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Arrange selected equipment with a named manufacturing-cell strategy.",
+        "sessionHandlers": [
+          "FacilitySession.applyPattern"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "create-cell-group",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "pattern",
+        "label": "Create Cell",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "add_zone"
+        ],
+        "preconditions": [
+          "selected placements"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Create a persistent named workcell envelope from selected resources.",
+        "sessionHandlers": [
+          "FacilitySession.createCellGroup"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "ungroup-cell",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "pattern",
+        "label": "Ungroup",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "delete_zone"
+        ],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "workcell",
+        "semanticUse": "Remove a workcell envelope without deleting its member equipment.",
+        "sessionHandlers": [
+          "FacilitySession.ungroupCell"
+        ],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "vertical-stack",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "pattern",
+        "label": "Stack",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "duplicate_placement",
+          "set_snap_relationship"
+        ],
+        "preconditions": [
+          "stack-compatible selected items"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Stack compatible items vertically from authoritative geometry.",
+        "sessionHandlers": [
+          "FacilitySession.applyPattern"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "surface-stack",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "pattern",
+        "label": "On Surface",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "move_placement",
+          "set_snap_relationship"
+        ],
+        "preconditions": [
+          "one support and one or more compatible child items"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Attach multiple children to independent local X/Z positions on a support surface.",
+        "sessionHandlers": [
+          "FacilitySession.applyPattern"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "mirror",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "pattern",
+        "label": "Mirror",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "duplicate_placement",
+          "move_placement"
+        ],
+        "preconditions": [
+          "selection and mirror axis"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Mirror assets, markings, or a complete cell across a grid or construction axis.",
+        "sessionHandlers": [
+          "FacilitySession.applyPattern"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "swap",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "pattern",
+        "label": "Swap",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "move_placement"
+        ],
+        "preconditions": [
+          "exactly two compatible entities"
+        ],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "selection",
+        "semanticUse": "Exchange the centers of two entities or two complete cells.",
+        "sessionHandlers": [
+          "FacilitySession.applyPattern"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "undo",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "history",
+        "label": "Undo",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "replay_inverse_draft_batch"
+        ],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "layout",
+        "semanticUse": "Reverse the previous draft edit.",
+        "sessionHandlers": [
+          "FacilitySession.undo"
+        ],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "redo",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "history",
+        "label": "Redo",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "replay_draft_batch"
+        ],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "layout",
+        "semanticUse": "Restore the previously reversed draft edit.",
+        "sessionHandlers": [
+          "FacilitySession.redo"
+        ],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "fit",
+        "deterministicOwner": "facility.workspace_and_renderer",
+        "effect": "viewport",
+        "group": "layout",
+        "label": "Fit Facility",
+        "operationKernelApplicability": "not_applicable",
+        "operationKernelHandlers": [],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "viewport",
+        "semanticUse": "Frame the complete facility boundary.",
+        "sessionHandlers": [],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "fit-layout",
+        "deterministicOwner": "facility.workspace_and_renderer",
+        "effect": "viewport",
+        "group": "layout",
+        "label": "Fit Layout",
+        "operationKernelApplicability": "not_applicable",
+        "operationKernelHandlers": [],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "viewport",
+        "semanticUse": "Frame currently placed layout content.",
+        "sessionHandlers": [],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_three_adapter.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "plan_and_3d_navigation"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "top-view",
+        "deterministicOwner": "facility.workspace_and_renderer",
+        "effect": "viewport",
+        "group": "layout",
+        "label": "Top View",
+        "operationKernelApplicability": "not_applicable",
+        "operationKernelHandlers": [],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "viewport",
+        "semanticUse": "Orient the 3D camera for direct Plan comparison.",
+        "sessionHandlers": [],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_three_adapter.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "plan_and_3d_navigation"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "auto-arrange",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "draft_edit",
+        "group": "layout",
+        "label": "Auto Arrange",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "validated_proposal_batch"
+        ],
+        "preconditions": [
+          "eligible auto placements and a supported strategy"
+        ],
+        "relatedAgentTools": [
+          "build_facility_layout_preview"
+        ],
+        "requiredCapabilities": [
+          "agent_preview"
+        ],
+        "scope": "selection",
+        "semanticUse": "Generate a deterministic arrangement for eligible auto placements.",
+        "sessionHandlers": [
+          "FacilitySession.requestLayoutProposal"
+        ],
+        "supportsMultipleSelection": true,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "explicit_user_commit",
+        "commandId": "save",
+        "deterministicOwner": "facility.operations_and_repository",
+        "effect": "persistent_save",
+        "group": "document",
+        "label": "Save",
+        "operationKernelApplicability": "applicable",
+        "operationKernelHandlers": [
+          "revision_compare_and_swap",
+          "atomic_repository_write"
+        ],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "manual_edit"
+        ],
+        "scope": "layout",
+        "semanticUse": "Validate and persist the current authored layout after an explicit user command.",
+        "sessionHandlers": [
+          "FacilitySession.save"
+        ],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_operations.py",
+          "tests/test_facility_layout_p11_contracts.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_service.py",
+          "tests/test_facility_layout_session.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace.executeCommand",
+        "uiSurface": "ribbon"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "orbit",
+        "deterministicOwner": "facility.workspace_and_renderer",
+        "effect": "viewport",
+        "group": "3d_navigation",
+        "label": "Orbit",
+        "operationKernelApplicability": "not_applicable",
+        "operationKernelHandlers": [],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "viewport",
+        "semanticUse": "Inspect the scene from an unconstrained exterior camera.",
+        "sessionHandlers": [],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_three_adapter.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace._handleThreeNavigationClick",
+        "uiSurface": "3d_navigation"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "walkthrough",
+        "deterministicOwner": "facility.workspace_and_renderer",
+        "effect": "viewport",
+        "group": "3d_navigation",
+        "label": "Walkthrough",
+        "operationKernelApplicability": "not_applicable",
+        "operationKernelHandlers": [],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "viewport",
+        "semanticUse": "Inspect human-scale access using standing, crouching, and crawling postures.",
+        "sessionHandlers": [],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_three_adapter.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace._handleThreeNavigationClick",
+        "uiSurface": "3d_navigation"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "drone",
+        "deterministicOwner": "facility.workspace_and_renderer",
+        "effect": "viewport",
+        "group": "3d_navigation",
+        "label": "Drone",
+        "operationKernelApplicability": "not_applicable",
+        "operationKernelHandlers": [],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "viewport",
+        "semanticUse": "Navigate large facilities freely in X/Y/Z with assisted collision handling.",
+        "sessionHandlers": [],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_three_adapter.js",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace._handleThreeNavigationClick",
+        "uiSurface": "3d_navigation"
+      },
+      {
+        "agentAvailability": "ui_only",
+        "commandId": "record",
+        "deterministicOwner": "facility.recorder",
+        "effect": "viewport_capture",
+        "group": "3d_presentation",
+        "label": "Record",
+        "operationKernelApplicability": "not_applicable",
+        "operationKernelHandlers": [],
+        "preconditions": [],
+        "relatedAgentTools": [],
+        "requiredCapabilities": [
+          "viewer_v2"
+        ],
+        "scope": "viewport",
+        "semanticUse": "Record the rendered 3D viewport for review or training.",
+        "sessionHandlers": [],
+        "supportsMultipleSelection": false,
+        "tests": [
+          "tests/test_facility_layout_intelligence_evaluation.py",
+          "tests/test_facility_layout_recorder.js",
+          "tests/test_facility_layout_semantic_model.py",
+          "tests/test_facility_layout_workspace.js"
+        ],
+        "uiHandler": "Workspace._handleThreeNavigationClick",
+        "uiSurface": "3d_capture"
+      }
+    ],
+    "count": 39,
+    "effectCounts": {
+      "draft_edit": 28,
+      "persistent_save": 1,
+      "read": 1,
+      "viewport": 8,
+      "viewport_capture": 1
+    },
+    "nonRibbonCount": 7,
+    "ribbonCount": 32
+  },
+  "featureFlagLadder": {
+    "count": 7,
+    "flags": [
+      {
+        "capability": "viewer_v2",
+        "dependencies": [],
+        "environmentVariable": "INSPECTORPRO_FACILITY_LAYOUT_VIEWER_V2"
+      },
+      {
+        "capability": "asset_library",
+        "dependencies": [
+          "viewer_v2"
+        ],
+        "environmentVariable": "INSPECTORPRO_INDUSTRIAL_ASSET_LIBRARY"
+      },
+      {
+        "capability": "manual_edit",
+        "dependencies": [
+          "asset_library"
+        ],
+        "environmentVariable": "INSPECTORPRO_FACILITY_LAYOUT_MANUAL_EDIT"
+      },
+      {
+        "capability": "constraints",
+        "dependencies": [
+          "manual_edit"
+        ],
+        "environmentVariable": "INSPECTORPRO_FACILITY_LAYOUT_CONSTRAINTS"
+      },
+      {
+        "capability": "routing",
+        "dependencies": [
+          "constraints"
+        ],
+        "environmentVariable": "INSPECTORPRO_FACILITY_LAYOUT_ROUTING"
+      },
+      {
+        "capability": "agent_preview",
+        "dependencies": [
+          "routing"
+        ],
+        "environmentVariable": "INSPECTORPRO_FACILITY_LAYOUT_AGENT_PREVIEW"
+      },
+      {
+        "capability": "agent_write",
+        "dependencies": [
+          "agent_preview"
+        ],
+        "environmentVariable": "INSPECTORPRO_FACILITY_LAYOUT_AGENT_WRITE"
+      }
+    ],
+    "orderedCapabilities": [
+      "viewer_v2",
+      "asset_library",
+      "manual_edit",
+      "constraints",
+      "routing",
+      "agent_preview",
+      "agent_write"
+    ]
+  },
+  "generatedAtUtc": "2026-08-26T22:22:28Z",
+  "operationKernel": {
+    "supportedOperationCount": 34,
+    "supportedOperations": [
+      "add_aisle",
+      "add_floor_marking",
+      "add_route",
+      "add_utility_network",
+      "add_utility_network_node",
+      "add_utility_network_segment",
+      "add_zone",
+      "archive_layout",
+      "attach_process_binding",
+      "clear_layout_contents",
+      "delete_floor_marking",
+      "delete_placement",
+      "delete_route",
+      "delete_utility_network",
+      "delete_utility_network_node",
+      "delete_utility_network_segment",
+      "delete_zone",
+      "detach_process_binding",
+      "duplicate_placement",
+      "edit_aisle",
+      "edit_floor_marking",
+      "edit_process_binding",
+      "edit_route",
+      "edit_utility_network",
+      "edit_utility_network_node",
+      "edit_utility_network_segment",
+      "edit_zone",
+      "move_placement",
+      "place_asset",
+      "rename_layout",
+      "rotate_placement",
+      "set_plan_settings",
+      "set_position_mode",
+      "set_snap_relationship"
+    ]
+  },
+  "schemaVersion": "facility-layout-kf0-command-crosswalk-v1",
+  "sources": [
+    {
+      "byteLength": 303569,
+      "path": "ai_inspector/facility_layout/semantic_model.py",
+      "sha256": "1798a7406865d7259838653b2fdea01db27302b0490817dab293d5bf28e3801d"
+    },
+    {
+      "byteLength": 4149,
+      "path": "ai_inspector/facility_layout/feature_flags.py",
+      "sha256": "62cb8114f08a24a40b2748e6e7eb1da468ab3ff1568f9742b07eb89fbd7ae31c"
+    },
+    {
+      "byteLength": 61543,
+      "path": "ai_inspector/facility_layout/operations.py",
+      "sha256": "153d2548ffa7c84d3e8e80f155ab72ecce02bcb8cd169fa6ae082a10dd1ad899"
+    },
+    {
+      "byteLength": 4447227,
+      "path": "static/index.html",
+      "sha256": "a24287a34c65518751bbda73d0cbab7d5108d0824510939e34c161e8b584b475"
+    },
+    {
+      "byteLength": 548243,
+      "path": "static/facility_layout_workspace.js",
+      "sha256": "646ab50a0144164aa1c30f0d38bbbad05dab795491e91575574a3fbd6849d6e5"
+    },
+    {
+      "byteLength": 151953,
+      "path": "static/facility_layout_session.js",
+      "sha256": "d3a87e301cfd0683e28c435a8fdb8924a5514824f51505fa8957c2a4694a5533"
+    }
+  ]
+}

@@ -217,6 +217,8 @@
         const encodedLayout = encodeURIComponent(layoutId);
         const layoutUrl = baseUrl + '/api/facility-layouts/'
             + encodedSite + '/' + encodedLayout;
+        const generationUrl = baseUrl + '/api/facility-layout-generation/'
+            + encodedSite + '/' + encodedLayout;
 
         async function request(path, method, body, requestOptions) {
             const requestConfig = requestOptions || {};
@@ -240,12 +242,93 @@
             return result;
         }
 
+        async function generationRequest(path, method, body, requestOptions) {
+            const requestConfig = requestOptions || {};
+            const init = {
+                method: method || 'GET',
+                cache: 'no-store',
+                credentials: options.credentials || 'same-origin',
+                headers: Object.assign({}, headers),
+            };
+            init.headers['X-InspectorPro-Session'] = sessionId;
+            if (requestConfig.signal) init.signal = requestConfig.signal;
+            if (body !== undefined) {
+                init.headers['Content-Type'] = 'application/json';
+                init.body = JSON.stringify(body);
+            }
+            const response = await fetchImpl(
+                generationUrl + (path || ''), init
+            );
+            const result = await response.json().catch(function () {
+                return {};
+            });
+            if (!response.ok) throw errorFromResponse(response, result);
+            return result;
+        }
+
         return Object.freeze({
             apiVersion: API_VERSION,
             siteId: siteId,
             layoutId: layoutId,
             layoutUrl: layoutUrl,
+            generationUrl: generationUrl,
             sessionId: sessionId,
+            startG1Generation: function (payload, requestOptions) {
+                const value = object(payload, 'G1 generation payload');
+                return generationRequest('/g1', 'POST', value, requestOptions);
+            },
+            continueGenerationRun: function (payload, requestOptions) {
+                const value = object(payload, 'generation continuation payload');
+                const runId = boundedIdentifier(value.runId, 'runId');
+                return generationRequest(
+                    '/runs/' + encodeURIComponent(runId) + '/continue',
+                    'POST',
+                    {
+                        explicitStageAcceptance:
+                            value.explicitStageAcceptance === true,
+                    },
+                    requestOptions
+                );
+            },
+            getGenerationRun: function (payload, requestOptions) {
+                const value = object(payload, 'generation run payload');
+                const runId = boundedIdentifier(value.runId, 'runId');
+                return generationRequest(
+                    '/runs/' + encodeURIComponent(runId),
+                    'GET',
+                    undefined,
+                    requestOptions
+                );
+            },
+            undoGenerationRun: function (payload, requestOptions) {
+                const value = object(payload, 'generation undo payload');
+                const runId = boundedIdentifier(value.runId, 'runId');
+                return generationRequest(
+                    '/runs/' + encodeURIComponent(runId) + '/undo',
+                    'POST',
+                    {},
+                    requestOptions
+                );
+            },
+            saveGenerationRun: function (payload, requestOptions) {
+                const value = object(payload, 'generation save payload');
+                const runId = boundedIdentifier(value.runId, 'runId');
+                if (value.explicitApproval !== true) {
+                    throw new TypeError('explicitApproval must equal true');
+                }
+                return generationRequest(
+                    '/runs/' + encodeURIComponent(runId) + '/save',
+                    'POST',
+                    {
+                        cumulativeDiffHash: nonEmptyString(
+                            value.cumulativeDiffHash,
+                            'cumulativeDiffHash'
+                        ),
+                        explicitApproval: true,
+                    },
+                    requestOptions
+                );
+            },
             previewOperations: function (payload) {
                 const value = payload || {};
                 return request('/preview', 'POST', {

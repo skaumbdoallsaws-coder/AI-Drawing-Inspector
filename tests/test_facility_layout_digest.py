@@ -261,15 +261,16 @@ def test_small_digest_is_byte_stable_and_pins_contract() -> None:
 
     assert first == second
     assert hashlib.sha256(payload).hexdigest() == (
-        "dfcc60824645d1a072f3252d4c80d5e595d61c8f79b6980ad69888dadd09728f"
+        "5d3ab2143a71a0fa4eeb1170494dc436a52f229e8925e5aefadc301f4976e371"
     )
     assert first["digestContractVersion"] == 1
     assert first["tokenizerId"] == "inspectorpro_utf8_quarter_v1"
     assert first["tokenizerRevision"] == 1
     assert first["counts"] == {
-        "placements": 1,
-        "zones": 2,
-        "routes": 0,
+            "placements": 1,
+            "zones": 2,
+            "floorMarkings": 0,
+            "routes": 0,
         "utilityNetworks": 0,
         "processBindings": 0,
         "assetDefinitions": 2,
@@ -336,6 +337,72 @@ def test_warehouse_5000_digest_uses_summaries_and_stable_read_descriptors() -> N
     assert b'"transform"' not in encoded
     assert b'"position"' not in encoded
     assert len(encoded) < 12000
+
+
+def test_digest_aggregates_repeated_stale_dependencies_at_scale() -> None:
+    observation = _scale_observation()
+    state = deepcopy(observation["state"])
+    dependency = {
+        "kind": "asset_definition",
+        "id": "asset-p9-rack",
+        "expectedRevision": "f" * 64,
+        "reason": "referenced_asset_revision_unavailable",
+    }
+    state["staleDependencies"] = [deepcopy(dependency) for _ in range(5000)]
+
+    digest = build_facility_layout_digest(state, observation["evidence"])
+
+    assert digest["staleDependencies"] == [
+        {
+            **dependency,
+            "affectedCount": 5000,
+        }
+    ]
+    assert {item["collection"] for item in digest["readDescriptors"]} == {
+        "assets",
+        "findings",
+        "floorMarkings",
+        "placements",
+        "processBindings",
+        "routes",
+        "utilityNetworks",
+        "zones",
+    }
+    assert digest["estimatedTokens"] <= (
+        FACILITY_LAYOUT_DIGEST_MAXIMUM_TOKENS
+    )
+    assert digest["canonicalUtf8Bytes"] <= (
+        FACILITY_LAYOUT_DIGEST_MAXIMUM_CANONICAL_UTF8_BYTES
+    )
+
+
+def test_digest_bounds_unique_stale_dependency_samples() -> None:
+    observation = _golden_observation()
+    state = deepcopy(observation["state"])
+    state["staleDependencies"] = [
+        {
+            "kind": "asset_definition",
+            "id": f"asset-stale-{index:04d}",
+            "expectedRevision": f"{index:064x}",
+            "reason": "referenced_asset_revision_unavailable",
+        }
+        for index in range(500)
+    ]
+
+    digest = build_facility_layout_digest(state, observation["evidence"])
+
+    assert len(digest["staleDependencies"]) <= 40
+    assert digest["truncation"]["staleDependencies"]["omittedCount"] >= 460
+    assert any(
+        item["collection"] == "placements"
+        for item in digest["readDescriptors"]
+    )
+    assert digest["estimatedTokens"] <= (
+        FACILITY_LAYOUT_DIGEST_MAXIMUM_TOKENS
+    )
+    assert digest["canonicalUtf8Bytes"] <= (
+        FACILITY_LAYOUT_DIGEST_MAXIMUM_CANONICAL_UTF8_BYTES
+    )
 
 
 def test_digest_rejects_browser_spoofed_server_tags() -> None:

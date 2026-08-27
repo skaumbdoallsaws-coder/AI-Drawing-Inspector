@@ -16,6 +16,8 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 from .canonical import canonical_layout_bytes, canonicalize_layout, layout_revision
 from .diff import build_exact_layout_diff, facility_layout_diff_hash
 from .errors import FacilityValidationError
+from .plan_settings import PLAN_SETTINGS_EXTENSION_KEY, normalize_plan_settings
+from .routing import persisted_route_fingerprint
 from .validate import validate_layout
 
 
@@ -25,6 +27,29 @@ _ID_LIMIT = 128
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _POSITION_MODES = frozenset(("auto", "manual", "locked"))
 _MOVEMENT_KINDS = frozenset(("user", "automatic"))
+_LAYOUT_PROVENANCE_COMMANDS = frozenset((
+    "linear_pattern",
+    "circular_pattern",
+    "perimeter",
+    "cell_layout",
+    "vertical_stack",
+    "surface_stack",
+    "mirror",
+    "swap",
+    "duplicate",
+))
+_LAYOUT_STRATEGIES = frozenset((
+    "line",
+    "l",
+    "u",
+    "grid",
+    "parallel",
+    "serpentine",
+    "loop",
+    "spine",
+    "herringbone",
+    "cluster",
+))
 
 
 class FacilityLayoutOperationError(FacilityValidationError):
@@ -121,6 +146,113 @@ def _mapping(value: Any, field: str) -> Dict[str, Any]:
     return deepcopy(dict(value))
 
 
+def _layout_provenance(value: Any) -> Dict[str, Any]:
+    provenance = _mapping(value, "layoutProvenance")
+    command = provenance.get("command")
+    if command not in _LAYOUT_PROVENANCE_COMMANDS:
+        _fail(
+            "invalid_operation_field",
+            "layoutProvenance.command is unsupported.",
+        )
+    strategy = provenance.get("authoredStrategy")
+    if strategy is not None and strategy not in _LAYOUT_STRATEGIES:
+        _fail(
+            "invalid_operation_field",
+            "layoutProvenance.authoredStrategy is unsupported.",
+        )
+    seed_ids = provenance.get("seedEntityIds", [])
+    if (
+        not isinstance(seed_ids, list)
+        or len(seed_ids) > MAX_OPERATION_BATCH
+        or any(not isinstance(item, str) or not item for item in seed_ids)
+    ):
+        _fail(
+            "invalid_operation_field",
+            "layoutProvenance.seedEntityIds must be a bounded string array.",
+        )
+    parameters = provenance.get("parameters", {})
+    if not isinstance(parameters, Mapping) or len(parameters) > 32:
+        _fail(
+            "invalid_operation_field",
+            "layoutProvenance.parameters must be a bounded object.",
+        )
+    result = deepcopy(provenance)
+    result["schemaVersion"] = 1
+    result["command"] = command
+    result["authoredStrategy"] = strategy
+    result["seedEntityIds"] = list(dict.fromkeys(seed_ids))
+    result["parameters"] = deepcopy(dict(parameters))
+    result["manuallyEditedSinceCreation"] = False
+    return result
+
+
+def _current_layout_geometry(target: Mapping[str, Any]) -> Dict[str, Any]:
+    if "placementId" in target:
+        return {
+            "kind": "placement",
+            "transform": deepcopy(target.get("transform")),
+        }
+    if "markingId" in target:
+        return {
+            "kind": "floor_marking",
+            "transform": deepcopy(target.get("transform")),
+            "width": target.get("width"),
+            "depth": target.get("depth"),
+        }
+    return {
+        "kind": "zone",
+        "boundary": deepcopy(target.get("boundary")),
+    }
+
+
+def _normalize_embedded_layout_provenance(
+    target: Dict[str, Any],
+    *,
+    container: str,
+) -> None:
+    record = target.get(container)
+    if not isinstance(record, dict):
+        return
+    raw = record.get("layoutProvenance")
+    if not isinstance(raw, Mapping):
+        return
+    normalized = _layout_provenance(raw)
+    normalized.setdefault(
+        "authoredGeometry",
+        _current_layout_geometry(target),
+    )
+    record["layoutProvenance"] = normalized
+
+
+def _set_or_stale_layout_provenance(
+    target: Dict[str, Any],
+    operation: Mapping[str, Any],
+    *,
+    container: str,
+    manually_edited: bool = True,
+) -> None:
+    record = target.get(container)
+    if not isinstance(record, dict):
+        record = {}
+        target[container] = record
+    supplied = operation.get("layoutProvenance")
+    if supplied is not None:
+        normalized = _layout_provenance(supplied)
+        normalized.setdefault(
+            "authoredGeometry",
+            _current_layout_geometry(target),
+        )
+        record["layoutProvenance"] = normalized
+        return
+    current = record.get("layoutProvenance")
+    if isinstance(current, Mapping):
+        stale = deepcopy(dict(current))
+        stale["geometryEditedSinceCreation"] = True
+        if manually_edited:
+            stale["manuallyEditedSinceCreation"] = True
+        record["layoutProvenance"] = stale
+
+
 def _collection(document: Dict[str, Any], field: str) -> List[Dict[str, Any]]:
     value = document.get(field)
     if not isinstance(value, list):
@@ -168,6 +300,12 @@ def _all_object_ids(document: Dict[str, Any]) -> Set[str]:
             for record in _collection(document, collection)
             if isinstance(record.get(key), str)
         )
+    result.update(
+        str(record["markingId"])
+        for record in document.get("floorMarkings", [])
+        if isinstance(record, Mapping)
+        and isinstance(record.get("markingId"), str)
+    )
     for network in _collection(document, "utilityNetworks"):
         for collection, key in (
             (network.get("nodes"), "networkNodeId"),
@@ -275,6 +413,13 @@ def _placement_references(document: Dict[str, Any], placement_id: str) -> List[s
                 continue
             if _reference_matches(record, "placementId", placement_id):
                 references.append(str(record.get(key) or collection))
+            if collection == "placements":
+                relationship = record.get("snapRelationship")
+                if (
+                    isinstance(relationship, Mapping)
+                    and relationship.get("supportPlacementId") == placement_id
+                ):
+                    references.append(str(record.get(key) or collection))
             if collection == "processBindings":
                 ids = record.get("placementIds")
                 if isinstance(ids, list) and placement_id in ids:
@@ -345,6 +490,10 @@ def _op_add_zone(
     if zone_id in _all_object_ids(document):
         _fail("duplicate_id", f"zoneId '{zone_id}' is already in use.")
     zone["zoneId"] = zone_id
+    _normalize_embedded_layout_provenance(
+        zone,
+        container="extensions",
+    )
     _collection(document, "zones").append(zone)
     return [zone_id], [zone_id]
 
@@ -362,6 +511,12 @@ def _op_edit_zone(
     zone = _find(document, "zones", "zoneId", zone_id, "Zone")
     for key, value in patch.items():
         zone[str(key)] = deepcopy(value)
+    if {"boundary", "anchors", "floorElevation"}.intersection(patch):
+        _set_or_stale_layout_provenance(
+            zone,
+            operation,
+            container="extensions",
+        )
     return [], [zone_id]
 
 
@@ -384,6 +539,116 @@ def _op_delete_zone(
         zone for zone in _collection(document, "zones") if zone.get("zoneId") != zone_id
     ]
     return [], [zone_id]
+
+
+def _floor_markings(document: Dict[str, Any]) -> List[Dict[str, Any]]:
+    value = document.setdefault("floorMarkings", [])
+    if not isinstance(value, list) or not all(
+        isinstance(item, Mapping) for item in value
+    ):
+        _fail("invalid_layout_shape", "floorMarkings must contain objects.")
+    return value
+
+
+def _op_add_floor_marking(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    index: int,
+    base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    marking = _mapping(operation.get("floorMarking"), "floorMarking")
+    requested = marking.get("markingId", operation.get("markingId"))
+    if requested is None:
+        identity_operation = {
+            **operation,
+            "floorMarking": {
+                key: value
+                for key, value in marking.items()
+                if key != "markingId"
+            },
+        }
+        marking_id = _requested_or_generated_id(
+            document,
+            identity_operation,
+            index,
+            field="markingId",
+            prefix="fm",
+            base_revision=base_revision,
+        )
+    else:
+        marking_id = _clean_id(requested, "markingId", "fm")
+    if marking_id in _all_object_ids(document):
+        _fail("duplicate_id", f"markingId '{marking_id}' is already in use.")
+    marking["markingId"] = marking_id
+    _normalize_embedded_layout_provenance(
+        marking,
+        container="metadata",
+    )
+    _floor_markings(document).append(marking)
+    return [marking_id], [marking_id]
+
+
+def _op_edit_floor_marking(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    marking_id = _clean_id(operation.get("markingId"), "markingId", "fm")
+    _floor_markings(document)
+    patch = _mapping(operation.get("patch"), "patch")
+    if "markingId" in patch:
+        _fail(
+            "immutable_identity",
+            "edit_floor_marking cannot change markingId.",
+        )
+    marking = _find(
+        document,
+        "floorMarkings",
+        "markingId",
+        marking_id,
+        "Floor marking",
+    )
+    if marking.get("positionMode") == "locked" and (
+        "transform" in patch or "width" in patch or "depth" in patch
+    ):
+        _fail(
+            "locked_object",
+            f"Floor marking '{marking_id}' is locked.",
+            details={"targetId": marking_id},
+        )
+    for key, value in patch.items():
+        marking[str(key)] = deepcopy(value)
+    if {"transform", "width", "depth"}.intersection(patch):
+        _set_or_stale_layout_provenance(
+            marking,
+            operation,
+            container="metadata",
+        )
+    return [], [marking_id]
+
+
+def _op_delete_floor_marking(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    marking_id = _clean_id(operation.get("markingId"), "markingId", "fm")
+    _floor_markings(document)
+    _find(
+        document,
+        "floorMarkings",
+        "markingId",
+        marking_id,
+        "Floor marking",
+    )
+    document["floorMarkings"] = [
+        marking
+        for marking in _floor_markings(document)
+        if marking.get("markingId") != marking_id
+    ]
+    return [], [marking_id]
 
 
 def _op_place_asset(
@@ -411,6 +676,10 @@ def _op_place_asset(
     if placement_id in _all_object_ids(document):
         _fail("duplicate_id", f"placementId '{placement_id}' is already in use.")
     placement["placementId"] = placement_id
+    _normalize_embedded_layout_provenance(
+        placement,
+        container="metadata",
+    )
     _collection(document, "placements").append(placement)
     return [placement_id], [placement_id]
 
@@ -466,6 +735,12 @@ def _op_move_placement(
         field="position",
     )
     placement["transform"]["position"] = _mapping(operation["position"], "position")
+    _set_or_stale_layout_provenance(
+        placement,
+        operation,
+        container="metadata",
+        manually_edited=movement_kind == "user",
+    )
     if movement_kind == "user" and placement.get("positionMode") == "auto":
         placement["positionMode"] = "manual"
     return [], [placement_id]
@@ -485,6 +760,12 @@ def _op_rotate_placement(
     placement["transform"]["quaternion"] = _mapping(
         operation["quaternion"],
         "quaternion",
+    )
+    _set_or_stale_layout_provenance(
+        placement,
+        operation,
+        container="metadata",
+        manually_edited=movement_kind == "user",
     )
     if movement_kind == "user" and placement.get("positionMode") == "auto":
         placement["positionMode"] = "manual"
@@ -520,6 +801,13 @@ def _op_duplicate_placement(
     duplicate = deepcopy(source)
     duplicate["placementId"] = new_id
     duplicate["snapRelationship"] = None
+    if "snapRelationship" in operation:
+        relationship = operation.get("snapRelationship")
+        duplicate["snapRelationship"] = (
+            None
+            if relationship is None
+            else _mapping(relationship, "snapRelationship")
+        )
     duplicate["positionMode"] = operation.get("positionMode", "manual")
     if duplicate["positionMode"] not in _POSITION_MODES:
         _fail(
@@ -539,6 +827,24 @@ def _op_duplicate_placement(
                 operation["quaternion"],
                 "quaternion",
             )
+    if operation.get("layoutProvenance") is not None:
+        _set_or_stale_layout_provenance(
+            duplicate,
+            operation,
+            container="metadata",
+        )
+    else:
+        metadata = duplicate.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        duplicate["metadata"] = metadata
+        metadata["layoutProvenance"] = {
+            "schemaVersion": 1,
+            "command": "duplicate",
+            "authoredStrategy": None,
+            "seedEntityIds": [source_id],
+            "parameters": {},
+            "manuallyEditedSinceCreation": False,
+        }
     _collection(document, "placements").append(duplicate)
     return [new_id], [source_id, new_id]
 
@@ -621,7 +927,70 @@ def _op_set_snap_relationship(
         if relationship is None
         else _mapping(relationship, "snapRelationship")
     )
+    if operation.get("layoutProvenance") is not None:
+        _set_or_stale_layout_provenance(
+            placement,
+            operation,
+            container="metadata",
+        )
     return [], [placement_id]
+
+
+def _apply_seed_layout_provenance(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+) -> List[str]:
+    raw_ids = operation.get("layoutProvenanceSeedEntityIds")
+    if raw_ids is None:
+        return []
+    if (
+        not isinstance(raw_ids, list)
+        or len(raw_ids) > MAX_OPERATION_BATCH
+        or any(not isinstance(item, str) or not item for item in raw_ids)
+    ):
+        _fail(
+            "invalid_operation_field",
+            "layoutProvenanceSeedEntityIds must be a bounded string array.",
+        )
+    affected = []
+    for entity_id in dict.fromkeys(raw_ids):
+        target: Optional[Dict[str, Any]] = None
+        container = "metadata"
+        for collection, key, candidate_container in (
+            ("placements", "placementId", "metadata"),
+            ("zones", "zoneId", "extensions"),
+        ):
+            target = next(
+                (
+                    item for item in _collection(document, collection)
+                    if item.get(key) == entity_id
+                ),
+                None,
+            )
+            if target is not None:
+                container = candidate_container
+                break
+        if target is None:
+            target = next(
+                (
+                    item for item in _floor_markings(document)
+                    if item.get("markingId") == entity_id
+                ),
+                None,
+            )
+        if target is None:
+            _fail(
+                "operation_target_not_found",
+                f"Layout entity '{entity_id}' was not found.",
+                details={"targetId": entity_id},
+            )
+        _set_or_stale_layout_provenance(
+            target,
+            operation,
+            container=container,
+        )
+        affected.append(entity_id)
+    return affected
 
 
 def _insert_top_level_object(
@@ -693,6 +1062,213 @@ def _op_add_route(
         id_field="routeId",
         prefix="rt",
     )
+
+
+def _aisle_kind(value: Any) -> str:
+    if value not in {"forklift", "pedestrian", "material"}:
+        _fail(
+            "invalid_operation_field",
+            "aisleKind must be forklift, pedestrian, or material.",
+        )
+    return str(value)
+
+
+def _aisle_direction(value: Any) -> str:
+    if value not in {"one_way", "two_way"}:
+        _fail(
+            "invalid_operation_field",
+            "direction must be one_way or two_way.",
+        )
+    return str(value)
+
+
+def _aisle_color(value: Any) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"#[0-9A-Fa-f]{6}", value) is None:
+        _fail(
+            "invalid_operation_field",
+            "color must be a six-digit hex color.",
+        )
+    return value.lower()
+
+
+def _aisle_width(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        _fail("invalid_operation_field", "corridorWidth must be a number.")
+    width = float(value)
+    if not 0 < width <= 1000:
+        _fail(
+            "invalid_operation_field",
+            "corridorWidth must be greater than zero and at most 1000 meters.",
+        )
+    return width
+
+
+def _aisle_centerline(value: Any) -> List[Dict[str, float]]:
+    if not isinstance(value, list) or not 2 <= len(value) <= 4096:
+        _fail(
+            "invalid_operation_field",
+            "centerline must contain between 2 and 4096 points.",
+        )
+    result: List[Dict[str, float]] = []
+    for index, raw_point in enumerate(value):
+        point = _mapping(raw_point, f"centerline[{index}]")
+        if set(point) != {"x", "y", "z"}:
+            _fail(
+                "invalid_operation_field",
+                f"centerline[{index}] must contain x, y, and z.",
+            )
+        normalized: Dict[str, float] = {}
+        for axis in ("x", "y", "z"):
+            coordinate = point[axis]
+            if isinstance(coordinate, bool) or not isinstance(coordinate, (int, float)):
+                _fail(
+                    "invalid_operation_field",
+                    f"centerline[{index}].{axis} must be a number.",
+                )
+            normalized[axis] = float(coordinate)
+        result.append(normalized)
+    return result
+
+
+def _aisle_route(
+    request: Mapping[str, Any],
+    *,
+    base_revision: str,
+    existing: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    aisle = deepcopy(dict(request))
+    current = deepcopy(dict(existing or {}))
+    extensions = current.get("extensions")
+    existing_extension = (
+        extensions.get("facilityAisle")
+        if isinstance(extensions, Mapping)
+        and isinstance(extensions.get("facilityAisle"), Mapping)
+        else {}
+    )
+    aisle_kind = _aisle_kind(
+        aisle.get("aisleKind", existing_extension.get("aisleKind"))
+    )
+    direction = _aisle_direction(
+        aisle.get("direction", existing_extension.get("direction", "two_way"))
+    )
+    color = _aisle_color(
+        aisle.get("color", existing_extension.get("color", "#d9a514"))
+    )
+    centerline = _aisle_centerline(
+        aisle.get("centerline", current.get("centerline"))
+    )
+    width = _aisle_width(
+        aisle.get("corridorWidth", current.get("corridorWidth"))
+    )
+    label = _clean_label(aisle.get("label", current.get("label")), "label")
+    status = aisle.get(
+        "clearanceEvidenceStatus",
+        existing_extension.get("clearanceEvidenceStatus", "unverified"),
+    )
+    if status not in {"authored", "derived", "inferred", "unknown", "unverified"}:
+        _fail(
+            "invalid_operation_field",
+            "clearanceEvidenceStatus is unsupported.",
+        )
+    route_kind = {
+        "forklift": "forklift",
+        "pedestrian": "operator",
+        "material": "material",
+    }[aisle_kind]
+    route = {
+        "label": label,
+        "routeKind": route_kind,
+        "sourceEndpoint": {
+            "kind": "world_point",
+            "position": deepcopy(centerline[0]),
+        },
+        "targetEndpoint": {
+            "kind": "world_point",
+            "position": deepcopy(centerline[-1]),
+        },
+        "routingMode": "vehicle" if aisle_kind == "forklift" else "polyline",
+        "centerline": centerline,
+        "corridorWidth": width,
+        "routeFingerprint": "0" * 64,
+        "sourceRevisions": deepcopy(
+            current.get("sourceRevisions")
+            if isinstance(current.get("sourceRevisions"), Mapping)
+            else {"layoutBaseRevision": base_revision}
+        ),
+        "requirements": deepcopy(
+            current.get("requirements")
+            if isinstance(current.get("requirements"), list)
+            else []
+        ),
+        "evidence": deepcopy(
+            current.get("evidence")
+            if isinstance(current.get("evidence"), list)
+            else []
+        ),
+        "extensions": {
+            "facilityAisle": {
+                "schemaVersion": 1,
+                "aisleKind": aisle_kind,
+                "direction": direction,
+                "color": color,
+                "clearanceEvidenceStatus": str(status),
+            },
+        },
+    }
+    route["routeFingerprint"] = persisted_route_fingerprint(route)
+    return route
+
+
+def _op_add_aisle(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    index: int,
+    base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    route = _aisle_route(
+        _mapping(operation.get("aisle"), "aisle"),
+        base_revision=base_revision,
+    )
+    requested = operation.get("routeId")
+    if requested is not None:
+        route["routeId"] = requested
+    return _insert_top_level_object(
+        document,
+        {"op": "add_route", "route": route},
+        index,
+        base_revision,
+        collection="routes",
+        value_field="route",
+        id_field="routeId",
+        prefix="rt",
+    )
+
+
+def _op_edit_aisle(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    route_id = _clean_id(operation.get("routeId"), "routeId", "rt")
+    target = _find(document, "routes", "routeId", route_id, "Route")
+    extensions = target.get("extensions")
+    if not isinstance(extensions, Mapping) or not isinstance(
+        extensions.get("facilityAisle"), Mapping
+    ):
+        _fail(
+            "operation_target_type_mismatch",
+            f"Route '{route_id}' is not a facility aisle.",
+        )
+    rebuilt = _aisle_route(
+        _mapping(operation.get("patch"), "patch"),
+        base_revision=base_revision,
+        existing=target,
+    )
+    target.clear()
+    target.update(rebuilt)
+    target["routeId"] = route_id
+    return [], [route_id]
 
 
 def _op_edit_route(
@@ -1113,6 +1689,59 @@ def _op_detach_process_binding(
     return [], [binding_id]
 
 
+def _op_set_plan_settings(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    try:
+        settings = normalize_plan_settings(
+            _mapping(operation.get("planSettings"), "planSettings")
+        )
+    except ValueError as exc:
+        _fail("invalid_operation_field", str(exc))
+    extensions = document.setdefault("extensions", {})
+    if not isinstance(extensions, dict):
+        _fail("invalid_layout_shape", "extensions must be an object.")
+    extensions[PLAN_SETTINGS_EXTENSION_KEY] = settings
+    return [], []
+
+
+def _op_clear_layout_contents(
+    document: Dict[str, Any],
+    _operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    """Clear authored spatial contents while preserving document settings."""
+
+    identifier_fields = {
+        "zones": "zoneId",
+        "floorMarkings": "markingId",
+        "placements": "placementId",
+        "routes": "routeId",
+        "utilityNetworks": "utilityNetworkId",
+        "processBindings": "processBindingId",
+        "dismissedSuggestions": "suggestionId",
+    }
+    affected: List[str] = []
+    for collection_name, identifier_field in identifier_fields.items():
+        values = document.get(collection_name, [])
+        if not isinstance(values, list):
+            _fail(
+                "invalid_layout_shape",
+                f"{collection_name} must be an array.",
+            )
+        affected.extend(
+            str(value.get(identifier_field))
+            for value in values
+            if isinstance(value, Mapping) and value.get(identifier_field)
+        )
+        document[collection_name] = []
+    return [], affected
+
+
 _Handler = Callable[
     [Dict[str, Any], Mapping[str, Any], int, str],
     Tuple[List[str], List[str]],
@@ -1124,6 +1753,9 @@ _HANDLERS: Dict[str, _Handler] = {
     "add_zone": _op_add_zone,
     "edit_zone": _op_edit_zone,
     "delete_zone": _op_delete_zone,
+    "add_floor_marking": _op_add_floor_marking,
+    "edit_floor_marking": _op_edit_floor_marking,
+    "delete_floor_marking": _op_delete_floor_marking,
     "place_asset": _op_place_asset,
     "move_placement": _op_move_placement,
     "rotate_placement": _op_rotate_placement,
@@ -1132,6 +1764,8 @@ _HANDLERS: Dict[str, _Handler] = {
     "set_position_mode": _op_set_position_mode,
     "set_snap_relationship": _op_set_snap_relationship,
     "add_route": _op_add_route,
+    "add_aisle": _op_add_aisle,
+    "edit_aisle": _op_edit_aisle,
     "edit_route": _op_edit_route,
     "delete_route": _op_delete_route,
     "add_utility_network": _op_add_utility_network,
@@ -1146,6 +1780,8 @@ _HANDLERS: Dict[str, _Handler] = {
     "attach_process_binding": _op_attach_process_binding,
     "edit_process_binding": _op_edit_process_binding,
     "detach_process_binding": _op_detach_process_binding,
+    "set_plan_settings": _op_set_plan_settings,
+    "clear_layout_contents": _op_clear_layout_contents,
 }
 
 
@@ -1183,6 +1819,7 @@ def create_layout_document(
         "sourceShellRef": _mapping(source_shell_ref, "source_shell_ref"),
         "policySetRef": _mapping(policy_set_ref, "policy_set_ref"),
         "zones": [],
+        "floorMarkings": [],
         "placements": [],
         "routes": [],
         "utilityNetworks": [],
@@ -1277,6 +1914,10 @@ def apply_facility_layout_operations(
                 index,
                 effective_base_revision,
             )
+            affected.extend(_apply_seed_layout_provenance(
+                after,
+                operation,
+            ))
         except FacilityLayoutOperationError as exc:
             if exc.operation_index is None:
                 exc.operation_index = index

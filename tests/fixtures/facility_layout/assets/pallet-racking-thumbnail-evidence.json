@@ -72,7 +72,7 @@
   "passed": true,
   "renderer": {
     "background": "#e8edf2",
-    "browser": "150.0.4078.99",
+    "browser": "151.0.4129.59",
     "camera": {
       "direction": [
         0.6301408648309204,
@@ -97,9 +97,10 @@
     "fovDegrees": 35.0,
     "gltfLoaderSha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
     "renderCalls": 10,
-    "renderPlanSha256": "e23aaa1d97ef3540dc51f0deff6ce8c0585ca328190d007ee03cdedcc8fbd359",
+    "renderPlanSha256": "2f6bd20fcef84e669ea6c146b1bdef537e8509c3043a91ae95b416a311ec787e",
     "renderedTriangles": 161480,
-    "runnerSha256": "a7e1c921972a1aa633af1e9457fb74f16d58835de3c7b711d31db6f92193f92b",
+    "runnerSha256": "109d35aba20b5d2c2ec6541baa1e3ca8e0232657d4bc1ed92ce85bd9b89d5c6d",
+    "sourceTransform": null,
     "threeModuleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a",
     "threeRevision": "184"
   },

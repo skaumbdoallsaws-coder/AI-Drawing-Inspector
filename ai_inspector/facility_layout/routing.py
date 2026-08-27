@@ -669,6 +669,39 @@ def resolve_endpoint(
             ),
             "findings": [],
         }
+    elif kind == "world_point":
+        try:
+            position = _vector3(endpoint.get("position"), "endpoint.position")
+        except ValueError as exc:
+            return _failed_resolution(
+                endpoint,
+                _finding(
+                    "invalid_connector_geometry",
+                    "error",
+                    str(exc),
+                ),
+            )
+        canonical_position = _vector_dict(position)
+        result = {
+            "resolved": True,
+            "endpoint": deepcopy(dict(endpoint)),
+            "qualifiedEndpointId": (
+                "world:"
+                f"{canonical_position['x']}:"
+                f"{canonical_position['y']}:"
+                f"{canonical_position['z']}"
+            ),
+            "endpointKind": kind,
+            "position": canonical_position,
+            "facing": {"x": 0.0, "y": 0.0, "z": 1.0},
+            "serviceType": str(route_kind or ""),
+            "role": "bidirectional",
+            "allowedRouteKinds": sorted(ROUTE_KINDS),
+            "interface": {},
+            "capacity": {},
+            "evidenceStatus": "unverified",
+            "findings": [],
+        }
     else:
         return _failed_resolution(
             endpoint,
@@ -709,6 +742,152 @@ def resolve_endpoint(
         item["severity"] in {"error", "blocked"} for item in result["findings"]
     )
     return result
+
+
+def validate_facility_aisle_route(
+    layout: Mapping[str, Any],
+    route: Mapping[str, Any],
+    *,
+    endpoint_tolerance_meters: float = 0.01,
+) -> dict[str, Any]:
+    """Validate a planning aisle without upgrading it to a vehicle path."""
+
+    route_id = str(route.get("routeId") or "")
+    route_kind = str(route.get("routeKind") or "")
+    findings: list[Mapping[str, Any]] = []
+    if route_kind not in ROUTE_KINDS:
+        findings.append(
+            _finding(
+                "route_kind_invalid",
+                "error",
+                "Route kind is unsupported.",
+                subjects=(route_id, route_kind),
+            )
+        )
+    source = resolve_endpoint(
+        layout,
+        route.get("sourceEndpoint") or {},
+        route_kind=route_kind,
+        direction="source",
+    )
+    target = resolve_endpoint(
+        layout,
+        route.get("targetEndpoint") or {},
+        route_kind=route_kind,
+        direction="target",
+    )
+    findings.extend(source.get("findings", []))
+    findings.extend(target.get("findings", []))
+    if (
+        source.get("resolved")
+        and target.get("resolved")
+        and source.get("qualifiedEndpointId") == target.get("qualifiedEndpointId")
+    ):
+        findings.append(
+            _finding(
+                "route_self_connection",
+                "error",
+                "An aisle cannot begin and end at the same world point.",
+                subjects=(route_id, str(source.get("qualifiedEndpointId"))),
+            )
+        )
+    raw_centerline = route.get("centerline")
+    centerline = (
+        [item for item in raw_centerline if isinstance(item, Mapping)]
+        if isinstance(raw_centerline, list)
+        else []
+    )
+    if len(centerline) < 2:
+        findings.append(
+            _finding(
+                "aisle_centerline_invalid",
+                "error",
+                "An aisle centerline requires at least two world points.",
+                subjects=(route_id,),
+            )
+        )
+    elif source.get("resolved") and target.get("resolved"):
+        tolerance = max(
+            0.0,
+            _finite(endpoint_tolerance_meters, "endpoint_tolerance_meters"),
+        )
+        for label, point, resolved in (
+            ("source", centerline[0], source),
+            ("target", centerline[-1], target),
+        ):
+            distance = math.dist(
+                _vector3(point, f"{label}.centerline"),
+                _vector3(resolved.get("position"), f"{label}.position"),
+            )
+            if distance > tolerance + EPSILON:
+                findings.append(
+                    _finding(
+                        "route_endpoint_geometry_mismatch",
+                        "error",
+                        "Aisle centerline does not terminate at its world endpoint.",
+                        subjects=(route_id, label),
+                        details={
+                            "distanceMeters": _round(distance),
+                            "maximumMeters": _round(tolerance),
+                        },
+                    )
+                )
+    expected_fingerprint = persisted_route_fingerprint(route)
+    if route.get("routeFingerprint") != expected_fingerprint:
+        findings.append(
+            _finding(
+                "stale_route_geometry",
+                "error",
+                "Aisle fingerprint does not match its persisted geometry.",
+                subjects=(route_id,),
+                details={
+                    "expectedFingerprint": expected_fingerprint,
+                    "actualFingerprint": route.get("routeFingerprint"),
+                },
+            )
+        )
+    extensions = route.get("extensions")
+    aisle = (
+        extensions.get("facilityAisle")
+        if isinstance(extensions, Mapping)
+        and isinstance(extensions.get("facilityAisle"), Mapping)
+        else {}
+    )
+    evidence_status = str(aisle.get("clearanceEvidenceStatus") or "unverified")
+    evidence = route.get("evidence")
+    has_evidence = isinstance(evidence, list) and bool(evidence)
+    if evidence_status in {"authored", "derived"} and not has_evidence:
+        findings.append(
+            _finding(
+                "aisle_authoritative_evidence_missing",
+                "error",
+                "Authoritative aisle clearance requires attached evidence.",
+                subjects=(route_id,),
+                details={"clearanceEvidenceStatus": evidence_status},
+            )
+        )
+    elif evidence_status not in {"authored", "derived"}:
+        findings.append(
+            _finding(
+                "aisle_clearance_unverified",
+                "warning",
+                "Aisle clearance is planning data and remains unverified.",
+                subjects=(route_id,),
+                details={"clearanceEvidenceStatus": evidence_status},
+            )
+        )
+    ordered = _sort_findings(findings)
+    return {
+        "routeId": route_id,
+        "valid": not any(
+            item["severity"] in {"error", "blocked"} for item in ordered
+        ),
+        "source": source,
+        "target": target,
+        "sweptVolume": None,
+        "findings": ordered,
+        "processSemantics": dict(PROCESS_SEMANTICS),
+    }
 
 
 def _interface_findings(

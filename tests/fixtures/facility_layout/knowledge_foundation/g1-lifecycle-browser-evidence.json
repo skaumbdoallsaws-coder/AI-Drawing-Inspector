@@ -1,0 +1,191 @@
+{
+  "checks": {
+    "brownfield_request_is_dynamic": true,
+    "concurrent_save_and_generation_completed": true,
+    "different_dimensions_and_labels_recompiled": true,
+    "first_completed": true,
+    "no_console_errors": true,
+    "no_failed_responses": true,
+    "no_page_errors": true,
+    "no_session_busy": true,
+    "undo_restored_saved_base": true,
+    "unsaved_followup_superseded": true
+  },
+  "errors": {
+    "console": [],
+    "failedResponses": [],
+    "page": []
+  },
+  "passed": true,
+  "results": {
+    "concurrent": {
+      "generation": {
+        "completedStageCount": 10,
+        "cumulativeDiffHash": "07aa7fe1e6b246259419aacbbae3e74bdb2326c154f7b1ae4def2b76da1d9f61",
+        "departmentCount": 5,
+        "departmentLabels": [
+          "Inbound",
+          "Cutting",
+          "Welding",
+          "Assembly",
+          "Dispatch"
+        ],
+        "facilityEnvelope": {
+          "depth": 90,
+          "sourceUnit": "m",
+          "width": 120
+        },
+        "intentMode": "brownfield",
+        "ok": true,
+        "previewOnly": false,
+        "prototypeMode": true,
+        "receiptCount": 10,
+        "replacedUnsavedDraft": false,
+        "runId": "fgr-63bbd281372d43e7986324d5dc856ae3",
+        "saveEligibility": "eligible",
+        "saved": false,
+        "status": "complete",
+        "supersededRunId": "fgr-7d087abd46d04150a8c50a88308e1f93",
+        "unsavedDraft": true,
+        "validationStatus": "valid"
+      }
+    },
+    "first": {
+      "completedStageCount": 10,
+      "cumulativeDiffHash": "e31fa38c937344733a714c95cb3ebfa4a98cfd332f0cb5903c0e51c55a61166b",
+      "departmentCount": 4,
+      "departmentLabels": [
+        "Receiving",
+        "Machining",
+        "Assembly",
+        "Shipping"
+      ],
+      "facilityEnvelope": {
+        "depth": 80,
+        "sourceUnit": "m",
+        "width": 100
+      },
+      "intentMode": "greenfield",
+      "ok": true,
+      "previewOnly": false,
+      "prototypeMode": true,
+      "receiptCount": 10,
+      "replacedUnsavedDraft": false,
+      "runId": "fgr-fb48b177e27a42899943ea7a7388ed44",
+      "saveEligibility": "eligible",
+      "saved": false,
+      "status": "complete",
+      "supersededRunId": null,
+      "unsavedDraft": true,
+      "validationStatus": "valid"
+    },
+    "second": {
+      "completedStageCount": 10,
+      "cumulativeDiffHash": "d61c378aabb2d4354316a613dca1f3ca3d3a7d9aca2dc63ade9206c616616a43",
+      "departmentCount": 4,
+      "departmentLabels": [
+        "Stores",
+        "Fabrication",
+        "Build",
+        "Quality"
+      ],
+      "facilityEnvelope": {
+        "depth": 100,
+        "sourceUnit": "m",
+        "width": 100
+      },
+      "intentMode": "greenfield",
+      "ok": true,
+      "previewOnly": false,
+      "prototypeMode": true,
+      "receiptCount": 10,
+      "replacedUnsavedDraft": false,
+      "runId": "fgr-7d087abd46d04150a8c50a88308e1f93",
+      "saveEligibility": "eligible",
+      "saved": false,
+      "status": "complete",
+      "supersededRunId": "fgr-fb48b177e27a42899943ea7a7388ed44",
+      "unsavedDraft": true,
+      "validationStatus": "valid"
+    }
+  },
+  "schemaVersion": "facility-layout-g1-lifecycle-browser-evidence-v1",
+  "screenshot": "tests/fixtures/facility_layout/knowledge_foundation/g1-lifecycle-browser.png",
+  "states": {
+    "first": {
+      "baseLabels": [],
+      "busy": false,
+      "canSave": true,
+      "depthMeters": 80,
+      "dirty": true,
+      "labels": [
+        "Receiving",
+        "Machining",
+        "Assembly",
+        "Shipping"
+      ],
+      "runId": "fgr-fb48b177e27a42899943ea7a7388ed44",
+      "status": "complete",
+      "widthMeters": 100
+    },
+    "restored": {
+      "baseLabels": [
+        "Stores",
+        "Fabrication",
+        "Build",
+        "Quality"
+      ],
+      "busy": false,
+      "canSave": false,
+      "depthMeters": 100,
+      "dirty": false,
+      "labels": [
+        "Stores",
+        "Fabrication",
+        "Build",
+        "Quality"
+      ],
+      "runId": null,
+      "status": null,
+      "widthMeters": 100
+    },
+    "second": {
+      "baseLabels": [],
+      "busy": false,
+      "canSave": true,
+      "depthMeters": 100,
+      "dirty": true,
+      "labels": [
+        "Stores",
+        "Fabrication",
+        "Build",
+        "Quality"
+      ],
+      "runId": "fgr-7d087abd46d04150a8c50a88308e1f93",
+      "status": "complete",
+      "widthMeters": 100
+    },
+    "third": {
+      "baseLabels": [
+        "Stores",
+        "Fabrication",
+        "Build",
+        "Quality"
+      ],
+      "busy": false,
+      "canSave": true,
+      "depthMeters": 90,
+      "dirty": true,
+      "labels": [
+        "Inbound",
+        "Cutting",
+        "Welding",
+        "Assembly",
+        "Dispatch"
+      ],
+      "runId": "fgr-63bbd281372d43e7986324d5dc856ae3",
+      "status": "complete",
+      "widthMeters": 120
+    }
+  }
+}

@@ -1,0 +1,1296 @@
+{
+  "baselineDisposition": {
+    "changedSurfaceSuitesGreen": true,
+    "facilityReleaseBlockedByQuarantines": true,
+    "facilityReleaseEvidenceCurrent": false,
+    "kf0ExitEligible": true,
+    "quarantinedFailureCount": 13,
+    "rawFailureCount": 13,
+    "unexplainedFailureCount": 0
+  },
+  "baselineRuns": {
+    "browserJavaScript": {
+      "artifact": {
+        "byteLength": 2999,
+        "path": ".runtime/kf0/browser-tests.json",
+        "sha256": "317b59c1e1fb895f9742e92201da05f9c59f2180801cfd27c5717ca6b98246f9"
+      },
+      "failedFiles": [],
+      "fileCount": 11,
+      "passed": 250,
+      "total": 250
+    },
+    "deterministicIntelligence": {
+      "artifact": {
+        "byteLength": 118871,
+        "path": ".runtime/kf0/intelligence-evaluation.json",
+        "sha256": "f597ca9b725aceccf68914cd508a9621fe53758e911302a7186cdb9643d5ee58"
+      },
+      "effectiveConfiguration": {
+        "apiKeyRecorded": false,
+        "futureFacilityScopedEnvironmentVariables": [
+          "INSPECTORPRO_FACILITY_LAYOUT_SAGE_PROVIDER",
+          "INSPECTORPRO_FACILITY_LAYOUT_SAGE_ANTHROPIC_MODEL",
+          "INSPECTORPRO_FACILITY_LAYOUT_SAGE_OPENAI_MODEL",
+          "INSPECTORPRO_FACILITY_LAYOUT_SAGE_OPENAI_REASONING_EFFORT"
+        ],
+        "model": "claude-sonnet-4-5-20250929",
+        "modelSource": "SAGE_ANTHROPIC_MODEL_DEFAULT",
+        "provider": "anthropic",
+        "providerSource": "forced_for_non_deviation_agent",
+        "reasoningEffort": null,
+        "reasoningEffortSource": "not_applicable_for_anthropic",
+        "sharedOpenAiReasoningEffortObserved": null,
+        "sharedProviderOverrideObserved": null
+      },
+      "networkCalls": 0,
+      "providerCalls": 0,
+      "status": "passed",
+      "summary": {
+        "checkCount": 102,
+        "criticalFailureCount": 0,
+        "criticalFailureIds": [],
+        "failedCount": 0,
+        "failedGates": [],
+        "missingSourceBindings": [],
+        "passPercent": 100.0,
+        "passedCount": 102,
+        "structuralConversationCaseCount": 71
+      }
+    },
+    "facilityPython": {
+      "artifact": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "command": "python -m pytest <45 Facility Python files> -q -p no:cacheprovider",
+      "failed": 13,
+      "failures": [
+        {
+          "message": "assert True == False",
+          "testId": "tests.test_facility_layout_accessibility_audit::test_checked_in_raw_and_summary_are_consistent_when_present"
+        },
+        {
+          "message": "AssertionError: assert '940ea28d31af...b5a4d0c7d1a1e' == 'f5ff1792a259...062c738252c77'\n  \n  - f5ff1792a25944b6c32adf3a8f36ab82988b1d5824afd9b1785062c738252c77\n  + 940ea28d31af79182a3a5b23a655b95e170cf0f1d616c39c457b5a4d0c7d1a1e",
+          "testId": "tests.test_facility_layout_backend_release_benchmark::test_committed_artifact_is_bound_to_generated_fixtures_and_sources"
+        },
+        {
+          "message": "assert False is True",
+          "testId": "tests.test_facility_layout_p11_release::test_static_accessibility_and_visual_manifests_are_source_bound"
+        },
+        {
+          "message": "assert False is True",
+          "testId": "tests.test_facility_layout_p11_release::test_licensing_inventory_covers_vendored_javascript_and_blocks_assets"
+        },
+        {
+          "message": "assert False is True",
+          "testId": "tests.test_facility_layout_p11_release::test_consolidated_verdict_is_derived_and_retains_external_gates"
+        },
+        {
+          "message": "AssertionError: assert 'build_changed' == 'not_started'\n  \n  - not_started\n  + build_changed",
+          "testId": "tests.test_facility_layout_p11_soak::test_accelerated_soak_proves_mechanics_but_not_elapsed_time"
+        },
+        {
+          "message": "AssertionError: assert '9664ccc0e961...ac9d9cc891b24' == '47b4b99744a1...f38b1affb8b59'\n  \n  - 47b4b99744a1563075640782c6b92e8a3681ccbb666fc7ef924f38b1affb8b59\n  + 9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24",
+          "testId": "tests.test_facility_layout_p4_renderer::test_p4_browser_evidence_is_complete_and_bound_to_sources"
+        },
+        {
+          "message": "AssertionError: assert '9664ccc0e961...ac9d9cc891b24' == '47b4b99744a1...f38b1affb8b59'\n  \n  - 47b4b99744a1563075640782c6b92e8a3681ccbb666fc7ef924f38b1affb8b59\n  + 9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24",
+          "testId": "tests.test_facility_layout_p5_authoring::test_p5_browser_evidence_is_complete_and_bound_to_real_sources"
+        },
+        {
+          "message": "AssertionError: assert '9156e79d6ed3...d06544db846de' == '83e4f3e17360...eb0e3f9a4b58b'\n  \n  - 83e4f3e17360c06ef08980a596423844fbca406298c844b8f3deb0e3f9a4b58b\n  + 9156e79d6ed390e23cce6fa2b63a3fbc15ce2c6bc478b900cf2d06544db846de",
+          "testId": "tests.test_facility_layout_p5_product::test_product_evidence_is_bound_to_current_sources"
+        },
+        {
+          "message": "AssertionError: assert '9156e79d6ed3...d06544db846de' == '83e4f3e17360...eb0e3f9a4b58b'\n  \n  - 83e4f3e17360c06ef08980a596423844fbca406298c844b8f3deb0e3f9a4b58b\n  + 9156e79d6ed390e23cce6fa2b63a3fbc15ce2c6bc478b900cf2d06544db846de",
+          "testId": "tests.test_facility_layout_p6_product::test_p6_product_evidence_is_bound_to_current_sources"
+        },
+        {
+          "message": "AssertionError: assert '9156e79d6ed3...d06544db846de' == '83e4f3e17360...eb0e3f9a4b58b'\n  \n  - 83e4f3e17360c06ef08980a596423844fbca406298c844b8f3deb0e3f9a4b58b\n  + 9156e79d6ed390e23cce6fa2b63a3fbc15ce2c6bc478b900cf2d06544db846de",
+          "testId": "tests.test_facility_layout_p8_product::test_p8_product_evidence_is_bound_to_current_sources"
+        },
+        {
+          "message": "AssertionError: assert '47729847c63e...db8b54145be0d' == '729ddfa0ad96...be38025d1c25d'\n  \n  - 729ddfa0ad961add0ec1b66a4423f35f20dedb8bd97db09815bbe38025d1c25d\n  + 47729847c63e0b6b8b3027a60259609e2f1cc81ba1d1c4f2a3ddb8b54145be0d",
+          "testId": "tests.test_facility_layout_p9_product::test_p9_product_evidence_is_bound_to_current_sources"
+        },
+        {
+          "message": "AssertionError: assert ['source_hash..._layout', ...] == []\n  \n  Left contains 12 more items, first extra item: 'source_hash_mismatch:facility_layout_editor'\n  Use -v to get more diff",
+          "testId": "tests.test_facility_layout_release_performance_benchmark::test_smoke_artifacts_are_source_bound_and_cover_real_adapters"
+        }
+      ],
+      "passed": 656,
+      "skipped": 1,
+      "skippedTestIds": [
+        "tests.test_facility_layout_spatial::test_candidate_generation_p95_at_500_placements_is_within_contract"
+      ],
+      "total": 670
+    },
+    "focusedAgentPython": {
+      "artifact": {
+        "byteLength": 11994,
+        "path": ".runtime/kf0/agent-python.xml",
+        "sha256": "0c11f1396db280f40265b329a7f18542ebdde2090dfcdf6e5b1fe1528bf04276"
+      },
+      "command": "python -m pytest <7 focused agent/provider files> -q -p no:cacheprovider",
+      "failed": 0,
+      "failures": [],
+      "passed": 85,
+      "skipped": 0,
+      "skippedTestIds": [],
+      "total": 85
+    },
+    "savedLayoutSmoke": {
+      "allAssertionsPassed": true,
+      "artifact": {
+        "byteLength": 2189,
+        "path": ".runtime/kf0/saved-layout-smoke.json",
+        "sha256": "edfa855a7bea62808f4450438c4ff16c21abed974d0fc242ff8594f544159e5b"
+      },
+      "assertionCount": 10,
+      "networkCalls": 0,
+      "providerCalls": 0,
+      "status": "passed"
+    }
+  },
+  "classification": {
+    "agentToolCount": 14,
+    "capabilityGapCount": 10,
+    "evaluationCaseCount": 71,
+    "featureFlagCount": 7,
+    "semanticCommandCount": 39
+  },
+  "fixtures": {
+    "evaluation": {
+      "cases": [
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "A1",
+          "suite": "hierarchy"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "A2",
+          "suite": "hierarchy"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "A3",
+          "suite": "hierarchy"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "A4",
+          "suite": "hierarchy"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "A5",
+          "suite": "hierarchy"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "A6",
+          "suite": "hierarchy"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "B1",
+          "suite": "area"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "B2",
+          "suite": "area"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "B3",
+          "suite": "area"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "B4",
+          "suite": "area"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "B5",
+          "suite": "area"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "B6",
+          "suite": "area"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "C1",
+          "suite": "cell_semantics"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "C2",
+          "suite": "cell_semantics"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "C3",
+          "suite": "cell_semantics"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "C4",
+          "suite": "cell_semantics"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "C5",
+          "suite": "cell_semantics"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "D1",
+          "suite": "fit_capacity"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "D2",
+          "suite": "fit_capacity"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "D3",
+          "suite": "fit_capacity"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "D4",
+          "suite": "fit_capacity"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "E1",
+          "suite": "alternatives"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "E2",
+          "suite": "alternatives"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "E3",
+          "suite": "alternatives"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "F1",
+          "suite": "routes"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "F2",
+          "suite": "routes"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "F3",
+          "suite": "routes"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "G1",
+          "suite": "clearance"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "G2",
+          "suite": "clearance"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "G3",
+          "suite": "clearance"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "H1",
+          "suite": "process_flow"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "H2",
+          "suite": "process_flow"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "I1",
+          "suite": "asset_semantics"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "I2",
+          "suite": "asset_semantics"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "J1",
+          "suite": "charts"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "J2",
+          "suite": "charts"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "J3",
+          "suite": "charts"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "J4",
+          "suite": "charts"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "J5",
+          "suite": "charts"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "K1",
+          "suite": "command_authorization"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "K2",
+          "suite": "command_authorization"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "K3",
+          "suite": "command_authorization"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "K4",
+          "suite": "command_authorization"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "K5",
+          "suite": "command_authorization"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "L1",
+          "suite": "view_context"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "L2",
+          "suite": "view_context"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "M1",
+          "suite": "follow_up"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "M2",
+          "suite": "follow_up"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "M3",
+          "suite": "follow_up"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "M4",
+          "suite": "follow_up"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "M5",
+          "suite": "follow_up"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "N1",
+          "suite": "uncertainty"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "N2",
+          "suite": "uncertainty"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "N3",
+          "suite": "uncertainty"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "V1",
+          "suite": "unit_variant"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "V2",
+          "suite": "language_variant"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "V3",
+          "suite": "language_variant"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "V4",
+          "suite": "data_quality_variant"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R1",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R2",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R3",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R4",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R5",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R6",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R7",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R8",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R9",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R10",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R11",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R12",
+          "suite": "independent_review_regression"
+        },
+        {
+          "classification": "regression_visible",
+          "heldOut": false,
+          "id": "R13",
+          "suite": "independent_review_regression"
+        }
+      ],
+      "classification": "regression_visible_not_held_out",
+      "count": 71,
+      "source": {
+        "byteLength": 25148,
+        "path": "tests/fixtures/facility_layout/semantic_intelligence/evaluation-cases-v1.json",
+        "sha256": "be2ebf61636a7c4dcf2b70bfeb68e94f5eff50642c738849b8730a86ecc0388e"
+      },
+      "suiteCounts": {
+        "alternatives": 3,
+        "area": 6,
+        "asset_semantics": 2,
+        "cell_semantics": 5,
+        "charts": 5,
+        "clearance": 3,
+        "command_authorization": 5,
+        "data_quality_variant": 1,
+        "fit_capacity": 4,
+        "follow_up": 5,
+        "hierarchy": 6,
+        "independent_review_regression": 13,
+        "language_variant": 2,
+        "process_flow": 2,
+        "routes": 3,
+        "uncertainty": 3,
+        "unit_variant": 1,
+        "view_context": 2
+      }
+    },
+    "savedReferenceLayout": {
+      "byteLength": 446024,
+      "departments": 6,
+      "path": ".runtime/facility-layout/layouts/local/site-local/layouts/fl-main.json",
+      "placements": 827,
+      "revision": "8551e0b324df6dc17413d0ef8b6ad7f3bab438ba8558dc00320149bf7f855aa0",
+      "sha256": "8551e0b324df6dc17413d0ef8b6ad7f3bab438ba8558dc00320149bf7f855aa0",
+      "zones": 45
+    }
+  },
+  "generatedAtUtc": "2026-08-26T22:22:28Z",
+  "plan": {
+    "byteLength": 48077,
+    "path": "docs/facility-layout-sage-knowledge-foundation-plan.md",
+    "sha256": "f1ad5d529f174e5db003f163dedd81607c63464e40d2d5c676b5bd6c6d53f9b2"
+  },
+  "quarantines": [
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "stale_accessibility_capture",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Regenerate the full accessibility browser audit against the current source tree and commit matching raw and summary artifacts.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "assert True == False",
+      "owner": "facility-release-evidence",
+      "quarantineId": "KF0-Q01",
+      "reason": "The checked-in accessibility raw and summary artifacts predate current Facility UI sources, so recomputation correctly invalidates the stored pass.",
+      "testId": "tests.test_facility_layout_accessibility_audit::test_checked_in_raw_and_summary_are_consistent_when_present",
+      "testSource": {
+        "byteLength": 10478,
+        "path": "tests/test_facility_layout_accessibility_audit.py",
+        "sha256": "8ad4df107b4bc4f53c3b089520dedfdaeb8064537b29750fc8872d421d6aafe5"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "stale_backend_release_benchmark",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Run the full release-eligible backend benchmark on the approved hardware profile and commit its new source-bound artifact.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "AssertionError: assert '940ea28d31af...b5a4d0c7d1a1e' == 'f5ff1792a259...062c738252c77'\n  \n  - f5ff1792a25944b6c32adf3a8f36ab82988b1d5824afd9b1785062c738252c77\n  + 940ea28d31af79182a3a5b23a655b95e170cf0f1d616c39c457b5a4d0c7d1a1e",
+      "owner": "facility-performance-evidence",
+      "quarantineId": "KF0-Q02",
+      "reason": "The committed release benchmark is bound to an older source snapshot and cannot certify the current build.",
+      "testId": "tests.test_facility_layout_backend_release_benchmark::test_committed_artifact_is_bound_to_generated_fixtures_and_sources",
+      "testSource": {
+        "byteLength": 7922,
+        "path": "tests/test_facility_layout_backend_release_benchmark.py",
+        "sha256": "ed39fe5a9238f238135b793135e4330505161178f1fa510c286cfc8827e554e3"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "derived_release_gate_blocked",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Regenerate the upstream visual and accessibility evidence, then regenerate the consolidated P11 verdict.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "assert False is True",
+      "owner": "facility-release-evidence",
+      "quarantineId": "KF0-Q03",
+      "reason": "The consolidated visual gate correctly inherits the stale source-bound visual evidence and cannot remain green.",
+      "testId": "tests.test_facility_layout_p11_release::test_consolidated_verdict_is_derived_and_retains_external_gates",
+      "testSource": {
+        "byteLength": 12212,
+        "path": "tests/test_facility_layout_p11_release.py",
+        "sha256": "dd92c7fa77ceef9649c6868ec5c84a08c31676defbb13524e6b689c28a1b0d45"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "incomplete_licensing_inventory",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Update the vendored dependency inventory with license artifacts and complete the required human legal review.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "assert False is True",
+      "owner": "facility-licensing-review",
+      "quarantineId": "KF0-Q04",
+      "reason": "The vendored JavaScript inventory does not yet cover every current vendored artifact; legal readiness must remain blocked.",
+      "testId": "tests.test_facility_layout_p11_release::test_licensing_inventory_covers_vendored_javascript_and_blocks_assets",
+      "testSource": {
+        "byteLength": 12212,
+        "path": "tests/test_facility_layout_p11_release.py",
+        "sha256": "dd92c7fa77ceef9649c6868ec5c84a08c31676defbb13524e6b689c28a1b0d45"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "stale_visual_and_accessibility_manifest",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Recapture all required light, dark, desktop, mobile, WebGL recovery, and accessibility artifacts against current sources.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "assert False is True",
+      "owner": "facility-release-evidence",
+      "quarantineId": "KF0-Q05",
+      "reason": "P11 visual and accessibility manifests remain internally readable but their source bindings no longer match current UI files.",
+      "testId": "tests.test_facility_layout_p11_release::test_static_accessibility_and_visual_manifests_are_source_bound",
+      "testSource": {
+        "byteLength": 12212,
+        "path": "tests/test_facility_layout_p11_release.py",
+        "sha256": "dd92c7fa77ceef9649c6868ec5c84a08c31676defbb13524e6b689c28a1b0d45"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "elapsed_soak_build_changed",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Complete a new elapsed soak against one unchanged current build and commit its source-bound event ledger.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "AssertionError: assert 'build_changed' == 'not_started'\n  \n  - not_started\n  + build_changed",
+      "owner": "facility-soak-evidence",
+      "quarantineId": "KF0-Q06",
+      "reason": "The real elapsed-soak ledger belongs to an older build, so the verifier reports build_changed instead of treating it as current evidence.",
+      "testId": "tests.test_facility_layout_p11_soak::test_accelerated_soak_proves_mechanics_but_not_elapsed_time",
+      "testSource": {
+        "byteLength": 1325,
+        "path": "tests/test_facility_layout_p11_soak.py",
+        "sha256": "3b86ec8b3ed80a905c17efaee847e664fa92e8d97bba32834eb7337c2b777ba3"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "stale_p4_browser_capture",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Rerun the P4 browser verifier and commit a capture bound to current sources.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "AssertionError: assert '9664ccc0e961...ac9d9cc891b24' == '47b4b99744a1...f38b1affb8b59'\n  \n  - 47b4b99744a1563075640782c6b92e8a3681ccbb666fc7ef924f38b1affb8b59\n  + 9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24",
+      "owner": "facility-browser-evidence",
+      "quarantineId": "KF0-Q07",
+      "reason": "The P4 browser capture is bound to older editor and renderer source hashes.",
+      "testId": "tests.test_facility_layout_p4_renderer::test_p4_browser_evidence_is_complete_and_bound_to_sources",
+      "testSource": {
+        "byteLength": 3909,
+        "path": "tests/test_facility_layout_p4_renderer.py",
+        "sha256": "b8bc82989149301da2d4efb2267d9be44d50cf6a286fd31df7fabfed176c2446"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "stale_p5_authoring_capture",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Rerun the P5 authoring verifier and commit current source-bound evidence.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "AssertionError: assert '9664ccc0e961...ac9d9cc891b24' == '47b4b99744a1...f38b1affb8b59'\n  \n  - 47b4b99744a1563075640782c6b92e8a3681ccbb666fc7ef924f38b1affb8b59\n  + 9664ccc0e961728779d591cd10fe3c9ff7479df5f4c9a68b24bac9d9cc891b24",
+      "owner": "facility-browser-evidence",
+      "quarantineId": "KF0-Q08",
+      "reason": "The P5 authoring capture is bound to older editor, workspace, or renderer source hashes.",
+      "testId": "tests.test_facility_layout_p5_authoring::test_p5_browser_evidence_is_complete_and_bound_to_real_sources",
+      "testSource": {
+        "byteLength": 7605,
+        "path": "tests/test_facility_layout_p5_authoring.py",
+        "sha256": "33ce869c7627f57e4ce4553ee835b1cd9c886a86ccaa2a28f38cfea82a2fcfc3"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "stale_p5_product_capture",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Rerun the P5 product verifier and commit current source-bound evidence.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "AssertionError: assert '9156e79d6ed3...d06544db846de' == '83e4f3e17360...eb0e3f9a4b58b'\n  \n  - 83e4f3e17360c06ef08980a596423844fbca406298c844b8f3deb0e3f9a4b58b\n  + 9156e79d6ed390e23cce6fa2b63a3fbc15ce2c6bc478b900cf2d06544db846de",
+      "owner": "facility-browser-evidence",
+      "quarantineId": "KF0-Q09",
+      "reason": "The P5 product capture no longer matches the current app and workspace sources.",
+      "testId": "tests.test_facility_layout_p5_product::test_product_evidence_is_bound_to_current_sources",
+      "testSource": {
+        "byteLength": 3091,
+        "path": "tests/test_facility_layout_p5_product.py",
+        "sha256": "ba38fead3a1c8f351f3df09687553476c5c765d450b73a7ee45040f743d7b555"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "stale_p6_product_capture",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Rerun the P6 product verifier and commit current source-bound evidence.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "AssertionError: assert '9156e79d6ed3...d06544db846de' == '83e4f3e17360...eb0e3f9a4b58b'\n  \n  - 83e4f3e17360c06ef08980a596423844fbca406298c844b8f3deb0e3f9a4b58b\n  + 9156e79d6ed390e23cce6fa2b63a3fbc15ce2c6bc478b900cf2d06544db846de",
+      "owner": "facility-browser-evidence",
+      "quarantineId": "KF0-Q10",
+      "reason": "The P6 product capture no longer matches the current spatial and workspace sources.",
+      "testId": "tests.test_facility_layout_p6_product::test_p6_product_evidence_is_bound_to_current_sources",
+      "testSource": {
+        "byteLength": 2388,
+        "path": "tests/test_facility_layout_p6_product.py",
+        "sha256": "9f79ef00ccadfbbf754e38b329c609502fc2f8a1191961809a4018f7e574f25e"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "stale_p8_product_capture",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Rerun the P8 product verifier and commit current source-bound evidence.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "AssertionError: assert '9156e79d6ed3...d06544db846de' == '83e4f3e17360...eb0e3f9a4b58b'\n  \n  - 83e4f3e17360c06ef08980a596423844fbca406298c844b8f3deb0e3f9a4b58b\n  + 9156e79d6ed390e23cce6fa2b63a3fbc15ce2c6bc478b900cf2d06544db846de",
+      "owner": "facility-browser-evidence",
+      "quarantineId": "KF0-Q11",
+      "reason": "The P8 product capture no longer matches the current planner, service, and workspace sources.",
+      "testId": "tests.test_facility_layout_p8_product::test_p8_product_evidence_is_bound_to_current_sources",
+      "testSource": {
+        "byteLength": 2704,
+        "path": "tests/test_facility_layout_p8_product.py",
+        "sha256": "efcb97095e6bc6f4de74f451855413839f588ae8f7b571ab55b31545fb2ffa31"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "stale_p9_product_capture",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Rerun the P9 product verifier and commit current source-bound evidence.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "AssertionError: assert '47729847c63e...db8b54145be0d' == '729ddfa0ad96...be38025d1c25d'\n  \n  - 729ddfa0ad961add0ec1b66a4423f35f20dedb8bd97db09815bbe38025d1c25d\n  + 47729847c63e0b6b8b3027a60259609e2f1cc81ba1d1c4f2a3ddb8b54145be0d",
+      "owner": "facility-browser-evidence",
+      "quarantineId": "KF0-Q12",
+      "reason": "The P9 semantic product capture is bound to an older agent-runtime and server source snapshot.",
+      "testId": "tests.test_facility_layout_p9_product::test_p9_product_evidence_is_bound_to_current_sources",
+      "testSource": {
+        "byteLength": 2703,
+        "path": "tests/test_facility_layout_p9_product.py",
+        "sha256": "74870a03f274a1a0f7b57fb2a4188566276b10076cf4d7ace48e59d854c5cc82"
+      }
+    },
+    {
+      "baselineEvidence": {
+        "byteLength": 122586,
+        "path": ".runtime/kf0/facility-python.xml",
+        "sha256": "5de17f2c60f27c29d73e99e8694e23e0ddd7a99362e058caab4c23d3070ae6c1"
+      },
+      "blocksChangedSurfaceRegressionClaim": false,
+      "blocksFacilityReleaseClaim": true,
+      "category": "stale_browser_performance_smoke",
+      "changedSurfaceIntersection": false,
+      "disposition": "quarantined_release_evidence",
+      "expiryCondition": "Rerun the browser performance smoke and subsequent release profile against the current source tree and approved hardware.",
+      "nonIntersectionEvidence": {
+        "independentCurrentBehaviorEvidence": [
+          ".runtime/kf0/intelligence-evaluation.json",
+          ".runtime/kf0/saved-layout-smoke.json",
+          ".runtime/kf0/browser-tests.json",
+          ".runtime/kf0/agent-python.xml"
+        ],
+        "kf0ChangedSurface": [
+          "KF0 baseline tooling",
+          "KF0 machine-readable contracts",
+          "KF0 contract tests"
+        ],
+        "reason": "This test validates historical release certification or an external release gate, not the KF0 command, tool, budget, authority, or evaluation contracts."
+      },
+      "observedFailure": "AssertionError: assert ['source_hash..._layout', ...] == []\n  \n  Left contains 12 more items, first extra item: 'source_hash_mismatch:facility_layout_editor'\n  Use -v to get more diff",
+      "owner": "facility-performance-evidence",
+      "quarantineId": "KF0-Q13",
+      "reason": "The browser performance smoke contains measurements for an older set of twelve source hashes and is not current release evidence.",
+      "testId": "tests.test_facility_layout_release_performance_benchmark::test_smoke_artifacts_are_source_bound_and_cover_real_adapters",
+      "testSource": {
+        "byteLength": 10603,
+        "path": "tests/test_facility_layout_release_performance_benchmark.py",
+        "sha256": "55a66ba50807ab88f5226fdac9f9ec77527aa5f13a7da4b76963be3e59c2a2c9"
+      }
+    }
+  ],
+  "registryHashes": {
+    "agentToolRegistrySha256": "bfa5518982539247c9a1ade5d3fbe8a4d0a684c96f8effc0dea22b45202d26a3",
+    "capabilityGapsArtifactSha256": "953d320077db22cc3907fd9badde6e6fffcbcf36d0f50260c9098870d373f5e1",
+    "commandRegistrySha256": "94b27f82c4e7f02d518cc9f41cc8cf789312ae680931aa47a74958acbd5d3c7f",
+    "crosswalkArtifactSha256": "637cb0c09c143fd62834ca05b8e8b4a3828cc86352cb22d0d402cbadbc387d2e",
+    "decisionsArtifactSha256": "edc82309496c69ad070580b096fc478ac784aa20accd7426e96d1d3d4058225b"
+  },
+  "schemaVersion": "facility-layout-kf0-baseline-v1",
+  "sourceRevision": {
+    "gitCommit": "1a9093faa61eed23b39ac58ae5c6f69f99525fd1",
+    "sourceSnapshotSha256": "95f8768db639be89cec5e66b022e00366c36c8d6e92cdb950b4adc8f64ef6f9e",
+    "sources": [
+      {
+        "byteLength": 1677374,
+        "path": "server.py",
+        "sha256": "002092e7173702421a92f7aa49c955444d38f3290bce9ad90b3784b2367bb44c"
+      },
+      {
+        "byteLength": 86113,
+        "path": "ai_inspector/facility_layout/agent_runtime.py",
+        "sha256": "729ddfa0ad961add0ec1b66a4423f35f20dedb8bd97db09815bbe38025d1c25d"
+      },
+      {
+        "byteLength": 54463,
+        "path": "ai_inspector/facility_layout/authority_repository.py",
+        "sha256": "5c31782d07a1a3fe957a5d2e8504cff94ddc2391653ad924439871cf6410f896"
+      },
+      {
+        "byteLength": 25664,
+        "path": "ai_inspector/facility_layout/chat_context.py",
+        "sha256": "bd39931fb00abe4f2089fe170c3ce2c2fef954519b80d6fd068c5689a1e41cca"
+      },
+      {
+        "byteLength": 33485,
+        "path": "ai_inspector/facility_layout/chat_intent.py",
+        "sha256": "c300039d2971db11abd3a983c08c63eb11434694cb40099c1a5c3284e0c1a166"
+      },
+      {
+        "byteLength": 4149,
+        "path": "ai_inspector/facility_layout/feature_flags.py",
+        "sha256": "62cb8114f08a24a40b2748e6e7eb1da468ab3ff1568f9742b07eb89fbd7ae31c"
+      },
+      {
+        "byteLength": 22794,
+        "path": "ai_inspector/facility_layout/fit_analysis.py",
+        "sha256": "39ca4cabd9b5746a47b801691036822632076cda4a483fd43789fcdcd28b0555"
+      },
+      {
+        "byteLength": 97995,
+        "path": "ai_inspector/facility_layout/intelligence_evaluation.py",
+        "sha256": "ffa8130d47ff427d1f66f35039e8f583717601c337af54848729c5e099c1708e"
+      },
+      {
+        "byteLength": 84892,
+        "path": "ai_inspector/facility_layout/observation.py",
+        "sha256": "6c0b93577bd243543c11cf1d90a0f4811e4e1ae6ebbf257fa9b91484f26c0cd3"
+      },
+      {
+        "byteLength": 61543,
+        "path": "ai_inspector/facility_layout/operations.py",
+        "sha256": "153d2548ffa7c84d3e8e80f155ab72ecce02bcb8cd169fa6ae082a10dd1ad899"
+      },
+      {
+        "byteLength": 17199,
+        "path": "ai_inspector/facility_layout/orchestration.py",
+        "sha256": "2a628192646a59ff11bc50e681ea729b5506c0d76ce30af3d3cdcc3fa24c759a"
+      },
+      {
+        "byteLength": 5766,
+        "path": "ai_inspector/facility_layout/plan_settings.py",
+        "sha256": "6995ff3fa27f020db84db9d401755825f9d5853d7ceb0ef46fda6441025b025f"
+      },
+      {
+        "byteLength": 88869,
+        "path": "ai_inspector/facility_layout/planner.py",
+        "sha256": "418fe4af78d7a2d276b1945485eebadec1a7ed9915839913f7860cb3cb6a7a5a"
+      },
+      {
+        "byteLength": 303569,
+        "path": "ai_inspector/facility_layout/semantic_model.py",
+        "sha256": "1798a7406865d7259838653b2fdea01db27302b0490817dab293d5bf28e3801d"
+      },
+      {
+        "byteLength": 121589,
+        "path": "ai_inspector/facility_layout/semantic_plan.py",
+        "sha256": "29033ba3489935073ed4efe8d8d5841d98f47ce96a510612d3134bcb24983e4a"
+      },
+      {
+        "byteLength": 121077,
+        "path": "ai_inspector/facility_layout/service.py",
+        "sha256": "00d6a738a522c083287b6450eb1cd2e2ecfbcb1e18b3624d837d3d99dcfe99a5"
+      },
+      {
+        "byteLength": 177265,
+        "path": "ai_inspector/facility_layout/spatial.py",
+        "sha256": "940ea28d31af79182a3a5b23a655b95e170cf0f1d616c39c457b5a4d0c7d1a1e"
+      },
+      {
+        "byteLength": 849,
+        "path": "ai_inspector/agent_skills/generate-facility-layout/contract.yaml",
+        "sha256": "ea9b10a7c58956a8553048673363de015962ba929a0ce7e8802a7af6c5de8d9d"
+      },
+      {
+        "byteLength": 18486,
+        "path": "ai_inspector/agent_skills/generate-facility-layout/SKILL.md",
+        "sha256": "52707c13981fb567119c888433e51782a5008fe701bac1d8f300b76c04d2c8dc"
+      },
+      {
+        "byteLength": 9714,
+        "path": "static/facility_layout_app.js",
+        "sha256": "83e4f3e17360c06ef08980a596423844fbca406298c844b8f3deb0e3f9a4b58b"
+      },
+      {
+        "byteLength": 143618,
+        "path": "static/facility_layout_editor.js",
+        "sha256": "47b4b99744a1563075640782c6b92e8a3681ccbb666fc7ef924f38b1affb8b59"
+      },
+      {
+        "byteLength": 59133,
+        "path": "static/facility_layout_patterns.js",
+        "sha256": "370f943b28806043663aaf14c94e6393a0b7d1853de066482b125d2ccdfd10be"
+      },
+      {
+        "byteLength": 19188,
+        "path": "static/facility_layout_recorder.js",
+        "sha256": "df51fe0225fb85172e98cb520709d5445a1bbdf6f4d8eaea23a63a9f50c27e76"
+      },
+      {
+        "byteLength": 151953,
+        "path": "static/facility_layout_session.js",
+        "sha256": "d3a87e301cfd0683e28c435a8fdb8924a5514824f51505fa8957c2a4694a5533"
+      },
+      {
+        "byteLength": 346482,
+        "path": "static/facility_layout_three_adapter.js",
+        "sha256": "5950f41b5c595891061395f3bf98d8cccef9a67f22145743c7ca25f5deb951ed"
+      },
+      {
+        "byteLength": 548243,
+        "path": "static/facility_layout_workspace.js",
+        "sha256": "646ab50a0144164aa1c30f0d38bbbad05dab795491e91575574a3fbd6849d6e5"
+      },
+      {
+        "byteLength": 4447227,
+        "path": "static/index.html",
+        "sha256": "a24287a34c65518751bbda73d0cbab7d5108d0824510939e34c161e8b584b475"
+      },
+      {
+        "byteLength": 51822,
+        "path": "tools/build_facility_layout_kf0_baseline.py",
+        "sha256": "b5b5f99102f302a583e68aa0e4660cf64f52d78281b05eb28a7c70aed6179453"
+      },
+      {
+        "byteLength": 9512,
+        "path": "tests/test_facility_layout_kf0_knowledge_foundation.py",
+        "sha256": "ef87eb0159be3bdc2592c2d5375623f5d636962ceb41b34e9c83a33c227db50e"
+      },
+      {
+        "byteLength": 25148,
+        "path": "tests/fixtures/facility_layout/semantic_intelligence/evaluation-cases-v1.json",
+        "sha256": "be2ebf61636a7c4dcf2b70bfeb68e94f5eff50642c738849b8730a86ecc0388e"
+      },
+      {
+        "byteLength": 20217,
+        "path": "tests/fixtures/facility_layout/semantic_intelligence/golden-facility-a.json",
+        "sha256": "068ede458137c977db175fc83e4d7924e494e3a74c7a112ce02e9bed9dec6257"
+      },
+      {
+        "byteLength": 48077,
+        "path": "docs/facility-layout-sage-knowledge-foundation-plan.md",
+        "sha256": "f1ad5d529f174e5db003f163dedd81607c63464e40d2d5c676b5bd6c6d53f9b2"
+      }
+    ],
+    "workingTreeDirty": true
+  }
+}

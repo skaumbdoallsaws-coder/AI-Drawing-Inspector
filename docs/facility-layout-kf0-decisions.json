@@ -1,0 +1,135 @@
+{
+  "authorityPolicy": {
+    "finalSaveIsSeparateExplicitCommand": true,
+    "geometryFeasibilityIsAuthority": false,
+    "humanApprovalRequiredForPersistentSave": true,
+    "modelMayApproveOrRelease": false,
+    "modelMayGrantHumanAuthority": false,
+    "prototypeAssumptionsRemainVisible": true,
+    "prototypeModeRequiresExplicitFlag": true
+  },
+  "configuration": {
+    "apiKeyRecorded": false,
+    "futureFacilityScopedEnvironmentVariables": [
+      "INSPECTORPRO_FACILITY_LAYOUT_SAGE_PROVIDER",
+      "INSPECTORPRO_FACILITY_LAYOUT_SAGE_ANTHROPIC_MODEL",
+      "INSPECTORPRO_FACILITY_LAYOUT_SAGE_OPENAI_MODEL",
+      "INSPECTORPRO_FACILITY_LAYOUT_SAGE_OPENAI_REASONING_EFFORT"
+    ],
+    "model": "claude-sonnet-4-5-20250929",
+    "modelSource": "SAGE_ANTHROPIC_MODEL_DEFAULT",
+    "provider": "anthropic",
+    "providerSource": "forced_for_non_deviation_agent",
+    "reasoningEffort": null,
+    "reasoningEffortSource": "not_applicable_for_anthropic",
+    "sharedOpenAiReasoningEffortObserved": null,
+    "sharedProviderOverrideObserved": null
+  },
+  "durableRunDecisions": {
+    "crossProcessLockRequired": true,
+    "generationRepositoryRequired": true,
+    "generationRunIdleExpiryHours": 24,
+    "legacyPendingStoreIsRestartSafe": false,
+    "legacyPendingStoreRole": "read_only_follow_up_pointer_only",
+    "legacyPendingStoreTtlSeconds": 1800,
+    "modelTextMayEnqueueContinuation": false,
+    "singleWritableRunPerLayout": true,
+    "terminalTombstoneRetentionDays": 30
+  },
+  "gateG1Defaults": {
+    "explicitProportionsOverrideDefaults": true,
+    "inventCorridor": false,
+    "inventExpansionReserve": false,
+    "inventSafetySeparation": false,
+    "labelsOnlyDefault": "equal_area_partition_with_disclosed_assumption",
+    "maximumDepartmentCount": 50,
+    "maximumFacilityAxisMeters": 10000.0,
+    "minimumDepartmentCount": 1,
+    "minimumFacilityAxisMeters": 0.5,
+    "savePolicy": "separate_explicit_user_command",
+    "supportedSourceUnits": [
+      "m",
+      "mm",
+      "ft",
+      "in"
+    ]
+  },
+  "generatedAtUtc": "2026-08-26T22:22:28Z",
+  "runtimeBudgetArtifactMeasurement": {
+    "canonicalBytes": 426,
+    "canonicalSha256": "7dc73332787669bdb4ceb1566ce361f161e8f3720ae5a009f5b10257d195b7cf",
+    "estimatedTokens": 107,
+    "estimatorId": "bytes4-v1"
+  },
+  "runtimeBudgets": {
+    "cursorTtlSeconds": 300,
+    "estimator": {
+      "formula": "ceil(canonical_utf8_bytes / 4)",
+      "id": "bytes4-v1",
+      "isModelTokenizer": false
+    },
+    "headroomPercent": 20,
+    "operationBatch": 500,
+    "plannedInstances": 500,
+    "skillContextHardEstimatedTokens": 12000,
+    "skillContextTargetEstimatedTokens": 9600,
+    "stageRegistrySliceCanonicalBytes": 8192,
+    "stageRegistrySliceMaximumEstimatedTokens": 2048,
+    "toolCallsPerTurn": 10,
+    "toolResponseBytes": 16384,
+    "turnTtlSeconds": 600
+  },
+  "schemaVersion": "facility-layout-kf0-decisions-v1",
+  "stageTaxonomy": [
+    {
+      "id": "facility_envelope",
+      "label": "Facility envelope and plan settings",
+      "stage": 1
+    },
+    {
+      "id": "macro_departments",
+      "label": "Macro departments",
+      "stage": 2
+    },
+    {
+      "id": "primary_circulation",
+      "label": "Primary circulation and crossings",
+      "stage": 3
+    },
+    {
+      "id": "department_subdivisions",
+      "label": "Department subdivisions",
+      "stage": 4
+    },
+    {
+      "id": "department_resources",
+      "label": "Department resources and staging",
+      "stage": 5
+    },
+    {
+      "id": "seed_cells",
+      "label": "Seed manufacturing cells",
+      "stage": 6
+    },
+    {
+      "id": "repeated_modules",
+      "label": "Repeated cells, rows, and modules",
+      "stage": 7
+    },
+    {
+      "id": "floor_communication",
+      "label": "Floor communication and support details",
+      "stage": 8
+    },
+    {
+      "id": "deterministic_validation",
+      "label": "Full deterministic validation",
+      "stage": 9
+    },
+    {
+      "id": "review_and_save",
+      "label": "Review and explicit save",
+      "stage": 10
+    }
+  ]
+}

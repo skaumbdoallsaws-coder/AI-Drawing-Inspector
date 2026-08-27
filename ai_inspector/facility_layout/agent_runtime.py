@@ -20,12 +20,23 @@ import threading
 import time
 from typing import Any, Callable, Mapping, Sequence
 
+from ai_inspector.verified_workflows import (
+    VerifiedWorkflowBudget,
+    VerifiedWorkflowIssue,
+    VerifiedWorkflowRepair,
+    VerifiedWorkflowRuntime,
+)
+
 from .authorization import FacilityPrincipal, require_facility_action
 from .digest import build_facility_layout_digest
 from .errors import (
     FacilityConflictError,
     FacilityLayoutError,
     FacilityNotFoundError,
+)
+from .fit_analysis import (
+    FacilityFitAnalysisError,
+    analyze_facility_asset_fit,
 )
 from .observation import (
     MAXIMUM_READ_IDS,
@@ -35,17 +46,50 @@ from .observation import (
     build_facility_layout_observation,
     trusted_facility_source,
 )
+from .plan_settings import shell_with_plan_boundary
 from .semantic_plan import (
     SemanticFacilityPlanError,
     compile_semantic_facility_plan,
 )
+from .semantic_model import (
+    CELL_FEASIBILITY_STRATEGIES,
+    analyze_facility_asset_access,
+    analyze_facility_cell_access,
+    analyze_facility_cell_alternatives,
+    analyze_facility_clearances,
+    analyze_facility_drone_clearance,
+    analyze_facility_free_space,
+    analyze_facility_layout_provenance,
+    analyze_facility_module_fit,
+    analyze_facility_operator_travel,
+    analyze_facility_protected_intrusions,
+    analyze_facility_render_consistency,
+    analyze_facility_route_access,
+    analyze_facility_route_widths,
+    build_facility_semantic_map,
+    resolve_facility_entities,
+)
 
 
 FACILITY_LAYOUT_AGENT_RUNTIME_VERSION = 1
-FACILITY_LAYOUT_AGENT_MAXIMUM_CALLS_PER_TURN = 8
+FACILITY_LAYOUT_AGENT_MAXIMUM_CALLS_PER_TURN = 10
 FACILITY_LAYOUT_AGENT_MAXIMUM_RESPONSE_BYTES = 16_384
 FACILITY_LAYOUT_AGENT_CURSOR_TTL_SECONDS = 300
 FACILITY_LAYOUT_AGENT_TURN_TTL_SECONDS = 600
+FACILITY_LAYOUT_VERIFIED_WORKFLOW_ID = "facility-layout-preview"
+FACILITY_LAYOUT_VERIFIED_WORKFLOW_BUDGET = VerifiedWorkflowBudget(
+    max_repair_attempts=2,
+    max_tool_calls=16,
+    # Full-factory validation is intentionally bounded, but a cold browser and
+    # a large catalog can make the first authoritative collision pass exceed
+    # two minutes. Keep one shared five-minute server/client ceiling.
+    max_elapsed_ms=300_000,
+)
+_DETERMINISTIC_STRATEGY_ORDER = (
+    "compact_rows",
+    "balanced_grid",
+    "flow_lanes",
+)
 
 _READ_TOOLS = frozenset(
     {
@@ -54,11 +98,17 @@ _READ_TOOLS = frozenset(
         "inspect_facility_region",
         "inspect_facility_findings",
         "inspect_process_bindings",
+        "inspect_facility_semantics",
+        "inspect_pattern_provenance",
+        "inspect_cell_layout_provenance",
+        "analyze_facility_spatial",
+        "analyze_facility_fit",
     }
 )
 _ENTITY_COLLECTIONS = {
     "placement": ("placements", "placementId"),
     "zone": ("zones", "zoneId"),
+    "floor_marking": ("floorMarkings", "markingId"),
     "route": ("routes", "routeId"),
     "utility_network": ("utilityNetworks", "utilityNetworkId"),
 }
@@ -88,6 +138,8 @@ class FacilityAgentContextBundle:
     digest: dict[str, Any]
     shell_document: dict[str, Any]
     policy_document: dict[str, Any]
+    asset_documents: tuple[dict[str, Any], ...]
+    evidence_authority: dict[str, dict[str, Any]]
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -233,6 +285,7 @@ class FacilityLayoutAgentRuntime:
         | None = None,
         cursor_secret: bytes | None = None,
         clock: Callable[[], float] | None = None,
+        workflow_runtime: VerifiedWorkflowRuntime | None = None,
     ) -> None:
         self.service = service
         self.shell_repository = shell_repository
@@ -246,6 +299,7 @@ class FacilityLayoutAgentRuntime:
         if len(self.cursor_secret) < 32:
             raise ValueError("cursor_secret must contain at least 32 bytes")
         self.clock = clock or time.time
+        self.workflow_runtime = workflow_runtime or VerifiedWorkflowRuntime()
         self._turn_lock = threading.RLock()
         self._turn_calls: dict[tuple[str, str, str, str], tuple[float, int]] = {}
 
@@ -272,6 +326,9 @@ class FacilityLayoutAgentRuntime:
                     "revision": _revision(
                         revision,
                         "assetDefinitionRevision",
+                    ),
+                    "previewPlanningEligible": (
+                        raw.get("previewPlanningEligible") is True
                     ),
                     "document": deepcopy(dict(definition)),
                 }
@@ -316,6 +373,363 @@ class FacilityLayoutAgentRuntime:
                 }
             )
         return vehicles
+
+    @staticmethod
+    def _workflow_owner_key(
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+    ) -> str:
+        return "facility-owner-" + _fingerprint(
+            {
+                "tenantId": principal.tenant_id,
+                "principalId": principal.principal_id,
+                "siteId": site_id,
+                "layoutId": layout_id,
+            }
+        )[:40]
+
+    @staticmethod
+    def _workflow_goal(semantic_plan: Mapping[str, Any]) -> str:
+        scope = semantic_plan.get("scope")
+        label = (
+            _clean_text(scope.get("label"), 240)
+            if isinstance(scope, Mapping)
+            else ""
+        )
+        objective = _clean_text(semantic_plan.get("objective"), 120)
+        if label and objective:
+            return f"{objective}: {label}"
+        return label or objective or "Build a verified Facility Layout preview"
+
+    @staticmethod
+    def _workflow_hard_constraints() -> list[str]:
+        return [
+            "Use the exact trusted Facility Layout and dependency revisions.",
+            "Never accept model-authored coordinates or low-level geometry.",
+            "Preserve locked placements.",
+            "Preserve manually positioned placements by default.",
+            "Cover every requested asset occurrence.",
+            "Introduce no new hard spatial or routing finding.",
+            "Create a preview only; require explicit approval before atomic apply.",
+        ]
+
+    @staticmethod
+    def _workflow_soft_objectives(
+        semantic_plan: Mapping[str, Any],
+    ) -> list[str]:
+        hints = semantic_plan.get("layoutHints")
+        density = (
+            _clean_text(hints.get("density"), 80)
+            if isinstance(hints, Mapping)
+            else ""
+        )
+        strategies = [
+            _clean_text(item.get("strategy"), 80)
+            for item in semantic_plan.get("alternatives", [])
+            if isinstance(item, Mapping) and item.get("strategy")
+        ]
+        values = [
+            f"Prefer {density} layout density." if density else "",
+            (
+                "Evaluate deterministic strategies: " + ", ".join(strategies)
+                if strategies else ""
+            ),
+        ]
+        return [value for value in values if value]
+
+    @staticmethod
+    def _workflow_issue_from_finding(
+        finding: Mapping[str, Any],
+    ) -> VerifiedWorkflowIssue:
+        raw_severity = str(finding.get("severity") or "warning").lower()
+        severity = (
+            raw_severity
+            if raw_severity in {"info", "warning", "error", "blocked"}
+            else "warning"
+        )
+        return VerifiedWorkflowIssue(
+            code=str(finding.get("code") or "facility_plan_finding"),
+            severity=severity,
+            message=str(
+                finding.get("message")
+                or "The Facility Layout plan produced a validation finding."
+            ),
+            recoverability=(
+                "terminal" if severity in {"error", "blocked"}
+                else "not_applicable"
+            ),
+            details={
+                key: deepcopy(value)
+                for key, value in finding.items()
+                if key not in {"code", "severity", "message"}
+            },
+        )
+
+    @staticmethod
+    def _classify_workflow_error(
+        error: Exception,
+        phase: str,
+    ) -> VerifiedWorkflowIssue:
+        if isinstance(error, SemanticFacilityPlanError):
+            return VerifiedWorkflowIssue(
+                code=error.code,
+                severity="error",
+                message=str(error),
+                recoverability="terminal",
+                details={
+                    "phase": phase,
+                    "findings": deepcopy(error.findings),
+                    "statusCode": 422,
+                },
+            )
+        if isinstance(error, FacilityLayoutAgentRuntimeError):
+            return VerifiedWorkflowIssue(
+                code=error.code,
+                severity="blocked" if error.status_code == 409 else "error",
+                message=str(error),
+                recoverability="terminal",
+                details={
+                    **deepcopy(error.details),
+                    "phase": phase,
+                    "statusCode": error.status_code,
+                },
+            )
+        if isinstance(error, FacilityLayoutError):
+            recoverable = error.code == "no_layout_alternative"
+            return VerifiedWorkflowIssue(
+                code=error.code,
+                severity="error",
+                message=str(error),
+                recoverability=("recoverable" if recoverable else "terminal"),
+                details={
+                    **deepcopy(error.details),
+                    "phase": phase,
+                    "statusCode": error.status_code,
+                },
+            )
+        return VerifiedWorkflowIssue(
+            code="facility_verified_workflow_failed",
+            severity="error",
+            message="The verified Facility Layout workflow failed.",
+            recoverability="terminal",
+            details={
+                "phase": phase,
+                "exceptionType": type(error).__name__,
+                "statusCode": 500,
+            },
+        )
+
+    @staticmethod
+    def _validate_workflow_plan(
+        plan: Mapping[str, Any],
+        bundle: FacilityAgentContextBundle,
+    ) -> list[VerifiedWorkflowIssue]:
+        issues = [
+            FacilityLayoutAgentRuntime._workflow_issue_from_finding(item)
+            for item in plan["compiled"].get("findings", [])
+            if isinstance(item, Mapping)
+        ]
+        if not bundle.state.get("savedStateCurrent"):
+            planner_request = plan.get("compiled", {}).get(
+                "plannerRequest", {}
+            )
+            cleanup = (
+                planner_request.get("cleanup", {})
+                if isinstance(planner_request, Mapping)
+                else {}
+            )
+            explicit_replacement = (
+                isinstance(cleanup, Mapping)
+                and cleanup.get("replaceExistingContents") is True
+            )
+            if explicit_replacement:
+                issues.append(
+                    VerifiedWorkflowIssue(
+                        code="facility_dirty_draft_excluded_from_replacement",
+                        severity="warning",
+                        message=(
+                            "The replacement preview is bound to the saved "
+                            "layout revision; unsaved editor contents are not "
+                            "used as planning evidence."
+                        ),
+                        recoverability="human_required",
+                    )
+                )
+            else:
+                issues.append(
+                    VerifiedWorkflowIssue(
+                        code="facility_layout_saved_state_required",
+                        severity="blocked",
+                        message=(
+                            "Save or discard editor changes before building "
+                            "a proposal."
+                        ),
+                        recoverability="human_required",
+                        details={"statusCode": 409},
+                    )
+                )
+        return issues
+
+    @staticmethod
+    def _validate_workflow_preview(
+        proposals: Any,
+        _plan: Mapping[str, Any],
+        _bundle: FacilityAgentContextBundle,
+        _attempt: int,
+    ) -> list[VerifiedWorkflowIssue]:
+        issues: list[VerifiedWorkflowIssue] = []
+        if not isinstance(proposals, Mapping):
+            return [
+                VerifiedWorkflowIssue(
+                    code="facility_preview_result_invalid",
+                    severity="error",
+                    message="The deterministic planner returned no structured preview.",
+                    recoverability="terminal",
+                )
+            ]
+        if proposals.get("previewPure") is not True:
+            issues.append(
+                VerifiedWorkflowIssue(
+                    code="facility_preview_not_pure",
+                    severity="error",
+                    message="The Facility Layout result was not a pure preview.",
+                    recoverability="terminal",
+                )
+            )
+        alternatives = [
+            item for item in proposals.get("alternatives", [])
+            if isinstance(item, Mapping)
+        ]
+        selected_proposal_id = str(proposals.get("selectedProposalId") or "")
+        selected = next(
+            (
+                item for item in alternatives
+                if str(item.get("proposalId") or "") == selected_proposal_id
+            ),
+            None,
+        )
+        if not alternatives or not selected_proposal_id or selected is None:
+            issues.append(
+                VerifiedWorkflowIssue(
+                    code="facility_preview_selection_invalid",
+                    severity="error",
+                    message="The deterministic planner did not select a complete alternative.",
+                    recoverability="terminal",
+                )
+            )
+            return issues
+        if selected.get("newHardFindingIds"):
+            issues.append(
+                VerifiedWorkflowIssue(
+                    code="facility_preview_contains_new_hard_findings",
+                    severity="blocked",
+                    message="The selected preview introduced a hard spatial finding.",
+                    recoverability="terminal",
+                    details={
+                        "findingIds": deepcopy(selected["newHardFindingIds"]),
+                    },
+                )
+            )
+        metrics = selected.get("metrics")
+        if not isinstance(metrics, Mapping) or metrics.get("completeAssetSet") is not True:
+            issues.append(
+                VerifiedWorkflowIssue(
+                    code="facility_preview_asset_coverage_incomplete",
+                    severity="blocked",
+                    message="The selected preview did not cover every requested asset.",
+                    recoverability="terminal",
+                )
+            )
+        elif int(metrics.get("spatialUnverifiedCount") or 0) > 0:
+            issues.append(
+                VerifiedWorkflowIssue(
+                    code="facility_preview_contains_unverified_spatial_evidence",
+                    severity="warning",
+                    message="Some preview geometry remains unverified and requires review.",
+                    recoverability="human_required",
+                    details={
+                        "count": int(metrics.get("spatialUnverifiedCount") or 0),
+                    },
+                )
+            )
+        rejected = [
+            item for item in proposals.get("rejectedAlternatives", [])
+            if isinstance(item, Mapping)
+        ]
+        if rejected:
+            issues.append(
+                VerifiedWorkflowIssue(
+                    code="facility_preview_alternatives_rejected",
+                    severity="info",
+                    message="Some deterministic alternatives were rejected before preview.",
+                    recoverability="not_applicable",
+                    details={
+                        "count": len(rejected),
+                        "strategies": sorted(
+                            {
+                                str(item.get("strategy") or "unknown")
+                                for item in rejected
+                            }
+                        ),
+                    },
+                )
+            )
+        return issues
+
+    @staticmethod
+    def _repair_workflow_plan(
+        plan: Mapping[str, Any],
+        bundle: FacilityAgentContextBundle,
+        issues: Sequence[VerifiedWorkflowIssue],
+        _attempt: int,
+    ) -> VerifiedWorkflowRepair | None:
+        if {issue.code for issue in issues} != {"no_layout_alternative"}:
+            return None
+        semantic_plan = deepcopy(dict(plan["semanticPlan"]))
+        alternatives = [
+            deepcopy(dict(item))
+            for item in semantic_plan.get("alternatives", [])
+            if isinstance(item, Mapping)
+        ]
+        existing = {
+            str(item.get("strategy") or "") for item in alternatives
+        }
+        strategy = next(
+            (
+                value for value in _DETERMINISTIC_STRATEGY_ORDER
+                if value not in existing
+            ),
+            None,
+        )
+        if strategy is None:
+            return None
+        alternatives.append(
+            {
+                "alternativeId": f"verified-repair-{strategy.replace('_', '-')}",
+                "strategy": strategy,
+                "label": "Verified deterministic fallback",
+            }
+        )
+        semantic_plan["alternatives"] = alternatives
+        compiled = compile_semantic_facility_plan(
+            semantic_plan,
+            state=bundle.state,
+            evidence=bundle.evidence,
+        )
+        repaired = {
+            "semanticPlan": semantic_plan,
+            "compiled": compiled,
+        }
+        return VerifiedWorkflowRepair(
+            plan=repaired,
+            code="add_deterministic_layout_strategy",
+            message=(
+                "Added one permitted layout strategy without changing any "
+                "hard constraint."
+            ),
+            details={"strategy": strategy},
+        )
 
     @staticmethod
     def _default_evidence(
@@ -498,6 +912,11 @@ class FacilityLayoutAgentRuntime:
             authority_id=str(policy_ref.get("policySetId") or ""),
             revision=str(policy_ref.get("policySetRevision") or ""),
         )
+        # The published shell remains the authority source, while an authored
+        # facilityPlan extension is the active planning boundary. The service
+        # validation path already applies this projection; Sage must observe
+        # the same effective floor instead of a stale starter-shell footprint.
+        effective_shell = shell_with_plan_boundary(shell.document, layout)
         raw_assets = list(self.asset_catalog_provider(principal, site_id))
         asset_source_document = self._asset_source_document(raw_assets)
         process_maps = (
@@ -510,7 +929,7 @@ class FacilityLayoutAgentRuntime:
                 principal,
                 site_id,
                 layout,
-                shell.document,
+                effective_shell,
                 policy.document,
                 [
                     item["document"]
@@ -522,7 +941,7 @@ class FacilityLayoutAgentRuntime:
                 principal,
                 site_id,
                 layout,
-                shell.document,
+                effective_shell,
                 policy.document,
                 [
                     item["document"]
@@ -576,9 +995,9 @@ class FacilityLayoutAgentRuntime:
             ),
             "shell": trusted_facility_source(
                 "facility_shell",
-                shell.document,
+                effective_shell,
                 revision=shell.revision,
-                provider="facility-shell-repository",
+                provider="facility-shell-with-active-plan-boundary",
             ),
             "policy": trusted_facility_source(
                 "facility_policy",
@@ -653,12 +1072,24 @@ class FacilityLayoutAgentRuntime:
             observation["state"],
             observation["evidence"],
         )
+        asset_documents = []
+        for item in asset_source_document["assets"]:
+            document = deepcopy(dict(item["document"]))
+            document["assetDefinitionRevision"] = item["revision"]
+            asset_documents.append(document)
+        evidence_authority = {
+            str(item["evidenceId"]): deepcopy(dict(item))
+            for item in observation["evidence"].get("records", [])
+            if isinstance(item, Mapping) and item.get("evidenceId")
+        }
         return FacilityAgentContextBundle(
             state=observation["state"],
             evidence=observation["evidence"],
             digest=digest,
-            shell_document=deepcopy(dict(shell.document)),
+            shell_document=deepcopy(dict(effective_shell)),
             policy_document=deepcopy(dict(policy.document)),
+            asset_documents=tuple(asset_documents),
+            evidence_authority=evidence_authority,
         )
 
     def _principal_binding(
@@ -1055,6 +1486,542 @@ class FacilityLayoutAgentRuntime:
                 cursor_factory=next_cursor,
             )
 
+        if tool_name in {
+            "inspect_facility_semantics",
+            "inspect_pattern_provenance",
+            "inspect_cell_layout_provenance",
+        }:
+            semantic_map = build_facility_semantic_map(state)
+            view = str(args.get("view") or "")
+            if tool_name == "inspect_pattern_provenance":
+                view = "layout_patterns"
+            elif tool_name == "inspect_cell_layout_provenance":
+                view = "layout_patterns"
+            ids = (
+                set(_bounded_ids(args.get("ids")))
+                if "ids" in args else set()
+            )
+            query = _clean_text(args.get("query"), 120).casefold()
+            view_contract = {
+                "departments": ("departments", "zoneId"),
+                "department_metrics": (
+                    "departmentMetricSummaries",
+                    "zoneId",
+                ),
+                "zones": ("zones", "zoneId"),
+                "assets": ("assets", "assetId"),
+                "placements": ("placements", "placementId"),
+                "routes": ("routes", "routeId"),
+                "route_crossings": ("routeCrossings", "crossingId"),
+                "floor_markings": ("floorMarkings", "markingId"),
+                "process_bindings": (
+                    "processBindings",
+                    "processBindingId",
+                ),
+                "layout_patterns": (
+                    "layoutPatternGroups",
+                    "provenanceId",
+                ),
+                "commands": ("commands", "commandId"),
+                "cell_layout_strategies": (
+                    "cellLayoutStrategies",
+                    "strategyId",
+                ),
+                "derived_metrics": (
+                    "derivedMetricDefinitions",
+                    "metricId",
+                ),
+            }
+            if view == "overview":
+                if ids or query or cursor:
+                    raise FacilityLayoutAgentRuntimeError(
+                        "facility_agent_semantic_arguments_invalid",
+                        "overview does not accept ids, query, or cursor.",
+                    )
+                result = {
+                    **base_envelope,
+                    "semanticContractVersion": semantic_map[
+                        "semanticContractVersion"
+                    ],
+                    "evidenceVocabulary": semantic_map[
+                        "evidenceVocabulary"
+                    ],
+                    "facilitySummary": semantic_map["facilitySummary"],
+                    "assetRoleSummary": semantic_map["assetRoleSummary"],
+                    "routeRoleSummary": semantic_map["routeRoleSummary"],
+                    "routeNetworkSummary": semantic_map[
+                        "routeNetworkSummary"
+                    ],
+                    "floorMarkingRoleSummary": semantic_map[
+                        "floorMarkingRoleSummary"
+                    ],
+                    "analysisCapabilities": semantic_map[
+                        "analysisCapabilities"
+                    ],
+                    "processRelationshipSummary": semantic_map[
+                        "processRelationshipSummary"
+                    ],
+                    "availableViews": ["overview", *view_contract],
+                }
+                if len(_canonical_bytes(result)) > (
+                    FACILITY_LAYOUT_AGENT_MAXIMUM_RESPONSE_BYTES
+                ):
+                    raise FacilityLayoutAgentRuntimeError(
+                        "facility_agent_response_budget_exceeded",
+                        "The Facility semantic overview exceeded its bound.",
+                    )
+                return result
+            contract = view_contract.get(view)
+            if contract is None:
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_semantic_view_invalid",
+                    "Facility semantic view is unsupported.",
+                )
+            collection_name, id_field = contract
+            values = semantic_map.get(collection_name, [])
+            records = [
+                item
+                for item in values
+                if isinstance(item, Mapping)
+                and (
+                    tool_name not in {
+                        "inspect_pattern_provenance",
+                        "inspect_cell_layout_provenance",
+                    }
+                    or (
+                        tool_name == "inspect_pattern_provenance"
+                        and str(item.get("command") or "")
+                        != "cell_layout"
+                        and not bool(item.get("authoredStrategy"))
+                    )
+                    or (
+                        tool_name == "inspect_cell_layout_provenance"
+                        and (
+                            str(item.get("command") or "")
+                            == "cell_layout"
+                            or bool(item.get("authoredStrategy"))
+                        )
+                    )
+                )
+                and (
+                    not ids
+                    or str(item.get(id_field) or "") in ids
+                )
+                and (
+                    not query
+                    or query in json.dumps(
+                        item,
+                        ensure_ascii=True,
+                        sort_keys=True,
+                    ).casefold()
+                )
+            ]
+            result = self._page(
+                records,
+                offset=offset,
+                page_size=page_size,
+                envelope={
+                    **base_envelope,
+                    "semanticContractVersion": semantic_map[
+                        "semanticContractVersion"
+                    ],
+                    "view": view,
+                },
+                cursor_factory=next_cursor,
+            )
+            if ids:
+                returned_ids = {
+                    str(item.get(id_field) or "")
+                    for item in result.get("records", [])
+                }
+                result["unresolvedIds"] = sorted(ids - returned_ids)
+            return result
+
+        if tool_name == "analyze_facility_spatial":
+            if cursor:
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_spatial_arguments_invalid",
+                    "Focused Facility spatial analysis does not use cursors.",
+                )
+            analysis = str(args.get("analysis") or "")
+            maximum_results = args.get("maximumResults", 10)
+            if isinstance(maximum_results, bool):
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_spatial_arguments_invalid",
+                    "maximumResults must be an integer.",
+                )
+            try:
+                maximum_results = int(maximum_results)
+            except (TypeError, ValueError) as exc:
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_spatial_arguments_invalid",
+                    "maximumResults must be an integer.",
+                ) from exc
+            if not 1 <= maximum_results <= 50:
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_spatial_arguments_invalid",
+                    "maximumResults must be between 1 and 50.",
+                )
+            scope_ids = args.get("scopeIds") or []
+            if not isinstance(scope_ids, list):
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_spatial_arguments_invalid",
+                    "scopeIds must be an array.",
+                )
+            scope_ids = _bounded_ids(scope_ids)
+            try:
+                if analysis == "resolve_entities":
+                    kinds = args.get("entityKinds") or []
+                    if not isinstance(kinds, list):
+                        raise ValueError("entityKinds must be an array")
+                    payload = resolve_facility_entities(
+                        state,
+                        query=_clean_text(args.get("query"), 120),
+                        entity_kinds=[str(item) for item in kinds],
+                        use_selection=args.get("useCurrentSelection") is True,
+                        maximum_results=maximum_results,
+                    )
+                elif analysis == "clearances":
+                    payload = analyze_facility_clearances(
+                        state,
+                        scope_ids=scope_ids,
+                        maximum_results=maximum_results,
+                        unit_mode=str(
+                            args.get("unitMode") or "operational_units"
+                        ),
+                    )
+                elif analysis == "protected_intrusions":
+                    payload = analyze_facility_protected_intrusions(
+                        state,
+                        scope_ids=scope_ids,
+                        maximum_results=maximum_results,
+                    )
+                elif analysis == "route_crossings":
+                    semantic_map = build_facility_semantic_map(state)
+                    records = list(semantic_map.get("routeCrossings", []))
+                    payload = {
+                        "analysis": analysis,
+                        "records": records[:maximum_results],
+                        "returnedCount": min(len(records), maximum_results),
+                        "totalCount": len(records),
+                        "routeNetworkSummary": deepcopy(
+                            semantic_map.get("routeNetworkSummary") or {}
+                        ),
+                        "evidenceStatus": "derived",
+                    }
+                elif analysis == "free_space":
+                    payload = analyze_facility_free_space(
+                        state,
+                        scope_ids=scope_ids,
+                        metric=str(
+                            args.get("freeSpaceMetric") or "geometric"
+                        ),
+                        maximum_results=maximum_results,
+                    )
+                elif analysis == "layout_provenance":
+                    payload = analyze_facility_layout_provenance(
+                        state,
+                        query=_clean_text(args.get("query"), 120),
+                        scope_ids=scope_ids,
+                        use_selection=(
+                            args.get("useCurrentSelection") is True
+                        ),
+                        maximum_results=maximum_results,
+                    )
+                elif analysis == "route_access":
+                    source_zone_ids = args.get("sourceZoneIds") or []
+                    target_zone_ids = args.get("targetZoneIds") or []
+                    if not isinstance(source_zone_ids, list):
+                        raise ValueError("sourceZoneIds must be an array")
+                    if not isinstance(target_zone_ids, list):
+                        raise ValueError("targetZoneIds must be an array")
+                    payload = analyze_facility_route_access(
+                        state,
+                        source_query=_clean_text(
+                            args.get("sourceQuery"), 120
+                        ),
+                        target_query=_clean_text(
+                            args.get("targetQuery"), 120
+                        ),
+                        source_zone_ids=_bounded_ids(source_zone_ids),
+                        target_zone_ids=_bounded_ids(target_zone_ids),
+                        movement_class=str(
+                            args.get("movementClass") or "material"
+                        ),
+                    )
+                elif analysis == "route_widths":
+                    payload = analyze_facility_route_widths(
+                        state,
+                        scope_ids=scope_ids,
+                        movement_class=str(
+                            args.get("movementClass") or "any"
+                        ),
+                        maximum_results=maximum_results,
+                    )
+                elif analysis == "cell_alternatives":
+                    strategies = args.get("cellStrategies") or list(
+                        CELL_FEASIBILITY_STRATEGIES
+                    )
+                    if not isinstance(strategies, list):
+                        raise ValueError("cellStrategies must be an array")
+                    payload = analyze_facility_cell_alternatives(
+                        state,
+                        query=_clean_text(args.get("query"), 120),
+                        scope_ids=scope_ids,
+                        strategies=[str(item) for item in strategies],
+                        preferred_gap_meters=args.get(
+                            "preferredGapMeters", 1.0
+                        ),
+                        invert_u=args.get("invertU") is True,
+                    )
+                elif analysis == "module_fit":
+                    source_zone_ids = args.get("sourceZoneIds") or []
+                    target_zone_ids = args.get("targetZoneIds") or []
+                    orientations = args.get("orientationsDegrees") or [0, 90]
+                    if not isinstance(source_zone_ids, list):
+                        raise ValueError("sourceZoneIds must be an array")
+                    if not isinstance(target_zone_ids, list):
+                        raise ValueError("targetZoneIds must be an array")
+                    if not isinstance(orientations, list):
+                        raise ValueError("orientationsDegrees must be an array")
+                    payload = analyze_facility_module_fit(
+                        state,
+                        source_query=_clean_text(
+                            args.get("sourceQuery"), 120
+                        ),
+                        target_query=_clean_text(
+                            args.get("targetQuery"), 120
+                        ),
+                        source_zone_ids=_bounded_ids(source_zone_ids),
+                        target_zone_ids=_bounded_ids(target_zone_ids),
+                        orientations_degrees=orientations,
+                        gap_meters=args.get("moduleGapMeters", 1.0),
+                        maximum_results=maximum_results,
+                    )
+                elif analysis == "operator_travel":
+                    payload = analyze_facility_operator_travel(
+                        state,
+                        scope_ids=scope_ids,
+                        maximum_results=maximum_results,
+                    )
+                elif analysis == "asset_access":
+                    payload = analyze_facility_asset_access(
+                        state,
+                        interface_role=str(
+                            args.get("interfaceRole") or "service"
+                        ),
+                        query=_clean_text(args.get("query"), 120),
+                        scope_ids=scope_ids,
+                        use_selection=(
+                            args.get("useCurrentSelection") is True
+                        ),
+                        maximum_results=maximum_results,
+                    )
+                elif analysis == "cell_access":
+                    payload = analyze_facility_cell_access(
+                        state,
+                        query=_clean_text(args.get("query"), 120),
+                        scope_ids=scope_ids,
+                        use_selection=(
+                            args.get("useCurrentSelection") is True
+                        ),
+                        maximum_results=maximum_results,
+                    )
+                elif analysis == "drone_clearance":
+                    payload = analyze_facility_drone_clearance(
+                        state,
+                        query=_clean_text(args.get("query"), 120),
+                        scope_ids=scope_ids,
+                        use_selection=(
+                            args.get("useCurrentSelection") is True
+                        ),
+                        altitude_meters=args.get("altitudeMeters"),
+                        maximum_results=maximum_results,
+                    )
+                elif analysis == "render_consistency":
+                    payload = analyze_facility_render_consistency(state)
+                else:
+                    raise ValueError("analysis is unsupported")
+            except (TypeError, ValueError) as exc:
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_spatial_arguments_invalid",
+                    str(exc),
+                ) from exc
+            response = {**base_envelope, **payload}
+            if len(_canonical_bytes(response)) > (
+                FACILITY_LAYOUT_AGENT_MAXIMUM_RESPONSE_BYTES
+            ):
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_response_budget_exceeded",
+                    "The focused Facility spatial response exceeded its limit.",
+                )
+            return response
+
+        if tool_name == "analyze_facility_fit":
+            allowed = {
+                "assetId",
+                "assetDefinitionRevision",
+                "assetQuery",
+                "sourcePlacementId",
+                "useSelectedPlacement",
+                "zoneId",
+                "zoneQuery",
+                "orientationsDegrees",
+                "maximumResults",
+            }
+            unexpected = sorted(set(args) - allowed)
+            if cursor or unexpected:
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_fit_arguments_invalid",
+                    "Facility fit analysis accepts only asset or placement "
+                    "selectors, a target zone selector, orientations, and a "
+                    "result limit.",
+                    details={"unexpectedFields": unexpected},
+                )
+            placements_by_id = {
+                str(item.get("placementId")): item
+                for item in state.get("placements", [])
+                if isinstance(item, Mapping) and item.get("placementId")
+            }
+            zones_by_id = {
+                str(item.get("zoneId")): item
+                for item in state.get("zones", [])
+                if isinstance(item, Mapping) and item.get("zoneId")
+            }
+            selected_placement_ids = list(
+                (state.get("selection") or {}).get("placementIds", [])
+            )
+            source_placement_id = str(
+                args.get("sourcePlacementId") or ""
+            ).strip()
+            if args.get("useSelectedPlacement") is True:
+                if len(selected_placement_ids) != 1:
+                    raise FacilityLayoutAgentRuntimeError(
+                        "facility_agent_fit_asset_ambiguous",
+                        "Select exactly one source placement for this fit analysis.",
+                        details={
+                            "selectedPlacementIds": selected_placement_ids[:20]
+                        },
+                    )
+                source_placement_id = str(selected_placement_ids[0])
+            source_placement = placements_by_id.get(source_placement_id)
+            if source_placement_id and source_placement is None:
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_fit_asset_unresolved",
+                    "The source placement is not present in the current layout revision.",
+                )
+
+            asset_id = str(args.get("assetId") or "").strip()
+            asset_revision = str(
+                args.get("assetDefinitionRevision") or ""
+            ).strip()
+            if source_placement is not None:
+                asset_id = str(source_placement.get("assetId") or "")
+                asset_revision = str(
+                    source_placement.get("assetDefinitionRevision") or ""
+                )
+            elif args.get("assetQuery"):
+                resolution = resolve_facility_entities(
+                    state,
+                    query=_clean_text(args.get("assetQuery"), 120),
+                    entity_kinds=["placement", "asset"],
+                    maximum_results=20,
+                )
+                resolved = resolution.get("resolved")
+                if not isinstance(resolved, Mapping):
+                    raise FacilityLayoutAgentRuntimeError(
+                        "facility_agent_fit_asset_ambiguous"
+                        if resolution.get("resolutionStatus") == "ambiguous"
+                        else "facility_agent_fit_asset_unresolved",
+                        "The asset name did not resolve uniquely in the current revision.",
+                        details={"candidates": resolution.get("candidates", [])},
+                    )
+                if resolved.get("entityKind") == "placement":
+                    source_placement = placements_by_id.get(
+                        str(resolved.get("entityId") or "")
+                    )
+                    asset_id = str(source_placement.get("assetId") or "")
+                    asset_revision = str(
+                        source_placement.get("assetDefinitionRevision") or ""
+                    )
+                else:
+                    asset_id = str(resolved.get("entityId") or "")
+                    asset_revision = str(
+                        resolved.get("assetDefinitionRevision") or ""
+                    )
+            asset_id = _stable_id(asset_id, "assetId")
+            asset_revision = _revision(
+                asset_revision,
+                "assetDefinitionRevision",
+            )
+
+            zone_id = str(args.get("zoneId") or "").strip()
+            if args.get("zoneQuery"):
+                zone_resolution = resolve_facility_entities(
+                    state,
+                    query=_clean_text(args.get("zoneQuery"), 120),
+                    entity_kinds=["zone"],
+                    maximum_results=20,
+                )
+                resolved_zone = zone_resolution.get("resolved")
+                if not isinstance(resolved_zone, Mapping):
+                    raise FacilityLayoutAgentRuntimeError(
+                        "facility_agent_fit_zone_ambiguous"
+                        if zone_resolution.get("resolutionStatus") == "ambiguous"
+                        else "facility_agent_fit_zone_unresolved",
+                        "The target zone name did not resolve uniquely in the current revision.",
+                        details={"candidates": zone_resolution.get("candidates", [])},
+                    )
+                zone_id = str(resolved_zone.get("entityId") or "")
+            zone_id = _stable_id(zone_id, "zoneId")
+            if zone_id not in zones_by_id:
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_fit_zone_unresolved",
+                    "The target zone is not present in the current layout revision.",
+                )
+            orientations = args.get("orientationsDegrees")
+            if orientations is not None and not isinstance(
+                orientations,
+                list,
+            ):
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_fit_arguments_invalid",
+                    "orientationsDegrees must be an array.",
+                )
+            maximum_results = args.get("maximumResults", 8)
+            if isinstance(maximum_results, bool):
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_fit_arguments_invalid",
+                    "maximumResults must be an integer.",
+                )
+            try:
+                result = analyze_facility_asset_fit(
+                    state,
+                    bundle.asset_documents,
+                    asset_id=asset_id,
+                    asset_definition_revision=asset_revision,
+                    zone_id=zone_id,
+                    shell=bundle.shell_document,
+                    policy_set=bundle.policy_document,
+                    evidence_authority=bundle.evidence_authority,
+                    orientations_degrees=orientations,
+                    maximum_results=int(maximum_results),
+                )
+            except (FacilityFitAnalysisError, TypeError, ValueError) as exc:
+                raise FacilityLayoutAgentRuntimeError(
+                    getattr(exc, "code", "facility_agent_fit_failed"),
+                    str(exc),
+                ) from exc
+            response = {**base_envelope, **result}
+            if len(_canonical_bytes(response)) > (
+                FACILITY_LAYOUT_AGENT_MAXIMUM_RESPONSE_BYTES
+            ):
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_response_budget_exceeded",
+                    "The bounded Facility fit response exceeded its limit.",
+                )
+            return response
+
         ids = (
             set(_bounded_ids(args.get("ids")))
             if "ids" in args
@@ -1094,53 +2061,137 @@ class FacilityLayoutAgentRuntime:
         proposal_id: str | None = None,
         receipt_ids: Sequence[Any] | None = None,
     ) -> dict[str, Any]:
-        bundle = self.resolve_context(
-            principal,
-            site_id=site_id,
-            layout_id=layout_id,
-            expected_revision=expected_revision,
-            live_facts=live_facts,
-            proposal_id=proposal_id,
-            receipt_ids=receipt_ids,
-        )
-        if not bundle.state.get("savedStateCurrent"):
-            raise FacilityLayoutAgentRuntimeError(
-                "facility_layout_saved_state_required",
-                "Save or discard editor changes before building a proposal.",
-                status_code=409,
+        site_id = _stable_id(site_id, "siteId")
+        layout_id = _stable_id(layout_id, "layoutId")
+        expected_revision = _revision(expected_revision, "expectedRevision")
+        source_revisions = semantic_plan.get("sourceRevisions")
+        request_identity = {
+            "semanticPlan": deepcopy(dict(semantic_plan)),
+            "proposalId": proposal_id,
+            "receiptIds": sorted(
+                str(item) for item in (receipt_ids or []) if item
+            ),
+        }
+        source_binding = {
+            "siteId": site_id,
+            "layoutId": layout_id,
+            "layoutRevision": expected_revision,
+            "semanticSourceRevisions": (
+                deepcopy(dict(source_revisions))
+                if isinstance(source_revisions, Mapping)
+                else {}
+            ),
+        }
+        observed_identity: dict[str, Any] = {}
+
+        def observe() -> FacilityAgentContextBundle:
+            bundle = self.resolve_context(
+                principal,
+                site_id=site_id,
+                layout_id=layout_id,
+                expected_revision=expected_revision,
+                live_facts=live_facts,
+                proposal_id=proposal_id,
+                receipt_ids=receipt_ids,
             )
-        try:
-            compiled = compile_semantic_facility_plan(
-                semantic_plan,
-                state=bundle.state,
-                evidence=bundle.evidence,
+            observed_identity.update(
+                deepcopy(dict(bundle.state.get("identity") or {}))
             )
-            proposals = self.service.create_layout_proposals(
+            return bundle
+
+        def build_plan(bundle: FacilityAgentContextBundle) -> dict[str, Any]:
+            source_plan = deepcopy(dict(semantic_plan))
+            return {
+                "semanticPlan": source_plan,
+                "compiled": compile_semantic_facility_plan(
+                    source_plan,
+                    state=bundle.state,
+                    evidence=bundle.evidence,
+                ),
+            }
+
+        def simulate(
+            plan: Mapping[str, Any],
+            bundle: FacilityAgentContextBundle,
+            _attempt: int,
+        ) -> dict[str, Any]:
+            return self.service.create_layout_proposals(
                 principal,
                 str(bundle.state["identity"]["siteId"]),
                 str(bundle.state["identity"]["layoutId"]),
                 str(bundle.state["identity"]["revision"]),
-                compiled["plannerRequest"],
+                plan["compiled"]["plannerRequest"],
             )
-        except SemanticFacilityPlanError as error:
+
+        workflow = self.workflow_runtime.run_preview(
+            owner_key=self._workflow_owner_key(
+                principal,
+                site_id,
+                layout_id,
+            ),
+            workflow_id=FACILITY_LAYOUT_VERIFIED_WORKFLOW_ID,
+            goal=self._workflow_goal(semantic_plan),
+            request_identity=request_identity,
+            source_binding=source_binding,
+            hard_constraints=self._workflow_hard_constraints(),
+            soft_objectives=self._workflow_soft_objectives(semantic_plan),
+            observe=observe,
+            build_plan=build_plan,
+            validate_plan=self._validate_workflow_plan,
+            simulate=simulate,
+            validate_result=self._validate_workflow_preview,
+            repair=self._repair_workflow_plan,
+            classify_error=self._classify_workflow_error,
+            budget=FACILITY_LAYOUT_VERIFIED_WORKFLOW_BUDGET,
+        )
+        trace = deepcopy(dict(workflow.trace))
+        if trace.get("status") != "preview_ready":
+            issues = [
+                item for item in trace.get("issues", [])
+                if isinstance(item, Mapping)
+            ]
+            issue = next(
+                (
+                    item for item in reversed(issues)
+                    if item.get("severity") in {"error", "blocked"}
+                ),
+                {
+                    "code": "facility_verified_workflow_blocked",
+                    "message": "The verified Facility Layout workflow was blocked.",
+                    "details": {},
+                },
+            )
+            issue_details = (
+                deepcopy(dict(issue.get("details") or {}))
+                if isinstance(issue.get("details"), Mapping)
+                else {}
+            )
+            status_code = int(issue_details.pop("statusCode", 422) or 422)
             raise FacilityLayoutAgentRuntimeError(
-                error.code,
-                str(error),
-                details={"findings": deepcopy(error.findings)},
-            ) from error
-        except FacilityLayoutError as error:
+                str(issue.get("code") or "facility_verified_workflow_blocked"),
+                str(issue.get("message") or "Facility Layout workflow blocked."),
+                status_code=status_code,
+                details={
+                    **issue_details,
+                    "workflowRun": trace,
+                },
+            )
+        if not isinstance(workflow.plan, Mapping) or not isinstance(
+            workflow.output, Mapping
+        ):
             raise FacilityLayoutAgentRuntimeError(
-                error.code,
-                str(error),
-                status_code=error.status_code,
-                details=error.details,
-            ) from error
+                "facility_verified_workflow_result_invalid",
+                "The verified workflow returned no complete preview.",
+                details={"workflowRun": trace},
+            )
+        compiled = workflow.plan["compiled"]
+        proposals = workflow.output
         return {
             "ok": True,
             "runtimeVersion": FACILITY_LAYOUT_AGENT_RUNTIME_VERSION,
             "previewOnly": True,
             "saved": False,
-            "identity": deepcopy(bundle.state["identity"]),
+            "identity": deepcopy(observed_identity),
             "semanticPlan": {
                 "planId": compiled["plan"]["planId"],
                 "planHash": compiled["planHash"],
@@ -1154,11 +2205,41 @@ class FacilityLayoutAgentRuntime:
             "proposal": proposals,
             "selectedProposalId": proposals.get("selectedProposalId"),
             "canonicalReceipt": None,
+            "workflowRun": trace,
             "message": (
                 "Facility Layout ghost preview created. It is not saved and "
                 "requires explicit approval before atomic apply."
             ),
         }
+
+    def get_workflow_run(
+        self,
+        principal: FacilityPrincipal,
+        *,
+        site_id: str,
+        layout_id: str,
+        run_id: str,
+    ) -> dict[str, Any]:
+        site_id = _stable_id(site_id, "siteId")
+        layout_id = _stable_id(layout_id, "layoutId")
+        run_id = _stable_id(run_id, "runId")
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="layout.read",
+        )
+        trace = self.workflow_runtime.get_run(
+            self._workflow_owner_key(principal, site_id, layout_id),
+            run_id,
+        )
+        if trace is None:
+            raise FacilityLayoutAgentRuntimeError(
+                "facility_workflow_run_not_found",
+                "The verified Facility Layout workflow run was not found.",
+                status_code=404,
+            )
+        return trace
 
 
 __all__ = [
@@ -1166,6 +2247,8 @@ __all__ = [
     "FACILITY_LAYOUT_AGENT_MAXIMUM_CALLS_PER_TURN",
     "FACILITY_LAYOUT_AGENT_MAXIMUM_RESPONSE_BYTES",
     "FACILITY_LAYOUT_AGENT_RUNTIME_VERSION",
+    "FACILITY_LAYOUT_VERIFIED_WORKFLOW_BUDGET",
+    "FACILITY_LAYOUT_VERIFIED_WORKFLOW_ID",
     "FacilityAgentContextBundle",
     "FacilityLayoutAgentRuntime",
     "FacilityLayoutAgentRuntimeError",

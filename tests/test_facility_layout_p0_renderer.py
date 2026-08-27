@@ -42,6 +42,7 @@ def test_vendored_three_manifest_matches_every_pinned_file():
         "examples/jsm/utils/BufferGeometryUtils.js",
         "examples/jsm/utils/SkeletonUtils.js",
         "examples/jsm/controls/OrbitControls.js",
+        "examples/jsm/controls/PointerLockControls.js",
         "examples/jsm/loaders/STLLoader.js",
         "examples/jsm/renderers/CSS2DRenderer.js",
         "LICENSE",

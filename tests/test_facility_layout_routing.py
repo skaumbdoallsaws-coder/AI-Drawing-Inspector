@@ -17,6 +17,7 @@ from ai_inspector.facility_layout.routing import (
     resolve_endpoint,
     routing_layout_fingerprint,
     stable_route_fingerprint,
+    validate_facility_aisle_route,
     validate_route,
     validate_swept_volume,
     validate_utility_network,
@@ -172,6 +173,60 @@ def _layout():
             }
         ],
     }
+
+
+def test_semantic_aisle_uses_world_endpoints_without_vehicle_authority():
+    layout = _layout()
+    route = {
+        "routeId": "rt-main-aisle",
+        "routeKind": "forklift",
+        "sourceEndpoint": {
+            "kind": "world_point",
+            "position": {"x": 0.0, "y": 0.0, "z": 5.0},
+        },
+        "targetEndpoint": {
+            "kind": "world_point",
+            "position": {"x": 20.0, "y": 0.0, "z": 5.0},
+        },
+        "routingMode": "vehicle",
+        "centerline": [
+            {"x": 0.0, "y": 0.0, "z": 5.0},
+            {"x": 20.0, "y": 0.0, "z": 5.0},
+        ],
+        "corridorWidth": 3.5,
+        "sourceRevisions": {"layoutBaseRevision": "d" * 64},
+        "requirements": [],
+        "evidence": [],
+        "extensions": {
+            "facilityAisle": {
+                "schemaVersion": 1,
+                "aisleKind": "forklift",
+                "direction": "two_way",
+                "color": "#d9a514",
+                "clearanceEvidenceStatus": "unverified",
+            }
+        },
+    }
+    route["routeFingerprint"] = persisted_route_fingerprint(route)
+
+    result = validate_facility_aisle_route(layout, route)
+
+    assert result["valid"] is True
+    assert result["source"]["endpointKind"] == "world_point"
+    assert result["target"]["position"] == {"x": 20.0, "y": 0.0, "z": 5.0}
+    assert [item["code"] for item in result["findings"]] == [
+        "aisle_clearance_unverified"
+    ]
+
+    unsupported = deepcopy(route)
+    unsupported["extensions"]["facilityAisle"][
+        "clearanceEvidenceStatus"
+    ] = "authored"
+    invalid = validate_facility_aisle_route(layout, unsupported)
+    assert invalid["valid"] is False
+    assert [item["code"] for item in invalid["findings"]] == [
+        "aisle_authoritative_evidence_missing"
+    ]
 
 
 def _utility_network():

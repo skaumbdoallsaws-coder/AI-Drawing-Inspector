@@ -335,6 +335,81 @@ def canonicalize_layout(layout: Mapping[str, Any]) -> dict[str, Any]:
                     ("x", "y", "z"),
                     f"{zone_path}.anchors[{anchor_index}].facing",
                 )
+        extensions = zone.get("extensions")
+        extensions = extensions if isinstance(extensions, MutableMapping) else {}
+        cell_group = extensions.get("cellGroup")
+        cell_group = (
+            cell_group if isinstance(cell_group, MutableMapping) else {}
+        )
+        if "envelopePadding" in cell_group:
+            cell_group["envelopePadding"] = _rounded_number(
+                cell_group["envelopePadding"],
+                METER_DECIMAL_PLACES,
+                f"{zone_path}.extensions.cellGroup.envelopePadding",
+            )
+        interfaces = cell_group.get("functionalInterfaces")
+        interfaces = (
+            interfaces if isinstance(interfaces, MutableMapping) else {}
+        )
+        for role, raw_interface in interfaces.items():
+            if not isinstance(raw_interface, MutableMapping):
+                continue
+            interface_path = (
+                f"{zone_path}.extensions.cellGroup."
+                f"functionalInterfaces.{role}"
+            )
+            for field in ("openingWidthMeters", "approachDepthMeters"):
+                if field in raw_interface:
+                    raw_interface[field] = _rounded_number(
+                        raw_interface[field],
+                        METER_DECIMAL_PLACES,
+                        f"{interface_path}.{field}",
+                    )
+            if "position" in raw_interface:
+                _canonical_vector(
+                    raw_interface["position"],
+                    ("x", "z"),
+                    f"{interface_path}.position",
+                )
+            if "facing" in raw_interface:
+                _canonical_vector(
+                    raw_interface["facing"],
+                    ("x", "z"),
+                    f"{interface_path}.facing",
+                )
+            if "accessEnvelope" in raw_interface:
+                raw_interface["accessEnvelope"] = canonicalize_polygon(
+                    raw_interface["accessEnvelope"],
+                    f"{interface_path}.accessEnvelope",
+                )
+
+    floor_markings = _sequence(
+        result.get("floorMarkings", []),
+        "$.floorMarkings",
+    )
+    for marking_index, raw_marking in enumerate(floor_markings):
+        path = f"$.floorMarkings[{marking_index}]"
+        marking = _mapping(raw_marking, path)
+        transform = _mapping(marking.get("transform"), f"{path}.transform")
+        if "position" in transform:
+            _canonical_vector(
+                transform["position"],
+                ("x", "y", "z"),
+                f"{path}.transform.position",
+            )
+        if "rotationDegrees" in transform:
+            transform["rotationDegrees"] = _rounded_number(
+                transform["rotationDegrees"],
+                METER_DECIMAL_PLACES,
+                f"{path}.transform.rotationDegrees",
+            )
+        for field in ("width", "depth", "opacity"):
+            if field in marking:
+                marking[field] = _rounded_number(
+                    marking[field],
+                    METER_DECIMAL_PLACES,
+                    f"{path}.{field}",
+                )
 
     placements = _sequence(result.get("placements"), "$.placements")
     for placement_index, raw_placement in enumerate(placements):

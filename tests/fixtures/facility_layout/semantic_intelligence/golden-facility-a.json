@@ -1,0 +1,469 @@
+{
+  "fixtureContractVersion": 1,
+  "snapshotId": "golden-facility-a",
+  "description": "Frozen six-department 300 m by 200 m semantic evaluation plant.",
+  "expected": {
+    "facilityWidthMeters": 300.0,
+    "facilityDepthMeters": 200.0,
+    "facilityAreaSquareMeters": 60000.0,
+    "facilityAreaSquareFeet": 645834.625003,
+    "departmentCount": 6,
+    "zoneCount": 7,
+    "departmentAreaSquareMeters": 9000.0,
+    "departmentAreaSumSquareMeters": 54000.0,
+    "departmentUnionAreaSquareMeters": 54000.0,
+    "uncoveredShellAreaSquareMeters": 6000.0,
+    "departmentAreaSharePercent": 16.666667,
+    "floorPlacementCount": 6,
+    "totalPlacementCount": 7,
+    "netPhysicalFootprintSquareMeters": 600.0,
+    "geometricFreeAreaSquareMeters": 59400.0,
+    "clearanceUnionSquareMeters": 864.0,
+    "routeUnionSquareMeters": 440.0,
+    "markingUnionSquareMeters": 60.0,
+    "operationalFreeAreaSquareMeters": 57220.0,
+    "receivingOperationalFreeAreaSquareMeters": 8676.0,
+    "ordinaryDepartmentOperationalFreeAreaSquareMeters": 8856.0,
+    "reconciledClearanceOnlySquareMeters": 264.0,
+    "reconciledCellEnvelopeOnlySquareMeters": 1456.0,
+    "reconciledRouteOnlySquareMeters": 440.0,
+    "reconciledMarkingOnlySquareMeters": 20.0,
+    "routeLengthMeters": 110.0,
+    "routeWidthMeters": 4.0,
+    "processBindingCount": 5,
+    "processBoundZoneCount": 6,
+    "processRelationshipEdgeCount": 4,
+    "assemblyCellAreaSquareMeters": 1600.0
+  },
+  "state": {
+    "identity": {
+      "siteId": "site-golden-a",
+      "layoutId": "fl-golden-a",
+      "displayName": "Golden Facility A",
+      "revision": "1111111111111111111111111111111111111111111111111111111111111111",
+      "status": "active"
+    },
+    "coordinateFrame": {
+      "units": "m",
+      "handedness": "right",
+      "upAxis": "+Y",
+      "floorAxes": ["+X", "+Z"],
+      "datumId": "golden-a-origin",
+      "floorElevation": 0.0
+    },
+    "facilityShell": {
+      "shellId": "shell-golden-a",
+      "shellRevision": "2222222222222222222222222222222222222222222222222222222222222222",
+      "status": "reviewed",
+      "floorGeometryAuthoritative": true,
+      "floorSurfaces": [
+        {
+          "featureId": "floor-golden-a",
+          "boundary": [
+            {"x": 0.0, "z": 0.0},
+            {"x": 300.0, "z": 0.0},
+            {"x": 300.0, "z": 200.0},
+            {"x": 0.0, "z": 200.0}
+          ],
+          "elevation": 0.0,
+          "evidenceIds": ["ev-shell-golden-a"],
+          "evidenceAuthoritative": true
+        }
+      ],
+      "unresolvedItems": []
+    },
+    "facilityPolicy": {
+      "policySetId": "policy-golden-a",
+      "policySetRevision": "3333333333333333333333333333333333333333333333333333333333333333",
+      "status": "reviewed",
+      "rulesAuthoritative": true,
+      "deterministicRules": [
+        {
+          "ruleId": "rule-golden-a-clearance",
+          "ruleType": "asset_clearance",
+          "severity": "error",
+          "evidenceIds": ["ev-policy-golden-a"],
+          "evidenceAuthoritative": true
+        }
+      ],
+      "unresolvedItems": []
+    },
+    "zones": [
+      {
+        "zoneId": "dept-receiving",
+        "zoneType": "department",
+        "label": "Receiving + Raw Material",
+        "boundary": [
+          {"x": 0.0, "z": 110.0},
+          {"x": 100.0, "z": 110.0},
+          {"x": 100.0, "z": 200.0},
+          {"x": 0.0, "z": 200.0}
+        ]
+      },
+      {
+        "zoneId": "dept-machining",
+        "zoneType": "department",
+        "label": "Machining Hall",
+        "boundary": [
+          {"x": 100.0, "z": 110.0},
+          {"x": 200.0, "z": 110.0},
+          {"x": 200.0, "z": 200.0},
+          {"x": 100.0, "z": 200.0}
+        ]
+      },
+      {
+        "zoneId": "dept-automation",
+        "zoneType": "department",
+        "label": "Automation + Robot Cells",
+        "boundary": [
+          {"x": 200.0, "z": 110.0},
+          {"x": 300.0, "z": 110.0},
+          {"x": 300.0, "z": 200.0},
+          {"x": 200.0, "z": 200.0}
+        ]
+      },
+      {
+        "zoneId": "dept-material-maintenance",
+        "zoneType": "department",
+        "label": "Material Handling + Maintenance",
+        "boundary": [
+          {"x": 0.0, "z": 0.0},
+          {"x": 100.0, "z": 0.0},
+          {"x": 100.0, "z": 90.0},
+          {"x": 0.0, "z": 90.0}
+        ]
+      },
+      {
+        "zoneId": "dept-assembly",
+        "zoneType": "department",
+        "label": "Assembly + Kitting",
+        "boundary": [
+          {"x": 100.0, "z": 0.0},
+          {"x": 200.0, "z": 0.0},
+          {"x": 200.0, "z": 90.0},
+          {"x": 100.0, "z": 90.0}
+        ]
+      },
+      {
+        "zoneId": "cell-assembly-a01",
+        "zoneType": "workcell",
+        "label": "Assembly Cell A01",
+        "boundary": [
+          {"x": 110.0, "z": 20.0},
+          {"x": 150.0, "z": 20.0},
+          {"x": 150.0, "z": 60.0},
+          {"x": 110.0, "z": 60.0}
+        ]
+      },
+      {
+        "zoneId": "dept-inspection-finished",
+        "zoneType": "department",
+        "label": "Inspection + Packing + Finished Goods",
+        "boundary": [
+          {"x": 200.0, "z": 0.0},
+          {"x": 300.0, "z": 0.0},
+          {"x": 300.0, "z": 90.0},
+          {"x": 200.0, "z": 90.0}
+        ]
+      }
+    ],
+    "assets": [
+      {
+        "assetId": "asset-rack",
+        "assetDefinitionRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "displayName": "Pallet Rack",
+        "category": "Storage",
+        "dimensions": {"x": 10.0, "y": 5.0, "z": 10.0},
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true
+      },
+      {
+        "assetId": "asset-monitor",
+        "assetDefinitionRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "displayName": "Industrial Computer Monitor",
+        "category": "Information Equipment",
+        "dimensions": {"x": 4.0, "y": 0.4, "z": 4.0},
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true
+      },
+      {
+        "assetId": "asset-cnc",
+        "assetDefinitionRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "displayName": "CNC Machining Center",
+        "category": "Machines",
+        "dimensions": {"x": 10.0, "y": 5.0, "z": 10.0},
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true
+      },
+      {
+        "assetId": "asset-robot",
+        "assetDefinitionRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "displayName": "Industrial Robot Cell",
+        "category": "Automation",
+        "dimensions": {"x": 10.0, "y": 5.0, "z": 10.0},
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true
+      },
+      {
+        "assetId": "asset-forklift",
+        "assetDefinitionRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "displayName": "Forklift Truck",
+        "category": "Material Handling",
+        "dimensions": {"x": 10.0, "y": 5.0, "z": 10.0},
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true
+      },
+      {
+        "assetId": "asset-bench",
+        "assetDefinitionRevision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "displayName": "Assembly Workbench",
+        "category": "Workstations",
+        "dimensions": {"x": 10.0, "y": 5.0, "z": 10.0},
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true
+      },
+      {
+        "assetId": "asset-inspection",
+        "assetDefinitionRevision": "9999999999999999999999999999999999999999999999999999999999999999",
+        "displayName": "Inspection Station",
+        "category": "Inspection",
+        "dimensions": {"x": 10.0, "y": 5.0, "z": 10.0},
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true
+      }
+    ],
+    "placements": [
+      {
+        "placementId": "pl-receiving-rack",
+        "assetId": "asset-rack",
+        "assetDefinitionRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "displayName": "Receiving Rack R01",
+        "category": "Storage",
+        "transform": {"position": {"x": 20.0, "y": 0.0, "z": 150.0}, "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}, "scale": 1.0},
+        "zoneIds": ["dept-receiving"],
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true,
+        "clearanceRecordCount": 1,
+        "physicalGeometry": [{"recordId": "phy-receiving", "polygon": [{"x": 15.0, "z": 145.0}, {"x": 25.0, "z": 145.0}, {"x": 25.0, "z": 155.0}, {"x": 15.0, "z": 155.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}],
+        "clearanceGeometry": [{"recordId": "clr-receiving", "polygon": [{"x": 14.0, "z": 144.0}, {"x": 26.0, "z": 144.0}, {"x": 26.0, "z": 156.0}, {"x": 14.0, "z": 156.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}]
+      },
+      {
+        "placementId": "pl-receiving-monitor",
+        "assetId": "asset-monitor",
+        "assetDefinitionRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "displayName": "Receiving Monitor",
+        "category": "Information Equipment",
+        "transform": {"position": {"x": 20.0, "y": 1.2, "z": 150.0}, "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}, "scale": 1.0},
+        "zoneIds": ["dept-receiving"],
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true,
+        "clearanceRecordCount": 1,
+        "physicalGeometry": [{"recordId": "phy-monitor", "polygon": [{"x": 18.0, "z": 148.0}, {"x": 22.0, "z": 148.0}, {"x": 22.0, "z": 152.0}, {"x": 18.0, "z": 152.0}], "minimumY": 1.2, "maximumY": 1.6, "authoritative": true}],
+        "clearanceGeometry": [{"recordId": "clr-monitor", "polygon": [{"x": 17.0, "z": 147.0}, {"x": 23.0, "z": 147.0}, {"x": 23.0, "z": 153.0}, {"x": 17.0, "z": 153.0}], "minimumY": 1.2, "maximumY": 1.6, "authoritative": true}]
+      },
+      {
+        "placementId": "pl-machining-cnc",
+        "assetId": "asset-cnc",
+        "assetDefinitionRevision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "displayName": "CNC-01",
+        "category": "Machines",
+        "transform": {"position": {"x": 120.0, "y": 0.0, "z": 150.0}, "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}, "scale": 1.0},
+        "zoneIds": ["dept-machining"],
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true,
+        "clearanceRecordCount": 1,
+        "physicalGeometry": [{"recordId": "phy-machining", "polygon": [{"x": 115.0, "z": 145.0}, {"x": 125.0, "z": 145.0}, {"x": 125.0, "z": 155.0}, {"x": 115.0, "z": 155.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}],
+        "clearanceGeometry": [{"recordId": "clr-machining", "polygon": [{"x": 114.0, "z": 144.0}, {"x": 126.0, "z": 144.0}, {"x": 126.0, "z": 156.0}, {"x": 114.0, "z": 156.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}]
+      },
+      {
+        "placementId": "pl-automation-robot",
+        "assetId": "asset-robot",
+        "assetDefinitionRevision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "displayName": "Robot Cell A01",
+        "category": "Automation",
+        "transform": {"position": {"x": 220.0, "y": 0.0, "z": 150.0}, "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}, "scale": 1.0},
+        "zoneIds": ["dept-automation"],
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true,
+        "clearanceRecordCount": 1,
+        "physicalGeometry": [{"recordId": "phy-automation", "polygon": [{"x": 215.0, "z": 145.0}, {"x": 225.0, "z": 145.0}, {"x": 225.0, "z": 155.0}, {"x": 215.0, "z": 155.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}],
+        "clearanceGeometry": [{"recordId": "clr-automation", "polygon": [{"x": 214.0, "z": 144.0}, {"x": 226.0, "z": 144.0}, {"x": 226.0, "z": 156.0}, {"x": 214.0, "z": 156.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}]
+      },
+      {
+        "placementId": "pl-material-forklift",
+        "assetId": "asset-forklift",
+        "assetDefinitionRevision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "displayName": "Forklift 01",
+        "category": "Material Handling",
+        "transform": {"position": {"x": 20.0, "y": 0.0, "z": 40.0}, "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}, "scale": 1.0},
+        "zoneIds": ["dept-material-maintenance"],
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true,
+        "clearanceRecordCount": 1,
+        "physicalGeometry": [{"recordId": "phy-material", "polygon": [{"x": 15.0, "z": 35.0}, {"x": 25.0, "z": 35.0}, {"x": 25.0, "z": 45.0}, {"x": 15.0, "z": 45.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}],
+        "clearanceGeometry": [{"recordId": "clr-material", "polygon": [{"x": 14.0, "z": 34.0}, {"x": 26.0, "z": 34.0}, {"x": 26.0, "z": 46.0}, {"x": 14.0, "z": 46.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}]
+      },
+      {
+        "placementId": "pl-assembly-bench",
+        "assetId": "asset-bench",
+        "assetDefinitionRevision": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "displayName": "Assembly Bench A01",
+        "category": "Workstations",
+        "transform": {"position": {"x": 120.0, "y": 0.0, "z": 40.0}, "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}, "scale": 1.0},
+        "zoneIds": ["dept-assembly", "cell-assembly-a01"],
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true,
+        "clearanceRecordCount": 1,
+        "physicalGeometry": [{"recordId": "phy-assembly", "polygon": [{"x": 115.0, "z": 35.0}, {"x": 125.0, "z": 35.0}, {"x": 125.0, "z": 45.0}, {"x": 115.0, "z": 45.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}],
+        "clearanceGeometry": [{"recordId": "clr-assembly", "polygon": [{"x": 114.0, "z": 34.0}, {"x": 126.0, "z": 34.0}, {"x": 126.0, "z": 46.0}, {"x": 114.0, "z": 46.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}],
+        "metadata": {
+          "layoutProvenance": {
+            "schemaVersion": 1,
+            "provenanceId": "layout-pattern:assembly-a01-u",
+            "command": "cell_layout",
+            "authoredStrategy": "u",
+            "seedEntityIds": ["pl-assembly-bench"],
+            "parameters": {"invertU": false, "gap": 1.0},
+            "manuallyEditedSinceCreation": false,
+            "authoredGeometry": {"kind": "placement", "transform": {"position": {"x": 120.0, "y": 0.0, "z": 40.0}, "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}, "scale": 1.0}}
+          }
+        }
+      },
+      {
+        "placementId": "pl-inspection-station",
+        "assetId": "asset-inspection",
+        "assetDefinitionRevision": "9999999999999999999999999999999999999999999999999999999999999999",
+        "displayName": "Inspection Station Q01",
+        "category": "Inspection",
+        "transform": {"position": {"x": 220.0, "y": 0.0, "z": 40.0}, "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}, "scale": 1.0},
+        "zoneIds": ["dept-inspection-finished"],
+        "planningReady": true,
+        "planningReadinessEvidenceComplete": true,
+        "clearanceRecordCount": 1,
+        "physicalGeometry": [{"recordId": "phy-inspection", "polygon": [{"x": 215.0, "z": 35.0}, {"x": 225.0, "z": 35.0}, {"x": 225.0, "z": 45.0}, {"x": 215.0, "z": 45.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}],
+        "clearanceGeometry": [{"recordId": "clr-inspection", "polygon": [{"x": 214.0, "z": 34.0}, {"x": 226.0, "z": 34.0}, {"x": 226.0, "z": 46.0}, {"x": 214.0, "z": 46.0}], "minimumY": 0.0, "maximumY": 5.0, "authoritative": true}]
+      }
+    ],
+    "routes": [
+      {
+        "routeId": "rt-forklift-north-south",
+        "label": "Receiving to Material Handling",
+        "routeKind": "forklift",
+        "corridorWidth": 4.0,
+        "centerline": [{"x": 50.0, "y": 0.0, "z": 45.0}, {"x": 50.0, "y": 0.0, "z": 155.0}],
+        "clearanceAuthoritative": true,
+        "extensions": {"facilityAisle": {"clearanceEvidenceStatus": "derived"}}
+      }
+    ],
+    "floorMarkings": [
+      {
+        "markingId": "fm-central-crosswalk",
+        "markingType": "crosswalk",
+        "label": "Central Crosswalk",
+        "semanticRole": "pedestrian_lane",
+        "transform": {"position": {"x": 50.0, "y": 0.0, "z": 100.0}, "rotationDegrees": 0.0},
+        "width": 6.0,
+        "depth": 10.0,
+        "evidenceAuthoritative": true
+      }
+    ],
+    "processMaps": [
+      {
+        "productId": "product-golden",
+        "processMapId": "pm-golden",
+        "processMapRevision": "7777777777777777777777777777777777777777777777777777777777777777",
+        "displayName": "Golden Product Flow",
+        "nodeIds": ["op-receive", "op-machine", "op-automate", "op-assemble", "op-inspect"],
+        "edgeIds": ["edge-receive-machine", "edge-machine-automate", "edge-automate-assemble", "edge-assemble-inspect"],
+        "graphTopologyLoaded": true,
+        "precedenceEdges": [
+          {
+            "edgeId": "edge-receive-machine",
+            "fromNodeId": "op-receive",
+            "toNodeId": "op-machine",
+            "edgeKind": "precedence",
+            "evidenceStatus": "authored"
+          },
+          {
+            "edgeId": "edge-machine-automate",
+            "fromNodeId": "op-machine",
+            "toNodeId": "op-automate",
+            "edgeKind": "precedence",
+            "evidenceStatus": "authored"
+          },
+          {
+            "edgeId": "edge-automate-assemble",
+            "fromNodeId": "op-automate",
+            "toNodeId": "op-assemble",
+            "edgeKind": "precedence",
+            "evidenceStatus": "authored"
+          },
+          {
+            "edgeId": "edge-assemble-inspect",
+            "fromNodeId": "op-assemble",
+            "toNodeId": "op-inspect",
+            "edgeKind": "precedence",
+            "evidenceStatus": "authored"
+          }
+        ]
+      }
+    ],
+    "processBindings": [
+      {
+        "processBindingId": "pb-golden-receiving",
+        "productId": "product-golden",
+        "processMapId": "pm-golden",
+        "processMapRevision": "7777777777777777777777777777777777777777777777777777777777777777",
+        "processNodeIds": ["op-receive"],
+        "processEdgeIds": [],
+        "placementIds": ["pl-receiving-rack"],
+        "routeIds": ["rt-forklift-north-south"],
+        "bindingRole": "resource"
+      },
+      {
+        "processBindingId": "pb-golden-machining",
+        "productId": "product-golden",
+        "processMapId": "pm-golden",
+        "processMapRevision": "7777777777777777777777777777777777777777777777777777777777777777",
+        "processNodeIds": ["op-machine"],
+        "processEdgeIds": [],
+        "placementIds": ["pl-machining-cnc"],
+        "routeIds": [],
+        "bindingRole": "resource"
+      },
+      {
+        "processBindingId": "pb-golden-automation",
+        "productId": "product-golden",
+        "processMapId": "pm-golden",
+        "processMapRevision": "7777777777777777777777777777777777777777777777777777777777777777",
+        "processNodeIds": ["op-automate"],
+        "processEdgeIds": [],
+        "placementIds": ["pl-automation-robot"],
+        "routeIds": [],
+        "bindingRole": "resource"
+      },
+      {
+        "processBindingId": "pb-golden-assembly",
+        "productId": "product-golden",
+        "processMapId": "pm-golden",
+        "processMapRevision": "7777777777777777777777777777777777777777777777777777777777777777",
+        "processNodeIds": ["op-assemble"],
+        "processEdgeIds": [],
+        "placementIds": ["pl-assembly-bench"],
+        "routeIds": [],
+        "bindingRole": "resource"
+      },
+      {
+        "processBindingId": "pb-golden-inspection",
+        "productId": "product-golden",
+        "processMapId": "pm-golden",
+        "processMapRevision": "7777777777777777777777777777777777777777777777777777777777777777",
+        "processNodeIds": ["op-inspect"],
+        "processEdgeIds": [],
+        "placementIds": ["pl-inspection-station"],
+        "routeIds": [],
+        "bindingRole": "resource"
+      }
+    ]
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "checks": {
+    "cleanup_restores_empty_base": true,
+    "exact_department_labels": true,
+    "exact_dimensions": true,
+    "no_console_errors": true,
+    "no_failed_responses": true,
+    "no_interruption_message": true,
+    "no_page_errors": true,
+    "no_unrequested_entities": true,
+    "review_draft_is_unsaved": true,
+    "sage_selected": true,
+    "stream_completed": true
+  },
+  "errors": {
+    "console": [],
+    "failedResponses": [],
+    "page": []
+  },
+  "passed": true,
+  "prompt": "Create a new 100 m by 80 m facility and divide it into four equal departments named Receiving and Stores, Machining, Assembly, and Inspection and Shipping.",
+  "responseText": "Shadrack\nCreate a new 100 m by 80 m facility and divide it into four equal departments named Receiving and Stores, Machining, Assembly, and Inspection and Shipping.\nSage\n\nThe facility envelope and 4 macro departments are ready for review as an unsaved draft. InspectorPro built 100 x 80 m through 10 deterministic stages: Receiving and Stores, Machining, Assembly, Inspection and Shipping. Validation returned valid, and the saved layout is unchanged. Use Save to approve the exact cumulative draft or Undo to restore the empty base.\n\n\ud83d\udc4d\n\ud83d\udc4e",
+  "result": {
+    "canSave": true,
+    "cleanup": {
+      "dirty": false,
+      "markingCount": 0,
+      "placementCount": 0,
+      "routeCount": 0,
+      "zoneCount": 0
+    },
+    "departmentLabels": [
+      "Receiving and Stores",
+      "Machining",
+      "Assembly",
+      "Inspection and Shipping"
+    ],
+    "dirty": true,
+    "facility": {
+      "depthMeters": 80,
+      "widthMeters": 100
+    },
+    "runId": "fgr-7fbb78ddd176484c991c337d3980789c"
+  },
+  "schemaVersion": "facility-layout-g1-chat-browser-evidence-v1",
+  "screenshot": "tests/fixtures/facility_layout/knowledge_foundation/g1-chat-browser.png",
+  "streamStatuses": [
+    200
+  ]
+}

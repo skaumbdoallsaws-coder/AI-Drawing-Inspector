@@ -2258,8 +2258,9 @@ def _zone_fixture(zone_type: str, zone_id: str) -> dict[str, Any]:
 
 
 def build_real_soak_evidence(
-    ledger_path: Path = REAL_SOAK_EVENT_LEDGER,
+    ledger_path: Path | None = None,
 ) -> dict[str, Any]:
+    ledger_path = ledger_path or REAL_SOAK_EVENT_LEDGER
     if not ledger_path.is_file():
         return {
             "startedAtUtc": None,

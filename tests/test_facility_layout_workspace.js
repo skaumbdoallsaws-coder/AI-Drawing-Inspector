@@ -8,6 +8,11 @@ const vm = require('vm');
 const ROOT = path.resolve(__dirname, '..');
 const MODULE_PATH = path.join(ROOT, 'static', 'facility_layout_workspace.js');
 const workspaceModule = require(MODULE_PATH);
+const patternModule = require(path.join(
+    ROOT,
+    'static',
+    'facility_layout_patterns.js'
+));
 const SPATIAL_FIXTURE = JSON.parse(fs.readFileSync(path.join(
     ROOT,
     'tests',
@@ -66,6 +71,19 @@ class FakeElement {
         this.isContentEditable = false;
         this.capturedPointers = new Set();
         this.focusCount = 0;
+        this.style = {
+            left: '',
+            top: '',
+            right: '',
+            gridTemplateRows: '',
+            properties: {},
+            setProperty(name, value) {
+                this.properties[name] = String(value);
+            },
+            getPropertyValue(name) {
+                return this.properties[name] || '';
+            },
+        };
     }
 
     appendChild(child) {
@@ -212,6 +230,65 @@ class FakeDocument {
     }
 }
 
+class FakeSurfaceManager {
+    constructor() {
+        this.available = true;
+        this.active = null;
+        this.openCalls = [];
+        this.closeCalls = [];
+        this.repositionCount = 0;
+        this.destroyCount = 0;
+    }
+
+    open(config) {
+        if (this.active) this.close('replaced');
+        this.active = config;
+        this.openCalls.push(config);
+        return true;
+    }
+
+    close(reason) {
+        if (!this.active) return false;
+        const active = this.active;
+        this.active = null;
+        this.closeCalls.push(reason);
+        if (typeof active.onClose === 'function') active.onClose(reason);
+        return true;
+    }
+
+    destroy() {
+        this.destroyCount += 1;
+        this.close('destroyed');
+    }
+
+    reanchor(reference) {
+        if (!this.active) return false;
+        this.active.reference = reference;
+        return true;
+    }
+
+    reposition() {
+        this.repositionCount += 1;
+        return Promise.resolve(Boolean(this.active));
+    }
+
+    isOpen() {
+        return Boolean(this.active);
+    }
+
+    getActive() {
+        return this.active;
+    }
+}
+
+function fakeFloatingDom() {
+    return {
+        offset(value) { return { name: 'offset', value }; },
+        flip(value) { return { name: 'flip', value }; },
+        shift(value) { return { name: 'shift', value }; },
+    };
+}
+
 class FakeDataTransfer {
     constructor() {
         this.data = {};
@@ -261,6 +338,28 @@ function zone(id) {
     };
 }
 
+function floorMarking(id, type) {
+    return {
+        markingId: id,
+        markingType: type || 'keep_clear',
+        label: 'Keep Clear',
+        semanticRole: 'keep_clear',
+        transform: {
+            position: { x: 4, y: 0, z: 3 },
+            rotationDegrees: 0,
+        },
+        width: 4,
+        depth: 2,
+        fillColor: '#facc15',
+        strokeColor: '#111827',
+        opacity: 1,
+        text: 'KEEP CLEAR',
+        positionMode: 'manual',
+        metadata: { authoredIn: 'facility_plan' },
+        evidence: [],
+    };
+}
+
 function layout() {
     return {
         schemaVersion: 1,
@@ -286,6 +385,7 @@ function layout() {
             policySetRevision: 'c'.repeat(64),
         },
         zones: [zone('zn-a')],
+        floorMarkings: [],
         placements: [
             placement('pl-a', 'asset-rack', 1, 1, 'auto'),
             placement('pl-b', 'asset-forklift', 5, 2, 'manual'),
@@ -301,7 +401,9 @@ function layout() {
 
 function selectedRecord(document, id) {
     return document.placements.find(item => item.placementId === id)
-        || document.zones.find(item => item.zoneId === id);
+        || document.zones.find(item => item.zoneId === id)
+        || (document.floorMarkings || []).find(item => item.markingId === id)
+        || (document.routes || []).find(item => item.routeId === id);
 }
 
 class FakeSession {
@@ -337,9 +439,13 @@ class FakeSession {
         this.listeners.forEach(listener => listener(snapshot));
     }
 
-    _gesture(name) {
+    _gesture(name, operationCount) {
         this.state.dirty = true;
-        this.state.history.push({ label: name, operationCount: 1, applied: true });
+        this.state.history.push({
+            label: name,
+            operationCount: operationCount || 1,
+            applied: true,
+        });
         this.state.historyCursor = this.state.history.length;
         this.state.canUndo = true;
         this.state.canRedo = false;
@@ -638,11 +744,38 @@ class FakeSession {
         return this._gesture('Place asset');
     }
 
+    placeAssets(requests) {
+        this.calls.push(['placeAssets', clone(requests)]);
+        const created = requests.map(request => {
+            this.idSequence += 1;
+            const id = `pl-browser-${this.idSequence}`;
+            const value = placement(
+                id,
+                request.assetId,
+                request.worldPosition.x,
+                request.worldPosition.z,
+                request.positionMode || 'manual'
+            );
+            value.assetDefinitionRevision = request.assetDefinitionRevision;
+            value.transform.position.y = request.worldPosition.y || 0;
+            value.metadata = clone(request.metadata || {});
+            this.state.layout.placements.push(value);
+            return id;
+        });
+        this.state.selection = created;
+        return this._gesture(
+            requests.length === 1 ? 'Add asset' : 'Add assets',
+            requests.length
+        );
+    }
+
     moveSelected(delta) {
         this.calls.push(['moveSelected', clone(delta)]);
         this.state.selection.forEach(id => {
             const value = this.state.layout.placements.find(
                 item => item.placementId === id
+            ) || (this.state.layout.floorMarkings || []).find(
+                item => item.markingId === id
             );
             if (!value) return;
             value.transform.position.x += delta.x || 0;
@@ -651,6 +784,19 @@ class FakeSession {
             if (value.positionMode === 'auto') value.positionMode = 'manual';
         });
         return this._gesture('Move selection');
+    }
+
+    movePlacements(updates, label) {
+        this.calls.push(['movePlacements', clone(updates), label]);
+        updates.forEach(update => {
+            const value = this.state.layout.placements.find(
+                item => item.placementId === update.placementId
+            );
+            if (!value) return;
+            value.transform.position = clone(update.position);
+            if (value.positionMode === 'auto') value.positionMode = 'manual';
+        });
+        return this._gesture(label || 'Position placements');
     }
 
     rotateSelected90(turns) {
@@ -663,16 +809,24 @@ class FakeSession {
                 item => item.placementId === id
             );
             if (value) value.transform.quaternion = clone(q);
+            const marking = (this.state.layout.floorMarkings || []).find(
+                item => item.markingId === id
+            );
+            if (marking) {
+                marking.transform.rotationDegrees += 90
+                    * (turns === undefined ? 1 : turns);
+            }
         });
         return this._gesture('Rotate selection');
     }
 
-    duplicateSelected(offset) {
-        this.calls.push(['duplicateSelected', clone(offset)]);
-        const source = this.state.layout.placements.find(
-            item => item.placementId === this.state.selection[0]
-        );
-        if (source) {
+    _duplicatePlacements(placementIds, offset) {
+        const created = [];
+        placementIds.forEach(placementId => {
+            const source = this.state.layout.placements.find(
+                item => item.placementId === placementId
+            );
+            if (!source) return;
             this.idSequence += 1;
             const duplicate = clone(source);
             duplicate.placementId = `pl-copy-${this.idSequence}`;
@@ -680,9 +834,144 @@ class FakeSession {
             duplicate.transform.position.z += offset.z;
             duplicate.positionMode = 'manual';
             this.state.layout.placements.push(duplicate);
-            this.state.selection = [duplicate.placementId];
-        }
+            created.push(duplicate.placementId);
+        });
+        this.state.selection = created;
         return this._gesture('Duplicate selection');
+    }
+
+    duplicatePlacements(placementIds, offset) {
+        this.calls.push([
+            'duplicatePlacements',
+            clone(placementIds),
+            clone(offset),
+        ]);
+        return this._duplicatePlacements(placementIds, offset);
+    }
+
+    _duplicateItems(itemIds, offset) {
+        const created = [];
+        itemIds.forEach(id => {
+            const placement = this.state.layout.placements.find(
+                item => item.placementId === id
+            );
+            if (placement) {
+                this.idSequence += 1;
+                const copy = clone(placement);
+                copy.placementId = `pl-copy-${this.idSequence}`;
+                copy.transform.position.x += offset.x;
+                copy.transform.position.z += offset.z;
+                copy.positionMode = 'manual';
+                this.state.layout.placements.push(copy);
+                created.push(copy.placementId);
+                return;
+            }
+            const marking = (this.state.layout.floorMarkings || []).find(
+                item => item.markingId === id
+            );
+            if (!marking) return;
+            this.idSequence += 1;
+            const copy = clone(marking);
+            copy.markingId = `fm-copy-${this.idSequence}`;
+            copy.transform.position.x += offset.x;
+            copy.transform.position.z += offset.z;
+            copy.positionMode = 'manual';
+            this.state.layout.floorMarkings.push(copy);
+            created.push(copy.markingId);
+        });
+        this.state.selection = created;
+        return this._gesture('Duplicate selection');
+    }
+
+    duplicateItems(itemIds, offset) {
+        this.calls.push(['duplicateItems', clone(itemIds), clone(offset)]);
+        return this._duplicateItems(itemIds, offset);
+    }
+
+    duplicateSelected(offset) {
+        this.calls.push(['duplicateSelected', clone(offset)]);
+        return this._duplicateItems(this.state.selection.slice(), offset);
+    }
+
+    applyPattern(result, label) {
+        this.calls.push(['applyPattern', clone(result), label]);
+        const created = [];
+        (result.copies || []).forEach(copy => {
+            const placement = this.state.layout.placements.find(
+                item => item.placementId === copy.sourceId
+            );
+            if (placement && copy.kind === 'placement') {
+                this.idSequence += 1;
+                const value = clone(placement);
+                value.placementId = `pl-pattern-${this.idSequence}`;
+                value.transform.position = clone(copy.position);
+                value.positionMode = 'manual';
+                this.state.layout.placements.push(value);
+                created.push(value.placementId);
+                return;
+            }
+            const marking = (this.state.layout.floorMarkings || []).find(
+                item => item.markingId === copy.sourceId
+            );
+            if (marking && copy.kind === 'floor-marking') {
+                this.idSequence += 1;
+                const value = clone(marking);
+                value.markingId = `fm-pattern-${this.idSequence}`;
+                value.transform.position = clone(copy.position);
+                value.transform.rotationDegrees = copy.rotationDegrees;
+                value.positionMode = 'manual';
+                this.state.layout.floorMarkings.push(value);
+                created.push(value.markingId);
+                return;
+            }
+            const zone = this.state.layout.zones.find(
+                item => item.zoneId === copy.sourceId
+            );
+            if (zone && copy.kind === 'zone') {
+                this.idSequence += 1;
+                const value = clone(zone);
+                value.zoneId = `zn-pattern-${this.idSequence}`;
+                value.boundary = clone(copy.boundary);
+                this.state.layout.zones.push(value);
+                created.push(value.zoneId);
+            }
+        });
+        (result.moves || []).forEach(move => {
+            const value = selectedRecord(this.state.layout, move.sourceId);
+            if (!value) return;
+            if (value.zoneId) {
+                value.boundary = clone(move.boundary);
+                return;
+            }
+            value.transform.position = clone(move.position);
+            if (value.markingId) {
+                value.transform.rotationDegrees = move.rotationDegrees;
+            }
+            if (value.positionMode === 'auto') value.positionMode = 'manual';
+        });
+        if (created.length) this.state.selection = created;
+        return this._gesture(label || 'Create pattern',
+            (result.copies || []).length + (result.moves || []).length);
+    }
+
+    setPlanSettings(settings) {
+        this.calls.push(['setPlanSettings', clone(settings)]);
+        this.state.layout.extensions = this.state.layout.extensions || {};
+        this.state.layout.extensions.facilityPlan = clone(settings);
+        return this._gesture('Resize facility plan');
+    }
+
+    clearLayout() {
+        this.calls.push(['clearLayout']);
+        this.state.layout.placements = [];
+        this.state.layout.zones = [];
+        this.state.layout.floorMarkings = [];
+        this.state.layout.routes = [];
+        this.state.layout.utilityNetworks = [];
+        this.state.layout.processBindings = [];
+        this.state.layout.dismissedSuggestions = [];
+        this.state.selection = [];
+        return this._gesture('Clear facility layout');
     }
 
     deleteSelected() {
@@ -694,6 +983,9 @@ class FakeSession {
         this.state.layout.zones = this.state.layout.zones.filter(
             item => !selected.has(item.zoneId)
         );
+        this.state.layout.floorMarkings = (
+            this.state.layout.floorMarkings || []
+        ).filter(item => !selected.has(item.markingId));
         this.state.selection = [];
         return this._gesture('Delete selection');
     }
@@ -703,6 +995,8 @@ class FakeSession {
         this.state.selection.forEach(id => {
             const value = this.state.layout.placements.find(
                 item => item.placementId === id
+            ) || (this.state.layout.floorMarkings || []).find(
+                item => item.markingId === id
             );
             if (value) value.positionMode = 'locked';
         });
@@ -714,6 +1008,8 @@ class FakeSession {
         this.state.selection.forEach(id => {
             const value = this.state.layout.placements.find(
                 item => item.placementId === id
+            ) || (this.state.layout.floorMarkings || []).find(
+                item => item.markingId === id
             );
             if (value) value.positionMode = 'manual';
         });
@@ -742,6 +1038,93 @@ class FakeSession {
         return this._gesture('Create rectangle zone');
     }
 
+    createZones(requests) {
+        this.calls.push(['createZones', clone(requests)]);
+        const created = [];
+        requests.forEach(request => {
+            this.idSequence += 1;
+            const id = `zn-bulk-${this.idSequence}`;
+            this.state.layout.zones.push({
+                zoneId: id,
+                zoneType: request.zoneType,
+                label: request.label,
+                boundary: [
+                    { x: request.minX, z: request.minZ },
+                    { x: request.minX + request.width, z: request.minZ },
+                    {
+                        x: request.minX + request.width,
+                        z: request.minZ + request.depth,
+                    },
+                    { x: request.minX, z: request.minZ + request.depth },
+                ],
+                floorElevation: 0,
+                anchors: [],
+                evidence: [],
+                extensions: clone(request.extensions || {}),
+            });
+            created.push(id);
+        });
+        this.state.selection = created;
+        return this._gesture('Create facility zones');
+    }
+
+    createCellGroup(request) {
+        this.calls.push(['createCellGroup', clone(request)]);
+        this.idSequence += 1;
+        const id = `zn-cell-${this.idSequence}`;
+        const sequence = String(request.start).padStart(
+            request.numberPadding,
+            '0'
+        );
+        this.state.layout.zones.push({
+            zoneId: id,
+            zoneType: 'workcell',
+            label: request.baseName + ' ' + request.prefix + sequence,
+            boundary: [
+                { x: request.minX, z: request.minZ },
+                { x: request.minX + request.width, z: request.minZ },
+                {
+                    x: request.minX + request.width,
+                    z: request.minZ + request.depth,
+                },
+                { x: request.minX, z: request.minZ + request.depth },
+            ],
+            floorElevation: 0,
+            anchors: [],
+            evidence: [],
+            extensions: Object.assign({}, clone(request.extensions || {}), {
+                cellGroup: {
+                    schemaVersion: 1,
+                    groupKind: 'manufacturing_cell',
+                    membership: 'geometric',
+                    envelopePadding: request.envelopePadding,
+                    autoNumber: {
+                        seriesId: request.seriesId,
+                        baseName: request.baseName,
+                        prefix: request.prefix,
+                        start: request.start,
+                        padding: request.numberPadding,
+                        sequence: request.start,
+                    },
+                    functionalInterfaces: clone(
+                        request.functionalInterfaces || {}
+                    ),
+                },
+            }),
+        });
+        this.state.selection = [id];
+        return this._gesture('Create manufacturing cell');
+    }
+
+    ungroupCell(zoneId) {
+        this.calls.push(['ungroupCell', zoneId]);
+        this.state.layout.zones = this.state.layout.zones.filter(
+            zone => zone.zoneId !== zoneId
+        );
+        this.state.selection = [];
+        return this._gesture('Ungroup manufacturing cell');
+    }
+
     createPolygonZone(points, options) {
         this.calls.push(['createPolygonZone', clone(points), clone(options)]);
         this.idSequence += 1;
@@ -759,6 +1142,84 @@ class FakeSession {
         return this._gesture('Create polygon zone');
     }
 
+    createFloorMarking(request) {
+        this.calls.push(['createFloorMarking', clone(request)]);
+        this.idSequence += 1;
+        const value = Object.assign(
+            floorMarking(`fm-new-${this.idSequence}`, request.markingType),
+            clone(request)
+        );
+        this.state.layout.floorMarkings.push(value);
+        this.state.selection = [value.markingId];
+        return this._gesture('Create floor marking');
+    }
+
+    editFloorMarking(markingId, patch) {
+        this.calls.push(['editFloorMarking', markingId, clone(patch)]);
+        const value = (this.state.layout.floorMarkings || []).find(
+            item => item.markingId === markingId
+        );
+        if (!value) return Promise.reject(new Error('Unknown floor marking'));
+        Object.assign(value, clone(patch));
+        return this._gesture('Edit floor marking');
+    }
+
+    createAisle(request) {
+        this.calls.push(['createAisle', clone(request)]);
+        this.idSequence += 1;
+        const id = `rt-aisle-${this.idSequence}`;
+        this.state.layout.routes.push({
+            routeId: id,
+            label: request.label,
+            routeKind: request.aisleKind === 'forklift'
+                ? 'forklift' : 'material',
+            sourceEndpoint: {
+                kind: 'world_point',
+                position: clone(request.centerline[0]),
+            },
+            targetEndpoint: {
+                kind: 'world_point',
+                position: clone(request.centerline.at(-1)),
+            },
+            routingMode: request.aisleKind === 'forklift'
+                ? 'vehicle' : 'polyline',
+            centerline: clone(request.centerline),
+            corridorWidth: request.corridorWidth,
+            requirements: [],
+            evidence: [],
+            extensions: {
+                facilityAisle: {
+                    schemaVersion: 1,
+                    aisleKind: request.aisleKind,
+                    direction: request.direction,
+                    color: request.color,
+                    clearanceEvidenceStatus:
+                        request.clearanceEvidenceStatus,
+                },
+            },
+        });
+        this.state.selection = [id];
+        return this._gesture('Create facility aisle');
+    }
+
+    editAisle(routeId, patch) {
+        this.calls.push(['editAisle', routeId, clone(patch)]);
+        const route = this.state.layout.routes.find(
+            item => item.routeId === routeId
+        );
+        if (!route) return Promise.reject(new Error('Unknown facility aisle'));
+        if (patch.label !== undefined) route.label = patch.label;
+        if (patch.corridorWidth !== undefined) {
+            route.corridorWidth = patch.corridorWidth;
+        }
+        const aisle = route.extensions.facilityAisle;
+        ['aisleKind', 'direction', 'color', 'clearanceEvidenceStatus']
+            .forEach(key => {
+                if (patch[key] !== undefined) aisle[key] = patch[key];
+            });
+        return this._gesture('Edit facility aisle');
+    }
+
     editZoneDimensions(id, dimensions) {
         this.calls.push(['editZoneDimensions', id, clone(dimensions)]);
         const value = this.state.layout.zones.find(item => item.zoneId === id);
@@ -772,6 +1233,20 @@ class FakeSession {
             { x: center.x - halfWidth, z: center.z + halfDepth },
         ];
         return this._gesture('Resize zone');
+    }
+
+    editZoneLabel(id, label) {
+        this.calls.push(['editZoneLabel', id, label]);
+        const value = this.state.layout.zones.find(item => item.zoneId === id);
+        if (value) value.label = label;
+        return this._gesture('Rename zone');
+    }
+
+    editZoneType(id, zoneType) {
+        this.calls.push(['editZoneType', id, zoneType]);
+        const value = this.state.layout.zones.find(item => item.zoneId === id);
+        if (value) value.zoneType = zoneType;
+        return this._gesture('Change zone purpose');
     }
 
     undo() {
@@ -814,6 +1289,96 @@ class FakeAdapter {
         this.camera = null;
         this.ghost = null;
         this.proposalPreviews = [];
+        this.transientPlacementMoves = [];
+        this.transientPlacementDuplicates = [];
+        this.transientZonePreviews = [];
+        this.transientFloorMarkingPreviews = [];
+        this.transientAislePreviews = [];
+        this.transientPatternPreviews = [];
+        this.navigationModes = [];
+        this.zoomFactors = [];
+        this.gridVisibility = [];
+        this.visualSettings = [];
+        this.environmentSettings = [];
+        this.scaleAtCalls = [];
+        this.walkthrough = {
+            supported: true,
+            active: false,
+            locked: false,
+            reason: null,
+            route: {
+                active: false,
+                reason: null,
+            },
+        };
+        this.walkthroughEntries = [];
+        this.walkthroughExits = [];
+        this.walkthroughNavigations = [];
+        this.walkthroughNavigationCancels = [];
+        this.walkthroughHandler = null;
+        this.walkthroughContextHandler = null;
+        this.cameraOrientationHandler = null;
+        this.cameraOrientation = {
+            headingDegrees: 0,
+            screenTop: { x: 0, z: 1 },
+            northAxis: '+Z',
+            eastAxis: '+X',
+        };
+        this.walkthroughContextFocus = null;
+        this.drone = {
+            supported: true,
+            active: false,
+            locked: false,
+            assistedFlight: true,
+            altitude: 0,
+            currentSpeed: 0,
+            nearestObstacleDistance: null,
+            reason: null,
+        };
+        this.droneEntries = [];
+        this.droneExits = [];
+        this.immersiveSwitches = [];
+        this.droneHandler = null;
+        this.cameraView = {
+            position: { x: 8, y: 7, z: 6 },
+            quaternion: { x: 0, y: 0, z: 0, w: 1 },
+            up: { x: 0, y: 1, z: 0 },
+            target: { x: 2, y: 0, z: 3 },
+            near: 0.01,
+            far: 1000,
+            navigationMode: 'orbit',
+        };
+        this.appliedCameraViews = [];
+        this.fitFacilityCount = 0;
+        this.fitLayoutCount = 0;
+        this.frontViewCount = 0;
+        this.topViewCount = 0;
+        this.rightViewCount = 0;
+        this.isometricCount = 0;
+        this.viewportHandler = null;
+        this.viewPreferences = { displayUnit: 'm', showGrid: true };
+        this.viewportState = {
+            projection: {
+                width: 900,
+                height: 600,
+                scale: 20,
+                offsetX: 50,
+                offsetY: 20,
+                minX: 0,
+                minZ: 0,
+                maxX: 40,
+                maxZ: 30,
+            },
+            worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+            grid: { spacing: 1, majorSpacing: 5 },
+            displayUnit: 'm',
+            showGrid: true,
+        };
+        this.recordingCanvas = {
+            width: 900,
+            height: 600,
+            captureStream() { return {}; },
+        };
     }
 
     mount(host) {
@@ -835,6 +1400,52 @@ class FakeAdapter {
 
     setLayout(value) {
         this.layouts.push(clone(value));
+        if (this.viewportHandler) this.viewportHandler(this.getViewportState());
+    }
+
+    setViewportChangeHandler(handler) {
+        this.viewportHandler = typeof handler === 'function' ? handler : null;
+        if (this.viewportHandler) this.viewportHandler(this.getViewportState());
+    }
+
+    getViewportState() {
+        return clone(this.viewportState);
+    }
+
+    setViewPreferences(value) {
+        this.viewPreferences = Object.assign({}, this.viewPreferences, value || {});
+        this.viewportState.displayUnit = this.viewPreferences.displayUnit;
+        this.viewportState.showGrid = this.viewPreferences.showGrid;
+        if (this.viewportHandler) this.viewportHandler(this.getViewportState());
+        return true;
+    }
+
+    setEnvironmentSettings(value) {
+        const settings = clone(value || {});
+        this.environmentSettings.push(settings);
+        if (settings.worldBounds) {
+            this.viewportState.worldBounds = clone(settings.worldBounds);
+            Object.assign(
+                this.viewportState.projection,
+                settings.worldBounds
+            );
+        }
+        if (Number.isFinite(settings.floorGridSpacing)) {
+            this.viewportState.grid.spacing = settings.floorGridSpacing;
+        }
+        if (Number.isFinite(settings.floorMajorGridSpacing)) {
+            this.viewportState.grid.majorSpacing =
+                settings.floorMajorGridSpacing;
+        }
+        if (this.viewportHandler) this.viewportHandler(this.getViewportState());
+        return true;
+    }
+
+    setScaleAt(event, scale) {
+        this.scaleAtCalls.push({ event: clone(event), scale });
+        this.viewportState.projection.scale = scale;
+        if (this.viewportHandler) this.viewportHandler(this.getViewportState());
+        return true;
     }
 
     setGhostPlacement(value) {
@@ -844,6 +1455,45 @@ class FakeAdapter {
 
     setProposalPreview(value) {
         this.proposalPreviews.push(clone(value));
+        return true;
+    }
+
+    setTransientPlacementMove(ids, delta) {
+        this.transientPlacementMoves.push({
+            ids: clone(ids),
+            delta: clone(delta),
+        });
+        return true;
+    }
+
+    setTransientPlacementDuplicate(ids, delta) {
+        this.transientPlacementDuplicates.push({
+            ids: clone(ids),
+            delta: clone(delta),
+        });
+        return true;
+    }
+
+    setTransientZonePreview(points, options) {
+        this.transientZonePreviews.push({
+            points: clone(points),
+            options: clone(options),
+        });
+        return true;
+    }
+
+    setTransientFloorMarkingPreview(marking) {
+        this.transientFloorMarkingPreviews.push(clone(marking));
+        return true;
+    }
+
+    setTransientAislePreview(preview) {
+        this.transientAislePreviews.push(clone(preview));
+        return true;
+    }
+
+    setTransientPatternPreview(preview) {
+        this.transientPatternPreviews.push(clone(preview));
         return true;
     }
 
@@ -857,11 +1507,14 @@ class FakeAdapter {
 
     panByPixels(x, y) {
         this.lastPan = { x, y };
+        if (this.viewportHandler) this.viewportHandler(this.getViewportState());
         return true;
     }
 
     zoomAt(event, factor) {
         this.lastZoom = { event, factor };
+        this.viewportState.projection.scale *= factor;
+        if (this.viewportHandler) this.viewportHandler(this.getViewportState());
         return true;
     }
 
@@ -877,6 +1530,235 @@ class FakeAdapter {
     fit() {
         this.fitCount = (this.fitCount || 0) + 1;
         return { fitted: true };
+    }
+
+    fitFacility() {
+        this.fitFacilityCount += 1;
+        return true;
+    }
+
+    fitLayout() {
+        this.fitLayoutCount += 1;
+        return true;
+    }
+
+    frontView() {
+        this.frontViewCount += 1;
+        return true;
+    }
+
+    topView() {
+        this.topViewCount += 1;
+        return true;
+    }
+
+    rightView() {
+        this.rightViewCount += 1;
+        return true;
+    }
+
+    isometricView() {
+        this.isometricCount += 1;
+        return true;
+    }
+
+    setNavigationMode(mode) {
+        this.navigationModes.push(mode);
+        return true;
+    }
+
+    setWalkthroughStateHandler(handler) {
+        this.walkthroughHandler = typeof handler === 'function' ? handler : null;
+        if (this.walkthroughHandler) {
+            this.walkthroughHandler(this.getWalkthroughState());
+        }
+        return Boolean(this.walkthroughHandler);
+    }
+
+    setDroneStateHandler(handler) {
+        this.droneHandler = typeof handler === 'function' ? handler : null;
+        if (this.droneHandler) this.droneHandler(this.getDroneState());
+        return Boolean(this.droneHandler);
+    }
+
+    setWalkthroughContextHandler(handler) {
+        this.walkthroughContextHandler = typeof handler === 'function'
+            ? handler : null;
+        if (this.walkthroughContextHandler) {
+            this.walkthroughContextHandler(clone(this.walkthroughContextFocus));
+        }
+        return Boolean(this.walkthroughContextHandler);
+    }
+
+    setCameraOrientationHandler(handler) {
+        this.cameraOrientationHandler = typeof handler === 'function'
+            ? handler : null;
+        if (this.cameraOrientationHandler) {
+            this.cameraOrientationHandler(clone(this.cameraOrientation));
+        }
+        return Boolean(this.cameraOrientationHandler);
+    }
+
+    emitCameraOrientation(value) {
+        this.cameraOrientation = clone(value);
+        if (this.cameraOrientationHandler) {
+            this.cameraOrientationHandler(clone(this.cameraOrientation));
+        }
+    }
+
+    getWalkthroughContextFocus() {
+        return clone(this.walkthroughContextFocus);
+    }
+
+    getRecordingCanvas() {
+        return this.mounted && !this.suspended ? this.recordingCanvas : null;
+    }
+
+    emitWalkthroughContext(value) {
+        this.walkthroughContextFocus = clone(value || null);
+        if (this.walkthroughContextHandler) {
+            this.walkthroughContextHandler(
+                clone(this.walkthroughContextFocus)
+            );
+        }
+    }
+
+    getWalkthroughState() {
+        return clone(this.walkthrough);
+    }
+
+    getDroneState() {
+        return clone(this.drone);
+    }
+
+    enterDrone(value) {
+        this.droneEntries.push(clone(value || {}));
+        this.drone = Object.assign({}, this.drone, {
+            active: true,
+            locked: true,
+            altitude: 12.5,
+            currentSpeed: 5,
+            nearestObstacleDistance: 2.75,
+            reason: 'active',
+        });
+        if (this.droneHandler) this.droneHandler(this.getDroneState());
+        return this.getDroneState();
+    }
+
+    exitDrone(reason) {
+        this.droneExits.push(reason || null);
+        this.drone = Object.assign({}, this.drone, {
+            active: false,
+            locked: false,
+            currentSpeed: 0,
+            reason: reason || 'exited',
+        });
+        if (this.droneHandler) this.droneHandler(this.getDroneState());
+        return true;
+    }
+
+    enterWalkthrough(value) {
+        this.walkthroughEntries.push(clone(value || {}));
+        this.walkthrough = Object.assign({}, this.walkthrough, {
+            active: true,
+            locked: true,
+            reason: 'active',
+        });
+        if (this.walkthroughHandler) {
+            this.walkthroughHandler(this.getWalkthroughState());
+        }
+        return this.getWalkthroughState();
+    }
+
+    exitWalkthrough(reason) {
+        this.walkthroughExits.push(reason || null);
+        this.walkthrough = Object.assign({}, this.walkthrough, {
+            active: false,
+            locked: false,
+            reason: reason || 'exited',
+        });
+        if (this.walkthroughHandler) {
+            this.walkthroughHandler(this.getWalkthroughState());
+        }
+        return true;
+    }
+
+    switchImmersiveMode(mode) {
+        this.immersiveSwitches.push(mode);
+        if (mode === 'walkthrough') {
+            this.drone = Object.assign({}, this.drone, {
+                active: false,
+                locked: false,
+            });
+            if (this.droneHandler) this.droneHandler(this.getDroneState());
+            return this.enterWalkthrough({ immersiveHandoff: true });
+        }
+        this.walkthrough = Object.assign({}, this.walkthrough, {
+            active: false,
+            locked: false,
+        });
+        if (this.walkthroughHandler) {
+            this.walkthroughHandler(this.getWalkthroughState());
+        }
+        return this.enterDrone({ immersiveHandoff: true });
+    }
+
+    navigateWalkthroughToPlacement(placementId) {
+        this.walkthroughNavigations.push(placementId);
+        this.walkthrough = Object.assign({}, this.walkthrough, {
+            active: true,
+            locked: true,
+            reason: 'navigating',
+            route: {
+                active: true,
+                reason: 'navigating',
+                targetPlacementId: placementId,
+            },
+        });
+        if (this.walkthroughHandler) {
+            this.walkthroughHandler(this.getWalkthroughState());
+        }
+        return { ok: true, reason: 'routed' };
+    }
+
+    cancelWalkthroughNavigation(reason) {
+        this.walkthroughNavigationCancels.push(reason || null);
+        this.walkthrough = Object.assign({}, this.walkthrough, {
+            route: {
+                active: false,
+                reason: reason || 'cancelled',
+            },
+        });
+        if (this.walkthroughHandler) {
+            this.walkthroughHandler(this.getWalkthroughState());
+        }
+        return true;
+    }
+
+    getCameraView() {
+        return clone(this.cameraView);
+    }
+
+    applyCameraView(value) {
+        this.appliedCameraViews.push(clone(value));
+        this.cameraView = clone(value);
+        return true;
+    }
+
+    zoomBy(factor) {
+        this.zoomFactors.push(factor);
+        return true;
+    }
+
+    setGridVisible(visible) {
+        this.gridVisibility.push(Boolean(visible));
+        return true;
+    }
+
+    setVisualSettings(value) {
+        const settings = clone(value);
+        this.visualSettings.push(settings);
+        return settings;
     }
 
     invalidate() {
@@ -905,7 +1787,134 @@ class FakeAdapter {
 
     dispose() {
         this.disposed = true;
+        this.viewportHandler = null;
     }
+}
+
+class FakeRecordingController {
+    constructor(options) {
+        this.options = options;
+        this.calls = [];
+        this.result = null;
+        this.state = {
+            status: 'idle',
+            elapsedMs: 0,
+            paused: false,
+            format: {
+                mimeType: 'video/webm;codecs=vp8',
+                extension: 'webm',
+                label: 'WebM (VP8)',
+            },
+            error: null,
+        };
+        this.disposed = false;
+    }
+
+    _emit() {
+        if (this.options.onStateChange) {
+            this.options.onStateChange(clone(this.state));
+        }
+    }
+
+    start(settings) {
+        this.calls.push(['start', settings]);
+        this.state = Object.assign({}, this.state, {
+            status: 'recording',
+            elapsedMs: 0,
+            paused: false,
+            resolution: settings.resolution === '1080p'
+                ? { width: 1920, height: 1080 }
+                : { width: 900, height: 600 },
+            fps: settings.fps,
+        });
+        this._emit();
+        return Promise.resolve(this.getState());
+    }
+
+    pause() {
+        this.calls.push(['pause']);
+        this.state.status = 'paused';
+        this.state.paused = true;
+        this.state.elapsedMs = 2500;
+        this._emit();
+        return true;
+    }
+
+    resume() {
+        this.calls.push(['resume']);
+        this.state.status = 'recording';
+        this.state.paused = false;
+        this._emit();
+        return true;
+    }
+
+    stop() {
+        this.calls.push(['stop']);
+        this.result = {
+            url: 'blob:workspace-recording',
+            filename: 'Workspace-test-walkthrough.webm',
+            extension: 'webm',
+            mimeType: 'video/webm;codecs=vp8',
+            width: 1920,
+            height: 1080,
+            fps: 60,
+            durationMs: 4500,
+        };
+        this.state.status = 'preview';
+        this.state.paused = false;
+        this.state.elapsedMs = 4500;
+        this.state.filename = this.result.filename;
+        this._emit();
+        return Promise.resolve(this.getState());
+    }
+
+    discard() {
+        this.calls.push(['discard']);
+        this.result = null;
+        this.state.status = 'idle';
+        this.state.elapsedMs = 0;
+        this.state.filename = null;
+        this._emit();
+        return this.getState();
+    }
+
+    download() {
+        this.calls.push(['download']);
+        return Boolean(this.result);
+    }
+
+    getState() {
+        return clone(this.state);
+    }
+
+    getResult() {
+        return clone(this.result);
+    }
+
+    dispose() {
+        this.calls.push(['dispose']);
+        this.disposed = true;
+        return true;
+    }
+}
+
+function fakeRecordingRuntime() {
+    const runtime = {
+        controllers: [],
+        chooseRecordingFormat() {
+            return {
+                mimeType: 'video/webm;codecs=vp8',
+                extension: 'webm',
+                label: 'WebM (VP8)',
+            };
+        },
+        createCanvasRecorder(options) {
+            const controller = new FakeRecordingController(options);
+            runtime.controllers.push(controller);
+            return controller;
+        },
+    };
+    return runtime;
 }
 
 class FakeController {
@@ -915,6 +1924,9 @@ class FakeController {
         this.catalogs = [clone(initialCatalog || [])];
         this.selections = [];
         this.fitCount = 0;
+        this.fitFacilityCount = 0;
+        this.fitLayoutCount = 0;
+        this.topViewCount = 0;
         this.disposeCount = 0;
         this.suspendCount = 0;
         this.resumeCount = 0;
@@ -944,8 +1956,32 @@ class FakeController {
     }
 
     fit() {
+        return this.fitFacility();
+    }
+
+    fitFacility() {
         this.fitCount += 1;
-        this.adapters.forEach(adapter => adapter.fit());
+        this.fitFacilityCount += 1;
+        this.adapters.forEach(adapter => {
+            if (typeof adapter.fitFacility === 'function') {
+                adapter.fitFacility();
+            } else if (typeof adapter.fit === 'function') adapter.fit();
+        });
+    }
+
+    fitLayout() {
+        this.fitLayoutCount += 1;
+        this.adapters.forEach(adapter => {
+            if (typeof adapter.fitLayout === 'function') adapter.fitLayout();
+            else if (typeof adapter.fit === 'function') adapter.fit();
+        });
+    }
+
+    topView() {
+        this.topViewCount += 1;
+        this.adapters.forEach(adapter => {
+            if (typeof adapter.topView === 'function') adapter.topView();
+        });
     }
 
     suspend() {
@@ -1024,6 +2060,16 @@ function catalog() {
             assetDefinitionRevision: 'revision-asset-machine',
             displayName: 'CNC Mill',
             category: 'Machines',
+            manufacturer: 'InspectorPro Fixture Works',
+            contextCard: {
+                processStep: 'Machine the fixture plate',
+                cycleTime: '4.8 min',
+                throughput: '12 parts/hour',
+                ppe: ['Eye protection', 'Safety footwear'],
+                maintenanceNotes: ['Inspect way covers before service'],
+                trainingNotes: ['Verify the work offset before cycle start'],
+                qualityNotes: ['Confirm the first-piece inspection record'],
+            },
         },
     ];
 }
@@ -1035,6 +2081,8 @@ function fixture(options) {
     const top = new FakeAdapter('top-plan');
     top.mounted = true;
     const three = options && options.noThree ? null : new FakeAdapter('three');
+    const recordingRuntime = options && options.recordingRuntime
+        || fakeRecordingRuntime();
     let controller = null;
     const layoutRuntime = {
         createTopPlanAdapter(host) {
@@ -1052,8 +2100,16 @@ function fixture(options) {
         session,
         layoutRuntime,
         threeAdapter: three,
-        assetCatalog: catalog(),
+        recordingRuntime,
+        patternRuntime: patternModule,
+        recordingCountdownSeconds: options
+            && options.recordingCountdownSeconds,
+        assetCatalog: options && options.assetCatalog || catalog(),
+        externalCommandSurface: Boolean(
+            options && options.externalCommandSurface
+        ),
         gridSize: 0.5,
+        planPreferenceStorage: options && options.planPreferenceStorage,
         eventToWorld(event) {
             return event && event.world
                 ? event.world
@@ -1061,12 +2117,14 @@ function fixture(options) {
         },
         marqueeResolver: options && options.marqueeResolver,
         keyboardPlacementPoint: options && options.keyboardPlacementPoint,
-        createDragSessionId: () => 'drag-stable-001',
         spatialAdvisor: options && options.spatialAdvisor,
         ownsSpatialAdvisor: options && options.ownsSpatialAdvisor,
         useAuthoritativePlacementCandidates: Boolean(
             options && options.useAuthoritativePlacementCandidates
         ),
+        onCommandStateChange: options && options.onCommandStateChange,
+        floatingSurfaceRuntime: options && options.floatingSurfaceRuntime,
+        floatingDom: options && options.floatingDom,
     });
     return {
         documentRef,
@@ -1074,6 +2132,7 @@ function fixture(options) {
         session,
         top,
         three,
+        recordingRuntime,
         get controller() { return controller; },
         workspace,
         setProjectedPoint(value) { projectedPoint = value; },
@@ -1084,8 +2143,67 @@ function toolbarButton(data, command) {
     return data.root.querySelector(`[data-command="${command}"]`);
 }
 
+function planCard(data, placementId, rect) {
+    const card = data.documentRef.createElement('g');
+    card.setAttribute('class', 'ip-flw-plan-card');
+    card.setAttribute('data-placement-id', placementId);
+    card.getBoundingClientRect = function () {
+        return Object.assign({}, rect, {
+            right: rect.left + rect.width,
+            bottom: rect.top + rect.height,
+        });
+    };
+    data.workspace.planView.appendChild(card);
+    return card;
+}
+
+function planZone(data, zoneId, rect) {
+    const zoneNode = data.documentRef.createElement('polygon');
+    zoneNode.setAttribute('data-zone-id', zoneId);
+    zoneNode.getBoundingClientRect = function () {
+        return Object.assign({}, rect, {
+            right: rect.left + rect.width,
+            bottom: rect.top + rect.height,
+        });
+    };
+    data.workspace.planView.appendChild(zoneNode);
+    return zoneNode;
+}
+
+function planFloorMarking(data, markingId, rect) {
+    const node = data.documentRef.createElement('g');
+    node.setAttribute('data-floor-marking-id', markingId);
+    node.getBoundingClientRect = function () {
+        return Object.assign({}, rect, {
+            right: rect.left + rect.width,
+            bottom: rect.top + rect.height,
+        });
+    };
+    data.workspace.planView.appendChild(node);
+    return node;
+}
+
 function assetRow(data, assetId) {
     return data.root.querySelector(`[data-asset-id="${assetId}"]`);
+}
+
+function assetAction(data, assetId, action) {
+    const card = assetRow(data, assetId);
+    return card && card.querySelector(
+        `[data-asset-browser-action="${action}"]`
+    );
+}
+
+function externalAssetTransfer(assetId) {
+    const transfer = new FakeDataTransfer();
+    transfer.setData(
+        workspaceModule.ASSET_MIME,
+        workspaceModule.createAssetDragPayload({
+            assetId,
+            assetDefinitionRevision: `revision-${assetId}`,
+        }, 'external-drag-001')
+    );
+    return transfer;
 }
 
 async function main() {
@@ -1124,6 +2242,35 @@ async function main() {
         ), null);
     });
 
+    await check('selection toolbar command sets stay compact and contextual',
+        async () => {
+            assert.deepStrictEqual(
+                workspaceModule.selectionToolbarCommands(0),
+                []
+            );
+            assert.deepStrictEqual(
+                workspaceModule.selectionToolbarCommands(1),
+                [
+                    'rotate', 'offset', 'duplicate', 'vertical-stack',
+                    'mirror', 'lock', 'delete',
+                ]
+            );
+            assert.deepStrictEqual(
+                workspaceModule.selectionToolbarCommands(2),
+                [
+                    'align', 'relative', 'distance', 'offset',
+                    'duplicate', 'surface-stack', 'mirror', 'lock', 'delete',
+                ]
+            );
+            assert.deepStrictEqual(
+                workspaceModule.selectionToolbarCommands(3),
+                [
+                    'align', 'distribute', 'relative', 'offset',
+                    'duplicate', 'surface-stack', 'mirror', 'lock', 'delete',
+                ]
+            );
+        });
+
     await check('grid snap and quarter-turn quaternion are deterministic', async () => {
         assert.deepStrictEqual(
             workspaceModule.snapWorldPoint({ x: 1.24, y: 4, z: -1.26 }, 0.5),
@@ -1137,6 +2284,208 @@ async function main() {
             { x: 0, y: 0, z: 0, w: 1 }
         );
     });
+
+    await check('floor marking resize keeps the opposite rotated corner fixed',
+        async () => {
+            const marking = floorMarking('fm-resize', 'direction_arrow');
+            marking.transform.rotationDegrees = 90;
+            const resized = workspaceModule.resizeFloorMarkingFromHandle(
+                marking,
+                2,
+                { x: 7, y: 0, z: -1 },
+                0.5
+            );
+            assert.strictEqual(resized.width, 6);
+            assert.strictEqual(resized.depth, 4);
+            assert.deepStrictEqual(
+                resized.transform.position,
+                { x: 5, y: 0, z: 2 }
+            );
+            assert.strictEqual(resized.transform.rotationDegrees, 90);
+            assert.strictEqual(resized.positionMode, 'manual');
+        });
+
+    await check('precision positioning helpers use real footprint edges', async () => {
+        const precisionLayout = layout();
+        precisionLayout.placements = [
+            placement('pl-a', 'asset-a', 0, 0, 'manual'),
+            placement('pl-b', 'asset-b', 5, 1, 'manual'),
+            placement('pl-c', 'asset-c', 12, 2, 'manual'),
+        ];
+        const precisionCatalog = [
+            {
+                assetId: 'asset-a',
+                assetDefinitionRevision: 'revision-asset-a',
+                dimensions: { width: 2, depth: 2, height: 1 },
+            },
+            {
+                assetId: 'asset-b',
+                assetDefinitionRevision: 'revision-asset-b',
+                dimensions: { width: 4, depth: 2, height: 1 },
+            },
+            {
+                assetId: 'asset-c',
+                assetDefinitionRevision: 'revision-asset-c',
+                dimensions: { width: 2, depth: 2, height: 1 },
+            },
+        ];
+        const aligned = workspaceModule.buildAlignmentUpdates(
+            precisionLayout,
+            precisionCatalog,
+            ['pl-a', 'pl-b'],
+            'left',
+            'pl-a'
+        );
+        assert.deepStrictEqual(aligned.updates, [{
+            placementId: 'pl-b',
+            position: { x: 1, y: 0, z: 1 },
+        }]);
+
+        const distributed = workspaceModule.buildDistributionUpdates(
+            precisionLayout,
+            precisionCatalog,
+            ['pl-a', 'pl-b', 'pl-c'],
+            'x',
+            'equal-gap'
+        );
+        assert.strictEqual(distributed.clearGap, 3);
+        assert.deepStrictEqual(distributed.updates, [{
+            placementId: 'pl-b',
+            position: { x: 6, y: 0, z: 1 },
+        }]);
+
+        const relative = workspaceModule.buildRelativePositionUpdates(
+            precisionLayout,
+            precisionCatalog,
+            ['pl-b'],
+            'pl-a',
+            'north',
+            2,
+            'center'
+        );
+        assert.deepStrictEqual(relative.updates, [{
+            placementId: 'pl-b',
+            position: { x: 0, y: 0, z: 4 },
+        }]);
+
+        assert.strictEqual(workspaceModule.measurePlacementDistance(
+            precisionLayout,
+            precisionCatalog,
+            'pl-a',
+            'pl-b',
+            'horizontal-gap'
+        ), 2);
+        const distance = workspaceModule.buildDistanceUpdate(
+            precisionLayout,
+            precisionCatalog,
+            'pl-a',
+            'pl-b',
+            'horizontal-gap',
+            4
+        );
+        assert.deepStrictEqual(distance.updates, [{
+            placementId: 'pl-b',
+            position: { x: 7, y: 0, z: 1 },
+        }]);
+    });
+
+    await check('precision positioning refuses to move locked equipment', async () => {
+        const precisionLayout = layout();
+        precisionLayout.placements = [
+            placement('pl-a', 'asset-rack', 0, 0, 'manual'),
+            placement('pl-b', 'asset-rack', 4, 1, 'locked'),
+        ];
+        assert.throws(() => workspaceModule.buildAlignmentUpdates(
+            precisionLayout,
+            catalog(),
+            ['pl-a', 'pl-b'],
+            'left',
+            'pl-a'
+        ), /Unlock/);
+    });
+
+    await check('asset browser placement helper is deterministic and collision-free',
+        async () => {
+            const source = layout();
+            source.zones = [];
+            const before = JSON.stringify(source);
+            const selected = [{
+                assetId: 'asset-rack',
+                assetDefinitionRevision: 'revision-asset-rack',
+                quantity: 2,
+            }, {
+                assetId: 'asset-machine',
+                assetDefinitionRevision: 'revision-asset-machine',
+                quantity: 1,
+            }];
+            const first = workspaceModule.buildAssetBatchPlacementRequests(
+                selected,
+                source,
+                catalog(),
+                { x: 10, y: 0, z: 8 },
+                {
+                    gridSize: 0.5,
+                    worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+                }
+            );
+            const repeated = workspaceModule.buildAssetBatchPlacementRequests(
+                selected,
+                source,
+                catalog(),
+                { x: 10, y: 0, z: 8 },
+                {
+                    gridSize: 0.5,
+                    worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+                }
+            );
+            assert.deepStrictEqual(first, repeated);
+            assert.strictEqual(first.length, 3);
+            assert.strictEqual(
+                new Set(first.map(item => JSON.stringify(item.worldPosition))).size,
+                3
+            );
+            assert.ok(first.every(item => item.positionMode === 'manual'));
+            assert.strictEqual(JSON.stringify(source), before);
+        });
+
+    await check('asset browser places equipment in the nearest operational zone',
+        async () => {
+            const source = layout();
+            source.placements = [];
+            source.zones = [{
+                zoneId: 'zn-receiving',
+                zoneType: 'receiving',
+                label: 'Receiving',
+                boundary: [
+                    { x: 24, z: 18 },
+                    { x: 38, z: 18 },
+                    { x: 38, z: 28 },
+                    { x: 24, z: 28 },
+                ],
+                floorElevation: 0,
+                anchors: [],
+                evidence: [],
+            }];
+            const requests = workspaceModule.buildAssetBatchPlacementRequests(
+                [{
+                    assetId: 'asset-rack',
+                    assetDefinitionRevision: 'revision-asset-rack',
+                    quantity: 1,
+                }],
+                source,
+                catalog(),
+                { x: 10, y: 0, z: 8 },
+                {
+                    gridSize: 0.5,
+                    worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+                }
+            );
+            assert.strictEqual(requests.length, 1);
+            assert.ok(requests[0].worldPosition.x >= 24.6);
+            assert.ok(requests[0].worldPosition.x <= 37.4);
+            assert.ok(requests[0].worldPosition.z >= 18.4);
+            assert.ok(requests[0].worldPosition.z <= 27.6);
+        });
 
     await check('Auto Arrange request is declarative and preserves ownership',
         async () => {
@@ -1221,7 +2570,7 @@ async function main() {
             ));
         });
 
-    await check('builds accessible CAD workspace with advisory authority notice',
+    await check('builds accessible CAD workspace with transient asset browser',
         async () => {
             const data = fixture();
             assert.strictEqual(
@@ -1233,9 +2582,21 @@ async function main() {
                 'Facility layout tools'
             );
             assert.ok(data.root.textContent === '' || data.root.children.length > 0);
-            assert.strictEqual(data.root.querySelectorAll('.ip-flw-asset-group').length, 3);
+            assert.strictEqual(data.root.querySelectorAll('.ip-flw-assets').length, 0);
+            assert.strictEqual(data.workspace.shell.children.length, 2);
+            assert.strictEqual(data.workspace.assetBrowser.hidden, true);
+            assert.strictEqual(
+                data.workspace.assetBrowser.getAttribute('role'),
+                'dialog'
+            );
+            assert.strictEqual(
+                data.workspace.assetGrid.querySelectorAll(
+                    '.ip-flw-asset-card'
+                ).length,
+                3
+            );
             assert.ok(data.root.querySelector('.ip-flw-advisory-authority')
-                .textContent.includes('server validates'));
+                .textContent.includes('Save performs authoritative'));
             assert.strictEqual(
                 data.workspace.advisoryLiveRegion.getAttribute('aria-live'),
                 'polite'
@@ -1252,6 +2613,10 @@ async function main() {
                 toolbarButton(data, 'delete').getAttribute('aria-label'),
                 'Delete'
             );
+            assert.strictEqual(
+                toolbarButton(data, 'assets').getAttribute('aria-label'),
+                'Open asset library'
+            );
             assert.strictEqual(data.workspace.threeTab.disabled, false);
             assert.strictEqual(
                 toolbarButton(data, 'select').getAttribute('aria-pressed'),
@@ -1261,7 +2626,685 @@ async function main() {
                 toolbarButton(data, 'delete').getAttribute('aria-pressed'),
                 null
             );
+            assert.strictEqual(
+                data.workspace.getCommandStates().select.active,
+                true
+            );
             data.workspace.destroy();
+        });
+
+    await check('publishes ribbon-ready command state for external command surfaces',
+        async () => {
+            const updates = [];
+            const data = fixture({
+                onCommandStateChange(states) { updates.push(states); },
+            });
+            assert.ok(updates.length > 0);
+            assert.strictEqual(data.workspace.getCommandStates().select.active, true);
+            await data.workspace.executeCommand('pan');
+            let states = data.workspace.getCommandStates();
+            assert.strictEqual(states.select.active, false);
+            assert.strictEqual(states.pan.active, true);
+            data.session.select('pl-a');
+            states = data.workspace.getCommandStates();
+            assert.strictEqual(states.duplicate.disabled, false);
+            await data.workspace.executeCommand('lock');
+            await data.workspace.whenIdle();
+            states = data.workspace.getCommandStates();
+            assert.strictEqual(states.lock.active, true);
+            assert.strictEqual(states.lock.label, 'Unlock');
+            assert.ok(updates.at(-1).lock.active);
+            data.workspace.destroy();
+        });
+
+    await check('external command surface structurally removes the local toolbar row',
+        async () => {
+            const data = fixture({ externalCommandSurface: true });
+            assert.strictEqual(data.workspace.toolbar.hidden, true);
+            assert.strictEqual(
+                data.workspace.toolbar.getAttribute('aria-hidden'),
+                'true'
+            );
+            assert.strictEqual(
+                data.workspace.toolbar.getAttribute('style'),
+                'display:none'
+            );
+            assert.ok(data.root.className.includes(
+                'ip-flw-external-command-surface'
+            ));
+            assert.strictEqual(
+                data.workspace.getCommandStates().select.active,
+                true
+            );
+            data.workspace.destroy();
+        });
+
+    await check('U-cell preview rearranges a heterogeneous selected cell atomically',
+        async () => {
+            const data = fixture({ externalCommandSurface: true });
+            const marking = floorMarking('fm-cell', 'direction_arrow');
+            marking.transform.position = { x: 3, y: 0, z: 1.5 };
+            data.session.state.layout.floorMarkings.push(marking);
+            data.session.selectMany(['pl-a', 'pl-b', 'fm-cell']);
+
+            await data.workspace.executeCommand('cell-layout');
+            assert.strictEqual(data.workspace.patternDialog.hidden, false);
+            assert.strictEqual(
+                data.root.getAttribute('data-pattern-open'),
+                'true'
+            );
+            assert.strictEqual(data.workspace.getState().viewMode, 'plan');
+            let preview = data.top.transientPatternPreviews.at(-1);
+            assert.strictEqual(preview.mode, 'cell-layout');
+            assert.strictEqual(preview.shape, 'u');
+            assert.strictEqual(preview.seedCount, 3);
+            assert.strictEqual(preview.moves.length, 3);
+            assert.strictEqual(preview.copies.length, 0);
+
+            const width = data.workspace.patternBody.querySelector(
+                '[data-pattern-field="width"]'
+            );
+            const depth = data.workspace.patternBody.querySelector(
+                '[data-pattern-field="depth"]'
+            );
+            width.value = '20';
+            width.dispatch('input');
+            width.dispatch('change');
+            assert.strictEqual(
+                data.workspace.patternBody.querySelector(
+                    '[data-pattern-field="depth"]'
+                ),
+                depth
+            );
+            depth.value = '16';
+            depth.dispatch('input');
+            depth.dispatch('change');
+            preview = data.top.transientPatternPreviews.at(-1);
+            assert.strictEqual(preview.guide.width, 20);
+            assert.strictEqual(preview.guide.depth, 16);
+
+            const invert = data.workspace.patternBody.querySelector(
+                '[data-pattern-field="invertU"]'
+            );
+            invert.checked = true;
+            invert.dispatch('change');
+            preview = data.top.transientPatternPreviews.at(-1);
+            assert.strictEqual(preview.inverted, true);
+            assert.strictEqual(preview.guide.inverted, true);
+
+            const shape = data.workspace.patternBody.querySelector(
+                '[data-pattern-field="shape"]'
+            );
+            shape.value = 'serpentine';
+            shape.dispatch('change');
+            preview = data.top.transientPatternPreviews.at(-1);
+            assert.strictEqual(preview.shape, 'serpentine');
+            assert.strictEqual(preview.moves.length, 3);
+
+            data.workspace.patternApply.dispatch('click');
+            await data.workspace.whenIdle();
+            const calls = data.session.calls.filter(function (call) {
+                return call[0] === 'applyPattern';
+            });
+            assert.strictEqual(calls.length, 1);
+            assert.strictEqual(calls[0][1].mode, 'cell-layout');
+            assert.strictEqual(calls[0][1].shape, 'serpentine');
+            assert.strictEqual(data.session.state.history.length, 1);
+            assert.strictEqual(data.workspace.patternDialog.hidden, true);
+            assert.strictEqual(data.top.transientPatternPreviews.at(-1), null);
+            data.workspace.destroy();
+        });
+
+    await check('linear pattern propagates a selected named cell and its contents',
+        async () => {
+            const data = fixture({ externalCommandSurface: true });
+            const marking = floorMarking('fm-cell', 'direction_arrow');
+            marking.transform.position = { x: 2, y: 0, z: 2 };
+            data.session.state.layout.floorMarkings.push(marking);
+            data.session.select('zn-a');
+
+            await data.workspace.executeCommand('linear-pattern');
+            let preview = data.top.transientPatternPreviews.at(-1);
+            assert.strictEqual(preview.mode, 'linear');
+            assert.strictEqual(preview.seedCount, 3);
+            assert.deepStrictEqual(
+                Array.from(new Set(preview.copies.map(item => item.kind))).sort(),
+                ['floor-marking', 'placement', 'zone']
+            );
+            const count = data.workspace.patternBody.querySelector(
+                '[data-pattern-field="count"]'
+            );
+            count.focus();
+            count.value = '4';
+            count.dispatch('input');
+            preview = data.top.transientPatternPreviews.at(-1);
+            assert.strictEqual(preview.count, 4);
+            assert.strictEqual(preview.copies.length, 9);
+            assert.strictEqual(data.documentRef.activeElement, count);
+
+            data.workspace.patternApply.dispatch('click');
+            await data.workspace.whenIdle();
+            const state = data.session.getState();
+            assert.strictEqual(state.layout.placements.length, 5);
+            assert.strictEqual(state.layout.floorMarkings.length, 4);
+            assert.strictEqual(state.layout.zones.length, 4);
+            assert.strictEqual(state.selection.length, 9);
+            assert.strictEqual(state.history.length, 1);
+            assert.strictEqual(state.history[0].operationCount, 9);
+            assert.strictEqual(data.workspace.patternDialog.hidden, true);
+            data.workspace.destroy();
+        });
+
+    await check('surface placement exposes and uses a catalog-defined worktop',
+        async () => {
+            const records = catalog();
+            Object.assign(records[0], {
+                width: 3,
+                depth: 2,
+                height: 1,
+                supportSurfaces: [{
+                    surfaceId: 'worktop',
+                    label: 'Worktop',
+                    localFrame: {
+                        origin: { x: 0, y: 0.9, z: 0 },
+                        xAxis: { x: 1, y: 0, z: 0 },
+                        zAxis: { x: 0, y: 0, z: 1 },
+                        normal: { x: 0, y: 1, z: 0 },
+                    },
+                    bounds: {
+                        minimumX: -1.4,
+                        maximumX: 1.4,
+                        minimumZ: -0.9,
+                        maximumZ: 0.9,
+                    },
+                    allowedSides: ['above'],
+                    evidenceStatus: 'derived',
+                }],
+            });
+            Object.assign(records[1], { width: 0.5, depth: 0.4, height: 0.6 });
+            const data = fixture({
+                externalCommandSurface: true,
+                assetCatalog: records,
+            });
+            data.session.selectMany(['pl-a', 'pl-b']);
+
+            await data.workspace.executeCommand('surface-stack');
+            const surface = data.workspace.patternBody.querySelector(
+                '[data-pattern-field="surfaceId"]'
+            );
+            const side = data.workspace.patternBody.querySelector(
+                '[data-pattern-field="surfaceSide"]'
+            );
+            const preview = data.top.transientPatternPreviews.at(-1);
+            assert.strictEqual(surface.value, 'worktop');
+            assert.strictEqual(side.value, 'above');
+            assert.strictEqual(preview.guide.surfaceId, 'worktop');
+            assert.strictEqual(
+                preview.relationships[0].snapRelationship.surfaceSource,
+                'asset_definition'
+            );
+            assert.strictEqual(
+                preview.relationships[0].snapRelationship.evidenceStatus,
+                'derived'
+            );
+            data.workspace.closePatternDialog(false);
+            data.workspace.destroy();
+        });
+
+    await check('perimeter pattern previews and creates independent guarding',
+        async () => {
+            const data = fixture({ externalCommandSurface: true });
+            data.session.select('pl-a');
+            await data.workspace.executeCommand('perimeter-pattern');
+            assert.strictEqual(data.workspace.patternDialog.hidden, false);
+            let preview = data.top.transientPatternPreviews.at(-1);
+            assert.strictEqual(preview.mode, 'perimeter');
+            const widthCount = data.workspace.patternBody.querySelector(
+                '[data-pattern-field="perimeterWidthCount"]'
+            );
+            const depthCount = data.workspace.patternBody.querySelector(
+                '[data-pattern-field="perimeterDepthCount"]'
+            );
+            const gap = data.workspace.patternBody.querySelector(
+                '[data-pattern-field="perimeterClearGap"]'
+            );
+            widthCount.value = '3';
+            widthCount.dispatch('input');
+            depthCount.value = '2';
+            depthCount.dispatch('input');
+            gap.value = '0';
+            gap.dispatch('input');
+            preview = data.top.transientPatternPreviews.at(-1);
+            assert.strictEqual(preview.count, 10);
+            assert.strictEqual(preview.copies.length, 9);
+            assert.strictEqual(preview.guide.clearGap, 0);
+
+            data.workspace.patternApply.dispatch('click');
+            await data.workspace.whenIdle();
+            assert.strictEqual(data.session.state.layout.placements.length, 11);
+            assert.strictEqual(data.session.state.selection.length, 9);
+            assert.strictEqual(data.session.state.history.length, 1);
+            assert.strictEqual(
+                data.session.calls.filter(call => call[0] === 'applyPattern')
+                    .at(-1)[1].mode,
+                'perimeter'
+            );
+            data.workspace.destroy();
+        });
+
+    await check('Swap exchanges two complete selected cell zones', async () => {
+        const data = fixture({ externalCommandSurface: true });
+        data.session.state.layout.zones.push({
+            zoneId: 'zn-b',
+            zoneType: 'workcell',
+            label: 'Finishing cell',
+            boundary: [
+                { x: 4, z: 0 }, { x: 8, z: 0 },
+                { x: 8, z: 3 }, { x: 4, z: 3 },
+            ],
+            floorElevation: 0,
+            anchors: [],
+            evidence: [],
+        });
+        data.session.selectMany(['zn-a', 'zn-b']);
+        assert.strictEqual(data.workspace.getCommandStates().swap.disabled, false);
+        await data.workspace.executeCommand('swap');
+        let preview = data.top.transientPatternPreviews.at(-1);
+        assert.strictEqual(preview.mode, 'swap');
+        assert.strictEqual(preview.moves.length, 4);
+        data.workspace.patternApply.dispatch('click');
+        await data.workspace.whenIdle();
+        assert.strictEqual(
+            data.session.state.layout.placements.find(
+                item => item.placementId === 'pl-a'
+            ).transform.position.x,
+            5
+        );
+        assert.strictEqual(
+            data.session.state.layout.placements.find(
+                item => item.placementId === 'pl-b'
+            ).transform.position.x,
+            1
+        );
+        assert.deepStrictEqual(data.session.state.layout.zones[0].boundary[0], {
+            x: 4,
+            z: 0,
+        });
+        assert.strictEqual(data.session.state.history.length, 1);
+        data.workspace.destroy();
+    });
+
+    await check('Clear All confirms once and preserves facility plan settings',
+        async () => {
+            const data = fixture({ externalCommandSurface: true });
+            data.session.state.layout.extensions = {
+                facilityPlan: {
+                    widthMeters: 40,
+                    depthMeters: 30,
+                    minorGridMeters: 1,
+                    majorGridMeters: 5,
+                },
+            };
+            const settings = clone(data.session.state.layout.extensions);
+            assert.strictEqual(
+                data.workspace.getCommandStates()['clear-all'].disabled,
+                false
+            );
+            await data.workspace.executeCommand('clear-all');
+            assert.strictEqual(data.workspace.clearAllDialog.hidden, false);
+            data.workspace.clearAllDialog.querySelector(
+                '[data-clear-all-action="cancel"]'
+            ).dispatch('click');
+            assert.strictEqual(data.session.state.layout.placements.length, 2);
+            assert.strictEqual(data.session.calls.filter(
+                call => call[0] === 'clearLayout'
+            ).length, 0);
+
+            await data.workspace.executeCommand('clear-all');
+            data.workspace.clearAllDialog.querySelector(
+                '[data-clear-all-action="apply"]'
+            ).dispatch('click');
+            await data.workspace.whenIdle();
+            assert.strictEqual(data.session.state.layout.placements.length, 0);
+            assert.strictEqual(data.session.state.layout.zones.length, 0);
+            assert.deepStrictEqual(data.session.state.layout.extensions, settings);
+            assert.strictEqual(data.session.state.history.length, 1);
+            assert.strictEqual(data.workspace.clearAllDialog.hidden, true);
+            assert.strictEqual(
+                data.workspace.getCommandStates()['clear-all'].disabled,
+                true
+            );
+            data.workspace.destroy();
+        });
+
+    await check('mirror previews and copies a complete cell across a picked axis',
+        async () => {
+            const data = fixture({ externalCommandSurface: true });
+            const marking = floorMarking('fm-cell', 'direction_arrow');
+            marking.transform.position = { x: 2, y: 0, z: 2 };
+            data.session.state.layout.floorMarkings.push(marking);
+            data.session.select('zn-a');
+
+            await data.workspace.executeCommand('mirror');
+            assert.strictEqual(data.workspace.patternDialog.hidden, false);
+            let preview = data.top.transientPatternPreviews.at(-1);
+            assert.strictEqual(preview.mode, 'mirror');
+            assert.strictEqual(preview.seedCount, 3);
+            assert.deepStrictEqual(
+                Array.from(new Set(preview.copies.map(item => item.kind))).sort(),
+                ['floor-marking', 'placement', 'zone']
+            );
+
+            data.workspace.patternBody.querySelector(
+                '[data-pattern-action="pick-mirror-axis"]'
+            ).dispatch('click');
+            data.workspace.planView.dispatch('pointerdown', {
+                world: { x: 10.24, y: 0, z: 2 },
+                pointerId: 1,
+            });
+            preview = data.top.transientPatternPreviews.at(-1);
+            assert.strictEqual(preview.guide.start.x, 10);
+            assert.strictEqual(preview.guide.end.x, 10);
+
+            const axisMode = data.workspace.patternBody.querySelector(
+                '[data-pattern-field="mirrorAxisMode"]'
+            );
+            axisMode.value = 'two-point';
+            axisMode.dispatch('change');
+            data.workspace.patternBody.querySelector(
+                '[data-pattern-action="pick-mirror-axis"]'
+            ).dispatch('click');
+            data.workspace.planView.dispatch('pointerdown', {
+                world: { x: 7.1, y: 0, z: 1.2 },
+                pointerId: 2,
+            });
+            data.workspace.planView.dispatch('pointerdown', {
+                world: { x: 9.1, y: 0, z: 4.2 },
+                pointerId: 3,
+            });
+            preview = data.top.transientPatternPreviews.at(-1);
+            assert.deepStrictEqual(preview.guide.start, { x: 7, z: 1 });
+            assert.deepStrictEqual(preview.guide.end, { x: 9, z: 4 });
+            assert.strictEqual(
+                data.root.getAttribute('data-mirror-axis-picking'),
+                null
+            );
+
+            data.workspace.patternApply.dispatch('click');
+            await data.workspace.whenIdle();
+            const calls = data.session.calls.filter(function (call) {
+                return call[0] === 'applyPattern';
+            });
+            assert.strictEqual(calls.length, 1);
+            assert.strictEqual(calls[0][1].mode, 'mirror');
+            assert.strictEqual(calls[0][1].copies.length, 3);
+            assert.strictEqual(data.session.state.layout.placements.length, 3);
+            assert.strictEqual(data.session.state.layout.floorMarkings.length, 2);
+            assert.strictEqual(data.session.state.layout.zones.length, 2);
+            assert.strictEqual(data.session.state.history.length, 1);
+            data.workspace.destroy();
+        });
+
+    await check('Position panel aligns a multi-selection in one gesture',
+        async () => {
+            const data = fixture({ externalCommandSurface: true });
+            data.session.selectMany(['pl-a', 'pl-b']);
+            let states = data.workspace.getCommandStates();
+            assert.strictEqual(states.align.disabled, false);
+            assert.strictEqual(states.distribute.disabled, true);
+            await data.workspace.executeCommand('align');
+            assert.strictEqual(data.workspace.precisionDialog.hidden, false);
+            assert.strictEqual(
+                data.root.getAttribute('data-precision-open'),
+                'true'
+            );
+            states = data.workspace.getCommandStates();
+            assert.strictEqual(states.align.active, true);
+            data.workspace.precisionApply.dispatch('click');
+            await data.workspace.whenIdle();
+            const calls = data.session.calls.filter(function (call) {
+                return call[0] === 'movePlacements';
+            });
+            assert.strictEqual(calls.length, 1);
+            assert.strictEqual(calls[0][1].length, 1);
+            assert.deepStrictEqual(calls[0][1][0], {
+                placementId: 'pl-b',
+                position: { x: 1, y: 0, z: 2 },
+            });
+            assert.strictEqual(data.workspace.precisionDialog.hidden, true);
+            assert.strictEqual(data.session.state.history.length, 1);
+            data.workspace.destroy();
+        });
+
+    await check('command panels move by title bar within workspace bounds',
+        async () => {
+            const data = fixture({ externalCommandSurface: true });
+            const before = JSON.stringify(data.session.getState().layout);
+            [
+                data.workspace.precisionDialog,
+                data.workspace.patternDialog,
+                data.workspace.planSettingsDialog,
+                data.workspace.clearAllDialog,
+            ].forEach(function (dialog) {
+                const handle = dialog.querySelector(
+                    '.ip-flw-precision-header'
+                );
+                assert.strictEqual(
+                    handle.getAttribute('data-dialog-drag-handle'),
+                    'true'
+                );
+                assert.strictEqual(handle.getAttribute('tabindex'), '0');
+                assert.ok(handle.getAttribute('aria-label').startsWith('Move '));
+            });
+
+            data.root.getBoundingClientRect = function () {
+                return {
+                    left: 0, top: 0, right: 1000, bottom: 700,
+                    width: 1000, height: 700,
+                };
+            };
+            data.workspace.shell.getBoundingClientRect = function () {
+                return {
+                    left: 0, top: 80, right: 1000, bottom: 660,
+                    width: 1000, height: 580,
+                };
+            };
+            const dialog = data.workspace.patternDialog;
+            dialog.hidden = false;
+            dialog.getBoundingClientRect = function () {
+                const left = Number.parseFloat(dialog.style.left) || 600;
+                const top = Number.parseFloat(dialog.style.top) || 120;
+                return {
+                    left: left,
+                    top: top,
+                    right: left + 350,
+                    bottom: top + 260,
+                    width: 350,
+                    height: 260,
+                };
+            };
+            const handle = dialog.querySelector('.ip-flw-precision-header');
+
+            handle.dispatch('pointerdown', {
+                target: data.workspace.patternClose,
+                button: 0,
+                pointerId: 1,
+                clientX: 930,
+                clientY: 135,
+            });
+            assert.strictEqual(data.workspace.movableDialogDrag, null);
+
+            const down = handle.dispatch('pointerdown', {
+                target: handle,
+                button: 0,
+                pointerId: 2,
+                clientX: 650,
+                clientY: 140,
+            });
+            assert.strictEqual(down.defaultPrevented, true);
+            assert.strictEqual(handle.hasPointerCapture(2), true);
+            assert.strictEqual(
+                dialog.getAttribute('data-dialog-dragging'),
+                'true'
+            );
+            handle.dispatch('pointermove', {
+                target: handle,
+                pointerId: 2,
+                clientX: 100,
+                clientY: 600,
+            });
+            assert.strictEqual(dialog.style.left, '50px');
+            assert.strictEqual(dialog.style.top, '392px');
+            assert.strictEqual(dialog.style.right, 'auto');
+            assert.strictEqual(dialog.getAttribute('data-dialog-left'), '50');
+            assert.strictEqual(dialog.getAttribute('data-dialog-top'), '392');
+
+            handle.dispatch('pointerup', {
+                target: handle,
+                pointerId: 2,
+                clientX: 100,
+                clientY: 600,
+            });
+            assert.strictEqual(data.workspace.movableDialogDrag, null);
+            assert.strictEqual(handle.hasPointerCapture(2), false);
+            assert.strictEqual(
+                dialog.getAttribute('data-dialog-dragging'),
+                null
+            );
+
+            const keyEvent = handle.dispatch('keydown', {
+                target: handle,
+                key: 'ArrowRight',
+                shiftKey: true,
+            });
+            assert.strictEqual(keyEvent.defaultPrevented, true);
+            assert.strictEqual(dialog.style.left, '60px');
+            assert.strictEqual(dialog.style.top, '392px');
+            assert.strictEqual(
+                JSON.stringify(data.session.getState().layout),
+                before
+            );
+            data.workspace.destroy();
+        });
+
+    await check('floating card toolbar follows selection and delegates commands',
+        async () => {
+            const manager = new FakeSurfaceManager();
+            const data = fixture({
+                externalCommandSurface: true,
+                floatingSurfaceRuntime: {
+                    createSurfaceManager() { return manager; },
+                },
+                floatingDom: fakeFloatingDom(),
+            });
+            planCard(data, 'pl-a', {
+                left: 100, top: 160, width: 120, height: 80,
+            });
+            planCard(data, 'pl-b', {
+                left: 280, top: 220, width: 100, height: 60,
+            });
+            planZone(data, 'zn-a', {
+                left: 420, top: 140, width: 260, height: 180,
+            });
+
+            data.session.select('pl-a');
+            assert.strictEqual(manager.isOpen(), true);
+            let toolbar = data.workspace.selectionToolbarElement;
+            assert.strictEqual(
+                toolbar.getAttribute('aria-label'),
+                'Selected equipment actions'
+            );
+            assert.deepStrictEqual(
+                toolbar.querySelectorAll('[data-selection-command]').map(
+                    item => item.getAttribute('data-selection-command')
+                ),
+                [
+                    'rotate', 'offset', 'duplicate', 'vertical-stack',
+                    'mirror', 'lock', 'delete',
+                ]
+            );
+            toolbar.querySelector(
+                '[data-selection-command="rotate"]'
+            ).dispatch('click');
+            await data.workspace.whenIdle();
+            assert.strictEqual(
+                data.session.calls.filter(
+                    call => call[0] === 'rotateSelected90'
+                ).length,
+                1
+            );
+
+            data.session.selectMany(['pl-a', 'pl-b']);
+            toolbar = data.workspace.selectionToolbarElement;
+            assert.strictEqual(manager.openCalls.length, 2);
+            assert.strictEqual(
+                toolbar.querySelector('.ip-flw-selection-count').textContent,
+                '2'
+            );
+            assert.deepStrictEqual(
+                toolbar.querySelectorAll('[data-selection-command]').map(
+                    item => item.getAttribute('data-selection-command')
+                ),
+                [
+                    'align', 'relative', 'distance', 'offset',
+                    'duplicate', 'surface-stack', 'mirror', 'lock', 'delete',
+                ]
+            );
+            assert.deepStrictEqual(
+                manager.getActive().reference.getBoundingClientRect(),
+                {
+                    x: 100,
+                    y: 160,
+                    left: 100,
+                    top: 160,
+                    right: 380,
+                    bottom: 280,
+                    width: 280,
+                    height: 120,
+                }
+            );
+
+            toolbar.querySelector(
+                '[data-selection-command="distance"]'
+            ).dispatch('click');
+            assert.strictEqual(data.workspace.precisionState.open, true);
+            assert.strictEqual(manager.isOpen(), false);
+            data.workspace.closePrecisionDialog(false);
+            assert.strictEqual(manager.isOpen(), true);
+            data.workspace._setViewMode('3d');
+            assert.strictEqual(manager.isOpen(), false);
+            data.workspace._setViewMode('plan');
+            assert.strictEqual(manager.isOpen(), true);
+            data.session.select('zn-a');
+            assert.strictEqual(manager.isOpen(), true);
+            toolbar = data.workspace.selectionToolbarElement;
+            assert.strictEqual(
+                toolbar.getAttribute('data-facility-zone-toolbar'),
+                'zn-a'
+            );
+            const name = toolbar.querySelector('[data-zone-name]');
+            assert.strictEqual(name.value, 'Assembly cell');
+            name.value = 'Lathe Cell';
+            name.dispatch('keydown', { key: 'Enter' });
+            await data.workspace.whenIdle();
+            assert.deepStrictEqual(
+                data.session.calls.filter(
+                    call => call[0] === 'editZoneLabel'
+                ).pop(),
+                ['editZoneLabel', 'zn-a', 'Lathe Cell']
+            );
+            assert.strictEqual(
+                data.session.getState().layout.zones[0].label,
+                'Lathe Cell'
+            );
+            await data.workspace.executeCommand('polygon-zone');
+            assert.strictEqual(manager.isOpen(), false);
+            assert.strictEqual(
+                data.workspace.getState().toolMode,
+                'polygon-zone'
+            );
+            data.workspace.destroy();
+            assert.strictEqual(manager.destroyCount, 1);
         });
 
     await check('bounded suspension detaches and restores one workspace without rebuilding',
@@ -1299,10 +3342,7 @@ async function main() {
         async () => {
             const advisor = new FakeSpatialAdvisor();
             const data = fixture({ spatialAdvisor: advisor });
-            const transfer = new FakeDataTransfer();
-            assetRow(data, 'asset-machine').dispatch('dragstart', {
-                dataTransfer: transfer,
-            });
+            const transfer = externalAssetTransfer('asset-machine');
             data.workspace.viewportStack.dispatch('dragover', {
                 dataTransfer: transfer,
                 world: { x: 3, y: 0, z: 3 },
@@ -1561,6 +3601,26 @@ async function main() {
             data.workspace.destroy();
         });
 
+    await check('proposal approval restores focus to the external app ribbon',
+        async () => {
+            const data = fixture();
+            const ribbonCommand = data.documentRef.createElement('button');
+            ribbonCommand.setAttribute(
+                'data-facility-ribbon-command',
+                'auto-arrange'
+            );
+            ribbonCommand.focus();
+            await data.workspace.executeCommand('auto-arrange');
+            await data.workspace.whenIdle();
+            const approve = data.workspace.candidateControls.querySelector(
+                '[data-candidate-action="accept"]'
+            );
+            approve.dispatch('click');
+            await data.workspace.whenIdle();
+            assert.strictEqual(data.documentRef.activeElement, ribbonCommand);
+            data.workspace.destroy();
+        });
+
     await check('candidate safety copy is distinct and summary stays bounded',
         async () => {
             const data = fixture();
@@ -1629,10 +3689,7 @@ async function main() {
             const data = fixture({
                 useAuthoritativePlacementCandidates: true,
             });
-            const transfer = new FakeDataTransfer();
-            assetRow(data, 'asset-machine').dispatch('dragstart', {
-                dataTransfer: transfer,
-            });
+            const transfer = externalAssetTransfer('asset-machine');
             data.workspace.viewportStack.dispatch('drop', {
                 dataTransfer: transfer,
                 world: { x: 7, y: 0, z: 3 },
@@ -1654,16 +3711,41 @@ async function main() {
             data.workspace.destroy();
         });
 
-    await check('asset search filters categorized rows without changing catalog',
+    await check('asset browser search and categories filter cards without changing catalog',
         async () => {
             const data = fixture();
-            const search = data.root.querySelector('input');
+            toolbarButton(data, 'assets').dispatch('click');
+            const search = data.workspace.assetBrowserSearch;
             search.value = 'forklift';
             search.dispatch('input');
-            assert.strictEqual(data.root.querySelectorAll('.ip-flw-asset-row').length, 1);
             assert.strictEqual(
-                data.root.querySelector('.ip-flw-asset-row').getAttribute('data-asset-id'),
+                data.workspace.assetGrid.querySelectorAll(
+                    '.ip-flw-asset-card'
+                ).length,
+                1
+            );
+            assert.strictEqual(
+                data.workspace.assetGrid.querySelector(
+                    '.ip-flw-asset-card'
+                ).getAttribute('data-asset-id'),
                 'asset-forklift'
+            );
+            search.value = '';
+            search.dispatch('input');
+            data.workspace.assetCategoryNav.querySelector(
+                '[data-asset-category="Storage"]'
+            ).dispatch('click');
+            assert.strictEqual(
+                data.workspace.assetGrid.querySelectorAll(
+                    '.ip-flw-asset-card'
+                ).length,
+                1
+            );
+            assert.strictEqual(
+                data.workspace.assetGrid.querySelector(
+                    '.ip-flw-asset-card'
+                ).getAttribute('data-asset-id'),
+                'asset-rack'
             );
             assert.strictEqual(data.workspace.assetCatalog.length, 3);
             data.workspace.destroy();
@@ -1672,14 +3754,12 @@ async function main() {
     await check('drop remains world-stable after arbitrary camera changes and delegates once',
         async () => {
             const data = fixture();
-            const row = assetRow(data, 'asset-rack');
-            const transfer = new FakeDataTransfer();
-            row.dispatch('dragstart', { dataTransfer: transfer });
+            const transfer = externalAssetTransfer('asset-rack');
             const payload = JSON.parse(transfer.getData(workspaceModule.ASSET_MIME));
             assert.deepStrictEqual(payload, {
                 assetId: 'asset-rack',
                 assetDefinitionRevision: 'revision-asset-rack',
-                dragSessionId: 'drag-stable-001',
+                dragSessionId: 'external-drag-001',
             });
             data.top.camera = { panX: 700, panY: -420, zoom: 0.18 };
             data.three.camera = { x: 80, y: 60, z: -120, zoom: 2.6 };
@@ -1705,14 +3785,18 @@ async function main() {
             );
             assert.deepStrictEqual(created.transform.position, { x: 12, y: 0, z: -3.5 });
             assert.strictEqual(data.session.getState().ghostPlacement, null);
+            assert.strictEqual(
+                data.session.getState().placementAlternatives,
+                null
+            );
+            assert.strictEqual(data.workspace.candidateControls.hidden, true);
             assert.strictEqual(data.workspace.ghostOverlay.hidden, true);
             data.workspace.destroy();
         });
 
     await check('ghost cancel is transient and never commits layout', async () => {
         const data = fixture();
-        const transfer = new FakeDataTransfer();
-        assetRow(data, 'asset-machine').dispatch('dragstart', { dataTransfer: transfer });
+        const transfer = externalAssetTransfer('asset-machine');
         data.workspace.viewportStack.dispatch('dragover', {
             dataTransfer: transfer,
             world: { x: 8, y: 0, z: 7 },
@@ -1811,6 +3895,13 @@ async function main() {
             target.dispatch('pointermove', {
                 world: { x: 3.2, y: 0, z: 0.2 },
             });
+            assert.deepStrictEqual(
+                data.top.transientPlacementMoves.at(-1),
+                {
+                    ids: ['pl-a'],
+                    delta: { x: 2, y: 0, z: -1 },
+                }
+            );
             target.dispatch('pointerup', {
                 world: { x: 3.2, y: 0, z: 0.2 },
             });
@@ -1822,6 +3913,323 @@ async function main() {
                 item => item.placementId === 'pl-a'
             );
             assert.strictEqual(moved.positionMode, 'manual');
+            assert.deepStrictEqual(
+                data.top.transientPlacementMoves.at(-1),
+                { ids: [], delta: null }
+            );
+            data.workspace.destroy();
+        });
+
+    await check('placement preview stays at the drop point until the move settles',
+        async () => {
+            const data = fixture();
+            const moveSelected = data.session.moveSelected.bind(data.session);
+            let releaseMove = null;
+            data.session.moveSelected = delta => new Promise((resolve, reject) => {
+                releaseMove = () => Promise.resolve(moveSelected(delta)).then(resolve, reject);
+            });
+            const target = data.documentRef.createElement('polygon');
+            target.setAttribute('data-placement-id', 'pl-a');
+            data.workspace.planView.appendChild(target);
+            target.dispatch('pointerdown', {
+                world: { x: 1, y: 0, z: 1 },
+            });
+            target.dispatch('pointermove', {
+                world: { x: 3, y: 0, z: 2 },
+            });
+            target.dispatch('pointerup', {
+                world: { x: 3, y: 0, z: 2 },
+            });
+            await Promise.resolve();
+            await Promise.resolve();
+            assert.strictEqual(typeof releaseMove, 'function');
+            assert.deepStrictEqual(
+                data.top.transientPlacementMoves.at(-1),
+                {
+                    ids: ['pl-a'],
+                    delta: { x: 2, y: 0, z: 1 },
+                }
+            );
+            releaseMove();
+            await data.workspace.whenIdle();
+            assert.deepStrictEqual(
+                data.top.transientPlacementMoves.at(-1),
+                { ids: [], delta: null }
+            );
+            data.workspace.destroy();
+        });
+
+    await check('Ctrl-drag duplicates one placement at the drop point', async () => {
+        const data = fixture();
+        data.session.select('pl-b');
+        const sourceBefore = clone(data.session.getState().layout.placements.find(
+            item => item.placementId === 'pl-a'
+        ));
+        const target = data.documentRef.createElement('polygon');
+        target.setAttribute('data-placement-id', 'pl-a');
+        data.workspace.planView.appendChild(target);
+        target.dispatch('pointerdown', {
+            pointerId: 51,
+            ctrlKey: true,
+            clientX: 10,
+            clientY: 10,
+            world: { x: 1, y: 0, z: 1 },
+        });
+        assert.deepStrictEqual(data.session.getState().selection, ['pl-b']);
+        target.dispatch('pointermove', {
+            pointerId: 51,
+            ctrlKey: true,
+            clientX: 40,
+            clientY: 30,
+            world: { x: 4, y: 0, z: 3 },
+        });
+        assert.deepStrictEqual(
+            data.top.transientPlacementDuplicates.at(-1),
+            {
+                ids: ['pl-a'],
+                delta: { x: 3, y: 0, z: 2 },
+            }
+        );
+        assert.deepStrictEqual(
+            data.session.getState().layout.placements.find(
+                item => item.placementId === 'pl-a'
+            ),
+            sourceBefore
+        );
+        target.dispatch('pointerup', {
+            pointerId: 51,
+            ctrlKey: true,
+            clientX: 40,
+            clientY: 30,
+            world: { x: 4, y: 0, z: 3 },
+        });
+        await data.workspace.whenIdle();
+        const calls = data.session.calls.filter(
+            call => call[0] === 'duplicateItems'
+        );
+        assert.strictEqual(calls.length, 1);
+        assert.deepStrictEqual(calls[0][1], ['pl-a']);
+        assert.deepStrictEqual(calls[0][2], { x: 3, y: 0, z: 2 });
+        const state = data.session.getState();
+        assert.strictEqual(state.layout.placements.length, 3);
+        const duplicate = state.layout.placements.find(
+            item => item.placementId === state.selection[0]
+        );
+        assert.deepStrictEqual(duplicate.transform.position, { x: 4, y: 0, z: 3 });
+        assert.strictEqual(duplicate.positionMode, 'manual');
+        assert.deepStrictEqual(
+            data.top.transientPlacementDuplicates.at(-1),
+            { ids: [], delta: null }
+        );
+        data.workspace.destroy();
+    });
+
+    await check('Ctrl-drag duplicates the complete selected equipment group',
+        async () => {
+            const data = fixture();
+            data.session.selectMany(['pl-a', 'pl-b']);
+            const originals = clone(data.session.getState().layout.placements);
+            const target = data.documentRef.createElement('polygon');
+            target.setAttribute('data-placement-id', 'pl-a');
+            data.workspace.planView.appendChild(target);
+            target.dispatch('pointerdown', {
+                pointerId: 53,
+                ctrlKey: true,
+                clientX: 10,
+                clientY: 10,
+                world: { x: 1, y: 0, z: 1 },
+            });
+            target.dispatch('pointermove', {
+                pointerId: 53,
+                ctrlKey: true,
+                clientX: 35,
+                clientY: 30,
+                world: { x: 3, y: 0, z: 4 },
+            });
+            assert.deepStrictEqual(
+                data.top.transientPlacementDuplicates.at(-1),
+                {
+                    ids: ['pl-a', 'pl-b'],
+                    delta: { x: 2, y: 0, z: 3 },
+                }
+            );
+            target.dispatch('pointerup', {
+                pointerId: 53,
+                ctrlKey: true,
+                clientX: 35,
+                clientY: 30,
+                world: { x: 3, y: 0, z: 4 },
+            });
+            await data.workspace.whenIdle();
+            const calls = data.session.calls.filter(
+                call => call[0] === 'duplicateItems'
+            );
+            assert.strictEqual(calls.length, 1);
+            assert.deepStrictEqual(calls[0][1], ['pl-a', 'pl-b']);
+            assert.deepStrictEqual(calls[0][2], { x: 2, y: 0, z: 3 });
+            const state = data.session.getState();
+            assert.deepStrictEqual(state.layout.placements.slice(0, 2), originals);
+            assert.strictEqual(state.layout.placements.length, 4);
+            assert.deepStrictEqual(state.selection, ['pl-copy-1', 'pl-copy-2']);
+            assert.deepStrictEqual(
+                state.layout.placements.slice(2).map(
+                    item => item.transform.position
+                ),
+                [
+                    { x: 3, y: 0, z: 4 },
+                    { x: 7, y: 0, z: 5 },
+                ]
+            );
+            assert.strictEqual(state.history.length, 1);
+            assert.deepStrictEqual(
+                data.top.transientPlacementDuplicates.at(-1),
+                { ids: [], delta: null }
+            );
+            data.workspace.destroy();
+        });
+
+    await check('stationary Ctrl-click remains additive selection', async () => {
+        const data = fixture();
+        const target = data.documentRef.createElement('polygon');
+        target.setAttribute('data-placement-id', 'pl-a');
+        data.workspace.planView.appendChild(target);
+        target.dispatch('pointerdown', {
+            pointerId: 52,
+            ctrlKey: true,
+            clientX: 10,
+            clientY: 10,
+            world: { x: 1, y: 0, z: 1 },
+        });
+        target.dispatch('pointerup', {
+            pointerId: 52,
+            ctrlKey: true,
+            clientX: 10,
+            clientY: 10,
+            world: { x: 1, y: 0, z: 1 },
+        });
+        assert.deepStrictEqual(data.session.getState().selection, ['pl-a']);
+        assert.strictEqual(
+            data.session.calls.filter(
+                call => call[0] === 'duplicateItems'
+            ).length,
+            0
+        );
+        data.workspace.destroy();
+    });
+
+    await check('Ctrl-drag duplicates an unselected floor marking at the drop point',
+        async () => {
+            const data = fixture();
+            const marking = floorMarking('fm-arrow', 'direction_arrow');
+            data.session.state.layout.floorMarkings.push(marking);
+            data.session.select('pl-b');
+            const sourceBefore = clone(marking);
+            const target = data.documentRef.createElement('g');
+            target.setAttribute('data-floor-marking-id', 'fm-arrow');
+            data.workspace.planView.appendChild(target);
+            target.dispatch('pointerdown', {
+                pointerId: 54,
+                ctrlKey: true,
+                clientX: 10,
+                clientY: 10,
+                world: { x: 4, y: 0, z: 3 },
+            });
+            target.dispatch('pointermove', {
+                pointerId: 54,
+                ctrlKey: true,
+                clientX: 40,
+                clientY: 30,
+                world: { x: 6, y: 0, z: 4 },
+            });
+            assert.deepStrictEqual(
+                data.top.transientPlacementDuplicates.at(-1),
+                {
+                    ids: ['fm-arrow'],
+                    delta: { x: 2, y: 0, z: 1 },
+                }
+            );
+            target.dispatch('pointerup', {
+                pointerId: 54,
+                ctrlKey: true,
+                clientX: 40,
+                clientY: 30,
+                world: { x: 6, y: 0, z: 4 },
+            });
+            await data.workspace.whenIdle();
+            const calls = data.session.calls.filter(
+                call => call[0] === 'duplicateItems'
+            );
+            assert.deepStrictEqual(calls, [[
+                'duplicateItems',
+                ['fm-arrow'],
+                { x: 2, y: 0, z: 1 },
+            ]]);
+            const state = data.session.getState();
+            assert.deepStrictEqual(state.layout.floorMarkings[0], sourceBefore);
+            assert.strictEqual(state.layout.floorMarkings.length, 2);
+            assert.deepStrictEqual(
+                state.layout.floorMarkings[1].transform.position,
+                { x: 6, y: 0, z: 4 }
+            );
+            assert.strictEqual(state.layout.floorMarkings[1].positionMode, 'manual');
+            data.workspace.destroy();
+        });
+
+    await check('dragging a floor marking corner previews and commits one resize',
+        async () => {
+            const data = fixture();
+            const marking = floorMarking('fm-resize', 'direction_arrow');
+            data.session.state.layout.floorMarkings.push(marking);
+            data.session.select('fm-resize');
+            const handle = data.documentRef.createElement('rect');
+            handle.setAttribute('data-floor-marking-id', 'fm-resize');
+            handle.setAttribute('data-floor-marking-resize-handle', '2');
+            data.workspace.planView.appendChild(handle);
+            handle.dispatch('pointerdown', {
+                pointerId: 55,
+                clientX: 10,
+                clientY: 10,
+                world: { x: 6, y: 0, z: 4 },
+            });
+            handle.dispatch('pointermove', {
+                pointerId: 55,
+                clientX: 50,
+                clientY: 40,
+                world: { x: 8, y: 0, z: 6 },
+            });
+            const preview = data.top.transientFloorMarkingPreviews.at(-1);
+            assert.strictEqual(preview.width, 6);
+            assert.strictEqual(preview.depth, 4);
+            assert.deepStrictEqual(
+                preview.transform.position,
+                { x: 5, y: 0, z: 4 }
+            );
+            handle.dispatch('pointerup', {
+                pointerId: 55,
+                clientX: 50,
+                clientY: 40,
+                world: { x: 8, y: 0, z: 6 },
+            });
+            await data.workspace.whenIdle();
+            const calls = data.session.calls.filter(
+                call => call[0] === 'editFloorMarking'
+            );
+            assert.strictEqual(calls.length, 1);
+            assert.strictEqual(calls[0][1], 'fm-resize');
+            assert.strictEqual(calls[0][2].width, 6);
+            assert.strictEqual(calls[0][2].depth, 4);
+            assert.deepStrictEqual(
+                calls[0][2].transform.position,
+                { x: 5, y: 0, z: 4 }
+            );
+            const resized = data.session.getState().layout.floorMarkings[0];
+            assert.strictEqual(resized.width, 6);
+            assert.strictEqual(resized.depth, 4);
+            assert.strictEqual(resized.positionMode, 'manual');
+            assert.strictEqual(
+                data.top.transientFloorMarkingPreviews.at(-1),
+                null
+            );
             data.workspace.destroy();
         });
 
@@ -1878,6 +4286,664 @@ async function main() {
             data.workspace.destroy();
         });
 
+    await check('Plan navigation overlays track view state without mutating layout',
+        async () => {
+            const stored = {};
+            const storage = {
+                getItem(key) { return stored[key] || null; },
+                setItem(key, value) { stored[key] = String(value); },
+            };
+            const data = fixture({ planPreferenceStorage: storage });
+            const layoutBefore = clone(data.session.getState().layout);
+            assert.ok(data.workspace.planTopRuler.children.length > 0);
+            assert.ok(data.workspace.planLeftRuler.children.length > 0);
+            assert.strictEqual(data.workspace.planScaleLabel.textContent, '5 m');
+            assert.strictEqual(
+                data.workspace.planCompass.getAttribute('aria-label'),
+                'Facility orientation: north is positive Z and east is positive X'
+            );
+            const zoomIn = data.workspace.planNavigation.querySelector(
+                '[data-plan-command="zoom-in"]'
+            );
+            zoomIn.dispatch('click');
+            assert.strictEqual(data.top.lastZoom.factor, 1.25);
+            const unit = data.workspace.planNavigation.querySelector(
+                '[data-plan-command="unit"]'
+            );
+            unit.dispatch('click');
+            assert.strictEqual(data.workspace.getState().planPreferences.unit, 'ft');
+            assert.strictEqual(data.top.viewPreferences.displayUnit, 'ft');
+            assert.strictEqual(unit.textContent, 'ft');
+            assert.ok(data.workspace.planScaleLabel.textContent.endsWith(' ft'));
+            const grid = data.workspace.planNavigation.querySelector(
+                '[data-plan-command="grid"]'
+            );
+            grid.dispatch('click');
+            assert.strictEqual(data.workspace.getState().planPreferences.showGrid, false);
+            assert.strictEqual(data.top.viewPreferences.showGrid, false);
+            const snap = data.workspace.planNavigation.querySelector(
+                '[data-plan-command="snap"]'
+            );
+            snap.dispatch('click');
+            assert.strictEqual(
+                data.workspace.getState().planPreferences.snapToGrid,
+                false
+            );
+            assert.deepStrictEqual(
+                data.workspace._worldDelta(
+                    { x: 0, y: 0, z: 0 },
+                    { x: 0.37, y: 0, z: 0.41 }
+                ),
+                { x: 0.37, y: 0, z: 0.41 }
+            );
+            assert.deepStrictEqual(data.session.getState().layout, layoutBefore);
+            assert.ok(stored[data.workspace.planPreferenceKey]);
+            data.workspace.destroy();
+
+            const reopened = fixture({ planPreferenceStorage: storage });
+            assert.deepStrictEqual(reopened.workspace.getState().planPreferences, {
+                unit: 'ft',
+                showGrid: false,
+                snapToGrid: false,
+            });
+            reopened.workspace.destroy();
+        });
+
+    await check('double-click edits persisted facility dimensions grid and view scale',
+        async () => {
+            const data = fixture({ externalCommandSurface: true });
+            const originalRulerCount = data.workspace.planTopRuler.children.length;
+            const caption = data.documentRef.createElement('span');
+            caption.setAttribute('data-plan-settings-trigger', 'dimensions');
+            data.workspace.planView.appendChild(caption);
+            caption.dispatch('dblclick');
+            assert.strictEqual(data.workspace.planSettingsDialog.hidden, false);
+            assert.strictEqual(
+                data.root.getAttribute('data-plan-settings-open'),
+                'true'
+            );
+
+            const width = data.workspace.planSettingsBody.querySelector(
+                '[data-plan-settings-field="widthMeters"]'
+            );
+            const depth = data.workspace.planSettingsBody.querySelector(
+                '[data-plan-settings-field="depthMeters"]'
+            );
+            const grid = data.workspace.planSettingsBody.querySelector(
+                '[data-plan-settings-field="gridSpacingMeters"]'
+            );
+            width.value = '55';
+            width.dispatch('input');
+            depth.value = '36';
+            depth.dispatch('input');
+            grid.value = '2';
+            grid.dispatch('input');
+            const environment = data.top.environmentSettings.at(-1);
+            assert.deepStrictEqual(environment.worldBounds, {
+                minX: 0, minZ: 0, maxX: 55, maxZ: 36, floorY: 0,
+            });
+            assert.strictEqual(environment.floorGridSpacing, 2);
+            assert.strictEqual(environment.floorMajorGridSpacing, 10);
+            assert.deepStrictEqual(
+                data.three.environmentSettings.at(-1),
+                environment
+            );
+            assert.notStrictEqual(
+                data.workspace.planTopRuler.children.length,
+                originalRulerCount
+            );
+
+            data.workspace.planSettingsDialog.querySelector(
+                '[data-plan-settings-action="apply"]'
+            ).dispatch('click');
+            await data.workspace.whenIdle();
+            assert.deepStrictEqual(
+                data.session.calls.filter(call => call[0] === 'setPlanSettings'),
+                [[
+                    'setPlanSettings',
+                    {
+                        widthMeters: 55,
+                        depthMeters: 36,
+                        gridSpacingMeters: 2,
+                        majorGridSpacingMeters: 10,
+                    },
+                ]]
+            );
+            assert.deepStrictEqual(data.workspace.getState().planSettings, {
+                widthMeters: 55,
+                depthMeters: 36,
+                gridSpacingMeters: 2,
+                majorGridSpacingMeters: 10,
+            });
+
+            data.workspace.planScaleBar.dispatch('dblclick');
+            const scale = data.workspace.planSettingsBody.querySelector(
+                '[data-plan-settings-field="scaleDistanceMeters"]'
+            );
+            assert.strictEqual(data.documentRef.activeElement, scale);
+            scale.value = '10';
+            scale.dispatch('input');
+            assert.strictEqual(data.top.scaleAtCalls.at(-1).scale, 13);
+            data.workspace.planSettingsDialog.querySelector(
+                '[data-plan-settings-action="apply"]'
+            ).dispatch('click');
+            await data.workspace.whenIdle();
+            assert.strictEqual(
+                data.session.calls.filter(call => call[0] === 'setPlanSettings').length,
+                1
+            );
+            assert.strictEqual(data.session.state.history.length, 1);
+            data.workspace.destroy();
+        });
+
+    await check('3D heads-up toolbar controls only camera and display state',
+        async () => {
+            const data = fixture();
+            const before = clone(data.session.getState().layout);
+            data.workspace._setViewMode('3d');
+            const controls = data.workspace.threeNavigation.querySelectorAll(
+                '[data-three-command]'
+            );
+            assert.strictEqual(controls.length, 15);
+            assert.deepStrictEqual(controls.map(button => (
+                button.getAttribute('data-three-command')
+            )), [
+                'fit-layout',
+                'zoom-out',
+                'zoom-in',
+                'pan',
+                'view-orientation',
+                'display-settings',
+                'orbit',
+                'walkthrough',
+                'drone',
+                'switch-immersive',
+                'walk-to-selected',
+                'viewpoints',
+                'record',
+                'fit-facility',
+                'grid',
+            ]);
+            assert.strictEqual(
+                data.workspace.threeNavigation.getAttribute('aria-label'),
+                '3D viewport navigation'
+            );
+            controls.forEach(button => {
+                const commandName = button.getAttribute('data-three-command');
+                const icon = button.querySelector('img');
+                if (commandName === 'record') {
+                    assert.ok(button.querySelector('.ip-flw-record-symbol'));
+                    assert.strictEqual(
+                        button.getAttribute('data-icon-source'),
+                        'record-symbol'
+                    );
+                } else if (commandName === 'view-orientation') {
+                    assert.ok(icon);
+                    const source = icon.getAttribute('src');
+                    assert.ok(source.endsWith('/view-iso.png'));
+                } else {
+                    assert.ok(icon);
+                    const source = icon.getAttribute('src');
+                    assert.ok(source.endsWith('.svg'));
+                }
+                assert.ok(button.getAttribute('title'));
+            });
+            const command = name => data.workspace.threeNavigation.querySelector(
+                '[data-three-command="' + name + '"]'
+            );
+            command('pan').dispatch('click');
+            assert.strictEqual(data.workspace.getState().threeNavigation.mode, 'pan');
+            assert.strictEqual(command('pan').getAttribute('aria-pressed'), 'true');
+            assert.strictEqual(data.three.navigationModes.at(-1), 'pan');
+            command('zoom-in').dispatch('click');
+            command('zoom-out').dispatch('click');
+            assert.deepStrictEqual(data.three.zoomFactors, [1.25, 0.8]);
+            command('fit-layout').dispatch('click');
+            command('fit-facility').dispatch('click');
+            assert.strictEqual(data.three.fitLayoutCount, 1);
+            assert.strictEqual(data.three.fitFacilityCount, 1);
+            assert.strictEqual(command('walk-to-selected').disabled, true);
+            data.session.select('pl-a');
+            assert.strictEqual(command('walk-to-selected').disabled, false);
+            command('walk-to-selected').dispatch('click');
+            assert.deepStrictEqual(data.three.walkthroughNavigations, ['pl-a']);
+            assert.strictEqual(
+                data.workspace.threeWalkthroughTitle.textContent,
+                'Navigating'
+            );
+            data.three.exitWalkthrough('navigation_test_complete');
+            command('walkthrough').dispatch('click');
+            assert.deepStrictEqual(data.three.walkthroughEntries.at(-1), {
+                placementId: 'pl-a',
+            });
+            assert.strictEqual(
+                data.workspace.getState().threeNavigation.walkthrough.active,
+                true
+            );
+            assert.strictEqual(command('walkthrough').getAttribute('aria-pressed'), 'true');
+            assert.strictEqual(data.workspace.threeWalkthroughHud.hidden, false);
+            command('walkthrough').dispatch('click');
+            assert.strictEqual(data.three.walkthroughExits.at(-1), 'toolbar_exit');
+            assert.strictEqual(data.workspace.threeWalkthroughHud.hidden, true);
+            command('drone').dispatch('click');
+            assert.deepStrictEqual(data.three.droneEntries.at(-1), {
+                placementId: 'pl-a',
+            });
+            assert.strictEqual(
+                data.workspace.getState().threeNavigation.drone.active,
+                true
+            );
+            assert.strictEqual(command('drone').getAttribute('aria-pressed'), 'true');
+            assert.strictEqual(data.workspace.threeDroneHud.hidden, false);
+            assert.strictEqual(
+                data.workspace.threeDroneAltitude.textContent,
+                'ALT 12.5 m'
+            );
+            assert.strictEqual(
+                data.workspace.threeDroneSpeed.textContent,
+                'SPD 5 m/s'
+            );
+            assert.strictEqual(
+                data.workspace.threeDroneObstacle.textContent,
+                'OBS 2.75 m'
+            );
+            assert.strictEqual(command('switch-immersive').disabled, false);
+            command('switch-immersive').dispatch('click');
+            assert.strictEqual(data.three.immersiveSwitches.at(-1), 'walkthrough');
+            assert.strictEqual(data.workspace.threeWalkthrough.active, true);
+            command('switch-immersive').dispatch('click');
+            assert.strictEqual(data.three.immersiveSwitches.at(-1), 'drone');
+            assert.strictEqual(data.workspace.threeDrone.active, true);
+            command('drone').dispatch('click');
+            assert.strictEqual(data.three.droneExits.at(-1), 'toolbar_exit');
+            assert.strictEqual(data.workspace.threeDroneHud.hidden, true);
+
+            const orientation = command('view-orientation');
+            const viewOption = name => data.workspace.threeNavigation.querySelector(
+                '[data-three-view="' + name + '"]'
+            );
+            assert.strictEqual(
+                data.workspace.threeViewOrientationMenu.querySelectorAll(
+                    '[data-three-view]'
+                ).length,
+                4
+            );
+            ['front', 'top', 'right', 'iso'].forEach(name => {
+                orientation.dispatch('click');
+                assert.strictEqual(
+                    orientation.getAttribute('aria-expanded'),
+                    'true'
+                );
+                assert.strictEqual(
+                    data.workspace.threeViewOrientationMenu.hidden,
+                    false
+                );
+                viewOption(name).dispatch('click');
+                assert.strictEqual(
+                    data.workspace.threeViewOrientationMenu.hidden,
+                    true
+                );
+            });
+            assert.strictEqual(data.three.frontViewCount, 1);
+            assert.strictEqual(data.three.topViewCount, 1);
+            assert.strictEqual(data.three.rightViewCount, 1);
+            assert.strictEqual(data.three.isometricCount, 1);
+            assert.strictEqual(
+                data.workspace.getState().threeNavigation.orientation,
+                'iso'
+            );
+            assert.ok(
+                orientation.querySelector('img').getAttribute('src')
+                    .endsWith('/view-iso.png')
+            );
+            command('grid').dispatch('click');
+            assert.strictEqual(
+                data.workspace.getState().threeNavigation.gridVisible,
+                false
+            );
+            assert.strictEqual(data.three.gridVisibility.at(-1), false);
+            assert.strictEqual(command('grid').getAttribute('aria-pressed'), 'false');
+            assert.strictEqual(command('grid').getAttribute('title'), 'Show floor grid');
+            command('display-settings').dispatch('click');
+            assert.strictEqual(data.workspace.threeSettingsPanel.hidden, false);
+            assert.strictEqual(data.workspace.threeViewOrientationMenu.hidden, true);
+            assert.strictEqual(
+                command('display-settings').getAttribute('aria-expanded'),
+                'true'
+            );
+            assert.deepStrictEqual(
+                data.workspace.getState().threeNavigation.visualSettings,
+                {
+                    ambient: 1.55,
+                    directional: 2,
+                    exposure: 1.22,
+                    contrast: 1.02,
+                    metalness: 0.04,
+                    roughness: 0.7,
+                    autoRotate: false,
+                    wireframe: false,
+                    background: 'auto',
+                }
+            );
+            const exposure = data.workspace.threeSettingsPanel.querySelector(
+                '[data-three-setting="exposure"]'
+            );
+            exposure.value = '1.4';
+            exposure.dispatch('input');
+            assert.strictEqual(
+                data.three.visualSettings.at(-1).exposure,
+                1.4
+            );
+            const autoRotate = data.workspace.threeSettingsPanel.querySelector(
+                '[data-three-setting="autoRotate"]'
+            );
+            autoRotate.checked = true;
+            autoRotate.dispatch('input');
+            assert.strictEqual(
+                data.workspace.getState().threeNavigation.visualSettings
+                    .autoRotate,
+                true
+            );
+            assert.deepStrictEqual(data.session.getState().layout, before);
+            data.workspace.destroy();
+        });
+
+    await check('3D compass follows camera heading without changing layout state',
+        async () => {
+            const data = fixture();
+            const before = clone(data.session.getState().layout);
+            const compass = data.workspace.threeCompass;
+            assert.ok(compass);
+            assert.strictEqual(compass.parentNode, data.workspace.threeView);
+            assert.strictEqual(
+                compass.getAttribute('data-three-overlay'),
+                'compass'
+            );
+            assert.strictEqual(
+                compass.getAttribute('data-heading-cardinal'),
+                'north'
+            );
+            assert.strictEqual(
+                data.workspace.getState().threeNavigation.compass.cardinal,
+                'north'
+            );
+
+            data.three.emitCameraOrientation({
+                headingDegrees: 90,
+                screenTop: { x: 1, z: 0 },
+                northAxis: '+Z',
+                eastAxis: '+X',
+            });
+            assert.strictEqual(
+                compass.getAttribute('data-heading-degrees'),
+                '90.0'
+            );
+            assert.strictEqual(
+                compass.getAttribute('data-heading-cardinal'),
+                'east'
+            );
+            assert.ok(compass.getAttribute('aria-label').includes(
+                'top of the view points east'
+            ));
+            assert.strictEqual(
+                data.workspace.getState().threeNavigation.compass
+                    .headingDegrees,
+                90
+            );
+            assert.deepStrictEqual(data.session.getState().layout, before);
+            data.workspace.destroy();
+            assert.strictEqual(data.three.cameraOrientationHandler, null);
+        });
+
+    await check('walkthrough context cards stay grounded and intentional',
+        async () => {
+            const data = fixture();
+            const machine = data.session.state.layout.placements[0];
+            machine.assetId = 'asset-machine';
+            machine.assetDefinitionRevision = 'revision-asset-machine';
+            machine.metadata = {
+                instanceLabel: 'CNC Mill 04',
+            };
+            data.session._notify();
+            data.workspace._setViewMode('3d');
+            data.three.enterWalkthrough({ placementId: 'pl-a' });
+            data.three.emitWalkthroughContext({
+                placementId: 'pl-a',
+                distanceMeters: 2.35,
+                lineOfSight: true,
+                focusSource: 'center_ray',
+            });
+
+            assert.strictEqual(data.workspace.walkthroughContextPrompt.hidden, false);
+            assert.strictEqual(
+                data.workspace.walkthroughContextPromptName.textContent,
+                'CNC Mill 04'
+            );
+            assert.strictEqual(
+                data.workspace.walkthroughContextPromptHint.textContent,
+                'E  Details  2.4 m'
+            );
+            const openEvent = data.root.dispatch('keydown', { key: 'e' });
+            assert.strictEqual(openEvent.defaultPrevented, true);
+            assert.strictEqual(openEvent.propagationStopped, true);
+            assert.strictEqual(data.workspace.walkthroughContextCard.hidden, false);
+            assert.strictEqual(
+                data.workspace.walkthroughContextTitle.textContent,
+                'CNC Mill 04'
+            );
+            const renderedContextText = () => (
+                data.workspace.walkthroughContextBody.descendants()
+                    .map(item => item.textContent)
+                    .join(' ')
+            );
+            assert.ok(renderedContextText().includes('Machine the fixture plate'));
+            assert.ok(renderedContextText().includes('4.8 min'));
+
+            data.workspace.walkthroughContextMode.value = 'safety';
+            data.workspace.walkthroughContextMode.dispatch('change');
+            assert.ok(renderedContextText().includes('Eye protection'));
+            const pin = data.workspace.walkthroughContextCard.querySelector(
+                '[data-walkthrough-context-action="pin"]'
+            );
+            pin.dispatch('click');
+            data.three.emitWalkthroughContext(null);
+            assert.strictEqual(data.workspace.walkthroughContextCard.hidden, false);
+            assert.strictEqual(pin.getAttribute('aria-pressed'), 'true');
+
+            const dismissEvent = data.root.dispatch('keydown', { key: 'Escape' });
+            assert.strictEqual(dismissEvent.defaultPrevented, true);
+            assert.strictEqual(dismissEvent.propagationStopped, true);
+            assert.strictEqual(data.workspace.walkthroughContextCard.hidden, true);
+            assert.strictEqual(
+                data.workspace.getState().threeNavigation.contextCard.expanded,
+                false
+            );
+
+            data.three.emitWalkthroughContext({
+                placementId: 'pl-a',
+                distanceMeters: 1.5,
+            });
+            data.workspace.walkthroughContextPrompt.dispatch('click');
+            data.workspace.walkthroughContextCard.querySelector(
+                '[data-walkthrough-context-action="select"]'
+            ).dispatch('click');
+            assert.strictEqual(data.workspace.getState().viewMode, 'plan');
+            assert.deepStrictEqual(data.session.getState().selection, ['pl-a']);
+            assert.strictEqual(
+                data.three.walkthroughExits.at(-1),
+                'context_select'
+            );
+            data.workspace.destroy();
+            assert.strictEqual(data.three.walkthroughContextHandler, null);
+        });
+
+    await check('Drone mode reuses grounded machine context cards',
+        async () => {
+            const data = fixture();
+            const machine = data.session.state.layout.placements[0];
+            machine.assetId = 'asset-machine';
+            machine.assetDefinitionRevision = 'revision-asset-machine';
+            machine.metadata = { instanceLabel: 'CNC Mill 04' };
+            data.session._notify();
+            data.workspace._setViewMode('3d');
+            data.three.enterDrone({ placementId: 'pl-a' });
+            data.three.emitWalkthroughContext({
+                placementId: 'pl-a',
+                distanceMeters: 8.2,
+                lineOfSight: true,
+                focusSource: 'center_ray',
+            });
+            assert.strictEqual(data.workspace.walkthroughContextPrompt.hidden, false);
+            const openEvent = data.root.dispatch('keydown', { key: 'e' });
+            assert.strictEqual(openEvent.defaultPrevented, true);
+            assert.strictEqual(data.workspace.walkthroughContextCard.hidden, false);
+            data.workspace.walkthroughContextCard.querySelector(
+                '[data-walkthrough-context-action="select"]'
+            ).dispatch('click');
+            assert.strictEqual(data.workspace.getState().viewMode, 'plan');
+            assert.strictEqual(data.three.droneExits.at(-1), 'context_select');
+            data.workspace.destroy();
+            assert.strictEqual(data.three.droneHandler, null);
+        });
+
+    await check('3D viewport recording configures, monitors, previews, and exports',
+        async () => {
+            const data = fixture({ recordingCountdownSeconds: 0 });
+            data.workspace._setViewMode('3d');
+            const record = data.workspace.threeNavigation.querySelector(
+                '[data-three-command="record"]'
+            );
+            assert.strictEqual(record.disabled, false);
+            record.dispatch('click');
+            assert.strictEqual(data.workspace.threeRecordingPanel.hidden, false);
+            assert.ok(
+                data.workspace.recordingFormatText.textContent.includes('WebM')
+            );
+
+            data.workspace.recordingPresentationInput.value = 'training';
+            data.workspace.recordingPresentationInput.dispatch('change');
+            assert.strictEqual(data.workspace.recordingHudInput.checked, true);
+            assert.strictEqual(data.workspace.recordingCursorInput.checked, true);
+            assert.strictEqual(data.workspace.recordingHudInput.disabled, false);
+            data.workspace.recordingResolutionInput.value = '1080p';
+            data.workspace.recordingResolutionInput.dispatch('change');
+            data.workspace.recordingFpsInput.value = '60';
+            data.workspace.recordingFpsInput.dispatch('change');
+            data.workspace.recordingMicrophoneInput.checked = true;
+            data.workspace.recordingMicrophoneInput.dispatch('change');
+
+            data.workspace.threeRecordingPanel.querySelector(
+                '[data-recording-action="start"]'
+            ).dispatch('click');
+            await Promise.resolve();
+            const controller = data.recordingRuntime.controllers[0];
+            assert.ok(controller);
+            assert.strictEqual(controller.calls[0][0], 'start');
+            assert.strictEqual(controller.calls[0][1].resolution, '1080p');
+            assert.strictEqual(controller.calls[0][1].fps, 60);
+            assert.strictEqual(controller.calls[0][1].microphone, true);
+            assert.strictEqual(controller.calls[0][1].includeHud, true);
+            assert.strictEqual(controller.calls[0][1].includeCursor, true);
+            assert.strictEqual(data.workspace.threeRecordingMonitor.hidden, false);
+            assert.strictEqual(record.getAttribute('aria-pressed'), 'true');
+
+            data.workspace.threeRecordingMonitor.querySelector(
+                '[data-recording-action="pause"]'
+            ).dispatch('click');
+            assert.strictEqual(
+                data.workspace.getState().recording.status,
+                'paused'
+            );
+            assert.strictEqual(
+                data.workspace.threeRecordingMonitor.querySelector(
+                    '[data-recording-action="pause"]'
+                ).textContent,
+                'Resume'
+            );
+            data.workspace.threeRecordingMonitor.querySelector(
+                '[data-recording-action="stop"]'
+            ).dispatch('click');
+            assert.strictEqual(data.workspace.threeRecordingPreview.hidden, false);
+            assert.strictEqual(
+                data.workspace.recordingPreviewVideo.getAttribute('src'),
+                'blob:workspace-recording'
+            );
+            assert.ok(
+                data.workspace.recordingPreviewSummary.textContent
+                    .includes('1920 x 1080')
+            );
+            data.workspace.threeRecordingPreview.querySelector(
+                '[data-recording-action="download"]'
+            ).dispatch('click');
+            assert.strictEqual(controller.calls.at(-1)[0], 'download');
+            data.workspace.threeRecordingPreview.querySelector(
+                '[data-recording-action="discard"]'
+            ).dispatch('click');
+            assert.strictEqual(data.workspace.threeRecordingPreview.hidden, true);
+            assert.strictEqual(
+                data.workspace.getState().recording.status,
+                'idle'
+            );
+            data.workspace.destroy();
+            assert.strictEqual(controller.disposed, true);
+        });
+
+    await check('named 3D viewpoints persist and restore camera state only',
+        async () => {
+            const stored = {};
+            const storage = {
+                getItem(key) { return stored[key] || null; },
+                setItem(key, value) { stored[key] = String(value); },
+            };
+            const data = fixture({ planPreferenceStorage: storage });
+            const layoutBefore = clone(data.session.getState().layout);
+            data.workspace._setViewMode('3d');
+            const trigger = data.workspace.threeNavigation.querySelector(
+                '[data-three-command="viewpoints"]'
+            );
+            trigger.dispatch('click');
+            assert.strictEqual(data.workspace.threeViewpointPanel.hidden, false);
+            data.workspace.threeViewpointInput.value = 'Receiving overview';
+            data.workspace.threeViewpointPanel.querySelector(
+                '[data-viewpoint-action="save"]'
+            ).dispatch('click');
+            assert.strictEqual(
+                data.workspace.getState().threeNavigation.viewpoints.length,
+                1
+            );
+            assert.ok(stored[data.workspace.threeViewpointKey]);
+            assert.deepStrictEqual(data.session.getState().layout, layoutBefore);
+            data.workspace.destroy();
+
+            const reopened = fixture({ planPreferenceStorage: storage });
+            reopened.workspace._setViewMode('3d');
+            const reopenedTrigger = reopened.workspace.threeNavigation.querySelector(
+                '[data-three-command="viewpoints"]'
+            );
+            reopenedTrigger.dispatch('click');
+            const go = reopened.workspace.threeViewpointPanel.querySelector(
+                '[data-viewpoint-action="apply"]'
+            );
+            assert.strictEqual(go.textContent, 'Receiving overview');
+            reopened.three.cameraView.position.x = 99;
+            go.dispatch('click');
+            assert.strictEqual(
+                reopened.three.appliedCameraViews.at(-1).position.x,
+                8
+            );
+            assert.strictEqual(reopened.workspace.threeViewpointPanel.hidden, true);
+            reopenedTrigger.dispatch('click');
+            reopened.workspace.threeViewpointPanel.querySelector(
+                '[data-viewpoint-action="delete"]'
+            ).dispatch('click');
+            assert.strictEqual(
+                reopened.workspace.getState().threeNavigation.viewpoints.length,
+                0
+            );
+            assert.deepStrictEqual(reopened.session.getState().layout, layoutBefore);
+            reopened.workspace.destroy();
+        });
+
     await check('toolbar commands delegate exactly once and Fit changes only view',
         async () => {
             const data = fixture();
@@ -1885,6 +4951,12 @@ async function main() {
             const layoutBeforeFit = clone(data.session.getState().layout);
             await data.workspace.executeCommand('fit');
             assert.strictEqual(data.controller.fitCount, 1);
+            assert.strictEqual(data.controller.fitFacilityCount, 1);
+            await data.workspace.executeCommand('fit-layout');
+            assert.strictEqual(data.controller.fitLayoutCount, 1);
+            await data.workspace.executeCommand('top-view');
+            assert.strictEqual(data.controller.topViewCount, 1);
+            assert.strictEqual(data.workspace.getState().viewMode, '3d');
             assert.deepStrictEqual(data.session.getState().layout, layoutBeforeFit);
             for (const command of ['rotate', 'duplicate', 'lock', 'undo', 'redo', 'save']) {
                 await data.workspace.executeCommand(command);
@@ -1917,11 +4989,205 @@ async function main() {
             data.workspace.destroy();
         });
 
+    await check('bulk zone editor creates exact named zones in one gesture', async () => {
+        const data = fixture({ externalCommandSurface: true });
+        await data.workspace.executeCommand('bulk-zones');
+        assert.strictEqual(data.workspace.bulkZoneDialog.hidden, false);
+        data.workspace.bulkZoneDialog.querySelector(
+            '[data-bulk-zone-action="add-row"]'
+        ).dispatch('click');
+        const labels = data.workspace.bulkZoneDialog.querySelectorAll(
+            '[data-bulk-zone-field="label"]'
+        );
+        const widths = data.workspace.bulkZoneDialog.querySelectorAll(
+            '[data-bulk-zone-field="width"]'
+        );
+        labels[0].value = 'Machining Hall';
+        labels[0].dispatch('input');
+        widths[0].value = '30';
+        widths[0].dispatch('input');
+        labels[1].value = 'Assembly Hall';
+        labels[1].dispatch('input');
+        data.workspace.bulkZoneDialog.querySelector(
+            '[data-bulk-zone-action="apply"]'
+        ).dispatch('click');
+        await data.workspace.whenIdle();
+        const calls = data.session.calls.filter(
+            call => call[0] === 'createZones'
+        );
+        assert.strictEqual(calls.length, 1);
+        assert.strictEqual(calls[0][1].length, 2);
+        assert.strictEqual(calls[0][1][0].label, 'Machining Hall');
+        assert.strictEqual(calls[0][1][0].width, 30);
+        assert.strictEqual(calls[0][1][1].label, 'Assembly Hall');
+        assert.strictEqual(data.session.state.history.length, 1);
+        assert.strictEqual(data.workspace.bulkZoneDialog.hidden, true);
+        data.workspace.destroy();
+    });
+
+    await check('manufacturing cell panel persists a named group and can ungroup it',
+        async () => {
+            const data = fixture({ externalCommandSurface: true });
+            data.session.selectMany(['pl-a', 'pl-b']);
+            await data.workspace.executeCommand('create-cell-group');
+            assert.strictEqual(data.workspace.cellGroupDialog.hidden, false);
+            const name = data.workspace.cellGroupDialog.querySelector(
+                '[data-cell-group-field="baseName"]'
+            );
+            const prefix = data.workspace.cellGroupDialog.querySelector(
+                '[data-cell-group-field="prefix"]'
+            );
+            const gate = data.workspace.cellGroupDialog.querySelector(
+                '[data-cell-group-field="gateSide"]'
+            );
+            const loading = data.workspace.cellGroupDialog.querySelector(
+                '[data-cell-group-field="loadingSide"]'
+            );
+            const service = data.workspace.cellGroupDialog.querySelector(
+                '[data-cell-group-field="serviceSide"]'
+            );
+            name.value = 'Robot Cell';
+            name.dispatch('input');
+            prefix.value = 'R';
+            prefix.dispatch('input');
+            gate.value = 'south';
+            gate.dispatch('change');
+            loading.value = 'east';
+            loading.dispatch('change');
+            service.value = 'north';
+            service.dispatch('change');
+            data.workspace.cellGroupDialog.querySelector(
+                '[data-cell-group-action="apply"]'
+            ).dispatch('click');
+            await data.workspace.whenIdle();
+            const calls = data.session.calls.filter(
+                call => call[0] === 'createCellGroup'
+            );
+            assert.strictEqual(calls.length, 1);
+            assert.strictEqual(calls[0][1].baseName, 'Robot Cell');
+            assert.strictEqual(calls[0][1].prefix, 'R');
+            assert.ok(calls[0][1].width > 0);
+            assert.ok(calls[0][1].depth > 0);
+            assert.deepStrictEqual(calls[0][1].functionalInterfaces, {
+                gate: 'south',
+                loading: 'east',
+                service: 'north',
+            });
+            const cellId = data.session.state.selection[0];
+            assert.strictEqual(
+                data.session.state.layout.zones.find(
+                    zone => zone.zoneId === cellId
+                ).extensions.cellGroup.membership,
+                'geometric'
+            );
+            assert.deepStrictEqual(
+                data.session.state.layout.zones.find(
+                    zone => zone.zoneId === cellId
+                ).extensions.cellGroup.functionalInterfaces,
+                calls[0][1].functionalInterfaces
+            );
+            assert.strictEqual(
+                data.workspace.getCommandStates()['ungroup-cell'].disabled,
+                false
+            );
+            await data.workspace.executeCommand('ungroup-cell');
+            await data.workspace.whenIdle();
+            assert.strictEqual(data.session.calls.filter(
+                call => call[0] === 'ungroupCell'
+            ).length, 1);
+            assert.strictEqual(
+                data.session.state.layout.zones.some(
+                    zone => zone.zoneId === cellId
+                ),
+                false
+            );
+            data.workspace.destroy();
+        });
+
+    await check('semantic aisle tool draws one validated native route', async () => {
+        const data = fixture({ externalCommandSurface: true });
+        await data.workspace.executeCommand('aisle');
+        assert.strictEqual(data.workspace.aisleDialog.hidden, false);
+        const name = data.workspace.aisleDialog.querySelector(
+            '[data-aisle-field="label"]'
+        );
+        const kind = data.workspace.aisleDialog.querySelector(
+            '[data-aisle-field="aisleKind"]'
+        );
+        const direction = data.workspace.aisleDialog.querySelector(
+            '[data-aisle-field="direction"]'
+        );
+        const width = data.workspace.aisleDialog.querySelector(
+            '[data-aisle-field="corridorWidth"]'
+        );
+        name.value = 'Main Forklift Boulevard';
+        name.dispatch('input');
+        kind.value = 'forklift';
+        kind.dispatch('change');
+        direction.value = 'two_way';
+        direction.dispatch('change');
+        width.value = '3.5';
+        width.dispatch('input');
+        data.workspace.aisleDialog.querySelector(
+            '[data-aisle-action="draw"]'
+        ).dispatch('click');
+        data.workspace.planView.dispatch('pointerdown', {
+            world: { x: 2, y: 0, z: 3 },
+        });
+        data.workspace.planView.dispatch('pointermove', {
+            world: { x: 12, y: 0, z: 3 },
+        });
+        assert.deepStrictEqual(data.top.transientAislePreviews.at(-1), {
+            points: [
+                { x: 2, y: 0, z: 3 },
+                { x: 12, y: 0, z: 3 },
+            ],
+            corridorWidth: 3.5,
+            color: '#d9a514',
+        });
+        data.workspace.planView.dispatch('pointerup', {
+            world: { x: 12, y: 0, z: 3 },
+        });
+        await data.workspace.whenIdle();
+        const calls = data.session.calls.filter(
+            call => call[0] === 'createAisle'
+        );
+        assert.strictEqual(calls.length, 1);
+        assert.strictEqual(calls[0][1].label, 'Main Forklift Boulevard');
+        assert.strictEqual(calls[0][1].corridorWidth, 3.5);
+        assert.strictEqual(calls[0][1].direction, 'two_way');
+        assert.strictEqual(
+            calls[0][1].clearanceEvidenceStatus,
+            'unverified'
+        );
+        assert.strictEqual(data.session.state.layout.routes.length, 1);
+        assert.deepStrictEqual(
+            data.session.state.layout.routes[0].centerline,
+            [
+                { x: 2, y: 0, z: 3 },
+                { x: 12, y: 0, z: 3 },
+            ]
+        );
+        data.workspace.destroy();
+    });
+
     await check('rectangle and polygon zone tools commit one gesture each', async () => {
         const data = fixture();
         await data.workspace.executeCommand('rectangle-zone');
         data.workspace.planView.dispatch('pointerdown', {
             world: { x: 1, y: 0, z: 1 },
+        });
+        data.workspace.planView.dispatch('pointermove', {
+            world: { x: 5, y: 0, z: 4 },
+        });
+        assert.deepStrictEqual(data.top.transientZonePreviews.at(-1), {
+            points: [
+                { x: 1, z: 1 },
+                { x: 5, z: 1 },
+                { x: 5, z: 4 },
+                { x: 1, z: 4 },
+            ],
+            options: { kind: 'rectangle', closed: true },
         });
         data.workspace.planView.dispatch('pointerup', {
             world: { x: 5, y: 0, z: 4 },
@@ -1931,12 +5197,24 @@ async function main() {
             data.session.calls.filter(call => call[0] === 'createRectangleZone').length,
             1
         );
+        assert.deepStrictEqual(
+            data.top.transientZonePreviews.at(-1),
+            { points: [], options: {} }
+        );
         await data.workspace.executeCommand('polygon-zone');
         [
             { x: 0, y: 0, z: 0 },
             { x: 3, y: 0, z: 0 },
             { x: 2, y: 0, z: 2 },
         ].forEach(world => data.workspace.planView.dispatch('click', { world }));
+        assert.deepStrictEqual(data.top.transientZonePreviews.at(-1), {
+            points: [
+                { x: 0, y: 0, z: 0 },
+                { x: 3, y: 0, z: 0 },
+                { x: 2, y: 0, z: 2 },
+            ],
+            options: { kind: 'polygon', closed: false },
+        });
         data.root.dispatch('keydown', {
             key: 'Enter',
             target: data.root,
@@ -1946,8 +5224,84 @@ async function main() {
             data.session.calls.filter(call => call[0] === 'createPolygonZone').length,
             1
         );
+        assert.deepStrictEqual(
+            data.top.transientZonePreviews.at(-1),
+            { points: [], options: {} }
+        );
         data.workspace.destroy();
     });
+
+    await check('floor marking palette creates and edits one semantic object',
+        async () => {
+            const manager = new FakeSurfaceManager();
+            const data = fixture({
+                externalCommandSurface: true,
+                floatingSurfaceRuntime: {
+                    createSurfaceManager() { return manager; },
+                },
+                floatingDom: fakeFloatingDom(),
+            });
+            await data.workspace.executeCommand('floor-marking');
+            assert.strictEqual(data.workspace.floorMarkingPalette.hidden, false);
+            assert.strictEqual(
+                data.workspace.getCommandStates()['floor-marking'].active,
+                true
+            );
+            const keepClear = data.workspace.floorMarkingPalette.querySelector(
+                '[data-floor-marking-type="keep_clear"]'
+            );
+            keepClear.dispatch('click');
+            assert.strictEqual(data.workspace.floorMarkingPalette.hidden, true);
+            data.workspace.planView.dispatch('pointerdown', {
+                world: { x: 2, y: 0, z: 2 },
+            });
+            data.workspace.planView.dispatch('pointermove', {
+                world: { x: 6, y: 0, z: 4 },
+            });
+            assert.strictEqual(
+                data.top.transientFloorMarkingPreviews.at(-1).markingType,
+                'keep_clear'
+            );
+            data.workspace.planView.dispatch('pointerup', {
+                world: { x: 6, y: 0, z: 4 },
+            });
+            await data.workspace.whenIdle();
+            const createCall = data.session.calls.find(
+                call => call[0] === 'createFloorMarking'
+            );
+            assert(createCall);
+            assert.strictEqual(createCall[1].semanticRole, 'keep_clear');
+            assert.deepStrictEqual(createCall[1].transform.position, {
+                x: 4, y: 0, z: 3,
+            });
+            assert.strictEqual(
+                data.top.transientFloorMarkingPreviews.at(-1),
+                null
+            );
+            const markingId = data.session.getState().selection[0];
+            planFloorMarking(data, markingId, {
+                left: 200, top: 200, width: 160, height: 80,
+            });
+            await data.workspace.executeCommand('select');
+            data.session.select(markingId);
+            assert.strictEqual(manager.isOpen(), true);
+            const toolbar = data.workspace.selectionToolbarElement;
+            assert.strictEqual(
+                toolbar.getAttribute('data-facility-floor-marking-toolbar'),
+                markingId
+            );
+            const textInput = toolbar.querySelector('[data-floor-marking-text]');
+            textInput.value = 'CNC KEEP CLEAR';
+            textInput.dispatch('keydown', { key: 'Enter' });
+            await data.workspace.whenIdle();
+            const editCall = data.session.calls.filter(
+                call => call[0] === 'editFloorMarking'
+            ).at(-1);
+            assert.strictEqual(editCall[1], markingId);
+            assert.strictEqual(editCall[2].label, 'CNC KEEP CLEAR');
+            assert.strictEqual(editCall[2].text, 'CNC KEEP CLEAR');
+            data.workspace.destroy();
+        });
 
     await check('session updates controller and adapter selections return to session',
         async () => {
@@ -2067,6 +5421,31 @@ async function main() {
                 call => call[0] === 'editZoneDimensions'
             ).pop();
             assert.deepStrictEqual(zoneCall.slice(1), ['zn-a', { width: 8, depth: 6 }]);
+            const label = data.workspace.propertiesBody.querySelector(
+                '[data-property="label"]'
+            );
+            label.value = 'Machine Cell';
+            label.dispatch('change');
+            await data.workspace.whenIdle();
+            assert.deepStrictEqual(
+                data.session.calls.filter(
+                    call => call[0] === 'editZoneLabel'
+                ).pop(),
+                ['editZoneLabel', 'zn-a', 'Machine Cell']
+            );
+            const purpose = data.workspace.propertiesBody.querySelector(
+                '[data-property="zoneType"]'
+            );
+            assert.ok(purpose);
+            purpose.value = 'service';
+            purpose.dispatch('change');
+            await data.workspace.whenIdle();
+            assert.deepStrictEqual(
+                data.session.calls.filter(
+                    call => call[0] === 'editZoneType'
+                ).pop(),
+                ['editZoneType', 'zn-a', 'service']
+            );
             data.workspace.destroy();
         });
 
@@ -2087,6 +5466,12 @@ async function main() {
                 target: data.root,
             });
             data.root.dispatch('keydown', { key: 'f', target: data.root });
+            data.root.dispatch('keydown', {
+                key: 'F',
+                shiftKey: true,
+                target: data.root,
+            });
+            data.root.dispatch('keydown', { key: 't', target: data.root });
             await data.workspace.whenIdle();
             assert.strictEqual(
                 data.session.calls.filter(call => call[0] === 'rotateSelected90').length,
@@ -2097,6 +5482,8 @@ async function main() {
                 1
             );
             assert.strictEqual(data.controller.fitCount, 1);
+            assert.strictEqual(data.controller.fitLayoutCount, 1);
+            assert.strictEqual(data.controller.topViewCount, 1);
             const input = data.documentRef.createElement('input');
             data.root.dispatch('keydown', { key: 'Delete', target: input });
             await data.workspace.whenIdle();
@@ -2107,30 +5494,133 @@ async function main() {
             data.workspace.destroy();
         });
 
-    await check('Enter places the focused catalog asset at the plan center',
+    await check('asset browser batches quantities into one placement gesture',
         async () => {
             const data = fixture({
-                keyboardPlacementPoint: { x: 7.24, y: 0, z: -2.76 },
+                keyboardPlacementPoint: { x: 14.24, y: 0, z: 10.26 },
             });
-            const row = assetRow(data, 'asset-machine');
-            const event = row.dispatch('keydown', {
-                key: 'Enter',
-                target: row,
-            });
+            data.session.state.baseLayout.zones = [];
+            data.session.state.layout.zones = [];
+            data.session._notify();
+            toolbarButton(data, 'assets').dispatch('click');
+            assert.strictEqual(data.workspace.assetBrowser.hidden, false);
+            assert.strictEqual(
+                data.workspace.shell.getAttribute('aria-hidden'),
+                'true'
+            );
+            assert.strictEqual(toolbarButton(data, 'delete').disabled, true);
+            assetAction(data, 'asset-rack', 'toggle').dispatch('click');
+            assetAction(data, 'asset-rack', 'increment').dispatch('click');
+            assetAction(data, 'asset-machine', 'toggle').dispatch('click');
+            assert.ok(data.workspace.assetBrowserSelectionStatus.textContent.includes(
+                '3 total items'
+            ));
+            data.workspace.assetBrowserAdd.dispatch('click');
             await data.workspace.whenIdle();
-            assert.strictEqual(event.defaultPrevented, true);
-            const commit = data.session.calls.filter(
-                call => call[0] === 'commitGhostPlacement'
+            await Promise.resolve();
+            const calls = data.session.calls.filter(
+                call => call[0] === 'placeAssets'
             );
-            assert.strictEqual(commit.length, 1);
-            const created = data.session.getState().layout.placements.find(
-                item => item.placementId.startsWith('pl-new-')
+            assert.strictEqual(calls.length, 1);
+            assert.strictEqual(calls[0][1].length, 3);
+            assert.strictEqual(
+                new Set(calls[0][1].map(
+                    request => JSON.stringify(request.worldPosition)
+                )).size,
+                3
             );
-            assert.deepStrictEqual(
-                created.transform.position,
-                { x: 7, y: 0, z: -3 }
+            const state = data.session.getState();
+            assert.strictEqual(state.selection.length, 3);
+            assert.deepStrictEqual(state.history[state.history.length - 1], {
+                label: 'Add assets',
+                operationCount: 3,
+                applied: true,
+            });
+            assert.strictEqual(data.workspace.assetBrowser.hidden, true);
+            assert.strictEqual(
+                data.workspace.getState().assetBrowser.selectionOrder.length,
+                0
             );
-            assert.strictEqual(data.session.getState().ghostPlacement, null);
+            assert.strictEqual(toolbarButton(data, 'delete').disabled, false);
+            data.workspace.destroy();
+        });
+
+    await check('asset browser uses the active 3D floor point and reports submission progress',
+        async () => {
+            const data = fixture();
+            data.session.state.baseLayout.zones = [];
+            data.session.state.layout.zones = [];
+            data.session._notify();
+            let projectedInput = null;
+            data.three.worldPointOnFloor = input => {
+                projectedInput = clone(input);
+                return { x: 18.24, y: 0, z: 11.26 };
+            };
+            data.workspace._setViewMode('3d');
+            toolbarButton(data, 'assets').dispatch('click');
+            assetAction(data, 'asset-machine', 'toggle').dispatch('click');
+            data.workspace.assetBrowserAdd.dispatch('click');
+
+            assert.strictEqual(data.workspace.assetBrowserAdd.disabled, true);
+            assert.strictEqual(
+                data.workspace.assetBrowserAdd.textContent,
+                'Adding...'
+            );
+            assert.strictEqual(
+                data.workspace.assetBrowserAdd.getAttribute('aria-busy'),
+                'true'
+            );
+            assert.ok(data.workspace.assetBrowserSelectionStatus.textContent
+                .includes('Adding 1 asset'));
+
+            await data.workspace.whenIdle();
+            await Promise.resolve();
+            const call = data.session.calls.find(item => item[0] === 'placeAssets');
+            assert(call);
+            assert.deepStrictEqual(projectedInput, {
+                clientX: 450,
+                clientY: 300,
+            });
+            assert.deepStrictEqual(call[1][0].worldPosition, {
+                x: 18,
+                y: 0,
+                z: 11.5,
+            });
+            assert.strictEqual(data.workspace.assetBrowser.hidden, true);
+            assert.strictEqual(data.workspace.assetBrowserSubmitting, false);
+            assert.strictEqual(data.workspace.assetBrowserAdd.textContent,
+                'Add to Layout');
+            assert.strictEqual(data.controller.fitCount, 1);
+            data.workspace.destroy();
+        });
+
+    await check('asset browser cancel is pure and Escape preserves a pending selection',
+        async () => {
+            const data = fixture();
+            const before = JSON.stringify(data.session.getState().layout);
+            toolbarButton(data, 'assets').dispatch('click');
+            assetAction(data, 'asset-forklift', 'toggle').dispatch('click');
+            data.workspace.assetBrowser.dispatch('keydown', {
+                key: 'Escape',
+                target: data.workspace.assetBrowser,
+            });
+            assert.strictEqual(data.workspace.assetBrowser.hidden, true);
+            assert.strictEqual(
+                data.workspace.getState().assetBrowser.selected['asset-forklift'],
+                1
+            );
+            toolbarButton(data, 'assets').dispatch('click');
+            data.workspace.assetBrowserCancel.dispatch('click');
+            assert.strictEqual(data.workspace.assetBrowser.hidden, true);
+            assert.strictEqual(
+                Object.keys(data.workspace.getState().assetBrowser.selected).length,
+                0
+            );
+            assert.strictEqual(JSON.stringify(data.session.getState().layout), before);
+            assert.strictEqual(
+                data.session.calls.filter(call => call[0] === 'placeAssets').length,
+                0
+            );
             data.workspace.destroy();
         });
 

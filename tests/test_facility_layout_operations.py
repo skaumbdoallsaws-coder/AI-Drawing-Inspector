@@ -49,6 +49,30 @@ def _zone(*, zone_id: str | None = None) -> dict:
     return value
 
 
+def _floor_marking(*, marking_id: str | None = None) -> dict:
+    value = {
+        "markingType": "direction_arrow",
+        "label": "Material flow arrow",
+        "semanticRole": "material_flow",
+        "transform": {
+            "position": {"x": 4.0, "y": 0.0, "z": 2.0},
+            "rotationDegrees": 90.0,
+        },
+        "width": 0.8,
+        "depth": 1.6,
+        "fillColor": "#ffffff",
+        "strokeColor": "#1f2937",
+        "opacity": 0.9,
+        "text": "",
+        "positionMode": "manual",
+        "metadata": {"createdBy": "user"},
+        "evidence": [],
+    }
+    if marking_id:
+        value["markingId"] = marking_id
+    return value
+
+
 def test_same_batch_produces_identical_bytes_diff_and_hash() -> None:
     layout = _fixture("empty_cell.json")
     operations = [
@@ -103,6 +127,204 @@ def test_generated_identity_is_bound_to_base_revision_and_operation_index() -> N
 
     assert first["createdIds"] != different_base["createdIds"]
     assert first["createdIds"] != different_index["createdIds"]
+
+
+def test_floor_markings_are_deterministic_editable_and_deletable() -> None:
+    layout = _fixture("empty_cell.json")
+    operation = {
+        "op": "add_floor_marking",
+        "floorMarking": _floor_marking(),
+    }
+    first = apply_facility_layout_operations(layout, [operation])
+    second = apply_facility_layout_operations(layout, [operation])
+
+    assert first["createdIds"] == second["createdIds"]
+    marking_id = first["createdIds"][0]
+    assert marking_id.startswith("fm-")
+    assert first["document"]["floorMarkings"][0]["markingId"] == marking_id
+    assert canonical_layout_bytes(first["document"]) == canonical_layout_bytes(
+        second["document"]
+    )
+
+    edited = apply_facility_layout_operations(
+        first["document"],
+        [{
+            "op": "edit_floor_marking",
+            "markingId": marking_id,
+            "patch": {
+                "label": "Outbound material flow",
+                "fillColor": "#facc15",
+            },
+        }],
+    )
+    assert edited["document"]["floorMarkings"][0]["label"] == (
+        "Outbound material flow"
+    )
+
+    deleted = apply_facility_layout_operations(
+        edited["document"],
+        [{"op": "delete_floor_marking", "markingId": marking_id}],
+    )
+    assert deleted["document"]["floorMarkings"] == []
+
+
+def test_plan_settings_are_validated_and_persisted_as_layout_extensions() -> None:
+    layout = _fixture("empty_cell.json")
+    result = apply_facility_layout_operations(
+        layout,
+        [{
+            "op": "set_plan_settings",
+            "planSettings": {
+                "widthMeters": 55.0,
+                "depthMeters": 36.0,
+                "gridSpacingMeters": 2.0,
+                "majorGridSpacingMeters": 10.0,
+            },
+        }],
+    )
+
+    assert result["document"]["extensions"]["facilityPlan"] == {
+        "widthMeters": 55.0,
+        "depthMeters": 36.0,
+        "gridSpacingMeters": 2.0,
+        "majorGridSpacingMeters": 10.0,
+    }
+    assert result["createdIds"] == []
+
+
+def test_clear_layout_contents_is_atomic_and_preserves_document_settings() -> None:
+    layout = _fixture("utility_cell.json")
+    prepared = apply_facility_layout_operations(
+        layout,
+        [
+            {"op": "add_zone", "zone": _zone(zone_id="zn-clear-cell")},
+            {
+                "op": "add_floor_marking",
+                "floorMarking": _floor_marking(marking_id="fm-clear-arrow"),
+            },
+            {
+                "op": "set_plan_settings",
+                "planSettings": {
+                    "widthMeters": 55.0,
+                    "depthMeters": 36.0,
+                    "gridSpacingMeters": 2.0,
+                    "majorGridSpacingMeters": 10.0,
+                },
+            },
+        ],
+    )["document"]
+    plan_settings = deepcopy(prepared["extensions"]["facilityPlan"])
+    identity = {
+        key: deepcopy(prepared[key])
+        for key in (
+            "schemaVersion",
+            "layoutId",
+            "displayName",
+            "association",
+            "coordinateFrame",
+            "sourceShellRef",
+            "policySetRef",
+        )
+    }
+    expected_affected = {
+        "zn-clear-cell",
+        "fm-clear-arrow",
+        *[item["placementId"] for item in prepared["placements"]],
+        *[item["routeId"] for item in prepared["routes"]],
+        *[
+            item["utilityNetworkId"]
+            for item in prepared["utilityNetworks"]
+        ],
+        *[
+            item["processBindingId"]
+            for item in prepared["processBindings"]
+        ],
+    }
+
+    result = apply_facility_layout_operations(
+        prepared,
+        [{"op": "clear_layout_contents"}],
+    )
+    document = result["document"]
+
+    for collection in (
+        "zones",
+        "floorMarkings",
+        "placements",
+        "routes",
+        "utilityNetworks",
+        "processBindings",
+        "dismissedSuggestions",
+    ):
+        assert document[collection] == []
+    assert document["extensions"]["facilityPlan"] == plan_settings
+    assert {key: document[key] for key in identity} == identity
+    assert result["createdIds"] == []
+    assert expected_affected.issubset(set(result["affectedIds"]))
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {
+            "widthMeters": 0.1,
+            "depthMeters": 36.0,
+            "gridSpacingMeters": 1.0,
+            "majorGridSpacingMeters": 5.0,
+        },
+        {
+            "widthMeters": 55.0,
+            "depthMeters": 36.0,
+            "gridSpacingMeters": 2.0,
+            "majorGridSpacingMeters": 5.0,
+        },
+        {
+            "widthMeters": 55.0,
+            "depthMeters": 36.0,
+            "gridSpacingMeters": 2.0,
+            "majorGridSpacingMeters": 10.0,
+            "screenScale": 20,
+        },
+    ],
+)
+def test_invalid_plan_settings_reject_the_complete_batch(settings: dict) -> None:
+    layout = _fixture("empty_cell.json")
+    original = deepcopy(layout)
+
+    with pytest.raises(FacilityLayoutOperationError) as caught:
+        apply_facility_layout_operations(
+            layout,
+            [
+                {"op": "rename_layout", "displayName": "Must not survive"},
+                {"op": "set_plan_settings", "planSettings": settings},
+            ],
+        )
+
+    assert caught.value.code == "invalid_operation_field"
+    assert caught.value.operation_index == 1
+    assert layout == original
+
+
+def test_locked_floor_marking_rejects_geometry_changes() -> None:
+    layout = _fixture("empty_cell.json")
+    marking = _floor_marking(marking_id="fm-locked-arrow")
+    marking["positionMode"] = "locked"
+    added = apply_facility_layout_operations(
+        layout,
+        [{"op": "add_floor_marking", "floorMarking": marking}],
+    )
+
+    with pytest.raises(FacilityLayoutOperationError) as caught:
+        apply_facility_layout_operations(
+            added["document"],
+            [{
+                "op": "edit_floor_marking",
+                "markingId": "fm-locked-arrow",
+                "patch": {"width": 2.0},
+            }],
+        )
+
+    assert caught.value.code == "locked_object"
 
 
 def test_failed_batch_does_not_mutate_input_or_return_partial_changes() -> None:
@@ -273,6 +495,33 @@ def test_duplicate_is_independent_and_clears_snap_relationship() -> None:
     assert _placement(result["document"], "pl-rack-a")["transform"]["position"]["x"] == 2.0
 
 
+def test_duplicate_accepts_explicit_vertical_stack_relationship() -> None:
+    layout = _fixture("repeated_assets.json")
+    relationship = {
+        "family": "vertical_stack",
+        "stackId": "stack-rack-a",
+        "level": 1,
+        "count": 3,
+        "gapMeters": 0.0,
+        "itemHeightMeters": 2.4,
+        "evidenceStatus": "unverified",
+    }
+    result = apply_facility_layout_operations(
+        layout,
+        [{
+            "op": "duplicate_placement",
+            "sourcePlacementId": "pl-rack-a",
+            "position": {"x": 2.0, "y": 2.4, "z": 2.0},
+            "snapRelationship": relationship,
+        }],
+    )
+    duplicate = _placement(result["document"], result["createdIds"][0])
+
+    assert duplicate["snapRelationship"] == relationship
+    assert duplicate["snapRelationship"] is not relationship
+    assert _placement(layout, "pl-rack-a")["snapRelationship"] is None
+
+
 def test_delete_zone_and_placement_reject_live_references() -> None:
     two_assets = _fixture("two_asset_cell.json")
     with pytest.raises(FacilityLayoutOperationError) as zone_error:
@@ -300,6 +549,30 @@ def test_unreferenced_zone_and_placement_delete_without_cascade() -> None:
     assert [item["placementId"] for item in result["document"]["placements"]] == [
         "pl-rack-b"
     ]
+
+
+def test_surface_support_cannot_be_deleted_while_children_reference_it() -> None:
+    layout = _fixture("repeated_assets.json")
+    support = _placement(layout, "pl-rack-a")
+    child = _placement(layout, "pl-rack-b")
+    child["snapRelationship"] = {
+        "family": "surface_attachment",
+        "attachmentId": "surface-rack-a-top",
+        "supportPlacementId": support["placementId"],
+        "surfaceId": "derived-top",
+        "side": "above",
+        "localPosition": {"x": 0.0, "z": 0.0},
+        "localRotationDegrees": 0,
+        "normalOffsetMeters": 0,
+        "surfaceSource": "derived_aabb",
+        "evidenceStatus": "unverified",
+    }
+    with pytest.raises(FacilityLayoutOperationError) as captured:
+        apply_facility_layout_operations(
+            layout,
+            [{"op": "delete_placement", "placementId": "pl-rack-a"}],
+        )
+    assert captured.value.code == "referenced_object_in_use"
 
     empty = _fixture("empty_cell.json")
     added = apply_facility_layout_operations(
@@ -338,6 +611,58 @@ def test_unknown_compatible_fields_round_trip_through_targeted_edits() -> None:
     assert document["futureTopLevel"] == {"enabled": True}
     assert document["zones"][0]["futureZoneField"] == {"review": "retain"}
     assert document["placements"][0]["futurePlacementField"] == [1, 2, 3]
+
+
+def test_pattern_provenance_covers_seed_and_copy_then_marks_manual_drift() -> None:
+    layout = _fixture("repeated_assets.json")
+    provenance = {
+        "schemaVersion": 1,
+        "provenanceId": "layout-pattern:test-linear-a",
+        "command": "linear_pattern",
+        "authoredStrategy": None,
+        "seedEntityIds": ["pl-rack-a"],
+        "parameters": {"count": 2, "pitch": 4.0},
+        "manuallyEditedSinceCreation": False,
+    }
+    patterned = apply_facility_layout_operations(
+        layout,
+        [{
+            "op": "duplicate_placement",
+            "sourcePlacementId": "pl-rack-a",
+            "position": {"x": 6.0, "y": 0.0, "z": 2.0},
+            "layoutProvenance": provenance,
+            "layoutProvenanceSeedEntityIds": ["pl-rack-a"],
+        }],
+    )
+    copy_id = patterned["createdIds"][0]
+    source = _placement(patterned["document"], "pl-rack-a")
+    copied = _placement(patterned["document"], copy_id)
+
+    for item in (source, copied):
+        stored = item["metadata"]["layoutProvenance"]
+        assert stored["provenanceId"] == "layout-pattern:test-linear-a"
+        assert stored["authoredGeometry"]["kind"] == "placement"
+        assert stored["manuallyEditedSinceCreation"] is False
+
+    moved = apply_facility_layout_operations(
+        patterned["document"],
+        [{
+            "op": "move_placement",
+            "placementId": copy_id,
+            "position": {"x": 7.0, "y": 0.0, "z": 2.0},
+            "movementKind": "user",
+        }],
+    )
+    drift = _placement(moved["document"], copy_id)["metadata"][
+        "layoutProvenance"
+    ]
+    assert drift["geometryEditedSinceCreation"] is True
+    assert drift["manuallyEditedSinceCreation"] is True
+    assert drift["authoredGeometry"]["transform"]["position"] == {
+        "x": 6.0,
+        "y": 0.0,
+        "z": 2.0,
+    }
 
 
 def test_empty_and_semantic_noop_are_byte_stable() -> None:
@@ -576,3 +901,59 @@ def test_utility_topology_operations_preserve_referential_integrity():
         item["networkSegmentId"] == "ns-air-review-drop"
         for item in network["segments"]
     )
+
+
+def test_semantic_aisle_operations_create_world_route_and_rebind_fingerprint():
+    layout = _fixture("empty_cell.json")
+    base_revision = layout_revision(layout)
+    added = apply_facility_layout_operations(
+        layout,
+        [{
+            "op": "add_aisle",
+            "aisle": {
+                "label": "Main Forklift Boulevard",
+                "aisleKind": "forklift",
+                "direction": "two_way",
+                "color": "#d9a514",
+                "corridorWidth": 10.668,
+                "centerline": [
+                    {"x": 0.0, "y": 0.0, "z": 12.0},
+                    {"x": 40.0, "y": 0.0, "z": 12.0},
+                ],
+                "clearanceEvidenceStatus": "unverified",
+            },
+        }],
+        base_revision=base_revision,
+    )
+    route = added["document"]["routes"][0]
+    route_id = route["routeId"]
+    first_fingerprint = route["routeFingerprint"]
+
+    assert route_id.startswith("rt-")
+    assert route["label"] == "Main Forklift Boulevard"
+    assert route["sourceEndpoint"]["kind"] == "world_point"
+    assert route["targetEndpoint"]["position"]["x"] == 40.0
+    assert route["extensions"]["facilityAisle"] == {
+        "schemaVersion": 1,
+        "aisleKind": "forklift",
+        "direction": "two_way",
+        "color": "#d9a514",
+        "clearanceEvidenceStatus": "unverified",
+    }
+
+    edited = apply_facility_layout_operations(
+        added["document"],
+        [{
+            "op": "edit_aisle",
+            "routeId": route_id,
+            "patch": {
+                "corridorWidth": 12.0,
+                "direction": "one_way",
+            },
+        }],
+        base_revision=layout_revision(added["document"]),
+    )
+    changed = edited["document"]["routes"][0]
+    assert changed["corridorWidth"] == 12.0
+    assert changed["extensions"]["facilityAisle"]["direction"] == "one_way"
+    assert changed["routeFingerprint"] != first_fingerprint

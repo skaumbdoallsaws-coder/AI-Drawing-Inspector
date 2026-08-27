@@ -1,0 +1,684 @@
+{
+  "contractVersion": 1,
+  "snapshotId": "golden-facility-a",
+  "description": "Frozen authorization and tool-routing variants for Sage Facility Layout intelligence. Deterministic semantic and geometry oracles are evaluated separately.",
+  "cases": [
+    {
+      "id": "A1",
+      "suite": "hierarchy",
+      "prompt": "What are the six main departments in this facility?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "A2",
+      "suite": "hierarchy",
+      "prompt": "What is inside the Machining Hall?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "A3",
+      "suite": "hierarchy",
+      "prompt": "Where is the Automation department relative to Machining?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "A4",
+      "suite": "hierarchy",
+      "prompt": "Which departments border the central forklift boulevard?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "A5",
+      "suite": "hierarchy",
+      "prompt": "Describe the facility material flow in one paragraph.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "A6",
+      "suite": "hierarchy",
+      "prompt": "Summarize this plant layout at department level, not by every child zone.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "B1",
+      "suite": "area",
+      "prompt": "What is the total facility floor area in square meters and square feet?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "B2",
+      "suite": "area",
+      "prompt": "How much floor space does each department occupy?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "B3",
+      "suite": "area",
+      "prompt": "How much free space remains in Machining Hall? Separate geometric and operational free space.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "B4",
+      "suite": "area",
+      "prompt": "Which facility department is most crowded by physical footprint?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "B5",
+      "suite": "area",
+      "prompt": "How packed is the Assembly and Kitting department? Use area, not asset count.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "B6",
+      "suite": "area",
+      "prompt": "Show equipment footprint, clearance, route, and usable free-space percentages for the facility.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "C1",
+      "suite": "cell_semantics",
+      "prompt": "What layout strategy was used for Assembly Cell A01?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "C2",
+      "suite": "cell_semantics",
+      "prompt": "Does Manufacturing Cell A01 still match its authored U-shaped layout?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "C3",
+      "suite": "cell_semantics",
+      "prompt": "Why would a U-shaped manufacturing cell make sense for one operator and five sequential stations?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "C4",
+      "suite": "cell_semantics",
+      "prompt": "Compare U-shaped, L-shaped, and straight manufacturing cell strategies for a long narrow zone.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "present_chat_table"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "C5",
+      "suite": "cell_semantics",
+      "prompt": "Why are pallet racks usually arranged in parallel rows with shared aisles?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "D1",
+      "suite": "fit_capacity",
+      "prompt": "Can we add another exact CNC asset to Machining Hall? Analyze fit only.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "analyze_facility_fit"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "D2",
+      "suite": "fit_capacity",
+      "prompt": "Could this department fit one more rack without narrowing the protected aisle?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "analyze_facility_fit"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "D3",
+      "suite": "fit_capacity",
+      "prompt": "Can Cell A03 increase production capacity by 20 percent?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "D4",
+      "suite": "fit_capacity",
+      "prompt": "Which facility department has the most spatial expansion potential?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "E1",
+      "suite": "alternatives",
+      "prompt": "Propose a preview that saves floor space in Assembly Cell A01 without moving locked equipment.",
+      "mode": "preview",
+      "expectedIntent": "generation",
+      "requiredTools": ["inspect_facility_semantics", "build_facility_layout_preview"],
+      "forbiddenTools": []
+    },
+    {
+      "id": "E2",
+      "suite": "alternatives",
+      "prompt": "Generate a new facility layout preview that preserves manual placements and the forklift boulevard.",
+      "mode": "preview",
+      "expectedIntent": "generation",
+      "requiredTools": ["inspect_facility_semantics", "build_facility_layout_preview"],
+      "forbiddenTools": []
+    },
+    {
+      "id": "E3",
+      "suite": "alternatives",
+      "prompt": "Optimize the selected facility department for shorter material travel and show a ghost preview.",
+      "mode": "preview",
+      "expectedIntent": "generation",
+      "requiredTools": ["inspect_facility_semantics", "build_facility_layout_preview"],
+      "forbiddenTools": []
+    },
+    {
+      "id": "F1",
+      "suite": "routes",
+      "prompt": "Are the main facility material aisles geometrically continuous?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "F2",
+      "suite": "routes",
+      "prompt": "Which departments connect to the central material route?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "F3",
+      "suite": "routes",
+      "prompt": "Where do pedestrian and forklift routes cross in this facility layout?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "G1",
+      "suite": "clearance",
+      "prompt": "Are any facility assets physically overlapping?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_findings", "inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "G2",
+      "suite": "clearance",
+      "prompt": "Which machine has the least validated maintenance clearance?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_findings", "inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "G3",
+      "suite": "clearance",
+      "prompt": "Is this entire factory layout OSHA compliant?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "H1",
+      "suite": "process_flow",
+      "prompt": "How does material move through this facility from receiving to finished goods?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "inspect_process_bindings"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "H2",
+      "suite": "process_flow",
+      "prompt": "Which authored process relationship connects Machining to Automation?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "inspect_process_bindings"],
+      "forbiddenTools": ["build_facility_layout_preview"],
+      "activeFacilityWorkflow": true
+    },
+    {
+      "id": "I1",
+      "suite": "asset_semantics",
+      "prompt": "How many machines are assigned to Machining Hall?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "I2",
+      "suite": "asset_semantics",
+      "prompt": "Which facility assets support maintenance operations?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "J1",
+      "suite": "charts",
+      "prompt": "Give me a pie chart by floor area of the six facility departments.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "present_chat_visualization"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "J2",
+      "suite": "charts",
+      "prompt": "Show a Pareto chart of facility entities, not a plain bar chart.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "present_chat_visualization"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "J3",
+      "suite": "charts",
+      "prompt": "Show a heatmap of facility asset categories by department.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "present_chat_visualization"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "J4",
+      "suite": "charts",
+      "prompt": "Create a scatter plot of department floor area versus physical equipment footprint.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "present_chat_visualization"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "J5",
+      "suite": "charts",
+      "prompt": "Compare the Machining Hall and Automation department in a table.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "present_chat_table"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "K1",
+      "suite": "command_authorization",
+      "prompt": "Analyze the current facility layout without changing anything.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "K2",
+      "suite": "command_authorization",
+      "prompt": "Can you add another CNC to Machining Hall and show the proposal?",
+      "mode": "preview",
+      "expectedIntent": "generation",
+      "requiredTools": ["inspect_facility_semantics", "analyze_facility_fit", "build_facility_layout_preview"],
+      "forbiddenTools": []
+    },
+    {
+      "id": "K3",
+      "suite": "command_authorization",
+      "prompt": "Create a complete greenfield factory layout preview from the available process requirements.",
+      "mode": "preview",
+      "expectedIntent": "generation",
+      "requiredTools": ["search_industrial_assets", "inspect_facility_semantics", "build_facility_layout_preview"],
+      "forbiddenTools": []
+    },
+    {
+      "id": "K4",
+      "suite": "command_authorization",
+      "prompt": "Mirror Cell A01 across the center aisle.",
+      "mode": "preview",
+      "expectedIntent": "generation",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": [],
+      "expectedCapability": "gated_ui_only",
+      "commandId": "mirror"
+    },
+    {
+      "id": "K5",
+      "suite": "command_authorization",
+      "prompt": "Swap these two machines without changing their orientations.",
+      "mode": "preview",
+      "expectedIntent": "generation",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": [],
+      "expectedCapability": "gated_ui_only",
+      "commandId": "swap"
+    },
+    {
+      "id": "L1",
+      "suite": "view_context",
+      "prompt": "Does the Facility Layout 3D scene use the same placement state as the 2D plan?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_entities"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "L2",
+      "suite": "view_context",
+      "prompt": "Can a person walk from Assembly to Inspection in this facility?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "inspect_facility_findings"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "M1",
+      "suite": "follow_up",
+      "prompt": "How much free space does it have?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"],
+      "recentTurns": [
+        {
+          "role": "user",
+          "content": "Analyze Assembly Cell A01 in the facility layout."
+        }
+      ]
+    },
+    {
+      "id": "M2",
+      "suite": "follow_up",
+      "prompt": "yes",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "present_chat_visualization"],
+      "forbiddenTools": ["build_facility_layout_preview"],
+      "recentTurns": [
+        {
+          "role": "assistant",
+          "content": "Would you like the facility department comparison as a pie chart?"
+        },
+        {
+          "role": "user",
+          "content": "Use placement-count labels only."
+        }
+      ]
+    },
+    {
+      "id": "M3",
+      "suite": "follow_up",
+      "prompt": "Pareto, not bar.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["present_chat_visualization"],
+      "forbiddenTools": ["build_facility_layout_preview"],
+      "recentTurns": [
+        {
+          "role": "user",
+          "content": "Show a bar chart of Facility Layout entity counts."
+        }
+      ]
+    },
+    {
+      "id": "M4",
+      "suite": "follow_up",
+      "prompt": "hi",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": [],
+      "forbiddenTools": ["build_facility_layout_preview"],
+      "activeFacilityWorkflow": true
+    },
+    {
+      "id": "M5",
+      "suite": "follow_up",
+      "prompt": "hi",
+      "mode": "read_only",
+      "expectedIntent": "unrelated",
+      "requiredTools": [],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "N1",
+      "suite": "uncertainty",
+      "prompt": "What is the current OEE of the machines in this facility?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "N2",
+      "suite": "uncertainty",
+      "prompt": "What source supports the maintenance clearance around this machine?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "inspect_facility_findings"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "N3",
+      "suite": "uncertainty",
+      "prompt": "If clearance metadata is missing, can you still say this factory layout is safe?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "V1",
+      "suite": "unit_variant",
+      "prompt": "How many square feet of room are left in the Automation department?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "V2",
+      "suite": "language_variant",
+      "prompt": "Could we squeeze one more exact workstation into the selected workcell?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "analyze_facility_fit"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "V3",
+      "suite": "language_variant",
+      "prompt": "Can you place one more exact workstation in the selected workcell and preview it?",
+      "mode": "preview",
+      "expectedIntent": "generation",
+      "requiredTools": ["inspect_facility_semantics", "analyze_facility_fit", "build_facility_layout_preview"],
+      "forbiddenTools": []
+    },
+    {
+      "id": "V4",
+      "suite": "data_quality_variant",
+      "prompt": "Is Inpection Station Q01 an inspection station in this facility layout?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "R1",
+      "suite": "independent_review_regression",
+      "prompt": "Review this facility layout without changing anything and list the three highest-priority spatial checks.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "analyze_facility_spatial"],
+      "forbiddenTools": ["build_facility_layout_preview", "preview_facility_move", "viewport_intent", "ui_actions"]
+    },
+    {
+      "id": "R2",
+      "suite": "independent_review_regression",
+      "prompt": "Move the selected machine 10 ft east and preserve its rotation.",
+      "mode": "preview",
+      "expectedIntent": "generation",
+      "requiredTools": ["preview_facility_move"],
+      "forbiddenTools": ["build_facility_layout_preview", "viewport_intent", "ui_actions"]
+    },
+    {
+      "id": "R3",
+      "suite": "independent_review_regression",
+      "prompt": "Show operational space utilization by department, excluding placement counts.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["inspect_facility_semantics", "present_chat_visualization"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "R4",
+      "suite": "independent_review_regression",
+      "prompt": "Report the five smallest actual edge-to-edge clearances. Do not judge adequacy without requirements.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["analyze_facility_spatial"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "R5",
+      "suite": "independent_review_regression",
+      "prompt": "Find every geometric crossing between pedestrian and forklift routes even when the route graphs are disconnected.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["analyze_facility_spatial"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "R6",
+      "suite": "independent_review_regression",
+      "prompt": "Inspect the gates, loading sides, service access, and keep-clear intrusions for every robot cell.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["analyze_facility_spatial"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "R7",
+      "suite": "independent_review_regression",
+      "prompt": "Can another Doosan DBC130 II fit in Machining Hall without changing the layout?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["analyze_facility_spatial", "analyze_facility_fit"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "R8",
+      "suite": "independent_review_regression",
+      "prompt": "Audit actual 2D and 3D placement transforms and report any mismatches.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["analyze_facility_spatial"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "R9",
+      "suite": "independent_review_regression",
+      "prompt": "Can the drone collider pass between these selected racks at the current altitude?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["analyze_facility_spatial"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "R10",
+      "suite": "independent_review_regression",
+      "prompt": "What strategy and pattern parameters originally created Assembly Cell A01, and has it drifted?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["analyze_facility_spatial"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "R11",
+      "suite": "independent_review_regression",
+      "prompt": "Which assembly cell has the least operator walking?",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["analyze_facility_spatial"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    },
+    {
+      "id": "R12",
+      "suite": "independent_review_regression",
+      "prompt": "yes",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["analyze_facility_spatial"],
+      "forbiddenTools": ["build_facility_layout_preview"],
+      "recentTurns": [
+        {
+          "role": "user",
+          "content": "Which assembly cell has the least operator walking?"
+        },
+        {
+          "role": "assistant",
+          "content": "I can retrieve the assembly-cell coordinates and calculate the walking-distance comparison. Should I do that?"
+        }
+      ]
+    },
+    {
+      "id": "R13",
+      "suite": "independent_review_regression",
+      "prompt": "Which machines are hardest to service? Rank measured service-side access and list machines whose service side is missing separately.",
+      "mode": "read_only",
+      "expectedIntent": "analysis",
+      "requiredTools": ["analyze_facility_spatial"],
+      "forbiddenTools": ["build_facility_layout_preview"]
+    }
+  ]
+}

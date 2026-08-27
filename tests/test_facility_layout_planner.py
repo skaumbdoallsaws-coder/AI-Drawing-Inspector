@@ -146,6 +146,183 @@ def test_preview_is_pure_and_exact_operations_replay_identically(
     assert golden["assetDefinitions"] == original_assets
 
 
+def test_explicit_replacement_is_preview_only_and_clears_before_planning(
+    golden: dict,
+) -> None:
+    original = deepcopy(golden["baseLayout"])
+    request = deepcopy(golden["request"])
+    request["requestId"] = "request-p8-explicit-replacement"
+    request["cleanup"]["replaceExistingContents"] = True
+    request["assetSet"] = request["assetSet"][:2]
+    for item in request["assetSet"]:
+        item.pop("targetZoneId", None)
+        item.pop("existingPlacementId", None)
+    request["routes"] = []
+    request["zoneSizing"] = [
+        {
+            "memberItemIds": [request["assetSet"][0]["itemId"]],
+            "paddingMeters": 1.0,
+            "newZone": {
+                "zoneId": "zn-replacement-west",
+                "zoneType": "workcell",
+                "label": "West department",
+                "allowedAssetCategories": [],
+                "evidence": [],
+            },
+        },
+        {
+            "memberItemIds": [request["assetSet"][1]["itemId"]],
+            "paddingMeters": 1.0,
+            "newZone": {
+                "zoneId": "zn-replacement-east",
+                "zoneType": "workcell",
+                "label": "East department",
+                "allowedAssetCategories": [],
+                "evidence": [],
+            },
+        },
+    ]
+
+    shell = {
+        "features": [{
+            "featureId": "floor-explicit-replacement",
+            "featureKind": "floor",
+            "geometry": {
+                "boundary": [
+                    {"x": 0.0, "z": 0.0},
+                    {"x": 30.0, "z": 0.0},
+                    {"x": 30.0, "z": 20.0},
+                    {"x": 0.0, "z": 20.0},
+                ],
+                "elevation": 0.0,
+            },
+        }],
+    }
+    result = _plan(golden, request=request, shell=shell)
+
+    assert result["alternatives"]
+    for alternative in result["alternatives"]:
+        assert alternative["operations"][0] == {
+            "op": "clear_layout_contents"
+        }
+        ghost = alternative["ghostPreview"]["layout"]
+        assert len(ghost["placements"]) == 4
+        assert len(ghost["zones"]) == 2
+        zone_bounds = {
+            zone["zoneId"]: (
+                min(point["x"] for point in zone["boundary"]),
+                min(point["z"] for point in zone["boundary"]),
+                max(point["x"] for point in zone["boundary"]),
+                max(point["z"] for point in zone["boundary"]),
+            )
+            for zone in ghost["zones"]
+        }
+        assert min(value[0] for value in zone_bounds.values()) <= 2.0
+        assert max(value[2] for value in zone_bounds.values()) >= 28.0
+        placement_items = {
+            item["metadata"]["plannerItemId"]: item
+            for item in ghost["placements"]
+        }
+        expected_zones = {
+            request["assetSet"][0]["itemId"]: "zn-replacement-west",
+            request["assetSet"][1]["itemId"]: "zn-replacement-east",
+        }
+        for item_id, placement in placement_items.items():
+            minimum_x, minimum_z, maximum_x, maximum_z = zone_bounds[
+                expected_zones[item_id]
+            ]
+            position = placement["transform"]["position"]
+            assert minimum_x <= position["x"] <= maximum_x
+            assert minimum_z <= position["z"] <= maximum_z
+        assert not {
+            "pl-p8-existing-auto",
+            "pl-p8-existing-manual",
+            "pl-p8-existing-locked",
+        } & {item["placementId"] for item in ghost["placements"]}
+    assert golden["baseLayout"] == original
+
+
+def test_replacement_department_grid_adds_inferred_macro_infrastructure(
+    golden: dict,
+) -> None:
+    request = deepcopy(golden["request"])
+    request["requestId"] = "request-p8-department-infrastructure"
+    request["objective"] = "place_and_cleanup"
+    request["strategies"] = ["balanced_grid"]
+    request["maximumAlternatives"] = 1
+    request["cleanup"] = {
+        "enabled": True,
+        "moveAuto": True,
+        "movableManualPlacementIds": [],
+        "replaceExistingContents": True,
+    }
+    request["routes"] = []
+    seed = deepcopy(golden["request"]["assetSet"][0])
+    seed.pop("targetZoneId", None)
+    seed.pop("existingPlacementId", None)
+    seed["quantity"] = 1
+    request["assetSet"] = []
+    request["zoneSizing"] = []
+    for index in range(6):
+        item = deepcopy(seed)
+        item["itemId"] = f"department-item-{index + 1}"
+        item["stage"] = index
+        request["assetSet"].append(item)
+        request["zoneSizing"].append({
+            "memberItemIds": [item["itemId"]],
+            "paddingMeters": 1.0,
+            "newZone": {
+                "zoneId": f"zn-department-{index + 1}",
+                "zoneType": "workcell",
+                "label": f"Department {index + 1}",
+                "allowedAssetCategories": [],
+                "evidence": [],
+            },
+        })
+    shell = {
+        "features": [{
+            "featureId": "floor-department-infrastructure",
+            "featureKind": "floor",
+            "geometry": {
+                "boundary": [
+                    {"x": 0.0, "z": 0.0},
+                    {"x": 30.0, "z": 0.0},
+                    {"x": 30.0, "z": 20.0},
+                    {"x": 0.0, "z": 20.0},
+                ],
+                "elevation": 0.0,
+            },
+        }],
+    }
+
+    result = _plan(golden, request=request, shell=shell)
+    alternative = result["alternatives"][0]
+    ghost = alternative["ghostPreview"]["layout"]
+
+    assert len(ghost["placements"]) == 6
+    assert len(ghost["zones"]) == 6
+    assert len(ghost["routes"]) == 3
+    assert len(ghost["floorMarkings"]) == 8
+    assert sum(
+        route["extensions"]["facilityAisle"]["aisleKind"] == "forklift"
+        for route in ghost["routes"]
+    ) == 1
+    assert sum(
+        route["extensions"]["facilityAisle"]["aisleKind"] == "pedestrian"
+        for route in ghost["routes"]
+    ) == 2
+    assert sum(
+        marking["markingType"] == "direction_arrow"
+        for marking in ghost["floorMarkings"]
+    ) == 6
+    assert sum(
+        marking["markingType"] == "crosswalk"
+        for marking in ghost["floorMarkings"]
+    ) == 2
+    assert alternative["metrics"]["spatialErrorCount"] == 0
+    assert alternative["operations"][0] == {"op": "clear_layout_contents"}
+
+
 def test_locked_and_manual_placements_are_preserved_by_default(
     golden: dict,
 ) -> None:

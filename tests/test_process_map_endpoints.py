@@ -85,6 +85,131 @@ def test_flag_off_keeps_editor_routes_unavailable(
     assert response.status_code == 404
 
 
+def test_auto_routing_status_is_independently_flagged_and_edit_gated(
+    process_map_asset: dict,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = TestClient(server.app)
+    monkeypatch.delenv("INSPECTORPRO_PROCESS_MAP_AUTO_ROUTING", raising=False)
+    assert client.get("/api/training/process-map-auto-routing-status").json() == {
+        "success": True,
+        "enabled": False,
+    }
+
+    monkeypatch.setenv("INSPECTORPRO_PROCESS_MAP_AUTO_ROUTING", "1")
+    assert client.get("/api/training/process-map-auto-routing-status").json() == {
+        "success": True,
+        "enabled": True,
+    }
+
+    monkeypatch.delenv("INSPECTORPRO_PROCESS_MAP_EDIT", raising=False)
+    assert client.get("/api/training/process-map-auto-routing-status").status_code == 404
+
+
+def test_spatial_analysis_status_is_independently_flagged_and_edit_gated(
+    process_map_asset: dict,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = TestClient(server.app)
+    monkeypatch.delenv("INSPECTORPRO_PROCESS_MAP_SPATIAL_ANALYSIS", raising=False)
+    assert client.get("/api/training/process-map-spatial-analysis-status").json() == {
+        "success": True,
+        "enabled": False,
+    }
+
+    monkeypatch.setenv("INSPECTORPRO_PROCESS_MAP_SPATIAL_ANALYSIS", "1")
+    assert client.get("/api/training/process-map-spatial-analysis-status").json() == {
+        "success": True,
+        "enabled": True,
+    }
+
+    monkeypatch.delenv("INSPECTORPRO_PROCESS_MAP_EDIT", raising=False)
+    assert client.get("/api/training/process-map-spatial-analysis-status").status_code == 404
+
+
+def test_spatial_telemetry_records_only_bounded_aggregates(
+    process_map_asset: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    from ai_inspector.telemetry import (
+        ENV_VAR,
+        get_default_store,
+        reset_default_store_for_tests,
+    )
+
+    monkeypatch.setenv(ENV_VAR, str(tmp_path / "spatial-telemetry.sqlite"))
+    reset_default_store_for_tests()
+    client = TestClient(server.app)
+    body = {
+        "productId": "fixture-product",
+        "mapId": "default",
+        "revision": "a" * 64,
+        "operation": "arrangement",
+        "outcome": "previewed",
+        "scope": "selection",
+        "spatialEngineVersion": 1,
+        "policyVersion": 1,
+        "nodeCount": 12,
+        "edgeCount": 11,
+        "scopedNodeCount": 3,
+        "scopedEdgeCount": 2,
+        "candidatesEvaluated": 24,
+        "movedNodeCount": 3,
+        "latencyMs": 48.25,
+        "rejectionCounts": {"node_overlap": 2, "customer_label": 99},
+        "metricsBefore": {"nodeOverlaps": 2, "x": 900.0},
+        "metricsAfter": {"nodeOverlaps": 0, "routeLength": 410.5},
+    }
+    response = client.post("/api/training/process-map-spatial-events", json=body)
+    assert response.status_code == 202
+    events = [
+        event for event in get_default_store().query_recent(20)
+        if event.workflow == "process_map_spatial"
+    ]
+    assert len(events) == 1
+    event = events[0]
+    assert event.processMapProductId == "fixture-product"
+    assert event.processMapId == "default"
+    assert event.processMapOperation == "arrangement"
+    assert event.processMapOutcome == "previewed"
+    assert event.processMapMovedNodeCount == 3
+    assert json.loads(event.processMapRejectionCountsJson) == {"node_overlap": 2}
+    assert json.loads(event.processMapMetricsBeforeJson) == {"nodeOverlaps": 2.0}
+    assert json.loads(event.processMapMetricsAfterJson) == {
+        "nodeOverlaps": 0.0,
+        "routeLength": 410.5,
+    }
+
+    rejected = client.post(
+        "/api/training/process-map-spatial-events",
+        json={**body, "position": {"x": 10, "y": 20}},
+    )
+    assert rejected.status_code == 422
+    reset_default_store_for_tests()
+
+
+def test_agent_layout_write_status_is_independently_flagged_and_edit_gated(
+    process_map_asset: dict,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = TestClient(server.app)
+    monkeypatch.delenv("INSPECTORPRO_PROCESS_MAP_AGENT_LAYOUT_WRITE", raising=False)
+    assert client.get("/api/training/process-map-agent-layout-write-status").json() == {
+        "success": True,
+        "enabled": False,
+    }
+
+    monkeypatch.setenv("INSPECTORPRO_PROCESS_MAP_AGENT_LAYOUT_WRITE", "1")
+    assert client.get("/api/training/process-map-agent-layout-write-status").json() == {
+        "success": True,
+        "enabled": True,
+    }
+
+    monkeypatch.delenv("INSPECTORPRO_PROCESS_MAP_EDIT", raising=False)
+    assert client.get("/api/training/process-map-agent-layout-write-status").status_code == 404
+
+
 def test_get_migrates_v1_in_memory_and_returns_stored_revision(process_map_asset: dict):
     client = TestClient(server.app)
     response = client.get("/api/training/process-map/fixture-product")
@@ -94,7 +219,7 @@ def test_get_migrates_v1_in_memory_and_returns_stored_revision(process_map_asset
     assert payload["assetName"] == "fixture_process_map_working_draft.json"
     assert len(payload["revision"]) == 64
     assert payload["map"]["schemaVersion"] == 3
-    assert payload["map"]["layoutVersion"] == 2
+    assert payload["map"]["layoutVersion"] == 3
     assert payload["map"]["canvasNodes"] == []
     assert payload["map"]["canvasEdges"] == []
     assert payload["map"]["canvasGroups"] == []
@@ -126,6 +251,38 @@ def test_put_round_trip_creates_backup_source_sidecar_and_ascii_v3_asset(process
             "position": {"x": 120, "y": 240},
         }
     )
+    edited["canvasNodes"].extend(
+        [
+            {
+                "nodeId": "stage-install",
+                "nodeKind": "process_step",
+                "processType": "operation",
+                "name": "Install fixture module",
+                "position": {"x": 420, "y": 240},
+                "properties": {
+                    "description": "Install and align the fixture module.",
+                    "duration": "12 min",
+                    "torqueRequirements": "10 N m",
+                    "inspectionRequirements": "Verify alignment.",
+                },
+            },
+            {
+                "nodeId": "junction-split",
+                "nodeKind": "junction",
+                "junctionType": "split",
+                "position": {"x": 760, "y": 313},
+            },
+        ]
+    )
+    edited["canvasEdges"] = [
+        {
+            "edgeId": "stage-to-split",
+            "logicalConnectionId": "stage-to-split",
+            "from": {"nodeId": "stage-install", "port": "out"},
+            "to": {"nodeId": "junction-split", "port": "in"},
+            "kind": "precedence",
+        }
+    ]
     edited["referenceCatalog"] = [
         {
             "referenceId": "machine-1",
@@ -141,7 +298,7 @@ def test_put_round_trip_creates_backup_source_sidecar_and_ascii_v3_asset(process
             "position": {"x": 60, "y": 160},
             "size": {"width": 520, "height": 340},
             "colorKey": "orange",
-            "memberNodeIds": ["canvas-module"],
+            "memberNodeIds": ["canvas-module", "stage-install", "junction-split"],
             "collapsed": False,
             "futureGroupField": {"preserve": True},
         }
@@ -166,8 +323,25 @@ def test_put_round_trip_creates_backup_source_sidecar_and_ascii_v3_asset(process
     assert stored["canvasNodes"][0]["labelOverride"] == "Primary fixture module"
     assert stored["canvasNodes"][0]["note"] == "Verify alignment before the inspection step."
     assert stored["canvasNodes"][0]["referenceIds"] == ["machine-1"]
-    assert stored["layoutVersion"] == 2
-    assert stored["canvasGroups"][0]["memberNodeIds"] == ["canvas-module"]
+    stored_stage = next(
+        node for node in stored["canvasNodes"] if node["nodeId"] == "stage-install"
+    )
+    stored_junction = next(
+        node for node in stored["canvasNodes"] if node["nodeId"] == "junction-split"
+    )
+    assert stored_stage["properties"]["duration"] == "12 min"
+    assert stored_stage["properties"]["torqueRequirements"] == "10 N m"
+    assert stored_junction["junctionType"] == "split"
+    assert stored["canvasEdges"][0]["to"] == {
+        "nodeId": "junction-split",
+        "port": "in",
+    }
+    assert stored["layoutVersion"] == 3
+    assert stored["canvasGroups"][0]["memberNodeIds"] == [
+        "canvas-module",
+        "stage-install",
+        "junction-split",
+    ]
     assert stored["canvasGroups"][0]["futureGroupField"] == {"preserve": True}
     assert stored["referenceCatalog"][0]["identifier"] == "MC-01"
     structure_asset = process_map_asset["productDir"] / "fixture_product_product_structure.json"
@@ -184,6 +358,15 @@ def test_put_round_trip_creates_backup_source_sidecar_and_ascii_v3_asset(process
     assert reloaded["map"]["canvasNodes"][0]["note"] == "Verify alignment before the inspection step."
     assert reloaded["map"]["canvasNodes"][0]["referenceIds"] == ["machine-1"]
     assert reloaded["map"]["referenceCatalog"][0]["identifier"] == "MC-01"
+    reloaded_stage = next(
+        node for node in reloaded["map"]["canvasNodes"]
+        if node["nodeId"] == "stage-install"
+    )
+    assert reloaded_stage["properties"] == stored_stage["properties"]
+    assert any(
+        node.get("junctionType") == "split"
+        for node in reloaded["map"]["canvasNodes"]
+    )
     assert reloaded["map"]["canvasGroups"] == stored["canvasGroups"]
     assert len(reloaded["productStructure"]["occurrences"]) == 3
 

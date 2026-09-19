@@ -8,7 +8,7 @@ Pillow                    # Image processing
 numpy                     # Array operations
 scipy                     # Hungarian matching for dimension verification
 pyyaml                    # YAML parsing for datasets
-shapely                   # Polygon IoU in evaluation
+shapely                   # Exact Facility polygon unions and evaluation IoU
 
 # ---------- Web Server (InspectorPro UI) ----------
 fastapi                   # REST API framework
@@ -19,7 +19,8 @@ elevenlabs                # TTS voice synthesis for agent voices
 anthropic                 # Claude API for agents
 openai                    # Whisper API fallback + FAI fill
 python-dotenv             # .env file loading
-PyMuPDF                   # PDF rendering
+PyMuPDF==1.27.2.3         # PDF rendering; pilot blocked pending AGPL/commercial license disposition
+python-docx==1.2.0        # Editable prototype operations-manual working copy (MIT)
 faster-whisper>=1.1.0     # Local STT via CTranslate2
 
 # ---------- Optional / Development ----------

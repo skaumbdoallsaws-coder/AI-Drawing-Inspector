@@ -116,7 +116,7 @@ def test_layout_v1_placement_map_upgrades_without_losing_unknown_fields():
     assert source["layoutVersion"] == 1
 
 
-def test_layout_v2_group_round_trip_preserves_unknown_group_fields():
+def test_layout_v2_group_migrates_to_v3_and_preserves_unknown_group_fields():
     source = {
         "schemaVersion": 3,
         "mapId": "default",
@@ -145,8 +145,110 @@ def test_layout_v2_group_round_trip_preserves_unknown_group_fields():
         product_structure={"occurrences": [{"occurrenceId": "part-a"}]},
     )
     assert findings == []
-    assert migrated == source
+    assert migrated["layoutVersion"] == PROCESS_MAP_LAYOUT_VERSION
+    assert migrated["canvasGroups"] == source["canvasGroups"]
+    assert source["layoutVersion"] == 2
     assert validate_placement_map(migrated, {"part-a"}) == []
+
+
+def test_layout_v3_accepts_optional_orthogonal_routing_and_keeps_legacy_edges_additive():
+    process_map = {
+        "schemaVersion": 3,
+        "layoutVersion": PROCESS_MAP_LAYOUT_VERSION,
+        "canvasNodes": [
+            _placement("node-a", "part-a"),
+            _placement("node-b", "part-b"),
+        ],
+        "canvasEdges": [
+            {
+                "edgeId": "legacy",
+                "from": {"nodeId": "node-a", "port": "out"},
+                "to": {"nodeId": "node-b", "port": "in"},
+                "kind": "feedback",
+            },
+            {
+                "edgeId": "routed",
+                "from": {"nodeId": "node-a", "port": "out"},
+                "to": {"nodeId": "node-b", "port": "in"},
+                "kind": "precedence",
+                "routing": {
+                    "mode": "orthogonal_auto",
+                    "routerVersion": 1,
+                    "waypoints": [{"x": 280, "y": 93}, {"x": 280, "y": 180}],
+                    "obstacleFingerprint": "0123456789abcdef",
+                },
+            },
+        ],
+        "canvasGroups": [],
+    }
+    assert validate_placement_map(process_map, {"part-a", "part-b"}) == []
+
+
+def test_routed_edges_require_layout_v3_and_valid_route_fields():
+    process_map = {
+        "schemaVersion": 3,
+        "layoutVersion": 2,
+        "canvasNodes": [
+            _placement("node-a", "part-a"),
+            _placement("node-b", "part-b"),
+        ],
+        "canvasEdges": [
+            {
+                "edgeId": "bad-route",
+                "from": {"nodeId": "node-a", "port": "out"},
+                "to": {"nodeId": "node-b", "port": "in"},
+                "kind": "precedence",
+                "routing": {
+                    "mode": "orthogonal_auto",
+                    "routerVersion": 0,
+                    "waypoints": [{"x": "bad", "y": 0}],
+                    "obstacleFingerprint": "",
+                },
+            }
+        ],
+        "canvasGroups": [],
+    }
+    codes = {finding["code"] for finding in validate_placement_map(process_map, {"part-a", "part-b"})}
+    assert {
+        "routing_requires_layout_version_3",
+        "invalid_edge_router_version",
+        "invalid_edge_route_waypoint",
+        "invalid_edge_obstacle_fingerprint",
+    }.issubset(codes)
+
+
+def test_manual_polyline_edges_allow_authored_diagonal_points_without_obstacle_hash():
+    process_map = {
+        "schemaVersion": 3,
+        "layoutVersion": 3,
+        "canvasNodes": [
+            _placement("node-a", "part-a"),
+            _placement("node-b", "part-b"),
+        ],
+        "canvasEdges": [
+            {
+                "edgeId": "manual-route",
+                "from": {"nodeId": "node-a", "port": "out"},
+                "to": {"nodeId": "node-b", "port": "in"},
+                "kind": "precedence",
+                "routing": {
+                    "mode": "polyline_manual",
+                    "routerVersion": 1,
+                    "waypoints": [{"x": 310.5, "y": 92.0}, {"x": 455.0, "y": 238.5}],
+                },
+            }
+        ],
+        "canvasGroups": [],
+    }
+    assert validate_placement_map(process_map, {"part-a", "part-b"}) == []
+
+    process_map["canvasEdges"][0]["routing"]["waypoints"][1]["x"] = "bad"
+    codes = {
+        finding["code"]
+        for finding in validate_placement_map(process_map, {"part-a", "part-b"})
+    }
+    assert "invalid_edge_route_waypoint" in codes
+    assert "invalid_edge_obstacle_fingerprint" not in codes
 
 
 def test_group_validator_reports_membership_and_shape_failures():
@@ -239,6 +341,7 @@ def test_explicit_position_is_preserved_as_authored_placement():
             "nameSnapshot": "Repeated Part",
             "itemIdSnapshot": "P-1",
             "position": {"x": 125, "y": 250},
+            "positionMode": "manual",
         }
     ]
 
@@ -433,6 +536,31 @@ def test_card_port_orientation_is_validated_and_junctions_cannot_use_it():
     assert "junction_port_layout_not_allowed" in junction_codes
 
 
+def test_card_position_lock_is_validated_and_junctions_share_position_ownership():
+    locked = _placement("node-a", "part-a")
+    locked["locked"] = True
+    assert validate_placement_map(
+        {"schemaVersion": 3, "canvasNodes": [locked], "canvasEdges": []},
+        {"part-a"},
+    ) == []
+
+    invalid = _placement("node-a", "part-a")
+    invalid["locked"] = "yes"
+    invalid_codes = {
+        item["code"] for item in validate_placement_map(
+            {"schemaVersion": 3, "canvasNodes": [invalid], "canvasEdges": []},
+            {"part-a"},
+        )
+    }
+    assert "invalid_node_locked" in invalid_codes
+
+    junction = _junction()
+    junction["locked"] = True
+    assert validate_placement_map(
+        {"schemaVersion": 3, "canvasNodes": [junction], "canvasEdges": []}
+    ) == []
+
+
 def test_card_label_override_and_note_are_validated():
     product = _placement("node-a", "part-a")
     product["labelOverride"] = "Finish-grind housing"
@@ -486,6 +614,80 @@ def test_process_step_label_and_junction_card_metadata_are_validated():
         )
     }
     assert {"invalid_process_step_name", "junction_card_metadata_not_allowed"}.issubset(codes)
+
+
+def test_stage_properties_and_semantic_junction_types_are_native_map_data():
+    stage = {
+        "nodeId": "stage-a",
+        "nodeKind": "process_step",
+        "processType": "operation",
+        "name": "Install lower panels",
+        "position": {"x": 120, "y": 80},
+        "properties": {
+            "description": "Join both lower panels before the upper fairing is installed.",
+            "duration": "12 min",
+            "fastenersConsumables": "8 x M6 fasteners; medium-strength threadlocker",
+            "torqueRequirements": "10 N m",
+            "inspectionRequirements": "Verify flushness and fastener witness marks.",
+            "constraints": "Use fixture F-14.",
+        },
+    }
+    junctions = [
+        {
+            "nodeId": f"junction-{junction_type}",
+            "nodeKind": "junction",
+            "junctionType": junction_type,
+            "position": {"x": 400, "y": index * 80},
+        }
+        for index, junction_type in enumerate(("parallel_and", "merge", "split"))
+    ]
+    findings = validate_placement_map({
+        "schemaVersion": 3,
+        "canvasNodes": [stage, *junctions],
+        "canvasEdges": [],
+    })
+    assert not [finding for finding in findings if finding["severity"] == "error"]
+    warning_codes = {finding["code"] for finding in findings}
+    assert {
+        "junction_has_fewer_than_two_inputs",
+        "split_junction_has_fewer_than_two_outputs",
+    }.issubset(warning_codes)
+
+
+def test_stage_properties_fail_closed_on_wrong_owner_or_unknown_field():
+    step = {
+        "nodeId": "stage-a",
+        "nodeKind": "process_step",
+        "processType": "operation",
+        "name": "Install panel",
+        "position": {"x": 20, "y": 30},
+        "properties": {"unknownField": "not supported", "duration": " "},
+    }
+    product = _placement("node-a", "part-a")
+    product["properties"] = {"duration": "10 min"}
+    invalid_junction = {
+        "nodeId": "junction-a",
+        "nodeKind": "junction",
+        "junctionType": "conditional_merge",
+        "position": {"x": 300, "y": 30},
+    }
+    codes = {
+        finding["code"]
+        for finding in validate_placement_map(
+            {
+                "schemaVersion": 3,
+                "canvasNodes": [step, product, invalid_junction],
+                "canvasEdges": [],
+            },
+            {"part-a"},
+        )
+    }
+    assert {
+        "unknown_process_step_property",
+        "invalid_process_step_property",
+        "process_step_properties_not_allowed",
+        "unknown_junction_type",
+    }.issubset(codes)
 
 
 def test_cards_and_connections_accept_reusable_process_references():

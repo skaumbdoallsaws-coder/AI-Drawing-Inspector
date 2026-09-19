@@ -15,9 +15,29 @@ import json
 import math
 from typing import Any, Iterable, Mapping, Sequence
 
+try:
+    from shapely.geometry import GeometryCollection, LineString, MultiPolygon, Polygon
+    from shapely.geometry.polygon import orient as orient_polygon
+    from shapely.ops import unary_union
+    from shapely.strtree import STRtree
+except ImportError:  # pragma: no cover - exercised by explicit fail-closed tests
+    GeometryCollection = None
+    LineString = None
+    MultiPolygon = None
+    Polygon = None
+    STRtree = None
+    orient_polygon = None
+    unary_union = None
+
+from .errors import FacilityValidationError
+
 
 ROUTING_ENGINE_VERSION = "facility-routing-v1"
 ROUTER_VERSION = "heading-lattice-v1"
+SWEPT_ENVELOPE_REVISION = "facility-swept-envelope-v1"
+MAXIMUM_SWEPT_VOLUME_SAMPLES = 25_000
+MAXIMUM_SWEEP_OBSTACLE_COMPARISONS = 5_000_000
+CARDINAL_ROUTE_ALIGNMENT_TOLERANCE_RADIANS = math.radians(0.1)
 METER_DECIMAL_PLACES = 6
 HEADING_DECIMAL_PLACES = 9
 EPSILON = 1e-9
@@ -39,6 +59,10 @@ PROCESS_SEMANTICS = {
     "policy": "spatial_proximity_never_implies_process_precedence",
 }
 _SEVERITY_ORDER = {"error": 0, "blocked": 1, "warning": 2, "info": 3}
+
+
+class FacilityRoutingResourceError(FacilityValidationError):
+    """Fail closed when deterministic route analysis exceeds a fixed budget."""
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -304,6 +328,8 @@ def _catalog_records(
         revision = raw.get("assetDefinitionRevision") or raw.get("revision")
         if isinstance(raw.get("document"), Mapping):
             document = raw["document"]
+        elif isinstance(raw.get("definition"), Mapping):
+            document = raw["definition"]
         elif isinstance(raw.get("assetDefinition"), Mapping):
             document = raw["assetDefinition"]
         if document.get("documentKind") != "industrial_asset_definition":
@@ -2173,6 +2199,39 @@ def _heading_radians(index: int) -> float:
     return result if result <= math.pi else result - 2 * math.pi
 
 
+def normalized_cardinal_route_heading(
+    start: Mapping[str, Any],
+    end: Mapping[str, Any],
+) -> float:
+    """Normalize sub-0.1-degree route drafting drift to the P7 lattice.
+
+    The threshold is a computational compatibility tolerance, not an
+    engineering clearance or an authority for reinterpreting diagonal routes.
+    """
+
+    delta_x = _finite(end.get("x"), "route end.x") - _finite(
+        start.get("x"), "route start.x"
+    )
+    delta_z = _finite(end.get("z"), "route end.z") - _finite(
+        start.get("z"), "route start.z"
+    )
+    if math.hypot(delta_x, delta_z) <= EPSILON:
+        raise ValueError("Route heading requires two distinct centerline points")
+    raw = math.atan2(delta_z, delta_x)
+    nearest = int(round(raw / (math.pi / 2.0))) % 4
+    target = _heading_radians(nearest)
+    difference = abs(
+        math.atan2(math.sin(raw - target), math.cos(raw - target))
+    )
+    if difference > CARDINAL_ROUTE_ALIGNMENT_TOLERANCE_RADIANS + EPSILON:
+        raise ValueError(
+            "P7 motion playback requires a cardinal route centerline; the "
+            "selected segment exceeds the 0.1-degree computational alignment "
+            "tolerance"
+        )
+    return target
+
+
 def _vehicle_footprints(
     vehicle_profile: Mapping[str, Any],
     load: Mapping[str, Any] | None,
@@ -2363,6 +2422,244 @@ def _obstacle_records(
     return sorted(records, key=lambda item: item[0])
 
 
+def _polygon_bounds(
+    polygon: Sequence[tuple[float, float]],
+) -> tuple[float, float, float, float]:
+    return (
+        min(point[0] for point in polygon),
+        min(point[1] for point in polygon),
+        max(point[0] for point in polygon),
+        max(point[1] for point in polygon),
+    )
+
+
+def _bounds_overlap(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+) -> bool:
+    return not (
+        left[2] < right[0] - EPSILON
+        or right[2] < left[0] - EPSILON
+        or left[3] < right[1] - EPSILON
+        or right[3] < left[1] - EPSILON
+    )
+
+
+def _obstacles_near_traversable_space(
+    obstacles: Sequence[tuple[str, Sequence[tuple[float, float]]]],
+    traversable: Sequence[Sequence[tuple[float, float]]],
+) -> list[tuple[str, Sequence[tuple[float, float]]]]:
+    """Discard obstacles whose bounds cannot intersect traversable space."""
+
+    traversable_bounds = [_polygon_bounds(polygon) for polygon in traversable]
+    return [
+        obstacle
+        for obstacle in obstacles
+        if any(
+            _bounds_overlap(_polygon_bounds(obstacle[1]), bounds)
+            for bounds in traversable_bounds
+        )
+    ]
+
+
+def projected_swept_sample_count(
+    poses: Sequence[Mapping[str, Any]],
+    spacing: float,
+) -> int:
+    """Return the exact number of poses ``_interpolate_poses`` will allocate."""
+
+    resolved_spacing = _finite(spacing, "sample_spacing_meters")
+    if resolved_spacing <= 0:
+        raise ValueError("sample_spacing_meters must be positive")
+    if not poses:
+        return 0
+    count = 1
+    for index in range(1, len(poses)):
+        previous = poses[index - 1]
+        current = poses[index]
+        start = (
+            _finite(previous.get("x"), "pose.x"),
+            _finite(previous.get("z"), "pose.z"),
+        )
+        end = (
+            _finite(current.get("x"), "pose.x"),
+            _finite(current.get("z"), "pose.z"),
+        )
+        count += max(1, int(math.ceil(math.dist(start, end) / resolved_spacing)))
+    return count
+
+
+def _require_motion_geometry_engine() -> None:
+    if any(
+        item is None
+        for item in (
+            GeometryCollection,
+            LineString,
+            MultiPolygon,
+            Polygon,
+            STRtree,
+            orient_polygon,
+            unary_union,
+        )
+    ):
+        raise FacilityRoutingResourceError(
+            "facility_motion_geometry_engine_unavailable",
+            "Motion geometry requires the configured exact polygon engine.",
+        )
+
+
+def _ring_area_twice(points: Sequence[Mapping[str, Any]]) -> float:
+    return sum(
+        float(point["x"]) * float(points[(index + 1) % len(points)]["z"])
+        - float(points[(index + 1) % len(points)]["x"]) * float(point["z"])
+        for index, point in enumerate(points)
+    )
+
+
+def _canonical_motion_ring(
+    coordinates: Sequence[Sequence[float]],
+    *,
+    counterclockwise: bool,
+) -> list[dict[str, float]]:
+    values = list(coordinates)
+    if len(values) > 1 and values[0][:2] == values[-1][:2]:
+        values.pop()
+    points: list[dict[str, float]] = []
+    for coordinate in values:
+        point = {"x": _round(coordinate[0]), "z": _round(coordinate[1])}
+        if not points or point != points[-1]:
+            points.append(point)
+    if len(points) > 1 and points[0] == points[-1]:
+        points.pop()
+    if len(points) < 3 or abs(_ring_area_twice(points)) <= EPSILON:
+        raise FacilityRoutingResourceError(
+            "facility_motion_swept_geometry_invalid",
+            "Swept geometry collapsed during canonical normalization.",
+        )
+    is_counterclockwise = _ring_area_twice(points) > 0
+    if is_counterclockwise != counterclockwise:
+        points.reverse()
+    start = min(
+        range(len(points)),
+        key=lambda index: (points[index]["x"], points[index]["z"], index),
+    )
+    return points[start:] + points[:start]
+
+
+def _canonical_swept_geometry(shapes: Sequence[Any]) -> dict[str, Any]:
+    _require_motion_geometry_engine()
+    merged = unary_union(list(shapes))
+    if not merged.is_valid:
+        merged = merged.buffer(0)
+    if merged.is_empty:
+        raise FacilityRoutingResourceError(
+            "facility_motion_swept_geometry_invalid",
+            "Swept geometry is empty.",
+        )
+    if isinstance(merged, Polygon):
+        polygon_parts = [merged]
+    elif isinstance(merged, MultiPolygon):
+        polygon_parts = list(merged.geoms)
+    elif isinstance(merged, GeometryCollection):
+        polygon_parts = [item for item in merged.geoms if isinstance(item, Polygon)]
+    else:
+        polygon_parts = []
+    polygons = []
+    for raw_polygon in polygon_parts:
+        oriented = orient_polygon(raw_polygon, sign=1.0)
+        exterior = _canonical_motion_ring(
+            oriented.exterior.coords,
+            counterclockwise=True,
+        )
+        holes = [
+            _canonical_motion_ring(ring.coords, counterclockwise=False)
+            for ring in oriented.interiors
+        ]
+        holes.sort(
+            key=lambda ring: (
+                ring[0]["x"],
+                ring[0]["z"],
+                abs(_ring_area_twice(ring)),
+            )
+        )
+        polygons.append({"exterior": exterior, "holes": holes})
+    if not polygons:
+        raise FacilityRoutingResourceError(
+            "facility_motion_swept_geometry_invalid",
+            "Swept geometry contains no polygonal component.",
+        )
+    polygons.sort(
+        key=lambda item: (
+            item["exterior"][0]["x"],
+            item["exterior"][0]["z"],
+            abs(_ring_area_twice(item["exterior"])),
+        )
+    )
+    return {
+        "polygons": polygons,
+        "ringOrientation": {
+            "exterior": "counterclockwise",
+            "holes": "clockwise",
+        },
+        "startVertexRule": "lowest_x_then_z_lexicographic",
+        "precisionDecimals": METER_DECIMAL_PLACES,
+        "polygonSortKey": "first_vertex_then_area",
+    }
+
+
+def route_traversable_corridor(
+    route: Mapping[str, Any],
+) -> list[list[dict[str, float]]]:
+    """Derive exact traversable polygons from one authored route corridor."""
+
+    _require_motion_geometry_engine()
+    centerline = route.get("centerline")
+    if not isinstance(centerline, list) or len(centerline) < 2:
+        raise FacilityRoutingResourceError(
+            "facility_motion_route_geometry_unavailable",
+            "The selected route has no replayable centerline.",
+        )
+    try:
+        points = [
+            (
+                _finite(point.get("x"), "route.centerline.x"),
+                _finite(point.get("z"), "route.centerline.z"),
+            )
+            for point in centerline
+            if isinstance(point, Mapping)
+        ]
+        width = _finite(route.get("corridorWidth"), "route.corridorWidth")
+    except ValueError as exc:
+        raise FacilityRoutingResourceError(
+            "facility_motion_route_geometry_unavailable",
+            "The selected route corridor is invalid.",
+        ) from exc
+    if len(points) < 2 or width <= 0:
+        raise FacilityRoutingResourceError(
+            "facility_motion_route_geometry_unavailable",
+            "The selected route requires a positive-width centerline corridor.",
+        )
+    corridor = LineString(points).buffer(
+        width / 2.0,
+        cap_style=3,
+        join_style=2,
+    )
+    if corridor.is_empty or not corridor.is_valid:
+        raise FacilityRoutingResourceError(
+            "facility_motion_route_geometry_unavailable",
+            "The selected route corridor could not be resolved.",
+        )
+    parts = [corridor] if isinstance(corridor, Polygon) else list(corridor.geoms)
+    return [
+        [
+            {"x": _round(x), "z": _round(z)}
+            for x, z in list(part.exterior.coords)[:-1]
+        ]
+        for part in parts
+        if isinstance(part, Polygon)
+    ]
+
+
 def _interpolate_poses(
     poses: Sequence[Mapping[str, Any]],
     spacing: float,
@@ -2405,6 +2702,8 @@ def validate_swept_volume(
     load: Mapping[str, Any] | None = None,
     sample_spacing_meters: float = 0.1,
     allow_reverse: bool | None = None,
+    maximum_sample_count: int = MAXIMUM_SWEPT_VOLUME_SAMPLES,
+    maximum_obstacle_comparisons: int = MAXIMUM_SWEEP_OBSTACLE_COMPARISONS,
 ) -> dict[str, Any]:
     """Independently recheck a complete route's footprint sweep."""
 
@@ -2419,25 +2718,90 @@ def validate_swept_volume(
             "sampledPoseCount": 0,
             "effectiveWidthMeters": None,
             "effectiveLengthMeters": None,
+            "sampleSpacingMeters": None,
+            "sweptEnvelopeRevision": SWEPT_ENVELOPE_REVISION,
             "findings": [finding],
         }
     spacing = _finite(sample_spacing_meters, "sample_spacing_meters")
     if spacing <= 0:
         raise ValueError("sample_spacing_meters must be positive")
+    projected_count = projected_swept_sample_count(poses, spacing)
+    if projected_count > int(maximum_sample_count):
+        raise FacilityRoutingResourceError(
+            "facility_route_sample_budget_exceeded",
+            "The requested route resolution exceeds the motion sample budget.",
+            details={
+                "projectedSampleCount": projected_count,
+                "maximumSampleCount": int(maximum_sample_count),
+                "requestedSampleSpacingMeters": _round(spacing),
+            },
+        )
+    _require_motion_geometry_engine()
     traversable = [
         _polygon(value, f"traversable[{index}]")
         for index, value in enumerate(traversable_polygons)
     ]
     obstacle_records = _obstacle_records(obstacles)
     footprints, width, length = _vehicle_footprints(vehicle_profile, load)
+    projected_comparisons = (
+        projected_count * len(footprints) * len(obstacle_records)
+    )
+    if projected_comparisons > int(maximum_obstacle_comparisons):
+        raise FacilityRoutingResourceError(
+            "facility_route_clearance_budget_exceeded",
+            "The route clearance analysis exceeds the geometry-work budget.",
+            details={
+                "projectedComparisonCount": projected_comparisons,
+                "maximumComparisonCount": int(maximum_obstacle_comparisons),
+                "projectedSampleCount": projected_count,
+                "obstacleCount": len(obstacle_records),
+                "footprintPartCount": len(footprints),
+            },
+        )
     sampled = _interpolate_poses(poses, spacing)
+    sampled_distances = [0.0]
+    for index in range(1, len(sampled)):
+        sampled_distances.append(
+            sampled_distances[-1]
+            + math.dist(
+                (float(sampled[index - 1]["x"]), float(sampled[index - 1]["z"])),
+                (float(sampled[index]["x"]), float(sampled[index]["z"])),
+            )
+        )
+    obstacle_shapes = [Polygon(item[1]) for item in obstacle_records]
+    obstacle_tree = STRtree(obstacle_shapes) if obstacle_shapes else None
     findings = []
     bounds = [math.inf, math.inf, -math.inf, -math.inf]
     outside_reported = False
     collided: set[str] = set()
+    sampled_shapes = []
+    clearance_samples = []
+
+    def location(index: int) -> dict[str, Any]:
+        pose = sampled[index]
+        return {
+            "localized": True,
+            "sampleIndex": index,
+            "pose": {
+                "x": _round(pose["x"]),
+                "z": _round(pose["z"]),
+                "heading": _round(
+                    _heading(pose["heading"], "pose.heading"),
+                    HEADING_DECIMAL_PLACES,
+                ),
+                "gear": str(pose.get("gear") or "forward"),
+            },
+            "distanceMeters": _round(sampled_distances[index]),
+        }
+
     for index, pose in enumerate(sampled):
+        sample_parts = []
         for local in footprints:
             world = _transform_polygon(local, pose)
+            shape = Polygon(world)
+            if not shape.is_valid:
+                shape = shape.buffer(0)
+            sample_parts.append(shape)
             for point in world:
                 bounds[0] = min(bounds[0], point[0])
                 bounds[1] = min(bounds[1], point[1])
@@ -2454,9 +2818,21 @@ def validate_swept_volume(
                             details={"sampleIndex": index},
                         )
                     )
+                    findings[-1]["location"] = location(index)
                     outside_reported = True
-            for obstacle_id, obstacle in obstacle_records:
-                if obstacle_id not in collided and _polygons_intersect(world, obstacle):
+        sample_shape = unary_union(sample_parts)
+        sampled_shapes.append(sample_shape)
+        if obstacle_tree is not None:
+            intersecting = sorted(
+                (int(item) for item in obstacle_tree.query(
+                    sample_shape,
+                    predicate="intersects",
+                )),
+                key=lambda item: obstacle_records[item][0],
+            )
+            for obstacle_index in intersecting:
+                obstacle_id = obstacle_records[obstacle_index][0]
+                if obstacle_id not in collided:
                     collided.add(obstacle_id)
                     findings.append(
                         _finding(
@@ -2467,6 +2843,44 @@ def validate_swept_volume(
                             details={"sampleIndex": index},
                         )
                     )
+                    findings[-1]["location"] = location(index)
+            nearest_indices, nearest_distances = obstacle_tree.query_nearest(
+                sample_shape,
+                all_matches=True,
+                return_distance=True,
+            )
+            pairs = sorted(
+                (
+                    (obstacle_records[int(obstacle_index)][0], float(distance))
+                    for obstacle_index, distance in zip(
+                        nearest_indices,
+                        nearest_distances,
+                    )
+                ),
+                key=lambda item: item[0],
+            )
+            minimum_distance = min(item[1] for item in pairs)
+            nearest_ids = [
+                obstacle_id
+                for obstacle_id, distance in pairs
+                if math.isclose(
+                    distance,
+                    minimum_distance,
+                    rel_tol=0.0,
+                    abs_tol=1e-9,
+                )
+            ]
+            clearance = _round(minimum_distance)
+        else:
+            nearest_ids = []
+            clearance = None
+        clearance_samples.append(
+            {
+                "distanceMeters": _round(sampled_distances[index]),
+                "nearestObstacleIds": nearest_ids,
+                "clearanceMeters": clearance,
+            }
+        )
     minimum_radius = _finite(
         (vehicle_profile.get("steeringLimits") or {}).get(
             "minimumTurningRadiusMeters", 0
@@ -2514,6 +2928,7 @@ def validate_swept_volume(
                     },
                 )
             )
+            findings[-1]["location"] = location(index)
             break
     reverse_policy = str(vehicle_profile.get("reversePolicy") or "prohibited")
     reverse_permitted = (
@@ -2521,7 +2936,15 @@ def validate_swept_volume(
         if allow_reverse is not None
         else reverse_policy in {"allowed", "permitted"}
     )
-    if any(pose.get("gear") == "reverse" for pose in sampled) and not reverse_permitted:
+    first_reverse = next(
+        (
+            index
+            for index, pose in enumerate(sampled)
+            if pose.get("gear") == "reverse"
+        ),
+        None,
+    )
+    if first_reverse is not None and not reverse_permitted:
         findings.append(
             _finding(
                 "route_reverse_not_allowed",
@@ -2530,12 +2953,60 @@ def validate_swept_volume(
                 subjects=("swept-volume", reverse_policy),
             )
         )
+        findings[-1]["location"] = location(first_reverse)
+    for finding in findings:
+        if finding.get("severity") == "error" and "location" not in finding:
+            finding["location"] = {"localized": False}
     ordered = _sort_findings(findings)
+    localized_errors = [
+        item
+        for item in ordered
+        if item.get("severity") == "error"
+        and (item.get("location") or {}).get("localized") is True
+    ]
+    blocking_index = (
+        min(int(item["location"]["sampleIndex"]) for item in localized_errors)
+        if localized_errors
+        else None
+    )
+    geometry_shapes = (
+        sampled_shapes
+        if blocking_index is None
+        else sampled_shapes[: blocking_index + 1]
+    )
+    blocking_findings = [
+        item
+        for item in localized_errors
+        if int(item["location"]["sampleIndex"]) == blocking_index
+    ]
+    blocking_obstacles = sorted(
+        {
+            subject
+            for item in blocking_findings
+            if item.get("code") == "route_swept_volume_collision"
+            for subject in item.get("subjects", [])
+            if subject != "swept-volume"
+        }
+    )
+    blocking = (
+        {
+            "localized": True,
+            "blockingSampleIndex": blocking_index,
+            "blockingPose": location(blocking_index)["pose"],
+            "blockingDistanceMeters": location(blocking_index)["distanceMeters"],
+            "blockingObstacleIds": blocking_obstacles,
+        }
+        if blocking_index is not None
+        else {"localized": False, "blockingObstacleIds": []}
+    )
     return {
         "valid": not any(item["severity"] == "error" for item in ordered),
         "sampledPoseCount": len(sampled),
+        "projectedSampleCount": projected_count,
+        "sampleSpacingMeters": _round(spacing),
         "effectiveWidthMeters": _round(width),
         "effectiveLengthMeters": _round(length),
+        "sweptEnvelopeRevision": SWEPT_ENVELOPE_REVISION,
         "sweptBounds": (
             None
             if math.isinf(bounds[0])
@@ -2544,6 +3015,12 @@ def validate_swept_volume(
                 "maximum": {"x": _round(bounds[2]), "z": _round(bounds[3])},
             }
         ),
+        "geometry": _canonical_swept_geometry(geometry_shapes),
+        "clearance": {
+            "sampleSpacingMeters": _round(spacing),
+            "samples": clearance_samples,
+        },
+        "blocking": blocking,
         "findings": ordered,
     }
 
@@ -2674,23 +3151,48 @@ def _rejected_route(
     findings: Iterable[Mapping[str, Any]],
     *,
     loaded: bool,
+    outcome: str = "unroutable",
+    centerline: Sequence[Mapping[str, Any]] = (),
+    poses: Sequence[Mapping[str, Any]] = (),
+    actions: Sequence[str] = (),
+    distance_meters: float | None = None,
+    estimated_travel_seconds: float | None = None,
+    swept_volume: Mapping[str, Any] | None = None,
+    attempt_fingerprint: str | None = None,
+    source_revisions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    if outcome not in {"unroutable", "envelope_refused"}:
+        raise ValueError("unsupported rejected route outcome")
+    result = {
         "accepted": False,
+        "outcome": outcome,
         "routingEngineVersion": ROUTING_ENGINE_VERSION,
         "routerVersion": ROUTER_VERSION,
         "routeFingerprint": None,
-        "centerline": [],
-        "poses": [],
-        "actions": [],
-        "distanceMeters": None,
-        "estimatedTravelSeconds": None,
-        "reverseUsed": False,
+        "centerline": deepcopy([dict(item) for item in centerline]),
+        "poses": deepcopy([dict(item) for item in poses]),
+        "actions": [str(item) for item in actions],
+        "distanceMeters": (
+            None if distance_meters is None else _round(distance_meters)
+        ),
+        "estimatedTravelSeconds": (
+            None
+            if estimated_travel_seconds is None
+            else _round(estimated_travel_seconds)
+        ),
+        "reverseUsed": "reverse" in actions,
         "loaded": loaded,
-        "sweptVolume": None,
+        "sweptVolume": (
+            None if swept_volume is None else deepcopy(dict(swept_volume))
+        ),
         "findings": _sort_findings(findings),
         "processSemantics": dict(PROCESS_SEMANTICS),
     }
+    if attempt_fingerprint is not None:
+        result["attemptFingerprint"] = str(attempt_fingerprint)
+    if source_revisions is not None:
+        result["sourceRevisions"] = deepcopy(dict(source_revisions))
+    return result
 
 
 def plan_forklift_route(
@@ -2729,7 +3231,10 @@ def plan_forklift_route(
             _polygon(value, f"traversable[{index}]")
             for index, value in enumerate(traversable_polygons)
         ]
-        obstacle_records = _obstacle_records(obstacles)
+        obstacle_records = _obstacles_near_traversable_space(
+            _obstacle_records(obstacles),
+            traversable,
+        )
         footprints, effective_width, _ = _vehicle_footprints(vehicle_profile, load)
         minimum_radius = _finite(
             (vehicle_profile.get("steeringLimits") or {}).get(
@@ -2749,6 +3254,7 @@ def plan_forklift_route(
                 )
             ],
             loaded=loaded,
+            source_revisions=source_revisions,
         )
     maximum_load = (vehicle_profile.get("loadLimits") or {}).get(
         "maximumKilograms"
@@ -2770,6 +3276,7 @@ def plan_forklift_route(
                     )
                 ],
                 loaded=loaded,
+                source_revisions=source_revisions,
             )
     direct_horizontal_distance = math.hypot(goal_x - start_x, goal_z - start_z)
     grade_percent = (
@@ -2805,6 +3312,7 @@ def plan_forklift_route(
                 )
             ],
             loaded=loaded,
+            source_revisions=source_revisions,
         )
     if not traversable:
         return _rejected_route(
@@ -2816,6 +3324,7 @@ def plan_forklift_route(
                 )
             ],
             loaded=loaded,
+            source_revisions=source_revisions,
         )
     polygon_widths = []
     for polygon in traversable:
@@ -2838,6 +3347,7 @@ def plan_forklift_route(
                 )
             ],
             loaded=loaded,
+            source_revisions=source_revisions,
         )
     reverse_policy = str(vehicle_profile.get("reversePolicy") or "prohibited")
     reverse_permitted = (
@@ -2899,6 +3409,7 @@ def plan_forklift_route(
                     )
                 ],
                 loaded=loaded,
+                source_revisions=source_revisions,
             )
     def heuristic(state: tuple[float, float, int, str]) -> float:
         heading_steps = min(
@@ -2998,6 +3509,7 @@ def plan_forklift_route(
                 )
             ],
             loaded=loaded,
+            source_revisions=source_revisions,
         )
     poses, actions, distance = _reconstruct_route(
         final_state, start_state, came_from
@@ -3012,7 +3524,100 @@ def plan_forklift_route(
         allow_reverse=reverse_permitted,
     )
     if not swept["valid"]:
-        return _rejected_route(swept["findings"], loaded=loaded)
+        attempted_horizontal_segments = [
+            math.dist(
+                (
+                    float(poses[index - 1]["x"]),
+                    float(poses[index - 1]["z"]),
+                ),
+                (float(poses[index]["x"]), float(poses[index]["z"])),
+            )
+            for index in range(1, len(poses))
+        ]
+        attempted_total_horizontal = sum(attempted_horizontal_segments)
+        attempted_cumulative = 0.0
+        attempted_centerline = []
+        for index, pose in enumerate(poses):
+            if index:
+                attempted_cumulative += attempted_horizontal_segments[index - 1]
+            ratio = (
+                attempted_cumulative / attempted_total_horizontal
+                if attempted_total_horizontal > EPSILON
+                else 0.0
+            )
+            attempted_centerline.append(
+                {
+                    "x": _round(pose["x"]),
+                    "y": _round(start_y + (goal_y - start_y) * ratio),
+                    "z": _round(pose["z"]),
+                }
+            )
+        attempted_poses = [
+            {
+                "x": _round(pose["x"]),
+                "z": _round(pose["z"]),
+                "heading": _round(
+                    _heading(pose["heading"], "pose.heading"),
+                    HEADING_DECIMAL_PLACES,
+                ),
+                "gear": str(pose.get("gear") or "forward"),
+            }
+            for pose in poses
+        ]
+        attempted_maximum_speed = _finite(
+            (vehicle_profile.get("speedLimits") or {}).get(
+                "maximumMetersPerSecond", 1.0
+            ),
+            "maximumMetersPerSecond",
+        )
+        attempted_seconds = (
+            distance / attempted_maximum_speed
+            if attempted_maximum_speed > 0
+            else None
+        )
+        attempt_input = {
+            "fingerprintKind": "facility-route-attempt-v1",
+            "start": {
+                "x": start_state[0],
+                "z": start_state[1],
+                "heading": _heading_radians(start_heading),
+            },
+            "goal": {
+                "x": goal_key[0],
+                "z": goal_key[1],
+                "heading": _heading_radians(goal_heading),
+            },
+            "vehicleProfileId": vehicle_profile.get("vehicleProfileId"),
+            "vehicleProfileRevision": vehicle_profile.get(
+                "vehicleProfileRevision"
+            ),
+            "loaded": loaded,
+            "load": deepcopy(dict(load or {})),
+            "centerline": attempted_centerline,
+            "poses": attempted_poses,
+            "sourceRevisions": deepcopy(dict(source_revisions or {})),
+            "obstacleFingerprint": _sha256(
+                [
+                    {"obstacleId": item[0], "polygon": item[1]}
+                    for item in obstacle_records
+                ]
+            ),
+            "traversableFingerprint": _sha256(traversable),
+            "blocking": swept.get("blocking"),
+        }
+        return _rejected_route(
+            swept["findings"],
+            loaded=loaded,
+            outcome="envelope_refused",
+            centerline=attempted_centerline,
+            poses=attempted_poses,
+            actions=actions,
+            distance_meters=distance,
+            estimated_travel_seconds=attempted_seconds,
+            swept_volume=swept,
+            attempt_fingerprint=_sha256(attempt_input),
+            source_revisions=source_revisions,
+        )
     horizontal_segments = [
         math.dist(
             (float(poses[index - 1]["x"]), float(poses[index - 1]["z"])),
@@ -3081,6 +3686,7 @@ def plan_forklift_route(
     }
     return {
         "accepted": True,
+        "outcome": "accepted",
         "routingEngineVersion": ROUTING_ENGINE_VERSION,
         "routerVersion": ROUTER_VERSION,
         "routeFingerprint": stable_route_fingerprint(fingerprint_input),

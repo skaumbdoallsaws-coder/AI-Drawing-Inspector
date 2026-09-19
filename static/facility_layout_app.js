@@ -42,6 +42,54 @@
         return error;
     }
 
+    function designUndoRecoveryStore(options) {
+        // An explicit async adapter is separate from the synchronous Web Storage
+        // API. A durable native acknowledgment must actually be awaited.
+        if (options.designUndoRecovery !== undefined) {
+            const recovery = options.designUndoRecovery;
+            ['load', 'persist', 'clear'].forEach(function (name) {
+                requireFunction(recovery && recovery[name], 'designUndoRecovery.' + name);
+            });
+            return {
+                load: async function () { return clone(await recovery.load()); },
+                persist: async function (record) { await recovery.persist(clone(record)); },
+                clear: async function () { await recovery.clear(); },
+            };
+        }
+        const storage = options.designUndoRecoveryStorage
+            || (root && root.sessionStorage) || null;
+        const key = 'InspectorPro:facility-design-undo:'
+            + String(options.siteId || 'site-local') + ':'
+            + String(options.layoutId || 'fl-main');
+        if (!storage || typeof storage.getItem !== 'function'
+                || typeof storage.setItem !== 'function'
+                || typeof storage.removeItem !== 'function') {
+            return {
+                load: async function () { return null; },
+                persist: async function () {},
+                clear: async function () {},
+            };
+        }
+        return {
+            load: async function () {
+                const encoded = storage.getItem(key);
+                if (!encoded) return null;
+                try {
+                    return JSON.parse(encoded);
+                } catch (_error) {
+                    storage.removeItem(key);
+                    return null;
+                }
+            },
+            persist: async function (record) {
+                storage.setItem(key, JSON.stringify(record));
+            },
+            clear: async function () {
+                storage.removeItem(key);
+            },
+        };
+    }
+
     async function resolveSpatialAdvisorRuntime(options) {
         let runtime = options.spatialAdvisorRuntime
             || (root && root.InspectorProFacilitySpatialAdvisor)
@@ -100,9 +148,11 @@
                 fetch: options.fetch,
                 sessionId: options.sessionId,
             });
+        const designUndoRecovery = designUndoRecoveryStore(options);
         const session = options.session
             || requireFunction(Session.createSession, 'createSession')({
                 previewOperations: transport.previewOperations,
+                sessionId: transport.sessionId,
                 applyOperations: transport.applyOperations,
                 reloadLayout: transport.reloadLayout,
                 placementCandidates: transport.placementCandidates,
@@ -117,7 +167,25 @@
                 getLayoutReceipt: transport.getLayoutReceipt,
                 undoGenerationDraft: transport.undoGenerationRun,
                 saveGenerationDraft: transport.saveGenerationRun,
+                prepareDesignProposalApply:
+                    transport.prepareDesignProposalApply,
+                commitDesignProposalApply:
+                    transport.commitDesignProposalApply,
+                acknowledgeDesignProposalApply:
+                    transport.acknowledgeDesignProposalApply,
+                recoverDesignProposalApply:
+                    transport.recoverDesignProposalApply,
+                saveDesignProposalDraft:
+                    transport.saveDesignProposalDraft,
+                prepareDesignUndo: transport.prepareDesignUndo,
+                acknowledgeDesignUndo: transport.acknowledgeDesignUndo,
+                loadDesignUndoRecovery: designUndoRecovery.load,
+                persistDesignUndoRecovery: designUndoRecovery.persist,
+                clearDesignUndoRecovery: designUndoRecovery.clear,
             });
+        const desktopRecovery = options.desktopRecoveryHooks
+            ? requireFunction(session.installDesktopRecovery, 'installDesktopRecovery')(
+                options.desktopRecoveryHooks) : null;
 
         let workspace = null;
         let spatialAdvisor = options.spatialAdvisor || null;
@@ -148,18 +216,31 @@
             }
             loadReceipt = receipt;
             session.load(loadReceipt);
+            if (typeof session.resumeDesignUndoRecovery === 'function') {
+                try {
+                    await session.resumeDesignUndoRecovery();
+                } catch (caught) {
+                    error = caught;
+                    if (typeof options.onError === 'function') {
+                        options.onError(caught);
+                    }
+                }
+            }
             workspace = requireFunction(
                 Workspace.createWorkspace,
                 'createWorkspace'
             )({
                 root: host,
                 session: session,
+                motionTransport: transport,
+                designTransport: transport,
                 layoutRuntime: Layout,
                 assetCatalog: options.assetCatalog || [],
                 capabilities: options.capabilities || {},
                 externalCommandSurface:
                     options.externalCommandSurface === true,
                 gridSize: options.gridSize,
+                motionPanelHost: options.motionPanelHost,
                 topPlanOptions: options.topPlanOptions,
                 threeRuntime: options.threeRuntime
                     || (root && root.InspectorProFacilityThree),
@@ -175,6 +256,8 @@
                 onAssetBrowserStateChange:
                     options.onAssetBrowserStateChange,
                 onCommandStateChange: options.onCommandStateChange,
+                onMotionPanelVisibilityChange:
+                    options.onMotionPanelVisibilityChange,
                 onStateChange: options.onStateChange,
                 onError: options.onError,
             });
@@ -196,6 +279,7 @@
             ready: ready,
             get transport() { return transport; },
             get session() { return session; },
+            get desktopRecovery() { return desktopRecovery; },
             get workspace() { return workspace; },
             getState: function () {
                 return {

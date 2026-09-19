@@ -1,0 +1,26 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Undo</title>
+      <defs>
+  <linearGradient id="undo-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#5BC7FF"/>
+    <stop offset="1" stop-color="#1F6FD1"/>
+  </linearGradient>
+  <linearGradient id="undo-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="undo-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#undo-shadow)">
+  <path d="M12 8H7.2L10.3 4.9" stroke="url(#undo-g)" stroke-width="3.1"/>
+  <path d="M7.5 8.2H17.4C23.1 8.2 26.5 11.6 26.5 16.4C26.5 21.3 22.8 24.8 17.1 24.8H12.8" stroke="url(#undo-g)" stroke-width="3.1"/>
+  <path d="M8.7 6.4H12.1" stroke="#D9F3FF" stroke-width="0.9" opacity="0.9"/>
+</g>
+
+      </g>
+    </svg>

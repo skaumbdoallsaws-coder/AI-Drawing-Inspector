@@ -11,6 +11,7 @@ from typing import Any, Callable, Mapping, Sequence
 from ai_inspector.telemetry import (
     classify_exception_status,
     record_anthropic_call,
+    record_openai_call,
     record_workflow_stage,
     time_block,
 )
@@ -42,6 +43,7 @@ def classify_shadow_route(
     workflow_state: Mapping[str, Any] | None,
     cache: ExactRouteCache,
     model: str,
+    provider: str = "anthropic",
     timeout_seconds: float,
     max_tokens: int,
     api_key: str | None = None,
@@ -97,26 +99,51 @@ def classify_shadow_route(
         if complete is not None:
             raw = complete(SKILL_ROUTE_SYSTEM, user_text)
         else:
-            import anthropic
-
-            key_value = api_key or os.getenv("ANTHROPIC_API_KEY")
+            provider = str(provider or "anthropic").strip().lower()
+            if provider not in {"anthropic", "openai"}:
+                _note_failure(failure, "invalid_provider")
+                return None
+            key_name = (
+                "OPENAI_API_KEY" if provider == "openai" else "ANTHROPIC_API_KEY"
+            )
+            key_value = api_key or os.getenv(key_name)
             if not key_value:
                 _record_empty_stage("api_key_missing", started, agent_type, workflow=telemetry_workflow)
                 _note_failure(failure, "api_key_missing")
                 return None
-            client = anthropic.Anthropic(
-                api_key=key_value,
-                max_retries=0,
-                timeout=float(timeout_seconds),
-            )
+            if provider == "openai":
+                import openai
+
+                client = openai.OpenAI(
+                    api_key=key_value,
+                    max_retries=0,
+                    timeout=float(timeout_seconds),
+                )
+            else:
+                import anthropic
+
+                client = anthropic.Anthropic(
+                    api_key=key_value,
+                    max_retries=0,
+                    timeout=float(timeout_seconds),
+                )
             with time_block() as elapsed_ms:
                 try:
-                    response = client.messages.create(
-                        model=model,
-                        max_tokens=int(max_tokens),
-                        system=SKILL_ROUTE_SYSTEM,
-                        messages=[{"role": "user", "content": user_text}],
-                    )
+                    if provider == "openai":
+                        response = client.responses.create(
+                            model=model,
+                            instructions=SKILL_ROUTE_SYSTEM,
+                            input=user_text,
+                            max_output_tokens=int(max_tokens),
+                            store=False,
+                        )
+                    else:
+                        response = client.messages.create(
+                            model=model,
+                            max_tokens=int(max_tokens),
+                            system=SKILL_ROUTE_SYSTEM,
+                            messages=[{"role": "user", "content": user_text}],
+                        )
                 except Exception as exc:  # noqa: BLE001
                     status, error_type = classify_exception_status(exc)
                     error_message = _sanitize_provider_error(exc, secrets=(key_value,))
@@ -125,7 +152,12 @@ def classify_shadow_route(
                         error_type,
                         error_message,
                     )
-                    record_anthropic_call(
+                    recorder = (
+                        record_openai_call
+                        if provider == "openai"
+                        else record_anthropic_call
+                    )
+                    recorder(
                         model=model,
                         response=None,
                         latency_ms=elapsed_ms(),
@@ -145,7 +177,12 @@ def classify_shadow_route(
                         error_message=error_message,
                     )
                     return None
-            record_anthropic_call(
+            recorder = (
+                record_openai_call
+                if provider == "openai"
+                else record_anthropic_call
+            )
+            recorder(
                 model=model,
                 response=response,
                 latency_ms=elapsed_ms(),
@@ -153,7 +190,15 @@ def classify_shadow_route(
                 workflow=telemetry_workflow,
                 agentType=agent_type,
             )
-            raw = "".join(block.text for block in response.content if hasattr(block, "text"))
+            raw = (
+                str(getattr(response, "output_text", "") or "")
+                if provider == "openai"
+                else "".join(
+                    block.text
+                    for block in response.content
+                    if hasattr(block, "text")
+                )
+            )
 
         parsed = extract_json_object(raw)
         route = validate_route_response(parsed, catalog)

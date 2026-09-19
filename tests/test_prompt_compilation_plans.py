@@ -78,7 +78,11 @@ def test_expected_compilation_plans():
         )
         assert plan["resolved_policy"]["primary_skill"] == case["primary"]
         assert plan["resolved_policy"]["side_effect_default"] == "prohibited"
-        assert plan["accounting"]["total_chars"] < 15_000
+        assert plan["accounting"]["total_chars"] < 20_000
+        assert plan["prompt"].count(
+            "SUPPLIER FAI INVERTED-PYRAMID RESPONSE FORMAT"
+        ) == 1
+        assert plan["prompt"].count("[FORMAT EXAMPLE - SYNTHETIC DATA]") == 8
         for banned in (
             "HIGHLIGHT_PARTS:",
             "HIGHLIGHT_FEATURES:",
@@ -95,7 +99,7 @@ def test_expected_compilation_plans():
             assert set(control["explicit_request_tools"]) == set(case["allowed_tools"])
             assert plan["resolved_policy"]["output"] == {
                 "format": "concise_action_confirmation",
-                "maximum_sentences": 2,
+                "maximum_sentences": 3,
             }
             assert plan["resolved_policy"]["contradictory_context"] == "refuse_side_effect"
         else:

@@ -284,7 +284,11 @@
     "Work Instructions":
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <path d="M13.8 5.2a4.2 4.2 0 0 0-5.5 5.4L3.7 15.2a2.5 2.5 0 1 0 3.5 3.5l4.6-4.6a4.2 4.2 0 0 0 5.5-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.1-3.1Z" fill="currentColor" opacity=".10"/> <path d="M13.8 5.2a4.2 4.2 0 0 0-5.5 5.4L3.7 15.2a2.5 2.5 0 1 0 3.5 3.5l4.6-4.6a4.2 4.2 0 0 0 5.5-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.1-3.1Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/> <path d="M15.5 17h5M15.5 20h3.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/> </svg>',
     "Inspection Sheet":
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <rect x="5" y="4" width="14" height="17" rx="2" fill="currentColor" opacity=".08"/> <rect x="5" y="4" width="14" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/> <path d="M9 4V2.8h6V4M8.2 10.2l1.2 1.2 2.2-2.3M13.7 10.4h2.3M8.2 15.4l1.2 1.2 2.2-2.3M13.7 15.6h2.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/> </svg>'
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <rect x="5" y="4" width="14" height="17" rx="2" fill="currentColor" opacity=".08"/> <rect x="5" y="4" width="14" height="17" rx="2" stroke="currentColor" stroke-width="1.7"/> <path d="M9 4V2.8h6V4M8.2 10.2l1.2 1.2 2.2-2.3M13.7 10.4h2.3M8.2 15.4l1.2 1.2 2.2-2.3M13.7 15.6h2.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/> </svg>',
+    "Process Explanation":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <path d="M4 5.5h16A1.5 1.5 0 0 1 21.5 7v8a1.5 1.5 0 0 1-1.5 1.5h-7.2L9 20.2V16.5H4A1.5 1.5 0 0 1 2.5 15V7A1.5 1.5 0 0 1 4 5.5Z" fill="currentColor" opacity=".10"/> <path d="M4 5.5h16A1.5 1.5 0 0 1 21.5 7v8a1.5 1.5 0 0 1-1.5 1.5h-7.2L9 20.2V16.5H4A1.5 1.5 0 0 1 2.5 15V7A1.5 1.5 0 0 1 4 5.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/> <path d="m10.4 8.6 4.6 2.5-4.6 2.5V8.6Z" fill="currentColor"/> </svg>',
+    "Access & Clearance":
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"> <rect x="3" y="3.4" width="18" height="3" rx="1" fill="currentColor" opacity=".10"/> <rect x="3" y="3.4" width="18" height="3" rx="1" stroke="currentColor" stroke-width="1.7"/> <path d="M3.9 20.6h16.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/> <path d="M7 9v8.6M5.4 10.3 7 8.7l1.6 1.6M5.4 16.3 7 17.9l1.6-1.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <circle cx="15.4" cy="12.3" r="1.8" stroke="currentColor" stroke-width="1.6"/> <path d="M12.8 20.5v-2.1a2.6 2.6 0 0 1 5.2 0v2.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/> </svg>'
   };
 
   var WORKFLOWS = [
@@ -374,16 +378,29 @@
       label: "TRAINING",
       accent: "#00E676",
       status: "available",
+      /* Shared by both demos, so it has to stay true of a narrated process
+         explanation and a first-person access check alike. The specifics of
+         each - who is being taught, versus what is being measured - live in
+         the per-demo captions. */
       headline: "Turn the product itself into the training environment.",
-      description: "Guide operators and technicians through assemblies using the CAD you already have. Sage controls the view, highlights components, answers questions and resumes the walkthrough in context.",
+      description: "Operators and technicians learn on the CAD you already have. Sage explains the process and controls the view, and the same model answers whether a person can physically reach the work.",
+      pickerLabel: "Choose a view",
       demos: [
         {
-          id: "walkthrough",
-          title: "Walkthrough",
+          id: "process-explanation",
+          title: "Process Explanation",
           media: "assets/videos/workflow_training.mp4",
           poster: "assets/images/workflow_training.jpg",
           caption: "Ask a question and the 3D model becomes a guided tour - camera flying to each part, highlights tracking the explanation.",
           alt: "Guided 3D walkthrough explaining a plant process"
+        },
+        {
+          id: "access-clearance",
+          title: "Access & Clearance",
+          media: "assets/videos/workflow_access_clearance_v1.mp4",
+          poster: "assets/images/workflow_access_clearance_v1.jpg",
+          caption: "Walk the plant at human scale - 1.95 m standing, real collision. Under the structure the model stops you: clearance is 1.36 m, so the job is done kneeling.",
+          alt: "First-person walkthrough of a cooling tower at human scale in InspectorPro: walking the service platform and stairs, then crawling under the structure where the heads-up display refuses the stand command and reports that geometry clearance is 1.36 metres while standing requires 1.95 metres"
         }
         /* , { id: "ask-sage", title: "Ask Sage", ... }
            , { id: "isolation", title: "Component Isolation", ... } */
@@ -489,6 +506,7 @@
     var screenEl = root.querySelector("[data-wf-screen]");
     var demosEl = root.querySelector("[data-wf-demos]");
     var pickerEl = root.querySelector("[data-wf-picker]");
+    var pickerLabelEl = root.querySelector("[data-wf-picker-label]");
     var captionEl = root.querySelector("[data-wf-caption]");
     if (!tabsEl || !stageEl || !copyEl || !screenEl || !demosEl || !captionEl) return;
 
@@ -597,6 +615,12 @@
          picker - heading included - stays out of the page. */
       if (pickerEl) pickerEl.hidden = wf.demos.length < 2;
       if (wf.demos.length < 2) return;
+      /* the grid sizes its tracks from the count, so two cards fill the
+         column instead of huddling in the first two of five */
+      demosEl.style.setProperty("--wf-doc-count", String(wf.demos.length));
+      var pickerText = wf.pickerLabel || "Choose a document type";
+      if (pickerLabelEl) pickerLabelEl.textContent = pickerText;
+      demosEl.setAttribute("aria-label", pickerText);
 
       for (var i = 0; i < wf.demos.length; i++) {
         (function (index) {

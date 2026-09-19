@@ -31,7 +31,7 @@ def _resolved_asset(asset_id, revision):
         "definition": {
             "assetId": asset_id,
             "assetDefinitionRevision": revision,
-            "category": "machine",
+            "category": "operators" if asset_id == "asset-operator" else "machine",
             "geometry": {
                 "footprintPolygons": [[
                     {"x": -0.5, "z": -0.5},
@@ -274,6 +274,62 @@ def test_routing_http_surface_is_revision_bound_and_read_only(tmp_path):
     stale = client.post(
         "/api/facility-layouts/site-a/fl-api-cell/routing/diagnostics",
         json={"baseRevision": "f" * 64, "operations": []},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "revision_conflict"
+
+
+def test_manual_navigation_validation_http_surface_uses_unsaved_draft(tmp_path):
+    client, _, shell, policy = _client(tmp_path)
+    created = client.post(
+        "/api/facility-layouts/site-a",
+        json={"layout": _layout(shell, policy)},
+    ).json()
+    operation = _placement_operation()
+    operation["placement"].update({
+        "placementId": "pl-api-operator",
+        "assetId": "asset-operator",
+    })
+    operation["placement"]["transform"]["position"].update({
+        "x": 2.0,
+        "z": 2.0,
+    })
+    revision = operation["placement"]["assetDefinitionRevision"]
+    before = _file_snapshot(tmp_path)
+
+    validated = client.post(
+        "/api/facility-layouts/site-a/fl-api-cell/"
+        "navigation/manual-path/validate",
+        json={
+            "baseRevision": created["revision"],
+            "operations": [operation],
+            "request": {
+                "actorPlacementId": "pl-api-operator",
+                "actorClass": "pedestrian",
+                "actorProfileRef": {
+                    "profileKind": "pedestrian",
+                    "profileId": "pedestrian-profile:asset-operator",
+                    "profileRevision": revision,
+                },
+                "constraintMode": "complete_override",
+                "direction": "forward",
+                "points": [{"x": 2, "z": 2}, {"x": 12, "z": 2}],
+            },
+        },
+    )
+    assert validated.status_code == 200
+    assert validated.json()["valid"] is True
+    assert validated.json()["mutated"] is False
+    assert _file_snapshot(tmp_path) == before
+
+    stale = client.post(
+        "/api/facility-layouts/site-a/fl-api-cell/"
+        "navigation/manual-path/validate",
+        json={
+            "baseRevision": "f" * 64,
+            "operations": [],
+            "request": {},
+        },
     )
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "revision_conflict"

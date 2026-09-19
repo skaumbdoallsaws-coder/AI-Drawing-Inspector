@@ -84,6 +84,56 @@ class TelemetryEvent:
     httpStatus:    Optional[int] = None
     stage:         Optional[str] = None
 
+    # Process-map spatial rollout telemetry. These fields intentionally carry
+    # only stable IDs, bounded enums, counts, timings, and aggregate metrics.
+    # Labels, notes, coordinates, routes, and customer geometry are forbidden
+    # by the endpoint schema that populates them.
+    processMapProductId:              Optional[str] = None
+    processMapId:                     Optional[str] = None
+    processMapRevision:               Optional[str] = None
+    processMapOperation:              Optional[str] = None
+    processMapOutcome:                Optional[str] = None
+    processMapScope:                  Optional[str] = None
+    processMapSpatialEngineVersion:   Optional[int] = None
+    processMapPolicyVersion:          Optional[int] = None
+    processMapNodeCount:              Optional[int] = None
+    processMapEdgeCount:              Optional[int] = None
+    processMapScopedNodeCount:        Optional[int] = None
+    processMapScopedEdgeCount:        Optional[int] = None
+    processMapCandidatesEvaluated:    Optional[int] = None
+    processMapMovedNodeCount:         Optional[int] = None
+    processMapRejectionCountsJson:    Optional[str] = None
+    processMapMetricsBeforeJson:      Optional[str] = None
+    processMapMetricsAfterJson:       Optional[str] = None
+    processMapFallbackReason:         Optional[str] = None
+
+    # Sage-memory rollout telemetry. Only bounded enums, counts, IDs, and
+    # hashes are allowed here; conversation content is never recorded.
+    memoryMode:                       Optional[str] = None
+    memoryClassification:             Optional[str] = None
+    memoryAuthoritative:               Optional[bool] = None
+    memoryContextTokens:               Optional[int] = None
+    memoryLegacyTokens:                Optional[int] = None
+    memoryOmissionCount:               Optional[int] = None
+    memoryReplayed:                    Optional[bool] = None
+    memoryRevisionOutcome:             Optional[str] = None
+    memoryRetentionDeletedCount:       Optional[int] = None
+    memorySummaryRevision:             Optional[int] = None
+    memoryWorkflowStateRevision:       Optional[int] = None
+    memoryContextManifestId:           Optional[str] = None
+    memoryEnvelopeSha256:              Optional[str] = None
+    memorySourceRevisionSha256:        Optional[str] = None
+    memoryResultRevisionSha256:        Optional[str] = None
+    memoryFallbackMode:                Optional[str] = None
+
+    # Feedback telemetry carries only bounded aggregate metadata. Raw
+    # response and correction text remain in the feedback repository.
+    feedbackRating:                    Optional[str] = None
+    feedbackReasonCount:               Optional[int] = None
+    feedbackHasCorrection:             Optional[bool] = None
+    feedbackLinkedTurn:                Optional[bool] = None
+    feedbackLinkedRun:                 Optional[bool] = None
+
     # ── Conversions ──────────────────────────────────────────────────
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -95,4 +145,13 @@ class TelemetryEvent:
         to the constructor."""
         known_names = {f.name for f in fields(cls)}
         filtered = {k: v for k, v in d.items() if k in known_names}
+        for name in (
+            "memoryAuthoritative",
+            "memoryReplayed",
+            "feedbackHasCorrection",
+            "feedbackLinkedTurn",
+            "feedbackLinkedRun",
+        ):
+            if filtered.get(name) is not None:
+                filtered[name] = bool(filtered[name])
         return cls(**filtered)

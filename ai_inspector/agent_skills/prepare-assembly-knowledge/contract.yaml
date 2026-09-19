@@ -1,0 +1,25 @@
+schema_version: 1
+skill_id: prepare-assembly-knowledge
+version: 1.0.0
+intents:
+  - explain_assembly_knowledge_preparation
+  - assess_assembly_knowledge_readiness
+required_evidence: []
+forbidden_context:
+  - browser.process_map_evidence
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request: []
+output_contract:
+  format: concise_preparation_status
+  maximum_sentences: 4
+failure_behavior:
+  missing_required_context: report_missing_evidence
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: assembly-knowledge-preparation-v1
+context_budget:
+  maximum_tokens: 4000
+  priorities:
+    - process_map.evidence

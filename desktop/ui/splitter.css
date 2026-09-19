@@ -1,0 +1,1 @@
+html,body,#splitter{margin:0;width:100%;height:100%;overflow:hidden;cursor:col-resize;touch-action:none;background:#bdc8d1}#splitter:hover,#splitter:focus-visible{background:#009cdb;outline:none}@media(prefers-color-scheme:dark){html,body,#splitter{background:#3c4b58}#splitter:hover,#splitter:focus-visible{background:#28b8e9}}

@@ -1,0 +1,29 @@
+schema_version: 1
+skill_id: publish-parts-manual
+version: 1.0.0
+intents:
+  - generate_parts_manual
+  - publish_parts_manual
+required_evidence: []
+forbidden_context: []
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request:
+    - propose_parts_manual_structure
+    - generate_parts_manual_draft
+    - edit_parts_manual_composition
+    - generate_and_publish_parts_manual
+output_contract:
+  format: concise_documentation_workflow_receipt
+  maximum_sentences: 8
+failure_behavior:
+  missing_required_context: report_missing_evidence
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: documentation-publication-v1
+context_budget:
+  maximum_tokens: 12000
+  priorities:
+    - assembly.parts
+    - assembly.mates

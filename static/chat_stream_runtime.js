@@ -5,6 +5,24 @@
 })(typeof window !== 'undefined' ? window : globalThis, function () {
     'use strict';
 
+    function statusLabel(phase) {
+        const labels = {
+            routing: 'Routing', context: 'Inspecting assembly context',
+            generating: 'Preparing the response', executing: 'Preparing visual aids',
+            finalizing: 'Finalizing response',
+            generation_context: 'Checking the brief and previous proposal',
+            generation_catalog: 'Inspecting available equipment',
+            generation_search: 'Researching public sources',
+            generation_read: 'Reading source evidence',
+            generation_plan: 'Developing the layout plan',
+            generation_requirements: 'Checking requirements and assumptions',
+            generation_geometry: 'Generating and validating geometry',
+            generation_inspect: 'Inspecting the generated candidate',
+            generation_repair: 'Reviewing a planning issue',
+        };
+        return Object.prototype.hasOwnProperty.call(labels, phase) ? labels[phase] : 'Preparing the response';
+    }
+
     function parseEventLine(line) {
         if (!String(line || '').startsWith('data: ')) return null;
         try {
@@ -184,6 +202,7 @@
     }
 
     return {
+        statusLabel,
         parseEventLine,
         createEventGate,
         SseDecoder,

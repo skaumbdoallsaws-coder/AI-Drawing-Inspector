@@ -20,7 +20,7 @@ from .plan_settings import MINIMUM_GRID_SPACING_METERS
 
 G1_PARTITION_TOLERANCE = 1e-6
 G1_COORDINATE_PRECISION_METERS = 1e-6
-_ZONE_TYPES = frozenset(
+G1_ZONE_TYPES = frozenset(
     {
         "workcell",
         "storage",
@@ -38,6 +38,9 @@ _ZONE_TYPES = frozenset(
         "operator",
     }
 )
+
+# Backward-compatible private alias for older call sites.
+_ZONE_TYPES = G1_ZONE_TYPES
 
 
 def _stable_id(prefix: str, value: Any) -> str:
@@ -180,6 +183,103 @@ def _deterministic_grid(
     return result
 
 
+def _authored_row_stack(
+    width: float,
+    depth: float,
+    labels: Sequence[str],
+    proportions: Sequence[float],
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[
+    list[tuple[float, float, float, float]],
+    dict[str, dict[str, Any]],
+]:
+    """Compile north-to-south rows without accepting authored coordinates."""
+
+    index_by_key = {
+        str(label).casefold(): index for index, label in enumerate(labels)
+    }
+    rectangle_by_key: dict[str, tuple[float, float, float, float]] = {}
+    row_by_key: dict[str, dict[str, Any]] = {}
+    north_edge = depth
+    for row_index, row in enumerate(rows):
+        row_labels = list(row["labels"])
+        row_share = float(row["proportion"])
+        south_edge = (
+            0.0
+            if row_index == len(rows) - 1
+            else north_edge - depth * row_share
+        )
+        west_edge = 0.0
+        for column_index, label in enumerate(row_labels):
+            key = str(label).casefold()
+            department_share = float(proportions[index_by_key[key]])
+            local_width_share = department_share / row_share
+            east_edge = (
+                width
+                if column_index == len(row_labels) - 1
+                else west_edge + width * local_width_share
+            )
+            rectangle_by_key[key] = (
+                west_edge,
+                south_edge,
+                east_edge,
+                north_edge,
+            )
+            row_by_key[key] = {
+                "rowIndex": row_index,
+                "columnIndex": column_index,
+                "rowProportion": row_share,
+                "rowOrder": "north_to_south",
+            }
+            west_edge = east_edge
+        north_edge = south_edge
+    return (
+        [rectangle_by_key[str(label).casefold()] for label in labels],
+        row_by_key,
+    )
+
+
+def compile_partition_rectangles(
+    width: float,
+    depth: float,
+    partition: Mapping[str, Any],
+    labels: Sequence[str],
+) -> tuple[
+    list[tuple[float, float, float, float]],
+    dict[str, dict[str, Any]],
+]:
+    """Compile one validated coordinate-free partition inside a rectangle."""
+
+    arrangement = str(partition["arrangement"])
+    row_metadata: dict[str, dict[str, Any]] = {}
+    if arrangement == "rows":
+        rectangles = _horizontal_bands(
+            width, depth, partition["proportions"]
+        )
+    elif arrangement == "columns":
+        rectangles = _vertical_columns(
+            width, depth, partition["proportions"]
+        )
+    elif arrangement == "row_stack":
+        rectangles, row_metadata = _authored_row_stack(
+            width,
+            depth,
+            labels,
+            partition["proportions"],
+            partition["rows"],
+        )
+    else:
+        rectangles = _deterministic_grid(
+            width,
+            depth,
+            partition["proportions"],
+            partition["orientation"],
+        )
+    if len(rectangles) != int(partition["count"]):
+        raise AssertionError("partition did not produce the requested count")
+    return rectangles, row_metadata
+
+
 def g1_department_semantic_type(label: str) -> tuple[str, str]:
     normalized = re.sub(
         r"[^a-z0-9]+",
@@ -198,7 +298,14 @@ def g1_department_semantic_type(label: str) -> tuple[str, str]:
         "utilities": "utility",
         "utility": "utility",
         "service": "service",
-        "maintenance": "service",
+        # A named maintenance department is an equipment-bearing operating
+        # area. ``service`` is reserved for authored service-clearance zones,
+        # which the spatial kernel intentionally prohibits placements inside.
+        "maintenance": "workcell",
+        "keep_clear": "exclusion",
+        "no_entry": "exclusion",
+        "restricted": "exclusion",
+        "safety": "safety",
     }
     for token, zone_type in aliases.items():
         if token in normalized:
@@ -224,31 +331,43 @@ def compile_g1_department_operations(
         partition["count"]
     )
     arrangement = partition["arrangement"]
-    if arrangement == "rows":
-        rectangles = _horizontal_bands(width, depth, partition["proportions"])
-    elif arrangement == "columns":
-        rectangles = _vertical_columns(width, depth, partition["proportions"])
-    else:
-        rectangles = _deterministic_grid(
-            width,
-            depth,
-            partition["proportions"],
-            partition["orientation"],
-        )
-    if len(rectangles) != partition["count"]:
-        raise AssertionError("department partition did not produce the requested count")
+    rectangles, row_metadata = compile_partition_rectangles(
+        width, depth, partition, labels
+    )
     operations = []
     zone_ids = []
+    label_occurrences: dict[str, int] = {}
+    bounds_by_zone_id: dict[str, list[float]] = {}
     for index, (label, rectangle) in enumerate(zip(labels, rectangles, strict=True)):
         minimum_x, minimum_z, maximum_x, maximum_z = rectangle
         zone_type, semantic_type = g1_department_semantic_type(label)
         if zone_type not in _ZONE_TYPES:
             zone_type = "workcell"
+        label_key = re.sub(r"\s+", " ", label.strip()).casefold()
+        occurrence = label_occurrences.get(label_key, 0)
+        label_occurrences[label_key] = occurrence + 1
         zone_id = _stable_id(
             "zn-g1",
-            {"layoutId": layout.get("layoutId"), "index": index, "label": label},
+            {
+                "layoutId": layout.get("layoutId"),
+                "label": label_key,
+                "occurrence": occurrence,
+            },
         )
         zone_ids.append(zone_id)
+        bounds_by_zone_id[zone_id] = [
+            minimum_x,
+            minimum_z,
+            maximum_x,
+            maximum_z,
+        ]
+        partition_metadata = {
+            "arrangement": arrangement,
+            "orientation": partition["orientation"],
+            "areaProportion": partition["proportions"][index],
+            "areaSizing": partition["areaSizing"],
+        }
+        partition_metadata.update(row_metadata.get(label.casefold(), {}))
         operations.append(
             {
                 "op": "add_zone",
@@ -270,6 +389,7 @@ def compile_g1_department_operations(
                             "semanticType": semantic_type,
                             "semanticTypeEvidenceStatus": "derived",
                             "partitionAssumptions": list(partition["assumptions"]),
+                            "partition": partition_metadata,
                         }
                     },
                 },
@@ -288,12 +408,19 @@ def compile_g1_department_operations(
             "facility_containment",
             "zero_overlap",
             "area_proportions",
+            "authored_row_membership",
+            "deterministic_zone_bounds",
         ],
         "expectedSummary": {
             "departmentCount": partition["count"],
             "labels": labels,
             "zoneIds": zone_ids,
             "proportions": list(partition["proportions"]),
+            "arrangement": arrangement,
+            "rows": deepcopy(partition["rows"]),
+            "rowOrder": partition["rowOrder"],
+            "areaSizing": partition["areaSizing"],
+            "boundsByZoneId": bounds_by_zone_id,
             "inventedCorridor": False,
             "inventedSafetySeparation": False,
             "inventedExpansionReserve": False,
@@ -317,6 +444,8 @@ def _rectangle(zone: Mapping[str, Any]) -> tuple[float, float, float, float]:
 def validate_g1_department_result(
     layout: Mapping[str, Any],
     expected: Mapping[str, Any],
+    *,
+    allowed_extra_zone_ids: Sequence[str] = (),
 ) -> dict[str, Any]:
     expected_ids = list(expected["zoneIds"])
     zones_by_id = {
@@ -332,7 +461,11 @@ def validate_g1_department_result(
             details={"missingZoneIds": missing},
         )
     zones = [zones_by_id[item] for item in expected_ids]
-    unexpected = sorted(set(zones_by_id) - set(expected_ids))
+    unexpected = sorted(
+        set(zones_by_id)
+        - set(expected_ids)
+        - {str(item) for item in allowed_extra_zone_ids}
+    )
     labels = [str(item.get("label")) for item in zones]
     rectangles = [_rectangle(item) for item in zones]
     plan = layout["extensions"]["facilityPlan"]
@@ -357,6 +490,22 @@ def validate_g1_department_result(
     shares = [area / total_area for area in areas]
     expected_shares = list(expected["proportions"])
     share_errors = [abs(actual - planned) for actual, planned in zip(shares, expected_shares, strict=True)]
+    expected_bounds = expected.get("boundsByZoneId")
+    boundary_errors: list[float] = []
+    if isinstance(expected_bounds, Mapping):
+        for zone_id, rectangle in zip(expected_ids, rectangles, strict=True):
+            planned = expected_bounds.get(zone_id)
+            if not isinstance(planned, Sequence) or len(planned) != 4:
+                boundary_errors.append(float("inf"))
+                continue
+            boundary_errors.extend(
+                abs(actual - float(target))
+                for actual, target in zip(rectangle, planned, strict=True)
+            )
+    maximum_boundary_error = max(boundary_errors, default=0.0)
+    geometry_matches = (
+        maximum_boundary_error <= G1_COORDINATE_PRECISION_METERS
+    )
     contained = all(
         minimum_x >= -G1_PARTITION_TOLERANCE
         and minimum_z >= -G1_PARTITION_TOLERANCE
@@ -370,6 +519,7 @@ def validate_g1_department_result(
         and not overlaps
         and contained
         and max(share_errors, default=0.0) <= G1_PARTITION_TOLERANCE
+        and geometry_matches
         and abs(sum(areas) - total_area) <= area_tolerance
     )
     return {
@@ -383,6 +533,12 @@ def validate_g1_department_result(
         "areaShares": shares,
         "expectedAreaShares": expected_shares,
         "maximumShareError": max(share_errors, default=0.0),
+        "arrangement": expected.get("arrangement"),
+        "rows": deepcopy(expected.get("rows")),
+        "rowOrder": expected.get("rowOrder"),
+        "areaSizing": expected.get("areaSizing"),
+        "geometryMatches": geometry_matches,
+        "maximumBoundaryErrorMeters": maximum_boundary_error,
         "coversFacilityArea": abs(sum(areas) - total_area) <= area_tolerance,
         "facilityAreaError": abs(sum(areas) - total_area),
         "facilityAreaTolerance": area_tolerance,
@@ -394,6 +550,7 @@ __all__ = [
     "G1_COORDINATE_PRECISION_METERS",
     "compile_g1_department_operations",
     "compile_g1_envelope_operations",
+    "compile_partition_rectangles",
     "default_g1_department_labels",
     "g1_department_semantic_type",
     "validate_g1_department_result",

@@ -149,6 +149,19 @@ def _normalize_direction(values: tuple[float, float, float]) -> tuple[float, ...
     return tuple(value / magnitude for value in values)
 
 
+def _normalize_source_transform(
+    values: tuple[float, ...] | list[float] | None,
+) -> list[float] | None:
+    if values is None:
+        return None
+    if len(values) != 16:
+        raise ThumbnailRenderError("Source transform must contain 16 values")
+    normalized = [float(value) for value in values]
+    if not all(math.isfinite(value) for value in normalized):
+        raise ThumbnailRenderError("Source transform must be finite")
+    return normalized
+
+
 def _renderer_html(config: dict[str, Any]) -> bytes:
     encoded_config = json.dumps(
         config, ensure_ascii=True, separators=(",", ":"), sort_keys=True
@@ -199,6 +212,12 @@ def _renderer_html(config: dict[str, Any]) -> bytes:
       const gltf = await loader.loadAsync("{INPUT_ENDPOINT}");
       const root = gltf && gltf.scene;
       if (!root) throw new Error("GLB_SCENE_MISSING");
+
+      if (config.sourceTransform) {{
+        const sourceTransform = new THREE.Matrix4();
+        sourceTransform.fromArray(config.sourceTransform);
+        root.applyMatrix4(sourceTransform);
+      }}
 
       root.updateMatrixWorld(true);
       root.traverse((object) => {{
@@ -522,6 +541,7 @@ def render_industrial_asset_thumbnail(
     maximum_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
     browser_path: Path | None = None,
     timeout_ms: int = 120_000,
+    source_transform: tuple[float, ...] | list[float] | None = None,
 ) -> dict[str, Any]:
     if not MIN_DIMENSION <= width <= MAX_DIMENSION:
         raise ThumbnailRenderError(
@@ -535,6 +555,7 @@ def render_industrial_asset_thumbnail(
         raise ThumbnailRenderError("Field of view must be between 15 and 70 degrees")
     background_rgb = _parse_hex_color(background)
     normalized_direction = _normalize_direction(camera_direction)
+    normalized_source_transform = _normalize_source_transform(source_transform)
     source = validate_glb_container(
         input_path, maximum_input_bytes=maximum_input_bytes
     )
@@ -554,6 +575,7 @@ def render_industrial_asset_thumbnail(
         "cameraDirection": list(normalized_direction),
         "fovDegrees": float(fov_degrees),
         "height": height,
+        "sourceTransform": normalized_source_transform,
         "width": width,
     }
     renderer_page = _renderer_html(render_config)
@@ -765,6 +787,7 @@ def render_industrial_asset_thumbnail(
         "height": height,
         "loaderSha256": loader_hash,
         "sourceSha256": source["sha256"],
+        "sourceTransform": normalized_source_transform,
         "threeModuleSha256": module_hash,
         "width": width,
     }
@@ -816,6 +839,7 @@ def render_industrial_asset_thumbnail(
             ).hexdigest(),
             "renderedTriangles": render_result["renderedTriangles"],
             "runnerSha256": runner_hash,
+            "sourceTransform": normalized_source_transform,
             "threeModuleSha256": module_hash,
             "threeRevision": render_result["threeRevision"],
         },

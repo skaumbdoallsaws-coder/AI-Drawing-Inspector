@@ -1,0 +1,24 @@
+schema_version: 1
+id: publish-parts-manual
+version: 1.0.0
+description: Plan, compose, validate, and publish revision-bound illustrated parts manuals.
+agents:
+  - sage
+workflows:
+  - documentation-publication
+modes:
+  - training
+requires_context: []
+optional_context:
+  - assembly.parts
+  - assembly.mates
+allowed_tools:
+  - propose_parts_manual_structure
+  - generate_parts_manual_draft
+  - edit_parts_manual_composition
+  - generate_and_publish_parts_manual
+side_effects: []
+depends_on: []
+conflicts_with: []
+composable_with: []
+evidence_policy: computed_fields_only

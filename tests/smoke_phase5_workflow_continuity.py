@@ -314,7 +314,7 @@ def run() -> int:
         record("asset_change_invalidated_workflow", changed.get("workflow_state") is None, changed)
         record(
             "asset_invalidation_reported",
-            changed.get("workflow_state_event", {}).get("event") == "invalidated_asset_change",
+            changed.get("workflow_state_event", {}).get("event") == "scope_changed",
             changed,
         )
         record(

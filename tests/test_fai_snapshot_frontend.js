@@ -18,9 +18,16 @@ check('measured input commits on input instead of blur only',
     && html.includes("_commitFaiInputValue(c, 'measured', e.target.value)"));
 check('focused FAI input becomes the selected characteristic',
   html.includes("input.addEventListener('focus', () => _faiSelectCharacteristic(c.key))"));
+const sendHandlerStart = html.indexOf('async function handleAgentSend(');
+const sendFlushIndex = html.indexOf('_flushPendingFaiEdits();', sendHandlerStart);
+const sendContextIndex = html.indexOf(
+  'const inspCtx = buildInspectionContext();',
+  sendHandlerStart,
+);
 check('send flushes table editors before request construction',
-  html.indexOf('_flushPendingFaiEdits();', html.indexOf('async function handleAgentSend()'))
-    < html.indexOf('const inspCtx = buildInspectionContext();', html.indexOf('async function handleAgentSend()')));
+  sendHandlerStart >= 0
+    && sendFlushIndex > sendHandlerStart
+    && sendContextIndex > sendFlushIndex);
 check('inspection attachment carries one immutable FAI snapshot',
   html.includes('att.inspection.fai_snapshot = faiSnapshot')
     && html.includes('att.inspection.fai_characteristics = faiSnapshot.rows'));

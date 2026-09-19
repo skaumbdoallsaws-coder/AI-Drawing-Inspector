@@ -737,6 +737,362 @@ def create_facility_layout_router(
             )
         )
 
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/"
+        "navigation/manual-path/validate"
+    )
+    async def validate_manual_navigation_path(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        blocked = _feature_block(feature_gate, "navigation_manual")
+        if blocked is not None:
+            return blocked
+        try:
+            payload = _body_mapping(body)
+            navigation_request = _body_mapping(payload.get("request"))
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.validate_manual_navigation_path(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                navigation_request,
+                operations=operations,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/"
+        "navigation/snapshots/compile"
+    )
+    async def compile_navigation_snapshot(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        blocked = _feature_block(feature_gate, "navigation_snapshot")
+        if blocked is not None:
+            return blocked
+        try:
+            payload = _body_mapping(body)
+            navigation_request = _body_mapping(payload.get("request"))
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.compile_navigation_snapshot(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                navigation_request,
+                operations=operations,
+            )
+        )
+
+    @router.get(
+        "/api/facility-layouts/{site_id}/{layout_id}/"
+        "navigation/packages/{package_id}"
+    )
+    async def get_navigation_snapshot_package(
+        site_id: str,
+        layout_id: str,
+        package_id: str,
+        request: Request,
+    ):
+        blocked = _feature_block(feature_gate, "navigation_snapshot")
+        if blocked is not None:
+            return blocked
+        return await _thread_result(
+            lambda: service.get_navigation_snapshot_package(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                package_id,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/"
+        "navigation/journeys/plan"
+    )
+    async def plan_actor_journey(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        blocked = _feature_block(feature_gate, "navigation_pedestrian")
+        if blocked is not None:
+            return blocked
+        try:
+            payload = _body_mapping(body)
+            journey_request = _body_mapping(payload.get("request"))
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.plan_actor_journey(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                journey_request,
+                operations=operations,
+            )
+        )
+
+    @router.get(
+        "/api/facility-layouts/{site_id}/{layout_id}/"
+        "navigation/journeys/{journey_solution_id}"
+    )
+    async def get_actor_journey(
+        site_id: str,
+        layout_id: str,
+        journey_solution_id: str,
+        request: Request,
+    ):
+        blocked = _feature_block(feature_gate, "navigation_pedestrian")
+        if blocked is not None:
+            return blocked
+        return await _thread_result(
+            lambda: service.get_actor_journey(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                journey_solution_id,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/"
+        "navigation/handoffs/compile"
+    )
+    async def compile_navigation_handoff(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        blocked = _feature_block(feature_gate, "navigation_handoff")
+        if blocked is not None:
+            return blocked
+        try:
+            payload = _body_mapping(body)
+            handoff_request = _body_mapping(payload.get("request"))
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.compile_navigation_handoff(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                handoff_request,
+                operations=operations,
+            )
+        )
+
+    @router.get(
+        "/api/facility-layouts/{site_id}/{layout_id}/"
+        "navigation/handoffs/{handoff_result_id}"
+    )
+    async def get_navigation_handoff(
+        site_id: str,
+        layout_id: str,
+        handoff_result_id: str,
+        request: Request,
+    ):
+        blocked = _feature_block(feature_gate, "navigation_handoff")
+        if blocked is not None:
+            return blocked
+        return await _thread_result(
+            lambda: service.get_navigation_handoff(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                handoff_result_id,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/"
+        "navigation/activity-scenarios"
+    )
+    async def build_navigation_activity_scenario(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        blocked = _feature_block(feature_gate, "navigation_multi_actor")
+        if blocked is not None:
+            return blocked
+        try:
+            payload = _body_mapping(body)
+            activity_request = _body_mapping(payload.get("request"))
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.build_navigation_activity_scenario(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                activity_request,
+                operations=operations,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/motion-packages"
+    )
+    async def create_forklift_motion_package(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        blocked = _feature_block(feature_gate, "routing")
+        if blocked is not None:
+            return blocked
+        try:
+            payload = _body_mapping(body)
+            motion_request = _body_mapping(payload.get("request"))
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.build_forklift_motion_package(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                motion_request,
+                operations=operations,
+            )
+        )
+
+    @router.get(
+        "/api/facility-layouts/{site_id}/{layout_id}/motion-packages/{package_id}"
+    )
+    async def get_forklift_motion_package(
+        site_id: str,
+        layout_id: str,
+        package_id: str,
+        request: Request,
+        active_revision: str | None = Query(None, alias="activeRevision"),
+    ):
+        blocked = _feature_block(feature_gate, "routing")
+        if blocked is not None:
+            return blocked
+        return _result(
+            lambda: service.get_forklift_motion_package(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                package_id,
+                active_revision=active_revision,
+            )
+        )
+
+    @router.post(
+        "/api/facility-layouts/{site_id}/{layout_id}/activity-scenarios"
+    )
+    async def create_prototype_activity_scenario(
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Any = Body(...),
+    ):
+        blocked = _feature_block(feature_gate, "routing")
+        if blocked is not None:
+            return blocked
+        try:
+            payload = _body_mapping(body)
+            scenario_request = _body_mapping(payload.get("request"))
+            operations = payload.get("operations", [])
+            if not isinstance(operations, list):
+                raise FacilityValidationError(
+                    "invalid_request_body",
+                    "operations must be an array.",
+                )
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        return await _thread_result(
+            lambda: service.build_prototype_activity_scenario(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                str(payload.get("baseRevision") or ""),
+                scenario_request,
+                operations=operations,
+            )
+        )
+
+    @router.get(
+        "/api/facility-layouts/{site_id}/{layout_id}/"
+        "activity-scenarios/{scenario_id}"
+    )
+    async def get_prototype_activity_scenario(
+        site_id: str,
+        layout_id: str,
+        scenario_id: str,
+        request: Request,
+        active_revision: str | None = Query(None, alias="activeRevision"),
+    ):
+        blocked = _feature_block(feature_gate, "routing")
+        if blocked is not None:
+            return blocked
+        return _result(
+            lambda: service.get_prototype_activity_scenario(
+                principal_resolver(request),
+                site_id,
+                layout_id,
+                scenario_id,
+                active_revision=active_revision,
+            )
+        )
+
     @router.post("/api/facility-layouts/{site_id}/{layout_id}/archive")
     async def archive_layout(
         site_id: str,

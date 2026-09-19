@@ -1,0 +1,32 @@
+schema_version: 1
+skill_id: analyze-facility-layout
+version: 1.4.0
+intents:
+  - analyze_facility_layout
+  - compare_facility_entities
+  - summarize_facility_zones
+  - visualize_facility_data
+  - analyze_actor_navigation
+required_evidence:
+  - facility_layout_digest
+forbidden_context:
+  - browser.facility_layout_digest
+  - browser.facility_layout_state
+  - browser.facility_layout_evidence
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request: []
+output_contract:
+  format: rich_facility_layout_analysis
+  maximum_sentences: 12
+failure_behavior:
+  missing_required_context: report_missing_evidence
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: facility-layout-analysis-v1
+context_budget:
+  maximum_tokens: 12000
+  priorities:
+    - facility_layout.digest
+    - facility_layout.evidence

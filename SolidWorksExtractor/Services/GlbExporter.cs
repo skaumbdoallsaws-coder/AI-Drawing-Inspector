@@ -1659,8 +1659,11 @@ namespace SolidWorksExtractor.Services
                 colorIdx++;
             }
 
-            // Extract tessellation for each component
+            // Extract tessellation for each component. Repeated facility layouts
+            // often reuse the same rack/forklift parts hundreds of times, so cache
+            // local part meshes by file/config and only apply each instance transform.
             var meshes = new List<MeshData>();
+            var localMeshCache = new Dictionary<string, MeshData>(StringComparer.OrdinalIgnoreCase);
             foreach (object obj in allComponents)
             {
                 IComponent2 comp = (IComponent2)obj;
@@ -1673,7 +1676,7 @@ namespace SolidWorksExtractor.Services
                 string fn = Path.GetFileName(path)?.ToLower();
                 if (string.IsNullOrEmpty(fn) || !partToColorIndex.ContainsKey(fn)) continue;
 
-                MeshData mesh = ExtractComponentMesh(comp, fn, partToColorIndex[fn]);
+                MeshData mesh = ExtractComponentMeshCached(comp, fn, partToColorIndex[fn], localMeshCache);
                 if (mesh != null)
                     meshes.Add(mesh);
             }
@@ -1706,6 +1709,275 @@ namespace SolidWorksExtractor.Services
         /// <summary>
         /// Extract tessellation data for a single component, transformed into assembly space.
         /// </summary>
+        private MeshData ExtractComponentMeshCached(
+            IComponent2 comp,
+            string partFilename,
+            int paletteIndex,
+            Dictionary<string, MeshData> localMeshCache)
+        {
+            if (comp == null) return null;
+            string path = comp.GetPathName();
+            string configName = "";
+            try { configName = comp.ReferencedConfiguration ?? ""; } catch { }
+            string cacheKey = (path ?? partFilename) + "|" + configName;
+
+            if (!localMeshCache.TryGetValue(cacheKey, out MeshData localMesh))
+            {
+                IModelDoc2 refDoc = (IModelDoc2)comp.GetModelDoc2();
+                if (refDoc == null)
+                {
+                    Console.WriteLine($"    Warning: '{comp.Name2}' is lightweight, skipping GLB mesh");
+                    return null;
+                }
+
+                if (!string.IsNullOrWhiteSpace(configName))
+                {
+                    try { refDoc.ShowConfiguration2(configName); }
+                    catch { /* best effort: component context may already be correct */ }
+                }
+
+                IPartDoc partDoc = refDoc as IPartDoc;
+                if (partDoc == null) return null;
+
+                localMesh = ExtractLocalPartMesh(refDoc, partDoc, partFilename, configName);
+                if (localMesh == null) return null;
+                localMeshCache[cacheKey] = localMesh;
+                Console.WriteLine($"    Cached {partFilename} [{(string.IsNullOrWhiteSpace(configName) ? "default" : configName)}]: {localMesh.Positions.Length / 3:N0} verts, {localMesh.Indices.Length / 3:N0} tris");
+            }
+
+            MeshData transformed = TransformLocalMeshForComponent(localMesh, comp, partFilename, paletteIndex);
+            if (transformed != null)
+                Console.WriteLine($"    {comp.Name2}: {transformed.Positions.Length / 3:N0} verts, {transformed.Indices.Length / 3:N0} tris");
+            return transformed;
+        }
+
+        private MeshData ExtractLocalPartMesh(IModelDoc2 refDoc, IPartDoc partDoc, string partFilename, string configName)
+        {
+            // Ensure sheet metal parts are in folded state (suppress Flat Pattern if active)
+            IFeature flatPatternFeature = null;
+            bool needRestore = false;
+            try
+            {
+                IFeature feat = (IFeature)refDoc.FirstFeature();
+                while (feat != null)
+                {
+                    if (feat.GetTypeName2() == "FlatPattern")
+                    {
+                        if (!feat.IsSuppressed())
+                        {
+                            flatPatternFeature = feat;
+                            feat.SetSuppression2(
+                                (int)swFeatureSuppressionAction_e.swSuppressFeature,
+                                (int)swInConfigurationOpts_e.swThisConfiguration, null);
+                            refDoc.ForceRebuild3(false);
+                            needRestore = true;
+                        }
+                        break;
+                    }
+                    feat = (IFeature)feat.GetNextFeature();
+                }
+            }
+            catch { /* proceed without flat pattern handling */ }
+
+            var taggedBodies = EnumerateVisibleBodies(partDoc);
+            if (taggedBodies.Count == 0)
+            {
+                if (needRestore) RestoreFlatPattern(flatPatternFeature, refDoc);
+                return null;
+            }
+
+            var allPositions = new List<float>();
+            var allNormals = new List<float>();
+            var allIndices = new List<uint>();
+            uint indexOffset = 0;
+            bool sawSolid = false;
+            bool sawSheet = false;
+
+            foreach (var tagged in taggedBodies)
+            {
+                IBody2 body = tagged.Body;
+                if (body == null) continue;
+                if (tagged.IsSheet) sawSheet = true;
+                else sawSolid = true;
+
+                IFace2 face = (IFace2)body.GetFirstFace();
+                while (face != null)
+                {
+                    float[] triVerts = null;
+                    float[] triNorms = null;
+                    try
+                    {
+                        triVerts = ConvertToFloatArray(face.GetTessTriangles(true));
+                        triNorms = ConvertToFloatArray(face.GetTessNorms());
+                    }
+                    catch { /* skip face */ }
+
+                    if (triVerts == null || triVerts.Length < 9)
+                    {
+                        face = (IFace2)face.GetNextFace();
+                        continue;
+                    }
+
+                    int vertexCount = triVerts.Length / 3;
+                    if (triNorms == null || triNorms.Length != triVerts.Length)
+                    {
+                        triNorms = new float[triVerts.Length];
+                        for (int i = 0; i < vertexCount; i++)
+                        {
+                            triNorms[i * 3 + 0] = 0f;
+                            triNorms[i * 3 + 1] = 1f;
+                            triNorms[i * 3 + 2] = 0f;
+                        }
+                    }
+
+                    for (int v = 0; v < vertexCount; v++)
+                    {
+                        allPositions.Add(triVerts[v * 3 + 0]);
+                        allPositions.Add(triVerts[v * 3 + 1]);
+                        allPositions.Add(triVerts[v * 3 + 2]);
+
+                        float nx = triNorms[v * 3 + 0];
+                        float ny = triNorms[v * 3 + 1];
+                        float nz = triNorms[v * 3 + 2];
+                        double len = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+                        if (len > 1e-10)
+                        {
+                            allNormals.Add((float)(nx / len));
+                            allNormals.Add((float)(ny / len));
+                            allNormals.Add((float)(nz / len));
+                        }
+                        else
+                        {
+                            allNormals.Add(0f);
+                            allNormals.Add(1f);
+                            allNormals.Add(0f);
+                        }
+                    }
+
+                    for (uint i = 0; i < (uint)vertexCount; i++)
+                        allIndices.Add(indexOffset + i);
+                    indexOffset += (uint)vertexCount;
+
+                    face = (IFace2)face.GetNextFace();
+                }
+            }
+
+            if (needRestore)
+                RestoreFlatPattern(flatPatternFeature, refDoc);
+
+            if (allPositions.Count == 0) return null;
+
+            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+            for (int i = 0; i < allPositions.Count; i += 3)
+            {
+                float x = allPositions[i], y = allPositions[i + 1], z = allPositions[i + 2];
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (y < minY) minY = y; if (y > maxY) maxY = y;
+                if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+            }
+
+            return new MeshData
+            {
+                Name = string.IsNullOrWhiteSpace(configName) ? partFilename : $"{partFilename}:{configName}",
+                PartFilename = partFilename,
+                PaletteIndex = 0,
+                Positions = allPositions.ToArray(),
+                Normals = allNormals.ToArray(),
+                Indices = allIndices.ToArray(),
+                BoundsMin = new float[] { minX, minY, minZ },
+                BoundsMax = new float[] { maxX, maxY, maxZ },
+                IsSheetBody = sawSheet && !sawSolid
+            };
+        }
+
+        private MeshData TransformLocalMeshForComponent(MeshData localMesh, IComponent2 comp, string partFilename, int paletteIndex)
+        {
+            if (localMesh == null) return null;
+
+            double[] xform = null;
+            try
+            {
+                IMathTransform mathXform = comp.Transform2;
+                if (mathXform != null)
+                    xform = (double[])mathXform.ArrayData;
+            }
+            catch { /* use identity if transform unavailable */ }
+
+            var positions = new float[localMesh.Positions.Length];
+            var normals = new float[localMesh.Normals.Length];
+            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+
+            for (int i = 0; i < localMesh.Positions.Length; i += 3)
+            {
+                float px = localMesh.Positions[i];
+                float py = localMesh.Positions[i + 1];
+                float pz = localMesh.Positions[i + 2];
+
+                float tx = px, ty = py, tz = pz;
+                if (xform != null && xform.Length >= 13)
+                {
+                    double scale = xform[12];
+                    double rx = xform[0] * px + xform[3] * py + xform[6] * pz;
+                    double ry = xform[1] * px + xform[4] * py + xform[7] * pz;
+                    double rz = xform[2] * px + xform[5] * py + xform[8] * pz;
+                    tx = (float)(rx * scale + xform[9]);
+                    ty = (float)(ry * scale + xform[10]);
+                    tz = (float)(rz * scale + xform[11]);
+                }
+                positions[i] = tx;
+                positions[i + 1] = ty;
+                positions[i + 2] = tz;
+
+                if (tx < minX) minX = tx; if (tx > maxX) maxX = tx;
+                if (ty < minY) minY = ty; if (ty > maxY) maxY = ty;
+                if (tz < minZ) minZ = tz; if (tz > maxZ) maxZ = tz;
+            }
+
+            for (int i = 0; i < localMesh.Normals.Length; i += 3)
+            {
+                float nx = localMesh.Normals[i];
+                float ny = localMesh.Normals[i + 1];
+                float nz = localMesh.Normals[i + 2];
+
+                float tx = nx, ty = ny, tz = nz;
+                if (xform != null && xform.Length >= 9)
+                {
+                    double rnx = xform[0] * nx + xform[3] * ny + xform[6] * nz;
+                    double rny = xform[1] * nx + xform[4] * ny + xform[7] * nz;
+                    double rnz = xform[2] * nx + xform[5] * ny + xform[8] * nz;
+                    double len = Math.Sqrt(rnx * rnx + rny * rny + rnz * rnz);
+                    if (len > 1e-10)
+                    {
+                        tx = (float)(rnx / len);
+                        ty = (float)(rny / len);
+                        tz = (float)(rnz / len);
+                    }
+                    else
+                    {
+                        tx = 0f; ty = 1f; tz = 0f;
+                    }
+                }
+                normals[i] = tx;
+                normals[i + 1] = ty;
+                normals[i + 2] = tz;
+            }
+
+            return new MeshData
+            {
+                Name = comp.Name2 ?? localMesh.Name,
+                PartFilename = partFilename,
+                PaletteIndex = paletteIndex,
+                Positions = positions,
+                Normals = normals,
+                Indices = localMesh.Indices,
+                BoundsMin = new float[] { minX, minY, minZ },
+                BoundsMax = new float[] { maxX, maxY, maxZ },
+                IsSheetBody = localMesh.IsSheetBody
+            };
+        }
+
         private MeshData ExtractComponentMesh(IComponent2 comp, string partFilename, int paletteIndex)
         {
             IModelDoc2 refDoc = (IModelDoc2)comp.GetModelDoc2();

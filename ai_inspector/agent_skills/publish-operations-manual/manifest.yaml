@@ -1,0 +1,22 @@
+schema_version: 1
+id: publish-operations-manual
+version: 1.0.0
+description: Generate and explicitly publish evidence-backed Operations and Maintenance Manual review documents.
+agents:
+  - sage
+workflows:
+  - documentation-publication
+modes:
+  - training
+requires_context: []
+optional_context:
+  - assembly.parts
+  - assembly.mates
+allowed_tools:
+  - generate_operations_manual_draft
+  - publish_operations_manual
+side_effects: []
+depends_on: []
+conflicts_with: []
+composable_with: []
+evidence_policy: source_bound_prototype

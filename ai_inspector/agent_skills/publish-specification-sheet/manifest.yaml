@@ -1,0 +1,21 @@
+schema_version: 1
+id: publish-specification-sheet
+version: 1.0.0
+description: Generate and explicitly publish an evidence-backed one-page product Specification Sheet.
+agents:
+  - sage
+workflows:
+  - documentation-publication
+modes:
+  - training
+requires_context: []
+optional_context:
+  - assembly.parts
+allowed_tools:
+  - generate_specification_sheet_draft
+  - publish_specification_sheet
+side_effects: []
+depends_on: []
+conflicts_with: []
+composable_with: []
+evidence_policy: approved_claims_only

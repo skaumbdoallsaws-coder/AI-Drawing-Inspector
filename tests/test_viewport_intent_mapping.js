@@ -78,6 +78,95 @@ for (const item of authorizationFixture.cases || []) {
         JSON.stringify({ expected, actual }));
 }
 
+// Facility turns carry their own action boundary. Object-transform language
+// must not be reinterpreted as an Assembly camera command in the browser.
+{
+    const preserve = 'Move the selected machine 10 ft east and preserve its rotation.';
+    check('AUTH facility move does not authorize viewport rotation',
+        _resolveViewportRotateIntent(preserve) === null);
+    check('AUTH preserve rotation is not a generic viewport command',
+        _messageExplicitlyRequestsViewportChange(preserve) === false);
+
+    const readOnly = _enforceFacilityChatToolBoundary([
+        { name: 'ui_actions', args: { workspace: 'assembly', actions: [{ type: 'rotate_view' }] } },
+        { name: 'build_facility_layout_preview', args: {} },
+        { name: 'generate_facility_departments_draft', args: {} },
+        { name: 'inspect_facility_semantics', args: {} },
+        { name: 'present_chat_table', args: {} },
+    ], { facility_action_mode: 'READ_ONLY' });
+    check('AUTH facility read-only keeps analysis and presentation only',
+        readOnly.mode === 'READ_ONLY'
+        && readOnly.toolCalls.map(item => item.name).join(',')
+            === 'inspect_facility_semantics,present_chat_table',
+        JSON.stringify(readOnly));
+
+    const preview = _enforceFacilityChatToolBoundary([
+        { name: 'build_facility_layout_preview', args: {} },
+        { name: 'preview_facility_move', args: {} },
+        { name: 'ui_actions', args: { workspace: 'assembly', actions: [{ type: 'rotate_view' }] } },
+    ], { facility_runtime_policy: { mode: 'PREVIEW' } });
+    check('AUTH facility preview permits only Facility preview action',
+        preview.mode === 'PREVIEW'
+        && preview.toolCalls.length === 1
+        && preview.toolCalls[0].name === 'build_facility_layout_preview',
+        JSON.stringify(preview));
+
+    const g1Preview = _enforceFacilityChatToolBoundary([
+        { name: 'generate_facility_departments_draft', args: { facility_envelope: {} } },
+        { name: 'build_facility_layout_preview', args: {} },
+        { name: 'ui_actions', args: { workspace: 'assembly', actions: [{ type: 'rotate_view' }] } },
+    ], {
+        facility_runtime_policy: {
+            mode: 'PREVIEW',
+            allowedToolNames: ['generate_facility_departments_draft'],
+        },
+    });
+    check('AUTH G1 preview keeps only the explicitly authorized generation tool',
+        g1Preview.mode === 'PREVIEW'
+        && g1Preview.toolCalls.length === 1
+        && g1Preview.toolCalls[0].name === 'generate_facility_departments_draft',
+        JSON.stringify(g1Preview));
+
+    const designPreview = _enforceFacilityChatToolBoundary([
+        { name: 'update_facility_design_brief', args: { target_labels: ['Main Boulevard'] } },
+        { name: 'run_facility_design_preview', args: { mode: 'production_sage' } },
+        { name: 'apply_facility_design_proposal_draft', args: {} },
+        { name: 'ui_actions', args: { workspace: 'assembly', actions: [{ type: 'rotate_view' }] } },
+    ], {
+        facility_runtime_policy: {
+            mode: 'PREVIEW',
+            allowedToolNames: [
+                'update_facility_design_brief',
+                'run_facility_design_preview',
+            ],
+        },
+    });
+    check('AUTH Facility design preview keeps its exact ordered tool pair',
+        designPreview.mode === 'PREVIEW'
+        && designPreview.toolCalls.map(item => item.name).join(',')
+            === 'update_facility_design_brief,run_facility_design_preview',
+        JSON.stringify(designPreview));
+
+    const exactMove = _enforceFacilityChatToolBoundary([
+        { name: 'build_facility_layout_preview', args: {} },
+        { name: 'preview_facility_move', args: {
+            use_current_selection: true,
+            direction: 'east', distance: 10, unit: 'ft',
+            preserve_rotation: true,
+        } },
+        { name: 'ui_actions', args: { workspace: 'assembly', actions: [{ type: 'rotate_view' }] } },
+    ], {
+        facility_runtime_policy: {
+            mode: 'PREVIEW', preciseTranslationAuthorized: true,
+        },
+    });
+    check('AUTH exact Facility move excludes camera and whole-layout preview',
+        exactMove.mode === 'PREVIEW'
+        && exactMove.toolCalls.length === 1
+        && exactMove.toolCalls[0].name === 'preview_facility_move',
+        JSON.stringify(exactMove));
+}
+
 // 1. "show the pin joint" -> highlight only, no play_motion
 {
     const r = _applyClassifiedViewportIntentToToolCalls('show the pin joint', [], vi({

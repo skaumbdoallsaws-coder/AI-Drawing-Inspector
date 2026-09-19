@@ -3,6 +3,8 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 import server
 
 
@@ -51,6 +53,49 @@ def test_non_sage_agents_remain_on_anthropic(monkeypatch):
     assert config.model == server.SAGE_ANTHROPIC_MODEL_DEFAULT
 
 
+def test_facility_model_mismatch_fails_before_api_key_or_provider_client(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv(
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_ANTHROPIC_MODEL", raising=False
+    )
+    monkeypatch.setenv("INSPECTORPRO_SAGE_ANTHROPIC_MODEL", "claude-opus-5")
+
+    with pytest.raises(server.HTTPException) as exc:
+        server._sage_answer_provider_config(
+            "deviation-analyst", active_mode="facility_layout"
+        )
+
+    assert exc.value.detail["error"]["code"] == "facility_model_mismatch"
+
+
+def test_facility_scoped_model_isolated_from_shared_sage_override(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+    monkeypatch.setenv("INSPECTORPRO_SAGE_ANTHROPIC_MODEL", "claude-opus-5")
+    monkeypatch.setenv(
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_ANTHROPIC_MODEL",
+        server.SAGE_ANTHROPIC_MODEL_DEFAULT,
+    )
+
+    config = server._sage_answer_provider_config(
+        "deviation-analyst", active_mode="facility_layout"
+    )
+
+    assert config.provider == "anthropic"
+    assert config.model == server.SAGE_ANTHROPIC_MODEL_DEFAULT
+
+
+def test_facility_skill_incompatibility_fails_before_provider(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+    monkeypatch.setattr(server, "_facility_skill_compatible_models", lambda: ("gpt",))
+
+    with pytest.raises(server.HTTPException) as exc:
+        server._sage_answer_provider_config(
+            "deviation-analyst", active_mode="facility_layout"
+        )
+
+    assert exc.value.detail["error"]["code"] == "facility_model_mismatch"
+
+
 def test_openai_input_preserves_history_text_and_images():
     payload = server._openai_responses_input([
         {"role": "user", "content": "Earlier question"},
@@ -69,6 +114,42 @@ def test_openai_input_preserves_history_text_and_images():
     assert "[assistant]" in content[0]["text"]
     assert any(part["type"] == "input_image" for part in content)
     assert any("What is the impact?" in part.get("text", "") for part in content)
+
+
+def test_openai_input_preserves_trusted_facility_tool_observations():
+    messages = [{
+        "role": "user",
+        "content": [{
+            "type": "text",
+            "text": "What is the exact department area?",
+        }],
+    }]
+    server._append_facility_tool_results_to_messages(
+        messages,
+        [{
+            "tool": "inspect_facility_semantics",
+            "arguments": {"view": "department_metrics"},
+            "status": "succeeded",
+            "result": {
+                "authoritative": True,
+                "evidenceClass": "derived",
+                "grossAreaM2": 100.0,
+            },
+        }],
+        round_index=1,
+    )
+
+    payload = server._openai_responses_input(messages)
+    text = "\n".join(
+        part.get("text", "")
+        for part in payload[0]["content"]
+        if part.get("type") == "input_text"
+    )
+
+    assert "What is the exact department area?" in text
+    assert '<trusted_facility_tool_results round="1">' in text
+    assert '"authoritative":true' in text
+    assert '"evidenceClass":"derived"' in text
 
 
 def test_openai_response_normalizes_text_tool_calls_and_usage():
@@ -104,6 +185,7 @@ def test_openai_adapter_uses_responses_contract_without_network():
             "description": "Highlight parts.",
             "input_schema": {"type": "object", "properties": {}, "required": []},
         }],
+        required_tool_name="highlight_parts",
         reasoning_effort="low",
     ))
 
@@ -111,4 +193,8 @@ def test_openai_adapter_uses_responses_contract_without_network():
     assert captured["model"] == "gpt-5.6-sol"
     assert captured["reasoning"] == {"effort": "low"}
     assert captured["tools"][0]["type"] == "function"
+    assert captured["tool_choice"] == {
+        "type": "function",
+        "name": "highlight_parts",
+    }
     assert server._accumulate_response_text(response) == "Grounded answer."

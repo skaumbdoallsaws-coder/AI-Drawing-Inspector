@@ -47,6 +47,9 @@ namespace SolidWorksExtractor.Models
         /// <summary>Export colored GLB 3D model for assembly?</summary>
         public bool ExportGlb { get; set; } = false;
 
+        /// <summary>Use SolidWorks' native Save As exporter for GLB instead of custom tessellation?</summary>
+        public bool NativeGlb { get; set; } = false;
+
         /// <summary>Export per-feature colored GLB for a single part?</summary>
         public bool ExportPartGlb { get; set; } = false;
 

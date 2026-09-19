@@ -30,7 +30,11 @@ def run() -> int:
 
     def check(name, ok, detail=None):
         result["checks"][name] = {"ok": bool(ok), "detail": detail}
-        print(f"{'PASS' if ok else 'FAIL'} {name}" + (f" :: {detail}" if not ok else ""))
+        suffix = ""
+        if not ok:
+            safe_detail = str(detail).encode("ascii", "backslashreplace").decode("ascii")
+            suffix = f" :: {safe_detail}"
+        print(f"{'PASS' if ok else 'FAIL'} {name}{suffix}")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -163,6 +167,11 @@ def run() -> int:
                 return rows[rows.length-1].innerText.trim(); }
         """)
         final = page.evaluate("window.__promptCompilerFinals[window.__promptCompilerFinals.length-1]")
+        bold_conclusion = page.evaluate("""
+            () => { const rows=document.querySelectorAll('#agentMessages .agent-msg-row.assistant');
+                const strong=rows[rows.length-1] && rows[rows.length-1].querySelector('strong');
+                return strong ? strong.innerText.trim() : ''; }
+        """)
         runtime = final.get("skill_runtime") or {}
         accounting = runtime.get("prompt_accounting") or {}
         context_accounting = runtime.get("context_accounting") or {}
@@ -173,12 +182,13 @@ def run() -> int:
 
         low = answer.lower()
         check("compiled_skill_runtime_used", bool(runtime) and runtime.get("fallback") in (False, True), runtime)
-        check("prompt_under_10k_chars", 0 < accounting.get("total_chars", 0) < 10_000, accounting)
+        check("prompt_under_17k_chars", 0 < accounting.get("total_chars", 0) < 17_000, accounting)
         check("context_was_pruned", context_accounting.get("reduction_ratio", 0) > 0.2, context_accounting)
         module_ids = {item.get("id") for item in runtime.get("prompt_modules") or []}
         check("versioned_modules_recorded", {
             "sage.identity", "sage.engineering-honesty", "sage.response-style",
-            "sage.mode.assembly", "sage.policy.fai-assembly-impact",
+            "sage.mode.assembly", "sage.policy.fai-inverted-pyramid",
+            "sage.policy.fai-assembly-impact",
         } <= module_ids, runtime.get("prompt_modules"))
         selection = runtime.get("selection") or []
         primary = [item.get("id") for item in selection if item.get("role") == "primary"]
@@ -186,7 +196,8 @@ def run() -> int:
         check("skill_contracts_recorded", len(runtime.get("contracts") or []) == len(selection), runtime.get("contracts"))
         check("native_tool_protocol_isolated", (runtime.get("tool_protocol") or {}).get("type") == "anthropic_native_tools_v1", runtime.get("tool_protocol"))
         check("context_validation_is_clean", context_accounting.get("context_status") == "ok" and context_accounting.get("provenance_count", 0) >= 4, context_accounting)
-        check("answer_quantifies_result", "88" in answer and "90" in answer and "1.95" in answer, answer)
+        check("answer_leads_with_bold_conclusion", bool(bold_conclusion), answer)
+        check("answer_quantifies_result", "88" in answer and "89.95" in answer and "1.95" in answer, answer)
         check("answer_avoids_unsupported_disposition", not any(term in low for term in ["scrap", "rework to", "will fail", "catastrophic"]), answer)
         check("explanation_is_read_only", viewport == {"tab":"assembly","motion":False,"highlighted":[]}, viewport)
         check("no_tool_call_for_explanation", final.get("tool_call_count") == 0, final.get("tool_calls"))

@@ -229,10 +229,12 @@ class SemanticFacilityPlanError(ValueError):
         message: str,
         *,
         findings: Sequence[Mapping[str, Any]] = (),
+        details: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.findings = [deepcopy(dict(item)) for item in findings]
+        self.details = deepcopy(dict(details or {}))
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -3660,6 +3662,132 @@ def compile_semantic_facility_plan(
     }
 
 
+def compile_semantic_process_binding_operations(
+    compiled_plan: Mapping[str, Any],
+    alternative: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Resolve validated semantic bindings after deterministic IDs exist."""
+
+    compiled = deepcopy(dict(compiled_plan))
+    plan = compiled.get("plan")
+    if not isinstance(plan, Mapping):
+        raise SemanticFacilityPlanError(
+            "semantic_process_binding_compile_invalid",
+            "A compiled semantic plan is required before process binding.",
+        )
+    instance_placements = alternative.get("instancePlacements")
+    if not isinstance(instance_placements, Mapping):
+        raise SemanticFacilityPlanError(
+            "semantic_process_binding_placement_map_unavailable",
+            "The deterministic placement identity map is unavailable.",
+        )
+    selected = {
+        str(item["itemId"]): int(item["quantity"])
+        for item in plan.get("selectedAssets", [])
+        if isinstance(item, Mapping)
+    }
+    placement_ids_by_item: dict[str, list[str]] = {}
+    for item_id, quantity in sorted(selected.items()):
+        resolved = []
+        for occurrence in range(quantity):
+            instance_key = f"{item_id}:{occurrence}"
+            placement_id = instance_placements.get(instance_key)
+            if not isinstance(placement_id, str) or not _identifier(placement_id):
+                raise SemanticFacilityPlanError(
+                    "semantic_process_binding_placement_unavailable",
+                    "A process-binding resource lacks an exact generated placement ID.",
+                    details={"itemId": item_id, "instanceKey": instance_key},
+                )
+            resolved.append(placement_id)
+        placement_ids_by_item[item_id] = sorted(set(resolved))
+
+    route_ids_by_flow: dict[str, str] = {}
+    route_proposals = (
+        (alternative.get("ghostPreview") or {}).get("routeProposals")
+        if isinstance(alternative.get("ghostPreview"), Mapping)
+        else None
+    )
+    for proposal in route_proposals or []:
+        if not isinstance(proposal, Mapping) or proposal.get("accepted") is not True:
+            continue
+        operation = proposal.get("operation")
+        route = operation.get("route") if isinstance(operation, Mapping) else None
+        route_id = route.get("routeId") if isinstance(route, Mapping) else None
+        flow_id = proposal.get("routeRequestId")
+        if isinstance(flow_id, str) and isinstance(route_id, str):
+            route_ids_by_flow[flow_id] = route_id
+
+    operations = []
+    mappings = []
+    for binding in sorted(
+        plan.get("processBindings", []),
+        key=lambda item: str(item.get("bindingIntentId") or ""),
+    ):
+        resource_ids = list(binding.get("resourceItemIds", []))
+        unknown_resources = sorted(
+            item_id for item_id in resource_ids if item_id not in placement_ids_by_item
+        )
+        if unknown_resources:
+            raise SemanticFacilityPlanError(
+                "semantic_process_binding_resource_unknown",
+                "A process binding references an unresolved semantic resource.",
+                details={"resourceItemIds": unknown_resources},
+            )
+        flow_ids = list(binding.get("flowIds", []))
+        unknown_flows = sorted(
+            flow_id for flow_id in flow_ids if flow_id not in route_ids_by_flow
+        )
+        if unknown_flows:
+            raise SemanticFacilityPlanError(
+                "semantic_process_binding_route_unavailable",
+                "A process binding references a flow without an accepted persisted route.",
+                details={"flowIds": unknown_flows},
+            )
+        intent_id = str(binding["bindingIntentId"])
+        process_binding_id = "pb-semantic-" + hashlib.sha256(
+            f"{plan['planId']}:{intent_id}".encode("ascii")
+        ).hexdigest()[:24]
+        process_binding = {
+            "processBindingId": process_binding_id,
+            "productId": binding["productId"],
+            "processMapId": binding["processMapId"],
+            "processMapRevision": binding["processMapRevision"],
+            "processNodeIds": sorted(set(binding.get("processNodeIds", []))),
+            "processEdgeIds": sorted(set(binding.get("processEdgeIds", []))),
+            "placementIds": sorted(
+                {
+                    placement_id
+                    for item_id in resource_ids
+                    for placement_id in placement_ids_by_item[item_id]
+                }
+            ),
+            "routeIds": sorted(route_ids_by_flow[item] for item in flow_ids),
+            "bindingRole": binding["bindingRole"],
+        }
+        operations.append(
+            {"op": "attach_process_binding", "processBinding": process_binding}
+        )
+        mappings.append(
+            {
+                "bindingIntentId": intent_id,
+                "processBindingId": process_binding_id,
+                "resourceItemIds": sorted(resource_ids),
+                "placementIds": process_binding["placementIds"],
+                "flowIds": sorted(flow_ids),
+                "routeIds": process_binding["routeIds"],
+            }
+        )
+    result = {
+        "schemaVersion": 1,
+        "planId": plan["planId"],
+        "planHash": compiled.get("planHash"),
+        "operations": operations,
+        "mappings": mappings,
+    }
+    result["bindingApplicationHash"] = semantic_facility_plan_fingerprint(result)
+    return result
+
+
 __all__ = [
     "EVIDENCE_STATUSES",
     "SEMANTIC_FACILITY_PLAN_VERSION",
@@ -3668,6 +3796,7 @@ __all__ = [
     "SemanticFacilityPlanError",
     "canonicalize_semantic_facility_plan",
     "compile_semantic_facility_plan",
+    "compile_semantic_process_binding_operations",
     "facility_layout_preview_tool_spec",
     "facility_layout_move_tool_spec",
     "semantic_facility_plan_fingerprint",

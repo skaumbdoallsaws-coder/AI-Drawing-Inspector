@@ -89,3 +89,7 @@ The knowledge foundation for later stages is implemented and qualified, but
 the production generation tool remains deliberately limited to G1. Aisles,
 nested subdivisions, assets, cells, modules, full-factory generation, and live
 dependency-aware reflow require their own rollout gates before enablement.
+
+The post-G1 capability inventory and promotion requirements are maintained in
+`docs/facility-layout-intelligence-backlog.md`. Items in that document are not
+current G1.1 acceptance criteria.

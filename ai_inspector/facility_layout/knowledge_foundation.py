@@ -12,10 +12,13 @@ from copy import deepcopy
 import hashlib
 import json
 import math
+from pathlib import Path
 import re
 from typing import Any, Iterable, Mapping, Sequence
 
 from .feature_flags import (
+    FACILITY_ALL_CAPABILITY_DEPENDENCIES,
+    FACILITY_ALL_CAPABILITY_FLAGS,
     FACILITY_LAYOUT_CAPABILITY_DEPENDENCIES,
     FACILITY_LAYOUT_CAPABILITY_FLAGS,
     FACILITY_LAYOUT_FEATURE_FLAGS,
@@ -41,7 +44,12 @@ FACILITY_COMMAND_EFFECTS = (
     "persistent_save",
     "viewport_capture",
 )
-FACILITY_AGENT_EFFECTS = ("read", "preview")
+FACILITY_AGENT_EFFECTS = (
+    "read",
+    "preview",
+    "design_state_edit",
+    "draft_edit",
+)
 FACILITY_STAGE_STATUSES = (
     "pending",
     "ready",
@@ -532,6 +540,11 @@ _NON_RIBBON_SURFACES: Mapping[str, tuple[str, ...]] = {
     "record": ("3d_capture",),
 }
 
+_CONSTRUCTION_CONTRACT = json.loads(
+    (Path(__file__).resolve().parents[2] / "static" / "contracts"
+     / "facility-construction-commands-v1.json").read_text(encoding="utf-8")
+)
+
 _INPUTS: Mapping[str, tuple[str, ...]] = {
     "assets": ("query", "capabilityTags"),
     "select": ("entityIds",),
@@ -541,6 +554,7 @@ _INPUTS: Mapping[str, tuple[str, ...]] = {
     "bulk-zones": ("zones", "sourceUnit"),
     "aisle": ("label", "routeKind", "width", "centerline", "sourceUnit"),
     "floor-marking": ("markingKind", "geometry", "label"),
+    "motion-path": ("actorPlacementId", "authoringMode"),
     "rotate": ("selectionIds", "quarterTurns"),
     "duplicate": ("selectionIds", "offset", "sourceUnit"),
     "delete": ("selectionIds",),
@@ -554,11 +568,11 @@ _INPUTS: Mapping[str, tuple[str, ...]] = {
     "linear-pattern": ("seedIds", "count", "direction", "spacing", "sourceUnit"),
     "circular-pattern": ("seedIds", "count", "center", "arcDegrees", "sourceUnit"),
     "perimeter-pattern": ("seedIds", "width", "depth", "clearGap", "sourceUnit"),
-    "cell-layout": ("selectionIds", "strategyId", "targetBounds", "sourceUnit"),
+    "cell-layout": ("selectionIds", "strategyId", "targetBounds", "sourceUnit", "gap", "rows", "orientation", "angleDegrees", "invertU"),
     "create-cell-group": ("selectionIds", "label", "envelopePadding", "sourceUnit"),
     "ungroup-cell": ("cellId",),
     "vertical-stack": ("selectionIds", "count", "gap", "sourceUnit"),
-    "surface-stack": ("supportId", "childIds", "surfaceId", "side", "gap", "sourceUnit"),
+    "surface-stack": ("supportId", "childIds", "surfaceId", "side", "gap", "sourceUnit", "itemGap", "inset"),
     "mirror": ("selectionIds", "axisStart", "axisEnd", "sourceUnit"),
     "swap": ("firstId", "secondId"),
     "undo": (),
@@ -583,6 +597,7 @@ _DEFAULTS: Mapping[str, Mapping[str, Any]] = {
     "create-cell-group": {"envelopePadding": 0.0, "sourceUnit": "m"},
     "vertical-stack": {"gap": 0.0, "sourceUnit": "m"},
     "surface-stack": {"side": "top", "gap": 0.0, "sourceUnit": "m"},
+    "motion-path": {"authoringMode": "plan_pointer"},
 }
 
 _OPTIONAL_INPUTS: Mapping[str, frozenset[str]] = {
@@ -596,6 +611,7 @@ _OPTIONAL_INPUTS: Mapping[str, frozenset[str]] = {
     "create-cell-group": frozenset({"envelopePadding", "sourceUnit"}),
     "vertical-stack": frozenset({"gap", "sourceUnit"}),
     "surface-stack": frozenset({"side", "gap", "sourceUnit"}),
+    "motion-path": frozenset({"authoringMode"}),
     "mirror": frozenset({"sourceUnit"}),
     "auto-arrange": frozenset({"selectionIds", "preferences"}),
     "drone": frozenset({"placementId", "altitudeMeters"}),
@@ -611,8 +627,9 @@ _COMMAND_STAGE_GROUPS: Mapping[str, tuple[str, ...]] = {
     "rectangle-zone": ("macro_departments", "department_subdivisions"),
     "polygon-zone": ("macro_departments", "department_subdivisions"),
     "bulk-zones": ("macro_departments", "department_subdivisions"),
-    "aisle": ("primary_circulation",),
-    "floor-marking": ("floor_communication",),
+    "aisle": ("primary_circulation", "floor_communication"),
+    "floor-marking": ("primary_circulation", "floor_communication"),
+    "motion-path": ("floor_communication",),
     "rotate": ("department_resources", "seed_cells", "repeated_modules"),
     "duplicate": (
         "department_subdivisions",
@@ -660,6 +677,9 @@ _READ_ONLY_OR_NAVIGATION_COMMANDS = frozenset(
 _DESTRUCTIVE_COMMANDS = frozenset({"delete", "clear-all"})
 
 _FIELD_TYPE_OVERRIDES: Mapping[str, Mapping[str, Any]] = {
+    "query": {"type": "string", "maxLength": 120},
+    "capabilityTags": {"type": "array", "maxItems": 48, "uniqueItems": True,
+                       "items": {"type": "string", "minLength": 1}},
     "sourceUnit": {"type": "string", "enum": list(FACILITY_SOURCE_UNITS)},
     "count": {"type": "integer", "minimum": 1},
     "quarterTurns": {"type": "integer"},
@@ -672,6 +692,7 @@ _FIELD_TYPE_OVERRIDES: Mapping[str, Mapping[str, Any]] = {
     "gap": {"type": "number", "minimum": 0},
     "clearGap": {"type": "number", "minimum": 0},
     "altitudeMeters": {"type": "number", "minimum": 0},
+    "authoringMode": {"type": "string", "enum": ["plan_pointer"]},
     "copy": {"type": "boolean"},
     "confirmed": {"type": "boolean", "const": True},
 }
@@ -695,7 +716,10 @@ def _command_supported_stages(command_id: str) -> list[str]:
 def _input_property_schema(field: str) -> dict[str, Any]:
     if field in _FIELD_TYPE_OVERRIDES:
         return deepcopy(dict(_FIELD_TYPE_OVERRIDES[field]))
-    if field.endswith("Ids") or field in {"zones", "vertices", "preferences"}:
+    if field.endswith("Ids"):
+        return {"type": "array", "minItems": 1, "uniqueItems": True,
+                "items": {"type": "string", "minLength": 1}}
+    if field in {"zones", "vertices", "preferences"}:
         return {"type": "array"}
     if field.endswith("Id") or field in {
         "label",
@@ -718,6 +742,11 @@ def _input_property_schema(field: str) -> dict[str, Any]:
 
 
 def _command_input_schema(command_id: str) -> dict[str, Any]:
+    if command_id in _CONSTRUCTION_CONTRACT["commands"]:
+        return {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            **deepcopy(_CONSTRUCTION_CONTRACT["commands"][command_id]),
+        }
     fields = list(_INPUTS[command_id])
     optional = _OPTIONAL_INPUTS.get(command_id, frozenset())
     return {
@@ -782,6 +811,7 @@ _COMMAND_CAPABILITIES: Mapping[str, tuple[str, ...]] = {
     "assets": ("asset_library",),
     "aisle": ("manual_edit", "routing"),
     "auto-arrange": ("agent_preview",),
+    "motion-path": ("manual_edit", "routing"),
 }
 
 _COMMAND_OWNERS: Mapping[str, str] = {
@@ -793,6 +823,10 @@ _COMMAND_OWNERS: Mapping[str, str] = {
 }
 
 _AGENT_TOOL_OWNERS: Mapping[str, str] = {
+    "preview_facility_cell_layout": "facility.construction_service",
+    "preview_facility_surface_stack": "facility.construction_service",
+    "preview_facility_create_cell_group": "facility.construction_service",
+    "preview_facility_linear_pattern": "facility.construction_service",
     "search_industrial_assets": "facility.observation.asset_catalog",
     "inspect_facility_entities": "facility.observation.entities",
     "inspect_facility_region": "facility.observation.region",
@@ -806,6 +840,10 @@ _AGENT_TOOL_OWNERS: Mapping[str, str] = {
     "preview_facility_move": "facility.agent_runtime.exact_move",
     "build_facility_layout_preview": "facility.semantic_plan",
     "generate_facility_departments_draft": "facility.generation_coordinator",
+    "inspect_facility_design_brief": "facility.design_repository",
+    "update_facility_design_brief": "facility.design_brief",
+    "run_facility_design_preview": "facility.design_runtime",
+    "apply_facility_design_proposal_draft": "facility.design_transaction",
     "present_chat_visualization": "facility.chat_content.visualization",
     "present_chat_table": "facility.chat_content.table",
 }
@@ -848,6 +886,13 @@ def _prohibited_uses(command: Mapping[str, Any]) -> list[str]:
         rules.append("execute without explicit destructive confirmation")
     if command["commandId"] == "auto-arrange":
         rules.append("persist a generated proposal without later cumulative approval")
+    if command["commandId"] == "motion-path":
+        rules.extend(
+            [
+                "accept path coordinates authored by model text",
+                "treat an authored path as proof of clearance, reachability, safety, or timing",
+            ]
+        )
     return rules
 
 
@@ -962,28 +1007,60 @@ def canonical_facility_agent_tool_registry() -> tuple[dict[str, Any], ...]:
                 "agent_tool_owner_missing",
                 f"Facility agent tool {tool_id} has no deterministic owner.",
             )
-        preview = command["effect"] == "preview"
+        effect = command["effect"]
+        if effect not in FACILITY_AGENT_EFFECTS:
+            raise FacilityKnowledgeContractError(
+                "unknown_agent_tool_effect",
+                f"Facility agent tool {tool_id} has an unknown effect.",
+            )
+        capability_by_tool = {
+            "preview_facility_cell_layout": "construction_sage",
+            "preview_facility_surface_stack": "construction_sage",
+            "preview_facility_create_cell_group": "construction_sage",
+            "preview_facility_linear_pattern": "construction_sage",
+            "inspect_facility_design_brief": "design_loop_preview",
+            "update_facility_design_brief": "design_loop_preview",
+            "run_facility_design_preview": "design_loop_preview",
+            "apply_facility_design_proposal_draft": "design_loop_apply",
+        }
+        capability = capability_by_tool.get(
+            tool_id,
+            "agent_preview" if effect == "preview" else "viewer_v2",
+        )
+        required_capabilities = [capability]
+        if tool_id == "apply_facility_design_proposal_draft":
+            required_capabilities.append("agent_write")
         records.append(
             {
                 "schemaVersion": FACILITY_KNOWLEDGE_SCHEMA_VERSION,
                 **command,
                 "deterministicOwner": owner,
-                "requiredCapabilities": [
-                    "agent_preview" if preview else "viewer_v2"
+                "requiredCapabilities": required_capabilities,
+                "requiredFeatureFlags": [
+                    FACILITY_ALL_CAPABILITY_FLAGS[item]
+                    for item in required_capabilities
                 ],
+                "featureFlagDependencies": {
+                    item: list(FACILITY_ALL_CAPABILITY_DEPENDENCIES[item])
+                    for item in required_capabilities
+                },
                 "executionContract": {
                     "modelCalculatesGeometry": False,
                     "mutatesSavedLayout": False,
                     "returnsRevisionBoundEvidence": True,
-                    "requiresExplicitUserRequest": preview,
+                    "requiresExplicitUserRequest": effect
+                    in {"preview", "design_state_edit", "draft_edit"},
+                    "mutatesDesignState": effect == "design_state_edit",
+                    "mutatesEditorDraft": effect == "draft_edit",
+                    "persistentWriteAllowed": False,
                 },
             }
         )
     identifiers = [item["commandId"] for item in records]
-    if len(records) != 15 or len(identifiers) != len(set(identifiers)):
+    if len(records) != 23 or len(identifiers) != len(set(identifiers)):
         raise FacilityKnowledgeContractError(
             "agent_tool_registry_invalid",
-            "Facility agent tool IDs must be 15 unique values.",
+            "Facility agent tool IDs must be 23 unique values.",
         )
     return tuple(records)
 
@@ -1298,7 +1375,14 @@ def validate_department_partition_request(value: Mapping[str, Any]) -> dict[str,
             "invalid_department_partition",
             "Department partition request must be an object.",
         )
-    allowed = {"labels", "count", "proportions", "arrangement", "orientation"}
+    allowed = {
+        "labels",
+        "count",
+        "proportions",
+        "arrangement",
+        "orientation",
+        "rows",
+    }
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise FacilityKnowledgeContractError(
@@ -1328,26 +1412,38 @@ def validate_department_partition_request(value: Mapping[str, Any]) -> dict[str,
             "department_label_count_mismatch",
             "Department labels must match the requested count.",
         )
-    proportions = value.get("proportions")
-    assumption = None
-    if proportions is None:
-        proportions = [1.0 / count] * count
-        assumption = "equal_area_partition"
-    if not isinstance(proportions, list) or len(proportions) != count:
+    normalized_labels = [item.strip() for item in labels]
+    raw_proportions = value.get("proportions")
+    proportions_authored = raw_proportions is not None
+    if raw_proportions is not None and (
+        not isinstance(raw_proportions, list)
+        or len(raw_proportions) != count
+    ):
         raise FacilityKnowledgeContractError(
             "invalid_department_proportions",
             "Department proportions must match the department count.",
         )
-    normalized_proportions = []
-    for index, proportion in enumerate(proportions):
-        normalized_proportions.append(
+    normalized_proportions = (
+        [
             _finite_positive(proportion, f"proportions[{index}]")
-        )
-    total = sum(normalized_proportions)
-    normalized_proportions = [item / total for item in normalized_proportions]
+            for index, proportion in enumerate(raw_proportions)
+        ]
+        if raw_proportions is not None
+        else []
+    )
+    if normalized_proportions:
+        total = sum(normalized_proportions)
+        normalized_proportions = [
+            item / total for item in normalized_proportions
+        ]
     arrangement = str(value.get("arrangement") or "deterministic_grid").strip()
     orientation = str(value.get("orientation") or "auto").strip()
-    if arrangement not in {"deterministic_grid", "rows", "columns"}:
+    if arrangement not in {
+        "deterministic_grid",
+        "rows",
+        "columns",
+        "row_stack",
+    }:
         raise FacilityKnowledgeContractError(
             "unsupported_department_arrangement",
             "Department arrangement is unsupported.",
@@ -1357,13 +1453,183 @@ def validate_department_partition_request(value: Mapping[str, Any]) -> dict[str,
             "unsupported_department_orientation",
             "Department orientation is unsupported.",
         )
+
+    raw_rows = value.get("rows")
+    normalized_rows: list[dict[str, Any]] | None = None
+    assumptions: list[str] = []
+    if raw_rows is not None:
+        if arrangement != "row_stack":
+            raise FacilityKnowledgeContractError(
+                "department_rows_require_row_stack",
+                "Authored rows require the row_stack arrangement.",
+            )
+        if orientation not in {"auto", "horizontal"}:
+            raise FacilityKnowledgeContractError(
+                "department_row_orientation_invalid",
+                "Authored rows run west to east and stack north to south.",
+            )
+        if not normalized_labels:
+            raise FacilityKnowledgeContractError(
+                "department_rows_require_labels",
+                "Authored rows require explicit department labels.",
+            )
+        label_keys = [item.casefold() for item in normalized_labels]
+        if len(label_keys) != len(set(label_keys)):
+            raise FacilityKnowledgeContractError(
+                "duplicate_department_label",
+                "Authored row labels must be unique.",
+            )
+        if not isinstance(raw_rows, list) or not 1 <= len(raw_rows) <= count:
+            raise FacilityKnowledgeContractError(
+                "invalid_department_rows",
+                "Rows must contain one through the requested department count.",
+            )
+        canonical_by_key = dict(zip(label_keys, normalized_labels, strict=True))
+        normalized_rows = []
+        flattened_keys: list[str] = []
+        row_proportion_presence: list[bool] = []
+        for row_index, row in enumerate(raw_rows):
+            if not isinstance(row, Mapping):
+                raise FacilityKnowledgeContractError(
+                    "invalid_department_row",
+                    "Each authored row must be an object.",
+                    details={"rowIndex": row_index},
+                )
+            unknown_row_fields = sorted(set(row) - {"labels", "proportion"})
+            if unknown_row_fields:
+                raise FacilityKnowledgeContractError(
+                    "unknown_department_row_field",
+                    "Authored rows contain unsupported fields.",
+                    details={
+                        "rowIndex": row_index,
+                        "unknown": unknown_row_fields,
+                    },
+                )
+            row_labels = row.get("labels")
+            if not isinstance(row_labels, list) or not row_labels:
+                raise FacilityKnowledgeContractError(
+                    "invalid_department_row_labels",
+                    "Each authored row requires at least one department label.",
+                    details={"rowIndex": row_index},
+                )
+            canonical_row_labels = []
+            for label in row_labels:
+                if not isinstance(label, str) or not label.strip():
+                    raise FacilityKnowledgeContractError(
+                        "invalid_department_row_labels",
+                        "Row labels must be non-empty strings.",
+                        details={"rowIndex": row_index},
+                    )
+                key = label.strip().casefold()
+                if key not in canonical_by_key:
+                    raise FacilityKnowledgeContractError(
+                        "department_row_label_unknown",
+                        "Every row label must resolve to a requested department.",
+                        details={"rowIndex": row_index, "label": label.strip()},
+                    )
+                canonical_row_labels.append(canonical_by_key[key])
+                flattened_keys.append(key)
+            row_proportion = row.get("proportion")
+            row_proportion_presence.append(row_proportion is not None)
+            normalized_rows.append(
+                {
+                    "labels": canonical_row_labels,
+                    "proportion": (
+                        _finite_positive(
+                            row_proportion,
+                            f"rows[{row_index}].proportion",
+                        )
+                        if row_proportion is not None
+                        else None
+                    ),
+                }
+            )
+        if len(flattened_keys) != count or set(flattened_keys) != set(label_keys):
+            raise FacilityKnowledgeContractError(
+                "department_row_coverage_invalid",
+                "Rows must contain every requested department exactly once.",
+            )
+        if len(flattened_keys) != len(set(flattened_keys)):
+            raise FacilityKnowledgeContractError(
+                "department_row_label_duplicate",
+                "A department cannot appear in more than one row.",
+            )
+        if any(row_proportion_presence) and not all(row_proportion_presence):
+            raise FacilityKnowledgeContractError(
+                "incomplete_department_row_proportions",
+                "Row proportions must be supplied for every row or none.",
+            )
+
+        index_by_key = {key: index for index, key in enumerate(label_keys)}
+        if all(row_proportion_presence):
+            row_total = sum(float(row["proportion"]) for row in normalized_rows)
+            for row in normalized_rows:
+                row["proportion"] = float(row["proportion"]) / row_total
+            if proportions_authored:
+                for row_index, row in enumerate(normalized_rows):
+                    requested_share = sum(
+                        normalized_proportions[index_by_key[label.casefold()]]
+                        for label in row["labels"]
+                    )
+                    if not math.isclose(
+                        requested_share,
+                        float(row["proportion"]),
+                        rel_tol=1e-9,
+                        abs_tol=1e-9,
+                    ):
+                        raise FacilityKnowledgeContractError(
+                            "department_row_area_conflict",
+                            "Row proportions conflict with department area proportions.",
+                            details={"rowIndex": row_index},
+                        )
+            else:
+                normalized_proportions = [0.0] * count
+                for row in normalized_rows:
+                    per_department = float(row["proportion"]) / len(row["labels"])
+                    for label in row["labels"]:
+                        normalized_proportions[index_by_key[label.casefold()]] = (
+                            per_department
+                        )
+                assumptions.append("equal_width_within_authored_rows")
+        else:
+            if not proportions_authored:
+                normalized_proportions = [1.0 / count] * count
+                assumptions.append("equal_area_partition")
+            for row in normalized_rows:
+                row["proportion"] = sum(
+                    normalized_proportions[index_by_key[label.casefold()]]
+                    for label in row["labels"]
+                )
+    else:
+        if arrangement == "row_stack":
+            raise FacilityKnowledgeContractError(
+                "department_rows_required",
+                "The row_stack arrangement requires authored rows.",
+            )
+        if not proportions_authored:
+            normalized_proportions = [1.0 / count] * count
+            assumptions.append("equal_area_partition")
+
+    area_sizing = (
+        "authored_department_proportions"
+        if proportions_authored
+        else (
+            "authored_row_proportions"
+            if normalized_rows is not None
+            and any(item.get("proportion") is not None for item in raw_rows)
+            else "equal_area"
+        )
+    )
     return {
         "count": count,
-        "labels": [item.strip() for item in labels],
+        "labels": normalized_labels,
         "proportions": normalized_proportions,
         "arrangement": arrangement,
         "orientation": orientation,
-        "assumptions": [assumption] if assumption else [],
+        "rows": normalized_rows,
+        "rowOrder": "north_to_south" if normalized_rows is not None else None,
+        "areaSizing": area_sizing,
+        "assumptions": assumptions,
         "inventedCorridor": False,
         "inventedSafetySeparation": False,
         "inventedExpansionReserve": False,

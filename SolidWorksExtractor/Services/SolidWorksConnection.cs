@@ -23,40 +23,46 @@ namespace SolidWorksExtractor.Services
         /// <returns>True if connected successfully</returns>
         public bool Connect(bool startIfNotRunning = false)
         {
-            try
+            foreach (var progId in new[] { "SldWorks.Application", "SldWorks.Application.32" })
             {
-                // Try to connect to running instance first
-                _swApp = (ISldWorks)Marshal.GetActiveObject("SldWorks.Application");
-                _createdNewInstance = false;
-                Console.WriteLine("Connected to running SolidWorks instance");
-                return true;
-            }
-            catch (COMException)
-            {
-                if (startIfNotRunning)
+                try
                 {
-                    try
-                    {
-                        // Start new instance
-                        Type swType = Type.GetTypeFromProgID("SldWorks.Application");
-                        _swApp = (ISldWorks)Activator.CreateInstance(swType);
-                        _swApp.Visible = true;
-                        _createdNewInstance = true;
-                        Console.WriteLine("Started new SolidWorks instance");
-                        return true;
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Failed to start SolidWorks: {ex.Message}");
-                        return false;
-                    }
+                    // Try to connect to running instance first. Some
+                    // installs register the running 64-bit app under the
+                    // versioned ProgID only.
+                    _swApp = (ISldWorks)Marshal.GetActiveObject(progId);
+                    _createdNewInstance = false;
+                    Console.WriteLine($"Connected to running SolidWorks instance ({progId})");
+                    return true;
                 }
-                else
+                catch (COMException)
                 {
-                    Console.WriteLine("SolidWorks is not running. Start SolidWorks first or use --start flag.");
+                    // Try the next ProgID before deciding SolidWorks is unavailable.
+                }
+            }
+
+            if (startIfNotRunning)
+            {
+                try
+                {
+                    // Start new instance
+                    Type swType = Type.GetTypeFromProgID("SldWorks.Application.32")
+                                  ?? Type.GetTypeFromProgID("SldWorks.Application");
+                    _swApp = (ISldWorks)Activator.CreateInstance(swType);
+                    _swApp.Visible = true;
+                    _createdNewInstance = true;
+                    Console.WriteLine("Started new SolidWorks instance");
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to start SolidWorks: {ex.Message}");
                     return false;
                 }
             }
+
+            Console.WriteLine("SolidWorks is not running. Start SolidWorks first or use --start flag.");
+            return false;
         }
 
         /// <summary>

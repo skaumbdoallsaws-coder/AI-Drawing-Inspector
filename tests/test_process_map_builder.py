@@ -16,6 +16,7 @@ from ai_inspector.process_map import (
     authorize_process_map_asset_write,
     load_asset_write_authorization_contract,
     reset_process_map_builder_state_for_tests,
+    resolve_process_map_receipts,
 )
 
 
@@ -117,6 +118,53 @@ def _placement_map() -> dict:
     }
 
 
+def _semantic_plan() -> dict:
+    return {
+        "schemaVersion": 1,
+        "planId": "fixture-module-plan",
+        "scope": {
+            "assemblyOccurrenceId": "module",
+            "label": "Fixture Module",
+        },
+        "requiredOccurrences": [
+            {"occurrenceId": "part-a", "quantity": 1},
+            {"occurrenceId": "part-b", "quantity": 1},
+        ],
+        "operations": [
+            {
+                "id": "op-join-parts",
+                "operationType": "operation",
+                "label": "Join fixture parts",
+                "inputs": [
+                    {"ref": "part-a", "type": "occurrence"},
+                    {"ref": "part-b", "type": "occurrence"},
+                ],
+                "output": {"ref": "module", "type": "occurrence"},
+                "branchId": "main",
+                "stageIndex": 1,
+                "knowledgeStatus": "inferred",
+                "evidence": [
+                    {
+                        "sourceType": "domain_heuristic",
+                        "sourceRef": "fixture-assembly",
+                        "supports": "candidate-operation",
+                    }
+                ],
+                "properties": {},
+            }
+        ],
+        "intermediateResults": [],
+        "junctions": [],
+        "branches": [{"id": "main", "label": "Main assembly"}],
+        "evidence": [],
+        "assumptions": [],
+        "layoutHints": [
+            {"ref": "op-join-parts", "branchId": "main", "stageIndex": 1}
+        ],
+        "unresolvedQuestions": [],
+    }
+
+
 @pytest.fixture
 def builder_product(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     root = tmp_path / "training"
@@ -134,6 +182,9 @@ def builder_product(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setattr(server, "PROCESS_MAP_TRAINING_ROOT", root)
     monkeypatch.setenv("INSPECTORPRO_PROCESS_MAP_EDIT", "1")
     monkeypatch.setenv("INSPECTORPRO_BUILDER_WRITE", "1")
+    monkeypatch.setenv("INSPECTORPRO_PROCESS_MAP_SPATIAL_PLACEMENT", "1")
+    monkeypatch.setenv("INSPECTORPRO_PROCESS_MAP_AUTO_ROUTING", "1")
+    monkeypatch.setenv("INSPECTORPRO_PROCESS_MAP_AGENT_LAYOUT_WRITE", "1")
     reset_process_map_builder_state_for_tests()
     yield {"root": root, "productDir": product_dir}
     reset_process_map_builder_state_for_tests()
@@ -159,36 +210,46 @@ def _proposal(client: TestClient, revision: str, operations: list[dict]) -> dict
 
 
 def _approve(client: TestClient, proposal: dict, key: str) -> dict:
+    body = {
+        "productId": "fixture-product",
+        "mapId": "default",
+        "baseRevision": proposal["baseRevision"],
+        "diffHash": proposal["diffHash"],
+        "userId": "fixture-user",
+        "sessionId": "fixture-session",
+        "idempotencyKey": key,
+        "explicitApproval": True,
+    }
+    if proposal.get("spatialBindingHash"):
+        body["spatialBindingHash"] = proposal["spatialBindingHash"]
+    if proposal.get("semanticBindingHash"):
+        body["semanticBindingHash"] = proposal["semanticBindingHash"]
     response = client.post(
         f"/api/builder/process-map-proposals/{proposal['proposalId']}/approve",
-        json={
-            "productId": "fixture-product",
-            "mapId": "default",
-            "baseRevision": proposal["baseRevision"],
-            "diffHash": proposal["diffHash"],
-            "userId": "fixture-user",
-            "sessionId": "fixture-session",
-            "idempotencyKey": key,
-            "explicitApproval": True,
-        },
+        json=body,
     )
     assert response.status_code == 200, response.text
     return response.json()
 
 
 def _apply(client: TestClient, proposal: dict, approval: dict, key: str):
+    body = {
+        "approvalToken": approval["approvalToken"],
+        "productId": "fixture-product",
+        "mapId": "default",
+        "baseRevision": proposal["baseRevision"],
+        "diffHash": proposal["diffHash"],
+        "userId": "fixture-user",
+        "sessionId": "fixture-session",
+        "idempotencyKey": key,
+    }
+    if proposal.get("spatialBindingHash"):
+        body["spatialBindingHash"] = proposal["spatialBindingHash"]
+    if proposal.get("semanticBindingHash"):
+        body["semanticBindingHash"] = proposal["semanticBindingHash"]
     return client.post(
         "/api/builder/process-map-apply",
-        json={
-            "approvalToken": approval["approvalToken"],
-            "productId": "fixture-product",
-            "mapId": "default",
-            "baseRevision": proposal["baseRevision"],
-            "diffHash": proposal["diffHash"],
-            "userId": "fixture-user",
-            "sessionId": "fixture-session",
-            "idempotencyKey": key,
-        },
+        json=body,
     )
 
 
@@ -208,6 +269,58 @@ def test_shared_asset_write_contract_cases_match_server_policy():
         result = authorize_process_map_asset_write(case["request"])
         assert result["authorized"] is case["authorized"], case["id"]
         assert result["reason"] == case["reason"], case["id"]
+
+
+def test_semantic_preview_is_revision_bound_and_commits_with_rich_receipt(
+    builder_product,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("INSPECTORPRO_PROCESS_MAP_SEMANTIC_GENERATION", "1")
+    client = _client()
+    loaded = _loaded(client)
+    response = client.post(
+        "/api/builder/process-maps/fixture-product/default/semantic-proposals",
+        json={
+            "baseRevision": loaded["revision"],
+            "scopeOccurrenceId": "module",
+            "semanticPlan": _semantic_plan(),
+        },
+    )
+    assert response.status_code == 200, response.text
+    proposal = response.json()
+    assert proposal["managedProposalType"] == "semantic_process_map"
+    assert proposal["semanticBindingHash"]
+    assert proposal["summary"]["requiredOccurrenceCount"] == 2
+    assert proposal["summary"]["operationCount"] == 1
+    assert proposal["createdIds"]["nodeIds"]
+    assert proposal["preview"]["nodes"]
+
+    approval = _approve(client, proposal, "semantic-preview-apply")
+    applied_response = _apply(
+        client,
+        proposal,
+        approval,
+        "semantic-preview-apply",
+    )
+    assert applied_response.status_code == 200, applied_response.text
+    applied = applied_response.json()
+    receipt = applied["receipt"]
+    assert receipt["semanticBindingHash"] == proposal["semanticBindingHash"]
+    assert receipt["createdIds"] == proposal["createdIds"]
+    assert receipt["revision"] == applied["revision"]
+    assert receipt["warnings"] == proposal["warnings"]
+    assert receipt["unresolvedItems"] == proposal["unresolvedItems"]
+    resolved = resolve_process_map_receipts(
+        [
+            {"receiptId": "pmr-forged", "warnings": ["browser supplied"]},
+            {"receiptId": receipt["receiptId"], "warnings": ["tampered"]},
+        ]
+    )
+    assert resolved == [receipt]
+    assert all(
+        node["positionMode"] == "auto"
+        for node in applied["map"]["canvasNodes"]
+    )
 
 
 def test_domain_operations_are_immutable_and_cover_core_edit_vocabulary():
@@ -234,6 +347,52 @@ def test_domain_operations_are_immutable_and_cover_core_edit_vocabulary():
     assert step["portOrientation"] == "vertical"
     assert step["referenceIds"] == ["ref-machine"]
     assert result["map"]["canvasGroups"][0]["memberNodeIds"] == ["node-a", "step-machine"]
+
+
+def test_domain_operations_create_semantic_junctions_and_stage_details():
+    original = _placement_map()
+    result = apply_process_map_operations(
+        original,
+        _structure(),
+        [
+            {
+                "op": "add_process_step",
+                "nodeId": "stage-install",
+                "processType": "operation",
+                "name": "Install panels",
+                "position": {"x": 120, "y": 80},
+                "properties": {"duration": "12 min"},
+            },
+            {
+                "op": "set_process_properties",
+                "nodeId": "stage-install",
+                "properties": {
+                    "description": "Install both lower panels.",
+                    "torqueRequirements": "10 N m",
+                    "inspectionRequirements": "Verify flushness.",
+                },
+            },
+            {
+                "op": "add_junction",
+                "nodeId": "junction-parallel",
+                "junctionType": "parallel_and",
+                "position": {"x": 420, "y": 80},
+            },
+        ],
+    )
+    assert original == _placement_map()
+    assert not [item for item in result["findings"] if item["severity"] == "error"]
+    stage = next(node for node in result["map"]["canvasNodes"] if node["nodeId"] == "stage-install")
+    junction = next(
+        node for node in result["map"]["canvasNodes"]
+        if node["nodeId"] == "junction-parallel"
+    )
+    assert stage["properties"] == {
+        "description": "Install both lower panels.",
+        "torqueRequirements": "10 N m",
+        "inspectionRequirements": "Verify flushness.",
+    }
+    assert junction["junctionType"] == "parallel_and"
 
 
 def test_split_delete_and_reference_detach_operations_preserve_valid_topology():
@@ -270,6 +429,35 @@ def test_split_delete_and_reference_detach_operations_preserve_valid_topology():
     assert len(deleted["map"]["canvasEdges"]) == 1
 
 
+def test_deleting_a_branch_never_collapses_a_semantic_merge_junction():
+    seeded = apply_process_map_operations(
+        _placement_map(),
+        _structure(),
+        [
+            {"op": "add_process_step", "nodeId": "a", "processType": "operation", "name": "A", "position": {"x": 0, "y": 0}},
+            {"op": "add_process_step", "nodeId": "b", "processType": "operation", "name": "B", "position": {"x": 500, "y": 0}},
+            {"op": "add_process_step", "nodeId": "c", "processType": "operation", "name": "C", "position": {"x": 0, "y": 220}},
+            {"op": "add_junction", "nodeId": "merge", "junctionType": "merge", "position": {"x": 360, "y": 73}},
+            {"op": "connect", "edgeId": "a-merge", "logicalConnectionId": "trunk", "fromNodeId": "a", "toNodeId": "merge"},
+            {"op": "connect", "edgeId": "merge-b", "logicalConnectionId": "trunk", "fromNodeId": "merge", "toNodeId": "b"},
+            {"op": "connect", "edgeId": "c-merge", "fromNodeId": "c", "toNodeId": "merge"},
+        ],
+    )["map"]
+    result = apply_process_map_operations(
+        seeded,
+        _structure(),
+        [{"op": "delete_edge", "edgeId": "c-merge"}],
+    )
+    assert any(
+        node.get("nodeId") == "merge" and node.get("junctionType") == "merge"
+        for node in result["map"]["canvasNodes"]
+    )
+    assert {
+        (edge["from"]["nodeId"], edge["to"]["nodeId"])
+        for edge in result["map"]["canvasEdges"]
+    } == {("a", "merge"), ("merge", "b")}
+
+
 def test_unknown_operation_fails_closed_without_mutating_input():
     process_map = _placement_map()
     before = deepcopy(process_map)
@@ -277,6 +465,264 @@ def test_unknown_operation_fails_closed_without_mutating_input():
         apply_process_map_operations(process_map, _structure(), [{"op": "write_json"}])
     assert caught.value.code == "unknown_process_map_operation"
     assert process_map == before
+
+
+def test_spatial_operations_cover_lock_policy_and_routing_without_mutation():
+    source = _placement_map()
+    result = apply_process_map_operations(
+        source,
+        _structure(),
+        [
+            {"op": "add_process_step", "nodeId": "a", "processType": "operation", "name": "A", "position": {"x": 0, "y": 0}},
+            {"op": "add_process_step", "nodeId": "b", "processType": "inspection", "name": "B", "position": {"x": 420, "y": 0}},
+            {"op": "connect", "edgeId": "ab", "fromNodeId": "a", "toNodeId": "b"},
+            {"op": "set_node_locked", "nodeId": "a", "locked": True},
+            {"op": "set_layout_policy", "policy": {"flowDirection": "left_to_right", "routeMode": "orthogonal_auto", "gridSize": 20}},
+            {"op": "set_edge_routing", "edgeId": "ab", "routing": {"mode": "orthogonal_auto", "routerVersion": 1, "waypoints": [{"x": 300, "y": 73}], "obstacleFingerprint": "a" * 64}},
+        ],
+    )
+    assert source == _placement_map()
+    node = next(item for item in result["map"]["canvasNodes"] if item["nodeId"] == "a")
+    edge = next(item for item in result["map"]["canvasEdges"] if item["edgeId"] == "ab")
+    assert node["locked"] is True
+    assert result["map"]["layoutPolicy"]["gridSize"] == 20
+    assert edge["routing"]["mode"] == "orthogonal_auto"
+    cleared = apply_process_map_operations(
+        result["map"], _structure(), [{"op": "clear_edge_routing", "edgeId": "ab"}]
+    )
+    assert "routing" not in cleared["map"]["canvasEdges"][0]
+
+
+def test_builder_accepts_user_authored_polyline_without_obstacle_fingerprint():
+    source = _placement_map()
+    result = apply_process_map_operations(
+        source,
+        _structure(),
+        [
+            {
+                "op": "add_process_step",
+                "nodeId": "manual-a",
+                "processType": "operation",
+                "name": "Manual A",
+                "position": {"x": 0, "y": 0},
+            },
+            {
+                "op": "add_process_step",
+                "nodeId": "manual-b",
+                "processType": "output",
+                "name": "Manual B",
+                "position": {"x": 640, "y": 220},
+            },
+            {
+                "op": "connect",
+                "edgeId": "manual-ab",
+                "fromNodeId": "manual-a",
+                "toNodeId": "manual-b",
+            },
+            {
+                "op": "set_edge_routing",
+                "edgeId": "manual-ab",
+                "routing": {
+                    "mode": "polyline_manual",
+                    "routerVersion": 1,
+                    "waypoints": [{"x": 310, "y": 260}, {"x": 470, "y": 120}],
+                },
+            },
+        ],
+    )
+    routing = result["map"]["canvasEdges"][0]["routing"]
+    assert source == _placement_map()
+    assert result["map"]["layoutVersion"] == 3
+    assert routing == {
+        "mode": "polyline_manual",
+        "routerVersion": 1,
+        "waypoints": [{"x": 310.0, "y": 260.0}, {"x": 470.0, "y": 120.0}],
+    }
+
+
+def test_spatial_inspection_and_proposal_are_read_only_and_hide_coordinates(builder_product: dict):
+    client = _client()
+    loaded = _loaded(client)
+    canonical = builder_product["productDir"] / "process_maps" / "default.json"
+    before = canonical.read_bytes()
+    inspected = client.post(
+        "/api/builder/process-maps/fixture-product/default/spatial-inspection",
+        json={"revision": loaded["revision"], "scopeIds": []},
+    )
+    assert inspected.status_code == 200, inspected.text
+    payload = inspected.json()
+    assert "worldBounds" not in payload and "nodes" not in payload
+    assert canonical.read_bytes() == before
+
+    proposed = client.post(
+        "/api/builder/process-maps/fixture-product/default/spatial-proposals",
+        json={
+            "baseRevision": loaded["revision"],
+            "tool": "propose_process_map_node_placement",
+            "request": {"targetKind": "process_step", "processType": "operation", "name": "Machine part"},
+        },
+    )
+    assert proposed.status_code == 200, proposed.text
+    proposal = proposed.json()
+    assert proposal["wouldSave"] is True
+    assert len(proposal["spatialBindingHash"]) == 64
+    assert proposal["summary"]["message"] == "Placed Machine part."
+    assert len(proposal["preview"]["nodes"]) == 1
+    assert canonical.read_bytes() == before
+
+
+def test_spatial_tool_rejects_model_authored_geometry(builder_product: dict):
+    client = _client()
+    loaded = _loaded(client)
+    response = client.post(
+        "/api/builder/process-maps/fixture-product/default/spatial-proposals",
+        json={
+            "baseRevision": loaded["revision"],
+            "tool": "propose_process_map_node_placement",
+            "request": {
+                "targetKind": "process_step",
+                "processType": "operation",
+                "name": "Injected",
+                "position": {"x": 999, "y": 999},
+            },
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error"] == "model_geometry_not_allowed"
+
+
+def test_spatial_approval_binds_preview_and_returns_grounded_receipt(builder_product: dict):
+    client = _client()
+    loaded = _loaded(client)
+    proposal_response = client.post(
+        "/api/builder/process-maps/fixture-product/default/spatial-proposals",
+        json={
+            "baseRevision": loaded["revision"],
+            "tool": "propose_process_map_node_placement",
+            "request": {"targetKind": "product_occurrence", "occurrenceId": "part-a"},
+        },
+    )
+    assert proposal_response.status_code == 200, proposal_response.text
+    proposal = proposal_response.json()
+    missing_binding = client.post(
+        f"/api/builder/process-map-proposals/{proposal['proposalId']}/approve",
+        json={
+            "productId": "fixture-product",
+            "mapId": "default",
+            "baseRevision": proposal["baseRevision"],
+            "diffHash": proposal["diffHash"],
+            "userId": "fixture-user",
+            "sessionId": "fixture-session",
+            "idempotencyKey": "spatial-missing-binding",
+            "explicitApproval": True,
+        },
+    )
+    assert missing_binding.status_code == 403
+    assert missing_binding.json()["error"] == "approval_binding_mismatch"
+
+    key = "spatial-exact-binding"
+    approval = _approve(client, proposal, key)
+    applied = _apply(client, proposal, approval, key)
+    assert applied.status_code == 200, applied.text
+    payload = applied.json()
+    assert payload["receipt"]["spatialBindingHash"] == proposal["spatialBindingHash"]
+    assert payload["receipt"]["outcome"]["message"] == "Placed Fixture Part A."
+    assert any(node.get("sourceOccurrenceId") == "part-a" for node in payload["map"]["canvasNodes"])
+
+
+def test_agent_layout_write_flag_blocks_only_spatial_writes(
+    builder_product: dict,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    client = _client()
+    loaded = _loaded(client)
+    proposal_response = client.post(
+        "/api/builder/process-maps/fixture-product/default/spatial-proposals",
+        json={
+            "baseRevision": loaded["revision"],
+            "tool": "propose_process_map_node_placement",
+            "request": {"targetKind": "product_occurrence", "occurrenceId": "part-a"},
+        },
+    )
+    assert proposal_response.status_code == 200
+    proposal = proposal_response.json()
+    monkeypatch.delenv("INSPECTORPRO_PROCESS_MAP_AGENT_LAYOUT_WRITE", raising=False)
+
+    inspection = client.post(
+        "/api/builder/process-maps/fixture-product/default/spatial-inspection",
+        json={"revision": loaded["revision"], "scopeIds": []},
+    )
+    assert inspection.status_code == 200
+    denied = client.post(
+        f"/api/builder/process-map-proposals/{proposal['proposalId']}/approve",
+        json={
+            "productId": "fixture-product",
+            "mapId": "default",
+            "baseRevision": proposal["baseRevision"],
+            "diffHash": proposal["diffHash"],
+            "spatialBindingHash": proposal["spatialBindingHash"],
+            "userId": "fixture-user",
+            "sessionId": "fixture-session",
+            "idempotencyKey": "spatial-write-flag-off",
+            "explicitApproval": True,
+        },
+    )
+    assert denied.status_code == 404
+    assert _loaded(client)["revision"] == loaded["revision"]
+
+    generic = _proposal(
+        client,
+        loaded["revision"],
+        [{
+            "op": "add_process_step",
+            "nodeId": "generic-step",
+            "processType": "operation",
+            "name": "Generic Builder step",
+            "position": {"x": 100, "y": 100},
+        }],
+    )
+    approval = _approve(client, generic, "generic-write-with-agent-layout-off")
+    applied = _apply(client, generic, approval, "generic-write-with-agent-layout-off")
+    assert applied.status_code == 200
+
+
+def test_spatial_apply_rejects_altered_binding_and_wrong_identity(builder_product: dict):
+    client = _client()
+    loaded = _loaded(client)
+    proposal = client.post(
+        "/api/builder/process-maps/fixture-product/default/spatial-proposals",
+        json={
+            "baseRevision": loaded["revision"],
+            "tool": "propose_process_map_node_placement",
+            "request": {"targetKind": "product_occurrence", "occurrenceId": "part-a"},
+        },
+    ).json()
+    key = "spatial-altered-binding"
+    approval = _approve(client, proposal, key)
+    wrong_binding = _apply(client, {**proposal, "spatialBindingHash": "f" * 64}, approval, key)
+    assert wrong_binding.status_code == 403
+    assert wrong_binding.json()["error"] == "approval_binding_mismatch"
+
+    wrong_user_body = {
+        "approvalToken": approval["approvalToken"],
+        "productId": "fixture-product",
+        "mapId": "default",
+        "baseRevision": proposal["baseRevision"],
+        "diffHash": proposal["diffHash"],
+        "spatialBindingHash": proposal["spatialBindingHash"],
+        "userId": "different-user",
+        "sessionId": "fixture-session",
+        "idempotencyKey": key,
+    }
+    wrong_user = client.post("/api/builder/process-map-apply", json=wrong_user_body)
+    assert wrong_user.status_code == 403
+    assert wrong_user.json()["error"] == "approval_binding_mismatch"
+
+    applied = _apply(client, proposal, approval, key)
+    assert applied.status_code == 200
+    replay = _apply(client, proposal, approval, key)
+    assert replay.status_code == 409
+    assert replay.json()["error"] == "idempotency_replay"
 
 
 def test_propose_is_read_only_and_show_diff_is_stable(builder_product: dict):

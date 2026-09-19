@@ -58,12 +58,21 @@ namespace SolidWorksExtractor.Services
                     // Set the standard view orientation
                     doc.ShowNamedView2("", viewId);
 
-                    // Set display mode AFTER switching view (ShowNamedView2 can reset display mode)
+                    // Set display mode AFTER switching view (ShowNamedView2 can reset it).
+                    // The document-level commands are more reliable than assigning
+                    // IModelView.DisplayMode when SaveBMP captures the viewport.
                     try
                     {
+                        if (useShaded)
+                            doc.ViewDisplayShaded();
+                        else
+                            doc.ViewDisplayHiddenremoved();
+
                         IModelView modelView = (IModelView)doc.ActiveView;
                         if (modelView != null)
                         {
+                            modelView.EnableGraphicsUpdate = true;
+                            modelView.UpdateAllGraphicsLayers = true;
                             if (useShaded)
                             {
                                 // swSHADED_WITH_EDGES = 9 in some SW versions,
@@ -74,6 +83,9 @@ namespace SolidWorksExtractor.Services
                             {
                                 modelView.DisplayMode = (int)swDisplayMode_e.swHIDDEN;
                             }
+                            Console.WriteLine(
+                                $"    View {viewName}: display mode {modelView.DisplayMode}");
+                            modelView.GraphicsRedraw(null);
                         }
                     }
                     catch (Exception ex)

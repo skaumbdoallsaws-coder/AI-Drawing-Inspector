@@ -2294,7 +2294,7 @@ def _tool_skill_checks(recorder: _Recorder, repo_root: Path) -> None:
     recorder.check(
         "K7",
         "read_only_safety",
-        "Generation exposes only narrow review previews under explicit request.",
+        "Generation exposes draft tools only under explicit request.",
         passed=(
             preview_spec["name"] in generation_tools
             and move_spec["name"] in generation_tools
@@ -2303,7 +2303,13 @@ def _tool_skill_checks(recorder: _Recorder, repo_root: Path) -> None:
             == "prohibited"
             and set(generation_contract["side_effect_policy"][
                 "require_explicit_user_request"
-            ]) == {move_spec["name"], preview_spec["name"]}
+            ]) == {
+                move_spec["name"],
+                preview_spec["name"],
+                "generate_full_factory_draft",
+                "generate_facility_planning_prototype_draft",
+                "amend_facility_program_resource_batch_draft",
+            }
         ),
         observed={
             "previewAvailable": preview_spec["name"] in generation_tools,
@@ -2312,7 +2318,7 @@ def _tool_skill_checks(recorder: _Recorder, repo_root: Path) -> None:
                 "require_explicit_user_request"
             ],
         },
-        expected="explicit narrow previews; no commit side effect",
+        expected="explicit draft tools; no commit side effect",
     )
     recorder.check(
         "K8",

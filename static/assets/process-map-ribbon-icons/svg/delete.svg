@@ -1,0 +1,28 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Delete</title>
+      <defs>
+  <linearGradient id="delete-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FF7D83"/>
+    <stop offset="1" stop-color="#D93A51"/>
+  </linearGradient>
+  <linearGradient id="delete-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="delete-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#delete-shadow)">
+  <path d="M9 10H23L21.8 26.2C21.7 27.2 20.9 28 19.9 28H12.1C11.1 28 10.3 27.2 10.2 26.2L9 10Z" fill="url(#delete-g)" stroke="#8B2635" stroke-width="1.1"/>
+  <path d="M7.5 8.5H24.5" stroke="#A12A3A" stroke-width="2.4"/>
+  <path d="M12.4 8.2V6.4C12.4 5.6 13 5 13.8 5H18.2C19 5 19.6 5.6 19.6 6.4V8.2" stroke="#A12A3A" stroke-width="1.8"/>
+  <path d="M13.3 13V24M18.7 13V24" stroke="#FFE5E7" stroke-width="1.55" opacity="0.92"/>
+  <path d="M10.4 11.3H21.6" stroke="#FFB6BE" stroke-width="1" opacity="0.8"/>
+</g>
+
+      </g>
+    </svg>

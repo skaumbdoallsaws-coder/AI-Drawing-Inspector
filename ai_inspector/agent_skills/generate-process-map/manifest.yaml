@@ -1,0 +1,22 @@
+schema_version: 1
+id: generate-process-map
+version: 1.2.0
+description: Draft one evidence-aware Semantic Process Plan and request one deterministic, revision-bound Process Map ghost preview.
+agents:
+  - sage
+workflows:
+  - process-map-generation
+modes:
+  - training
+requires_context:
+  - process_map.graph
+  - process_map.state
+  - process_map.evidence
+optional_context: []
+allowed_tools:
+  - build_process_map_preview
+side_effects: []
+depends_on: []
+conflicts_with: []
+composable_with: []
+evidence_policy: computed_fields_only

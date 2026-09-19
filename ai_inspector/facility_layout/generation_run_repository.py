@@ -16,11 +16,21 @@ from typing import Any, Callable, Iterator, Mapping
 from uuid import uuid4
 
 from .canonical import canonicalize_layout, layout_revision
+from .facility_draft_lease import (
+    FACILITY_DRAFT_LEASE_SCHEMA_VERSION,
+    FacilityDraftLeaseRepository,
+    build_facility_draft_lease,
+    validate_facility_draft_lease,
+)
 from .knowledge_foundation import (
+    FACILITY_GENERATION_STAGES,
     FACILITY_GENERATION_RUN_SCHEMA_VERSION,
+    FACILITY_MAXIMUM_OPERATION_BATCH,
+    FACILITY_MAXIMUM_PLANNED_INSTANCES,
     canonical_facility_knowledge_bytes,
     default_generation_stage_graph,
     validate_facility_intent,
+    validate_generation_cumulative_proposal,
     validate_generation_run,
     validate_generation_save_receipt,
     validate_generation_stage_receipt,
@@ -30,6 +40,7 @@ from .provider_config import (
     FacilityProviderConfigurationError,
     assert_facility_provider_configuration,
 )
+from .program_execution import validate_facility_program_operation_plan
 
 
 FACILITY_GENERATION_RUN_IDLE_SECONDS = 24 * 60 * 60
@@ -156,6 +167,330 @@ def _sha256(value: Any, field: str) -> str:
     return value
 
 
+def _validate_stage_operation_plan(value: Mapping[str, Any]) -> dict[str, Any]:
+    required = {
+        "schemaVersion",
+        "recordKind",
+        "planId",
+        "runId",
+        "stageId",
+        "baseDraftRevision",
+        "dependencyFingerprint",
+        "selectedCommandIds",
+        "normalizedRequest",
+        "assumptions",
+        "expectedSummary",
+        "plannedInstanceCount",
+        "operationCount",
+        "operationsHash",
+        "operations",
+        "substageCount",
+        "substageOperationCounts",
+        "substagePlannedInstanceCounts",
+        "baseDraft",
+        "createdAt",
+        "planRevision",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan fields are invalid.",
+        )
+    result = deepcopy(dict(value))
+    if (
+        result["schemaVersion"] != FACILITY_GENERATION_RUN_SCHEMA_VERSION
+        or result["recordKind"] != "facility_generation_stage_operation_plan"
+    ):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan version or kind is invalid.",
+        )
+    _identifier(result["planId"], "planId")
+    _run_id(result["runId"])
+    valid_stage_ids = {item["stageId"] for item in FACILITY_GENERATION_STAGES}
+    if result["stageId"] not in valid_stage_ids:
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan names an unknown generation stage.",
+        )
+    _sha256(result["baseDraftRevision"], "baseDraftRevision")
+    _sha256(result["dependencyFingerprint"], "dependencyFingerprint")
+    _sha256(result["operationsHash"], "operationsHash")
+    _sha256(result["planRevision"], "planRevision")
+    if not isinstance(result["selectedCommandIds"], list) or any(
+        not isinstance(item, str) or not item
+        for item in result["selectedCommandIds"]
+    ):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan command IDs are invalid.",
+        )
+    if not isinstance(result["normalizedRequest"], Mapping):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan request is invalid.",
+        )
+    if not isinstance(result["assumptions"], list) or any(
+        not isinstance(item, str) for item in result["assumptions"]
+    ):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan assumptions are invalid.",
+        )
+    if not isinstance(result["expectedSummary"], Mapping):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan expected summary is invalid.",
+        )
+    operations = result["operations"]
+    if not isinstance(operations, list) or any(
+        not isinstance(item, Mapping) for item in operations
+    ):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan operations are invalid.",
+        )
+    operation_count = result["operationCount"]
+    planned_count = result["plannedInstanceCount"]
+    substage_count = result["substageCount"]
+    for field, number in (
+        ("operationCount", operation_count),
+        ("plannedInstanceCount", planned_count),
+        ("substageCount", substage_count),
+    ):
+        if isinstance(number, bool) or not isinstance(number, int) or number < 1:
+            raise FacilityGenerationRunIntegrityError(
+                "generation_operation_plan_invalid",
+                f"Stage operation plan {field} is invalid.",
+            )
+    if operation_count != len(operations):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan count does not match its operations.",
+        )
+    operation_counts = result["substageOperationCounts"]
+    planned_counts = result["substagePlannedInstanceCounts"]
+    if (
+        not isinstance(operation_counts, list)
+        or not isinstance(planned_counts, list)
+        or len(operation_counts) != substage_count
+        or len(planned_counts) != substage_count
+        or any(
+            isinstance(item, bool)
+            or not isinstance(item, int)
+            or not 0 <= item <= FACILITY_MAXIMUM_OPERATION_BATCH
+            for item in operation_counts
+        )
+        or any(
+            isinstance(item, bool)
+            or not isinstance(item, int)
+            or not 0 <= item <= FACILITY_MAXIMUM_PLANNED_INSTANCES
+            for item in planned_counts
+        )
+        or sum(operation_counts) != operation_count
+        or sum(planned_counts) != planned_count
+    ):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan substage budgets are invalid.",
+        )
+    base_draft = canonicalize_layout(deepcopy(dict(result["baseDraft"])))
+    if layout_revision(base_draft) != result["baseDraftRevision"]:
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan base draft revision is invalid.",
+        )
+    result["baseDraft"] = base_draft
+    if _record_revision(operations) != result["operationsHash"]:
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan operations hash is invalid.",
+        )
+    unsigned = deepcopy(result)
+    unsigned.pop("planRevision")
+    if _record_revision(unsigned) != result["planRevision"]:
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan revision is invalid.",
+        )
+    if not isinstance(result["createdAt"], str) or not result["createdAt"].endswith("Z"):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_operation_plan_invalid",
+            "Stage operation plan timestamp is invalid.",
+        )
+    return result
+
+
+def _validate_facility_program_artifact(value: Mapping[str, Any]) -> dict[str, Any]:
+    required = {
+        "schemaVersion",
+        "recordKind",
+        "runId",
+        "programRevision",
+        "planRevision",
+        "baseLayoutRevision",
+        "program",
+        "operationPlan",
+        "createdAt",
+        "artifactRevision",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_artifact_invalid",
+            "FacilityProgram artifact fields are invalid.",
+        )
+    result = deepcopy(dict(value))
+    if (
+        result["schemaVersion"] != FACILITY_GENERATION_RUN_SCHEMA_VERSION
+        or result["recordKind"] != "facility_generation_program_artifact"
+    ):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_artifact_invalid",
+            "FacilityProgram artifact version or kind is invalid.",
+        )
+    _run_id(result["runId"])
+    _sha256(result["programRevision"], "programRevision")
+    _sha256(result["planRevision"], "planRevision")
+    _sha256(result["baseLayoutRevision"], "baseLayoutRevision")
+    _sha256(result["artifactRevision"], "artifactRevision")
+    _parse_timestamp(result["createdAt"], "createdAt")
+    if not isinstance(result["program"], Mapping):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_artifact_invalid",
+            "FacilityProgram artifact does not contain a program object.",
+        )
+    try:
+        plan = validate_facility_program_operation_plan(result["operationPlan"])
+    except Exception as exc:
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_artifact_invalid",
+            "FacilityProgram operation plan failed integrity validation.",
+        ) from exc
+    if (
+        _record_revision(result["program"]) != result["programRevision"]
+        or plan["programRevision"] != result["programRevision"]
+        or plan["planRevision"] != result["planRevision"]
+        or plan["baseLayoutRevision"] != result["baseLayoutRevision"]
+    ):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_artifact_revision_mismatch",
+            "FacilityProgram artifact revisions do not agree.",
+        )
+    unsigned = deepcopy(result)
+    artifact_revision = unsigned.pop("artifactRevision")
+    if artifact_revision != _record_revision(unsigned):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_artifact_revision_mismatch",
+            "FacilityProgram artifact revision does not match its contents.",
+        )
+    return result
+
+
+def _validate_facility_program_amendment_artifact(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    required = {
+        "schemaVersion",
+        "recordKind",
+        "amendmentId",
+        "runId",
+        "sequence",
+        "baseProgramRevision",
+        "programRevision",
+        "resourceBatchId",
+        "patch",
+        "program",
+        "baseDraftRevision",
+        "resultDraftRevision",
+        "dependencyFingerprintBefore",
+        "dependencyFingerprintAfter",
+        "operationsHash",
+        "affectedStableIds",
+        "createdAt",
+        "amendmentRevision",
+    }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_amendment_invalid",
+            "FacilityProgram amendment artifact fields are invalid.",
+        )
+    result = deepcopy(dict(value))
+    if (
+        result["schemaVersion"] != FACILITY_GENERATION_RUN_SCHEMA_VERSION
+        or result["recordKind"]
+        != "facility_generation_program_amendment"
+    ):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_amendment_invalid",
+            "FacilityProgram amendment artifact version or kind is invalid.",
+        )
+    _identifier(result["amendmentId"], "amendmentId")
+    _run_id(result["runId"])
+    if (
+        isinstance(result["sequence"], bool)
+        or not isinstance(result["sequence"], int)
+        or result["sequence"] < 1
+    ):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_amendment_invalid",
+            "FacilityProgram amendment sequence must be positive.",
+        )
+    for field in (
+        "baseProgramRevision",
+        "programRevision",
+        "baseDraftRevision",
+        "resultDraftRevision",
+        "dependencyFingerprintBefore",
+        "dependencyFingerprintAfter",
+        "operationsHash",
+        "amendmentRevision",
+    ):
+        _sha256(result[field], field)
+    _identifier(result["resourceBatchId"], "resourceBatchId")
+    allowed_patch_fields = {
+        "quantity",
+        "placement_pattern",
+        "semantic_orientation",
+        "authored_spacing",
+    }
+    if (
+        not isinstance(result["patch"], Mapping)
+        or not result["patch"]
+        or set(result["patch"]) - allowed_patch_fields
+    ):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_amendment_invalid",
+            "FacilityProgram amendment patch is empty or contains unsupported fields.",
+        )
+    if not isinstance(result["program"], Mapping):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_amendment_invalid",
+            "FacilityProgram amendment does not contain its canonical program.",
+        )
+    if _record_revision(result["program"]) != result["programRevision"]:
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_amendment_revision_mismatch",
+            "FacilityProgram amendment program revision is invalid.",
+        )
+    if not isinstance(result["affectedStableIds"], list) or any(
+        not isinstance(item, str) or not item
+        for item in result["affectedStableIds"]
+    ):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_amendment_invalid",
+            "FacilityProgram amendment affected IDs are invalid.",
+        )
+    _parse_timestamp(result["createdAt"], "amendment.createdAt")
+    unsigned = deepcopy(result)
+    revision = unsigned.pop("amendmentRevision")
+    if revision != _record_revision(unsigned):
+        raise FacilityGenerationRunIntegrityError(
+            "generation_facility_program_amendment_revision_mismatch",
+            "FacilityProgram amendment revision does not match its contents.",
+        )
+    return result
+
+
 def _read_bytes(path: Path) -> bytes:
     try:
         with open(_native_fs_path(path), "rb") as stream:
@@ -226,6 +561,15 @@ class FacilityGenerationRunRepository:
                 "generation_root_unavailable",
                 "Generation-run storage root is unavailable.",
             ) from exc
+        # This repository and FDL intentionally point at the same per-layout
+        # lease files and the same cross-process site lock.
+        self.draft_lease_repository = FacilityDraftLeaseRepository(
+            self.root,
+            clock=self._clock,
+            idle_seconds=self.idle_seconds,
+            lock_stale_seconds=self.lock_stale_seconds,
+            lock_timeout_seconds=self.lock_timeout_seconds,
+        )
 
     def _now(self) -> datetime:
         value = self._clock()
@@ -359,6 +703,52 @@ class FacilityGenerationRunRepository:
             / "stage-drafts"
             / f"{_identifier(receipt_id, 'receiptId')}.json"
         )
+
+    def _stage_operation_plan_path(
+        self,
+        tenant_id: str,
+        site_id: str,
+        run_id: str,
+        plan_id: str,
+    ) -> Path:
+        return (
+            self._scope_root(tenant_id, site_id)
+            / "run-artifacts"
+            / _run_id(run_id)
+            / "stage-operation-plans"
+            / f"{_identifier(plan_id, 'planId')}.json"
+        )
+
+    def _facility_program_artifact_path(
+        self, tenant_id: str, site_id: str, run_id: str
+    ) -> Path:
+        return (
+            self._scope_root(tenant_id, site_id)
+            / "run-artifacts"
+            / _run_id(run_id)
+            / "facility-program.json"
+        )
+
+    def _facility_program_amendments_root(
+        self, tenant_id: str, site_id: str, run_id: str
+    ) -> Path:
+        return (
+            self._scope_root(tenant_id, site_id)
+            / "run-artifacts"
+            / _run_id(run_id)
+            / "facility-program-amendments"
+        )
+
+    def _facility_program_amendment_path(
+        self,
+        tenant_id: str,
+        site_id: str,
+        run_id: str,
+        amendment_id: str,
+    ) -> Path:
+        return self._facility_program_amendments_root(
+            tenant_id, site_id, run_id
+        ) / f"{_identifier(amendment_id, 'amendmentId')}.json"
 
     def _receipt_supersession_path(
         self,
@@ -567,8 +957,8 @@ class FacilityGenerationRunRepository:
         if existing is None:
             self._atomic_write(path, record)
 
-    @staticmethod
     def _validate_checkpoint_transaction(
+        self,
         value: Mapping[str, Any],
     ) -> dict[str, Any]:
         required = {
@@ -653,10 +1043,19 @@ class FacilityGenerationRunRepository:
             )
         if value["leaseRecord"] is not None:
             lease = value["leaseRecord"]
-            if not isinstance(lease, Mapping) or lease.get("runId") != run_id:
+            if not isinstance(lease, Mapping):
                 raise FacilityGenerationRunIntegrityError(
                     "generation_checkpoint_transaction_invalid",
                     "Stage-checkpoint transaction lease is invalid.",
+                )
+            validated_lease = self._validate_lease_record(lease)
+            if (
+                validated_lease["ownerKind"] != "generation_run"
+                or validated_lease["ownerRunId"] != run_id
+            ):
+                raise FacilityGenerationRunIntegrityError(
+                    "generation_checkpoint_transaction_invalid",
+                    "Stage-checkpoint transaction lease owner is invalid.",
                 )
         return deepcopy(dict(value))
 
@@ -755,36 +1154,42 @@ class FacilityGenerationRunRepository:
                     tenant_id, site_id, transaction
                 )
 
-    @staticmethod
     def _lease_payload(
+        self,
         *,
+        tenant_id: str,
+        site_id: str,
         run_id: str,
         layout_id: str,
         owner_token: str,
         base_layout_revision: str,
+        current_draft_revision: str | None = None,
         acquired_at: str,
         updated_at: str,
         expires_at: str,
     ) -> dict[str, Any]:
-        value = {
-            "schemaVersion": FACILITY_GENERATION_RUN_SCHEMA_VERSION,
-            "recordKind": "facility_generation_layout_lease",
-            "runId": run_id,
-            "layoutId": layout_id,
-            "ownerToken": owner_token,
-            "baseLayoutRevision": base_layout_revision,
-            "acquiredAt": acquired_at,
-            "updatedAt": updated_at,
-            "expiresAt": expires_at,
-        }
-        value["leaseRevision"] = _record_revision(value)
-        return value
+        return build_facility_draft_lease(
+            tenant_id=tenant_id,
+            site_id=site_id,
+            layout_id=layout_id,
+            owner_kind="generation_run",
+            owner_run_id=run_id,
+            owner_token=owner_token,
+            base_saved_layout_revision=base_layout_revision,
+            current_draft_revision=(
+                current_draft_revision or base_layout_revision
+            ),
+            status="active",
+            acquired_at=acquired_at,
+            updated_at=updated_at,
+            expires_at=expires_at,
+        )
 
     @staticmethod
     def _run_lease_view(lease: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "layoutId": lease["layoutId"],
-            "runId": lease["runId"],
+            "runId": lease["ownerRunId"],
             "ownerToken": lease["ownerToken"],
             "leaseRevision": lease["leaseRevision"],
             "acquiredAt": lease["acquiredAt"],
@@ -793,37 +1198,18 @@ class FacilityGenerationRunRepository:
         }
 
     def _validate_lease_record(self, lease: Mapping[str, Any]) -> dict[str, Any]:
-        required = {
-            "schemaVersion",
-            "recordKind",
-            "runId",
-            "layoutId",
-            "ownerToken",
-            "baseLayoutRevision",
-            "acquiredAt",
-            "updatedAt",
-            "expiresAt",
-            "leaseRevision",
-        }
-        if set(lease) != required:
+        try:
+            value = validate_facility_draft_lease(lease)
+        except Exception as exc:
             raise FacilityGenerationRunIntegrityError(
                 "generation_lease_invalid",
-                "Generation writable lease fields are invalid.",
-            )
-        unsigned = deepcopy(dict(lease))
-        revision = unsigned.pop("leaseRevision")
-        if revision != _record_revision(unsigned):
-            raise FacilityGenerationRunIntegrityError(
-                "generation_lease_revision_mismatch",
-                "Generation writable lease revision is invalid.",
-            )
-        _run_id(lease["runId"])
-        _identifier(lease["layoutId"], "layoutId")
-        _identifier(lease["ownerToken"], "ownerToken")
-        _sha256(lease["baseLayoutRevision"], "baseLayoutRevision")
-        for field in ("acquiredAt", "updatedAt", "expiresAt"):
-            _parse_timestamp(lease[field], f"lease.{field}")
-        return deepcopy(dict(lease))
+                "Shared Facility writable lease is invalid.",
+            ) from exc
+        # Compatibility aliases remain in memory only. Existing generation
+        # run receipts and public writableLease views retain their frozen shape.
+        value["runId"] = value["ownerRunId"]
+        value["baseLayoutRevision"] = value["baseSavedLayoutRevision"]
+        return value
 
     def _active_lease(
         self,
@@ -833,15 +1219,27 @@ class FacilityGenerationRunRepository:
         now: datetime,
     ) -> dict[str, Any] | None:
         path = self._lease_path(tenant_id, site_id, layout_id)
-        record = self._load_optional(path, "facility_generation_layout_lease")
+        record = self._load_optional(path, "facility_draft_lease")
         if record is None:
             return None
         lease = self._validate_lease_record(record)
-        if _parse_timestamp(lease["expiresAt"], "lease.expiresAt") <= now:
+        deadline = (
+            lease["recoveryDeadlineAt"]
+            if lease["status"] == "review_required"
+            else lease["expiresAt"]
+        )
+        if lease["status"] not in {"active", "adopting", "review_required"} or (
+            deadline is not None
+            and _parse_timestamp(deadline, "lease.deadline") <= now
+        ):
             self._remove(path)
             return None
+        if lease["ownerKind"] != "generation_run":
+            return lease
         try:
-            envelope = self._load_run_envelope(tenant_id, site_id, lease["runId"])
+            envelope = self._load_run_envelope(
+                tenant_id, site_id, lease["ownerRunId"]
+            )
         except FacilityGenerationRunNotFoundError:
             self._remove(path)
             return None
@@ -869,6 +1267,7 @@ class FacilityGenerationRunRepository:
         prototype_mode: bool,
         writable: bool,
         run_id: str | None = None,
+        stage_inputs_by_id: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         tenant_id = _identifier(tenant_id, "tenantId")
         site_id = _identifier(site_id, "siteId")
@@ -941,9 +1340,11 @@ class FacilityGenerationRunRepository:
                     raise FacilityGenerationRunConflictError(
                         "generation_writable_lease_conflict",
                         "Another writable generation run owns this layout.",
-                        details={"runId": existing_lease["runId"]},
+                        details={"runId": existing_lease["ownerRunId"]},
                     )
                 lease = self._lease_payload(
+                    tenant_id=tenant_id,
+                    site_id=site_id,
                     run_id=run_id,
                     layout_id=layout_id,
                     owner_token=f"lease-{uuid4().hex}",
@@ -952,6 +1353,33 @@ class FacilityGenerationRunRepository:
                     updated_at=now_text,
                     expires_at=expires_at,
                 )
+            stage_graph = default_generation_stage_graph()
+            if stage_inputs_by_id is not None:
+                if not isinstance(stage_inputs_by_id, Mapping):
+                    raise FacilityGenerationRunRepositoryError(
+                        "generation_stage_inputs_invalid",
+                        "Generation stage inputs must be keyed by stage ID.",
+                    )
+                stages_by_id = {
+                    stage["stageId"]: stage for stage in stage_graph
+                }
+                unknown_stage_ids = sorted(
+                    set(stage_inputs_by_id) - set(stages_by_id)
+                )
+                if unknown_stage_ids:
+                    raise FacilityGenerationRunRepositoryError(
+                        "generation_stage_inputs_invalid",
+                        "Generation stage inputs reference unknown stages.",
+                        details={"stageIds": unknown_stage_ids},
+                    )
+                for stage_id, inputs in stage_inputs_by_id.items():
+                    if not isinstance(inputs, Mapping):
+                        raise FacilityGenerationRunRepositoryError(
+                            "generation_stage_inputs_invalid",
+                            "Each generation stage input must be an object.",
+                            details={"stageId": stage_id},
+                        )
+                    stages_by_id[stage_id]["inputs"] = deepcopy(dict(inputs))
             run = {
                 "schemaVersion": FACILITY_GENERATION_RUN_SCHEMA_VERSION,
                 "runId": run_id,
@@ -967,7 +1395,7 @@ class FacilityGenerationRunRepository:
                 "reasoningEffort": reasoning_effort,
                 "intentHash": intent_hash,
                 "dependencyFingerprint": dependency_fingerprint,
-                "stageGraph": default_generation_stage_graph(),
+                "stageGraph": stage_graph,
                 "currentStageId": "facility_envelope",
                 "resumePoint": {
                     "stageId": "facility_envelope",
@@ -1161,6 +1589,439 @@ class FacilityGenerationRunRepository:
             "draft": deepcopy(draft),
         }
 
+    def put_stage_operation_plan(
+        self,
+        tenant_id: str,
+        site_id: str,
+        plan: Mapping[str, Any],
+        *,
+        expected_run_revision: str,
+        lease_owner_token: str | None,
+    ) -> dict[str, Any]:
+        """Persist one immutable oversized-stage plan before its first batch."""
+
+        normalized = _validate_stage_operation_plan(plan)
+        run_id = normalized["runId"]
+        expected_run_revision = _sha256(
+            expected_run_revision, "expectedRunRevision"
+        )
+        with self._write_lock(tenant_id, site_id):
+            envelope = self._load_run_envelope(tenant_id, site_id, run_id)
+            run = envelope["run"]
+            if envelope["runRevision"] != expected_run_revision:
+                raise FacilityGenerationRunConflictError(
+                    "generation_run_revision_conflict",
+                    "Generation run changed before its operation plan was recorded.",
+                )
+            if run["currentStageId"] != normalized["stageId"]:
+                raise FacilityGenerationRunConflictError(
+                    "generation_stage_order_invalid",
+                    "Stage operation plan is not for the current eligible stage.",
+                )
+            if normalized["dependencyFingerprint"] != run["dependencyFingerprint"]:
+                raise FacilityGenerationRunConflictError(
+                    "generation_dependency_fingerprint_mismatch",
+                    "Stage operation plan dependency fingerprint is stale.",
+                )
+            draft = _read_record(
+                self._draft_checkpoint_path(tenant_id, site_id, run_id),
+                "facility_generation_draft",
+            )
+            if normalized["baseDraftRevision"] != draft["draftLayoutRevision"]:
+                raise FacilityGenerationRunConflictError(
+                    "generation_draft_revision_conflict",
+                    "Stage operation plan was compiled from a stale draft revision.",
+                )
+            if run["writable"]:
+                lease = self._load_optional(
+                    self._lease_path(tenant_id, site_id, run["layoutId"]),
+                    "facility_draft_lease",
+                )
+                if (
+                    lease is None
+                    or lease_owner_token is None
+                    or lease.get("ownerKind") != "generation_run"
+                    or lease.get("ownerRunId") != run_id
+                    or lease.get("ownerToken") != lease_owner_token
+                ):
+                    raise FacilityGenerationRunConflictError(
+                        "generation_writable_lease_conflict",
+                        "Stage operation plan requires the writable generation lease.",
+                    )
+            elif lease_owner_token is not None:
+                raise FacilityGenerationRunConflictError(
+                    "generation_preview_lease_forbidden",
+                    "Preview-only operation plans cannot carry a writable lease token.",
+                )
+            path = self._stage_operation_plan_path(
+                tenant_id, site_id, run_id, normalized["planId"]
+            )
+            existing = self._load_optional(
+                path, "facility_generation_stage_operation_plan"
+            )
+            if existing is not None and existing != normalized:
+                raise FacilityGenerationRunConflictError(
+                    "generation_operation_plan_exists",
+                    "A different immutable operation plan already uses this ID.",
+                )
+            if existing is None:
+                self._atomic_write(path, normalized)
+        return deepcopy(normalized)
+
+    def put_facility_program_artifact(
+        self,
+        tenant_id: str,
+        site_id: str,
+        *,
+        run_id: str,
+        program: Mapping[str, Any],
+        operation_plan: Mapping[str, Any],
+        expected_run_revision: str,
+        lease_owner_token: str | None,
+    ) -> dict[str, Any]:
+        """Persist one immutable resolved program and preflight plan per run."""
+
+        run_id = _run_id(run_id)
+        expected_run_revision = _sha256(
+            expected_run_revision, "expectedRunRevision"
+        )
+        plan = validate_facility_program_operation_plan(operation_plan)
+        program_value = deepcopy(dict(program))
+        now_text = _timestamp(self._now())
+        record = {
+            "schemaVersion": FACILITY_GENERATION_RUN_SCHEMA_VERSION,
+            "recordKind": "facility_generation_program_artifact",
+            "runId": run_id,
+            "programRevision": _record_revision(program_value),
+            "planRevision": plan["planRevision"],
+            "baseLayoutRevision": plan["baseLayoutRevision"],
+            "program": program_value,
+            "operationPlan": plan,
+            "createdAt": now_text,
+        }
+        record["artifactRevision"] = _record_revision(record)
+        normalized = _validate_facility_program_artifact(record)
+        with self._write_lock(tenant_id, site_id):
+            envelope = self._load_run_envelope(tenant_id, site_id, run_id)
+            run = envelope["run"]
+            if envelope["runRevision"] != expected_run_revision:
+                raise FacilityGenerationRunConflictError(
+                    "generation_run_revision_conflict",
+                    "Generation run changed before its FacilityProgram was recorded.",
+                )
+            if run["baseLayoutRevision"] != plan["baseLayoutRevision"]:
+                raise FacilityGenerationRunConflictError(
+                    "generation_base_layout_revision_mismatch",
+                    "FacilityProgram was compiled from a different base layout.",
+                )
+            if run["writable"]:
+                lease = self._load_optional(
+                    self._lease_path(tenant_id, site_id, run["layoutId"]),
+                    "facility_draft_lease",
+                )
+                if (
+                    lease is None
+                    or lease_owner_token is None
+                    or lease.get("ownerKind") != "generation_run"
+                    or lease.get("ownerRunId") != run_id
+                    or lease.get("ownerToken") != lease_owner_token
+                ):
+                    raise FacilityGenerationRunConflictError(
+                        "generation_writable_lease_conflict",
+                        "FacilityProgram persistence requires the writable generation lease.",
+                    )
+            elif lease_owner_token is not None:
+                raise FacilityGenerationRunConflictError(
+                    "generation_preview_lease_forbidden",
+                    "Preview-only FacilityPrograms cannot carry a writable lease token.",
+                )
+            path = self._facility_program_artifact_path(
+                tenant_id, site_id, run_id
+            )
+            existing = self._load_optional(
+                path, "facility_generation_program_artifact"
+            )
+            if existing is not None and existing != normalized:
+                raise FacilityGenerationRunConflictError(
+                    "generation_facility_program_artifact_exists",
+                    "A different FacilityProgram is already bound to this run.",
+                )
+            if existing is None:
+                self._atomic_write(path, normalized)
+        return deepcopy(normalized)
+
+    def get_facility_program_artifact(
+        self, tenant_id: str, site_id: str, run_id: str
+    ) -> dict[str, Any]:
+        record = _read_record(
+            self._facility_program_artifact_path(
+                tenant_id, site_id, _run_id(run_id)
+            ),
+            "facility_generation_program_artifact",
+        )
+        normalized = _validate_facility_program_artifact(record)
+        if normalized["runId"] != run_id:
+            raise FacilityGenerationRunIntegrityError(
+                "generation_facility_program_artifact_run_mismatch",
+                "FacilityProgram artifact does not belong to this run.",
+            )
+        return normalized
+
+    def list_facility_program_amendments(
+        self, tenant_id: str, site_id: str, run_id: str
+    ) -> list[dict[str, Any]]:
+        """Return the validated, contiguous semantic amendment chain."""
+
+        run_id = _run_id(run_id)
+        root = self._facility_program_amendments_root(
+            tenant_id, site_id, run_id
+        )
+        if not os.path.isdir(_native_fs_path(root)):
+            return []
+        envelope = self.get_run(tenant_id, site_id, run_id)
+        committed_amendment_ids: set[str] = set()
+        for receipt_id in envelope["run"]["receiptChain"]:
+            receipt_record = _read_record(
+                self._stage_receipt_path(
+                    tenant_id, site_id, run_id, receipt_id
+                ),
+                "facility_generation_stage_receipt",
+            )
+            substage_id = receipt_record["receipt"].get("substageId")
+            if isinstance(substage_id, str) and substage_id.startswith(
+                "program-amendment-"
+            ):
+                committed_amendment_ids.add(substage_id)
+        records: list[dict[str, Any]] = []
+        for entry in os.scandir(_native_fs_path(root)):
+            if not entry.is_file() or not entry.name.endswith(".json"):
+                continue
+            path = Path(entry.path)
+            record = _read_record(
+                path, "facility_generation_program_amendment"
+            )
+            normalized = _validate_facility_program_amendment_artifact(
+                record
+            )
+            if normalized["runId"] != run_id:
+                raise FacilityGenerationRunIntegrityError(
+                    "generation_facility_program_amendment_run_mismatch",
+                    "FacilityProgram amendment does not belong to this run.",
+                )
+            if normalized["amendmentId"] not in committed_amendment_ids:
+                continue
+            records.append(normalized)
+        records.sort(key=lambda item: item["sequence"])
+        base = self.get_facility_program_artifact(
+            tenant_id, site_id, run_id
+        )
+        prior_revision = base["programRevision"]
+        for expected_sequence, record in enumerate(records, start=1):
+            if (
+                record["sequence"] != expected_sequence
+                or record["baseProgramRevision"] != prior_revision
+            ):
+                raise FacilityGenerationRunIntegrityError(
+                    "generation_facility_program_amendment_chain_invalid",
+                    "FacilityProgram amendment chain is not contiguous.",
+                )
+            prior_revision = record["programRevision"]
+        return deepcopy(records)
+
+    def get_effective_facility_program(
+        self, tenant_id: str, site_id: str, run_id: str
+    ) -> dict[str, Any]:
+        """Resolve the immutable base program plus its amendment chain."""
+
+        base = self.get_facility_program_artifact(
+            tenant_id, site_id, run_id
+        )
+        amendments = self.list_facility_program_amendments(
+            tenant_id, site_id, run_id
+        )
+        if amendments:
+            program = deepcopy(amendments[-1]["program"])
+            revision = amendments[-1]["programRevision"]
+        else:
+            program = deepcopy(base["program"])
+            revision = base["programRevision"]
+        return {
+            "program": program,
+            "programRevision": revision,
+            "baseProgramRevision": base["programRevision"],
+            "amendments": amendments,
+        }
+
+    def put_facility_program_amendment(
+        self,
+        tenant_id: str,
+        site_id: str,
+        *,
+        amendment: Mapping[str, Any],
+        expected_run_revision: str,
+        lease_owner_token: str,
+    ) -> dict[str, Any]:
+        """Persist one immutable semantic amendment before its draft checkpoint."""
+
+        normalized = _validate_facility_program_amendment_artifact(amendment)
+        run_id = normalized["runId"]
+        expected_run_revision = _sha256(
+            expected_run_revision, "expectedRunRevision"
+        )
+        with self._write_lock(tenant_id, site_id):
+            envelope = self._load_run_envelope(tenant_id, site_id, run_id)
+            if envelope["runRevision"] != expected_run_revision:
+                raise FacilityGenerationRunConflictError(
+                    "generation_run_revision_conflict",
+                    "Generation run changed before its amendment was recorded.",
+                    details={"currentRunRevision": envelope["runRevision"]},
+                )
+            run = envelope["run"]
+            if (
+                run["status"] != "complete"
+                or not run["writable"]
+                or run["currentStageId"] is not None
+            ):
+                raise FacilityGenerationRunConflictError(
+                    "generation_facility_program_amendment_not_ready",
+                    "FacilityProgram amendments require a complete writable draft.",
+                )
+            lease_record = self._load_optional(
+                self._lease_path(tenant_id, site_id, run["layoutId"]),
+                "facility_draft_lease",
+            )
+            if lease_record is None:
+                raise FacilityGenerationRunConflictError(
+                    "generation_writable_lease_lost",
+                    "FacilityProgram amendment requires the writable generation lease.",
+                )
+            lease = self._validate_lease_record(lease_record)
+            if (
+                lease["ownerKind"] != "generation_run"
+                or lease["ownerRunId"] != run_id
+                or lease["ownerToken"] != lease_owner_token
+            ):
+                raise FacilityGenerationRunConflictError(
+                    "generation_writable_lease_conflict",
+                    "FacilityProgram amendment lease token does not match.",
+                )
+            draft = _read_record(
+                self._draft_checkpoint_path(tenant_id, site_id, run_id),
+                "facility_generation_draft",
+            )
+            if draft["draftLayoutRevision"] != normalized[
+                "baseDraftRevision"
+            ]:
+                raise FacilityGenerationRunConflictError(
+                    "generation_draft_revision_conflict",
+                    "FacilityProgram amendment was compiled from a stale draft.",
+                )
+            existing_records: list[dict[str, Any]] = []
+            root = self._facility_program_amendments_root(
+                tenant_id, site_id, run_id
+            )
+            if os.path.isdir(_native_fs_path(root)):
+                for entry in os.scandir(_native_fs_path(root)):
+                    if not entry.is_file() or not entry.name.endswith(
+                        ".json"
+                    ):
+                        continue
+                    candidate = Path(entry.path)
+                    existing_records.append(
+                        _validate_facility_program_amendment_artifact(
+                            _read_record(
+                                candidate,
+                                "facility_generation_program_amendment",
+                            )
+                        )
+                    )
+            existing_records.sort(key=lambda item: item["sequence"])
+            path = self._facility_program_amendment_path(
+                tenant_id,
+                site_id,
+                run_id,
+                normalized["amendmentId"],
+            )
+            existing = self._load_optional(
+                path, "facility_generation_program_amendment"
+            )
+            if existing is not None and existing != normalized:
+                raise FacilityGenerationRunConflictError(
+                    "generation_facility_program_amendment_exists",
+                    "A different immutable FacilityProgram amendment uses this ID.",
+                )
+            if existing == normalized:
+                return deepcopy(normalized)
+            base = _read_record(
+                self._facility_program_artifact_path(
+                    tenant_id, site_id, run_id
+                ),
+                "facility_generation_program_artifact",
+            )
+            base = _validate_facility_program_artifact(base)
+            expected_sequence = len(existing_records) + 1
+            prior_revision = (
+                existing_records[-1]["programRevision"]
+                if existing_records
+                else base["programRevision"]
+            )
+            if (
+                normalized["sequence"] != expected_sequence
+                or normalized["baseProgramRevision"] != prior_revision
+            ):
+                raise FacilityGenerationRunConflictError(
+                    "generation_facility_program_amendment_chain_conflict",
+                    "FacilityProgram amendment does not extend the current semantic chain.",
+                    details={
+                        "expectedSequence": expected_sequence,
+                        "expectedBaseProgramRevision": prior_revision,
+                    },
+                )
+            committed_ids = {
+                _read_record(
+                    self._stage_receipt_path(
+                        tenant_id, site_id, run_id, receipt_id
+                    ),
+                    "facility_generation_stage_receipt",
+                )["receipt"].get("substageId")
+                for receipt_id in run["receiptChain"]
+            }
+            pending = [
+                item["amendmentId"]
+                for item in existing_records
+                if item["amendmentId"] not in committed_ids
+            ]
+            if pending:
+                raise FacilityGenerationRunConflictError(
+                    "generation_facility_program_amendment_recovery_required",
+                    "A prior FacilityProgram amendment must finish recovery before another begins.",
+                    details={"pendingAmendmentIds": sorted(pending)},
+                )
+            if existing is None:
+                self._atomic_write(path, normalized)
+        return deepcopy(normalized)
+
+    def get_stage_operation_plan(
+        self,
+        tenant_id: str,
+        site_id: str,
+        run_id: str,
+        plan_id: str,
+    ) -> dict[str, Any]:
+        record = _read_record(
+            self._stage_operation_plan_path(
+                tenant_id, site_id, run_id, plan_id
+            ),
+            "facility_generation_stage_operation_plan",
+        )
+        normalized = _validate_stage_operation_plan(record)
+        if normalized["runId"] != _run_id(run_id):
+            raise FacilityGenerationRunIntegrityError(
+                "generation_operation_plan_run_mismatch",
+                "Stage operation plan does not belong to this generation run.",
+            )
+        return deepcopy(normalized)
+
     def record_stage_checkpoint(
         self,
         receipt: Mapping[str, Any],
@@ -1170,6 +2031,7 @@ class FacilityGenerationRunRepository:
         expected_run_revision: str,
         lease_owner_token: str | None,
         next_stage_id: str | None,
+        next_substage_id: str | None = None,
     ) -> dict[str, Any]:
         """Append one immutable receipt and atomically advance the durable draft."""
 
@@ -1201,7 +2063,7 @@ class FacilityGenerationRunRepository:
             lease = None
             if run["writable"]:
                 lease_record = self._load_optional(
-                    lease_path, "facility_generation_layout_lease"
+                    lease_path, "facility_draft_lease"
                 )
                 if lease_record is None:
                     raise FacilityGenerationRunConflictError(
@@ -1210,7 +2072,8 @@ class FacilityGenerationRunRepository:
                     )
                 lease = self._validate_lease_record(lease_record)
                 if (
-                    lease["runId"] != run_id
+                    lease["ownerKind"] != "generation_run"
+                    or lease["ownerRunId"] != run_id
                     or lease_owner_token is None
                     or lease["ownerToken"] != lease_owner_token
                 ):
@@ -1239,14 +2102,30 @@ class FacilityGenerationRunRepository:
                 else None
             )
             failed = normalized_receipt["status"] == "failed"
-            allowed_next_stage_id = (
-                normalized_receipt["stageId"] if failed else expected_next_stage_id
+            partial = (
+                not failed
+                and next_stage_id == normalized_receipt["stageId"]
             )
+            allowed_next_stage_id = normalized_receipt["stageId"] if (
+                failed or partial
+            ) else expected_next_stage_id
             if next_stage_id != allowed_next_stage_id:
                 raise FacilityGenerationRunConflictError(
                     "generation_stage_transition_invalid",
                     "Stage checkpoint does not advance through the frozen stage order.",
                     details={"expectedNextStageId": allowed_next_stage_id},
+                )
+            if partial and (
+                not isinstance(next_substage_id, str) or not next_substage_id
+            ):
+                raise FacilityGenerationRunConflictError(
+                    "generation_substage_transition_invalid",
+                    "A partial stage checkpoint must name its next substage.",
+                )
+            if not partial and not failed and next_substage_id is not None:
+                raise FacilityGenerationRunConflictError(
+                    "generation_substage_transition_invalid",
+                    "A completed stage cannot retain a next substage.",
                 )
             draft_path = self._draft_checkpoint_path(tenant_id, site_id, run_id)
             current_draft = _read_record(
@@ -1317,7 +2196,16 @@ class FacilityGenerationRunRepository:
                     "generation_failed_stage_not_blocked",
                     "A failed stage receipt must leave its stage blocked.",
                 )
-            if not failed and stage["status"] not in {"complete", "cancelled"}:
+            if partial and stage["status"] != "running":
+                raise FacilityGenerationRunConflictError(
+                    "generation_partial_stage_not_running",
+                    "A partial stage checkpoint must leave its stage running.",
+                )
+            if (
+                not failed
+                and not partial
+                and stage["status"] not in {"complete", "cancelled"}
+            ):
                 raise FacilityGenerationRunConflictError(
                     "generation_valid_stage_not_closed",
                     "A valid stage receipt must complete or cancel its stage.",
@@ -1329,7 +2217,11 @@ class FacilityGenerationRunRepository:
             run["resumePoint"] = (
                 {
                     "stageId": next_stage_id,
-                    "substageId": None,
+                    "substageId": (
+                        normalized_receipt["substageId"]
+                        if failed
+                        else next_substage_id
+                    ),
                     "turnSequence": turn_sequence,
                 }
                 if next_stage_id is not None
@@ -1358,10 +2250,13 @@ class FacilityGenerationRunRepository:
             run["expiresAt"] = expires_at
             if lease is not None:
                 lease = self._lease_payload(
+                    tenant_id=tenant_id,
+                    site_id=site_id,
                     run_id=run_id,
                     layout_id=run["layoutId"],
                     owner_token=lease["ownerToken"],
                     base_layout_revision=run["baseLayoutRevision"],
+                    current_draft_revision=result_revision,
                     acquired_at=lease["acquiredAt"],
                     updated_at=now_text,
                     expires_at=expires_at,
@@ -1404,6 +2299,280 @@ class FacilityGenerationRunRepository:
                 tenant_id, site_id, transaction
             )
         return result
+
+    def record_completed_amendment_checkpoint(
+        self,
+        receipt: Mapping[str, Any],
+        draft_layout: Mapping[str, Any],
+        *,
+        tenant_id: str,
+        site_id: str,
+        expected_run_revision: str,
+        lease_owner_token: str,
+        amendment_id: str,
+        dependency_fingerprint_before: str,
+        dependency_fingerprint_after: str,
+        cumulative_proposal: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically append one local amendment to a completed draft run."""
+
+        normalized_receipt = validate_generation_stage_receipt(receipt)
+        if (
+            normalized_receipt["stageId"] != "department_resources"
+            or normalized_receipt["status"] != "valid"
+            or normalized_receipt["substageId"] != amendment_id
+        ):
+            raise FacilityGenerationRunConflictError(
+                "generation_facility_program_amendment_receipt_invalid",
+                "FacilityProgram local amendments require a valid resource-stage receipt.",
+            )
+        normalized_draft = canonicalize_layout(deepcopy(dict(draft_layout)))
+        result_revision = layout_revision(normalized_draft)
+        if normalized_receipt["resultDraftRevision"] != result_revision:
+            raise FacilityGenerationRunConflictError(
+                "generation_stage_result_revision_mismatch",
+                "FacilityProgram amendment receipt does not bind its draft.",
+            )
+        expected_run_revision = _sha256(
+            expected_run_revision, "expectedRunRevision"
+        )
+        dependency_fingerprint_before = _sha256(
+            dependency_fingerprint_before, "dependencyFingerprintBefore"
+        )
+        dependency_fingerprint_after = _sha256(
+            dependency_fingerprint_after, "dependencyFingerprintAfter"
+        )
+        proposal = validate_generation_cumulative_proposal(
+            cumulative_proposal
+        )
+        run_id = normalized_receipt["runId"]
+        self._reconcile_checkpoint_transaction(tenant_id, site_id, run_id)
+        with self._write_lock(tenant_id, site_id):
+            envelope = self._load_run_envelope(tenant_id, site_id, run_id)
+            if envelope["runRevision"] != expected_run_revision:
+                raise FacilityGenerationRunConflictError(
+                    "generation_run_revision_conflict",
+                    "Generation run changed before its amendment checkpoint.",
+                    details={"currentRunRevision": envelope["runRevision"]},
+                )
+            run = deepcopy(envelope["run"])
+            if (
+                run["status"] != "complete"
+                or run["currentStageId"] is not None
+                or not run["writable"]
+            ):
+                raise FacilityGenerationRunConflictError(
+                    "generation_facility_program_amendment_not_ready",
+                    "FacilityProgram amendments require a complete writable draft.",
+                )
+            if run["dependencyFingerprint"] != dependency_fingerprint_before:
+                raise FacilityGenerationRunConflictError(
+                    "generation_dependency_fingerprint_mismatch",
+                    "FacilityProgram amendment dependency fingerprint is stale.",
+                )
+            if normalized_receipt[
+                "dependencyFingerprint"
+            ] != dependency_fingerprint_after:
+                raise FacilityGenerationRunConflictError(
+                    "generation_dependency_fingerprint_mismatch",
+                    "FacilityProgram amendment receipt has the wrong dependency fingerprint.",
+                )
+            lease_record = self._load_optional(
+                self._lease_path(tenant_id, site_id, run["layoutId"]),
+                "facility_draft_lease",
+            )
+            if lease_record is None:
+                raise FacilityGenerationRunConflictError(
+                    "generation_writable_lease_lost",
+                    "FacilityProgram amendment checkpoint requires the writable lease.",
+                )
+            lease = self._validate_lease_record(lease_record)
+            if (
+                lease["ownerKind"] != "generation_run"
+                or lease["ownerRunId"] != run_id
+                or lease["ownerToken"] != lease_owner_token
+            ):
+                raise FacilityGenerationRunConflictError(
+                    "generation_writable_lease_conflict",
+                    "FacilityProgram amendment checkpoint lease token does not match.",
+                )
+            current_draft = _read_record(
+                self._draft_checkpoint_path(tenant_id, site_id, run_id),
+                "facility_generation_draft",
+            )
+            if current_draft["draftLayoutRevision"] != normalized_receipt[
+                "baseDraftRevision"
+            ]:
+                raise FacilityGenerationRunConflictError(
+                    "generation_draft_revision_conflict",
+                    "FacilityProgram amendment checkpoint was compiled from a stale draft.",
+                )
+            artifact = _validate_facility_program_amendment_artifact(
+                _read_record(
+                    self._facility_program_amendment_path(
+                        tenant_id, site_id, run_id, amendment_id
+                    ),
+                    "facility_generation_program_amendment",
+                )
+            )
+            if (
+                artifact["baseDraftRevision"]
+                != normalized_receipt["baseDraftRevision"]
+                or artifact["resultDraftRevision"] != result_revision
+                or artifact["dependencyFingerprintBefore"]
+                != dependency_fingerprint_before
+                or artifact["dependencyFingerprintAfter"]
+                != dependency_fingerprint_after
+                or artifact["operationsHash"]
+                != normalized_receipt["operationsHash"]
+                or artifact["affectedStableIds"]
+                != normalized_receipt["affectedStableIds"]
+            ):
+                raise FacilityGenerationRunConflictError(
+                    "generation_facility_program_amendment_receipt_mismatch",
+                    "FacilityProgram amendment artifact and receipt do not agree.",
+                )
+
+            next_receipt_chain = [
+                *run["receiptChain"],
+                normalized_receipt["receiptId"],
+            ]
+            if (
+                proposal["runId"] != run_id
+                or proposal["baseLayoutRevision"]
+                != run["baseLayoutRevision"]
+                or proposal["draftLayoutRevision"] != result_revision
+                or proposal["receiptChain"] != next_receipt_chain
+                or proposal["dependencyFingerprint"]
+                != dependency_fingerprint_after
+                or proposal["saveEligibility"] != "eligible"
+            ):
+                raise FacilityGenerationRunConflictError(
+                    "generation_facility_program_amendment_proposal_invalid",
+                    "FacilityProgram amendment proposal does not bind the complete result.",
+                )
+
+            receipt_record = {
+                "schemaVersion": FACILITY_GENERATION_RUN_SCHEMA_VERSION,
+                "recordKind": "facility_generation_stage_receipt",
+                "receiptRevision": _record_revision(normalized_receipt),
+                "receipt": normalized_receipt,
+            }
+            stage = next(
+                item
+                for item in run["stageGraph"]
+                if item["stageId"] == "department_resources"
+            )
+            stage["operationReceiptIds"].append(
+                normalized_receipt["receiptId"]
+            )
+            stage["substageGraph"].append(
+                {
+                    "substageId": amendment_id,
+                    "sequence": len(stage["substageGraph"]) + 1,
+                    "status": "complete",
+                    "operationCount": normalized_receipt["operationCount"],
+                    "plannedInstanceCount": normalized_receipt[
+                        "plannedInstanceCount"
+                    ],
+                    "operationReceiptIds": [
+                        normalized_receipt["receiptId"]
+                    ],
+                    "validation": deepcopy(
+                        normalized_receipt["validation"]
+                    ),
+                    "affectedStableIds": list(
+                        normalized_receipt["affectedStableIds"]
+                    ),
+                }
+            )
+            stage["affectedStableIds"] = list(
+                dict.fromkeys(
+                    [
+                        *stage["affectedStableIds"],
+                        *normalized_receipt["affectedStableIds"],
+                    ]
+                )
+            )
+            stage["validation"] = deepcopy(
+                normalized_receipt["validation"]
+            )
+            run["receiptChain"] = next_receipt_chain
+            run["dependencyFingerprint"] = dependency_fingerprint_after
+            run["cumulativeDiffHash"] = proposal["cumulativeDiffHash"]
+            run["cumulativeProposal"] = proposal
+            run["saveEligibility"] = "eligible"
+
+            draft_record = {
+                "schemaVersion": FACILITY_GENERATION_RUN_SCHEMA_VERSION,
+                "recordKind": "facility_generation_draft",
+                "runId": run_id,
+                "baseLayoutRevision": run["baseLayoutRevision"],
+                "draftLayoutRevision": result_revision,
+                "receiptChain": list(next_receipt_chain),
+                "document": normalized_draft,
+            }
+            now = self._now()
+            now_text = _timestamp(now)
+            expires_at = _timestamp(
+                now + timedelta(seconds=self.idle_seconds)
+            )
+            run["updatedAt"] = now_text
+            run["lastActivityAt"] = now_text
+            run["expiresAt"] = expires_at
+            lease = self._lease_payload(
+                tenant_id=tenant_id,
+                site_id=site_id,
+                run_id=run_id,
+                layout_id=run["layoutId"],
+                owner_token=lease["ownerToken"],
+                base_layout_revision=run["baseLayoutRevision"],
+                current_draft_revision=result_revision,
+                acquired_at=lease["acquiredAt"],
+                updated_at=now_text,
+                expires_at=expires_at,
+            )
+            run["writableLease"] = self._run_lease_view(lease)
+            next_envelope = self._run_envelope(validate_generation_run(run))
+            transaction = {
+                "schemaVersion": FACILITY_GENERATION_RUN_SCHEMA_VERSION,
+                "recordKind": "facility_generation_checkpoint_transaction",
+                "transactionId": (
+                    f"checkpoint-{normalized_receipt['receiptId']}"
+                ),
+                "runId": run_id,
+                "expectedRunRevision": expected_run_revision,
+                "nextRunEnvelope": next_envelope,
+                "draftRecord": draft_record,
+                "receiptRecord": receipt_record,
+                "stageDraftRecord": deepcopy(draft_record),
+                "leaseRecord": deepcopy(lease),
+                "createdAt": now_text,
+            }
+            unsigned_transaction = deepcopy(transaction)
+            transaction["transactionRevision"] = _record_revision(
+                unsigned_transaction
+            )
+            transaction_path = self._checkpoint_transaction_path(
+                tenant_id, site_id, run_id
+            )
+            existing_transaction = self._load_optional(
+                transaction_path,
+                "facility_generation_checkpoint_transaction",
+            )
+            if (
+                existing_transaction is not None
+                and existing_transaction != transaction
+            ):
+                raise FacilityGenerationRunIntegrityError(
+                    "generation_checkpoint_transaction_exists",
+                    "A different amendment checkpoint is already pending.",
+                )
+            if existing_transaction is None:
+                self._atomic_write(transaction_path, transaction)
+            return self._apply_checkpoint_transaction_locked(
+                tenant_id, site_id, transaction
+            )
 
     def get_run(
         self,
@@ -1587,7 +2756,7 @@ class FacilityGenerationRunRepository:
                     tenant_id, site_id, current["layoutId"]
                 )
                 lease_record = self._load_optional(
-                    lease_path, "facility_generation_layout_lease"
+                    lease_path, "facility_draft_lease"
                 )
                 if lease_record is None:
                     raise FacilityGenerationRunConflictError(
@@ -1596,7 +2765,8 @@ class FacilityGenerationRunRepository:
                     )
                 lease = self._validate_lease_record(lease_record)
                 if (
-                    lease["runId"] != run_id
+                    lease["ownerKind"] != "generation_run"
+                    or lease["ownerRunId"] != run_id
                     or lease_owner_token is None
                     or lease["ownerToken"] != lease_owner_token
                 ):
@@ -1623,10 +2793,13 @@ class FacilityGenerationRunRepository:
                 )
             elif lease is not None:
                 lease = self._lease_payload(
+                    tenant_id=tenant_id,
+                    site_id=site_id,
                     run_id=run_id,
                     layout_id=current["layoutId"],
                     owner_token=lease["ownerToken"],
                     base_layout_revision=current["baseLayoutRevision"],
+                    current_draft_revision=lease["currentDraftRevision"],
                     acquired_at=lease["acquiredAt"],
                     updated_at=now_text,
                     expires_at=expires_at,
@@ -1672,7 +2845,17 @@ class FacilityGenerationRunRepository:
             self._atomic_write(
                 self._run_path(tenant_id, site_id, run_id), next_envelope
             )
-            self._remove(self._lease_path(tenant_id, site_id, run["layoutId"]))
+            lease_path = self._lease_path(tenant_id, site_id, run["layoutId"])
+            lease_record = self._load_optional(lease_path, "facility_draft_lease")
+            prior_view = envelope["run"].get("writableLease")
+            if lease_record is not None and isinstance(prior_view, Mapping):
+                lease = self._validate_lease_record(lease_record)
+                if (
+                    lease["ownerKind"] == "generation_run"
+                    and lease["ownerRunId"] == run_id
+                    and lease["ownerToken"] == prior_view.get("ownerToken")
+                ):
+                    self._remove(lease_path)
             self._remove(self._session_path(tenant_id, site_id, run["sessionId"]))
             return deepcopy(next_envelope)
 
@@ -1785,7 +2968,7 @@ class FacilityGenerationRunRepository:
             upstream_index = stage_ids.index(upstream_stage_id)
             lease_path = self._lease_path(tenant_id, site_id, run["layoutId"])
             lease_record = self._load_optional(
-                lease_path, "facility_generation_layout_lease"
+                lease_path, "facility_draft_lease"
             )
             if lease_record is None:
                 raise FacilityGenerationRunConflictError(
@@ -1794,7 +2977,8 @@ class FacilityGenerationRunRepository:
                 )
             lease = self._validate_lease_record(lease_record)
             if (
-                lease["runId"] != run_id
+                lease["ownerKind"] != "generation_run"
+                or lease["ownerRunId"] != run_id
                 or lease["ownerToken"] != lease_owner_token
             ):
                 raise FacilityGenerationRunConflictError(
@@ -1882,10 +3066,13 @@ class FacilityGenerationRunRepository:
             run["lastActivityAt"] = now_text
             run["expiresAt"] = expires_at
             lease = self._lease_payload(
+                tenant_id=tenant_id,
+                site_id=site_id,
                 run_id=run_id,
                 layout_id=run["layoutId"],
                 owner_token=lease["ownerToken"],
                 base_layout_revision=run["baseLayoutRevision"],
+                current_draft_revision=layout_revision(restored_document),
                 acquired_at=lease["acquiredAt"],
                 updated_at=now_text,
                 expires_at=expires_at,
@@ -1991,7 +3178,7 @@ class FacilityGenerationRunRepository:
                 tenant_id, site_id, run["layoutId"]
             )
             lease_record = self._load_optional(
-                lease_path, "facility_generation_layout_lease"
+                lease_path, "facility_draft_lease"
             )
             if lease_record is None:
                 raise FacilityGenerationRunConflictError(
@@ -2000,7 +3187,8 @@ class FacilityGenerationRunRepository:
                 )
             lease = self._validate_lease_record(lease_record)
             if (
-                lease["runId"] != run_id
+                lease["ownerKind"] != "generation_run"
+                or lease["ownerRunId"] != run_id
                 or lease["ownerToken"] != lease_owner_token
             ):
                 raise FacilityGenerationRunConflictError(
@@ -2094,7 +3282,7 @@ class FacilityGenerationRunRepository:
                 )
             lease_path = self._lease_path(tenant_id, site_id, run["layoutId"])
             lease_record = self._load_optional(
-                lease_path, "facility_generation_layout_lease"
+                lease_path, "facility_draft_lease"
             )
             if lease_record is None:
                 raise FacilityGenerationRunConflictError(
@@ -2103,7 +3291,8 @@ class FacilityGenerationRunRepository:
                 )
             lease = self._validate_lease_record(lease_record)
             if (
-                lease["runId"] != run["runId"]
+                lease["ownerKind"] != "generation_run"
+                or lease["ownerRunId"] != run["runId"]
                 or lease["ownerToken"] != lease_owner_token
             ):
                 raise FacilityGenerationRunConflictError(

@@ -119,6 +119,37 @@ def test_authored_pattern_produces_stable_evidence_versioned_suggestion():
     assert suggestion["suggestionId"].startswith("pms-")
 
 
+def test_authored_pattern_can_propose_one_unplaced_next_card_without_changing_identity_rules():
+    process_map = _map([_edge("edge-a-b", "node-a", "node-b")])
+    process_map["canvasNodes"] = process_map["canvasNodes"][:2]
+    first = suggest_process_map_connections(process_map, _structure())
+    second = suggest_process_map_connections(deepcopy(process_map), deepcopy(_structure()))
+    assert first == second
+    placements = [item for item in first["suggestions"] if "placement" in item]
+    assert len(placements) == 1
+    suggestion = placements[0]
+    assert suggestion["ruleId"] == "sibling_sequence_next_card"
+    assert suggestion["placement"] == {
+        "sourceOccurrenceId": "c",
+        "nameSnapshot": "Part C",
+        "itemIdSnapshot": "PART-C",
+        "anchorNodeId": "node-b",
+        "connectionDirection": "outgoing",
+        "edgeKind": "precedence",
+        "edgeId": "pm-e-suggest-" + suggestion["suggestionId"][4:20],
+    }
+    assert suggestion["suggestionId"].startswith("pms-")
+    assert first["summary"]["placementSuggestions"] == 1
+
+
+def test_unplaced_next_card_still_requires_corroborating_evidence():
+    process_map = _map()
+    process_map["canvasNodes"] = process_map["canvasNodes"][:1]
+    result = suggest_process_map_connections(process_map, _structure())
+    assert result["suggestions"] == []
+    assert result["summary"]["placementSuggestions"] == 0
+
+
 def test_equal_build_order_never_invents_direction_from_functional_evidence():
     structure = _structure()
     structure["occurrences"][2]["suggestedBuildOrder"] = 1
@@ -293,6 +324,31 @@ def test_suggestion_endpoint_is_revision_bound_and_read_only(suggestion_product:
         "error": "revision_conflict",
         "currentRevision": loaded["revision"],
     }
+    assert canonical.read_bytes() == before
+
+
+def test_suggestion_endpoint_adds_discardable_spatial_geometry_when_both_flags_are_on(
+    suggestion_product: dict,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("INSPECTORPRO_PROCESS_MAP_SPATIAL_PLACEMENT", "1")
+    monkeypatch.setenv("INSPECTORPRO_PROCESS_MAP_AUTO_ROUTING", "1")
+    client = TestClient(server.app)
+    loaded = client.get("/api/training/process-maps/fixture-product/default").json()
+    canonical = suggestion_product["productDir"] / "process_maps" / "default.json"
+    before = canonical.read_bytes()
+    response = client.get(
+        "/api/training/process-maps/fixture-product/default/suggestions",
+        params={"revision": loaded["revision"]},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    suggestion = payload["suggestions"][0]
+    assert suggestion["suggestionId"].startswith("pms-")
+    assert suggestion["spatialProposal"]["semanticSuggestionId"] == suggestion["suggestionId"]
+    assert suggestion["spatialProposal"]["accepted"] is True
+    assert suggestion["spatialProposal"]["route"]["points"]
+    assert payload["spatialSummary"]["spatialized"] == 1
     assert canonical.read_bytes() == before
 
 

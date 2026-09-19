@@ -58,6 +58,25 @@ def test_accumulate_response_text_accepts_message_and_string():
     assert server._accumulate_response_text("already text") == "already text"
 
 
+def test_stream_transports_tool_status_without_turning_it_into_answer_text(monkeypatch):
+    async def pipeline(*args, **kwargs):
+        sink = server._AGENT_CHAT_STATUS_SINK.get()
+        await sink("generation_search")
+        await sink("generation_geometry")
+        return {"response": "An isolated preview is ready.", "tool_calls": []}
+
+    monkeypatch.setattr(server, "_execute_agent_chat_with_memory", pipeline)
+    monkeypatch.setenv("INSPECTORPRO_CHAT_STREAMING", "1")
+    monkeypatch.setenv("INSPECTORPRO_STREAMING_AGENTS", "scout")
+    response = TestClient(server.app).post("/api/agent/chat/v2/stream", json=_payload())
+    events = _events(response)
+    assert [item["phase"] for item in events if item.get("phase", "").startswith("generation_")] == [
+        "generation_search", "generation_geometry"]
+    assert not any(item["event"] == "text_delta" for item in events)
+    assert events[-1]["event"] == "response_completed"
+    assert server._AGENT_CHAT_STATUS_SINK.get() is None
+
+
 def test_main_stream_retries_transient_failure_before_visible_text(monkeypatch):
     class FakeStream:
         def __init__(self, chunks=None, error=None):
@@ -159,6 +178,39 @@ def test_main_stream_does_not_retry_after_visible_text(monkeypatch):
     assert received == ["Partial answer"]
 
 
+def test_anthropic_adapter_forces_an_explicit_presentation_tool():
+    captured = {}
+
+    class FakeMessages:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return _Response("Structured result.")
+
+    asyncio.run(server._invoke_agent_model(
+        SimpleNamespace(messages=FakeMessages()),
+        model="synthetic-model",
+        max_tokens=64,
+        system="system",
+        messages=[{"role": "user", "content": "show a table"}],
+        tools=[{
+            "name": server.CHAT_TABLE_TOOL,
+            "description": "Present a table.",
+            "input_schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        }],
+        required_tool_name=server.CHAT_TABLE_TOOL,
+    ))
+
+    assert captured["tool_choice"] == {
+        "type": "tool",
+        "name": server.CHAT_TABLE_TOOL,
+        "disable_parallel_tool_use": True,
+    }
+
+
 def test_executor_only_fallback_is_limited_to_pure_authorized_actions():
     error = RuntimeError("overloaded_error: Overloaded")
     plan = SimpleNamespace(executor_id="show-resolved-motion-group")
@@ -228,6 +280,43 @@ def test_legacy_and_stream_terminal_results_are_identical(monkeypatch):
     ) == raw
     assert all(events[index]["seq"] == index for index in range(len(events)))
     assert events[0]["event"] == "response_started"
+    assert events[-1]["event"] == "response_completed"
+
+
+def test_stream_terminal_serializes_immutable_facility_tool_policy(monkeypatch):
+    async def facility_chat(_payload, _http_request):
+        return {
+            "response": "The Facility Layout draft is ready for review.",
+            "skill_runtime": {
+                "facility_orchestration": {
+                    "allowedToolNames": frozenset({
+                        "inspect_facility_semantics",
+                        "generate_facility_departments_draft",
+                    }),
+                },
+            },
+        }
+
+    monkeypatch.setattr(server, "agent_chat", facility_chat)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-real")
+    monkeypatch.setenv("INSPECTORPRO_CHAT_STREAMING", "1")
+    monkeypatch.setenv("INSPECTORPRO_STREAMING_AGENTS", "scout")
+
+    response = TestClient(server.app).post(
+        "/api/agent/chat/v2/stream", json=_payload()
+    )
+
+    assert response.status_code == 200, response.text
+    events = _events(response)
+    terminal = next(
+        event for event in events if event["event"] == "response_completed"
+    )
+    assert terminal["final"]["skill_runtime"]["facility_orchestration"][
+        "allowedToolNames"
+    ] == [
+        "generate_facility_departments_draft",
+        "inspect_facility_semantics",
+    ]
     assert events[-1]["event"] == "response_completed"
 
 
@@ -374,6 +463,25 @@ def test_stream_surfaces_provider_credit_failure_without_generic_detail(monkeypa
     assert "does not have enough credit" in failure["message"]
     assert "Error code:" not in failure["message"]
     assert not any(event["event"] == "response_completed" for event in events)
+
+
+def test_required_context_budget_error_payload_is_actionable():
+    failure = server._stream_provider_error_payload(
+        server.ContextBudgetError(
+            ["process_map.graph", "process_map.state"],
+            estimated_tokens=17218,
+            maximum_tokens=14000,
+        )
+    )
+
+    assert failure == {
+        "code": "required_context_budget_exceeded",
+        "message": (
+            "Sage could not assemble the required trusted context for this "
+            "request. Narrow the requested scope and retry."
+        ),
+        "retryable": False,
+    }
 
 
 if __name__ == "__main__":

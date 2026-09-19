@@ -14,7 +14,12 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 import server
+from ai_inspector.facility_layout.asset_placement import (
+    compile_asset_placement_program,
+)
+from ai_inspector.facility_layout.canonical import layout_revision
 from ai_inspector.facility_layout.host import (
+    LOCAL_ASSET_CATALOG,
     LOCAL_LAYOUT_ID,
     LOCAL_SITE_ID,
     LocalFacilityLayoutHost,
@@ -30,11 +35,30 @@ from ai_inspector.facility_layout.chat_intent import (
     classify_facility_request_kind,
     is_precise_facility_translation_request,
     parse_complete_facility_generation_request,
+    parse_facility_department_repartition_request,
     parse_precise_facility_translation,
     requested_facility_metric,
     requested_facility_spatial_analyses,
     resolve_facility_pending_follow_up,
     resolve_facility_layout_turn,
+)
+from ai_inspector.facility_layout.circulation import (
+    compile_primary_circulation_operations,
+    parse_circulation_turn,
+)
+from ai_inspector.facility_layout.design_intent import (
+    FACILITY_DESIGN_INTENT_SCHEMA_VERSION,
+)
+from ai_inspector.facility_layout.cell_composition import (
+    compile_cell_composition_program,
+)
+from ai_inspector.facility_layout.g1_planner import (
+    compile_g1_department_operations,
+    compile_g1_envelope_operations,
+)
+from ai_inspector.facility_layout.operations import (
+    apply_facility_layout_operations,
+    create_layout_document,
 )
 from ai_inspector.facility_layout.semantic_plan import (
     SEMANTIC_FACILITY_MOVE_TOOL,
@@ -217,6 +241,165 @@ def _g1_provider_args(*, width=100, depth=80, labels=None):
         },
         "execution_mode": "authorized_draft_run",
     }
+
+
+def _circulation_department_layout():
+    layout = create_layout_document(
+        layout_id="fl-circulation-agent",
+        display_name="Empty Facility",
+        association={"siteId": "site-a", "areaId": "main"},
+        coordinate_frame={
+            "units": "m",
+            "handedness": "right",
+            "upAxis": "+Y",
+            "floorAxes": ["+X", "+Z"],
+            "datumId": "origin-a",
+            "floorElevation": 0,
+        },
+        source_shell_ref={
+            "shellId": "shell-a",
+            "shellRevision": "a" * 64,
+            "coordinateFrameFingerprint": "b" * 64,
+        },
+        policy_set_ref={
+            "policySetId": "policy-a",
+            "policySetRevision": "c" * 64,
+        },
+        created_at="2026-08-27T00:00:00Z",
+    )
+    envelope = compile_g1_envelope_operations(
+        layout,
+        {
+            "width": 120,
+            "depth": 90,
+            "sourceUnit": "m",
+            "displayName": "Circulation Plant",
+        },
+    )
+    layout = apply_facility_layout_operations(
+        layout,
+        envelope["operations"],
+        base_revision=layout_revision(layout),
+    )["document"]
+    departments = compile_g1_department_operations(
+        layout,
+        {
+            "count": 4,
+            "labels": ["Receiving", "Machining", "Assembly", "Shipping"],
+            "proportions": [0.25, 0.25, 0.25, 0.25],
+            "arrangement": "columns",
+            "orientation": "horizontal",
+        },
+    )
+    return apply_facility_layout_operations(
+        layout,
+        departments["operations"],
+        base_revision=layout_revision(layout),
+    )["document"]
+
+
+def _circulation_point_crossing_layout():
+    layout = create_layout_document(
+        layout_id="fl-circulation-g23-agent",
+        display_name="Empty Facility",
+        association={"siteId": "site-a", "areaId": "main"},
+        coordinate_frame={
+            "units": "m",
+            "handedness": "right",
+            "upAxis": "+Y",
+            "floorAxes": ["+X", "+Z"],
+            "datumId": "origin-a",
+            "floorElevation": 0,
+        },
+        source_shell_ref={
+            "shellId": "shell-a",
+            "shellRevision": "a" * 64,
+            "coordinateFrameFingerprint": "b" * 64,
+        },
+        policy_set_ref={
+            "policySetId": "policy-a",
+            "policySetRevision": "c" * 64,
+        },
+        created_at="2026-08-28T00:00:00Z",
+    )
+    envelope = compile_g1_envelope_operations(
+        layout,
+        {
+            "width": 120,
+            "depth": 90,
+            "sourceUnit": "m",
+            "displayName": "G2.3 Circulation Plant",
+        },
+    )
+    layout = apply_facility_layout_operations(
+        layout,
+        envelope["operations"],
+        base_revision=layout_revision(layout),
+    )["document"]
+    labels = [
+        "North West",
+        "North Center",
+        "North East",
+        "Inbound",
+        "Center",
+        "Dispatch",
+        "South West",
+        "South Center",
+        "South East",
+    ]
+    departments = compile_g1_department_operations(
+        layout,
+        {
+            "count": len(labels),
+            "labels": labels,
+            "proportions": [1.0 / len(labels)] * len(labels),
+            "arrangement": "row_stack",
+            "orientation": "auto",
+            "rows": [
+                {"labels": labels[0:3], "proportion": None},
+                {"labels": labels[3:6], "proportion": None},
+                {"labels": labels[6:9], "proportion": None},
+            ],
+        },
+    )
+    layout = apply_facility_layout_operations(
+        layout,
+        departments["operations"],
+        base_revision=layout_revision(layout),
+    )["document"]
+    for prompt in (
+        "Add a 4 m material aisle from Inbound to Dispatch.",
+        "Add a 2 m pedestrian walkway from North Center to South Center.",
+    ):
+        parsed = parse_circulation_turn(prompt, layout)
+        compiled = compile_primary_circulation_operations(
+            layout,
+            parsed["request"],
+        )
+        layout = apply_facility_layout_operations(
+            layout,
+            compiled["operations"],
+            base_revision=layout_revision(layout),
+        )["document"]
+    return layout
+
+
+def _circulation_chat_context(layout, obstacle_context=None):
+    context = {
+        "facility_layout_state": {"identity": {"layoutId": layout["layoutId"]}},
+        "facility_layout_evidence": {},
+        "facility_layout_digest": {},
+        "_facility_layout_document": copy.deepcopy(layout),
+        "_facility_layout_department_program": {
+            "source": "active_generation_run",
+            "run_id": "fgr-circulation-agent",
+        },
+    }
+    if obstacle_context is not None:
+        context["_facility_layout_obstacle_context"] = copy.deepcopy(
+            obstacle_context
+        )
+    return context
 
 
 def _semantic_zone_observation(
@@ -473,7 +656,7 @@ def test_facility_provider_corrects_unsupported_table_before_return(
         "_execute_facility_layout_provider_reads",
         fake_read,
     )
-    response, trace, usage = asyncio.run(
+    response, trace, usage, _deferred = asyncio.run(
         server._resolve_facility_layout_provider_reads(
             initial,
             client=object(),
@@ -558,7 +741,7 @@ def test_facility_provider_fails_closed_after_repeated_unsupported_table(
         "_execute_facility_layout_provider_reads",
         fake_read,
     )
-    response, trace, _usage = asyncio.run(
+    response, trace, _usage, _deferred = asyncio.run(
         server._resolve_facility_layout_provider_reads(
             initial,
             client=object(),
@@ -632,7 +815,7 @@ def test_server_executes_facility_read_before_provider_synthesizes_answer(
         ).state,
     }
 
-    response, trace, usage = asyncio.run(
+    response, trace, usage, _deferred = asyncio.run(
         server._resolve_facility_layout_provider_reads(
             initial,
             client=object(),
@@ -740,7 +923,7 @@ def test_facility_read_loop_reissues_deferred_generation_action(
         "_execute_facility_layout_provider_reads",
         fake_read,
     )
-    response, trace, usage = asyncio.run(
+    response, trace, usage, _deferred = asyncio.run(
         server._resolve_facility_layout_provider_reads(
             initial,
             client=object(),
@@ -796,6 +979,110 @@ def test_facility_read_loop_reissues_deferred_generation_action(
     assert _current(facility_host)["revision"] == current["revision"]
 
 
+def test_facility_design_read_loop_preserves_exact_deferred_update(
+    monkeypatch,
+):
+    design_ctx = _facility_design_context()
+    update_args = {
+        "schema_version": FACILITY_DESIGN_INTENT_SCHEMA_VERSION,
+        "operation": "add_geometry_locks",
+        "target_labels": ["Main Boulevard"],
+    }
+    initial = _provider_response(
+        _provider_tool(
+            server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+            update_args,
+        ),
+        _provider_tool(
+            server.INSPECT_FACILITY_DESIGN_BRIEF_TOOL,
+            {
+                "brief_id": "fdbf-active",
+                "brief_revision": "a" * 64,
+            },
+        ),
+    )
+    observation = {
+        "tool": server.INSPECT_FACILITY_DESIGN_BRIEF_TOOL,
+        "arguments": {},
+        "status": "succeeded",
+        "authoritative": True,
+        "revision": "a" * 64,
+        "result": {
+            "briefId": "fdbf-active",
+            "briefRevision": "a" * 64,
+        },
+    }
+    invoked = []
+
+    async def fake_read(*_args, **kwargs):
+        encoded = server._canonical_facility_tool_result(observation)
+        return (
+            [copy.deepcopy(observation)],
+            [{
+                "round": kwargs["round_index"],
+                "tool": server.INSPECT_FACILITY_DESIGN_BRIEF_TOOL,
+                "status": "succeeded",
+                "revision": "a" * 64,
+                "resultBytes": len(encoded),
+                "resultSha256": "c" * 64,
+                "latencyMs": 0.1,
+            }],
+            kwargs["remaining_calls"] - 1,
+            kwargs["remaining_bytes"] - len(encoded),
+            False,
+        )
+
+    async def fake_invoke(_client, **kwargs):
+        invoked.append(copy.deepcopy(kwargs))
+        return _provider_response(_provider_text("The brief is ready."))
+
+    monkeypatch.setattr(server, "_invoke_agent_model", fake_invoke)
+    monkeypatch.setattr(
+        server,
+        "_execute_facility_layout_provider_reads",
+        fake_read,
+    )
+    response, trace, usage, deferred = asyncio.run(
+        server._resolve_facility_layout_provider_reads(
+            initial,
+            client=object(),
+            request=server.AgentChatRequest(
+                message="Keep the current Main Boulevard fixed too.",
+                agent_type="deviation-analyst",
+                session_id="facility-design-deferred-update-test",
+            ),
+            http_request=_facility_http_request(),
+            ctx=design_ctx,
+            skill_prompt_plan=_facility_design_prompt_plan(
+                "update_and_preview"
+            ),
+            system_prompt="Use deterministic Facility design tools.",
+            messages=[{
+                "role": "user",
+                "content": [{"type": "text", "text": "Keep it fixed."}],
+            }],
+            provider_tools=server.facility_design_agent_tool_specs(
+                apply_enabled=True
+            ),
+            provider="anthropic",
+            model="test-model",
+            reasoning_effort=None,
+            terminal_required_tool=None,
+        )
+    )
+
+    assert server._accumulate_response_text(response) == "The brief is ready."
+    assert deferred == [{
+        "name": server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+        "args": update_args,
+    }]
+    assert trace[-1]["deferredActionPreserved"] == [
+        server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL
+    ]
+    assert len(invoked) == 1
+    assert usage["calls"] == 2
+
+
 def test_facility_provider_read_loop_is_bounded_to_two_rounds(
     facility_host,
     monkeypatch,
@@ -823,7 +1110,7 @@ def test_facility_provider_read_loop_is_bounded_to_two_rounds(
         return _provider_response(_provider_text("Two bounded reads used."))
 
     monkeypatch.setattr(server, "_invoke_agent_model", fake_invoke)
-    response, trace, _usage = asyncio.run(
+    response, trace, _usage, _deferred = asyncio.run(
         server._resolve_facility_layout_provider_reads(
             initial,
             client=object(),
@@ -890,7 +1177,7 @@ def test_facility_required_evidence_fails_closed_before_synthesis(
         move_tool_name=SEMANTIC_FACILITY_MOVE_TOOL,
         spatial_analyses=("route_widths",),
     )
-    response, trace, _usage = asyncio.run(
+    response, trace, _usage, _deferred = asyncio.run(
         server._resolve_facility_layout_provider_reads(
             initial,
             client=object(),
@@ -1047,7 +1334,7 @@ def test_facility_presentation_is_required_after_authoritative_read(
         ))
 
     monkeypatch.setattr(server, "_invoke_agent_model", fake_invoke)
-    response, trace, _usage = asyncio.run(
+    response, trace, _usage, _deferred = asyncio.run(
         server._resolve_facility_layout_provider_reads(
             initial,
             client=object(),
@@ -1108,7 +1395,7 @@ def test_facility_read_failure_is_observed_and_not_silently_presented(
         ))
 
     monkeypatch.setattr(server, "_invoke_agent_model", fake_invoke)
-    response, trace, _usage = asyncio.run(
+    response, trace, _usage, _deferred = asyncio.run(
         server._resolve_facility_layout_provider_reads(
             initial,
             client=object(),
@@ -1316,7 +1603,16 @@ def test_memory_analysis_envelope_omits_full_facility_state(
     assert "zoneSummaries" not in digest
 
 
-def test_facility_request_policy_separates_read_and_preview_tools():
+@pytest.mark.parametrize("construction_enabled", [False, True])
+def test_facility_request_policy_separates_read_and_preview_tools(monkeypatch, construction_enabled):
+    from ai_inspector.facility_layout.feature_flags import FacilityLayoutFeatureFlags
+
+    flags = FacilityLayoutFeatureFlags.all_enabled()
+    flags = FacilityLayoutFeatureFlags(tuple(
+        (name, construction_enabled if name == "INSPECTORPRO_FACILITY_LAYOUT_CONSTRUCTION_SAGE" else value)
+        for name, value in flags.values
+    ))
+    monkeypatch.setattr(server, "_FACILITY_LAYOUT_HOST", SimpleNamespace(feature_flags=flags))
     base = {
         "workflow": {"id": "facility-layout-generation"},
         "prompt": "base",
@@ -1341,7 +1637,12 @@ def test_facility_request_policy_separates_read_and_preview_tools():
     assert set(generation["allowed_tools"]) == (
         READ_TOOLS | {SEMANTIC_FACILITY_PREVIEW_TOOL}
         | {server.G1_FACILITY_GENERATION_TOOL}
+        | {server.FULL_FACTORY_TOOL}
+        | {server.FACILITY_PLANNING_PROTOTYPE_TOOL}
+        | {server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL}
+        | (set(server.CONSTRUCTION_TOOLS) if construction_enabled else set())
     )
+    assert not set(generation["allowed_tools"]) & server.GENERATION_TOOLS
     assert generation["runtime_tool_policy"]["mode"] == (
         "semantic_generation"
     )
@@ -1579,10 +1880,11 @@ def test_complete_facility_request_parser_preserves_authored_program():
                 "Assembly",
                 "Inspection and Shipping",
             ],
-            "proportions": [0.25, 0.25, 0.25, 0.25],
-            "arrangement": "deterministic_grid",
-            "orientation": "auto",
-        },
+                "proportions": [0.25, 0.25, 0.25, 0.25],
+                "arrangement": "deterministic_grid",
+                "orientation": "auto",
+                "rows": None,
+            },
         "execution_mode": "authorized_draft_run",
     }
 
@@ -1625,6 +1927,234 @@ def test_complete_facility_request_parser_is_dynamic_and_fail_closed():
     assert parse_complete_facility_generation_request(
         "Create a report about a proposed 100 m by 80 m facility divided "
         "into four departments named A, B, C, and D."
+    ) is None
+
+
+def test_complete_facility_parser_preserves_authored_rows_and_unequal_areas():
+    parsed = parse_complete_facility_generation_request(
+        "Create a new 100 m by 80 m facility and divide it into five "
+        "departments named Receiving, Machining, Assembly, Inspection, "
+        "and Shipping. Put Receiving and Machining in the top row and "
+        "Assembly, Inspection, and Shipping in the bottom row. Use area "
+        "percentages of 10%, 20%, 30%, 15%, and 25%, respectively."
+    )
+
+    assert parsed is not None
+    assert parsed["departments"]["arrangement"] == "row_stack"
+    assert parsed["departments"]["rows"] == [
+        {
+            "labels": ["Receiving", "Machining"],
+            "proportion": None,
+        },
+        {
+            "labels": ["Assembly", "Inspection", "Shipping"],
+            "proportion": None,
+        },
+    ]
+    assert parsed["departments"]["proportions"] == [
+        10.0,
+        20.0,
+        30.0,
+        15.0,
+        25.0,
+    ]
+
+
+def test_complete_facility_parser_balances_any_authored_row_count():
+    parsed = parse_complete_facility_generation_request(
+        "Build a 120 m by 90 m factory with six equal departments named "
+        "Receiving, Stores, Machining, Assembly, Inspection, and Shipping "
+        "arranged in three rows."
+    )
+
+    assert parsed is not None
+    assert parsed["departments"]["arrangement"] == "row_stack"
+    assert [len(row["labels"]) for row in parsed["departments"]["rows"]] == [
+        2,
+        2,
+        2,
+    ]
+
+
+def test_complete_facility_parser_accepts_equal_area_hyphenation():
+    parsed = parse_complete_facility_generation_request(
+        "Create a new 150 m by 100 m facility with six equal-area "
+        "departments named Inbound, Raw Materials, Fabrication, "
+        "Subassembly, Final Inspection, and Dispatch. Arrange them in "
+        "three rows: Inbound and Raw Materials in row 1; Fabrication and "
+        "Subassembly in row 2; Final Inspection and Dispatch in row 3."
+    )
+
+    assert parsed is not None
+    assert parsed["departments"]["proportions"] == [1.0 / 6.0] * 6
+    assert parsed["departments"]["rows"] == [
+        {"labels": ["Inbound", "Raw Materials"], "proportion": None},
+        {"labels": ["Fabrication", "Subassembly"], "proportion": None},
+        {
+            "labels": ["Final Inspection", "Dispatch"],
+            "proportion": None,
+        },
+    ]
+
+
+def test_complete_facility_parser_preserves_label_first_numbered_rows():
+    parsed = parse_complete_facility_generation_request(
+        "Create a new 120 m by 90 m facility with eight departments named "
+        "Receiving, Stores, Machining, Automation, Assembly, Inspection, "
+        "Packing, and Shipping. Arrange them in four rows: Receiving in "
+        "row 1; Stores, Machining, and Automation in row 2; Assembly and "
+        "Inspection in row 3; Packing and Shipping in row 4. Keep all "
+        "departments equal in area."
+    )
+
+    assert parsed is not None
+    assert parsed["departments"]["rows"] == [
+        {"labels": ["Receiving"], "proportion": None},
+        {
+            "labels": ["Stores", "Machining", "Automation"],
+            "proportion": None,
+        },
+        {"labels": ["Assembly", "Inspection"], "proportion": None},
+        {"labels": ["Packing", "Shipping"], "proportion": None},
+    ]
+
+
+def test_complete_facility_parser_does_not_ignore_unresolved_row_or_area_intent():
+    assert parse_complete_facility_generation_request(
+        "Create a 100 m by 80 m facility with five departments named "
+        "Receiving, Machining, Assembly, Inspection, and Shipping. Put "
+        "some departments above the others."
+    ) is None
+    assert parse_complete_facility_generation_request(
+        "Create a 100 m by 80 m facility with five departments named "
+        "Receiving, Machining, Assembly, Inspection, and Shipping. Make "
+        "Assembly twice the area of Inspection."
+    ) is None
+
+
+def _five_department_program():
+    return {
+        "source": "active_generation_run",
+        "run_id": "fgr-demo",
+        "facility_envelope": {
+            "width": 100.0,
+            "depth": 80.0,
+            "source_unit": "m",
+            "display_name": "Facility Layout",
+            "grid_size": 1.0,
+        },
+        "departments": {
+            "count": 5,
+            "labels": [
+                "Receiving",
+                "Machining",
+                "Assembly",
+                "Inspection",
+                "Shipping",
+            ],
+            "proportions": [0.2] * 5,
+            "arrangement": "deterministic_grid",
+            "orientation": "auto",
+            "rows": None,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_counts"),
+    [
+        ("Put two departments above and three below.", [2, 3]),
+        ("Arrange these departments in three rows.", [2, 2, 1]),
+        (
+            "Top row: Receiving and Machining; bottom row: Assembly, "
+            "Inspection, and Shipping.",
+            [2, 3],
+        ),
+        (
+            "Use row 1: Receiving and Machining; row 2: Assembly and "
+            "Inspection; row 3: Shipping.",
+            [2, 2, 1],
+        ),
+        (
+            "Receiving in row 1; Machining and Assembly in row 2; "
+            "Inspection and Shipping in row 3.",
+            [1, 2, 2],
+        ),
+    ],
+)
+def test_department_repartition_parser_supports_flexible_rows(
+    message,
+    expected_counts,
+):
+    parsed = parse_facility_department_repartition_request(
+        message,
+        _five_department_program(),
+    )
+
+    assert parsed is not None
+    assert parsed["departments"]["arrangement"] == "row_stack"
+    assert [
+        len(row["labels"]) for row in parsed["departments"]["rows"]
+    ] == expected_counts
+    assert parsed["facility_envelope"]["width"] == 100.0
+    assert parsed["facility_envelope"]["depth"] == 80.0
+
+
+def test_department_repartition_parser_supports_unequal_department_or_row_area():
+    current = _five_department_program()
+    current["departments"]["arrangement"] = "row_stack"
+    current["departments"]["rows"] = [
+        {
+            "labels": ["Receiving", "Machining"],
+            "proportion": 0.4,
+        },
+        {
+            "labels": ["Assembly", "Inspection", "Shipping"],
+            "proportion": 0.6,
+        },
+    ]
+    department_areas = parse_facility_department_repartition_request(
+        "Make Receiving 10%, Machining 20%, Assembly 30%, Inspection "
+        "15%, and Shipping 25%.",
+        current,
+    )
+    row_areas = parse_facility_department_repartition_request(
+        "Put Receiving and Machining in the top row at 40% and Assembly, "
+        "Inspection, and Shipping in the bottom row at 60%.",
+        _five_department_program(),
+    )
+
+    assert department_areas["departments"]["proportions"] == [
+        10.0,
+        20.0,
+        30.0,
+        15.0,
+        25.0,
+    ]
+    assert [
+        row["proportion"]
+        for row in department_areas["departments"]["rows"]
+    ] == [None, None]
+    assert row_areas["departments"]["proportions"] is None
+    assert [
+        row["proportion"] for row in row_areas["departments"]["rows"]
+    ] == [40.0, 60.0]
+
+
+def test_department_repartition_parser_fails_closed_on_partial_intent():
+    program = _five_department_program()
+
+    assert parse_facility_department_repartition_request(
+        "Put some departments above the others.",
+        program,
+    ) is None
+    assert parse_facility_department_repartition_request(
+        "Make Assembly twice the area of Inspection.",
+        program,
+    ) is None
+    assert parse_facility_department_repartition_request(
+        "How would these departments look in three rows?",
+        program,
     ) is None
 
 
@@ -1760,6 +2290,624 @@ def test_g1_generation_tool_rejects_model_authored_geometry():
     assert changed is False
 
 
+def _full_factory_tool_call():
+    return {
+        "name": server.FULL_FACTORY_TOOL,
+        "args": {
+            "facility_envelope": {
+                "width": 120,
+                "depth": 90,
+                "source_unit": "m",
+                "display_name": "Integrated Factory",
+                "grid_size": 1,
+            },
+            "departments": {
+                "count": 3,
+                "labels": ["Inbound", "Assembly", "Dispatch"],
+                "proportions": None,
+                "arrangement": "columns",
+                "orientation": "horizontal",
+                "rows": None,
+            },
+            "circulation": {
+                "routes": [{
+                    "route_kind": "material",
+                    "width": 4,
+                    "source_unit": "m",
+                    "source_department": "Inbound",
+                    "target_department": "Dispatch",
+                    "via_departments": ["Assembly"],
+                    "direction": "two_way",
+                    "label": "Primary material aisle",
+                }],
+                "crossings": [],
+            },
+            "subdivisions": [{
+                "parent_department": "Assembly",
+                "count": 2,
+                "labels": ["Electrical Build", "Test"],
+                "proportions": None,
+                "arrangement": "columns",
+                "orientation": "horizontal",
+                "rows": None,
+            }],
+            "asset_placements": [],
+            "seed_cell": None,
+            "cell_replication": None,
+            "execution_mode": "authorized_draft_run",
+        },
+    }
+
+
+def test_full_factory_tool_is_canonicalized_without_degrading_to_g1():
+    call = _full_factory_tool_call()
+    message = (
+        "Create a 120 m by 90 m facility with Inbound, Assembly, and Dispatch. "
+        "Add a 4 m material aisle from Inbound through Assembly to Dispatch, "
+        "then divide Assembly into Electrical Build and Test."
+    )
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [call],
+        {
+            "workflow": {"id": "facility-layout-generation"},
+            "runtime_tool_policy": {"mode": "semantic_generation"},
+            "allowed_tools": [server.FULL_FACTORY_TOOL],
+        },
+        {},
+        message,
+        "deviation-analyst",
+    )
+    assert warnings == []
+    assert changed is True
+    assert calls[0]["name"] == server.FULL_FACTORY_TOOL
+    assert calls[0]["args"]["departments"]["labels"] == [
+        "Inbound", "Assembly", "Dispatch"
+    ]
+    assert calls[0]["args"]["circulation"]["routes"][0]["label"] == (
+        "Primary material aisle"
+    )
+
+
+def test_full_factory_execution_mode_is_owned_by_the_generation_boundary():
+    call = _full_factory_tool_call()
+    call["args"]["execution_mode"] = "preview_only"
+    message = (
+        "Create a 120 m by 90 m facility with Inbound, Assembly, and Dispatch. "
+        "Add a 4 m material aisle from Inbound through Assembly to Dispatch, "
+        "then divide Assembly into Electrical Build and Test. Keep it unsaved."
+    )
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [call],
+        {
+            "workflow": {"id": "facility-layout-generation"},
+            "runtime_tool_policy": {"mode": "semantic_generation"},
+            "allowed_tools": [server.FULL_FACTORY_TOOL],
+        },
+        {},
+        message,
+        "deviation-analyst",
+    )
+    assert warnings == []
+    assert changed is True
+    assert calls[0]["args"]["execution_mode"] == "authorized_draft_run"
+
+
+def test_mmle_planning_prototype_is_synthesized_from_explicit_package_intent():
+    message = (
+        "Build the trusted MMLE-50D factory prototype from its Facility "
+        "Planning package and keep it unsaved."
+    )
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [],
+        {
+            "workflow": {"id": "facility-layout-generation"},
+            "runtime_tool_policy": {"mode": "semantic_generation"},
+            "allowed_tools": [server.FACILITY_PLANNING_PROTOTYPE_TOOL],
+        },
+        {},
+        message,
+        "deviation-analyst",
+    )
+    assert warnings == []
+    assert changed is True
+    assert calls == [
+        {
+            "name": server.FACILITY_PLANNING_PROTOTYPE_TOOL,
+            "args": {
+                "planning_package_id": (
+                    server.MMLE_FACILITY_PLANNING_PACKAGE_ID
+                ),
+                "execution_mode": "authorized_draft_run",
+            },
+        }
+    ]
+
+
+def test_facility_program_resource_amendment_is_canonicalized_to_one_patch():
+    message = (
+        "Reduce the raw material rack batch to 89 and keep every other "
+        "resource, route, marking, and area unchanged. Keep it unsaved."
+    )
+    call = {
+        "name": server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL,
+        "args": {
+            "resource_batch_id": "raw-material-racks",
+            "quantity": 89,
+            "placement_pattern": None,
+            "semantic_orientation": None,
+            "authored_spacing_meters": None,
+            "execution_mode": "authorized_draft_run",
+        },
+    }
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [call],
+        {
+            "workflow": {"id": "facility-layout-generation"},
+            "runtime_tool_policy": {"mode": "semantic_generation"},
+            "allowed_tools": [
+                server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL
+            ],
+        },
+        {},
+        message,
+        "deviation-analyst",
+    )
+    assert warnings == []
+    assert changed is True
+    assert calls == [{
+        "name": server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL,
+        "args": {
+            "resource_batch_id": "raw-material-racks",
+            "patch": {"quantity": 89},
+            "execution_mode": "authorized_draft_run",
+        },
+    }]
+
+
+def test_facility_program_resource_followups_are_generation_intent():
+    for message in (
+        "Reduce the raw material rack batch to 89.",
+        "Set the machine batch quantity to 12.",
+        "Increase the workstation count to 8.",
+        "Reorient the equipment batch east-west.",
+        "Space the rack batch at exactly 1.5 m.",
+    ):
+        assert server._is_facility_layout_generation_request(message) is True
+
+
+def test_facility_program_resource_alias_resolves_to_unique_trusted_batch():
+    call = {
+        "name": server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL,
+        "args": {
+            "resource_batch_id": "raw_material_pallet_racks",
+            "quantity": 89,
+            "placement_pattern": None,
+            "semantic_orientation": None,
+            "authored_spacing_meters": None,
+            "execution_mode": "authorized_draft_run",
+        },
+    }
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [call],
+        {
+            "workflow": {"id": "facility-layout-generation"},
+            "runtime_tool_policy": {"mode": "semantic_generation"},
+            "allowed_tools": [
+                server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL
+            ],
+        },
+        {
+            "facility_layout_state": {
+                "generationDraft": {
+                    "facilityProgram": {
+                        "resourceBatches": [
+                            {
+                                "batchId": "raw-material-racks",
+                                "targetArea": "Raw Material Rack Bank",
+                                "quantity": 90,
+                            },
+                            {
+                                "batchId": "finished-goods-racks",
+                                "targetArea": "Finished Goods Rack Row R01",
+                                "quantity": 12,
+                            },
+                        ],
+                    },
+                },
+            },
+        },
+        "Reduce the raw material rack batch to 89 and keep it unsaved.",
+        "deviation-analyst",
+    )
+    assert warnings == []
+    assert changed is True
+    assert calls[0]["args"]["resource_batch_id"] == "raw-material-racks"
+
+
+def test_facility_program_resource_amendment_is_dropped_without_user_intent():
+    call = {
+        "name": server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL,
+        "args": {
+            "resource_batch_id": "raw-material-racks",
+            "quantity": 89,
+            "placement_pattern": None,
+            "semantic_orientation": None,
+            "authored_spacing_meters": None,
+            "execution_mode": "authorized_draft_run",
+        },
+    }
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [call],
+        {
+            "workflow": {"id": "facility-layout-generation"},
+            "runtime_tool_policy": {"mode": "semantic_generation"},
+            "allowed_tools": [
+                server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL
+            ],
+        },
+        {},
+        "What resources are present in Raw Material Storage?",
+        "deviation-analyst",
+    )
+    assert calls == []
+    assert warnings == [
+        "facility_program_resource_amendment_dropped_unrequested"
+    ]
+    assert changed is True
+
+
+def test_facility_program_resource_amendment_rejects_model_coordinates():
+    call = {
+        "name": server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL,
+        "args": {
+            "resource_batch_id": "raw-material-racks",
+            "quantity": 89,
+            "placement_pattern": None,
+            "semantic_orientation": None,
+            "authored_spacing_meters": None,
+            "execution_mode": "authorized_draft_run",
+            "x": 40,
+            "z": 25,
+        },
+    }
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [call],
+        {
+            "workflow": {"id": "facility-layout-generation"},
+            "runtime_tool_policy": {"mode": "semantic_generation"},
+            "allowed_tools": [
+                server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL
+            ],
+        },
+        {},
+        "Reduce the raw material rack batch to 89 and keep it unsaved.",
+        "deviation-analyst",
+    )
+    assert calls == []
+    assert warnings == [
+        "facility_program_resource_amendment_rejected:"
+        "facility_program_local_amendment_invalid"
+    ]
+    assert changed is False
+
+
+def test_full_factory_restores_explicit_equal_row_and_replication_intent():
+    call = _full_factory_tool_call()
+    call["args"]["subdivisions"][0].update({
+        "proportions": [0.499, 0.501],
+        "arrangement": "rows",
+        "orientation": "horizontal",
+        "rows": None,
+    })
+    call["args"]["asset_placements"] = [{
+        "asset_name": "Assembly Workbench",
+        "quantity": 2,
+        "target_area": "Electrical Build",
+        "orientation_mode": "long_side_east_west",
+        "facing_direction": None,
+        "resource_role": "production",
+        "access_requirement": "physical_only",
+    }]
+    call["args"]["seed_cell"] = {
+        "target_area": "Electrical Build",
+        "candidate_strategies": ["line", "l", "u"],
+        "selected_strategy": None,
+        "objective": "smallest_envelope",
+        "preferred_gap_meters": 1.0,
+        "invert_u": False,
+    }
+    call["args"]["cell_replication"] = None
+    message = (
+        "Create a 120 m by 90 m facility with Inbound, Assembly, and Dispatch; "
+        "add a material aisle. Divide Assembly into two equal child areas "
+        "named Electrical Build and Test in one row. Place two Assembly "
+        "Workbenches in Electrical Build, arrange that cell, and replicate "
+        "Electrical Build into the empty Test area. Keep it unsaved."
+    )
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [call],
+        {
+            "workflow": {"id": "facility-layout-generation"},
+            "runtime_tool_policy": {"mode": "semantic_generation"},
+            "allowed_tools": [server.FULL_FACTORY_TOOL],
+        },
+        {},
+        message,
+        "deviation-analyst",
+    )
+    assert warnings == []
+    assert changed is True
+    subdivision = calls[0]["args"]["subdivisions"][0]
+    assert subdivision["proportions"] == [0.5, 0.5]
+    assert subdivision["arrangement"] == "row_stack"
+    assert subdivision["rows"] == [{
+        "labels": ["Electrical Build", "Test"],
+        "proportion": 1.0,
+    }]
+    assert calls[0]["args"]["cell_replication"] == {
+        "source_cell": "Electrical Build",
+        "target_areas": ["Test"],
+        "copy_current_edited_state": False,
+    }
+
+
+def test_full_factory_tool_is_dropped_without_matching_user_generation_intent():
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [_full_factory_tool_call()],
+        {
+            "workflow": {"id": "facility-layout-generation"},
+            "runtime_tool_policy": {"mode": "semantic_generation"},
+            "allowed_tools": [server.FULL_FACTORY_TOOL],
+        },
+        {},
+        "What does the current layout contain?",
+        "deviation-analyst",
+    )
+    assert calls == []
+    assert warnings == [
+        "full_factory_generation_tool_dropped_unrequested"
+    ]
+    assert changed is True
+
+
+def test_full_factory_tool_rejects_model_authored_coordinates():
+    call = _full_factory_tool_call()
+    call["args"]["circulation"]["routes"][0]["centerline"] = [
+        {"x": 10, "z": 20}
+    ]
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [call],
+        {
+            "workflow": {"id": "facility-layout-generation"},
+            "runtime_tool_policy": {"mode": "semantic_generation"},
+            "allowed_tools": [server.FULL_FACTORY_TOOL],
+        },
+        {},
+        (
+            "Create a 120 m by 90 m facility, add a material aisle, and divide "
+            "Assembly into Electrical Build and Test."
+        ),
+        "deviation-analyst",
+    )
+    assert calls == []
+    assert warnings == [
+        "full_factory_generation_rejected:"
+        "full_factory_model_geometry_or_unknown_field"
+    ]
+    assert changed is False
+
+
+def test_full_factory_request_bypasses_narrow_deterministic_gate_parsers():
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Create a 120 m by 90 m facility with Inbound, Assembly, and "
+                "Dispatch; add a material aisle, divide Assembly into two "
+                "support areas, and place machines in the build area."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        {
+            "facility_layout_state": {},
+            "facility_layout_evidence": {},
+            "facility_layout_digest": {},
+            "_facility_layout_document": {
+                "zones": [],
+                "routes": [],
+                "placements": [],
+            },
+        },
+    ))
+    assert result is None
+
+
+def test_program_resource_amendment_bypasses_route_parser_preservation_words():
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Reduce the raw material rack batch to 89. Keep every other "
+                "area, route, marking, and resource unchanged. Keep the "
+                "complete result unsaved."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        {
+            "facility_layout_state": {},
+            "facility_layout_evidence": {},
+            "facility_layout_digest": {},
+            "_facility_layout_document": {
+                "zones": [],
+                "routes": [],
+                "placements": [],
+            },
+        },
+    ))
+    assert result is None
+
+
+def test_full_factory_provider_uses_one_closed_required_tool(
+    facility_host,
+    monkeypatch,
+):
+    current = _current(facility_host)
+    invoked = []
+
+    async def fake_invoke(_client, **kwargs):
+        invoked.append({
+            "required": kwargs.get("required_tool_name"),
+            "tools": [
+                str(item.get("name") or "")
+                for item in kwargs.get("tools") or []
+            ],
+        })
+        return _provider_response(_provider_tool(
+            server.FULL_FACTORY_TOOL,
+            _full_factory_tool_call()["args"],
+        ))
+
+    monkeypatch.setattr(server, "_invoke_agent_model", fake_invoke)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-real")
+    monkeypatch.setenv("INSPECTORPRO_SKILLS_ENABLED", "1")
+    monkeypatch.setenv("INSPECTORPRO_MEMORY_V1_MODE", "off")
+    server._reset_agent_skill_runtime_cache_for_tests()
+    response = TestClient(server.app).post(
+        "/api/agent/chat",
+        json={
+            "message": (
+                "Create a 120 m by 90 m facility with Inbound, Assembly, and "
+                "Dispatch. Add a 4 m material aisle from Inbound through "
+                "Assembly to Dispatch, then divide Assembly into Electrical "
+                "Build and Test. Place two Assembly Workbenches in Electrical "
+                "Build and arrange that cell. Keep it as an unsaved draft."
+            ),
+            "history": [],
+            "inspection_context": {
+                "attachments": {
+                    "facility_layout": {
+                        "siteId": LOCAL_SITE_ID,
+                        "layoutId": LOCAL_LAYOUT_ID,
+                        "revision": current["revision"],
+                    },
+                    "session": {"active_mode": "training"},
+                }
+            },
+            "agent_type": "deviation-analyst",
+            "session_id": "full-factory-closed-provider-test",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert invoked == [{
+        "required": server.FULL_FACTORY_TOOL,
+        "tools": [server.FULL_FACTORY_TOOL],
+    }]
+    payload = response.json()
+    assert payload["tool_call_count"] == 1
+    assert payload["tool_calls"][0]["name"] == server.FULL_FACTORY_TOOL
+
+
+def test_program_resource_amendment_provider_uses_one_closed_required_tool(
+    facility_host,
+    monkeypatch,
+):
+    current = _current(facility_host)
+    invoked = []
+    provider_args = {
+        "resource_batch_id": "raw-material-racks",
+        "quantity": 89,
+        "placement_pattern": None,
+        "semantic_orientation": None,
+        "authored_spacing_meters": None,
+        "execution_mode": "authorized_draft_run",
+    }
+
+    async def fake_invoke(_client, **kwargs):
+        invoked.append({
+            "required": kwargs.get("required_tool_name"),
+            "tools": [
+                str(item.get("name") or "")
+                for item in kwargs.get("tools") or []
+            ],
+        })
+        return _provider_response(_provider_tool(
+            server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL,
+            provider_args,
+        ))
+
+    monkeypatch.setattr(server, "_invoke_agent_model", fake_invoke)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-real")
+    monkeypatch.setenv("INSPECTORPRO_SKILLS_ENABLED", "1")
+    monkeypatch.setenv("INSPECTORPRO_MEMORY_V1_MODE", "off")
+    server._reset_agent_skill_runtime_cache_for_tests()
+    response = TestClient(server.app).post(
+        "/api/agent/chat",
+        json={
+            "message": (
+                "Reduce the raw material rack batch to 89. Keep every other "
+                "area, route, marking, and resource unchanged. Keep the "
+                "complete result unsaved."
+            ),
+            "history": [],
+            "inspection_context": {
+                "attachments": {
+                    "facility_layout": {
+                        "siteId": LOCAL_SITE_ID,
+                        "layoutId": LOCAL_LAYOUT_ID,
+                        "revision": current["revision"],
+                    },
+                    "session": {"active_mode": "training"},
+                }
+            },
+            "agent_type": "deviation-analyst",
+            "session_id": "program-resource-amendment-provider-test",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert invoked == [{
+        "required": server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL,
+        "tools": [server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL],
+    }]
+    payload = response.json()
+    assert payload["tool_call_count"] == 1
+    assert payload["tool_calls"] == [{
+        "name": server.FACILITY_PROGRAM_RESOURCE_AMENDMENT_TOOL,
+        "args": {
+            "resource_batch_id": "raw-material-racks",
+            "patch": {"quantity": 89},
+            "execution_mode": "authorized_draft_run",
+        },
+    }]
+
+
+def test_facility_program_resource_context_is_exact_and_bounded():
+    projection = server._facility_program_resource_context({
+        "programRevision": "a" * 64,
+        "baseProgramRevision": "b" * 64,
+        "amendments": [],
+        "program": {
+            "resource_batches": [{
+                "batch_id": "raw-material-racks",
+                "target_area": "Raw Material Rack Bank",
+                "quantity": 90,
+            }],
+        },
+    })
+    assert projection["resourceBatches"] == [{
+        "batchId": "raw-material-racks",
+        "targetArea": "Raw Material Rack Bank",
+        "quantity": 90,
+    }]
+    assert projection["evidenceStatus"] == "server_resolved"
+    payload = json.dumps(
+        projection,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    assert len(payload) <= 8_192
+
+
 def test_exact_move_fast_path_bypasses_model_and_never_rotates_viewport():
     state = {
         "selection": {"placementIds": ["placement-cnc-04"]},
@@ -1799,6 +2947,13 @@ def test_exact_move_fast_path_bypasses_model_and_never_rotates_viewport():
 
 
 def test_complete_facility_fast_path_bypasses_model_on_populated_layout():
+    populated_layout = _circulation_department_layout()
+    context = _circulation_chat_context(populated_layout)
+    context["facility_layout_state"].update({
+        "dirty": True,
+        "placements": [{"placementId": "existing-machine"}],
+        "zones": [{"zoneId": "existing-department"}],
+    })
     result = asyncio.run(server._deterministic_semantic_chat_result(
         server.AgentChatRequest(
             message=(
@@ -1808,15 +2963,7 @@ def test_complete_facility_fast_path_bypasses_model_on_populated_layout():
             ),
             agent_type="deviation-analyst",
         ),
-        {
-            "facility_layout_state": {
-                "dirty": True,
-                "placements": [{"placementId": "existing-machine"}],
-                "zones": [{"zoneId": "existing-department"}],
-            },
-            "facility_layout_evidence": {},
-            "facility_layout_digest": {},
-        },
+        context,
     ))
 
     assert result is not None
@@ -1840,6 +2987,1157 @@ def test_complete_facility_fast_path_bypasses_model_on_populated_layout():
         "Inspection and Shipping",
     ]
     assert result["facility_action_mode"] == "PREVIEW"
+
+
+def test_circulation_fast_path_builds_coordinate_free_tool_call():
+    layout = _circulation_department_layout()
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Add a 6 m material aisle from Receiving to Shipping "
+                "through Machining and Assembly."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+
+    assert result["tool_source"] == "facility_circulation_intent_fast_path"
+    assert result["facility_action_mode"] == "PREVIEW"
+    assert result["tool_call_count"] == 1
+    call = result["tool_calls"][0]
+    assert call == {
+        "name": server.G2_FACILITY_CIRCULATION_TOOL,
+        "args": {
+            "action": "create",
+            "route_kind": "material",
+            "width": 6.0,
+            "source_unit": "m",
+            "source_department": "Receiving",
+            "target_department": "Shipping",
+            "via_departments": ["Machining", "Assembly"],
+            "direction": "two_way",
+            "label": None,
+            "execution_mode": "authorized_draft_run",
+        },
+    }
+    assert "coordinates" not in repr(call).casefold()
+    assert "overlay" in result["response"].casefold()
+    assert "two-way" in result["response"].casefold()
+
+
+def test_motion_fast_path_builds_read_only_identity_only_tool_call():
+    layout = _circulation_department_layout()
+    layout["routes"].append({
+        "routeId": "rt-main-forklift",
+        "label": "Main Forklift Boulevard",
+        "routeKind": "forklift",
+    })
+    revision = "d" * 64
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Replay a forklift on Main Forklift Boulevard using vehicle "
+                f"profile forklift-standard revision {revision}."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+
+    assert result["tool_source"] == "facility_motion_intent_fast_path"
+    assert result["facility_action_mode"] == "READ_ONLY"
+    assert result["facility_runtime_policy"]["readOnly"] is True
+    assert result["tool_calls"] == [{
+        "name": server.FACILITY_MOTION_PLAYBACK_TOOL,
+        "args": {
+            "route_id": "rt-main-forklift",
+            "vehicle_profile_id": "forklift-standard",
+            "vehicle_profile_revision": revision,
+            "travel_direction": "forward",
+        },
+    }]
+    call_text = repr(result["tool_calls"]).casefold()
+    for forbidden in ("coordinate", "pose", "speed", "duration"):
+        assert forbidden not in call_text
+
+
+def test_legacy_activity_fast_path_is_unreachable_from_sage():
+    layout = _circulation_department_layout()
+    layout["routes"].append({
+        "routeId": "rt-main-forklift",
+        "label": "Main Forklift Boulevard",
+        "routeKind": "forklift",
+    })
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Play a prototype factory activity view with vehicles on authored "
+                "material lanes and operators on authored pedestrian routes. Keep "
+                "machines without revision-bound kinematic evidence stationary."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+
+    assert result["tool_source"] == "facility_activity_legacy_unavailable"
+    assert result["facility_action_mode"] == "READ_ONLY"
+    assert result["tool_calls"] == []
+    assert result["facility_generation_error"] == (
+        "facility_legacy_navigation_fixture_only"
+    )
+
+
+def test_complete_reference_activity_fast_path_is_read_only_and_bounded():
+    layout = _circulation_department_layout()
+    layout["layoutId"] = "fl-reference-manual-20260812"
+    layout["routes"].append({
+        "routeId": "rt-main-forklift",
+        "label": "Main Forklift Boulevard",
+        "routeKind": "forklift",
+    })
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Show the prototype movement candidate map for all moving "
+                "objects in this reference factory. Use the existing operators "
+                "and forklifts, display the pending handoff links, keep fixed "
+                "machines stationary, and do not save."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+
+    assert result["tool_source"] == (
+        "facility_reference_complete_activity_intent_fast_path"
+    )
+    assert result["facility_action_mode"] == "READ_ONLY"
+    assert result["facility_runtime_policy"]["readOnly"] is True
+    assert result["tool_calls"] == [{
+        "name": server.FACILITY_ACTIVITY_PLAYBACK_TOOL,
+        "args": {
+            "preset": "reference_complete_navigation",
+            "prototype_mode": True,
+            "maximum_actors": 23,
+            "scenario_label": "Complete reference movement",
+        },
+    }]
+    assert "23 unique existing actor placements" in result["response"]
+    assert "Nothing will be saved" in result["response"]
+
+
+def test_reference_downstream_activity_fast_path_routes_existing_operators():
+    layout = _circulation_department_layout()
+    layout["layoutId"] = "fl-reference-manual-20260812"
+    layout["routes"].append({
+        "routeId": "rt-main-forklift",
+        "label": "Main Forklift Boulevard",
+        "routeKind": "forklift",
+    })
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Play a prototype activity view for the existing operators in "
+                "the Inspection, Packaging, and Finished Goods area. Use "
+                "deterministic obstruction-free candidate journeys, loop each "
+                "operator back to its existing start, do not duplicate placements, "
+                "and do not save."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+
+    assert result["tool_source"] == (
+        "facility_reference_downstream_activity_intent_fast_path"
+    )
+    assert result["facility_action_mode"] == "READ_ONLY"
+    assert result["facility_runtime_policy"]["readOnly"] is True
+    assert result["tool_calls"] == [{
+        "name": server.FACILITY_ACTIVITY_PLAYBACK_TOOL,
+        "args": {
+            "preset": "reference_downstream_navigation",
+            "prototype_mode": True,
+            "maximum_actors": 8,
+            "scenario_label": "Downstream operator movement candidates",
+        },
+    }]
+    assert "eight existing downstream operators" in result["response"]
+    assert "Nothing will be saved" in result["response"]
+
+
+def test_packaging_cycle_activity_precedes_general_navigation_provider_route():
+    layout = _circulation_department_layout()
+    layout["layoutId"] = "fl-reference-manual-20260812"
+    layout["routes"].append({
+        "routeId": "rt-main-forklift",
+        "label": "Main Forklift Boulevard",
+        "routeKind": "forklift",
+    })
+    message = (
+        "Play a prototype Packaging activity. Each existing Packaging "
+        "operator picks from the left pallet, works at their current "
+        "table, walks around the table's right side to place the finished "
+        "product on the existing cart, then returns empty to the input "
+        "pallet and repeats. Reuse existing operators and carts; do not "
+        "duplicate placements and do not save."
+    )
+    activity_turn = server.parse_activity_playback_turn(message, layout)
+    assert activity_turn["kind"] == "build"
+    assert activity_turn["request"]["preset"] == (
+        "reference_downstream_navigation"
+    )
+    context = _circulation_chat_context(layout)
+    assert server._has_trusted_facility_layout_context(context)
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=message,
+            agent_type="deviation-analyst",
+        ),
+        context,
+    ))
+
+    assert result["tool_source"] == (
+        "facility_reference_downstream_activity_intent_fast_path"
+    )
+    assert result["facility_action_mode"] == "READ_ONLY"
+    assert result["tool_calls"] == [{
+        "name": server.FACILITY_ACTIVITY_PLAYBACK_TOOL,
+        "args": {
+            "preset": "reference_downstream_navigation",
+            "prototype_mode": True,
+            "maximum_actors": 8,
+            "scenario_label": "Downstream operator movement candidates",
+        },
+    }]
+    assert "Packaging follows the reviewed" in result["response"]
+    assert "Nothing will be saved" in result["response"]
+
+
+def test_inspection_cycle_activity_uses_deterministic_fast_path():
+    layout = _circulation_department_layout()
+    layout["layoutId"] = "fl-reference-manual-20260812"
+    layout["routes"].append({
+        "routeId": "rt-main-forklift",
+        "label": "Main Forklift Boulevard",
+        "routeKind": "forklift",
+    })
+    message = (
+        "Play the prototype Quality Inspection activity. Each existing "
+        "Inspection operator picks from the left input table, loads and "
+        "inspects the part at the current laboratory workstation, records "
+        "and unloads the result, places the inspected part in the right "
+        "container, then returns empty to the input table and repeats. Reuse "
+        "existing operators and equipment; do not duplicate placements and "
+        "do not save."
+    )
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=message,
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+
+    assert result["tool_source"] == (
+        "facility_reference_downstream_activity_intent_fast_path"
+    )
+    assert result["facility_action_mode"] == "READ_ONLY"
+    assert result["tool_calls"] == [{
+        "name": server.FACILITY_ACTIVITY_PLAYBACK_TOOL,
+        "args": {
+            "preset": "reference_downstream_navigation",
+            "prototype_mode": True,
+            "maximum_actors": 8,
+            "scenario_label": "Downstream operator movement candidates",
+        },
+    }]
+    assert "Quality Inspection follows the reviewed" in result["response"]
+    assert "Nothing will be saved" in result["response"]
+
+
+def test_legacy_activity_refusal_precedes_broad_resource_amendment_classifier():
+    layout = _circulation_department_layout()
+    layout["routes"].append({
+        "routeId": "rt-main-forklift",
+        "label": "Main Forklift Boulevard",
+        "routeKind": "forklift",
+    })
+    prompt = (
+        "Play a prototype factory activity view using only operators, forklifts, "
+        "and vehicles that are already placed in this layout. Move the selected "
+        "existing operators around their assigned assembly and kitting cells, "
+        "including each complete outbound walk to its FIFO point, the material "
+        "handoff between the paired FIFO points, and the return walk to the "
+        "operator's original station. Move the existing forklifts only on their "
+        "authored direction-marked material lanes, changing to the opposite lane "
+        "before each return trip. Do not add or duplicate any operator, vehicle, "
+        "asset, route, or placement. Keep machines without revision-bound "
+        "kinematic evidence stationary. Show the operator paths, FIFO access "
+        "paths, handoff lines, and FIFO points, loop every moving actor "
+        "continuously, use up to 20 actors, and keep the layout unsaved."
+    )
+    assert server.is_facility_program_resource_amendment_request(prompt)
+
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=prompt,
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+
+    assert result["tool_source"] == "facility_activity_legacy_unavailable"
+    assert result["facility_action_mode"] == "READ_ONLY"
+    assert result["tool_calls"] == []
+    assert result["facility_generation_error"] == (
+        "facility_legacy_navigation_fixture_only"
+    )
+
+
+def test_motion_fast_path_refuses_safety_question_without_tool_call():
+    layout = _circulation_department_layout()
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Does motion playback prove this forklift traffic pattern is safe?"
+            ),
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+
+    assert result["tool_source"] == "facility_motion_refuse"
+    assert result["tool_calls"] == []
+    assert result["facility_generation_error"] == (
+        "facility_motion_safety_authority_missing"
+    )
+
+
+def test_subdivision_fast_path_builds_coordinate_free_tool_call():
+    layout = _circulation_department_layout()
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Divide Assembly into four equal child areas named Kitting, "
+                "Mechanical Build, Electrical Build, and Test."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+
+    assert result["tool_source"] == "facility_subdivision_intent_fast_path"
+    assert result["facility_action_mode"] == "PREVIEW"
+    assert result["tool_call_count"] == 1
+    assert result["tool_calls"] == [
+        {
+            "name": server.G3_FACILITY_SUBDIVISION_TOOL,
+            "args": {
+                "parent_department": "Assembly",
+                "count": 4,
+                "labels": [
+                    "Kitting",
+                    "Mechanical Build",
+                    "Electrical Build",
+                    "Test",
+                ],
+                "proportions": [0.25, 0.25, 0.25, 0.25],
+                "arrangement": "deterministic_grid",
+                "orientation": "auto",
+                "rows": None,
+                "preserve_parent": True,
+                "execution_mode": "authorized_draft_run",
+            },
+        }
+    ]
+    assert "coordinates" not in repr(result["tool_calls"]).casefold()
+    assert "unsaved draft" in result["response"].casefold()
+
+
+def test_g4_asset_fast_path_binds_exact_revision_without_geometry():
+    layout = _circulation_department_layout()
+    context = _circulation_chat_context(layout)
+    context["facility_layout_state"]["assets"] = copy.deepcopy(
+        list(LOCAL_ASSET_CATALOG)
+    )
+    machine = next(
+        item for item in LOCAL_ASSET_CATALOG
+        if item["assetId"] == "asset-cnc-mill"
+    )
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Place two CNC Milling Machines in Assembly with their long "
+                "side east-west for production."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        context,
+    ))
+
+    assert result["tool_source"] == "facility_asset_intent_fast_path"
+    assert result["facility_action_mode"] == "PREVIEW"
+    assert result["tool_calls"] == [
+        {
+            "name": server.G4_FACILITY_ASSET_PLACEMENT_TOOL,
+            "args": {
+                "asset_id": "asset-cnc-mill",
+                "asset_definition_revision": machine[
+                    "assetDefinitionRevision"
+                ],
+                "quantity": 2,
+                "target_area": "Assembly",
+                "orientation_mode": "long_side_east_west",
+                "facing_direction": None,
+                "resource_role": "production",
+                "access_requirement": "physical_only",
+                "preserve_hierarchy": True,
+                "execution_mode": "authorized_draft_run",
+            },
+        }
+    ]
+    serialized = repr(result["tool_calls"]).casefold()
+    assert "coordinate" not in serialized
+    assert "transform" not in serialized
+    assert "clearance" not in serialized
+    assert "access remains unverified" in result["response"].casefold()
+
+
+def test_g5_cell_fast_path_uses_authoritative_geometry_not_browser_summaries(
+    facility_host,
+):
+    layout = _circulation_department_layout()
+    machine = next(
+        item for item in LOCAL_ASSET_CATALOG
+        if item["assetId"] == "asset-cnc-mill"
+    )
+    compiled = compile_asset_placement_program(
+        layout,
+        [{
+            "asset_id": machine["assetId"],
+            "asset_definition_revision": machine[
+                "assetDefinitionRevision"
+            ],
+            "quantity": 3,
+            "target_area": "Assembly",
+            "orientation_mode": "auto",
+            "facing_direction": None,
+            "resource_role": "production",
+            "access_requirement": "physical_only",
+            "preserve_hierarchy": True,
+            "execution_mode": "authorized_draft_run",
+        }],
+        list(LOCAL_ASSET_CATALOG),
+    )
+    layout = apply_facility_layout_operations(
+        layout,
+        compiled["operations"],
+        base_revision=layout_revision(layout),
+    )["document"]
+    context = _circulation_chat_context(layout)
+    context["facility_layout_state"]["assets"] = [
+        {
+            "assetId": item["assetId"],
+            "assetDefinitionRevision": item["assetDefinitionRevision"],
+            "displayName": item["displayName"],
+        }
+        for item in LOCAL_ASSET_CATALOG
+    ]
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Arrange Assembly using the shortest feasible of line, L, "
+                "and U layouts with 1 m spacing."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        context,
+    ))
+
+    assert result["tool_source"] == "facility_cell_intent_fast_path"
+    assert result["facility_action_mode"] == "PREVIEW"
+    assert result["tool_call_count"] == 1
+    call = result["tool_calls"][0]
+    assert call["name"] == server.G5_FACILITY_CELL_COMPOSITION_TOOL
+    assert call["args"]["target_area"] == "Assembly"
+    assert call["args"]["candidate_strategies"] == ["line", "l", "u"]
+    assert call["args"]["selected_strategy"] is None
+    assert call["args"]["objective"] == "shortest_travel"
+    assert call["args"]["preferred_gap_meters"] == 1.0
+    assert call["args"]["process_sequence_placement_ids"] == []
+    serialized = repr(call).casefold()
+    assert "coordinate" not in serialized
+    assert "transform" not in serialized
+    assert "unsaved draft" in result["response"].casefold()
+
+
+def test_g6_replication_fast_path_uses_named_qualified_source_and_targets(
+    facility_host,
+):
+    layout = _circulation_department_layout()
+    machine = next(
+        item for item in LOCAL_ASSET_CATALOG
+        if item["assetId"] == "asset-cnc-mill"
+    )
+    placed = compile_asset_placement_program(
+        layout,
+        [{
+            "asset_id": machine["assetId"],
+            "asset_definition_revision": machine[
+                "assetDefinitionRevision"
+            ],
+            "quantity": 3,
+            "target_area": "Assembly",
+            "orientation_mode": "auto",
+            "facing_direction": None,
+            "resource_role": "production",
+            "access_requirement": "physical_only",
+            "preserve_hierarchy": True,
+            "execution_mode": "authorized_draft_run",
+        }],
+        list(LOCAL_ASSET_CATALOG),
+    )
+    layout = apply_facility_layout_operations(
+        layout,
+        placed["operations"],
+        base_revision=layout_revision(layout),
+    )["document"]
+    composed = compile_cell_composition_program(
+        layout,
+        {
+            "target_area": "Assembly",
+            "candidate_strategies": ["line"],
+            "selected_strategy": "line",
+            "objective": "shortest_travel",
+            "preferred_gap_meters": 1.0,
+            "invert_u": False,
+            "process_sequence_placement_ids": [],
+            "preserve_departments": True,
+            "preserve_routes": True,
+            "preserve_markings": True,
+            "preserve_locked_and_manual": True,
+            "execution_mode": "authorized_draft_run",
+        },
+        list(LOCAL_ASSET_CATALOG),
+    )
+    layout = apply_facility_layout_operations(
+        layout,
+        composed["operations"],
+        base_revision=layout_revision(layout),
+    )["document"]
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message="Replicate Assembly into Machining and Shipping.",
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+
+    assert result["tool_source"] == "facility_cell_module_intent_fast_path"
+    assert result["facility_action_mode"] == "PREVIEW"
+    assert result["tool_call_count"] == 1
+    call = result["tool_calls"][0]
+    assert call["name"] == server.G6_FACILITY_CELL_REPLICATION_TOOL
+    assert call["args"] == {
+        "source_cell": "Assembly",
+        "target_areas": ["Machining", "Shipping"],
+        "copy_current_edited_state": False,
+        "preserve_departments": True,
+        "preserve_routes": True,
+        "preserve_markings": True,
+        "preserve_source_cell": True,
+        "preserve_manual_and_locked": True,
+        "execution_mode": "authorized_draft_run",
+    }
+    serialized = repr(call).casefold()
+    assert "coordinate" not in serialized
+    assert "transform" not in serialized
+    assert "unsaved draft" in result["response"].casefold()
+
+
+@pytest.mark.parametrize(
+    ("message", "code"),
+    [
+        (
+            "Place one CNC Milling Machine at x=20 z=10 in Assembly.",
+            "facility_asset_coordinate_ownership",
+        ),
+        (
+            "Place one CNC Milling Machine in Assembly with whatever OSHA "
+            "clearance applies.",
+            "facility_asset_unsupported_compliance_claim",
+        ),
+    ],
+)
+def test_g4_asset_fast_path_refuses_geometry_and_unsupported_authority(
+    message,
+    code,
+):
+    layout = _circulation_department_layout()
+    context = _circulation_chat_context(layout)
+    context["facility_layout_state"]["assets"] = copy.deepcopy(
+        list(LOCAL_ASSET_CATALOG)
+    )
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=message,
+            agent_type="deviation-analyst",
+        ),
+        context,
+    ))
+
+    assert result["facility_generation_error"] == code
+    assert result["facility_action_mode"] == "READ_ONLY"
+    assert result["tool_calls"] == []
+
+
+def test_g23_network_reachability_is_answered_without_provider_or_mutation():
+    layout = _circulation_point_crossing_layout()
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message="Can material travel from Inbound to Dispatch?",
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+
+    assert result["tool_source"] == "facility_circulation_network_direct"
+    assert result["tool_calls"] == []
+    assert result["facility_action_mode"] == "READ_ONLY"
+    assert result["facility_circulation_network_analysis"]["query"][
+        "reachable"
+    ] is True
+    assert result["response"].startswith("**Yes, Dispatch is reachable")
+    assert "reachability only" in result["response"]
+
+
+def test_g23_crossing_coverage_and_marking_use_exact_semantic_contract():
+    layout = _circulation_point_crossing_layout()
+    coverage = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message="Which mixed-traffic crossings are unmarked?",
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+    assert coverage["tool_source"] == "facility_circulation_network_direct"
+    assert coverage["tool_calls"] == []
+    assert coverage["response"].startswith("**1 of 1 mixed-traffic")
+
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Add a 4 m by 3 m pedestrian crossing at the route "
+                "intersection."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout),
+    ))
+    assert result["tool_source"] == "facility_circulation_intent_fast_path"
+    assert result["tool_call_count"] == 1
+    args = result["tool_calls"][0]["args"]
+    assert args["action"] == "add_crossing"
+    assert args["network_scope"] == "route_network"
+    assert len(args["crossing_route_ids"]) == 2
+    assert args["crossing_width"] == 4.0
+    assert args["crossing_depth"] == 3.0
+    assert args["crossing_width_unit"] == "m"
+    assert args["crossing_depth_unit"] == "m"
+    assert args["preserve_departments"] is True
+    assert args["preserve_routes"] is True
+    assert "centerline" not in repr(args).casefold()
+    assert "coordinates" not in repr(args).casefold()
+    assert "does not claim traffic safety" in result["response"]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Make this a safe crossing.",
+        "Is this network safe?",
+        "Is this crossing safe for pedestrians?",
+        "Is this aisle layout adequate?",
+        "Is this route network compliant with fire code?",
+        "Does this layout meet OSHA egress requirements?",
+    ],
+)
+def test_g23_refuses_unsupported_crossing_safety_claim_without_tool_call(message):
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=message,
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(_circulation_point_crossing_layout()),
+    ))
+
+    assert result["tool_source"] == "facility_circulation_refuse"
+    assert result["tool_calls"] == []
+    assert result["facility_generation_error"] == (
+        "facility_circulation_operational_authority_missing"
+    )
+    assert "cannot claim" in result["response"].casefold()
+    assert "compliant" in result["response"].casefold()
+
+
+def _circulation_mixed_conflict_layout():
+    layout = _circulation_department_layout()
+    for prompt in (
+        "Add a 5 m forklift lane from Receiving to Shipping through Machining and Assembly.",
+        "Add a 2 m pedestrian walkway from Machining to Assembly.",
+    ):
+        parsed = parse_circulation_turn(prompt, layout)
+        compiled = compile_primary_circulation_operations(
+            layout,
+            parsed["request"],
+        )
+        layout = apply_facility_layout_operations(
+            layout,
+            compiled["operations"],
+            base_revision=layout_revision(layout),
+        )["document"]
+    return layout
+
+
+def _circulation_obstacle_layout_and_context():
+    layout = _circulation_department_layout()
+    parsed = parse_circulation_turn(
+        "Add a 4 m material aisle from Receiving to Shipping.",
+        layout,
+    )
+    compiled = compile_primary_circulation_operations(
+        layout,
+        parsed["request"],
+    )
+    layout = apply_facility_layout_operations(
+        layout,
+        compiled["operations"],
+        base_revision=layout_revision(layout),
+    )["document"]
+    obstacle_context = {
+        "schemaVersion": 1,
+        "obstacles": [
+            {
+                "obstacleId": "placement:machine-agent",
+                "obstacleKind": "placement_footprint",
+                "boundary": [
+                    {"x": 55.0, "z": 38.0},
+                    {"x": 65.0, "z": 38.0},
+                    {"x": 65.0, "z": 52.0},
+                    {"x": 55.0, "z": 52.0},
+                ],
+                "evidenceStatus": "derived",
+                "sourceRef": "machine-agent",
+            }
+        ],
+        "sourceRevisions": {
+            "layout": layout_revision(layout),
+            "asset:machine-agent": "8" * 64,
+        },
+    }
+    return layout, obstacle_context
+
+
+def test_circulation_conflict_question_is_answered_from_exact_active_geometry():
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message="Where do the pedestrian and forklift routes conflict?",
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(_circulation_mixed_conflict_layout()),
+    ))
+
+    assert result["tool_source"] == "facility_circulation_conflicts_direct"
+    assert result["tool_calls"] == []
+    assert result["facility_action_mode"] == "READ_ONLY"
+    assert result["facility_circulation_analysis"][
+        "mixedTrafficConflictCount"
+    ] >= 1
+    assert result["response"].startswith("**The active draft has")
+    assert "static geometry" in result["response"]
+    assert "code compliance" in result["response"]
+
+
+def test_circulation_conflict_resolution_call_contains_intent_not_geometry():
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Resolve the mixed-traffic conflict with 1.5 m separation "
+                "without changing the departments."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(_circulation_mixed_conflict_layout()),
+    ))
+
+    assert result["tool_source"] == "facility_circulation_intent_fast_path"
+    call = result["tool_calls"][0]
+    assert call == {
+        "name": server.G2_FACILITY_CIRCULATION_TOOL,
+        "args": {
+            "action": "resolve_conflicts",
+            "route_kind": None,
+            "width": None,
+            "source_unit": None,
+            "source_department": None,
+            "target_department": None,
+            "via_departments": [],
+            "direction": None,
+            "label": None,
+            "conflict_scope": "mixed_traffic",
+            "minimum_separation": 1.5,
+            "separation_unit": "m",
+            "preserve_departments": True,
+            "adjust_route_kind": "auto_shortest",
+            "execution_mode": "authorized_draft_run",
+        },
+    }
+    assert "centerline" not in repr(call).casefold()
+    assert "coordinates" not in repr(call).casefold()
+    assert "preserved" in result["response"].casefold()
+
+
+def test_circulation_obstacle_question_is_answered_from_revision_bound_geometry():
+    layout, obstacle_context = _circulation_obstacle_layout_and_context()
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message="Does this aisle intersect any machines or restricted regions?",
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout, obstacle_context),
+    ))
+
+    assert result["tool_source"] == "facility_circulation_obstacles_direct"
+    assert result["tool_calls"] == []
+    assert result["facility_action_mode"] == "READ_ONLY"
+    assert result["facility_circulation_obstacle_analysis"][
+        "routeObstacleConflictCount"
+    ] == 1
+    assert result["response"].startswith("**The active draft has 1 route-to-obstacle")
+    assert "machine-agent" in result["response"]
+    assert "exact static geometry" in result["response"]
+    assert "vehicle-turning approval" in result["response"]
+
+
+def test_circulation_obstacle_reroute_call_contains_intent_not_geometry():
+    layout, obstacle_context = _circulation_obstacle_layout_and_context()
+    route_id = layout["routes"][0]["routeId"]
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=(
+                "Reroute that aisle around the machine with 1 m clearance and "
+                "keep the departments unchanged."
+            ),
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(layout, obstacle_context),
+    ))
+
+    assert result["tool_source"] == "facility_circulation_intent_fast_path"
+    assert result["tool_call_count"] == 1
+    assert result["tool_calls"][0] == {
+        "name": server.G2_FACILITY_CIRCULATION_TOOL,
+        "args": {
+            "action": "avoid_obstacles",
+            "route_kind": None,
+            "width": None,
+            "source_unit": None,
+            "source_department": None,
+            "target_department": None,
+            "via_departments": [],
+            "direction": None,
+            "label": None,
+            "conflict_scope": None,
+            "minimum_separation": None,
+            "separation_unit": None,
+            "preserve_departments": True,
+            "adjust_route_kind": None,
+            "obstacle_scope": "static_geometry",
+            "minimum_clearance": 1.0,
+            "clearance_unit": "m",
+            "preserve_route_identity": True,
+            "route_id": route_id,
+            "vehicle_profile_id": None,
+            "vehicle_profile_revision": None,
+            "allow_reverse": None,
+            "execution_mode": "authorized_draft_run",
+        },
+    }
+    assert "centerline" not in repr(result["tool_calls"]).casefold()
+    assert "boundary" not in repr(result["tool_calls"]).casefold()
+    assert "obstacle-aware" in result["response"].casefold()
+
+
+@pytest.mark.parametrize(
+    ("message", "tool_source", "error_code"),
+    [
+        (
+            "Add some aisles.",
+            "facility_circulation_ask",
+            "facility_circulation_width_required",
+        ),
+        (
+            "Add whatever fire aisles the code requires.",
+            "facility_circulation_refuse",
+            "facility_circulation_policy_authority_missing",
+        ),
+        (
+            "Place a 5 m material aisle at x=40, z=25.",
+            "facility_circulation_refuse",
+            "facility_circulation_model_geometry_refused",
+        ),
+        (
+            "Make this aisle safe for any forklift.",
+            "facility_circulation_refuse",
+            "facility_circulation_vehicle_profile_required",
+        ),
+        (
+            "Validate the turning radius using a typical warehouse forklift.",
+            "facility_circulation_refuse",
+            "facility_circulation_vehicle_profile_required",
+        ),
+        (
+            "Reroute using whatever OSHA clearance applies.",
+            "facility_circulation_refuse",
+            "facility_circulation_policy_authority_missing",
+        ),
+        (
+            "Put the detour at x=40 m and z=25 m.",
+            "facility_circulation_refuse",
+            "facility_circulation_model_geometry_refused",
+        ),
+    ],
+)
+def test_circulation_fast_path_asks_or_refuses_without_provider_call(
+    message,
+    tool_source,
+    error_code,
+):
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=message,
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(_circulation_department_layout()),
+    ))
+
+    assert result["tool_source"] == tool_source
+    assert result["facility_generation_error"] == error_code
+    assert result["tool_calls"] == []
+    assert result["facility_action_mode"] == "READ_ONLY"
+
+
+def test_circulation_follow_up_and_connectivity_use_active_draft():
+    layout = _circulation_department_layout()
+    create = parse_circulation_turn(
+        "Add a 6 m material aisle from Receiving to Shipping through Machining.",
+        layout,
+    )
+    compiled = compile_primary_circulation_operations(
+        layout,
+        create["request"],
+    )
+    with_route = apply_facility_layout_operations(
+        layout,
+        compiled["operations"],
+        base_revision=layout_revision(layout),
+    )["document"]
+
+    follow_up = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message="Make that aisle 5 m wide and keep the same endpoints.",
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(with_route),
+    ))
+    assert follow_up["tool_calls"][0]["args"]["action"] == "edit_recent"
+    assert follow_up["tool_calls"][0]["args"]["width"] == 5.0
+
+    connectivity = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message="Which departments are not connected by circulation yet?",
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(with_route),
+    ))
+    assert connectivity["tool_source"] == (
+        "facility_circulation_connectivity_direct"
+    )
+    assert "Assembly" in connectivity["response"]
+    assert connectivity["tool_calls"] == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "What if we added a direct material route from Receiving to "
+            "Shipping? Would it reduce travel by 20 percent?"
+        ),
+        "What would happen if we added a central aisle?",
+    ],
+)
+def test_circulation_hypothetical_does_not_invent_a_benefit_or_change_layout(
+    message,
+):
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message=message,
+            agent_type="deviation-analyst",
+        ),
+        _circulation_chat_context(_circulation_department_layout()),
+    ))
+
+    assert result["tool_source"] == "facility_circulation_read_only"
+    assert result["tool_calls"] == []
+    assert "no travel benefit is claimed" in result["response"].casefold()
+    assert "20" not in result["response"]
+
+
+def test_department_repartition_fast_path_reuses_trusted_active_program():
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        server.AgentChatRequest(
+            message="Put two departments above and three below.",
+            agent_type="deviation-analyst",
+        ),
+        {
+            "facility_layout_state": {"identity": {"layoutId": "fl-main"}},
+            "facility_layout_evidence": {},
+            "facility_layout_digest": {},
+            "_facility_layout_department_program": _five_department_program(),
+        },
+    ))
+
+    assert result["tool_source"] == "facility_g1_repartition_fast_path"
+    assert result["facility_action_mode"] == "PREVIEW"
+    assert result["facility_repartition"] == {
+        "source": "active_generation_run",
+        "supersededRunId": "fgr-demo",
+    }
+    call = result["tool_calls"][0]
+    assert call["name"] == server.G1_FACILITY_GENERATION_TOOL
+    assert [
+        row["labels"] for row in call["args"]["departments"]["rows"]
+    ] == [
+        ["Receiving", "Machining"],
+        ["Assembly", "Inspection", "Shipping"],
+    ]
+    assert call["args"]["facility_envelope"]["width"] == 100.0
+
+
+def test_trusted_context_binds_active_generation_run_for_follow_up(
+    facility_host,
+    monkeypatch,
+):
+    for name in (
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_PROVIDER",
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_ANTHROPIC_MODEL",
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_OPENAI_MODEL",
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_OPENAI_REASONING_EFFORT",
+        "INSPECTORPRO_SAGE_PROVIDER",
+        "INSPECTORPRO_SAGE_ANTHROPIC_MODEL",
+        "INSPECTORPRO_SAGE_OPENAI_MODEL",
+        "INSPECTORPRO_SAGE_OPENAI_REASONING_EFFORT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    principal = facility_host.principal()
+    current = _current(facility_host)
+    run = facility_host.generation_coordinator.start_g1_run(
+        tenant_id=principal.tenant_id,
+        site_id=LOCAL_SITE_ID,
+        workspace_id="workspace-facility-layout",
+        layout_id=LOCAL_LAYOUT_ID,
+        user_id=principal.principal_id,
+        session_id="session-g11-follow-up",
+        base_layout=current["layout"],
+        base_layout_revision=current["revision"],
+        envelope_request={
+            "width": 100,
+            "depth": 80,
+            "sourceUnit": "m",
+            "displayName": "Flexible Factory",
+        },
+        department_request={
+            "count": 5,
+            "labels": [
+                "Receiving",
+                "Machining",
+                "Assembly",
+                "Inspection",
+                "Shipping",
+            ],
+            "proportions": [1, 1, 1, 1, 1],
+            "arrangement": "row_stack",
+            "rows": [
+                {"labels": ["Receiving", "Machining"]},
+                {"labels": ["Assembly", "Inspection", "Shipping"]},
+            ],
+        },
+        execution_mode="authorized_draft_run",
+        prototype_mode=True,
+    )
+    while run["currentStageId"]:
+        run = facility_host.generation_coordinator.continue_run(
+            tenant_id=principal.tenant_id,
+            site_id=LOCAL_SITE_ID,
+            run_id=run["runId"],
+            current_base_layout=current["layout"],
+            current_base_revision=current["revision"],
+            explicit_stage_acceptance=False,
+        )
+
+    ctx = {
+        "facility_layout_ref": {
+            "siteId": LOCAL_SITE_ID,
+            "layoutId": LOCAL_LAYOUT_ID,
+            "revision": current["revision"],
+        },
+        "facility_layout_live_state": {
+            "dirty": True,
+            "editable": True,
+            "generationDraft": {
+                "active": True,
+                "runId": run["runId"],
+                "status": "complete",
+                "saveEligibility": "eligible",
+                "writable": True,
+            },
+        },
+    }
+    server._resolve_trusted_facility_layout_context(
+        ctx,
+        _facility_http_request(),
+    )
+
+    assert ctx["facility_layout_ref"]["revision"] == (
+        run["draftLayoutRevision"]
+    )
+    assert ctx["facility_layout_state"]["identity"]["revision"] == (
+        run["draftLayoutRevision"]
+    )
+    assert layout_revision(ctx["_facility_layout_document"]) == (
+        run["draftLayoutRevision"]
+    )
+    program = ctx["_facility_layout_department_program"]
+    assert program["source"] == "active_generation_run"
+    assert program["run_id"] == run["runId"]
+    assert program["facility_envelope"]["width"] == 100.0
+    assert program["departments"]["labels"] == [
+        "Receiving",
+        "Machining",
+        "Assembly",
+        "Inspection",
+        "Shipping",
+    ]
+    assert [
+        row["labels"] for row in program["departments"]["rows"]
+    ] == [
+        ["Receiving", "Machining"],
+        ["Assembly", "Inspection", "Shipping"],
+    ]
 
 
 def test_facility_read_only_policy_honors_requested_markdown_structure():
@@ -2392,6 +4690,533 @@ def test_complete_zone_table_uses_read_only_deterministic_chat_path():
         "saved_layout_unchanged": True,
     }
     assert result["response"].startswith("# Facility Layout Review\n")
+
+
+def test_facility_design_objective_bypasses_legacy_semantic_fast_paths():
+    request = server.AgentChatRequest(
+        message=(
+            "Reduce loaded material travel from Machining Output FIFO to "
+            "Inspection Input FIFO. Keep CNC Mill 03 and Inspection Station "
+            "02 fixed. You may move Output Buffer A and Input Buffer B, and "
+            "you may reroute Material Transfer Aisle and Main Boulevard. Use "
+            "the reviewed 24 loaded trips per Day Shift."
+        ),
+        agent_type="deviation-analyst",
+    )
+    ctx = {
+        "facility_layout_digest": {"counts": {"routes": 2}},
+        "facility_layout_state": {
+            "routes": [
+                {"routeId": "route-material-transfer"},
+                {"routeId": "route-main-boulevard"},
+            ],
+        },
+    }
+
+    result = asyncio.run(
+        server._deterministic_semantic_chat_result(request, ctx)
+    )
+
+    assert result is None
+    assert "facility_layout_state" in ctx
+
+
+def _facility_design_semantic_layout() -> dict:
+    return {
+        "placements": [
+            {
+                "placementId": "pl-source",
+                "metadata": {
+                    "instanceLabel": "Output Buffer A",
+                    "semanticAliases": ["Machining Output FIFO"],
+                },
+            },
+            {
+                "placementId": "pl-target",
+                "metadata": {
+                    "instanceLabel": "Input Buffer B",
+                    "semanticAliases": ["Inspection Input FIFO"],
+                },
+            },
+            {
+                "placementId": "pl-cnc",
+                "metadata": {"instanceLabel": "CNC Mill 03"},
+            },
+            {
+                "placementId": "pl-inspection",
+                "metadata": {"instanceLabel": "Inspection Station 02"},
+            },
+        ],
+        "routes": [
+            {"routeId": "rt-transfer", "label": "Material Transfer Aisle"},
+            {"routeId": "rt-main", "label": "Main Boulevard"},
+            {"routeId": "rt-input", "label": "Input Approach Aisle"},
+        ],
+        "zones": [],
+    }
+
+
+def test_facility_design_exact_create_bypasses_provider_round_trip():
+    layout = _facility_design_semantic_layout()
+    request = server.AgentChatRequest(
+        message=(
+            "Reduce loaded material travel from Machining Output FIFO to "
+            "Inspection Input FIFO. Keep CNC Mill 03 and Inspection Station "
+            "02 fixed. You may move Output Buffer A and Input Buffer B, and "
+            "you may reroute Material Transfer Aisle, Main Boulevard, and "
+            "Input Approach Aisle. Use the reviewed 24 loaded trips per Day "
+            "Shift."
+        ),
+        agent_type="deviation-analyst",
+    )
+
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        request,
+        {"_facility_layout_document": layout},
+    ))
+
+    assert result["tool_source"] == "facility_design_deterministic_create"
+    assert [call["name"] for call in result["tool_calls"]] == [
+        server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+        server.RUN_FACILITY_DESIGN_PREVIEW_TOOL,
+    ]
+    intent = result["tool_calls"][0]["args"]
+    assert intent["source_label"] == "Machining Output FIFO"
+    assert intent["target_label"] == "Inspection Input FIFO"
+    assert intent["locked_entity_labels"] == [
+        "CNC Mill 03",
+        "Inspection Station 02",
+    ]
+    assert intent["movable_placement_labels"] == [
+        "Output Buffer A",
+        "Input Buffer B",
+    ]
+    assert intent["mutable_route_labels"] == [
+        "Material Transfer Aisle",
+        "Main Boulevard",
+        "Input Approach Aisle",
+    ]
+    assert intent["loaded_trips_per_shift"] == 24
+    assert intent["shift_name"] == "Day Shift"
+    assert result["facility_runtime_policy"]["allowedToolNames"] == [
+        server.RUN_FACILITY_DESIGN_PREVIEW_TOOL,
+        server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+    ]
+
+
+@pytest.mark.parametrize(
+    "constraint_text",
+    [
+        (
+            "Keep CNC Mill 03 and Inspection Station 02 fixed. You may move "
+            "Output Buffer A or Input Buffer B, but not both."
+        ),
+        (
+            "Keep CNC Mill 03 and Inspection Station 02 fixed. You may move "
+            "Output Buffer A by at most 1 meter."
+        ),
+        (
+            "Keep CNC Mill 03 and Unknown Press fixed. You may move Output "
+            "Buffer A and Input Buffer B."
+        ),
+    ],
+)
+def test_facility_design_partial_initial_meaning_falls_back_to_provider(
+    constraint_text,
+):
+    request = server.AgentChatRequest(
+        message=(
+            "Reduce loaded material travel from Machining Output FIFO to "
+            "Inspection Input FIFO. "
+            + constraint_text
+            + " You may reroute Material Transfer Aisle, Main Boulevard, and "
+            "Input Approach Aisle. Use the reviewed 24 loaded trips per Day "
+            "Shift."
+        ),
+        agent_type="deviation-analyst",
+    )
+
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        request,
+        {"_facility_layout_document": _facility_design_semantic_layout()},
+    ))
+
+    assert result is None
+
+
+def test_facility_design_mixed_lock_correction_falls_back_to_provider():
+    state = _facility_design_context()["facility_design_state"]
+    state["referents"] = [
+        {"phrase": "Output Buffer A", "status": "active"},
+        {"phrase": "Input Buffer B", "status": "active"},
+    ]
+    request = server.AgentChatRequest(
+        message=(
+            "Keep Output Buffer A fixed, but Input Buffer B can move."
+        ),
+        agent_type="deviation-analyst",
+    )
+
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        request,
+        {"facility_design_state": state},
+    ))
+
+    assert result is None
+
+
+def test_facility_design_exact_correction_bypasses_provider_round_trip():
+    state = _facility_design_context()["facility_design_state"]
+    state["referents"] = [{
+        "phrase": "Main Boulevard",
+        "status": "active",
+    }]
+    request = server.AgentChatRequest(
+        message="Keep the current Main Boulevard fixed too.",
+        agent_type="deviation-analyst",
+    )
+
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        request,
+        {"facility_design_state": state},
+    ))
+
+    assert result["tool_source"] == "facility_design_deterministic_correction"
+    assert [call["name"] for call in result["tool_calls"]] == [
+        server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+        server.RUN_FACILITY_DESIGN_PREVIEW_TOOL,
+    ]
+    assert result["tool_calls"][0]["args"]["target_labels"] == [
+        "Main Boulevard"
+    ]
+    assert result["tool_calls"][0]["args"]["brief_id"] == "fdbf-active"
+    assert result["tool_calls"][0]["args"][
+        "expected_brief_revision"
+    ] == "a" * 64
+    assert result["facility_runtime_policy"]["mode"] == "PREVIEW"
+    assert result["facility_runtime_policy"]["allowedToolNames"] == [
+        server.RUN_FACILITY_DESIGN_PREVIEW_TOOL,
+        server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+    ]
+
+
+def test_facility_design_rather_than_preference_keeps_intended_priority():
+    request = server.AgentChatRequest(
+        message=(
+            "Rather than the shortest route, prefer fewer equipment moves."
+        ),
+        agent_type="deviation-analyst",
+    )
+
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        request,
+        _facility_design_context(),
+    ))
+
+    assert result["tool_source"] == "facility_design_deterministic_correction"
+    assert result["tool_calls"][0]["args"]["preference_metric_ids"] == [
+        "movedPlacementCount",
+        "loadedRouteDistanceMeters",
+    ]
+
+
+def test_facility_design_exact_apply_bypasses_provider_round_trip():
+    request = server.AgentChatRequest(
+        message="Apply the corrected proposal. Do not save it.",
+        agent_type="deviation-analyst",
+    )
+
+    result = asyncio.run(server._deterministic_semantic_chat_result(
+        request,
+        _facility_design_context(),
+    ))
+
+    assert result["tool_source"] == "facility_design_deterministic_apply"
+    assert result["tool_calls"] == [{
+        "name": server.APPLY_FACILITY_DESIGN_PROPOSAL_DRAFT_TOOL,
+        "args": {
+            "proposal_id": "fdlp-selected",
+            "proposal_revision": "b" * 64,
+        },
+    }]
+    assert result["facility_runtime_policy"]["mode"] == "PREVIEW"
+    assert result["facility_runtime_policy"]["allowedToolNames"] == [
+        server.APPLY_FACILITY_DESIGN_PROPOSAL_DRAFT_TOOL,
+    ]
+
+
+def test_facility_design_brief_is_an_executable_trusted_provider_read():
+    state = {
+        "briefId": "fdbf-provider-read",
+        "briefRevision": "a" * 64,
+        "status": "active",
+        "objective": {"objectiveKind": "reduce_loaded_material_travel"},
+        "hardConstraints": [{"constraintId": "lock-main-boulevard"}],
+        "preferences": [],
+        "permittedChanges": [],
+        "unknowns": [],
+        "referents": [],
+        "proposals": [{"proposalId": "fdlp-a"}],
+        "selectedProposal": {"proposalId": "fdlp-a"},
+    }
+
+    result = server._trusted_facility_design_brief_observation(
+        {"facility_design_state": state},
+        {
+            "brief_id": state["briefId"],
+            "brief_revision": state["briefRevision"],
+        },
+    )
+
+    assert (
+        server.INSPECT_FACILITY_DESIGN_BRIEF_TOOL
+        in server._FACILITY_LAYOUT_READ_TOOL_NAMES
+    )
+    assert result["authoritative"] is True
+    assert result["briefRevision"] == state["briefRevision"]
+    assert result["hardConstraints"] == state["hardConstraints"]
+    assert result["proposalCount"] == 1
+    assert result["savedLayoutChanged"] is False
+
+
+def _facility_design_prompt_plan(action: str) -> dict:
+    return {
+        "workflow": {"id": "facility-layout-generation"},
+        "runtime_tool_policy": {
+            "mode": "facility_design_loop",
+            "designAction": action,
+        },
+        "allowed_tools": sorted(
+            server.facility_design_allowed_tools(
+                action,
+                apply_enabled=True,
+            )
+        ),
+    }
+
+
+def _facility_design_context() -> dict:
+    return {
+        "facility_design_state": {
+            "briefId": "fdbf-active",
+            "briefRevision": "a" * 64,
+            "runId": "fdlr-active",
+            "selectedProposal": {
+                "proposalId": "fdlp-selected",
+                "proposalRevision": "b" * 64,
+            },
+        }
+    }
+
+
+def test_facility_design_update_is_paired_with_preview_in_execution_order():
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [{
+            "name": server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+            "args": {
+                "schema_version": FACILITY_DESIGN_INTENT_SCHEMA_VERSION,
+                "operation": "add_geometry_locks",
+                "target_labels": ["Main Boulevard"],
+            },
+        }],
+        _facility_design_prompt_plan("update_and_preview"),
+        _facility_design_context(),
+        "Keep the current Main Boulevard fixed too.",
+        "deviation-analyst",
+    )
+
+    assert [call["name"] for call in calls] == [
+        server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+        server.RUN_FACILITY_DESIGN_PREVIEW_TOOL,
+    ]
+    assert calls[0]["args"]["brief_id"] == "fdbf-active"
+    assert calls[0]["args"]["expected_brief_revision"] == "a" * 64
+    assert calls[1]["args"] == {"mode": "production_sage"}
+    assert "facility_design_preview_paired_with_update" in warnings
+    assert changed is True
+
+
+def test_facility_design_initial_split_calls_recover_from_exact_user_labels():
+    layout = {
+        "placements": [
+            {
+                "placementId": "pl-source",
+                "metadata": {
+                    "instanceLabel": "Output Buffer A",
+                    "semanticAliases": ["Machining Output FIFO"],
+                },
+            },
+            {
+                "placementId": "pl-target",
+                "metadata": {
+                    "instanceLabel": "Input Buffer B",
+                    "semanticAliases": ["Inspection Input FIFO"],
+                },
+            },
+            {
+                "placementId": "pl-cnc",
+                "metadata": {"instanceLabel": "CNC Mill 03"},
+            },
+            {
+                "placementId": "pl-inspection",
+                "metadata": {"instanceLabel": "Inspection Station 02"},
+            },
+        ],
+        "routes": [
+            {"routeId": "rt-transfer", "label": "Material Transfer Aisle"},
+            {"routeId": "rt-main", "label": "Main Boulevard"},
+        ],
+        "zones": [],
+    }
+    message = (
+        "Reduce loaded material travel from Machining Output FIFO to "
+        "Inspection Input FIFO. Keep CNC Mill 03 and Inspection Station 02 "
+        "fixed. You may move Output Buffer A and Input Buffer B, and you may "
+        "reroute Material Transfer Aisle and Main Boulevard. Use 24 loaded "
+        "trips per Day Shift. Show alternatives, but do not apply anything."
+    )
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [
+            {
+                "name": server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+                "args": {
+                    "schema_version": FACILITY_DESIGN_INTENT_SCHEMA_VERSION,
+                    "operation": "create_material_travel_brief",
+                    "source_label": "Machining Output FIFO",
+                },
+            },
+            {
+                "name": server.RUN_FACILITY_DESIGN_PREVIEW_TOOL,
+                "args": {"mode": "production_sage"},
+            },
+        ],
+        _facility_design_prompt_plan("create_and_preview"),
+        {"_facility_layout_document": layout},
+        message,
+        "deviation-analyst",
+    )
+
+    assert [call["name"] for call in calls] == [
+        server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+        server.RUN_FACILITY_DESIGN_PREVIEW_TOOL,
+    ]
+    recovered = calls[0]["args"]
+    assert recovered["source_label"] == "Machining Output FIFO"
+    assert recovered["target_label"] == "Inspection Input FIFO"
+    assert recovered["locked_entity_labels"] == [
+        "CNC Mill 03",
+        "Inspection Station 02",
+    ]
+    assert recovered["movable_placement_labels"] == [
+        "Output Buffer A",
+        "Input Buffer B",
+    ]
+    assert recovered["mutable_route_labels"] == [
+        "Material Transfer Aisle",
+        "Main Boulevard",
+    ]
+    assert recovered["loaded_trips_per_shift"] == 24
+    assert recovered["shift_name"] == "Day Shift"
+    assert "facility_design_create_grounded_from_user_turn" in warnings
+    assert changed is True
+
+
+def test_facility_design_split_lock_updates_merge_before_one_preview():
+    raw_calls = [
+        {
+            "name": server.RUN_FACILITY_DESIGN_PREVIEW_TOOL,
+            "args": {"mode": "production_sage"},
+        },
+        *[
+            {
+                "name": server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+                "args": {
+                    "schema_version": FACILITY_DESIGN_INTENT_SCHEMA_VERSION,
+                    "operation": "add_geometry_locks",
+                    "target_labels": [label],
+                },
+            }
+            for label in ("Main Boulevard", "Output Buffer A")
+        ],
+    ]
+    calls, warnings, _changed = (
+        server.ensure_facility_layout_preview_tool_call(
+            raw_calls,
+            _facility_design_prompt_plan("update_and_preview"),
+            _facility_design_context(),
+            "Keep Main Boulevard and Output Buffer A fixed.",
+            "deviation-analyst",
+        )
+    )
+
+    assert [call["name"] for call in calls] == [
+        server.UPDATE_FACILITY_DESIGN_BRIEF_TOOL,
+        server.RUN_FACILITY_DESIGN_PREVIEW_TOOL,
+    ]
+    assert calls[0]["args"]["target_labels"] == [
+        "Main Boulevard",
+        "Output Buffer A",
+    ]
+    assert "facility_design_split_update_merged" in warnings
+
+
+def test_facility_design_correction_understands_plural_locks_and_loaded_route():
+    context = _facility_design_context()
+    context["facility_design_state"]["referents"] = [
+        {"phrase": "Output Buffer A", "status": "active"},
+        {"phrase": "Input Buffer B", "status": "active"},
+    ]
+    lock = server.recover_facility_design_update_intent(
+        "Keep both Output Buffer A and Input Buffer B exactly where they are.",
+        active_design=context["facility_design_state"],
+    )
+    preference = server.recover_facility_design_update_intent(
+        "Prefer the shortest loaded route over fewer equipment moves.",
+        active_design=context["facility_design_state"],
+    )
+
+    assert lock["target_labels"] == ["Output Buffer A", "Input Buffer B"]
+    assert preference["preference_metric_ids"] == [
+        "loadedRouteDistanceMeters",
+        "movedPlacementCount",
+    ]
+
+
+def test_facility_design_preview_does_not_run_without_valid_correction():
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [{
+            "name": server.RUN_FACILITY_DESIGN_PREVIEW_TOOL,
+            "args": {"mode": "production_sage"},
+        }],
+        _facility_design_prompt_plan("update_and_preview"),
+        _facility_design_context(),
+        "Keep Output Buffer A fixed.",
+        "deviation-analyst",
+    )
+
+    assert calls == []
+    assert "facility_design_update_required_before_preview" in warnings
+    assert changed is False
+
+
+def test_facility_design_apply_uses_repository_selected_proposal():
+    calls, warnings, changed = server.ensure_facility_layout_preview_tool_call(
+        [],
+        _facility_design_prompt_plan("apply"),
+        _facility_design_context(),
+        "Apply the corrected proposal. Do not save it.",
+        "deviation-analyst",
+    )
+
+    assert calls == [{
+        "name": server.APPLY_FACILITY_DESIGN_PROPOSAL_DRAFT_TOOL,
+        "args": {
+            "proposal_id": "fdlp-selected",
+            "proposal_revision": "b" * 64,
+        },
+    }]
+    assert warnings == []
+    assert changed is True
 
 
 @pytest.mark.parametrize(
@@ -3276,9 +6101,9 @@ def test_facility_fallback_loads_the_hierarchical_skill_in_production():
     assert len(plan["selection"]) == 1
     selected = plan["selection"][0]
     assert selected["id"] == "generate-facility-layout"
-    assert selected["version"] == "1.5.0"
+    assert selected["version"] == "1.10.0"
     assert selected["role"] == "primary"
-    assert selected["contract_version"] == "1.5.0"
+    assert selected["contract_version"] == "1.10.0"
     assert len(selected["contract_sha256"]) == 64
     assert "Hierarchical Factory Procedure" in plan["prompt"]
     assert "build_facility_layout_preview" in plan["allowed_tools"]

@@ -84,6 +84,10 @@ namespace SolidWorksExtractor.Models
         public int Level { get; set; }              // Depth in tree (0 = root)
         public List<ComponentData> Children { get; set; } = new List<ComponentData>();
 
+        // FeatureManager display tree grouping (user-created folders)
+        public List<string> FeatureTreePath { get; set; } = new List<string>();
+        public string SemanticGroup { get; set; }
+
         // Transform (position in assembly)
         public TransformMatrix Transform { get; set; } = new TransformMatrix();
 

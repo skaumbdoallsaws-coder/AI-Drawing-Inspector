@@ -2122,10 +2122,6 @@ def benchmark(
             "p5CompositionReference": P5_JS.relative_to(ROOT).as_posix(),
             "referenceHardware": fixture_manifest["referenceHardware"],
             "unsupportedPlanFeatures": {
-                "visibleTextLabels": (
-                    "Current TopPlanAdapter exposes object labels through "
-                    "aria-label rather than SVG text."
-                ),
                 "placementClearanceVolumes": (
                     "Current TopPlanAdapter renders route corridor widths but "
                     "does not expose per-placement clearance-volume elements."

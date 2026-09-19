@@ -21,7 +21,15 @@ def run() -> int:
         {"type": "status", "phase": "generating"},
         {"type": "text_delta", "text": "Scout found "},
         {"type": "text_delta", "text": "a compatible spacer."},
-        {"type": "response", "text": "Scout found a compatible spacer."},
+        {
+            "type": "response",
+            "text": "Scout found a compatible spacer.",
+            "memory": {
+                "turnSequence": 1,
+                "revisionAdvancedDuringTurn": False,
+                "warnings": [],
+            },
+        },
         {"type": "done"},
     ]
     body = "".join("data: " + json.dumps(event) + "\n\n" for event in events)

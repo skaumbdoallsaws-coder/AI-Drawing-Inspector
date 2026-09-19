@@ -1115,13 +1115,14 @@ def _known_ids(layout: Mapping[str, Any]) -> dict[str, set[str]]:
 def _selected_ids(value: Any, known: set[str]) -> list[str]:
     if not isinstance(value, list):
         return []
-    return sorted(
-        {
-            item
-            for item in value[:MAXIMUM_SELECTION_IDS]
-            if isinstance(item, str) and item in known
-        }
-    )
+    selected: list[str] = []
+    seen: set[str] = set()
+    for item in value[:MAXIMUM_SELECTION_IDS]:
+        if not isinstance(item, str) or item not in known or item in seen:
+            continue
+        selected.append(item)
+        seen.add(item)
+    return selected
 
 
 def sanitize_facility_layout_live_facts(

@@ -132,6 +132,83 @@ def test_compiler_keeps_only_deterministically_targeted_row_and_join():
     assert [item["characteristic_id"] for item in compiled["affected_functional_interfaces"]] == ["5"]
 
 
+def test_drawing_turn_gets_trusted_parent_assembly_parts_and_motion_before_browser_load():
+    normalized = server.normalize_agent_context({
+        "attachments": {
+            "part": {"part_number": "100006", "part_name": "Piston"},
+            "selection": {
+                "available_parts": [
+                    {
+                        "part_number": "100006",
+                        "description": "browser value",
+                        "color": "#46F0F0",
+                        "color_name": "cyan",
+                    },
+                    {"part_number": "UNTRUSTED", "description": "must be removed"},
+                ],
+            },
+            "assembly": {},
+            "viewport": {
+                "active_tab": "drawing",
+                "motion": {"available": False},
+                "part_legend": [],
+                "state": {},
+            },
+            "session": {
+                "active_tab": "drawing",
+                "active_mode": "drawing",
+                "mode_contract": {"tab": "drawing", "mode": "drawing"},
+            },
+        },
+    })
+    ctx = normalized["flat"]
+    assert ctx["assembly_number"] == "100001"
+    assert ctx["available_parts_source"] == "reviewed_functional_graph"
+    assert [item["part_number"] for item in ctx["available_parts"]] == [
+        "100002", "100003", "100004", "100005",
+        "100006", "100007", "100008", "100009",
+    ]
+    piston = next(
+        item for item in ctx["available_parts"]
+        if item["part_number"] == "100006"
+    )
+    assert piston["description"] == "Piston"
+    assert piston["color_name"] == "cyan"
+    assert "UNTRUSTED" not in {
+        item["part_number"] for item in ctx["available_parts"]
+    }
+
+    viewport = ctx["viewport_context"]
+    assert viewport["motion"]["available"] is True
+    groups = {
+        group["id"]: group
+        for motion in viewport["motion"]["motions"]
+        for group in motion["groups"]
+    }
+    assert groups["pin_bore_fai_affected"]["part_numbers"] == [
+        "100004", "100005", "100006", "100007",
+    ]
+
+    _, contexts, _ = server._skill_route_context(ctx)
+    assert "assembly.parts" in contexts
+    assert "motion.groups" in contexts
+    prompt = server._build_context_message(ctx)
+    drawing_block = prompt.split("[DRAWING MODE]", 1)[1].split("\n\n", 1)[0]
+    assert "Cross-workspace actions available" in drawing_block
+    assert "highlight_parts / isolate_parts" not in drawing_block.split(
+        "Deprioritize:", 1
+    )[-1].split("Cross-workspace", 1)[0]
+
+
+def test_unrequested_disposition_keeps_only_complete_engineering_clause():
+    assert server._remove_unrequested_fai_disposition(
+        "**Disposition: Scrap.** The pin bore is above the upper limit."
+    ) == "The pin bore is above the upper limit."
+    assert server._remove_unrequested_fai_disposition(
+        "The pin bore is above the upper limit; scrap the part."
+    ) == "The pin bore is above the upper limit."
+
+
 def test_answer_cleanup_removes_unrelated_rows_internal_ids_and_followup():
     ctx = {
         "active_mode": "assembly",
@@ -647,7 +724,7 @@ def test_pin_bore_impact_answer_is_functional_and_has_no_disposition_instruction
     assert "hold" not in low and "disposition" not in low, cleaned
 
 
-def test_plain_pin_bore_impact_is_exactly_two_direct_sentences():
+def test_plain_pin_bore_impact_uses_inverted_pyramid():
     row = dict(next(row for row in _rows() if str(row["char_number"]) == "5"))
     row["measured"] = 32.0
     ctx = {
@@ -679,13 +756,14 @@ def test_plain_pin_bore_impact_is_exactly_two_direct_sentences():
     )
     cleaned = server._clean_agent_answer(raw, ctx, question)
     assert cleaned == (
-        "Wrist-pin hole diameter through the piston measured 32.00 mm, 1.95 mm "
-        "above the 30.05 mm upper limit. The oversized bore increases bearing "
+        "**The oversized bore increases bearing "
         "clearance around the piston pin, reducing radial support in the piston "
         "bosses and introducing free play where the piston transfers load to the "
-        "connecting rod during reciprocation."
+        "connecting rod during reciprocation.** Wrist-pin hole diameter through "
+        "the piston measured 32.00 mm, 1.95 mm above the 30.05 mm upper limit."
     )
     assert server._response_sentence_count(cleaned) == 2
+    assert cleaned.startswith("**The oversized bore")
     assert "cannot be established" not in cleaned.lower()
     assert "mating pin measurement" not in cleaned.lower()
 
@@ -695,6 +773,17 @@ def test_plain_pin_bore_impact_is_exactly_two_direct_sentences():
     assert server._compose_fai_assembly_impact_answer(
         ctx, "How severe is the impact and exactly how much free play is created?"
     ) is None
+
+
+def test_inverted_pyramid_formatter_preserves_three_sentence_accounting():
+    formatted = server._format_fai_inverted_pyramid(
+        "The result is outside tolerance. It measured 8.21 mm. Review is required."
+    )
+    assert formatted == (
+        "**The result is outside tolerance.** It measured 8.21 mm. "
+        "Review is required."
+    )
+    assert server._response_sentence_count(formatted) == 3
 
 
 def _run_without_pytest() -> int:

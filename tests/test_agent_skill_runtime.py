@@ -89,17 +89,45 @@ def test_production_catalog_loads_and_schema_documents_match():
         [SKILL_ROOT],
         workflow_ids=set(workflows.ids),
         known_agents={"sage", "iris", "scout"},
-        known_modes={"report_fai", "report", "drawing", "assembly", "training"},
+        known_modes={
+            "report_fai",
+            "report",
+            "drawing",
+            "assembly",
+            "training",
+            "facility_layout",
+        },
         known_tools_by_agent={
             "sage": {
                 "ui_actions",
                 "highlight_features",
+                "inspect_process_map_spatial_layout",
+                "propose_process_map_node_placement",
+                "propose_process_map_connection_route",
+                "propose_process_map_demo_metadata",
+                "build_process_map_preview",
                 "search_industrial_assets",
                 "inspect_facility_entities",
                 "inspect_facility_region",
                 "inspect_facility_findings",
                 "inspect_process_bindings",
+                "inspect_facility_semantics",
+                "inspect_pattern_provenance",
+                "inspect_cell_layout_provenance",
+                "analyze_facility_spatial",
+                "analyze_facility_fit",
+                "preview_facility_move",
                 "build_facility_layout_preview",
+                "present_chat_visualization",
+                    "present_chat_table",
+                    "generate_operations_manual_draft",
+                    "publish_operations_manual",
+                    "generate_specification_sheet_draft",
+                    "publish_specification_sheet",
+                "generate_parts_manual_draft",
+                "propose_parts_manual_structure",
+                "edit_parts_manual_composition",
+                "generate_and_publish_parts_manual",
             },
             "iris": set(),
             "scout": set(),
@@ -116,7 +144,13 @@ def test_production_catalog_loads_and_schema_documents_match():
     assert "100006" not in skill.body
     assert skills.ids == {
         "analyze-process-map",
+        "analyze-facility-layout",
         "generate-facility-layout",
+        "generate-process-map",
+            "publish-parts-manual",
+            "publish-operations-manual",
+            "publish-specification-sheet",
+        "prepare-assembly-knowledge",
         "assess-fai-characteristic",
         "recommend-fai-disposition",
         "reason-about-part-features",
@@ -340,12 +374,18 @@ def test_feature_flag_parsing_is_strict():
         {
             "INSPECTORPRO_SKILLS_ENABLED": "true",
             "INSPECTORPRO_SKILLS_SHADOW": "0",
+            "INSPECTORPRO_SKILL_ROUTER_PROVIDER": "openai",
             "INSPECTORPRO_SKILL_ROUTER_MODEL": "test-router",
         }
     )
     assert settings.enabled is True
     assert settings.shadow is False
+    assert settings.router_provider == "openai"
     assert settings.router_model == "test-router"
+    openai_defaults = SkillRuntimeSettings.from_env({
+        "INSPECTORPRO_SKILL_ROUTER_PROVIDER": "openai",
+    })
+    assert openai_defaults.router_model == "gpt-4o-mini"
     _expect_raises(
         SkillRuntimeError,
         lambda: SkillRuntimeSettings.from_env({"INSPECTORPRO_SKILLS_ENABLED": "maybe"}),
@@ -360,6 +400,7 @@ def test_internal_test_compose_is_gated_and_does_not_mutate_production_prompts()
     tracked = (
         "INSPECTORPRO_SKILLS_ENABLED",
         "INSPECTORPRO_SKILLS_SHADOW",
+        "INSPECTORPRO_SKILL_ROUTER_PROVIDER",
         "INSPECTORPRO_SKILL_ROUTER_MODEL",
     )
     original_env = {key: os.environ.get(key) for key in tracked}
@@ -386,10 +427,23 @@ def test_internal_test_compose_is_gated_and_does_not_mutate_production_prompts()
         assert status["phase"] == 5
         assert status["production_chat_integration"] is True
         assert status["runtime_loaded"] is True
-        assert len(status["skills"]) == 9
+        assert len(status["skills"]) == 15
         assert "assess-fai-characteristic" in {item["id"] for item in status["skills"]}
         assert "analyze-process-map" in {item["id"] for item in status["skills"]}
+        assert "generate-process-map" in {item["id"] for item in status["skills"]}
         assert "generate-facility-layout" in {
+            item["id"] for item in status["skills"]
+        }
+        assert "analyze-facility-layout" in {
+            item["id"] for item in status["skills"]
+        }
+        assert "prepare-assembly-knowledge" in {
+            item["id"] for item in status["skills"]
+        }
+        assert "publish-parts-manual" in {
+            item["id"] for item in status["skills"]
+        }
+        assert "publish-operations-manual" in {
             item["id"] for item in status["skills"]
         }
         result = asyncio.run(server.agent_skill_test_compose(request))

@@ -6,7 +6,12 @@ import pytest
 
 from ai_inspector.facility_layout.errors import FacilityAuthorizationError
 from ai_inspector.facility_layout.feature_flags import (
+    FACILITY_ALL_FEATURE_FLAGS,
+    FACILITY_DESIGN_LOOP_CAPABILITY_FLAGS,
+    FACILITY_DESIGN_LOOP_FEATURE_FLAGS,
     FACILITY_LAYOUT_FEATURE_FLAGS,
+    FACILITY_NAVIGATION_CAPABILITY_FLAGS,
+    FACILITY_NAVIGATION_FEATURE_FLAGS,
     FacilityLayoutFeatureFlags,
 )
 
@@ -121,3 +126,54 @@ def test_require_returns_stable_flag_and_capability_details():
 def test_all_enabled_policy_satisfies_every_effective_capability():
     flags = FacilityLayoutFeatureFlags.all_enabled()
     assert all(flags.to_dict()["effective"].values())
+
+
+def test_navigation_rollout_is_ordered_and_requires_general_prerequisites():
+    base = set(FACILITY_LAYOUT_FEATURE_FLAGS)
+    for index, flag in enumerate(FACILITY_NAVIGATION_FEATURE_FLAGS):
+        enabled = base | set(FACILITY_NAVIGATION_FEATURE_FLAGS[: index + 1])
+        flags = FacilityLayoutFeatureFlags.from_environment({
+            item: "1" if item in enabled else "0"
+            for item in FACILITY_ALL_FEATURE_FLAGS
+        })
+        capability = tuple(FACILITY_NAVIGATION_CAPABILITY_FLAGS)[index]
+        assert flags.enabled(capability) is True
+        for later in tuple(FACILITY_NAVIGATION_CAPABILITY_FLAGS)[index + 1:]:
+            assert flags.enabled(later) is False
+
+
+def test_navigation_sage_write_fails_closed_without_agent_write():
+    enabled = set(FACILITY_ALL_FEATURE_FLAGS)
+    enabled.remove("INSPECTORPRO_FACILITY_LAYOUT_AGENT_WRITE")
+    flags = FacilityLayoutFeatureFlags.from_environment({
+        item: "1" if item in enabled else "0"
+        for item in FACILITY_ALL_FEATURE_FLAGS
+    })
+    assert flags.enabled("navigation_multi_actor") is True
+    assert flags.enabled("navigation_sage_write") is False
+
+
+def test_design_loop_rollout_is_ordered_and_requires_general_prerequisites():
+    base = set(FACILITY_LAYOUT_FEATURE_FLAGS)
+    base.update(FACILITY_NAVIGATION_FEATURE_FLAGS)
+    for index, flag in enumerate(FACILITY_DESIGN_LOOP_FEATURE_FLAGS):
+        enabled = base | set(FACILITY_DESIGN_LOOP_FEATURE_FLAGS[: index + 1])
+        flags = FacilityLayoutFeatureFlags.from_environment({
+            item: "1" if item in enabled else "0"
+            for item in FACILITY_ALL_FEATURE_FLAGS
+        })
+        capability = tuple(FACILITY_DESIGN_LOOP_CAPABILITY_FLAGS)[index]
+        assert flags.enabled(capability) is True
+
+
+def test_design_loop_apply_fails_closed_without_agent_write():
+    enabled = set(FACILITY_ALL_FEATURE_FLAGS)
+    enabled.remove("INSPECTORPRO_FACILITY_LAYOUT_AGENT_WRITE")
+    flags = FacilityLayoutFeatureFlags.from_environment({
+        item: "1" if item in enabled else "0"
+        for item in FACILITY_ALL_FEATURE_FLAGS
+    })
+    assert flags.enabled("design_loop_preview") is True
+    assert flags.enabled("design_loop_apply") is False
+    assert flags.enabled("design_loop_lab") is True
+    assert flags.enabled("design_loop_sage") is True

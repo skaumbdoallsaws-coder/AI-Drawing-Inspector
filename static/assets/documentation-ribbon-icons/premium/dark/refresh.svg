@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F4FAFC"/><stop offset="1" stop-color="#B9CFD9"/>
+    </linearGradient>
+    <linearGradient id="paperSide" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#C8D9E1"/><stop offset="1" stop-color="#7895A4"/>
+    </linearGradient>
+    <linearGradient id="cyanTop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#BDF4FC"/><stop offset="0.55" stop-color="#62D4EC"/><stop offset="1" stop-color="#2BA7CA"/>
+    </linearGradient>
+    <linearGradient id="cyanFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#49C6E3"/><stop offset="1" stop-color="#11799F"/>
+    </linearGradient>
+    <linearGradient id="cyanSide" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#279EC2"/><stop offset="1" stop-color="#0B5878"/>
+    </linearGradient>
+    <linearGradient id="steelTop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F5FAFC"/><stop offset="0.55" stop-color="#C8D8E0"/><stop offset="1" stop-color="#91AAB7"/>
+    </linearGradient>
+    <linearGradient id="steelFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#C4D5DD"/><stop offset="1" stop-color="#718E9D"/>
+    </linearGradient>
+    <linearGradient id="steelSide" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8FA8B4"/><stop offset="1" stop-color="#4D6877"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFD774"/><stop offset="0.58" stop-color="#F6A22C"/><stop offset="1" stop-color="#C96510"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF9A8E"/><stop offset="0.55" stop-color="#EF5B51"/><stop offset="1" stop-color="#B82F35"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8FCBFF"/><stop offset="0.55" stop-color="#4C91E8"/><stop offset="1" stop-color="#2352A8"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#A8EE8D"/><stop offset="0.55" stop-color="#59BF5D"/><stop offset="1" stop-color="#237A43"/>
+    </linearGradient>
+    <radialGradient id="lens" cx="35%" cy="30%" r="70%">
+      <stop offset="0" stop-color="#D6FAFF"/><stop offset="0.35" stop-color="#64D7F1"/><stop offset="0.72" stop-color="#147EA8"/><stop offset="1" stop-color="#0A3D5E"/>
+    </radialGradient>
+    <linearGradient id="arrow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8DE9F8"/><stop offset="0.5" stop-color="#27B2D5"/><stop offset="1" stop-color="#0A6F95"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="0.7" stdDeviation="0.55" flood-color="#071A26" flood-opacity="0.30"/>
+    </filter>
+    <style>
+      .ink { stroke:#E6F1F6; }
+      .soft { stroke:#AFC7D2; }
+      .detail { stroke:#E6F1F6; stroke-width:1.15; stroke-linecap:round; stroke-linejoin:round; fill:none; }
+      .fine { stroke:#AFC7D2; stroke-width:0.85; stroke-linecap:round; stroke-linejoin:round; fill:none; }
+      .edge { stroke:#E6F1F6; stroke-width:1.2; stroke-linecap:round; stroke-linejoin:round; }
+      .edge2 { stroke:#E6F1F6; stroke-width:1.45; stroke-linecap:round; stroke-linejoin:round; }
+      .hi { stroke:#FFFFFF; stroke-opacity:.72; stroke-width:.75; stroke-linecap:round; fill:none; }
+    </style>
+  </defs>
+  <g filter="url(#shadow)">
+    <!-- center object -->
+    <path class="edge" fill="url(#paper)" d="M10.1 10.6h9.6l2.4 2.4v9.3h-12z"/>
+    <path class="edge" fill="url(#steelTop)" d="M19.7 10.6V13h2.4z"/>
+    <path class="fine" d="M12.5 15.3h6.5M12.5 18h5"/>
+    <!-- volumetric refresh arrow -->
+    <path d="M24.4 10.1A10.1 10.1 0 1 0 25.3 20" fill="none" class="ink" stroke-width="4.6" stroke-linecap="round"/>
+    <path d="M24.4 10.1A10.1 10.1 0 1 0 25.3 20" fill="none" stroke="url(#arrow)" stroke-width="3.2" stroke-linecap="round"/>
+    <path class="edge" fill="url(#cyanTop)" d="m22.2 5.8 5.1.8-2.3 4.7z"/>
+    <path class="hi" d="M7.7 8.4A9.1 9.1 0 0 1 21.8 6.7"/>
+</g>
+</svg>

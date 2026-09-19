@@ -1,0 +1,31 @@
+schema_version: 1
+skill_id: generate-process-map
+version: 1.2.0
+intents:
+  - generate_process_map
+required_evidence:
+  - process_map_graph
+  - process_map_state
+  - process_map_evidence
+forbidden_context:
+  - browser.process_map_digest
+  - browser.process_map_state
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request:
+    - build_process_map_preview
+output_contract:
+  format: concise_process_map_proposal
+  maximum_sentences: 3
+failure_behavior:
+  missing_required_context: report_missing_evidence
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: process-map-generation-v1
+context_budget:
+  maximum_tokens: 14000
+  priorities:
+    - process_map.state
+    - process_map.evidence
+    - process_map.graph

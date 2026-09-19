@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import threading
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -32,12 +33,52 @@ from .authorization import (
     local_facility_principal,
     require_facility_action,
 )
+from .canonical import canonicalize_layout, layout_revision
 from .agent_runtime import (
     FacilityLayoutAgentRuntime,
     FacilityLayoutAgentRuntimeError,
 )
+from .construction_service import FacilityConstructionService
+from .generation_admission import FacilityGenerationAdmissionService
+from .generation_agent import FacilityGenerationAgentService
+from .generation_requirement_repository import GenerationRequirementRepository
+from .generation_requirements import GenerationRequirementError
+from .program_execution import FacilityProgramExecutionError
 from .errors import FacilityLayoutError, FacilityNotFoundError
+from .design_base import (
+    FacilityDesignBaseError,
+    capture_facility_design_base,
+    validate_facility_design_base,
+)
+from .design_brief import FacilityDesignBriefError
+from .design_candidates import FacilityDesignCandidateError, OperationBuilder
+from .design_evaluator import FacilityDesignEvaluationError
+from .design_repository import (
+    FacilityDesignRepository,
+    FacilityDesignRepositoryError,
+)
+from .design_runtime import (
+    CandidateRecipeProvider,
+    FacilityDesignRuntime,
+    FacilityDesignRuntimeError,
+)
+from .design_service import (
+    FacilityDesignLoopService,
+    FacilityDesignServiceError,
+    validate_facility_design_editor_frame,
+)
+from .design_source import build_facility_design_source_bundle
+from .design_intent import (
+    FacilityDesignIntentError,
+    compile_facility_design_brief_body,
+    compile_facility_design_brief_patch,
+)
+from .facility_draft_lease import FacilityDraftLeaseError
 from .feature_flags import FacilityLayoutFeatureFlags
+from .facility_planning import (
+    FacilityPlanningPackageError,
+    compile_facility_planning_package,
+)
 from .generation_run_repository import FacilityGenerationRunRepository
 from .generation_coordinator import (
     FacilityGenerationCoordinator,
@@ -45,7 +86,7 @@ from .generation_coordinator import (
 )
 from .generation_run_repository import FacilityGenerationRunRepositoryError
 from .identity import FacilityPrincipalResolver
-from .operations import create_layout_document
+from .operations import apply_facility_layout_operations, create_layout_document
 from .plan_settings import (
     default_plan_settings,
     plan_settings_from_layout,
@@ -57,7 +98,11 @@ from .repository import (
 )
 from .service import FacilityLayoutService, coordinate_frame_fingerprint
 from .knowledge_foundation import FacilityKnowledgeContractError
-from .provider_config import FacilityProviderConfigurationError
+from .manufacturing_snapshot import FacilityManufacturingSnapshotError
+from .provider_config import (
+    FacilityProviderConfigurationError,
+    resolve_facility_provider_config,
+)
 from .transaction_adapter import FacilityLayoutTransactionRuntime
 
 
@@ -66,8 +111,24 @@ LOCAL_LAYOUT_ID = "fl-main"
 LOCAL_SHELL_ID = "shell-local"
 LOCAL_POLICY_ID = "policy-local"
 PRIVATE_ASSET_ENV = "INSPECTORPRO_FACILITY_PRIVATE_ASSETS"
+MOTION_PROTOTYPE_ENV = "INSPECTORPRO_FACILITY_MOTION_PROTOTYPE"
 PRIVATE_ASSET_MANIFEST = Path(
     "generated/industrial_assets/local_library/catalog.json"
+)
+
+_DESIGN_ERRORS = (
+    FacilityDesignBaseError,
+    FacilityDesignBriefError,
+    FacilityDesignCandidateError,
+    FacilityDesignEvaluationError,
+    FacilityDesignIntentError,
+    FacilityDesignRepositoryError,
+    FacilityDesignRuntimeError,
+    FacilityDesignServiceError,
+    FacilityDraftLeaseError,
+    FacilityManufacturingSnapshotError,
+    FacilityLayoutError,
+    FacilityProviderConfigurationError,
 )
 
 
@@ -99,6 +160,7 @@ def _asset(
     depth: float,
     height: float,
     description: str,
+    connectors: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     definition = {
         "schemaVersion": 1,
@@ -132,7 +194,7 @@ def _asset(
             },
         },
         "clearances": [],
-        "connectors": [],
+        "connectors": deepcopy(connectors or []),
         "readiness": {
             "visualReady": {"value": True, "blockers": []},
             "placementReady": {"value": True, "blockers": []},
@@ -180,6 +242,41 @@ LOCAL_ASSET_CATALOG: tuple[dict[str, Any], ...] = (
         depth=0.8,
         height=1.0,
         description="General-purpose manual assembly workstation.",
+    ),
+    _asset(
+        asset_id="asset-material-transfer-buffer",
+        display_name="Material Transfer Buffer",
+        category="Material Handling",
+        width=2.0,
+        depth=2.0,
+        height=0.3,
+        description="Prototype FIFO buffer with revision-bound material connectors.",
+        connectors=[
+            {
+                "connectorId": "material-output",
+                "connectorKind": "material",
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "facing": {"x": 1.0, "y": 0.0, "z": 0.0},
+                "role": "output",
+                "allowedRouteKinds": ["material"],
+                "interface": {},
+                "capacity": {},
+                "evidenceStatus": "authored",
+                "evidence": ["local-prototype-material-output"],
+            },
+            {
+                "connectorId": "material-input",
+                "connectorKind": "material",
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "facing": {"x": -1.0, "y": 0.0, "z": 0.0},
+                "role": "input",
+                "allowedRouteKinds": ["material"],
+                "interface": {},
+                "capacity": {},
+                "evidenceStatus": "authored",
+                "evidence": ["local-prototype-material-input"],
+            },
+        ],
     ),
     _asset(
         asset_id="asset-forklift",
@@ -651,16 +748,37 @@ class LocalFacilityLayoutHost:
         feature_flags: FacilityLayoutFeatureFlags | None = None,
         private_assets: bool | None = None,
         private_asset_root: str | Path | None = None,
+        facility_planning_root: str | Path | None = None,
         require_distinct_approver: bool = False,
         principal_resolver: (
             Callable[[Request], FacilityPrincipal] | None
         ) = None,
+        design_source_provider: (
+            Callable[
+                [
+                    FacilityPrincipal,
+                    str,
+                    str,
+                    Mapping[str, Any],
+                    Mapping[str, Any],
+                ],
+                Mapping[str, Any],
+            ]
+            | None
+        ) = None,
+        design_candidate_recipe_provider: CandidateRecipeProvider | None = None,
+        design_operation_builder: OperationBuilder | None = None,
     ) -> None:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.process_map_root = (
             Path(process_map_root).resolve()
             if process_map_root is not None
+            else None
+        )
+        self.facility_planning_root = (
+            Path(facility_planning_root).resolve()
+            if facility_planning_root is not None
             else None
         )
         self.feature_flags = (
@@ -697,6 +815,21 @@ class LocalFacilityLayoutHost:
             self.generation_run_repository,
             feature_flags=self.feature_flags,
         )
+        self.design_repository = FacilityDesignRepository(self.root)
+        self.design_runtime = FacilityDesignRuntime(
+            self.design_repository,
+            candidate_recipe_provider=design_candidate_recipe_provider,
+            operation_builder=design_operation_builder,
+        )
+        self.design_loop_service = FacilityDesignLoopService(
+            repository=self.design_repository,
+            runtime=self.design_runtime,
+            lease_repository=(
+                self.generation_run_repository.draft_lease_repository
+            ),
+            feature_flags=self.feature_flags,
+        )
+        self._design_source_provider = design_source_provider
         self.shell_repository = FacilityShellRepository(
             authority_root / "shells"
         )
@@ -747,6 +880,10 @@ class LocalFacilityLayoutHost:
                 else None
             ),
             transaction_runtime=self.transaction_runtime,
+            capability_gate=self.feature_flags.require,
+            allow_prototype_motion=_environment_enabled(
+                MOTION_PROTOTYPE_ENV
+            ),
         )
         self.agent_runtime = FacilityLayoutAgentRuntime(
             service=self.service,
@@ -756,18 +893,132 @@ class LocalFacilityLayoutHost:
             asset_catalog_provider=self._agent_asset_catalog,
             process_catalog_provider=self._agent_process_catalog,
             capabilities_provider=self._agent_capabilities,
+            generation_layout_provider=self._agent_generation_layout,
+        )
+        self.construction_service = FacilityConstructionService(
+            service=self.service, agent_runtime=self.agent_runtime,
+            repository=self.design_repository, capability_gate=self.feature_flags.require,
+        )
+        self.generation_requirement_repository = GenerationRequirementRepository(self.root)
+        self.generation_admission_service = FacilityGenerationAdmissionService(
+            service=self.service, agent_runtime=self.agent_runtime,
+            repository=self.generation_requirement_repository, capability_gate=self.feature_flags.require,
+            lease_repository=self.generation_run_repository.draft_lease_repository,
+            process_map_resolver=self._resolve_process_map, catalog_provider=self._agent_asset_catalog,
         )
         self._lock = threading.RLock()
+        self.generation_agent_service = FacilityGenerationAgentService(self.generation_admission_service)
         self._bootstrapped = False
 
     @staticmethod
     def principal() -> FacilityPrincipal:
         return local_facility_principal(site_id=LOCAL_SITE_ID)
 
+    def _load_facility_planning_package(
+        self,
+        package_id: str,
+    ) -> dict[str, Any]:
+        if self.facility_planning_root is None:
+            raise FacilityPlanningPackageError(
+                "facility_planning_package_unavailable",
+                "Facility Planning packages are not configured for this host.",
+            )
+        matches: list[dict[str, Any]] = []
+        for path in sorted(self.facility_planning_root.rglob("*.json")):
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            if (
+                isinstance(value, Mapping)
+                and str(value.get("packageId") or "") == package_id
+            ):
+                matches.append(deepcopy(dict(value)))
+        if len(matches) != 1:
+            raise FacilityPlanningPackageError(
+                "facility_planning_package_unavailable",
+                "The requested Facility Planning package did not resolve uniquely.",
+                details={"planningPackageId": package_id, "matchCount": len(matches)},
+            )
+        return matches[0]
+
     def close(self) -> None:
         """Release bounded background spatial workers."""
 
         self.service.spatial_executor.close(wait=True)
+
+    def _agent_generation_layout(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        saved_revision: str,
+        live_facts: Mapping[str, Any] | None,
+    ) -> Mapping[str, Any] | None:
+        """Resolve a browser pointer to one owned, revision-bound draft."""
+
+        pointer = (
+            live_facts.get("generationDraft")
+            if isinstance(live_facts, Mapping)
+            and isinstance(live_facts.get("generationDraft"), Mapping)
+            else None
+        )
+        if not isinstance(pointer, Mapping) or pointer.get("active") is not True:
+            return None
+        run_id = str(pointer.get("runId") or "").strip()
+        if not run_id:
+            raise FacilityLayoutAgentRuntimeError(
+                "facility_generation_context_run_missing",
+                "The active Facility generation draft has no run identity.",
+                status_code=409,
+            )
+        try:
+            artifacts = self.generation_run_repository.get_execution_artifacts(
+                principal.tenant_id,
+                site_id,
+                run_id,
+            )
+        except FacilityGenerationRunRepositoryError as exc:
+            raise FacilityLayoutAgentRuntimeError(
+                "facility_generation_context_unavailable",
+                "The active Facility generation draft is unavailable.",
+                status_code=409,
+                details={"runId": run_id, "reason": exc.code},
+            ) from exc
+        run = artifacts["run"]["run"]
+        draft = artifacts["draft"]
+        pointer_base = str(pointer.get("baseLayoutRevision") or "")
+        pointer_draft = str(pointer.get("draftLayoutRevision") or "")
+        mismatch = (
+            run.get("tenantId") != principal.tenant_id
+            or run.get("siteId") != site_id
+            or run.get("layoutId") != layout_id
+            or run.get("userId") != principal.principal_id
+            or run.get("baseLayoutRevision") != saved_revision
+            or (pointer_base and pointer_base != saved_revision)
+            or draft.get("document", {}).get("layoutId") != layout_id
+            or (
+                pointer_draft
+                and pointer_draft != draft.get("draftLayoutRevision")
+            )
+            or run.get("writable") is not True
+            or run.get("status")
+            not in {"active", "pending", "running", "complete"}
+        )
+        if mismatch:
+            raise FacilityLayoutAgentRuntimeError(
+                "facility_generation_context_conflict",
+                "The active Facility generation pointer is stale or not owned by this session.",
+                status_code=409,
+                details={"runId": run_id},
+            )
+        return {
+            "layout": deepcopy(draft["document"]),
+            "revision": draft["draftLayoutRevision"],
+            "baseRevision": saved_revision,
+            "runId": run_id,
+            "provider": "facility-generation-run-repository",
+        }
 
     def _resolve_asset_definition(
         self,
@@ -806,20 +1057,21 @@ class LocalFacilityLayoutHost:
         _site_id: str,
         product_id: str,
         map_id: str,
-        _revision: str,
+        revision: str,
     ) -> Mapping[str, Any] | None:
         if self.process_map_root is None:
             return None
         from ai_inspector.process_map.repository import (
             ProcessMapAssetError,
-            load_named_process_map,
+            load_named_process_map_revision,
         )
 
         try:
-            result = load_named_process_map(
+            result = load_named_process_map_revision(
                 self.process_map_root,
                 product_id,
                 map_id,
+                revision,
             )
         except ProcessMapAssetError:
             return None
@@ -839,6 +1091,11 @@ class LocalFacilityLayoutHost:
                 "Facility resource was not found.",
             )
         return deepcopy(list(self._catalog.values()))
+
+    def authoritative_asset_catalog(self) -> list[dict[str, Any]]:
+        """Return revision-bound asset definitions for server-side analysis."""
+
+        return deepcopy(list(self._asset_versions.values()))
 
     def _agent_process_catalog(
         self,
@@ -945,6 +1202,314 @@ class LocalFacilityLayoutHost:
             ),
         )
 
+    def _resolve_design_source_bundle(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        design_base: Mapping[str, Any],
+        design_brief: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        if self._design_source_provider is not None:
+            source = self._design_source_provider(
+                principal,
+                site_id,
+                layout_id,
+                design_base,
+                design_brief,
+            )
+        else:
+            source = build_facility_design_source_bundle(
+                design_base=design_base,
+                design_brief=design_brief,
+                asset_definitions=self.authoritative_asset_catalog(),
+                process_map_resolver=lambda product_id, map_id, revision: (
+                    self._resolve_process_map(
+                        principal,
+                        site_id,
+                        product_id,
+                        map_id,
+                        revision,
+                    )
+                ),
+            )
+        if not isinstance(source, Mapping):
+            raise FacilityDesignServiceError(
+                "facility_design_source_bundle_invalid",
+                "The authoritative design source provider returned no evidence object.",
+            )
+        return deepcopy(dict(source))
+
+    def _design_brief_and_base(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        brief_id: str,
+        *,
+        brief_revision: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        envelope = self.design_repository.get_brief(
+            principal.tenant_id,
+            site_id,
+            brief_id,
+            brief_revision=brief_revision,
+        )
+        brief = envelope["brief"]
+        body = brief["semanticBody"]
+        if (
+            body["tenantId"] != principal.tenant_id
+            or body["siteId"] != site_id
+            or body["layoutId"] != layout_id
+        ):
+            raise FacilityDesignServiceError(
+                "facility_design_scope_mismatch",
+                "Facility design brief is outside the requested layout scope.",
+            )
+        base_state = body["baseStateRef"]
+        base = self.design_repository.get_artifact(
+            principal.tenant_id,
+            site_id,
+            "design_base",
+            base_state["baseId"],
+            base_state["baseRevision"],
+        )["artifact"]
+        return envelope, validate_facility_design_base(base)
+
+    @staticmethod
+    def _design_source_turn(request: Request, body: Mapping[str, Any]) -> str:
+        raw = str(
+            body.get("sourceTurnRef")
+            or request.headers.get("X-InspectorPro-Agent-Turn")
+            or request.headers.get("X-InspectorPro-Session")
+            or "facility-design-turn"
+        ).strip()
+        normalized = re.sub(r"[^A-Za-z0-9._:-]+", "-", raw).strip("-.")
+        if normalized and normalized[0].isalnum():
+            return normalized[:160]
+        return "turn-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+    def _capture_design_base_from_editor(
+        self,
+        *,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        request: Request,
+        body: Mapping[str, Any],
+        current: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        frame = validate_facility_design_editor_frame(
+            self._authoritative_design_editor_frame(
+                body.get("editorFrame"),
+                current=current,
+                tenant_id=principal.tenant_id,
+                site_id=site_id,
+                layout_id=layout_id,
+            )
+        )
+        if (
+            frame["baseRevision"] != current["revision"]
+            or frame["baseLayout"].get("layoutId") != layout_id
+            or frame["draftLayout"].get("layoutId") != layout_id
+        ):
+            raise FacilityDesignServiceError(
+                "facility_design_base_scope_mismatch",
+                "The editor frame is not based on the current authorized layout.",
+            )
+        is_saved = bool(
+            frame["draftRevision"] == frame["baseRevision"]
+            and not frame["batches"]
+            and frame["cursor"] == 0
+            and frame["generatedDraft"] is None
+            and frame["activeProposal"] is None
+        )
+        base_kind = "saved_layout" if is_saved else "editor_draft"
+        session_value = str(
+            request.headers.get("X-InspectorPro-Session")
+            or "facility-design-editor"
+        )
+        editor_session_id = "editor-" + hashlib.sha256(
+            session_value.encode("utf-8")
+        ).hexdigest()[:24]
+        if is_saved:
+            source_ref = {
+                "repositoryRecordRevision": current["revision"],
+                "savedLayoutRevision": current["revision"],
+            }
+        else:
+            source_ref = {
+                "editorSessionId": editor_session_id,
+                "editorGenerationId": frame["editorGenerationId"],
+                "commandJournalHash": frame["commandJournalHash"],
+                "savedBaseRevision": frame["baseRevision"],
+                "capturedDraftRevision": frame["draftRevision"],
+            }
+        base_seed = {
+            "layoutId": layout_id,
+            "draftRevision": frame["draftRevision"],
+            "editorGenerationId": frame["editorGenerationId"],
+            "commandJournalHash": frame["commandJournalHash"],
+        }
+        base_id = "fdb-" + _revision(base_seed)[:24]
+        return capture_facility_design_base(
+            base_id=base_id,
+            base_kind=base_kind,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            workspace_id=str(body.get("workspaceId") or "workspace-local"),
+            document=frame["draftLayout"],
+            saved_layout_revision=current["revision"],
+            source_ref=source_ref,
+            captured_at=_timestamp(),
+        )
+
+    def _authoritative_design_editor_frame(
+        self,
+        raw_frame: Any,
+        *,
+        current: Mapping[str, Any],
+        tenant_id: str,
+        site_id: str,
+        layout_id: str,
+    ) -> Any:
+        """Restore JSON number lexemes from authoritative editor inputs.
+
+        Browsers cannot preserve the difference between JSON ``30.0`` and
+        ``30``. Facility revisions can, so the server reconstructs ordinary
+        edits from the active command journal and proposal drafts from their
+        immutable candidate artifact before validating the frame. No geometry
+        or revision is trusted unless the semantic document, transaction, and
+        supplied revision all agree.
+        """
+
+        if not isinstance(raw_frame, Mapping):
+            return raw_frame
+        frame = deepcopy(dict(raw_frame))
+        if frame.get("baseRevision") != current.get("revision"):
+            return frame
+        try:
+            authoritative_base = canonicalize_layout(current["layout"])
+            submitted_base = canonicalize_layout(frame.get("baseLayout"))
+        except (KeyError, TypeError, ValueError, FacilityLayoutError):
+            return frame
+        if submitted_base != authoritative_base:
+            return frame
+        frame["baseLayout"] = authoritative_base
+
+        if frame.get("generatedDraft") is not None:
+            return frame
+        active_proposal = frame.get("activeProposal")
+        if active_proposal is not None:
+            if not isinstance(active_proposal, Mapping):
+                return frame
+            try:
+                transaction = self.design_repository.get_transaction(
+                    tenant_id,
+                    site_id,
+                    str(active_proposal["transactionId"]),
+                )
+                transaction_body = transaction["transaction"]
+                proposal_binding = transaction_body["proposalBinding"]
+                candidate_ref = transaction_body["selectedCandidateRef"]
+                candidate = self.design_repository.get_artifact(
+                    tenant_id,
+                    site_id,
+                    candidate_ref["artifactKind"],
+                    candidate_ref["artifactId"],
+                    candidate_ref["artifactRevision"],
+                )["artifact"]
+                authoritative_draft = canonicalize_layout(
+                    candidate["candidateLayout"]
+                )
+                submitted_draft = canonicalize_layout(
+                    frame.get("draftLayout")
+                )
+            except (
+                KeyError,
+                TypeError,
+                ValueError,
+                FacilityDesignRepositoryError,
+                FacilityLayoutError,
+            ):
+                return frame
+            result_revision = proposal_binding.get("resultLayoutRevision")
+            active_matches = bool(
+                transaction_body.get("layoutId") == layout_id
+                and transaction_body.get("status")
+                in {"installation_pending", "active"}
+                and active_proposal.get("proposalId")
+                == proposal_binding.get("proposalId")
+                and active_proposal.get("proposalRevision")
+                == proposal_binding.get("proposalRevision")
+                and active_proposal.get("transactionRevision")
+                == transaction.get("transactionRevision")
+                and active_proposal.get("transactionBindingRevision")
+                == transaction_body.get(
+                    "installationBindingTransactionRevision"
+                )
+                and frame.get("draftRevision") == result_revision
+                and candidate.get("resultLayoutRevision") == result_revision
+                and layout_revision(authoritative_draft) == result_revision
+                and submitted_draft == authoritative_draft
+            )
+            if active_matches:
+                frame["draftLayout"] = authoritative_draft
+            return frame
+        batches = frame.get("batches")
+        cursor = frame.get("cursor")
+        if (
+            not isinstance(batches, list)
+            or isinstance(cursor, bool)
+            or not isinstance(cursor, int)
+            or cursor < 0
+            or cursor > len(batches)
+        ):
+            return frame
+        operations: list[dict[str, Any]] = []
+        for batch in batches[:cursor]:
+            if not isinstance(batch, Mapping) or not isinstance(
+                batch.get("operations"), list
+            ):
+                return frame
+            if not all(isinstance(item, Mapping) for item in batch["operations"]):
+                return frame
+            operations.extend(deepcopy(batch["operations"]))
+        try:
+            submitted_draft = canonicalize_layout(frame.get("draftLayout"))
+            updated_at = submitted_draft.get("updatedAt") if operations else None
+            reconstructed = apply_facility_layout_operations(
+                authoritative_base,
+                operations,
+                base_revision=str(current["revision"]),
+                updated_at=(str(updated_at) if updated_at is not None else None),
+            )["document"]
+        except (KeyError, TypeError, ValueError, FacilityLayoutError):
+            return frame
+        if (
+            reconstructed == submitted_draft
+            and layout_revision(reconstructed) == frame.get("draftRevision")
+        ):
+            frame["draftLayout"] = reconstructed
+        return frame
+
+    def _require_design_transaction_scope(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        transaction_id: str,
+    ) -> dict[str, Any]:
+        envelope = self.design_repository.get_transaction(
+            principal.tenant_id, site_id, transaction_id
+        )
+        if envelope["transaction"]["layoutId"] != layout_id:
+            raise FacilityDesignServiceError(
+                "facility_design_scope_mismatch",
+                "Facility design transaction is outside the requested layout scope.",
+            )
+        return envelope
+
     def _agent_capabilities(
         self,
         principal: FacilityPrincipal,
@@ -962,6 +1527,16 @@ class LocalFacilityLayoutHost:
                 allowed("proposal.create")
                 and self.feature_flags.enabled("agent_preview")
             ),
+            "generationPlanning": allowed("proposal.create") and self.feature_flags.enabled("generation_planning_sage"),
+            "constructionPreview": (
+                allowed("proposal.create")
+                and self.feature_flags.enabled("construction_sage")
+            ),
+            "constructionApply": (
+                allowed("proposal.approve") and allowed("proposal.apply")
+                and self.feature_flags.enabled("construction_sage")
+                and self.feature_flags.enabled("agent_write")
+            ),
             "approval": (
                 allowed("proposal.approve")
                 and self.feature_flags.enabled("agent_write")
@@ -975,6 +1550,39 @@ class LocalFacilityLayoutHost:
                 and self.feature_flags.enabled("manual_edit")
             ),
             "automaticRouting": self.feature_flags.enabled("routing"),
+            "navigationSnapshot": self.feature_flags.enabled("routing"),
+            "navigationContract": self.feature_flags.enabled(
+                "navigation_contract"
+            ),
+            "navigationManual": self.feature_flags.enabled(
+                "navigation_manual"
+            ),
+            "navigationPedestrian": self.feature_flags.enabled(
+                "navigation_pedestrian"
+            ),
+            "navigationVehicle": self.feature_flags.enabled(
+                "navigation_vehicle"
+            ),
+            "navigationHandoff": self.feature_flags.enabled(
+                "navigation_handoff"
+            ),
+            "navigationMultiActor": self.feature_flags.enabled(
+                "navigation_multi_actor"
+            ),
+            "navigationSageWrite": self.feature_flags.enabled(
+                "navigation_sage_write"
+            ),
+            "designBrief": self.feature_flags.enabled("design_brief"),
+            "designLoopPreview": (
+                allowed("proposal.create")
+                and self.feature_flags.enabled("design_loop_preview")
+            ),
+            "designLoopApply": (
+                allowed("proposal.apply")
+                and self.feature_flags.enabled("agent_write")
+                and self.feature_flags.enabled("design_loop_apply")
+            ),
+            "prototypeMotion": self.service.allow_prototype_motion,
             "spatialValidation": self.feature_flags.enabled("constraints"),
         }
 
@@ -1016,6 +1624,37 @@ class LocalFacilityLayoutHost:
                 "not_save_eligible",
             )
         ) else 422
+        return HTTPException(
+            status_code=status_code,
+            detail={
+                "error": {
+                    "code": code,
+                    "message": str(error),
+                    "details": details,
+                }
+            },
+        )
+
+    @staticmethod
+    def _design_error(error: Exception) -> HTTPException:
+        code = str(getattr(error, "code", "facility_design_failed"))
+        details = deepcopy(dict(getattr(error, "details", {}) or {}))
+        if "not_found" in code:
+            status_code = 404
+        elif any(
+            token in code
+            for token in (
+                "conflict",
+                "stale",
+                "changed",
+                "expired",
+                "mismatch",
+                "lease",
+            )
+        ):
+            status_code = 409
+        else:
+            status_code = 422
         return HTTPException(
             status_code=status_code,
             detail={
@@ -1192,6 +1831,9 @@ class LocalFacilityLayoutHost:
                     "majorSpacing": plan_settings["majorGridSpacingMeters"],
                 },
                 "capabilities": {
+                    "constructionPreview": self._agent_capabilities(principal, LOCAL_SITE_ID)["constructionPreview"],
+                    "generationPlanning": self._agent_capabilities(principal, LOCAL_SITE_ID)["generationPlanning"],
+                    "constructionApply": self._agent_capabilities(principal, LOCAL_SITE_ID)["constructionApply"],
                     "viewerV2": self.feature_flags.enabled("viewer_v2"),
                     "assetLibrary": self.feature_flags.enabled(
                         "asset_library"
@@ -1216,6 +1858,29 @@ class LocalFacilityLayoutHost:
                         "constraints"
                     ),
                     "automaticRouting": self.feature_flags.enabled("routing"),
+                    "navigationSnapshot": self.feature_flags.enabled("routing"),
+                    "navigationContract": self.feature_flags.enabled(
+                        "navigation_contract"
+                    ),
+                    "navigationManual": self.feature_flags.enabled(
+                        "navigation_manual"
+                    ),
+                    "navigationPedestrian": self.feature_flags.enabled(
+                        "navigation_pedestrian"
+                    ),
+                    "navigationVehicle": self.feature_flags.enabled(
+                        "navigation_vehicle"
+                    ),
+                    "navigationHandoff": self.feature_flags.enabled(
+                        "navigation_handoff"
+                    ),
+                    "navigationMultiActor": self.feature_flags.enabled(
+                        "navigation_multi_actor"
+                    ),
+                    "navigationSageWrite": self.feature_flags.enabled(
+                        "navigation_sage_write"
+                    ),
+                    "prototypeMotion": self.service.allow_prototype_motion,
                     "fullLayoutProposals": self.feature_flags.enabled(
                         "agent_preview"
                     ),
@@ -1435,6 +2100,689 @@ class LocalFacilityLayoutHost:
             except FacilityLayoutAgentRuntimeError as error:
                 raise self._agent_error(error) from error
 
+        @router.get("/api/facility-layout-planning/{site_id}/{layout_id}/sources")
+        def generation_planning_sources(request: Request, site_id: str, layout_id: str):
+            principal = self.resolve_principal(request)
+            try:
+                self._require_feature("generation_planning_sage")
+                self.service.get_layout(principal, site_id, layout_id)
+                return self.generation_agent_service.list_sources(principal, site_id=site_id)
+            except FacilityLayoutError as error:
+                raise HTTPException(status_code=error.status_code, detail={"error": error.to_dict()}) from error
+
+        @router.post("/api/facility-layout-planning/{site_id}/{layout_id}/{action}")
+        def isolated_generation_planning(request: Request, site_id: str, layout_id: str,
+                                         action: str, body: dict[str, Any]):
+            if action not in {"admit", "preview", "inspect"}:
+                raise HTTPException(status_code=404, detail="Planning action not found.")
+            self._require_feature("generation_planning_preview")
+            if set(body) != {"workspaceId", "request", "editorContext"}:
+                raise HTTPException(status_code=422, detail={"error": {"code": "generation_admission_fields_invalid"}})
+            principal = self.resolve_principal(request)
+            options = dict(site_id=site_id, layout_id=layout_id, workspace_id=body["workspaceId"],
+                           editor_context=body["editorContext"])
+            try:
+                if action == "inspect":
+                    reference = body["request"]
+                    if not isinstance(reference, Mapping) or set(reference) != {"previewId", "previewRevision"}:
+                        raise HTTPException(status_code=422, detail={"error": {"code": "generation_admission_fields_invalid"}})
+                    return self.generation_admission_service.get_preview(principal, **options,
+                        preview_id=reference["previewId"], preview_revision=reference["previewRevision"])
+                method = (self.generation_admission_service.admit if action == "admit"
+                          else self.generation_admission_service.preview)
+                return method(principal, **options, request=body["request"])
+            except FacilityLayoutError as error:
+                raise HTTPException(status_code=error.status_code, detail={"error": error.to_dict()}) from error
+            except (GenerationRequirementError, FacilityDesignRepositoryError, FacilityPlanningPackageError,
+                    FacilityProgramExecutionError, FacilityDesignServiceError, FacilityKnowledgeContractError,
+                    FacilityLayoutAgentRuntimeError) as error:
+                raise self._generation_error(error) from error
+
+        @router.get("/api/facility-layout-agent/{site_id}/{layout_id}/construction/{proposal_id}")
+        async def get_construction_preview(request: Request, site_id: str, layout_id: str, proposal_id: str):
+            try:
+                return self.construction_service.get_preview(self.resolve_principal(request),
+                    site_id=site_id, layout_id=layout_id, proposal_id=proposal_id)
+            except FacilityLayoutError as error:
+                raise HTTPException(status_code=error.status_code, detail={"error": error.to_dict()}) from error
+
+        @router.post("/api/facility-layout-agent/{site_id}/{layout_id}/construction/{proposal_id}/approve-unsaved")
+        async def approve_construction_unsaved(request: Request, site_id: str, layout_id: str,
+                                               proposal_id: str, body: dict[str, Any]):
+            try:
+                return self.construction_service.approve_unsaved(self.resolve_principal(request),
+                    site_id=site_id, layout_id=layout_id, proposal_id=proposal_id, request=body)
+            except FacilityLayoutError as error:
+                raise HTTPException(status_code=error.status_code, detail={"error": error.to_dict()}) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/briefs"
+        )
+        async def create_facility_design_brief_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.create"
+            )
+            try:
+                raw_base = body.get("designBase")
+                semantic_body = body.get("semanticBody")
+                current = self.service.get_layout(
+                    principal, site_id, layout_id
+                )
+                semantic_intent = body.get("semanticIntent")
+                if isinstance(semantic_intent, Mapping):
+                    base = self._capture_design_base_from_editor(
+                        principal=principal,
+                        site_id=site_id,
+                        layout_id=layout_id,
+                        request=request,
+                        body=body,
+                        current=current,
+                    )
+                    source_turn_ref = self._design_source_turn(
+                        request, body
+                    )
+                    semantic_body = compile_facility_design_brief_body(
+                        intent=semantic_intent,
+                        design_base=base,
+                        source_turn_ref=source_turn_ref,
+                    )
+                else:
+                    if not isinstance(raw_base, Mapping) or not isinstance(
+                        semantic_body, Mapping
+                    ):
+                        raise FacilityDesignServiceError(
+                            "facility_design_request_invalid",
+                            "Provide semanticIntent with editorFrame, or designBase with semanticBody.",
+                        )
+                    base = validate_facility_design_base(raw_base)
+                    source_turn_ref = self._design_source_turn(
+                        request, body
+                    )
+                if (
+                    base["tenantId"] != principal.tenant_id
+                    or base["siteId"] != site_id
+                    or base["layoutId"] != layout_id
+                    or base["savedLayoutRevision"] != current["revision"]
+                ):
+                    raise FacilityDesignServiceError(
+                        "facility_design_base_scope_mismatch",
+                        "The immutable design base does not match the current authorized layout.",
+                    )
+                brief_id = str(body.get("briefId") or "").strip()
+                if not brief_id:
+                    brief_id = "fdbf-" + hashlib.sha256(
+                        json.dumps(
+                            {
+                                "baseRevision": base["baseRevision"],
+                                "sourceTurnRef": source_turn_ref,
+                                "objective": semantic_body.get("objective"),
+                            },
+                            ensure_ascii=True,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("ascii")
+                    ).hexdigest()[:24]
+                return self.design_loop_service.create_brief(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    principal_id=principal.principal_id,
+                    brief_id=brief_id,
+                    semantic_body=semantic_body,
+                    source_turn_ref=source_turn_ref,
+                    design_base=base,
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.get(
+            "/api/facility-layout-design/{site_id}/{layout_id}/briefs/{brief_id}"
+        )
+        async def inspect_facility_design_brief_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            brief_id: str,
+            brief_revision: str | None = Query(
+                None, alias="briefRevision"
+            ),
+        ):
+            principal = self._require_request_action(
+                request, "proposal.read"
+            )
+            try:
+                self._design_brief_and_base(
+                    principal,
+                    site_id,
+                    layout_id,
+                    brief_id,
+                    brief_revision=brief_revision,
+                )
+                return self.design_loop_service.inspect_brief(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    brief_id=brief_id,
+                    brief_revision=brief_revision,
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/briefs/{brief_id}/revisions"
+        )
+        async def update_facility_design_brief_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            brief_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.create"
+            )
+            try:
+                brief_envelope, base = self._design_brief_and_base(
+                    principal, site_id, layout_id, brief_id
+                )
+                patch = body.get("patch")
+                semantic_intent = body.get("semanticIntent")
+                source_turn_ref = self._design_source_turn(request, body)
+                if isinstance(semantic_intent, Mapping):
+                    patch = compile_facility_design_brief_patch(
+                        intent=semantic_intent,
+                        current_brief=brief_envelope["brief"],
+                        design_base=base,
+                        source_turn_ref=source_turn_ref,
+                    )
+                elif not isinstance(patch, Mapping):
+                    raise FacilityDesignServiceError(
+                        "facility_design_request_invalid",
+                        "patch or semanticIntent must be a Facility design brief update object.",
+                    )
+                return self.design_loop_service.update_brief(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    principal_id=principal.principal_id,
+                    brief_id=brief_id,
+                    patch=patch,
+                    source_turn_ref=source_turn_ref,
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/briefs/{brief_id}/preview"
+        )
+        async def start_facility_design_preview_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            brief_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.create"
+            )
+            try:
+                brief_envelope, base = self._design_brief_and_base(
+                    principal,
+                    site_id,
+                    layout_id,
+                    brief_id,
+                    brief_revision=(
+                        str(body["briefRevision"])
+                        if body.get("briefRevision")
+                        else None
+                    ),
+                )
+                source = self._resolve_design_source_bundle(
+                    principal,
+                    site_id,
+                    layout_id,
+                    base,
+                    brief_envelope["brief"],
+                )
+                provider = resolve_facility_provider_config(os.environ)
+                return self.design_loop_service.start_preview(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    workspace_id=str(
+                        body.get("workspaceId")
+                        or base["workspaceId"]
+                    ),
+                    design_base=base,
+                    design_brief=brief_envelope["brief"],
+                    source_bundle=source,
+                    provider=provider.provider,
+                    model=provider.model,
+                    reasoning_effort=provider.reasoning_effort,
+                    client_generation_id=str(
+                        body.get("clientGenerationId")
+                        or self._generation_session_id(request)
+                    ),
+                    mode=str(body.get("mode") or "production_sage"),
+                    run_id=(
+                        str(body["runId"])
+                        if body.get("runId")
+                        else None
+                    ),
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/runs/{run_id}/continue"
+        )
+        async def continue_facility_design_preview_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.create"
+            )
+            try:
+                run = self.design_repository.get_run(
+                    principal.tenant_id, site_id, run_id
+                )
+                if run["run"]["layoutId"] != layout_id:
+                    raise FacilityDesignServiceError(
+                        "facility_design_scope_mismatch",
+                        "Facility design run is outside the requested layout scope.",
+                    )
+                return self.design_loop_service.continue_preview(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                    maximum_tool_calls=int(
+                        body.get("maximumToolCalls") or 10
+                    ),
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/runs/{run_id}/cancel"
+        )
+        async def cancel_facility_design_preview_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+        ):
+            principal = self._require_request_action(
+                request, "proposal.create"
+            )
+            try:
+                run = self.design_repository.get_run(
+                    principal.tenant_id, site_id, run_id
+                )
+                if run["run"]["layoutId"] != layout_id:
+                    raise FacilityDesignServiceError(
+                        "facility_design_scope_mismatch",
+                        "Facility design run is outside the requested layout scope.",
+                    )
+                return self.design_loop_service.cancel_preview(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.get(
+            "/api/facility-layout-design/{site_id}/{layout_id}/proposals/{proposal_id}"
+        )
+        async def inspect_facility_design_proposal_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            proposal_id: str,
+            proposal_revision: str = Query(..., alias="proposalRevision"),
+            include_candidate_layout: bool = Query(
+                False, alias="includeCandidateLayout"
+            ),
+        ):
+            principal = self._require_request_action(
+                request, "proposal.read"
+            )
+            try:
+                result = self.design_loop_service.inspect_proposal(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    proposal_id=proposal_id,
+                    proposal_revision=proposal_revision,
+                    include_candidate_layout=include_candidate_layout,
+                )
+                if result["proposal"]["layoutId"] != layout_id:
+                    raise FacilityDesignServiceError(
+                        "facility_design_scope_mismatch",
+                        "Facility design proposal is outside the requested layout scope.",
+                    )
+                return result
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/proposals/{proposal_id}/apply/prepare"
+        )
+        async def prepare_facility_design_apply_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            proposal_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            try:
+                current = self.service.get_layout(
+                    principal, site_id, layout_id
+                )
+                inspected = self.design_loop_service.inspect_proposal(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    proposal_id=proposal_id,
+                    proposal_revision=str(
+                        body.get("proposalRevision") or ""
+                    ),
+                )
+                if inspected["proposal"]["layoutId"] != layout_id:
+                    raise FacilityDesignServiceError(
+                        "facility_design_scope_mismatch",
+                        "Facility design proposal is outside the requested layout scope.",
+                    )
+                result = self.design_loop_service.prepare_proposal_apply(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    proposal_id=proposal_id,
+                    proposal_revision=str(
+                        body.get("proposalRevision") or ""
+                    ),
+                    root_undo_frame=self._authoritative_design_editor_frame(
+                        body.get("rootUndoFrame") or {},
+                        current=current,
+                        tenant_id=principal.tenant_id,
+                        site_id=site_id,
+                        layout_id=layout_id,
+                    ),
+                    previous_installation_state=(
+                        self._authoritative_design_editor_frame(
+                            body.get("previousInstallationState") or {},
+                            current=current,
+                            tenant_id=principal.tenant_id,
+                            site_id=site_id,
+                            layout_id=layout_id,
+                        )
+                    ),
+                    expected_result_editor_generation_id=str(
+                        body.get("expectedResultEditorGenerationId") or ""
+                    ),
+                    expected_result_command_journal_hash=str(
+                        body.get("expectedResultCommandJournalHash") or ""
+                    ),
+                    expected_source_owner=(
+                        body.get("expectedSourceOwner")
+                        if isinstance(
+                            body.get("expectedSourceOwner"), Mapping
+                        )
+                        else None
+                    ),
+                    transaction_id=(
+                        str(body["transactionId"])
+                        if body.get("transactionId")
+                        else None
+                    ),
+                    expected_transaction_revision=(
+                        str(body["expectedTransactionRevision"])
+                        if body.get("expectedTransactionRevision")
+                        else None
+                    ),
+                )
+                if result["transaction"]["transaction"]["layoutId"] != layout_id:
+                    raise FacilityDesignServiceError(
+                        "facility_design_scope_mismatch",
+                        "Facility design transaction is outside the requested layout scope.",
+                    )
+                return result
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/transactions/{transaction_id}/apply/commit"
+        )
+        async def commit_facility_design_apply_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            transaction_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            try:
+                self._require_design_transaction_scope(
+                    principal, site_id, layout_id, transaction_id
+                )
+                result = self.design_loop_service.commit_proposal_apply(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    transaction_id=transaction_id,
+                    expected_transaction_revision=str(
+                        body.get("expectedTransactionRevision") or ""
+                    ),
+                    adoption_token=str(body.get("adoptionToken") or ""),
+                )
+                if result["transaction"]["transaction"]["layoutId"] != layout_id:
+                    raise FacilityDesignServiceError(
+                        "facility_design_scope_mismatch",
+                        "Facility design transaction is outside the requested layout scope.",
+                    )
+                return result
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/transactions/{transaction_id}/apply/acknowledge"
+        )
+        async def acknowledge_facility_design_apply_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            transaction_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            try:
+                self._require_design_transaction_scope(
+                    principal, site_id, layout_id, transaction_id
+                )
+                return self.design_loop_service.acknowledge_proposal_apply(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    transaction_id=transaction_id,
+                    expected_transaction_revision=str(
+                        body.get("expectedTransactionRevision") or ""
+                    ),
+                    adoption_token=str(body.get("adoptionToken") or ""),
+                    observed_installation_fingerprint=str(
+                        body.get("observedInstallationFingerprint") or ""
+                    ),
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/transactions/{transaction_id}/apply/recover"
+        )
+        async def recover_facility_design_apply_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            transaction_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            try:
+                self._require_design_transaction_scope(
+                    principal, site_id, layout_id, transaction_id
+                )
+                return self.design_loop_service.recover_proposal_apply(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    transaction_id=transaction_id,
+                    expected_transaction_revision=str(
+                        body.get("expectedTransactionRevision") or ""
+                    ),
+                    observed_installation_fingerprint=str(
+                        body.get("observedInstallationFingerprint") or ""
+                    ),
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/transactions/{transaction_id}/save"
+        )
+        async def save_facility_design_proposal_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            transaction_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            try:
+                self._require_design_transaction_scope(
+                    principal, site_id, layout_id, transaction_id
+                )
+                return self.design_loop_service.save_proposal(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    transaction_id=transaction_id,
+                    expected_transaction_revision=str(
+                        body.get("expectedTransactionRevision") or ""
+                    ),
+                    observed_draft_revision=str(
+                        body.get("observedDraftRevision") or ""
+                    ),
+                    observed_command_journal_hash=str(
+                        body.get("observedCommandJournalHash") or ""
+                    ),
+                    explicit_approval=body.get("explicitApproval") is True,
+                    layout_saver=lambda document, base_revision: (
+                        self.service.save_layout(
+                            principal,
+                            site_id,
+                            layout_id,
+                            document,
+                            base_revision,
+                        )
+                    ),
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.get(
+            "/api/facility-layout-design/{site_id}/{layout_id}/transactions/{transaction_id}/undo"
+        )
+        async def inspect_facility_design_undo_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            transaction_id: str,
+        ):
+            principal = self._require_request_action(
+                request, "proposal.read"
+            )
+            try:
+                self._require_design_transaction_scope(
+                    principal, site_id, layout_id, transaction_id
+                )
+                return self.design_loop_service.undo_eligibility(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    transaction_id=transaction_id,
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/transactions/{transaction_id}/undo/prepare"
+        )
+        async def prepare_facility_design_undo_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            transaction_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            try:
+                self._require_design_transaction_scope(
+                    principal, site_id, layout_id, transaction_id
+                )
+                return self.design_loop_service.prepare_undo(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    transaction_id=transaction_id,
+                    expected_transaction_revision=str(
+                        body.get("expectedTransactionRevision") or ""
+                    ),
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-design/{site_id}/{layout_id}/transactions/{transaction_id}/undo/acknowledge"
+        )
+        async def acknowledge_facility_design_undo_endpoint(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            transaction_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            try:
+                self._require_design_transaction_scope(
+                    principal, site_id, layout_id, transaction_id
+                )
+                return self.design_loop_service.acknowledge_undo(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    transaction_id=transaction_id,
+                    expected_transaction_revision=str(
+                        body.get("expectedTransactionRevision") or ""
+                    ),
+                    observed_draft_revision=str(
+                        body.get("observedDraftRevision") or ""
+                    ),
+                    observed_command_journal_hash=str(
+                        body.get("observedCommandJournalHash") or ""
+                    ),
+                )
+            except _DESIGN_ERRORS as error:
+                raise self._design_error(error) from error
+
         @router.post(
             "/api/facility-layout-generation/{site_id}/{layout_id}/g1"
         )
@@ -1485,7 +2833,8 @@ class LocalFacilityLayoutHost:
                     },
                 )
             current = self.service.get_layout(principal, site_id, layout_id)
-            try:
+
+            def start_run() -> dict[str, Any]:
                 return self.generation_coordinator.start_g1_run(
                     tenant_id=principal.tenant_id,
                     site_id=site_id,
@@ -1502,7 +2851,370 @@ class LocalFacilityLayoutHost:
                     execution_mode=execution_mode,
                     prototype_mode=True,
                 )
+
+            try:
+                try:
+                    return start_run()
+                except FacilityGenerationRunRepositoryError as error:
+                    can_supersede = (
+                        body.get("supersedeActiveDraft") is True
+                        and error.code
+                        in {
+                            "generation_session_already_bound",
+                            "generation_writable_lease_conflict",
+                        }
+                    )
+                    prior_run_id = str(error.details.get("runId") or "").strip()
+                    if not can_supersede or not prior_run_id:
+                        raise
+                    prior_envelope = self.generation_run_repository.get_run(
+                        principal.tenant_id,
+                        site_id,
+                        prior_run_id,
+                    )
+                    prior_run = prior_envelope["run"]
+                    same_owned_draft = (
+                        prior_run["layoutId"] == layout_id
+                        and prior_run["userId"] == principal.principal_id
+                        and prior_run["writable"] is True
+                        and prior_run["status"]
+                        not in {"cancelled", "expired", "saved", "stale"}
+                    )
+                    if not same_owned_draft:
+                        raise
+                    superseded = self.generation_coordinator.undo_to_base(
+                        tenant_id=principal.tenant_id,
+                        site_id=site_id,
+                        run_id=prior_run_id,
+                    )
+                    replacement = start_run()
+                    replacement["supersededRunId"] = prior_run_id
+                    replacement["supersededReceiptIds"] = list(
+                        superseded.get("supersededReceiptIds") or []
+                    )
+                    return replacement
             except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/full-factory"
+        )
+        async def start_facility_generation_full_factory(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            session_id = self._generation_session_id(request)
+            if body.get("prototypeMode") is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "explicit_prototype_mode_required",
+                            "message": (
+                                "Full-factory generation requires "
+                                "prototypeMode=true."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            full_factory = body.get("fullFactory")
+            if not isinstance(full_factory, Mapping):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "full_factory_intent_incomplete",
+                            "message": "fullFactory must be an object.",
+                            "details": {},
+                        }
+                    },
+                )
+            current = self.service.get_layout(principal, site_id, layout_id)
+
+            def start_run() -> dict[str, Any]:
+                return self.generation_coordinator.start_full_factory_run(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    workspace_id=str(
+                        body.get("workspaceId")
+                        or "workspace-facility-layout"
+                    ),
+                    layout_id=layout_id,
+                    user_id=principal.principal_id,
+                    session_id=session_id,
+                    base_layout=current["layout"],
+                    base_layout_revision=current["revision"],
+                    full_factory_request=full_factory,
+                    asset_catalog=deepcopy(list(self._catalog.values())),
+                    prototype_mode=True,
+                )
+
+            try:
+                try:
+                    return start_run()
+                except FacilityGenerationRunRepositoryError as error:
+                    can_supersede = (
+                        body.get("supersedeActiveDraft") is True
+                        and error.code
+                        in {
+                            "generation_session_already_bound",
+                            "generation_writable_lease_conflict",
+                        }
+                    )
+                    prior_run_id = str(
+                        error.details.get("runId") or ""
+                    ).strip()
+                    if not can_supersede or not prior_run_id:
+                        raise
+                    prior_envelope = self.generation_run_repository.get_run(
+                        principal.tenant_id,
+                        site_id,
+                        prior_run_id,
+                    )
+                    prior_run = prior_envelope["run"]
+                    same_owned_draft = (
+                        prior_run["layoutId"] == layout_id
+                        and prior_run["userId"] == principal.principal_id
+                        and prior_run["writable"] is True
+                        and prior_run["status"]
+                        not in {
+                            "cancelled",
+                            "expired",
+                            "saved",
+                            "stale",
+                        }
+                    )
+                    if not same_owned_draft:
+                        raise
+                    superseded = self.generation_coordinator.undo_to_base(
+                        tenant_id=principal.tenant_id,
+                        site_id=site_id,
+                        run_id=prior_run_id,
+                    )
+                    replacement = start_run()
+                    replacement["supersededRunId"] = prior_run_id
+                    replacement["supersededReceiptIds"] = list(
+                        superseded.get("supersededReceiptIds") or []
+                    )
+                    return replacement
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/facility-program"
+        )
+        async def start_facility_program_generation(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(request, "proposal.apply")
+            session_id = self._generation_session_id(request)
+            if body.get("prototypeMode") is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "explicit_prototype_mode_required",
+                            "message": (
+                                "FacilityProgram generation requires prototypeMode=true."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            facility_program = body.get("facilityProgram")
+            if not isinstance(facility_program, Mapping):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "facility_program_intent_incomplete",
+                            "message": "facilityProgram must be an object.",
+                            "details": {},
+                        }
+                    },
+                )
+            current = self.service.get_layout(principal, site_id, layout_id)
+
+            def start_run() -> dict[str, Any]:
+                return self.generation_coordinator.start_facility_program_run(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    workspace_id=str(
+                        body.get("workspaceId") or "workspace-facility-layout"
+                    ),
+                    layout_id=layout_id,
+                    user_id=principal.principal_id,
+                    session_id=session_id,
+                    base_layout=current["layout"],
+                    base_layout_revision=current["revision"],
+                    facility_program=facility_program,
+                    asset_catalog=deepcopy(list(self._catalog.values())),
+                    prototype_mode=True,
+                )
+
+            try:
+                try:
+                    return start_run()
+                except FacilityGenerationRunRepositoryError as error:
+                    can_supersede = (
+                        body.get("supersedeActiveDraft") is True
+                        and error.code
+                        in {
+                            "generation_session_already_bound",
+                            "generation_writable_lease_conflict",
+                        }
+                    )
+                    prior_run_id = str(error.details.get("runId") or "").strip()
+                    if not can_supersede or not prior_run_id:
+                        raise
+                    prior_envelope = self.generation_run_repository.get_run(
+                        principal.tenant_id, site_id, prior_run_id
+                    )
+                    prior_run = prior_envelope["run"]
+                    same_owned_draft = (
+                        prior_run["layoutId"] == layout_id
+                        and prior_run["userId"] == principal.principal_id
+                        and prior_run["writable"] is True
+                        and prior_run["status"]
+                        not in {"cancelled", "expired", "saved", "stale"}
+                    )
+                    if not same_owned_draft:
+                        raise
+                    superseded = self.generation_coordinator.undo_to_base(
+                        tenant_id=principal.tenant_id,
+                        site_id=site_id,
+                        run_id=prior_run_id,
+                    )
+                    replacement = start_run()
+                    replacement["supersededRunId"] = prior_run_id
+                    replacement["supersededReceiptIds"] = list(
+                        superseded.get("supersededReceiptIds") or []
+                    )
+                    return replacement
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/planning-package"
+        )
+        async def start_facility_planning_package_generation(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(request, "proposal.apply")
+            session_id = self._generation_session_id(request)
+            if body.get("prototypeMode") is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "explicit_prototype_mode_required",
+                            "message": (
+                                "Facility Planning generation requires "
+                                "prototypeMode=true."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            package_id = str(body.get("planningPackageId") or "").strip()
+            current = self.service.get_layout(principal, site_id, layout_id)
+
+            def start_run() -> dict[str, Any]:
+                package = self._load_facility_planning_package(package_id)
+                compiled = compile_facility_planning_package(
+                    package,
+                    deepcopy(list(self._catalog.values())),
+                )
+                return self.generation_coordinator.start_facility_program_run(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    workspace_id=str(
+                        body.get("workspaceId")
+                        or "workspace-facility-layout"
+                    ),
+                    layout_id=layout_id,
+                    user_id=principal.principal_id,
+                    session_id=session_id,
+                    base_layout=current["layout"],
+                    base_layout_revision=current["revision"],
+                    facility_program=compiled["facilityProgram"],
+                    asset_catalog=deepcopy(list(self._catalog.values())),
+                    prototype_mode=True,
+                )
+
+            try:
+                try:
+                    result = start_run()
+                except FacilityGenerationRunRepositoryError as error:
+                    can_supersede = (
+                        body.get("supersedeActiveDraft") is True
+                        and error.code
+                        in {
+                            "generation_session_already_bound",
+                            "generation_writable_lease_conflict",
+                        }
+                    )
+                    prior_run_id = str(error.details.get("runId") or "").strip()
+                    if not can_supersede or not prior_run_id:
+                        raise
+                    prior_envelope = self.generation_run_repository.get_run(
+                        principal.tenant_id, site_id, prior_run_id
+                    )
+                    prior_run = prior_envelope["run"]
+                    same_owned_draft = (
+                        prior_run["layoutId"] == layout_id
+                        and prior_run["userId"] == principal.principal_id
+                        and prior_run["writable"] is True
+                        and prior_run["status"]
+                        not in {"cancelled", "expired", "saved", "stale"}
+                    )
+                    if not same_owned_draft:
+                        raise
+                    superseded = self.generation_coordinator.undo_to_base(
+                        tenant_id=principal.tenant_id,
+                        site_id=site_id,
+                        run_id=prior_run_id,
+                    )
+                    result = start_run()
+                    result["supersededRunId"] = prior_run_id
+                    result["supersededReceiptIds"] = list(
+                        superseded.get("supersededReceiptIds") or []
+                    )
+                result["planningPackageId"] = package_id
+                result["planningAuthority"] = "illustrative_prototype"
+                return result
+            except (
+                FacilityPlanningPackageError,
                 FacilityGenerationCoordinatorError,
                 FacilityGenerationRunRepositoryError,
                 FacilityProviderConfigurationError,
@@ -1582,6 +3294,523 @@ class LocalFacilityLayoutHost:
             if result["draftLayout"]["layoutId"] != layout_id:
                 raise HTTPException(status_code=404, detail="Not found")
             return result
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"
+            "{run_id}/circulation"
+        )
+        async def amend_facility_generation_circulation(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            if body.get("prototypeMode") is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "explicit_prototype_mode_required",
+                            "message": (
+                                "Circulation generation requires "
+                                "prototypeMode=true."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            circulation = body.get("circulation")
+            if not isinstance(circulation, Mapping):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "facility_circulation_intent_incomplete",
+                            "message": "circulation must be an object.",
+                            "details": {},
+                        }
+                    },
+                )
+            try:
+                run_envelope = self.generation_run_repository.get_run(
+                    principal.tenant_id, site_id, run_id
+                )
+                run = run_envelope["run"]
+                if (
+                    run.get("layoutId") != layout_id
+                    or run.get("userId") != principal.principal_id
+                ):
+                    raise HTTPException(status_code=404, detail="Not found")
+                if run.get("prototypeMode") is not True:
+                    raise FacilityGenerationCoordinatorError(
+                        "facility_circulation_prototype_run_required",
+                        "Circulation generation is enabled only for prototype runs.",
+                    )
+                current = self.service.get_layout(
+                    principal, site_id, layout_id
+                )
+                obstacle_context = None
+                if circulation.get("action") == "avoid_obstacles":
+                    execution = (
+                        self.generation_run_repository.get_execution_artifacts(
+                            principal.tenant_id,
+                            site_id,
+                            run_id,
+                        )
+                    )
+                    vehicle_ref = None
+                    if circulation.get("vehicle_profile_id") is not None:
+                        vehicle_ref = {
+                            "vehicleProfileId": circulation.get(
+                                "vehicle_profile_id"
+                            ),
+                            "vehicleProfileRevision": circulation.get(
+                                "vehicle_profile_revision"
+                            ),
+                        }
+                    obstacle_context = self.service.circulation_obstacle_context(
+                        principal,
+                        site_id,
+                        execution["draft"]["document"],
+                        vehicle_profile_ref=vehicle_ref,
+                    )
+                return self.generation_coordinator.amend_primary_circulation(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                    current_base_layout=current["layout"],
+                    current_base_revision=current["revision"],
+                    expected_draft_revision=str(
+                        body.get("expectedDraftRevision") or ""
+                    ),
+                    circulation_request=circulation,
+                    obstacle_context=obstacle_context,
+                )
+            except HTTPException:
+                raise
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"
+            "{run_id}/subdivisions"
+        )
+        async def amend_facility_generation_subdivisions(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            if body.get("prototypeMode") is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "explicit_prototype_mode_required",
+                            "message": (
+                                "Department subdivision requires "
+                                "prototypeMode=true."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            subdivision = body.get("subdivision")
+            if not isinstance(subdivision, Mapping):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "facility_subdivision_intent_incomplete",
+                            "message": "subdivision must be an object.",
+                            "details": {},
+                        }
+                    },
+                )
+            try:
+                run_envelope = self.generation_run_repository.get_run(
+                    principal.tenant_id, site_id, run_id
+                )
+                run = run_envelope["run"]
+                if (
+                    run.get("layoutId") != layout_id
+                    or run.get("userId") != principal.principal_id
+                ):
+                    raise HTTPException(status_code=404, detail="Not found")
+                if run.get("prototypeMode") is not True:
+                    raise FacilityGenerationCoordinatorError(
+                        "facility_subdivision_prototype_run_required",
+                        "Subdivision is enabled only for prototype runs.",
+                    )
+                current = self.service.get_layout(
+                    principal, site_id, layout_id
+                )
+                return self.generation_coordinator.amend_department_subdivisions(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                    current_base_layout=current["layout"],
+                    current_base_revision=current["revision"],
+                    expected_draft_revision=str(
+                        body.get("expectedDraftRevision") or ""
+                    ),
+                    subdivision_request=subdivision,
+                )
+            except HTTPException:
+                raise
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"
+            "{run_id}/assets"
+        )
+        async def amend_facility_generation_assets(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            if body.get("prototypeMode") is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "explicit_prototype_mode_required",
+                            "message": (
+                                "Asset placement requires prototypeMode=true."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            asset_placement = body.get("assetPlacement")
+            if not isinstance(asset_placement, Mapping):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "facility_asset_intent_incomplete",
+                            "message": "assetPlacement must be an object.",
+                            "details": {},
+                        }
+                    },
+                )
+            try:
+                run_envelope = self.generation_run_repository.get_run(
+                    principal.tenant_id, site_id, run_id
+                )
+                run = run_envelope["run"]
+                if (
+                    run.get("layoutId") != layout_id
+                    or run.get("userId") != principal.principal_id
+                ):
+                    raise HTTPException(status_code=404, detail="Not found")
+                if run.get("prototypeMode") is not True:
+                    raise FacilityGenerationCoordinatorError(
+                        "facility_asset_prototype_run_required",
+                        "Asset placement is enabled only for prototype runs.",
+                    )
+                current = self.service.get_layout(
+                    principal, site_id, layout_id
+                )
+                return self.generation_coordinator.amend_asset_placements(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                    current_base_layout=current["layout"],
+                    current_base_revision=current["revision"],
+                    expected_draft_revision=str(
+                        body.get("expectedDraftRevision") or ""
+                    ),
+                    asset_request=asset_placement,
+                    asset_catalog=deepcopy(list(self._catalog.values())),
+                )
+            except HTTPException:
+                raise
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"
+            "{run_id}/facility-program/resource-batch"
+        )
+        async def amend_facility_program_resource_batch(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            if body.get("prototypeMode") is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "explicit_prototype_mode_required",
+                            "message": (
+                                "FacilityProgram amendment requires "
+                                "prototypeMode=true."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            resource_batch_id = str(
+                body.get("resourceBatchId") or ""
+            ).strip()
+            patch = body.get("patch")
+            if not resource_batch_id or not isinstance(patch, Mapping):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": (
+                                "facility_program_local_amendment_invalid"
+                            ),
+                            "message": (
+                                "resourceBatchId and patch are required."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            try:
+                run_envelope = self.generation_run_repository.get_run(
+                    principal.tenant_id, site_id, run_id
+                )
+                run = run_envelope["run"]
+                if (
+                    run.get("layoutId") != layout_id
+                    or run.get("userId") != principal.principal_id
+                ):
+                    raise HTTPException(status_code=404, detail="Not found")
+                if run.get("prototypeMode") is not True:
+                    raise FacilityGenerationCoordinatorError(
+                        "facility_program_amendment_prototype_run_required",
+                        "FacilityProgram amendments are enabled only for prototype runs.",
+                    )
+                current = self.service.get_layout(
+                    principal, site_id, layout_id
+                )
+                return self.generation_coordinator.amend_facility_program_resource_batch(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                    current_base_layout=current["layout"],
+                    current_base_revision=current["revision"],
+                    expected_draft_revision=str(
+                        body.get("expectedDraftRevision") or ""
+                    ),
+                    resource_batch_id=resource_batch_id,
+                    patch=patch,
+                    asset_catalog=deepcopy(
+                        list(self._catalog.values())
+                    ),
+                )
+            except HTTPException:
+                raise
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"
+            "{run_id}/cells"
+        )
+        async def amend_facility_generation_cells(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            if body.get("prototypeMode") is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "explicit_prototype_mode_required",
+                            "message": (
+                                "Cell composition requires prototypeMode=true."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            cell_composition = body.get("cellComposition")
+            if not isinstance(cell_composition, Mapping):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "facility_cell_intent_incomplete",
+                            "message": "cellComposition must be an object.",
+                            "details": {},
+                        }
+                    },
+                )
+            try:
+                run_envelope = self.generation_run_repository.get_run(
+                    principal.tenant_id, site_id, run_id
+                )
+                run = run_envelope["run"]
+                if (
+                    run.get("layoutId") != layout_id
+                    or run.get("userId") != principal.principal_id
+                ):
+                    raise HTTPException(status_code=404, detail="Not found")
+                if run.get("prototypeMode") is not True:
+                    raise FacilityGenerationCoordinatorError(
+                        "facility_cell_prototype_run_required",
+                        "Cell composition is enabled only for prototype runs.",
+                    )
+                current = self.service.get_layout(
+                    principal, site_id, layout_id
+                )
+                return self.generation_coordinator.amend_cell_composition(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                    current_base_layout=current["layout"],
+                    current_base_revision=current["revision"],
+                    expected_draft_revision=str(
+                        body.get("expectedDraftRevision") or ""
+                    ),
+                    cell_request=cell_composition,
+                    asset_catalog=deepcopy(list(self._catalog.values())),
+                )
+            except HTTPException:
+                raise
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
+
+        @router.post(
+            "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"
+            "{run_id}/cell-replication"
+        )
+        async def amend_facility_generation_cell_replication(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            run_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(
+                request, "proposal.apply"
+            )
+            if body.get("prototypeMode") is not True:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "explicit_prototype_mode_required",
+                            "message": (
+                                "Cell replication requires prototypeMode=true."
+                            ),
+                            "details": {},
+                        }
+                    },
+                )
+            replication = body.get("cellReplication")
+            if not isinstance(replication, Mapping):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "error": {
+                            "code": "facility_cell_module_intent_incomplete",
+                            "message": "cellReplication must be an object.",
+                            "details": {},
+                        }
+                    },
+                )
+            try:
+                run_envelope = self.generation_run_repository.get_run(
+                    principal.tenant_id, site_id, run_id
+                )
+                run = run_envelope["run"]
+                if (
+                    run.get("layoutId") != layout_id
+                    or run.get("userId") != principal.principal_id
+                ):
+                    raise HTTPException(status_code=404, detail="Not found")
+                if run.get("prototypeMode") is not True:
+                    raise FacilityGenerationCoordinatorError(
+                        "facility_cell_module_prototype_run_required",
+                        "Cell replication is enabled only for prototype runs.",
+                    )
+                current = self.service.get_layout(
+                    principal, site_id, layout_id
+                )
+                return self.generation_coordinator.amend_cell_replication(
+                    tenant_id=principal.tenant_id,
+                    site_id=site_id,
+                    run_id=run_id,
+                    current_base_layout=current["layout"],
+                    current_base_revision=current["revision"],
+                    expected_draft_revision=str(
+                        body.get("expectedDraftRevision") or ""
+                    ),
+                    replication_request=replication,
+                    asset_catalog=deepcopy(list(self._catalog.values())),
+                )
+            except HTTPException:
+                raise
+            except (
+                FacilityGenerationCoordinatorError,
+                FacilityGenerationRunRepositoryError,
+                FacilityProviderConfigurationError,
+                FacilityKnowledgeContractError,
+                FacilityLayoutError,
+            ) as error:
+                raise self._generation_error(error) from error
 
         @router.post(
             "/api/facility-layout-generation/{site_id}/{layout_id}/runs/"

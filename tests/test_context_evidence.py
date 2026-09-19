@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,7 +14,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import server  # noqa: E402
-from ai_inspector.prompts import compile_skill_context  # noqa: E402
+from ai_inspector.prompts import (  # noqa: E402
+    ContextBudgetError,
+    compile_skill_context,
+    split_compiled_context_by_origin,
+)
 
 
 def _route() -> dict:
@@ -170,6 +177,13 @@ def test_missing_required_context_is_explicit_not_silent():
     assert diagnostics["status"] == "warning"
     assert diagnostics["missing_required_context"] == ["assembly.parts"]
     assert compiled.accounting["missing_required_context"] == ["assembly.parts"]
+    provider = {
+        row["contextKey"]: row
+        for row in compiled.accounting["providers"]
+    }["assembly.parts"]
+    assert provider["required"] is True
+    assert provider["included"] is False
+    assert provider["omissionReason"] == "required_context_unavailable"
 
 
 def test_context_budget_prunes_optional_data_but_preserves_required_evidence():
@@ -198,6 +212,69 @@ def test_context_budget_prunes_optional_data_but_preserves_required_evidence():
     assert "fai_characteristics" in compiled.context
     assert "available_parts" in compiled.context
     assert budget["required_evidence_preserved"] is True
+
+
+def test_required_context_over_budget_fails_closed_with_provider_names():
+    ctx = _context([{
+        "char_number": "1",
+        "description": "Shaft outside diameter",
+        "nominal": 10.0,
+        "lower_limit": 9.95,
+        "upper_limit": 10.05,
+        "measured": 9.8,
+        "status": "FAIL",
+    }])
+    ctx["available_parts"] = [
+        {
+            "part_number": f"SYNTH-{index:04d}",
+            "description": "required assembly evidence " + ("x" * 120),
+        }
+        for index in range(500)
+    ]
+    with pytest.raises(ContextBudgetError) as caught:
+        compile_skill_context(ctx, _packages(), mode="assembly")
+    assert caught.value.code == "required_context_budget_exceeded"
+    assert "assembly.parts" in caught.value.details["providers"]
+
+
+def test_server_and_browser_context_are_split_by_registered_origin():
+    package = SimpleNamespace(
+        manifest=SimpleNamespace(
+            id="test-process-map-skill",
+            requires_context=("process_map.state",),
+            optional_context=("assembly.parts",),
+        ),
+        contract=SimpleNamespace(
+            maximum_context_tokens=6000,
+            context_priorities=("process_map.state", "assembly.parts"),
+            forbidden_context=(),
+            required_evidence=(),
+        ),
+    )
+    compiled = compile_skill_context(
+        {
+            "active_mode": "process_map",
+            "process_map_state": {"dirty": False, "selection": []},
+            "available_parts": [{"part_number": "BROWSER-CLAIM"}],
+        },
+        (package,),
+        mode="process_map",
+    )
+    trusted, untrusted = split_compiled_context_by_origin(
+        compiled.context,
+        (package,),
+    )
+    assert trusted == {
+        "process_map_state": {"dirty": False, "selection": []}
+    }
+    assert untrusted["available_parts"] == [
+        {"part_number": "BROWSER-CLAIM"}
+    ]
+    providers = {
+        row["contextKey"]: row for row in compiled.accounting["providers"]
+    }
+    assert providers["process_map.state"]["origin"] == "server"
+    assert providers["assembly.parts"]["origin"] == "browser"
 
 
 def test_pure_viewport_context_has_empty_provenance_without_error():

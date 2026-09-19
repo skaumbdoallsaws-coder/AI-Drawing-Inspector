@@ -89,7 +89,7 @@ def _part_display_route(effect: str, *, part_id: str | None = "SYNTH-H1"):
 def test_phase3_registry_resolves_dependency_bounded_skill_compositions():
     server._reset_agent_skill_runtime_cache_for_tests()
     workflows, skills = server._get_agent_skill_runtime()
-    assert len(skills.ids) == 9
+    assert len(skills.ids) == 15
     disposition = skills.resolve_selection(
         primary_id="recommend-fai-disposition",
         supporting_ids=[],
@@ -116,6 +116,16 @@ def test_phase3_registry_resolves_dependency_bounded_skill_compositions():
         "control-cad-viewport",
     }
     assert workflows.get("supplier-fai-disposition").manifest.version == "1.0.0"
+    documentation = skills.resolve_selection(
+        primary_id="publish-parts-manual",
+        supporting_ids=[],
+        agent="sage",
+        workflow_id="documentation-publication",
+        mode="training",
+    )
+    assert [package.manifest.id for package in documentation] == [
+        "publish-parts-manual"
+    ]
 
 
 def test_phase3_prompt_contains_only_selected_skills_and_rejects_unsafe_routes():

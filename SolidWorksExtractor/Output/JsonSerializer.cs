@@ -841,6 +841,8 @@ namespace SolidWorksExtractor.Output
             WriteBool("isLightweight", comp.IsLightweight);
             WriteString("activeConfiguration", comp.ActiveConfiguration);
             WriteString("partDataKey", comp.PartDataKey);
+            WriteStringArray("featureTreePath", comp.FeatureTreePath);
+            WriteString("semanticGroup", comp.SemanticGroup);
 
             WriteName("transform");
             WriteTransform(comp.Transform, isLast: true);

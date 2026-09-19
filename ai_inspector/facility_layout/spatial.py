@@ -62,8 +62,10 @@ _SHELL_OBSTACLE_KINDS = frozenset(
     {
         "column",
         "door",
+        "dock",
         "fixed_equipment",
         "fixed_obstacle",
+        "loading_dock",
         "structural_column",
         "wall",
     }
@@ -381,15 +383,19 @@ def polygons_intersect(left: Sequence[Point2], right: Sequence[Point2]) -> bool:
 def polygon_contains_polygon(
     container: Sequence[Point2],
     subject: Sequence[Point2],
+    *,
+    tolerance: float = GEOMETRY_EPSILON,
 ) -> bool:
+    if tolerance < 0:
+        raise ValueError("polygon containment tolerance cannot be negative")
     if _polygon_is_axis_aligned_rectangle(container):
         container_bounds = polygon_bounds(container)
         subject_bounds = polygon_bounds(subject)
         return (
-            subject_bounds[0] + GEOMETRY_EPSILON >= container_bounds[0]
-            and subject_bounds[1] + GEOMETRY_EPSILON >= container_bounds[1]
-            and subject_bounds[2] <= container_bounds[2] + GEOMETRY_EPSILON
-            and subject_bounds[3] <= container_bounds[3] + GEOMETRY_EPSILON
+            subject_bounds[0] + tolerance >= container_bounds[0]
+            and subject_bounds[1] + tolerance >= container_bounds[1]
+            and subject_bounds[2] <= container_bounds[2] + tolerance
+            and subject_bounds[3] <= container_bounds[3] + tolerance
         )
     if not all(point_in_polygon(point, container) for point in subject):
         return False
@@ -2012,9 +2018,9 @@ def _placement_collisions(
             pair = tuple(sorted((record.owner_id, other.owner_id)))
             if pair in pair_hits:
                 continue
+            if pair in (allowed_contact_pairs or set()):
+                continue
             if _record_pair_intersects(record, other):
-                if pair in (allowed_contact_pairs or set()):
-                    continue
                 pair_hits.add(pair)
     findings = [
         _finding(
@@ -3458,6 +3464,7 @@ def diagnose_layout(
     policy_set: Mapping[str, Any] | None = None,
     evidence_authority: Mapping[str, Any] | Iterable[str] | None = None,
     cancel_check: CancelCheck | None = None,
+    allowed_contact_pairs: set[tuple[str, str]] | None = None,
     _prepared_zones: _PreparedZoneScene | None = None,
     _prepared_surfaces: Sequence[PreparedSurface] | None = None,
 ) -> dict[str, Any]:
@@ -3482,7 +3489,11 @@ def diagnose_layout(
     findings.extend(attachment_findings)
     collision_findings, collision_count = _placement_collisions(
         records_by_placement,
-        allowed_contact_pairs=stack_contact_pairs | attachment_contact_pairs,
+        allowed_contact_pairs=(
+            stack_contact_pairs
+            | attachment_contact_pairs
+            | (allowed_contact_pairs or set())
+        ),
     )
     findings.extend(collision_findings)
     shell_findings, shell_collision_count = _shell_obstacle_collisions(

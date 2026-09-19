@@ -1,0 +1,22 @@
+# Cloudflare Pages applies EVERY matching rule and concatenates same-named
+# headers, so Cache-Control is set only in the specific path rules below.
+# The catch-all carries security headers only - adding Cache-Control there
+# would append a second, contradictory value onto every asset response.
+#
+# Asset filenames are stable across deploys, so a week is cached without
+# "immutable" - that way a re-upload under the same name still refreshes.
+# HTML deliberately has no rule: Pages defaults it to must-revalidate, so a
+# redeploy is picked up immediately.
+
+/assets/*
+  Cache-Control: public, max-age=604800
+
+/css/*
+  Cache-Control: public, max-age=3600
+
+/js/*
+  Cache-Control: public, max-age=3600
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin

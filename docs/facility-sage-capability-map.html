@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Facility Sage Capability Map</title>
+  <style>
+    :root {
+      --ink: #17212b;
+      --muted: #536171;
+      --line: #c9d3dc;
+      --paper: #ffffff;
+      --ground: #e8edf1;
+      --blue: #1266a8;
+      --blue-soft: #e8f3fb;
+      --teal: #087f75;
+      --teal-soft: #e4f5f2;
+      --green: #367a42;
+      --green-soft: #eaf5eb;
+      --amber: #b56400;
+      --amber-soft: #fff1dc;
+      --red: #b23a3a;
+      --red-soft: #fceaea;
+      --purple: #7154a6;
+      --purple-soft: #f0ebf8;
+      --navy: #173b57;
+      --dark: #102332;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-width: 1200px;
+      color: var(--ink);
+      background: var(--ground);
+      font-family: "Segoe UI", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    body { padding: 34px; }
+
+    .canvas {
+      width: 2400px;
+      min-height: 1500px;
+      margin: 0 auto 34px;
+      padding: 46px 50px 42px;
+      background: var(--paper);
+      border: 1px solid #b9c5ce;
+      box-shadow: 0 10px 30px rgba(31, 45, 56, 0.12);
+      overflow: hidden;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 36px;
+      padding-bottom: 22px;
+      border-bottom: 4px solid var(--dark);
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 8px;
+      color: var(--blue);
+      font-size: 22px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      color: white;
+      background: var(--blue);
+      border-radius: 5px;
+      font-size: 19px;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--dark);
+      font-size: 48px;
+      line-height: 1.06;
+      font-weight: 750;
+    }
+
+    .subtitle {
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 23px;
+      line-height: 1.35;
+    }
+
+    .status-box {
+      width: 420px;
+      flex: 0 0 420px;
+      padding: 15px 18px;
+      border: 2px solid var(--teal);
+      border-radius: 6px;
+      background: var(--teal-soft);
+    }
+
+    .status-box strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--teal);
+      font-size: 18px;
+      text-transform: uppercase;
+    }
+
+    .status-box span {
+      color: #2f4d4a;
+      font-size: 17px;
+      line-height: 1.35;
+    }
+
+    .section-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 22px 0 11px;
+      color: var(--muted);
+      font-size: 16px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+
+    .section-label::after {
+      content: "";
+      height: 1px;
+      flex: 1;
+      background: var(--line);
+    }
+
+    .flow-row {
+      display: grid;
+      grid-template-columns: 1fr 72px 1.15fr 72px 1.15fr;
+      align-items: stretch;
+    }
+
+    .node {
+      position: relative;
+      min-width: 0;
+      padding: 18px 20px;
+      border: 2px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    .node.user { border-color: #d59b4d; background: var(--amber-soft); }
+    .node.context { border-color: #6b95b6; background: var(--blue-soft); }
+    .node.guard { border-color: #cb7777; background: var(--red-soft); }
+    .node.sage { border-color: var(--blue); background: #f4f9fd; }
+    .node.engine { border-color: var(--green); background: var(--green-soft); }
+    .node.nav { border-color: var(--purple); background: var(--purple-soft); }
+
+    .node-title {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      margin-bottom: 7px;
+      color: var(--dark);
+      font-size: 22px;
+      font-weight: 750;
+      line-height: 1.2;
+    }
+
+    .step {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 30px;
+      border-radius: 50%;
+      color: white;
+      background: var(--dark);
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .node p, .node li {
+      color: #3f4d5a;
+      font-size: 17px;
+      line-height: 1.38;
+    }
+
+    .node p { margin: 0; }
+    .node ul { margin: 9px 0 0; padding-left: 20px; }
+    .node li { margin: 3px 0; }
+
+    .arrow {
+      display: grid;
+      place-items: center;
+      color: #667684;
+      font-size: 43px;
+      font-weight: 700;
+    }
+
+    .sage-gate {
+      display: grid;
+      grid-template-columns: 1.05fr 54px 1.2fr 54px 1fr;
+      align-items: stretch;
+    }
+
+    .mini-node {
+      padding: 14px 16px;
+      border: 2px solid #91abc0;
+      border-radius: 6px;
+      background: #f6fafc;
+    }
+
+    .mini-node h3 {
+      margin: 0 0 5px;
+      color: var(--navy);
+      font-size: 20px;
+    }
+
+    .mini-node p {
+      margin: 0;
+      color: #465666;
+      font-size: 16px;
+      line-height: 1.35;
+    }
+
+    .route-note {
+      margin-top: 10px;
+      padding: 11px 15px;
+      border-left: 5px solid var(--blue);
+      background: #eef5fa;
+      color: #314b60;
+      font-size: 16px;
+      line-height: 1.35;
+    }
+
+    .branch-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 17px;
+    }
+
+    .branch {
+      min-width: 0;
+      border: 2px solid var(--line);
+      border-top-width: 7px;
+      border-radius: 6px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .branch.read { border-top-color: var(--teal); }
+    .branch.build { border-top-color: var(--green); }
+    .branch.move { border-top-color: var(--purple); }
+    .branch.stop { border-top-color: var(--red); }
+
+    .branch-head { padding: 15px 17px 12px; border-bottom: 1px solid var(--line); }
+    .branch-kicker { color: var(--muted); font-size: 14px; font-weight: 750; text-transform: uppercase; }
+    .branch h2 { margin: 4px 0 0; color: var(--dark); font-size: 25px; line-height: 1.15; }
+
+    .branch-body { padding: 14px 17px 16px; }
+
+    .flow-step {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 10px;
+      align-items: start;
+      margin-bottom: 9px;
+    }
+
+    .flow-step:last-child { margin-bottom: 0; }
+
+    .flow-step .dot {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border: 2px solid #8795a1;
+      border-radius: 50%;
+      color: #53616c;
+      background: white;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .flow-step strong { display: block; color: #24313d; font-size: 17px; line-height: 1.25; }
+    .flow-step span { display: block; margin-top: 2px; color: #5a6875; font-size: 15px; line-height: 1.3; }
+
+    .branch-result {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 4px;
+      color: white;
+      background: var(--dark);
+      font-size: 16px;
+      line-height: 1.3;
+      font-weight: 650;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 0;
+      border: 2px solid var(--green);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--green-soft);
+    }
+
+    .pipe-stage {
+      position: relative;
+      min-height: 105px;
+      padding: 14px 26px 14px 15px;
+      border-right: 1px solid #92b99a;
+    }
+
+    .pipe-stage:last-child { border-right: 0; }
+    .pipe-stage:not(:last-child)::after {
+      content: ">";
+      position: absolute;
+      right: 7px;
+      top: 39px;
+      color: var(--green);
+      font-size: 24px;
+      font-weight: 800;
+    }
+
+    .pipe-stage strong { display: block; margin-bottom: 4px; color: #255d30; font-size: 18px; }
+    .pipe-stage span { color: #45604a; font-size: 15px; line-height: 1.3; }
+
+    .authority-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+
+    .authority {
+      padding: 15px 18px;
+      border: 2px solid var(--line);
+      border-radius: 6px;
+      background: #fafbfc;
+    }
+
+    .authority.sage-owner { border-left: 8px solid var(--blue); }
+    .authority.engine-owner { border-left: 8px solid var(--green); }
+    .authority.user-owner { border-left: 8px solid var(--amber); }
+    .authority h3 { margin: 0 0 6px; color: var(--dark); font-size: 21px; }
+    .authority p { margin: 0; color: #4c5b68; font-size: 16px; line-height: 1.35; }
+
+    .hard-boundary {
+      margin-top: 14px;
+      padding: 12px 17px;
+      border: 2px solid var(--red);
+      border-radius: 6px;
+      background: var(--red-soft);
+      color: #783333;
+      font-size: 17px;
+      font-weight: 650;
+      line-height: 1.35;
+    }
+
+    /* Tool map */
+    .tool-columns {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 22px;
+    }
+
+    .tool-family {
+      min-width: 0;
+      border: 2px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .tool-family.read-tools { border-top: 8px solid var(--teal); }
+    .tool-family.draft-tools { border-top: 8px solid var(--green); }
+    .tool-family.nav-tools { border-top: 8px solid var(--purple); }
+    .tool-family.present-tools { border-top: 8px solid var(--amber); }
+
+    .tool-family header {
+      min-height: 112px;
+      padding: 15px 17px 13px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .tool-family h2 { margin: 0; color: var(--dark); font-size: 24px; }
+    .tool-family header p { margin: 6px 0 0; color: var(--muted); font-size: 15px; line-height: 1.32; }
+    .tool-list { padding: 11px 13px 14px; }
+
+    .tool {
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      min-height: 43px;
+      margin-bottom: 7px;
+      padding: 7px 9px;
+      border: 1px solid #d2dbe2;
+      border-radius: 4px;
+      background: #f8fafb;
+    }
+
+    .tool:last-child { margin-bottom: 0; }
+
+    .tool-code {
+      display: grid;
+      place-items: center;
+      width: 27px;
+      height: 27px;
+      border-radius: 3px;
+      color: white;
+      background: var(--dark);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .tool code {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      color: #223344;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .family-note {
+      margin: 12px 13px 14px;
+      padding: 9px 11px;
+      border-left: 4px solid #71808c;
+      background: #f1f4f6;
+      color: #52616d;
+      font-size: 14px;
+      line-height: 1.3;
+    }
+
+    .engine-band {
+      display: grid;
+      grid-template-columns: 330px 1fr;
+      margin-top: 19px;
+      border: 2px solid var(--green);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .engine-band-title {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 17px 20px;
+      color: white;
+      background: #306c3b;
+    }
+
+    .engine-band-title strong { font-size: 23px; }
+    .engine-band-title span { margin-top: 5px; font-size: 15px; line-height: 1.3; opacity: .9; }
+
+    .engine-cells {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      background: var(--green-soft);
+    }
+
+    .engine-cell {
+      min-width: 0;
+      padding: 14px 13px;
+      border-right: 1px solid #aac7af;
+    }
+
+    .engine-cell:last-child { border-right: 0; }
+    .engine-cell strong { display: block; margin-bottom: 4px; color: #285c32; font-size: 16px; }
+    .engine-cell span { color: #48634d; font-size: 14px; line-height: 1.28; }
+
+    .matrix-and-limits {
+      display: grid;
+      grid-template-columns: 1.55fr 1fr;
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .matrix, .limits {
+      border: 2px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+      background: white;
+    }
+
+    .block-title {
+      padding: 11px 15px;
+      color: white;
+      background: var(--dark);
+      font-size: 19px;
+      font-weight: 750;
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px 11px; border-bottom: 1px solid #d9e0e5; text-align: left; vertical-align: top; }
+    tr:last-child td { border-bottom: 0; }
+    th { color: #43515f; background: #eef2f5; font-size: 14px; text-transform: uppercase; }
+    td { color: #394856; font-size: 14px; line-height: 1.25; }
+    td strong { color: #253440; }
+
+    .limits-body { padding: 11px 14px; }
+
+    .limit-line {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 15px;
+      padding: 7px 0;
+      border-bottom: 1px solid #e0e5e9;
+      color: #465563;
+      font-size: 14px;
+    }
+
+    .limit-line:last-child { border-bottom: 0; }
+    .limit-line strong { color: var(--dark); font-family: Consolas, monospace; }
+
+    .tool-footer {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .availability-note, .claim-note {
+      padding: 12px 15px;
+      border: 2px solid var(--line);
+      border-radius: 6px;
+      font-size: 15px;
+      line-height: 1.35;
+    }
+
+    .availability-note { border-color: var(--blue); background: var(--blue-soft); color: #294e69; }
+    .claim-note { border-color: var(--red); background: var(--red-soft); color: #743838; }
+    .availability-note strong, .claim-note strong { color: var(--dark); }
+
+    @media (max-width: 1800px) {
+      body { padding: 14px; }
+      .canvas { transform-origin: top left; }
+    }
+
+    @media print {
+      body { padding: 0; background: white; }
+      .canvas { margin: 0; border: 0; box-shadow: none; page-break-after: always; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="canvas" id="decision-flow" aria-labelledby="decision-title">
+      <div class="page-header">
+        <div>
+          <div class="brand-row"><span class="brand-mark">IP</span> InspectorPro Facility Intelligence</div>
+          <h1 id="decision-title">Facility Sage: from question to trusted result</h1>
+          <p class="subtitle">How natural-language intent becomes evidence, deterministic geometry, an unsaved draft, or a named refusal.</p>
+        </div>
+        <div class="status-box">
+          <strong>Current implemented prototype surface</strong>
+          <span>Tools are exposed per intent and feature state. Sage does not receive the entire command surface on every turn.</span>
+        </div>
+      </div>
+
+      <div class="section-label">Request and trust binding</div>
+      <div class="flow-row">
+        <article class="node user">
+          <div class="node-title"><span class="step">1</span>User request</div>
+          <p>Question, creation instruction, change request, route objective, or playback command in the active Facility Layout workspace.</p>
+        </article>
+        <div class="arrow">&rarr;</div>
+        <article class="node context">
+          <div class="node-title"><span class="step">2</span>Bind trusted context</div>
+          <p>Layout ID and revision, shell and policy revisions, selection, current draft/run, authored anchors, asset/profile IDs, evidence, and enabled features.</p>
+        </article>
+        <div class="arrow">&rarr;</div>
+        <article class="node guard">
+          <div class="node-title"><span class="step">3</span>Fail-closed preflight</div>
+          <p>Reject stale revisions, unavailable features, model/provider mismatch, missing authority, invalid dimensions, or unsupported claims before mutation.</p>
+        </article>
+      </div>
+
+      <div class="section-label">Sage decision and tool exposure</div>
+      <div class="sage-gate">
+        <div class="mini-node">
+          <h3>Deterministic intent guards</h3>
+          <p>Known generation, circulation, cell, navigation, playback, ambiguity, and refusal patterns can route directly.</p>
+        </div>
+        <div class="arrow">&rarr;</div>
+        <div class="mini-node">
+          <h3>Sage interprets the objective</h3>
+          <p>The model resolves wording into semantic intent: named entities, relationships, order, proportions, constraints, and requested outcome. It does not author geometry.</p>
+        </div>
+        <div class="arrow">&rarr;</div>
+        <div class="mini-node">
+          <h3>Per-turn tool policy</h3>
+          <p>The runtime exposes only the relevant skill and tool subset, subject to feature flags, side-effect policy, budgets, and evidence availability.</p>
+        </div>
+      </div>
+      <div class="route-note"><strong>Fast-path rule:</strong> a deterministic parser may answer, ask, refuse, or launch an authorized draft without a provider tool loop. When model reasoning is needed, its output still passes through the same contracts and validators.</div>
+
+      <div class="section-label">Intent branches</div>
+      <div class="branch-grid">
+        <article class="branch read">
+          <div class="branch-head">
+            <div class="branch-kicker">Branch A</div>
+            <h2>Inspect, explain, compare</h2>
+          </div>
+          <div class="branch-body">
+            <div class="flow-step"><span class="dot">1</span><div><strong>Resolve exact scope</strong><span>Entities, region, findings, process bindings, or provenance.</span></div></div>
+            <div class="flow-step"><span class="dot">2</span><div><strong>Run bounded analysis</strong><span>Spatial relations, physical fit, route graph, or cell alternatives.</span></div></div>
+            <div class="flow-step"><span class="dot">3</span><div><strong>Present evidence</strong><span>Chat answer, structured table, or exact-value visualization.</span></div></div>
+            <div class="branch-result">Result: evidence-backed answer. Layout unchanged.</div>
+          </div>
+        </article>
+
+        <article class="branch build">
+          <div class="branch-head">
+            <div class="branch-kicker">Branch B</div>
+            <h2>Create or modify factory</h2>
+          </div>
+          <div class="branch-body">
+            <div class="flow-step"><span class="dot">1</span><div><strong>Check completeness</strong><span>Dimensions, units, labels, proportions, rows, assets, spacing, and authority.</span></div></div>
+            <div class="flow-step"><span class="dot">2</span><div><strong>Select one compiler</strong><span>G1-G6, full factory, planning package, amendment, preview, or exact move.</span></div></div>
+            <div class="flow-step"><span class="dot">3</span><div><strong>Build deterministically</strong><span>Geometry, operations, validation, receipts, and synchronized Plan/3D preview.</span></div></div>
+            <div class="branch-result">Result: one cumulative unsaved draft. Save or Undo remains with the user.</div>
+          </div>
+        </article>
+
+        <article class="branch move">
+          <div class="branch-head">
+            <div class="branch-kicker">Branch C</div>
+            <h2>Route, move, or play</h2>
+          </div>
+          <div class="branch-body">
+            <div class="flow-step"><span class="dot">1</span><div><strong>Observe navigation context</strong><span>Actor, authored stops, lanes, obstacles, profile, and revisions.</span></div></div>
+            <div class="flow-step"><span class="dot">2</span><div><strong>Compile and solve</strong><span>Profile-specific snapshot, journey, alternatives, and deterministic validation.</span></div></div>
+            <div class="flow-step"><span class="dot">3</span><div><strong>Author or present</strong><span>Unsaved navigation intent, activity scenario, or Plan/3D motion playback.</span></div></div>
+            <div class="branch-result">Result: validated path evidence or read-only playback, never a traffic simulation.</div>
+          </div>
+        </article>
+
+        <article class="branch stop">
+          <div class="branch-head">
+            <div class="branch-kicker">Branch D</div>
+            <h2>Ambiguous or unsupported</h2>
+          </div>
+          <div class="branch-body">
+            <div class="flow-step"><span class="dot">?</span><div><strong>Ask one specific question</strong><span>Missing unit, actor, anchor, stop order, proportions, profile, or conflicting constraints.</span></div></div>
+            <div class="flow-step"><span class="dot">!</span><div><strong>Refuse with a named reason</strong><span>Chat coordinates, invented clearance/profile, stale state, infeasible geometry, or unsupported authority.</span></div></div>
+            <div class="flow-step"><span class="dot">0</span><div><strong>Do not guess</strong><span>No partial build, silent normalization, implied compliance, or hidden mutation.</span></div></div>
+            <div class="branch-result">Result: clarification or refusal. Nothing changes.</div>
+          </div>
+        </article>
+      </div>
+
+      <div class="section-label">Deterministic draft pipeline used by creation and modification tools</div>
+      <div class="pipeline">
+        <div class="pipe-stage"><strong>Normalize</strong><span>Units, names, counts, percentages, direction, and semantic types.</span></div>
+        <div class="pipe-stage"><strong>Resolve</strong><span>Stable IDs, catalog revisions, zones, actors, routes, and dependencies.</span></div>
+        <div class="pipe-stage"><strong>Solve</strong><span>Partitions, patterns, physical fit, route paths, or navigation free space.</span></div>
+        <div class="pipe-stage"><strong>Compile</strong><span>Bounded operation batches and resumable stage artifacts.</span></div>
+        <div class="pipe-stage"><strong>Validate</strong><span>Containment, overlap, fit, bindings, direction, authority, and stale state.</span></div>
+        <div class="pipe-stage"><strong>Preview</strong><span>Immutable receipts, cumulative diff, synchronized Plan/3D, saved layout untouched.</span></div>
+      </div>
+
+      <div class="section-label">Who owns each decision</div>
+      <div class="authority-grid">
+        <div class="authority sage-owner"><h3>Sage owns intent</h3><p>Understand phrasing, classify the request, resolve semantic references, choose the allowed tool, sequence bounded work, and explain verified results.</p></div>
+        <div class="authority engine-owner"><h3>Deterministic engines own geometry</h3><p>Coordinates, polygons, paths, fit, collision checks, layout patterns, operations, canonical validation, fingerprints, diffs, and receipts.</p></div>
+        <div class="authority user-owner"><h3>The user owns authority</h3><p>Requirements, authored policy values, anchors, approved profiles, conflict choices, human review, explicit Save, and Undo.</p></div>
+      </div>
+      <div class="hard-boundary">Sage cannot invent coordinates, regulatory clearances, vehicle or operator profiles, safety/compliance/throughput claims, or approve Save on the user's behalf.</div>
+    </section>
+
+    <section class="canvas" id="tool-map" aria-labelledby="tool-title">
+      <div class="page-header">
+        <div>
+          <div class="brand-row"><span class="brand-mark">IP</span> InspectorPro Facility Intelligence</div>
+          <h1 id="tool-title">Facility Sage: current tool map</h1>
+          <p class="subtitle">Callable capability families, the deterministic engines behind them, and the side-effect boundary.</p>
+        </div>
+        <div class="status-box">
+          <strong>Important availability rule</strong>
+          <span>This is the union of the Facility tool surface. Runtime policy presents only the relevant subset for a specific turn.</span>
+        </div>
+      </div>
+
+      <div class="tool-columns">
+        <section class="tool-family read-tools">
+          <header><h2>Read and resolve</h2><p>Bounded inspection and analysis. These tools cannot mutate the layout.</p></header>
+          <div class="tool-list">
+            <div class="tool"><span class="tool-code">R</span><code>search_industrial_assets</code></div>
+            <div class="tool"><span class="tool-code">R</span><code>inspect_facility_entities</code></div>
+            <div class="tool"><span class="tool-code">R</span><code>inspect_facility_region</code></div>
+            <div class="tool"><span class="tool-code">R</span><code>inspect_facility_findings</code></div>
+            <div class="tool"><span class="tool-code">R</span><code>inspect_process_bindings</code></div>
+            <div class="tool"><span class="tool-code">R</span><code>inspect_facility_semantics</code></div>
+            <div class="tool"><span class="tool-code">R</span><code>inspect_pattern_provenance</code></div>
+            <div class="tool"><span class="tool-code">R</span><code>inspect_cell_layout_provenance</code></div>
+            <div class="tool"><span class="tool-code">A</span><code>analyze_facility_spatial</code></div>
+            <div class="tool"><span class="tool-code">A</span><code>analyze_facility_fit</code></div>
+          </div>
+          <div class="family-note">Used for questions such as what exists, what fits, what conflicts, what is adjacent, and why a pattern was chosen.</div>
+        </section>
+
+        <section class="tool-family draft-tools">
+          <header><h2>Factory drafts</h2><p>Deterministic creation and modification. Output remains unsaved until explicit approval.</p></header>
+          <div class="tool-list">
+            <div class="tool"><span class="tool-code">G1</span><code>generate_facility_departments_draft</code></div>
+            <div class="tool"><span class="tool-code">G2</span><code>generate_facility_circulation_draft</code></div>
+            <div class="tool"><span class="tool-code">G3</span><code>generate_facility_subdivision_draft</code></div>
+            <div class="tool"><span class="tool-code">G4</span><code>generate_facility_asset_placement_draft</code></div>
+            <div class="tool"><span class="tool-code">G5</span><code>generate_facility_cell_draft</code></div>
+            <div class="tool"><span class="tool-code">G6</span><code>generate_facility_cell_replication_draft</code></div>
+            <div class="tool"><span class="tool-code">FF</span><code>generate_full_factory_draft</code></div>
+            <div class="tool"><span class="tool-code">RQ</span><code>generate_facility_planning_prototype_draft</code></div>
+            <div class="tool"><span class="tool-code">AM</span><code>amend_facility_program_resource_batch_draft</code></div>
+            <div class="tool"><span class="tool-code">PV</span><code>build_facility_layout_preview</code></div>
+            <div class="tool"><span class="tool-code">MV</span><code>preview_facility_move</code></div>
+          </div>
+          <div class="family-note">G1-G6 cover departments, circulation, child areas, assets, cell arrangement, and replication. Full factory and reviewed planning packages coordinate multiple stages.</div>
+        </section>
+
+        <section class="tool-family nav-tools">
+          <header><h2>Navigation and journeys</h2><p>Profile- and revision-bound routing from authored semantic intent.</p></header>
+          <div class="tool-list">
+            <div class="tool"><span class="tool-code">N0</span><code>observe_navigation_context</code></div>
+            <div class="tool"><span class="tool-code">N1</span><code>propose_navigation_intent</code></div>
+            <div class="tool"><span class="tool-code">N2</span><code>compile_navigation_snapshot</code></div>
+            <div class="tool"><span class="tool-code">N3</span><code>plan_actor_journey</code></div>
+            <div class="tool"><span class="tool-code">N4</span><code>validate_actor_journey</code></div>
+            <div class="tool"><span class="tool-code">N5</span><code>compare_journey_alternatives</code></div>
+          </div>
+          <div class="family-note">Pedestrians use compiled free space and authored stops. Vehicles require directional lanes plus an exact published vehicle profile and swept-volume validation.</div>
+        </section>
+
+        <section class="tool-family present-tools">
+          <header><h2>Present and play</h2><p>Read-only browser presentation. Playback does not change saved geometry.</p></header>
+          <div class="tool-list">
+            <div class="tool"><span class="tool-code">AS</span><code>build_activity_scenario</code></div>
+            <div class="tool"><span class="tool-code">MP</span><code>start_facility_motion_playback</code></div>
+            <div class="tool"><span class="tool-code">CH</span><code>present_chat_visualization</code></div>
+            <div class="tool"><span class="tool-code">TB</span><code>present_chat_table</code></div>
+          </div>
+          <div class="family-note">Plan and 3D can present exact accepted journeys or candidate programs. This is route evidence, not scheduling, traffic simulation, safety, timing, or production approval.</div>
+        </section>
+      </div>
+
+      <div class="engine-band">
+        <div class="engine-band-title"><strong>Engines behind the tools</strong><span>Sage invokes these capabilities through closed contracts; it does not calculate or emit their geometry.</span></div>
+        <div class="engine-cells">
+          <div class="engine-cell"><strong>Facility partitioning</strong><span>Unit normalization, envelope bounds, equal/proportional areas, rows, bands, and adjacency.</span></div>
+          <div class="engine-cell"><strong>Placement and cells</strong><span>Catalog footprints, physical fit, patterns, ten cell strategies, hierarchy, and replication.</span></div>
+          <div class="engine-cell"><strong>Circulation</strong><span>Aisles, crossings, route graph, obstacles, direction, exact clearance, and rerouting.</span></div>
+          <div class="engine-cell"><strong>Navigation</strong><span>Compiled free space, actor itineraries, lane topology, profile turns, and swept-volume evidence.</span></div>
+          <div class="engine-cell"><strong>Kernel and authority</strong><span>Canonical operations, validation, revision CAS, immutable receipts, cumulative diff, Save, and Undo.</span></div>
+        </div>
+      </div>
+
+      <div class="matrix-and-limits">
+        <section class="matrix">
+          <div class="block-title">Intent to outcome matrix</div>
+          <table>
+            <thead><tr><th>User intent</th><th>Selected family</th><th>Side effect</th><th>Final authority</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Inspect or explain</strong></td><td>Read / analysis</td><td>None</td><td>Evidence-backed answer</td></tr>
+              <tr><td><strong>Compare layouts or fit</strong></td><td>Analyzers + provenance</td><td>None</td><td>User selects an option</td></tr>
+              <tr><td><strong>Create or change layout</strong></td><td>Factory draft compiler</td><td>Unsaved editor draft</td><td>User Save or Undo</td></tr>
+              <tr><td><strong>Define actor itinerary</strong></td><td>Navigation intent</td><td>Unsaved editor draft</td><td>User Save or Undo</td></tr>
+              <tr><td><strong>Route or animate</strong></td><td>Journey / presentation</td><td>Read-only playback</td><td>User closes playback</td></tr>
+              <tr><td><strong>Ambiguous or unsupported</strong></td><td>Clarification / refusal</td><td>None</td><td>User supplies authority or changes intent</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="limits">
+          <div class="block-title">Runtime and geometry limits</div>
+          <div class="limits-body">
+            <div class="limit-line"><span>Facility tool calls per turn</span><strong>10</strong></div>
+            <div class="limit-line"><span>Maximum tool response</span><strong>16,384 B</strong></div>
+            <div class="limit-line"><span>Skill context budget</span><strong>12,000 est. tokens</strong></div>
+            <div class="limit-line"><span>Operations per atomic batch</span><strong>500</strong></div>
+            <div class="limit-line"><span>Instances per placement request</span><strong>500</strong></div>
+            <div class="limit-line"><span>Department count</span><strong>1-50</strong></div>
+            <div class="limit-line"><span>Facility dimension range</span><strong>0.5-10,000 m</strong></div>
+            <div class="limit-line"><span>Cursor / turn lifetime</span><strong>300 / 600 s</strong></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="tool-footer">
+        <div class="availability-note"><strong>Availability is conditional:</strong> base feature gates progress from viewer to asset library, manual edit, constraints, routing, agent preview, and agent write. Navigation has its own contract-to-Sage-write dependency ladder. A missing dependency fails closed.</div>
+        <div class="claim-note"><strong>Claim boundary:</strong> route reachability, geometric fit, and validated draft state are supported. Safety, compliance, throughput, staffing, operational timing, and optimality require separately authored authority and evidence.</div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

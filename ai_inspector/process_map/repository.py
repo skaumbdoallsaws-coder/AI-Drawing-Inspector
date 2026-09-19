@@ -226,7 +226,14 @@ def _normalized_association(value: Any, product_id: str) -> Dict[str, str]:
             "Process-map association.productId must match the product route.",
         )
     normalized: Dict[str, str] = {"productId": product_id}
-    for key in ("assemblyId", "configuration"):
+    for key in (
+        "assemblyId",
+        "configuration",
+        "relation",
+        "parentMapId",
+        "parentStageOperationId",
+        "stageDetailHash",
+    ):
         raw = association.get(key)
         if raw is None or raw == "":
             continue
@@ -963,12 +970,22 @@ def _save_registered_process_map(
         supplied_structure_revision = stamped.get("sourceStructureRevision")
         if supplied_structure_revision != structure_revision:
             raise ProcessMapSourceConflictError(structure_revision)
+        stamped, migration_findings = migrate_to_placement_map(
+            stamped,
+            product_id=product_id,
+            structure_revision=structure_revision,
+            product_structure=structure,
+        )
         occurrence_ids = {
             occurrence.get("occurrenceId")
             for occurrence in structure.get("occurrences", [])
             if isinstance(occurrence, dict) and isinstance(occurrence.get("occurrenceId"), str)
         }
-        findings = structure_findings + validate_placement_map(stamped, occurrence_ids)
+        findings = (
+            structure_findings
+            + migration_findings
+            + validate_placement_map(stamped, occurrence_ids)
+        )
         if has_structural_errors(findings):
             raise ProcessMapValidationError(findings)
 

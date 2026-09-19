@@ -28,6 +28,7 @@ from ai_inspector.verified_workflows import (
 )
 
 from .authorization import FacilityPrincipal, require_facility_action
+from .canonical import canonicalize_layout, layout_revision
 from .digest import build_facility_layout_digest
 from .errors import (
     FacilityConflictError,
@@ -38,6 +39,17 @@ from .fit_analysis import (
     FacilityFitAnalysisError,
     analyze_facility_asset_fit,
 )
+from .journey_planning import journey_solution_summary
+from .navigation_intent import (
+    COMPARE_JOURNEY_ALTERNATIVES_TOOL,
+    COMPILE_NAVIGATION_SNAPSHOT_TOOL,
+    NAVIGATION_READ_TOOL_NAMES,
+    OBSERVE_NAVIGATION_CONTEXT_TOOL,
+    PLAN_ACTOR_JOURNEY_TOOL,
+    VALIDATE_ACTOR_JOURNEY_TOOL,
+    compare_journey_summaries,
+    navigation_context_summary,
+)
 from .observation import (
     MAXIMUM_READ_IDS,
     MAXIMUM_READ_PAGE_SIZE,
@@ -47,6 +59,7 @@ from .observation import (
     trusted_facility_source,
 )
 from .plan_settings import shell_with_plan_boundary
+from .operations import apply_facility_layout_operations
 from .semantic_plan import (
     SemanticFacilityPlanError,
     compile_semantic_facility_plan,
@@ -103,6 +116,7 @@ _READ_TOOLS = frozenset(
         "inspect_cell_layout_provenance",
         "analyze_facility_spatial",
         "analyze_facility_fit",
+        *NAVIGATION_READ_TOOL_NAMES,
     }
 )
 _ENTITY_COLLECTIONS = {
@@ -140,6 +154,9 @@ class FacilityAgentContextBundle:
     policy_document: dict[str, Any]
     asset_documents: tuple[dict[str, Any], ...]
     evidence_authority: dict[str, dict[str, Any]]
+    layout_document: dict[str, Any]
+    base_layout_revision: str
+    generation_run_id: str | None
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -283,6 +300,17 @@ class FacilityLayoutAgentRuntime:
             [FacilityPrincipal, str], Mapping[str, Any]
         ]
         | None = None,
+        generation_layout_provider: Callable[
+            [
+                FacilityPrincipal,
+                str,
+                str,
+                str,
+                Mapping[str, Any] | None,
+            ],
+            Mapping[str, Any] | None,
+        ]
+        | None = None,
         cursor_secret: bytes | None = None,
         clock: Callable[[], float] | None = None,
         workflow_runtime: VerifiedWorkflowRuntime | None = None,
@@ -295,6 +323,7 @@ class FacilityLayoutAgentRuntime:
         self.process_catalog_provider = process_catalog_provider
         self.evidence_provider = evidence_provider
         self.capabilities_provider = capabilities_provider
+        self.generation_layout_provider = generation_layout_provider
         self.cursor_secret = cursor_secret or secrets.token_bytes(32)
         if len(self.cursor_secret) < 32:
             raise ValueError("cursor_secret must contain at least 32 bytes")
@@ -873,22 +902,93 @@ class FacilityLayoutAgentRuntime:
             layout_id,
         )
         layout = deepcopy(dict(layout_receipt["layout"]))
-        current_revision = _revision(
+        saved_revision = _revision(
             layout_receipt["revision"],
             "layout revision",
         )
-        if expected_revision is not None:
-            requested_revision = _revision(
-                expected_revision,
-                "expected revision",
+        requested_revision = (
+            _revision(expected_revision, "expected revision")
+            if expected_revision is not None
+            else None
+        )
+        current_revision = saved_revision
+        layout_provider = "facility-layout-repository"
+        generation_run_id = None
+        if self.generation_layout_provider is not None:
+            generated = self.generation_layout_provider(
+                principal,
+                site_id,
+                layout_id,
+                saved_revision,
+                live_facts,
             )
-            if requested_revision != current_revision:
-                raise FacilityLayoutAgentRuntimeError(
-                    "facility_layout_revision_conflict",
-                    "The Facility Layout changed before Sage observed it.",
-                    status_code=409,
-                    details={"currentRevision": current_revision},
+            if generated is not None:
+                raw_layout = generated.get("layout")
+                if not isinstance(raw_layout, Mapping):
+                    raise FacilityLayoutAgentRuntimeError(
+                        "facility_generation_context_invalid",
+                        "The active Facility generation draft is invalid.",
+                        status_code=409,
+                    )
+                layout = canonicalize_layout(deepcopy(dict(raw_layout)))
+                current_revision = _revision(
+                    generated.get("revision"),
+                    "generation draft revision",
                 )
+                if layout_revision(layout) != current_revision:
+                    raise FacilityLayoutAgentRuntimeError(
+                        "facility_generation_context_revision_mismatch",
+                        "The active Facility generation draft revision is invalid.",
+                        status_code=409,
+                    )
+                layout_provider = str(
+                    generated.get("provider")
+                    or "facility-generation-run-repository"
+                )
+                generation_run_id = str(
+                    generated.get("runId") or ""
+                ).strip() or None
+        pending_operations = (
+            live_facts.get("pendingOperations")
+            if isinstance(live_facts, Mapping)
+            else None
+        )
+        if generation_run_id is None and pending_operations:
+            if (
+                not isinstance(pending_operations, list)
+                or len(pending_operations) > 500
+                or any(not isinstance(item, Mapping) for item in pending_operations)
+            ):
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_navigation_pending_operations_invalid",
+                    "The active Facility draft operation batch is invalid.",
+                    status_code=409,
+                )
+            try:
+                layout = apply_facility_layout_operations(
+                    layout,
+                    [deepcopy(dict(item)) for item in pending_operations],
+                    base_revision=saved_revision,
+                )["document"]
+            except FacilityLayoutError as error:
+                raise FacilityLayoutAgentRuntimeError(
+                    getattr(error, "code", "facility_navigation_pending_operations_invalid"),
+                    str(error),
+                    status_code=getattr(error, "status_code", 409),
+                    details=getattr(error, "details", {}),
+                ) from error
+            current_revision = layout_revision(layout)
+            layout_provider = "facility-layout-session-validated-draft"
+        if requested_revision not in {None, saved_revision, current_revision}:
+            raise FacilityLayoutAgentRuntimeError(
+                "facility_layout_revision_conflict",
+                "The Facility Layout changed before Sage observed it.",
+                status_code=409,
+                details={
+                    "currentRevision": current_revision,
+                    "savedRevision": saved_revision,
+                },
+            )
         shell_ref = layout.get("sourceShellRef")
         policy_ref = layout.get("policySetRef")
         if not isinstance(shell_ref, Mapping) or not isinstance(
@@ -986,7 +1086,7 @@ class FacilityLayoutAgentRuntime:
                 "facility_layout",
                 layout,
                 revision=current_revision,
-                provider="facility-layout-repository",
+                provider=layout_provider,
             ),
             "assets": trusted_facility_source(
                 "industrial_asset_catalog",
@@ -1024,7 +1124,11 @@ class FacilityLayoutAgentRuntime:
                 "facility_diagnostics",
                 {
                     "findings": deepcopy(
-                        layout_receipt.get("findings", [])
+                        (
+                            []
+                            if generation_run_id is not None
+                            else layout_receipt.get("findings", [])
+                        )
                     ),
                     "metrics": {},
                 },
@@ -1090,6 +1194,9 @@ class FacilityLayoutAgentRuntime:
             policy_document=deepcopy(dict(policy.document)),
             asset_documents=tuple(asset_documents),
             evidence_authority=evidence_authority,
+            layout_document=deepcopy(layout),
+            base_layout_revision=saved_revision,
+            generation_run_id=generation_run_id,
         )
 
     def _principal_binding(
@@ -1359,6 +1466,184 @@ class FacilityLayoutAgentRuntime:
                 filter_hash=filter_hash,
                 offset=next_offset,
             )
+
+        if tool_name in NAVIGATION_READ_TOOL_NAMES:
+            if cursor:
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_navigation_agent_arguments_invalid",
+                    "Navigation tools do not accept read cursors.",
+                )
+
+            def navigation_result(payload: Mapping[str, Any]) -> dict[str, Any]:
+                result = {**base_envelope, **deepcopy(dict(payload))}
+                if len(_canonical_bytes(result)) > FACILITY_LAYOUT_AGENT_MAXIMUM_RESPONSE_BYTES:
+                    raise FacilityLayoutAgentRuntimeError(
+                        "facility_agent_response_budget_exceeded",
+                        "The compact navigation response exceeded its bound.",
+                    )
+                return result
+
+            def require_fields(
+                allowed: set[str],
+                required: set[str] = set(),
+            ) -> None:
+                unknown = sorted(set(args) - allowed)
+                missing = sorted(required - set(args))
+                if unknown or missing:
+                    raise FacilityLayoutAgentRuntimeError(
+                        "facility_navigation_agent_arguments_invalid",
+                        "Navigation tool arguments do not match the closed contract.",
+                        details={"unknownFields": unknown, "missingFields": missing},
+                    )
+
+            try:
+                if tool_name == OBSERVE_NAVIGATION_CONTEXT_TOOL:
+                    require_fields({"query", "actorClass", "maximumRecords"})
+                    actor_class = args.get("actorClass")
+                    if actor_class is not None and actor_class not in {
+                        "pedestrian", "vehicle"
+                    }:
+                        raise FacilityLayoutAgentRuntimeError(
+                            "facility_navigation_agent_arguments_invalid",
+                            "actorClass must be pedestrian or vehicle.",
+                        )
+                    maximum = args.get("maximumRecords", 20)
+                    if isinstance(maximum, bool) or not isinstance(maximum, int):
+                        raise FacilityLayoutAgentRuntimeError(
+                            "facility_navigation_agent_arguments_invalid",
+                            "maximumRecords must be an integer.",
+                        )
+                    return navigation_result(navigation_context_summary(
+                        bundle.layout_document,
+                        query=_clean_text(args.get("query"), 160),
+                        actor_class=actor_class,
+                        maximum_records=maximum,
+                    ))
+
+                if tool_name == COMPILE_NAVIGATION_SNAPSHOT_TOOL:
+                    require_fields(
+                        {"movementProgramId", "prototypeMode"},
+                        {"movementProgramId"},
+                    )
+                    request = {
+                        "movementProgramId": _stable_id(
+                            args.get("movementProgramId"), "movementProgramId"
+                        ),
+                    }
+                    if "prototypeMode" in args:
+                        if not isinstance(args["prototypeMode"], bool):
+                            raise FacilityLayoutAgentRuntimeError(
+                                "facility_navigation_agent_arguments_invalid",
+                                "prototypeMode must be boolean.",
+                            )
+                        request["prototypeMode"] = args["prototypeMode"]
+                    compiled = self.service.compile_navigation_snapshot(
+                        principal,
+                        site_id,
+                        layout_id,
+                        bundle.base_layout_revision,
+                        request,
+                        _trusted_draft=bundle.layout_document,
+                    )
+                    return navigation_result(compiled)
+
+                if tool_name == PLAN_ACTOR_JOURNEY_TOOL:
+                    require_fields(
+                        {
+                            "navigationPackageId",
+                            "movementProgramId",
+                            "prototypeMode",
+                            "allowReverse",
+                        },
+                        {"navigationPackageId", "movementProgramId"},
+                    )
+                    request = {
+                        "navigationPackageId": _stable_id(
+                            args.get("navigationPackageId"), "navigationPackageId"
+                        ),
+                        "movementProgramId": _stable_id(
+                            args.get("movementProgramId"), "movementProgramId"
+                        ),
+                    }
+                    for field in ("prototypeMode", "allowReverse"):
+                        if field in args:
+                            if not isinstance(args[field], bool):
+                                raise FacilityLayoutAgentRuntimeError(
+                                    "facility_navigation_agent_arguments_invalid",
+                                    f"{field} must be boolean.",
+                                )
+                            request[field] = args[field]
+                    planned = self.service.plan_actor_journey(
+                        principal,
+                        site_id,
+                        layout_id,
+                        bundle.base_layout_revision,
+                        request,
+                        _trusted_draft=bundle.layout_document,
+                    )
+                    return navigation_result(planned)
+
+                if tool_name == VALIDATE_ACTOR_JOURNEY_TOOL:
+                    require_fields({"journeySolutionId"}, {"journeySolutionId"})
+                    journey_id = _stable_id(
+                        args.get("journeySolutionId"), "journeySolutionId"
+                    )
+                    journey = self.service.get_actor_journey(
+                        principal, site_id, layout_id, journey_id
+                    )
+                    active_revision = layout_revision(bundle.layout_document)
+                    return navigation_result({
+                        "summary": journey_solution_summary(journey),
+                        "activeDraftRevision": active_revision,
+                        "generationLayoutRevision": journey[
+                            "generationLayoutRevision"
+                        ],
+                        "stale": (
+                            journey["generationLayoutRevision"]
+                            != active_revision
+                        ),
+                        "validationContextFingerprint": journey[
+                            "validationContextFingerprint"
+                        ],
+                        "mutated": False,
+                    })
+
+                require_fields(
+                    {"journeySolutionIds"}, {"journeySolutionIds"}
+                )
+                raw_ids = args.get("journeySolutionIds")
+                if (
+                    not isinstance(raw_ids, list)
+                    or not 2 <= len(raw_ids) <= 16
+                ):
+                    raise FacilityLayoutAgentRuntimeError(
+                        "facility_navigation_agent_arguments_invalid",
+                        "Journey comparison requires 2-16 unique journey IDs.",
+                    )
+                journey_ids = [
+                    _stable_id(value, "journeySolutionId") for value in raw_ids
+                ]
+                if len(journey_ids) != len(set(journey_ids)):
+                    raise FacilityLayoutAgentRuntimeError(
+                        "facility_navigation_agent_arguments_invalid",
+                        "Journey comparison IDs must be unique.",
+                    )
+                journeys = [
+                    self.service.get_actor_journey(
+                        principal, site_id, layout_id, journey_id
+                    )
+                    for journey_id in journey_ids
+                ]
+                return navigation_result(compare_journey_summaries(journeys))
+            except FacilityLayoutAgentRuntimeError:
+                raise
+            except FacilityLayoutError as error:
+                raise FacilityLayoutAgentRuntimeError(
+                    getattr(error, "code", "facility_navigation_tool_failed"),
+                    str(error),
+                    status_code=getattr(error, "status_code", 422),
+                    details=getattr(error, "details", {}),
+                ) from error
 
         if tool_name == "search_industrial_assets":
             query = _clean_text(args.get("query"), 120).lower()

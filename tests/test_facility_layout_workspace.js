@@ -13,6 +13,11 @@ const patternModule = require(path.join(
     'static',
     'facility_layout_patterns.js'
 ));
+const navigationAuthoringModule = require(path.join(
+    ROOT,
+    'static',
+    'facility_layout_navigation_authoring.js'
+));
 const SPATIAL_FIXTURE = JSON.parse(fs.readFileSync(path.join(
     ROOT,
     'tests',
@@ -60,6 +65,7 @@ class FakeElement {
         this.parentNode = null;
         this.children = [];
         this.attributes = {};
+        this.dataset = {};
         this.listeners = new Map();
         this.className = '';
         this.textContent = '';
@@ -1220,6 +1226,21 @@ class FakeSession {
         return this._gesture('Edit facility aisle');
     }
 
+    setFacilityNavigation(facilityNavigation) {
+        this.calls.push(['setFacilityNavigation', clone(facilityNavigation)]);
+        this.state.layout.extensions = Object.assign(
+            {},
+            this.state.layout.extensions || {},
+            { facilityNavigation: clone(facilityNavigation) }
+        );
+        this.state.operations.push({
+            op: 'set_facility_navigation',
+            facilityNavigation: clone(facilityNavigation),
+            authoringSource: 'plan_pointer',
+        });
+        return this._gesture('Author motion path');
+    }
+
     editZoneDimensions(id, dimensions) {
         this.calls.push(['editZoneDimensions', id, clone(dimensions)]);
         const value = this.state.layout.zones.find(item => item.zoneId === id);
@@ -1298,6 +1319,7 @@ class FakeAdapter {
         this.navigationModes = [];
         this.zoomFactors = [];
         this.gridVisibility = [];
+        this.layerVisibility = [];
         this.visualSettings = [];
         this.environmentSettings = [];
         this.scaleAtCalls = [];
@@ -1379,6 +1401,159 @@ class FakeAdapter {
             height: 600,
             captureStream() { return {}; },
         };
+        this.motionPresentations = [];
+        this.motionSnapshots = [];
+        this.motionClearCount = 0;
+        this.motionState = {
+            loaded: false,
+            playing: false,
+            playbackRateMultiplier: 1,
+        };
+        this.motionStateHandler = null;
+        this.activityPresentations = [];
+        this.activitySnapshots = [];
+        this.activityClearCount = 0;
+        this.activityStateHandler = null;
+        this.activityState = {
+            loaded: false,
+            playing: false,
+            playbackRateMultiplier: 1,
+            actors: [],
+        };
+        this.activity = {
+            load: (payload, activeRevision) => {
+                const scenario = payload.scenario || {};
+                this.activityState = {
+                    loaded: true,
+                    scenarioId: scenario.scenarioId,
+                    label: scenario.label,
+                    status: 'ready',
+                    playing: false,
+                    elapsedSeconds: 0,
+                    durationSeconds: Number(
+                        scenario.cycleDurationSeconds || 0
+                    ),
+                    playbackRateMultiplier: 1,
+                    actors: clone(scenario.actors || []),
+                    visibleActorTypes: {
+                        vehicle: true,
+                        operator: true,
+                        mobile_equipment: true,
+                    },
+                    pathsVisible: true,
+                    prototypeMode: scenario.prototypeMode === true,
+                    qualification: scenario.qualification,
+                    activeRevision,
+                };
+                if (this.activityStateHandler) {
+                    this.activityStateHandler(clone(this.activityState));
+                }
+                return clone(this.activityState);
+            },
+            play: () => {
+                this.activityState.playing = true;
+                if (this.activityStateHandler) {
+                    this.activityStateHandler(clone(this.activityState));
+                }
+                return clone(this.activityState);
+            },
+            pause: () => {
+                this.activityState.playing = false;
+                if (this.activityStateHandler) {
+                    this.activityStateHandler(clone(this.activityState));
+                }
+                return clone(this.activityState);
+            },
+            dispose: reason => {
+                this.activityState = {
+                    loaded: false,
+                    playing: false,
+                    statusReason: reason || null,
+                    actors: [],
+                };
+                if (this.activityStateHandler) {
+                    this.activityStateHandler(clone(this.activityState));
+                }
+                return true;
+            },
+            getState: () => clone(this.activityState),
+        };
+        this.motion = {
+            load: (payload, activeRevision) => {
+                const movement = payload.package.movement;
+                this.motionState = {
+                    loaded: true,
+                    packageId: payload.package.packageId,
+                    outcome: movement.outcome,
+                    playing: false,
+                    elapsedSeconds: 0,
+                    durationSeconds: Number(
+                        movement.estimatedTravelSeconds || 0
+                    ),
+                    distanceMeters: 0,
+                    totalDistanceMeters: Number(
+                        movement.totalDistanceMeters || 0
+                    ),
+                    sampleSpacingMeters: movement.clearance
+                        && movement.clearance.sampleSpacingMeters || null,
+                    clearanceAtValidatedSample: movement.clearance
+                        && movement.clearance.samples[0] || null,
+                    qualification: payload.package.qualification,
+                    disclosure: 'fixture disclosure',
+                    activeRevision: activeRevision,
+                    playbackRateMultiplier: 1,
+                };
+                if (this.motionStateHandler) {
+                    this.motionStateHandler(clone(this.motionState));
+                }
+                return clone(this.motionState);
+            },
+            play: () => {
+                this.motionState.playing = true;
+                if (this.motionStateHandler) {
+                    this.motionStateHandler(clone(this.motionState));
+                }
+                return clone(this.motionState);
+            },
+            pause: () => {
+                this.motionState.playing = false;
+                if (this.motionStateHandler) {
+                    this.motionStateHandler(clone(this.motionState));
+                }
+                return clone(this.motionState);
+            },
+            seek: value => {
+                this.motionState.elapsedSeconds = Number(value || 0);
+                if (this.motionStateHandler) {
+                    this.motionStateHandler(clone(this.motionState));
+                }
+                return clone(this.motionState);
+            },
+            setRate: value => {
+                this.motionState.playbackRateMultiplier = Number(value || 1);
+                if (this.motionStateHandler) {
+                    this.motionStateHandler(clone(this.motionState));
+                }
+                return clone(this.motionState);
+            },
+            dispose: reason => {
+                this.motionState = {
+                    loaded: false,
+                    playing: false,
+                    statusReason: reason || null,
+                };
+                if (this.motionStateHandler) {
+                    this.motionStateHandler(clone(this.motionState));
+                }
+                return true;
+            },
+            getState: () => clone(this.motionState),
+            setStateHandler: handler => {
+                this.motionStateHandler = typeof handler === 'function'
+                    ? handler : null;
+                return Boolean(this.motionStateHandler);
+            },
+        };
     }
 
     mount(host) {
@@ -1456,6 +1631,46 @@ class FakeAdapter {
     setProposalPreview(value) {
         this.proposalPreviews.push(clone(value));
         return true;
+    }
+
+    setMotionPresentation(value) {
+        this.motionPresentations.push(clone(value));
+        return true;
+    }
+
+    updateMotionSnapshot(value) {
+        this.motionSnapshots.push(clone(value));
+        return true;
+    }
+
+    clearMotionPresentation() {
+        this.motionClearCount += 1;
+        return true;
+    }
+
+    setActivityPresentation(value) {
+        this.activityPresentations.push(clone(value));
+        return true;
+    }
+
+    updateActivitySnapshot(value) {
+        this.activitySnapshots.push(clone(value));
+        return true;
+    }
+
+    clearActivityPresentation() {
+        this.activityClearCount += 1;
+        return true;
+    }
+
+    setActivityStateHandler(handler) {
+        this.activityStateHandler = typeof handler === 'function'
+            ? handler : null;
+        return Boolean(this.activityStateHandler);
+    }
+
+    getActivityState() {
+        return clone(this.activityState);
     }
 
     setTransientPlacementMove(ids, delta) {
@@ -1573,6 +1788,10 @@ class FakeAdapter {
             this.walkthroughHandler(this.getWalkthroughState());
         }
         return Boolean(this.walkthroughHandler);
+    }
+
+    setMotionStateHandler(handler) {
+        return this.motion.setStateHandler(handler);
     }
 
     setDroneStateHandler(handler) {
@@ -1753,6 +1972,12 @@ class FakeAdapter {
     setGridVisible(visible) {
         this.gridVisibility.push(Boolean(visible));
         return true;
+    }
+
+    setLayerVisibility(value) {
+        const visibility = clone(value);
+        this.layerVisibility.push(visibility);
+        return visibility;
     }
 
     setVisualSettings(value) {
@@ -2077,6 +2302,8 @@ function catalog() {
 function fixture(options) {
     const documentRef = new FakeDocument();
     const root = documentRef.createElement('div');
+    const motionPanelHost = options && options.externalMotionPanel
+        ? documentRef.createElement('aside') : null;
     const session = new FakeSession();
     const top = new FakeAdapter('top-plan');
     top.mounted = true;
@@ -2102,12 +2329,15 @@ function fixture(options) {
         threeAdapter: three,
         recordingRuntime,
         patternRuntime: patternModule,
+        navigationRuntime: options && options.navigationRuntime
+            || navigationAuthoringModule,
         recordingCountdownSeconds: options
             && options.recordingCountdownSeconds,
         assetCatalog: options && options.assetCatalog || catalog(),
         externalCommandSurface: Boolean(
             options && options.externalCommandSurface
         ),
+        motionPanelHost,
         gridSize: 0.5,
         planPreferenceStorage: options && options.planPreferenceStorage,
         eventToWorld(event) {
@@ -2118,6 +2348,9 @@ function fixture(options) {
         marqueeResolver: options && options.marqueeResolver,
         keyboardPlacementPoint: options && options.keyboardPlacementPoint,
         spatialAdvisor: options && options.spatialAdvisor,
+        motionTransport: options && options.motionTransport,
+        designTransport: options && options.designTransport,
+        capabilities: options && options.capabilities,
         ownsSpatialAdvisor: options && options.ownsSpatialAdvisor,
         useAuthoritativePlacementCandidates: Boolean(
             options && options.useAuthoritativePlacementCandidates
@@ -2129,6 +2362,7 @@ function fixture(options) {
     return {
         documentRef,
         root,
+        motionPanelHost,
         session,
         top,
         three,
@@ -2207,6 +2441,42 @@ function externalAssetTransfer(assetId) {
 }
 
 async function main() {
+    await check('resolved session error leaves the visible status bar', async () => {
+        const data = fixture();
+        // The real session returns Error references without JSON cloning.
+        data.session.getState = function () {
+            return Object.assign(clone(this.state), { lastError: this.state.lastError });
+        };
+        const interruption = new Error('Managed backend restart interrupted the held acknowledgment');
+        data.session.state.lastError = interruption;
+        data.session._notify();
+        data.session._notify();
+        assert.ok(data.workspace.statusText.textContent.includes(interruption.message));
+        data.session.state.lastError = null;
+        data.session._notify();
+        assert.strictEqual(data.workspace.lastError, null);
+        assert.ok(!data.workspace.statusText.textContent.includes(interruption.message));
+        assert.ok(!data.workspace.statusText.textContent.includes('Error:'));
+        data.workspace.destroy();
+    });
+
+    await check('resolving a session error preserves a newer workspace error', async () => {
+        const data = fixture();
+        data.session.getState = function () {
+            return Object.assign(clone(this.state), { lastError: this.state.lastError });
+        };
+        data.session.state.lastError = new Error('Interrupted transaction');
+        data.session._notify();
+        const newer = new Error('Current workspace failure');
+        data.workspace._setError(newer);
+        data.session.state.lastError = null;
+        data.session._notify();
+        assert.strictEqual(data.workspace.lastError, newer);
+        assert.ok(data.workspace.statusText.textContent.includes(newer.message));
+        assert.ok(!data.workspace.statusText.textContent.includes('Interrupted transaction'));
+        data.workspace.destroy();
+    });
+
     await check('exports UMD and CommonJS API with pure helpers', async () => {
         assert.strictEqual(workspaceModule.API_VERSION, 1);
         assert.strictEqual(typeof workspaceModule.createWorkspace, 'function');
@@ -2583,7 +2853,8 @@ async function main() {
             );
             assert.ok(data.root.textContent === '' || data.root.children.length > 0);
             assert.strictEqual(data.root.querySelectorAll('.ip-flw-assets').length, 0);
-            assert.strictEqual(data.workspace.shell.children.length, 2);
+            assert.strictEqual(data.workspace.shell.children.length, 3);
+            assert.strictEqual(data.workspace.designPanel.hidden, true);
             assert.strictEqual(data.workspace.assetBrowser.hidden, true);
             assert.strictEqual(
                 data.workspace.assetBrowser.getAttribute('role'),
@@ -4444,7 +4715,7 @@ async function main() {
             const controls = data.workspace.threeNavigation.querySelectorAll(
                 '[data-three-command]'
             );
-            assert.strictEqual(controls.length, 15);
+            assert.strictEqual(controls.length, 16);
             assert.deepStrictEqual(controls.map(button => (
                 button.getAttribute('data-three-command')
             )), [
@@ -4454,6 +4725,7 @@ async function main() {
                 'pan',
                 'view-orientation',
                 'display-settings',
+                'layers',
                 'orbit',
                 'walkthrough',
                 'drone',
@@ -4604,6 +4876,30 @@ async function main() {
             assert.strictEqual(data.three.gridVisibility.at(-1), false);
             assert.strictEqual(command('grid').getAttribute('aria-pressed'), 'false');
             assert.strictEqual(command('grid').getAttribute('title'), 'Show floor grid');
+            command('layers').dispatch('click');
+            assert.strictEqual(data.workspace.layerPanel.hidden, false);
+            assert.strictEqual(
+                data.workspace.getState().layers.panelOpen,
+                true
+            );
+            const routesLayer = data.workspace.layerPanel.querySelector(
+                '[data-facility-layer="routes"]'
+            );
+            routesLayer.checked = false;
+            routesLayer.dispatch('change');
+            assert.strictEqual(
+                data.workspace.getState().layers.visibility.routes,
+                false
+            );
+            assert.strictEqual(data.top.layerVisibility.at(-1).routes, false);
+            assert.strictEqual(data.three.layerVisibility.at(-1).routes, false);
+            data.workspace.layerPanel.querySelector(
+                '[data-layer-action="show-all"]'
+            ).dispatch('click');
+            assert.strictEqual(
+                data.workspace.getState().layers.visibility.routes,
+                true
+            );
             command('display-settings').dispatch('click');
             assert.strictEqual(data.workspace.threeSettingsPanel.hidden, false);
             assert.strictEqual(data.workspace.threeViewOrientationMenu.hidden, true);
@@ -5338,6 +5634,305 @@ async function main() {
             noThree.workspace.destroy();
         });
 
+    await check('motion evidence loads the same package in Plan and 3D without editing',
+        async () => {
+            const calls = [];
+            const packageId = 'fmp-' + 'a'.repeat(64);
+            const motionPayload = {
+                prototypeMode: true,
+                prototypeLabel: 'Prototype fixture on reference factory',
+                package: {
+                    packageId,
+                    qualification: 'revision-bound fixture evidence',
+                    movement: {
+                        outcome: 'accepted',
+                        totalDistanceMeters: 20,
+                        estimatedTravelSeconds: 10,
+                        clearance: {
+                            sampleSpacingMeters: 0.1,
+                            samples: [{
+                                distanceMeters: 0,
+                                clearanceMeters: 1.25,
+                            }],
+                        },
+                    },
+                },
+                facilityMotionEnvelope: {},
+                vehicleProfile: {},
+            };
+            const motionTransport = {
+                async createMotionPackage(value) {
+                    calls.push(['create', clone(value)]);
+                    return {
+                        packageId,
+                        layoutRevision: 'rev-motion',
+                        summary: {
+                            packageId,
+                            outcome: 'accepted',
+                            routeId: 'rt-main',
+                            distanceMeters: 20,
+                            plannerDurationEstimateSeconds: 10,
+                            sampleSpacingMeters: 0.1,
+                            qualification: 'revision-bound fixture evidence',
+                        },
+                    };
+                },
+                async getMotionPackage(value) {
+                    calls.push(['get', clone(value)]);
+                    return clone(motionPayload);
+                },
+            };
+            const data = fixture({ motionTransport });
+            const before = data.session.getState();
+            const summary = await data.workspace.startMotionPlayback({
+                routeId: 'rt-main',
+                vehicleProfileRef: {
+                    vehicleProfileId: 'profile-forklift',
+                    vehicleProfileRevision: 'b'.repeat(64),
+                },
+                travelDirection: 'forward',
+            });
+            assert.strictEqual(summary.outcome, 'accepted');
+            assert.deepStrictEqual(calls[0][1], {
+                baseRevision: 'rev-1',
+                operations: [],
+                request: {
+                    routeId: 'rt-main',
+                    vehicleProfileRef: {
+                        vehicleProfileId: 'profile-forklift',
+                        vehicleProfileRevision: 'b'.repeat(64),
+                    },
+                    travelDirection: 'forward',
+                },
+            });
+            assert.deepStrictEqual(calls[1][1], {
+                packageId,
+                activeRevision: 'rev-motion',
+            });
+            assert.deepStrictEqual(
+                data.top.motionPresentations[0],
+                motionPayload
+            );
+            assert.strictEqual(data.three.motionState.packageId, packageId);
+            assert.strictEqual(
+                data.workspace.getState().motion.packageId,
+                packageId
+            );
+            assert.strictEqual(data.workspace.motionPanel.hidden, false);
+            assert.strictEqual(
+                data.workspace.motionTitle.textContent,
+                'Motion playback - prototype fixture'
+            );
+            assert.ok(data.workspace.motionEvidence.textContent.includes(
+                'Prototype fixture on reference factory'
+            ));
+            const after = data.session.getState();
+            assert.deepStrictEqual(after.layout, before.layout);
+            assert.deepStrictEqual(after.operations, before.operations);
+            assert.strictEqual(after.dirty, false);
+            data.workspace.clearMotionPlayback('test_complete');
+            assert.strictEqual(data.top.motionClearCount, 1);
+            assert.strictEqual(data.workspace.motionPanel.hidden, true);
+            data.workspace.destroy();
+        });
+
+    await check('navigation activity plans existing programs and stays read only',
+        async () => {
+            const calls = [];
+            const scenarioPayload = {
+                scenario: {
+                    scenarioId: 'fas-nav-one',
+                    label: 'Navigation activity',
+                    prototypeMode: true,
+                    cycleDurationSeconds: 12,
+                    qualification: 'deterministic navigation presentation',
+                    actors: [{
+                        actorId: 'actor-nav-one',
+                        actorType: 'operator',
+                        label: 'Operator One',
+                    }],
+                },
+                actorPayloads: {},
+                navigationPresentation: {},
+            };
+            const motionTransport = {
+                async compileNavigationSnapshot(value) {
+                    calls.push(['compile', clone(value)]);
+                    return {
+                        summary: { navigationPackageId: 'navpkg-one' },
+                    };
+                },
+                async planActorJourney(value) {
+                    calls.push(['plan', clone(value)]);
+                    return {
+                        summary: {
+                            journeySolutionId: 'njs-one',
+                            outcome: 'accepted',
+                        },
+                    };
+                },
+                async buildNavigationActivityScenario(value) {
+                    calls.push(['build', clone(value)]);
+                    return {
+                        scenarioId: 'fas-nav-one',
+                        layoutRevision: 'rev-1',
+                        summary: {
+                            actorCount: 1,
+                            qualification: 'deterministic navigation presentation',
+                        },
+                    };
+                },
+                async getActivityScenario(value) {
+                    calls.push(['get', clone(value)]);
+                    return clone(scenarioPayload);
+                },
+            };
+            const data = fixture({ motionTransport });
+            const before = data.session.getState();
+            const summary = await data.workspace.startNavigationActivityPlayback({
+                movementProgramIds: ['nmp-one'],
+                prototypeMode: true,
+                scenarioLabel: 'Navigation activity',
+            });
+            assert.strictEqual(summary.scenarioId, 'fas-nav-one');
+            assert.deepStrictEqual(summary.journeySolutionIds, ['njs-one']);
+            assert.strictEqual(summary.plannedJourneyCount, 1);
+            assert.strictEqual(calls.length, 4);
+            assert.strictEqual(calls[0][1].request.movementProgramId, 'nmp-one');
+            assert.strictEqual(calls[1][1].request.navigationPackageId, 'navpkg-one');
+            assert.deepStrictEqual(
+                calls[2][1].request.journeySolutionIds,
+                ['njs-one']
+            );
+            assert.deepStrictEqual(
+                data.top.activityPresentations[0],
+                scenarioPayload
+            );
+            assert.strictEqual(data.three.activityState.scenarioId, 'fas-nav-one');
+            assert.strictEqual(data.workspace.motionPanel.hidden, false);
+            assert.deepStrictEqual(data.session.getState().layout, before.layout);
+            assert.deepStrictEqual(data.session.getState().operations, before.operations);
+            assert.strictEqual(data.session.getState().dirty, false);
+            data.workspace.destroy();
+        });
+
+    await check('navigation activity rollout flag fails closed before transport',
+        async () => {
+            let called = false;
+            const data = fixture({
+                capabilities: { navigationMultiActor: false },
+                motionTransport: {
+                    async compileNavigationSnapshot() {
+                        called = true;
+                    },
+                    async planActorJourney() {},
+                    async buildNavigationActivityScenario() {},
+                    async getActivityScenario() {},
+                },
+            });
+            await assert.rejects(
+                data.workspace.startNavigationActivityPlayback({
+                    movementProgramIds: ['nmp-one'],
+                    prototypeMode: true,
+                }),
+                error => error && error.code === 'facility_feature_disabled'
+            );
+            assert.strictEqual(called, false);
+            data.workspace.destroy();
+        });
+
+    await check('manual path validates before one unsaved navigation gesture',
+        async () => {
+            const validationCalls = [];
+            let accepted = false;
+            const motionTransport = {
+                async validateManualNavigationPath(value) {
+                    validationCalls.push(clone(value));
+                    return accepted ? {
+                        valid: true,
+                        invalidSegmentIndexes: [],
+                        findings: [],
+                        validationFingerprint: 'f'.repeat(64),
+                    } : {
+                        valid: false,
+                        invalidSegmentIndexes: [0],
+                        findings: [{
+                            code: 'facility_navigation_manual_segment_blocked',
+                            message: 'The first segment intersects a machine.',
+                        }],
+                        validationFingerprint: 'e'.repeat(64),
+                    };
+                },
+            };
+            const data = fixture({ motionTransport });
+            const baseRevision = 'd'.repeat(64);
+            data.session.state.baseRevision = baseRevision;
+            data.session.select('pl-b');
+            assert.strictEqual(data.workspace.openNavigationDialog(), true);
+            Object.assign(data.workspace.navigationState, {
+                actorProfileId: 'vehicle-profile-forklift',
+                actorProfileRevision: 'a'.repeat(64),
+                points: [{ x: 5, z: 2 }, { x: 10, z: 2 }],
+                loopMode: 'one_way',
+                direction: 'forward',
+                constraintMode: 'complete_override',
+            });
+
+            assert.strictEqual(
+                await data.workspace._applyNavigationPath(),
+                false
+            );
+            assert.strictEqual(
+                data.workspace.navigationState.validationStatus,
+                'invalid'
+            );
+            assert.deepStrictEqual(
+                data.workspace.navigationState.validation
+                    .invalidSegmentIndexes,
+                [0]
+            );
+            assert.strictEqual(
+                data.session.calls.some(call => (
+                    call[0] === 'setFacilityNavigation'
+                )),
+                false
+            );
+
+            accepted = true;
+            assert.strictEqual(
+                await data.workspace._applyNavigationPath(),
+                true
+            );
+            assert.strictEqual(
+                data.workspace.navigationState.validationStatus,
+                'validated'
+            );
+            const authored = data.session.calls.filter(call => (
+                call[0] === 'setFacilityNavigation'
+            ));
+            assert.strictEqual(authored.length, 1);
+            assert.strictEqual(
+                authored[0][1].manualPathConstraints[0].reviewStatus,
+                'pending'
+            );
+            assert.strictEqual(validationCalls.length, 2);
+            assert.strictEqual(validationCalls[1].baseRevision, baseRevision);
+            assert.deepStrictEqual(validationCalls[1].operations, []);
+            assert.strictEqual(
+                validationCalls[1].request.prototypeMode,
+                false
+            );
+            assert.deepStrictEqual(
+                validationCalls[1].request.actorProfileRef,
+                {
+                    profileKind: 'vehicle',
+                    profileId: 'vehicle-profile-forklift',
+                    profileRevision: 'a'.repeat(64),
+                }
+            );
+            data.workspace.destroy();
+        });
+
     await check('Plan and 3D tabs support manual-activation arrow navigation',
         async () => {
             const data = fixture();
@@ -5623,6 +6218,608 @@ async function main() {
             );
             data.workspace.destroy();
         });
+
+    await check('motion controls can dock outside the layout viewport',
+        async () => {
+            const css = fs.readFileSync(path.join(ROOT, 'static', 'facility_layout_workspace.css'), 'utf8');
+            const docked = css.match(/\.ip-flw-motion-panel\[data-motion-docked="true"\] \{([^}]+)\}/)[1];
+            assert.match(docked, /--ip-flw-panel-alt:\s*var\(--bg-input,/);
+            assert.doesNotMatch(docked, /--bg-secondary/);
+            const data = fixture({ externalMotionPanel: true });
+            assert.strictEqual(
+                data.workspace.motionPanel.parentNode,
+                data.motionPanelHost
+            );
+            assert.strictEqual(
+                data.workspace.motionPanel.getAttribute('data-motion-docked'),
+                'true'
+            );
+            assert.strictEqual(
+                data.workspace.viewportStack.querySelector(
+                    '.ip-flw-motion-panel'
+                ),
+                null
+            );
+            data.workspace.destroy();
+            assert.strictEqual(data.motionPanelHost.children.length, 0);
+        });
+
+    await check('a brief correction cancels and cannot be overwritten by an older preview',
+        async () => {
+            let resolveContinuation;
+            const cancelled = [];
+            const designTransport = {
+                continueDesignPreview() {
+                    return new Promise(resolve => {
+                        resolveContinuation = resolve;
+                    });
+                },
+                cancelDesignPreview(payload) {
+                    cancelled.push(clone(payload));
+                    return Promise.resolve({ status: 'cancelled' });
+                },
+                updateDesignBrief() {
+                    return Promise.resolve({
+                        brief: {
+                            briefId: 'brief-one',
+                            briefRevision: 'b'.repeat(64),
+                            semanticBody: {
+                                objective: { summary: 'Reduce loaded travel' },
+                                hardConstraints: [],
+                                preferences: [],
+                            },
+                        },
+                    });
+                },
+            };
+            const data = fixture({ designTransport });
+            data.workspace.designState.brief = {
+                briefId: 'brief-one',
+                briefRevision: 'a'.repeat(64),
+                semanticBody: {
+                    objective: { summary: 'Reduce loaded travel' },
+                    hardConstraints: [],
+                    preferences: [],
+                },
+            };
+            data.workspace.designState.run = {
+                runId: 'run-old',
+                runRevision: 'c'.repeat(64),
+                briefRevision: 'a'.repeat(64),
+            };
+
+            const oldPreview = data.workspace.runDesignPreview({
+                run_id: 'run-old',
+            });
+            await Promise.resolve();
+            const corrected = await data.workspace.updateDesignBriefFromIntent({
+                schema_version: 'facility-design-intent-v1',
+                operation: 'add_geometry_locks',
+                target_labels: ['Main Boulevard'],
+            });
+            assert.strictEqual(corrected.brief.briefRevision, 'b'.repeat(64));
+            assert.deepStrictEqual(cancelled, [{ runId: 'run-old' }]);
+
+            resolveContinuation({
+                status: 'completed',
+                continuationRequired: false,
+                proposalRefs: [],
+            });
+            await assert.rejects(oldPreview, error => (
+                error.code === 'facility_design_preview_superseded'
+            ));
+            assert.strictEqual(
+                data.workspace.designState.brief.briefRevision,
+                'b'.repeat(64)
+            );
+            assert.strictEqual(data.workspace.designState.run, null);
+            assert.deepStrictEqual(data.workspace.designState.proposals, []);
+            assert.strictEqual(data.workspace.designState.error, null);
+            assert.strictEqual(data.workspace.designState.status, 'brief_ready');
+            data.workspace.destroy();
+        });
+
+    await check('preview-only design capability compares but exposes no Apply command',
+        async () => {
+            const designTransport = {
+                startDesignPreview() {
+                    return Promise.resolve({
+                        runId: 'run-preview-only',
+                        runRevision: 'c'.repeat(64),
+                        briefRevision: 'a'.repeat(64),
+                        status: 'preview_ready',
+                        continuationRequired: false,
+                        proposalRefs: [{
+                            artifactId: 'proposal-preview-only',
+                            artifactRevision: 'b'.repeat(64),
+                        }],
+                    });
+                },
+                inspectDesignProposal() {
+                    return Promise.resolve({
+                        proposal: {
+                            proposalId: 'proposal-preview-only',
+                            proposalRevision: 'b'.repeat(64),
+                            resultLayoutRevision: 'd'.repeat(64),
+                            diffHash: 'e'.repeat(64),
+                            classification: { preferred: true },
+                        },
+                        evaluation: {
+                            metrics: [{
+                                metricId: 'loadedRouteDistanceMeters',
+                                value: 24,
+                            }],
+                        },
+                    });
+                },
+            };
+            const data = fixture({
+                designTransport,
+                capabilities: {
+                    designBrief: true,
+                    designLoopPreview: true,
+                    designLoopApply: true,
+                    agentWrite: false,
+                },
+            });
+            data.workspace.designState.active = true;
+            data.workspace.designState.brief = {
+                briefId: 'brief-preview-only',
+                briefRevision: 'a'.repeat(64),
+                semanticBody: {
+                    objective: { targetRefs: [] },
+                    hardConstraints: [],
+                    preferences: [],
+                },
+            };
+
+            const compared = await data.workspace.runDesignPreview({});
+
+            assert.strictEqual(compared.proposals.length, 1);
+            assert.strictEqual(
+                data.root.querySelector('.ip-flw-design-apply'),
+                null
+            );
+            await assert.rejects(
+                data.workspace.applySelectedDesignProposal(),
+                error => error.code === 'facility_feature_disabled'
+            );
+            data.workspace.destroy();
+        });
+
+    await check('design preview follows bounded continuation responses to terminal state',
+        async () => {
+            let continuationCalls = 0;
+            const designTransport = {
+                startDesignPreview() {
+                    return Promise.resolve({
+                        runId: 'run-continuation',
+                        runRevision: 'c'.repeat(64),
+                        briefRevision: 'a'.repeat(64),
+                        status: 'active',
+                        continuationRequired: true,
+                        proposalRefs: [],
+                    });
+                },
+                continueDesignPreview() {
+                    continuationCalls += 1;
+                    if (continuationCalls === 1) {
+                        return Promise.resolve({
+                            runId: 'run-continuation',
+                            status: 'active',
+                            continuationRequired: true,
+                            proposalRefs: [],
+                        });
+                    }
+                    return Promise.resolve({
+                        runId: 'run-continuation',
+                        status: 'preview_ready',
+                        continuationRequired: false,
+                        proposalRefs: [{
+                            artifactId: 'proposal-continuation',
+                            artifactRevision: 'b'.repeat(64),
+                        }],
+                    });
+                },
+                inspectDesignProposal() {
+                    return Promise.resolve({
+                        proposal: {
+                            proposalId: 'proposal-continuation',
+                            proposalRevision: 'b'.repeat(64),
+                            resultLayoutRevision: 'd'.repeat(64),
+                            diffHash: 'e'.repeat(64),
+                            classification: { preferred: true },
+                        },
+                        evaluation: { metrics: [] },
+                    });
+                },
+            };
+            const data = fixture({ designTransport });
+            data.workspace.designState.active = true;
+            data.workspace.designState.brief = {
+                briefId: 'brief-continuation',
+                briefRevision: 'a'.repeat(64),
+                semanticBody: {
+                    objective: { targetRefs: [] },
+                    hardConstraints: [],
+                    preferences: [],
+                },
+            };
+
+            const result = await data.workspace.runDesignPreview({});
+
+            assert.strictEqual(continuationCalls, 2);
+            assert.strictEqual(result.summary.status, 'preview_ready');
+            assert.strictEqual(result.proposals.length, 1);
+            data.workspace.destroy();
+        });
+
+    await check('design comparison exposes its exact source and one shared Plan and 3D overlay',
+        async () => {
+            const candidateLayout = layout();
+            candidateLayout.placements[0].transform.position.x = 3;
+            const designTransport = {
+                startDesignPreview() {
+                    return Promise.resolve({
+                        runId: 'run-overlay',
+                        runRevision: 'c'.repeat(64),
+                        briefRevision: 'a'.repeat(64),
+                        status: 'preview_ready',
+                        continuationRequired: false,
+                        objectiveEndpoints: {
+                            source: {
+                                entityKind: 'placement',
+                                entityId: 'pl-a',
+                                connectorId: 'output',
+                            },
+                            target: {
+                                entityKind: 'placement',
+                                entityId: 'pl-b',
+                                connectorId: 'input',
+                            },
+                        },
+                        proposalRefs: [{
+                            artifactId: 'proposal-overlay',
+                            artifactRevision: 'b'.repeat(64),
+                        }],
+                        baseline: {
+                            baselineId: 'baseline-overlay',
+                            baselineRevision: 'f'.repeat(64),
+                            layoutRevision: 'd'.repeat(64),
+                            feasible: true,
+                            metrics: [{
+                                metricId: 'loadedRouteDistanceMeters',
+                                value: 40,
+                            }],
+                        },
+                    });
+                },
+                inspectDesignProposal() {
+                    return Promise.resolve({
+                        proposal: {
+                            proposalId: 'proposal-overlay',
+                            proposalRevision: 'b'.repeat(64),
+                            resultLayoutRevision: 'd'.repeat(64),
+                            diffHash: 'e'.repeat(64),
+                            classification: { preferred: true },
+                        },
+                        evaluation: {
+                            metrics: [{
+                                metricId: 'loadedRouteDistanceMeters',
+                                value: 24,
+                            }],
+                        },
+                        candidate: { candidateLayout },
+                    });
+                },
+            };
+            const data = fixture({ designTransport });
+            data.workspace.designState.active = true;
+            data.workspace.designState.brief = {
+                briefId: 'brief-overlay',
+                briefRevision: 'a'.repeat(64),
+                semanticBody: {
+                    baseStateRef: {
+                        baseId: 'base-overlay',
+                        baseRevision: '1'.repeat(64),
+                        baseKind: 'editor_draft',
+                        layoutId: 'fl-workspace',
+                        layoutRevision: '2'.repeat(64),
+                    },
+                    objective: {
+                        targetRefs: [
+                            { entityKind: 'placement', entityId: 'pl-b' },
+                            { entityKind: 'placement', entityId: 'pl-a' },
+                        ],
+                    },
+                    hardConstraints: [{
+                        status: 'active',
+                        targetRefs: [{
+                            entityKind: 'placement',
+                            entityId: 'pl-b',
+                        }],
+                    }],
+                    preferences: [],
+                },
+            };
+
+            await data.workspace.runDesignPreview({});
+
+            const topPreview = data.top.proposalPreviews.at(-1);
+            const threePreview = data.three.proposalPreviews.at(-1);
+            assert.strictEqual(topPreview.proposalId, 'proposal-overlay');
+            assert.deepStrictEqual(topPreview.movedPlacementIds, ['pl-a']);
+            assert.deepStrictEqual(topPreview.preservedPlacementIds, ['pl-b']);
+            assert.deepStrictEqual(threePreview, topPreview);
+            assert.strictEqual(
+                data.workspace.designState.proposalPreviewVisible,
+                true
+            );
+            assert.strictEqual(
+                data.workspace.designSource.children[0].textContent,
+                'Unsaved editor draft'
+            );
+            assert.strictEqual(
+                data.workspace.designObjective.children[1].textContent,
+                'pl-a to pl-b'
+            );
+            assert.strictEqual(data.workspace.designLegend.children.length, 2);
+            data.workspace.destroy();
+        });
+
+    await check('ambiguous and stale design failures name and highlight exact affected IDs',
+        async () => {
+            const ambiguous = new Error('Choose one exact transfer point.');
+            ambiguous.code = 'facility_design_referent_ambiguous';
+            ambiguous.details = {
+                candidates: [
+                    { entityKind: 'placement', entityId: 'pl-a' },
+                    { entityKind: 'placement', entityId: 'pl-b' },
+                ],
+            };
+            const designTransport = {
+                updateDesignBrief() {
+                    if (!this.returnStale) return Promise.reject(ambiguous);
+                    const stale = new Error('The design brief changed.');
+                    stale.code = 'facility_design_brief_revision_conflict';
+                    stale.details = { currentBriefRevision: 'f'.repeat(64) };
+                    return Promise.reject(stale);
+                },
+            };
+            const data = fixture({ designTransport });
+            data.workspace.designState.brief = {
+                briefId: 'brief-ambiguous',
+                briefRevision: 'a'.repeat(64),
+                semanticBody: {
+                    objective: { targetRefs: [] },
+                    hardConstraints: [],
+                    preferences: [],
+                },
+            };
+            await assert.rejects(
+                data.workspace.updateDesignBriefFromIntent({}),
+                error => error.code === 'facility_design_referent_ambiguous'
+            );
+            assert.strictEqual(data.workspace.designState.attentionKind, 'ambiguous');
+            assert.deepStrictEqual(
+                data.session.getState().selection,
+                ['pl-a', 'pl-b']
+            );
+            assert.strictEqual(
+                data.root.getAttribute('data-design-attention'),
+                'ambiguous'
+            );
+            assert.strictEqual(
+                data.workspace.designProposalList.querySelectorAll(
+                    '[data-design-attention-entity]'
+                ).length,
+                2
+            );
+
+            data.workspace.designState.brief = {
+                briefId: 'brief-stale',
+                briefRevision: 'a'.repeat(64),
+                semanticBody: {
+                    objective: {
+                        targetRefs: [{
+                            entityKind: 'placement',
+                            entityId: 'pl-a',
+                        }],
+                    },
+                    hardConstraints: [],
+                    preferences: [],
+                },
+            };
+            designTransport.returnStale = true;
+            await assert.rejects(
+                data.workspace.updateDesignBriefFromIntent({}),
+                error => error.code === 'facility_design_brief_revision_conflict'
+            );
+            assert.strictEqual(data.workspace.designState.attentionKind, 'stale');
+            assert.deepStrictEqual(data.session.getState().selection, ['pl-a']);
+            assert.strictEqual(
+                data.root.getAttribute('data-design-attention'),
+                'stale'
+            );
+            data.workspace.destroy();
+        });
+
+    await check('construction bridge loads once, delegates explicitly and respects workspace availability', async () => {
+        const originalFetch = global.fetch;
+        const originalAdapter = global.InspectorProFacilityCommandAdapter;
+        const contract = require('../static/contracts/facility-construction-commands-v1.json');
+        const calls = [];
+        let fetches = 0;
+        let data;
+        let disabled;
+        try {
+            global.fetch = async url => {
+                assert.strictEqual(url, '/static/contracts/facility-construction-commands-v1.json');
+                fetches++;
+                return { ok: true, json: async () => contract };
+            };
+            global.InspectorProFacilityCommandAdapter = { createAdapter(schema, patterns, session, getCatalog) {
+                assert.deepStrictEqual(schema, contract);
+                assert.strictEqual(patterns, patternModule);
+                assert.strictEqual(session, data.session);
+                assert.deepStrictEqual(getCatalog(), data.workspace.assetCatalog);
+                return { execute: async request => { calls.push(request); return { requestId: request.requestId }; } };
+            } };
+            data = fixture();
+            const request = { requestId: 'explicit-targets', commandId: 'linear-pattern',
+                expectedDraftRevision: 'revision', arguments: { seedIds: ['pl-a'] } };
+            assert.deepStrictEqual(await data.workspace.executeConstructionCommand(request), { requestId: request.requestId });
+            await data.workspace.executeConstructionCommand(request);
+            assert.strictEqual(fetches, 1);
+            assert.deepStrictEqual(calls, [request, request]);
+            disabled = fixture({ capabilities: { manualAuthoring: false } });
+            await assert.rejects(disabled.workspace.executeConstructionCommand(request), /unavailable/);
+            data.workspace.destroy();
+            await assert.rejects(data.workspace.executeConstructionCommand(request), /unavailable/);
+            assert.strictEqual(fetches, 1);
+        } finally {
+            if (data) data.workspace.destroy();
+            if (disabled) disabled.workspace.destroy();
+            global.fetch = originalFetch;
+            global.InspectorProFacilityCommandAdapter = originalAdapter;
+        }
+    });
+
+    await check('construction preview renders candidate without editing; partial and stale results cannot apply', async () => {
+        let proposal;
+        let applied = 0;
+        const data = fixture({capabilities: {constructionPreview: true, constructionApply: true, agentWrite: true},
+            designTransport: {getConstructionPreview: async () => clone(proposal),
+                approveConstructionPreview: async () => { applied++; return {}; }}});
+        data.session.state.draftRevision = 'a'.repeat(64);
+        data.session.state.editorGenerationId = 'frame-a';
+        data.session._notify();
+        const original = clone(data.session.state.layout);
+        const candidate = clone(original);
+        candidate.placements[0].transform.position.x += 2;
+        proposal = {proposalId: 'fcp-' + 'b'.repeat(64), baseRevision: 'a'.repeat(64),
+            candidateRevision: 'c'.repeat(64), commandCount: 1, candidateLayout: candidate, validationScope: 'Prototype checks'};
+        await data.workspace.showConstructionPreview({...proposal, partial: true});
+        assert.deepStrictEqual(data.session.state.layout, original);
+        assert.strictEqual(data.workspace.lastLayoutFingerprint, JSON.stringify(candidate));
+        assert.ok(data.root.querySelector('[data-construction-action="apply"]').disabled);
+        await assert.rejects(data.workspace.applyConstructionPreview(), /unavailable/);
+        data.workspace.dismissConstructionPreview();
+        assert.strictEqual(data.workspace.lastLayoutFingerprint, JSON.stringify(original));
+        await data.workspace.showConstructionPreview(proposal);
+        data.session.state.editorGenerationId = 'frame-new';
+        data.session._notify();
+        await assert.rejects(data.workspace.applyConstructionPreview(), /editor changed/);
+        assert.strictEqual(data.workspace.lastLayoutFingerprint, JSON.stringify(original));
+        assert.strictEqual(applied, 0);
+        data.workspace.destroy();
+    });
+
+    await check('construction preview rejects superseded asynchronous responses', async () => {
+        let resolve;
+        const data = fixture({capabilities: {constructionPreview: true},
+            designTransport: {getConstructionPreview: () => new Promise(done => { resolve = done; })}});
+        data.session.state.draftRevision = 'a'.repeat(64);
+        data.session.state.editorGenerationId = 'frame-a';
+        data.session._notify();
+        const summary = {proposalId: 'fcp-' + 'b'.repeat(64), baseRevision: 'a'.repeat(64), candidateRevision: 'c'.repeat(64)};
+        const pending = data.workspace.showConstructionPreview(summary);
+        data.workspace.dismissConstructionPreview();
+        resolve({...summary, candidateLayout: layout()});
+        await assert.rejects(pending, /superseded/);
+        assert.strictEqual(data.workspace.constructionPreview, null);
+        data.workspace.destroy();
+    });
+
+    await check('generation preview shares Plan/3D, blocks edits and restores the untouched editor', async () => {
+        const source = {artifactKind: 'generation-source-context', artifactId: 'b'.repeat(64), artifactRevision: 'c'.repeat(64)};
+        let proposal;
+        const data = fixture({capabilities: {generationPlanning: true}, designTransport: {sessionId: 'test',
+            listGenerationPlanningSources: async () => ({sources: [{sourceContextRef: source, displayName: 'Reviewed', contextId: 'context'}]}),
+            inspectGenerationPlanningPreview: async () => clone(proposal)}});
+        data.session.state.draftRevision = 'a'.repeat(64);
+        data.session.state.editorGenerationId = 'frame-a';
+        data.session._notify();
+        const original = clone(data.session.getState());
+        const view = data.workspace.generationPlanningView;
+        await view.open();
+        view.select(source);
+        view.begin('turn-1');
+        const candidate = clone(original.layout);
+        candidate.placements[0].transform.position.x += 2;
+        proposal = {previewId: 'd'.repeat(64), previewRevision: 'e'.repeat(64), baseRevision: 'a'.repeat(64),
+            candidateRevision: 'f'.repeat(64), ledgerRevision: '1'.repeat(64), candidateLayout: candidate,
+            counts: {placements: candidate.placements.length, zones: candidate.zones.length}};
+        await view.show({...proposal, workspaceId: 'planning-test', clientTurnId: 'turn-1', sourceContextRef: source});
+        assert.deepStrictEqual(data.session.getState(), original);
+        assert.strictEqual(data.workspace.lastLayoutFingerprint, JSON.stringify(candidate));
+        data.workspace._setViewMode('3d');
+        assert.strictEqual(data.workspace.lastLayoutFingerprint, JSON.stringify(candidate));
+        await assert.rejects(data.workspace.executeCommand('rectangle-zone'), /Exit.*preview/);
+        await assert.rejects(data.workspace.executeCommand('save'), /Exit.*preview/);
+        assert.ok(!data.root.querySelector('[data-construction-action="apply"]'));
+        view.close();
+        assert.strictEqual(data.workspace.lastLayoutFingerprint, JSON.stringify(original.layout));
+        assert.deepStrictEqual(data.session.getState(), original);
+        data.workspace.destroy();
+    });
+
+    await check('brief-first planning adopts provisional context and shows only safe evidence links', async () => {
+        const source = {artifactKind: 'generation-provisional-context', artifactId: 'b'.repeat(64), artifactRevision: 'c'.repeat(64)};
+        let proposal;
+        const data = fixture({capabilities: {generationPlanning: true}, designTransport: {sessionId: 'test',
+            listGenerationPlanningSources: async () => ({sources: []}),
+            inspectGenerationPlanningPreview: async () => clone(proposal)}});
+        data.session.state.draftRevision = 'a'.repeat(64);
+        data.session.state.editorGenerationId = 'frame-a';
+        data.session._notify();
+        const original = clone(data.session.getState());
+        const view = data.workspace.generationPlanningView;
+        await view.open();
+        assert.strictEqual(view.reference().sourceContextRef, null);
+        view.begin('brief-turn');
+        proposal = {previewId: 'd'.repeat(64), previewRevision: 'e'.repeat(64), baseRevision: 'a'.repeat(64),
+            candidateRevision: 'f'.repeat(64), ledgerRevision: '1'.repeat(64), candidateLayout: clone(original.layout),
+            counts: {placements: 2, zones: 3}, planningNotes: {assumptions: ['Provisional count'], unknowns: ['Cycle time'],
+                sources: [{url: 'https://maker.example/manual', title: 'Manual'}, {url: 'javascript:alert(1)', title: 'Unsafe'}]}};
+        await view.show({...proposal, workspaceId: 'planning-test', clientTurnId: 'brief-turn', sourceContextRef: source});
+        assert.deepStrictEqual(view.reference().sourceContextRef, source);
+        const links = data.root.querySelectorAll('a');
+        assert.strictEqual(links.length, 1);
+        assert.strictEqual(links[0].getAttribute('href'), 'https://maker.example/manual');
+        assert.strictEqual(links[0].getAttribute('rel'), 'noopener noreferrer');
+        assert.deepStrictEqual(data.session.getState(), original);
+        view.close();
+        assert.strictEqual(view.reference(), null);
+        data.workspace.destroy();
+    });
+
+    await check('generation preview rejects late responses after correction, source change and destruction', async () => {
+        for (const action of ['correction', 'source', 'destroy', 'editor']) {
+            const source = {artifactKind: 'generation-source-context', artifactId: 'b'.repeat(64), artifactRevision: 'c'.repeat(64)};
+            let resolve;
+            const data = fixture({capabilities: {generationPlanning: true}, designTransport: {sessionId: 'test',
+                listGenerationPlanningSources: async () => ({sources: [{sourceContextRef: source, displayName: 'Reviewed', contextId: 'ctx'}]}),
+                inspectGenerationPlanningPreview: () => new Promise(done => { resolve = done; })}});
+            data.session.state.draftRevision = 'a'.repeat(64);
+            data.session.state.editorGenerationId = 'frame-a';
+            data.session._notify();
+            const view = data.workspace.generationPlanningView;
+            await view.open(); view.select(source); view.begin('turn-1');
+            const summary = {previewId: 'd'.repeat(64), previewRevision: 'e'.repeat(64), baseRevision: 'a'.repeat(64),
+                candidateRevision: 'f'.repeat(64), ledgerRevision: '1'.repeat(64), workspaceId: 'planning-test',
+                clientTurnId: 'turn-1', sourceContextRef: source};
+            const pending = view.show(summary);
+            if (action === 'correction') view.begin('turn-2');
+            else if (action === 'source') view.select(null);
+            else if (action === 'destroy') data.workspace.destroy();
+            else data.session.state.editorGenerationId = 'frame-b';
+            resolve({...summary, candidateLayout: layout()});
+            await assert.rejects(pending, /superseded/);
+            assert.strictEqual(view.activeLayout(), null);
+            data.workspace.destroy();
+        }
+    });
 
     await check('destroy removes listeners, subscription, adapters, and DOM exactly once',
         async () => {

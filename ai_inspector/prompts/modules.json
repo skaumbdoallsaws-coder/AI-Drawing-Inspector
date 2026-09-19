@@ -3,8 +3,15 @@
   "modules": [
     {
       "id": "sage.policy.fai-assembly-impact",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "path": "policies/fai_assembly_impact.md",
+      "agents": ["policy"],
+      "modes": ["*"]
+    },
+    {
+      "id": "sage.policy.fai-inverted-pyramid",
+      "version": "1.0.0",
+      "path": "policies/fai_inverted_pyramid_examples.md",
       "agents": ["policy"],
       "modes": ["*"]
     },

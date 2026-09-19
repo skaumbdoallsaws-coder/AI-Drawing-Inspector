@@ -19,6 +19,14 @@ function event(seq, type, id = 'r1', extra = {}) {
     return { v: 1, event: type, response_id: id, seq, ts: 1, ...extra };
 }
 
+test('planning status labels name actual phases without displaying arbitrary provider text', () => {
+    assert.strictEqual(runtime.statusLabel('generation_search'), 'Researching public sources');
+    assert.strictEqual(runtime.statusLabel('generation_geometry'), 'Generating and validating geometry');
+    assert.strictEqual(runtime.statusLabel('generation_repair'), 'Reviewing a planning issue');
+    assert.strictEqual(runtime.statusLabel('<img src=x onerror=alert(1)>'), 'Preparing the response');
+    assert.strictEqual(runtime.statusLabel('__proto__'), 'Preparing the response');
+});
+
 test('SSE decoder tolerates byte-boundary line splits', () => {
     const decoder = new runtime.SseDecoder();
     const wire = 'data: ' + JSON.stringify(event(0, 'response_started')) + '\n\n'

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "facility-activity-visual-alignments-v1",
+  "entries": [
+    {
+      "assetId": "asset-2329t24-steel-flush-platform-truck",
+      "assetDefinitionRevision": "27f60a795756dabb8ac9a1cd8aadbb10974ae42504f4e0facd2dc6e88b90eb45",
+      "forwardAxis": "+Z",
+      "authority": "curated_revision_bound_visual_review",
+      "evidenceArtifact": "generated/industrial_assets/local_library/2329t24-steel-flush-platform-truck/2329T24_Steel Flush Platform Truck_colored.glb"
+    },
+    {
+      "assetId": "asset-forklift",
+      "assetDefinitionRevision": "da1345e51b1a32c38ad8388799154ba77dc59e99890a855caac3648548f5be5f",
+      "forwardAxis": "+Z",
+      "authority": "curated_revision_bound_visual_review",
+      "evidenceArtifact": "generated/industrial_assets/p0_spike/toyota_forklift/User Library-Toyota Forklift_colored.glb"
+    },
+    {
+      "assetId": "asset-forklift-2610x2264x986-minimum-height-green",
+      "assetDefinitionRevision": "62e93539bc7bedeba184c0d0d59882d2464d9f01ee24e4dac1f73fc60d2147d9",
+      "forwardAxis": "-X",
+      "authority": "curated_revision_bound_visual_review",
+      "evidenceArtifact": "generated/industrial_assets/local_library/forklift-2610x2264x986-minimum-height-green/10-22042013-087162_colored.glb"
+    },
+    {
+      "assetId": "asset-forklift-telescopic-red",
+      "assetDefinitionRevision": "ab73c19258c171d1c3cab496cd317b1d896293249ddd62c57cba81a61829f214",
+      "forwardAxis": "-X",
+      "authority": "curated_revision_bound_visual_review",
+      "evidenceArtifact": "generated/industrial_assets/local_library/forklift-telescopic-red/forklift_truck-with_fork-red_colored.glb"
+    },
+    {
+      "assetId": "asset-operator",
+      "assetDefinitionRevision": "773d3761fb0796587de7a21ccb8b368f4334c71f73c06682b84472d69d4b5757",
+      "forwardAxis": "+Z",
+      "authority": "curated_revision_bound_visual_review",
+      "evidenceArtifact": "generated/industrial_assets/local_library/operator/User Library-operator-3_colored.glb"
+    }
+  ]
+}

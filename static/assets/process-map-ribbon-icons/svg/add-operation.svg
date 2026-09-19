@@ -1,0 +1,30 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Add Operation Stage</title>
+      <defs>
+  <linearGradient id="add-operation-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#B992FF"/>
+    <stop offset="1" stop-color="#7043D6"/>
+  </linearGradient>
+  <linearGradient id="add-operation-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="add-operation-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+  <linearGradient id="add-operation-plus" x1="20" y1="19" x2="29" y2="29" gradientUnits="userSpaceOnUse"><stop stop-color="#6AE6AD"/><stop offset="1" stop-color="#1FA66E"/></linearGradient>
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#add-operation-shadow)">
+  <rect x="5" y="6" width="21" height="19" rx="5" fill="url(#add-operation-g)" stroke="#4E2E9D" stroke-width="1.1"/>
+  <circle cx="5" cy="11.5" r="1.8" fill="#F2EBFF" stroke="#6B45C4" stroke-width="0.9"/>
+  <circle cx="5" cy="19.5" r="1.8" fill="#F2EBFF" stroke="#6B45C4" stroke-width="0.9"/>
+  <circle cx="26" cy="15.5" r="1.8" fill="#F2EBFF" stroke="#6B45C4" stroke-width="0.9"/>
+  <path d="M11 12H20M11 16H18" stroke="#F7F1FF" stroke-width="1.4"/>
+  <circle cx="24.2" cy="24.2" r="5.1" fill="url(#add-operation-plus)" stroke="#147B51" stroke-width="1"/>
+  <path d="M24.2 21.4V27M21.4 24.2H27" stroke="#fff" stroke-width="1.8"/>
+</g>
+
+      </g>
+    </svg>

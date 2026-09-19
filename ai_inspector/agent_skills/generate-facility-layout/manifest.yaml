@@ -1,6 +1,6 @@
 schema_version: 1
 id: generate-facility-layout
-version: 1.5.0
+version: 1.10.0
 description: Plan a factory hierarchically from macro zones through flows and production cells, then request one deterministic, revision-bound 2D/3D ghost preview.
 agents:
   - sage
@@ -27,6 +27,16 @@ allowed_tools:
   - analyze_facility_fit
   - preview_facility_move
   - build_facility_layout_preview
+  - generate_full_factory_draft
+  - generate_facility_planning_prototype_draft
+  - amend_facility_program_resource_batch_draft
+  - observe_navigation_context
+  - compile_navigation_snapshot
+  - plan_actor_journey
+  - validate_actor_journey
+  - compare_journey_alternatives
+  - propose_navigation_intent
+  - build_activity_scenario
 side_effects: []
 depends_on: []
 conflicts_with: []

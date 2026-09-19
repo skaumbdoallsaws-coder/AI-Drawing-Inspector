@@ -6,7 +6,7 @@
   "classification": "held_out_post_contract",
   "authorship": "independent post-KF1 fixture; prompts were not copied from or used to author the canonical command registry",
   "frozenAtUtc": "2026-08-26T23:45:00Z",
-  "contractRevision": "2e89470341090643fa2242aad0ec8e57f6627ff35c87f799c1daa481957e7415",
+  "contractRevision": "5835b856e1ff3f23554fb86a4805eeb6bfc00a6d5d8a7b44353288eddb88ba54",
   "regressionCaseBinding": {
     "path": "tests/fixtures/facility_layout/semantic_intelligence/evaluation-cases-v1.json",
     "classification": "regression_visible_not_held_out",

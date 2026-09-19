@@ -1,0 +1,27 @@
+schema_version: 1
+skill_id: publish-operations-manual
+version: 1.0.0
+intents:
+  - generate_operations_manual
+  - publish_operations_manual
+required_evidence: []
+forbidden_context: []
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request:
+    - generate_operations_manual_draft
+    - publish_operations_manual
+output_contract:
+  format: concise_operations_manual_prototype_receipt
+  maximum_sentences: 8
+failure_behavior:
+  missing_required_context: report_missing_evidence
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: operations-manual-prototype-v1
+context_budget:
+  maximum_tokens: 12000
+  priorities:
+    - assembly.parts
+    - assembly.mates

@@ -525,6 +525,25 @@ def _validate_document_shape(
                 "invalid_authority_document",
                 "Vehicle footprint vertices must be unique.",
             )
+        asset_ref = normalized.get("assetDefinitionRef")
+        if asset_ref is not None:
+            asset_ref = _require_mapping(
+                asset_ref,
+                "assetDefinitionRef",
+            )
+            _require_exact_keys(
+                asset_ref,
+                {"assetId", "assetDefinitionRevision"},
+                "assetDefinitionRef",
+            )
+            _validate_stable_id(
+                asset_ref.get("assetId"),
+                "assetDefinitionRef.assetId",
+            )
+            _validate_revision(
+                asset_ref.get("assetDefinitionRevision"),
+                "assetDefinitionRef.assetDefinitionRevision",
+            )
     else:
         raise AuthorityValidationError(
             "unsupported_authority_kind",

@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -8,6 +9,8 @@ const vm = require('vm');
 const ROOT = path.resolve(__dirname, '..');
 const MODULE_PATH = path.join(ROOT, 'static', 'facility_layout_session.js');
 const facilitySession = require(MODULE_PATH);
+const constructionAdapter = require('../static/facility_layout_command_adapter.js');
+const constructionContract = require('../static/contracts/facility-construction-commands-v1.json');
 const facilityPatterns = require(path.join(
     ROOT,
     'static',
@@ -31,6 +34,22 @@ async function check(name, fn) {
 
 function clone(value) {
     return JSON.parse(JSON.stringify(value));
+}
+
+function canonicalValue(value) {
+    if (Array.isArray(value)) return value.map(canonicalValue);
+    if (!value || typeof value !== 'object') return value;
+    const result = {};
+    Object.keys(value).sort().forEach(key => {
+        result[key] = canonicalValue(value[key]);
+    });
+    return result;
+}
+
+function canonicalHash(value) {
+    return crypto.createHash('sha256')
+        .update(JSON.stringify(canonicalValue(value)), 'utf8')
+        .digest('hex');
 }
 
 function placement(placementId, assetId, x, z, positionMode) {
@@ -305,6 +324,20 @@ function applyFakeOperations(base, operations) {
             document.extensions = document.extensions || {};
             document.extensions.facilityPlan = clone(operation.planSettings);
             break;
+        case 'set_facility_navigation':
+            if (!['plan_pointer', 'sage_semantic'].includes(
+                operation.authoringSource
+            )) {
+                throw operationError(
+                    'facility_navigation_coordinate_authority_forbidden',
+                    'Navigation coordinates require the Plan pointer surface'
+                );
+            }
+            document.extensions = document.extensions || {};
+            document.extensions.facilityNavigation = clone(
+                operation.facilityNavigation
+            );
+            break;
         case 'clear_layout_contents':
             document.zones = [];
             document.floorMarkings = [];
@@ -414,6 +447,22 @@ function fakeAuthority(initialLayout, options) {
                 applyLayoutProposal: config.applyLayoutProposal,
                 undoGenerationDraft: config.undoGenerationDraft,
                 saveGenerationDraft: config.saveGenerationDraft,
+                prepareDesignProposalApply:
+                    config.prepareDesignProposalApply,
+                commitDesignProposalApply:
+                    config.commitDesignProposalApply,
+                acknowledgeDesignProposalApply:
+                    config.acknowledgeDesignProposalApply,
+                recoverDesignProposalApply:
+                    config.recoverDesignProposalApply,
+                saveDesignProposalDraft:
+                    config.saveDesignProposalDraft,
+                prepareDesignUndo: config.prepareDesignUndo,
+                acknowledgeDesignUndo: config.acknowledgeDesignUndo,
+                loadDesignUndoRecovery: config.loadDesignUndoRecovery,
+                persistDesignUndoRecovery:
+                    config.persistDesignUndoRecovery,
+                clearDesignUndoRecovery: config.clearDesignUndoRecovery,
                 createIdempotencyKey: config.createIdempotencyKey,
                 placementCandidatePreview: async request => {
                     candidatePreviewCalls.push(clone(request));
@@ -1451,6 +1500,110 @@ async function main() {
             );
             await session.deleteSelected();
             assert.strictEqual(session.getState().layout.routes.length, 0);
+        });
+
+    await check('manual navigation intent is one unsaved undoable gesture',
+        async () => {
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            const navigation = {
+                schemaVersion: 1,
+                anchors: [],
+                movementPrograms: [],
+                manualPathConstraints: [],
+                handoffPrograms: [],
+            };
+            await session.setFacilityNavigation(navigation);
+            let state = session.getState();
+            assert.strictEqual(state.dirty, true);
+            assert.strictEqual(state.history.length, 1);
+            assert.strictEqual(state.history[0].operationCount, 1);
+            assert.deepStrictEqual(
+                state.layout.extensions.facilityNavigation,
+                navigation
+            );
+            assert.strictEqual(
+                authority.layout.extensions
+                    && authority.layout.extensions.facilityNavigation,
+                undefined
+            );
+            assert.deepStrictEqual(authority.previewCalls[0].operations, [{
+                op: 'set_facility_navigation',
+                authoringSource: 'plan_pointer',
+                facilityNavigation: navigation,
+            }]);
+            await session.undo();
+            state = session.getState();
+            assert.strictEqual(state.dirty, false);
+            assert.strictEqual(
+                state.layout.extensions
+                    && state.layout.extensions.facilityNavigation,
+                undefined
+            );
+            await session.redo();
+            await session.save();
+            assert.deepStrictEqual(
+                authority.layout.extensions.facilityNavigation,
+                navigation
+            );
+            assert.strictEqual(session.getState().dirty, false);
+        });
+
+    await check('semantic navigation proposal is one unsaved exact Undo',
+        async () => {
+            const initial = layout();
+            initial.extensions = {
+                facilityNavigation: {
+                    schemaVersion: 1,
+                    anchors: [{
+                        navigationAnchorId: 'na-existing-home',
+                        localPosition: { x: 2, z: 3 },
+                    }],
+                    movementPrograms: [],
+                    manualPathConstraints: [{
+                        manualPathConstraintId: 'nmc-existing-guide',
+                        authoredPolyline: [
+                            { x: 2, z: 3 },
+                            { x: 8, z: 3 },
+                        ],
+                    }],
+                    handoffPrograms: [],
+                },
+            };
+            const authority = fakeAuthority(initial);
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            const before = JSON.stringify(session.getState().layout);
+            const proposal = clone(
+                initial.extensions.facilityNavigation
+            );
+            proposal.movementPrograms.push({
+                movementProgramId: 'nmp-sage-proposal',
+                evidenceStatus: 'inferred',
+                reviewStatus: 'pending',
+            });
+
+            await session.proposeFacilityNavigation(proposal);
+            const proposed = session.getState();
+            assert.strictEqual(proposed.dirty, true);
+            assert.strictEqual(proposed.history.length, 1);
+            assert.deepStrictEqual(authority.previewCalls[0].operations, [{
+                op: 'set_facility_navigation',
+                authoringSource: 'sage_semantic',
+                facilityNavigation: proposal,
+            }]);
+            assert.deepStrictEqual(
+                proposed.layout.extensions.facilityNavigation
+                    .manualPathConstraints,
+                initial.extensions.facilityNavigation.manualPathConstraints
+            );
+            await session.undo();
+            assert.strictEqual(
+                JSON.stringify(session.getState().layout),
+                before
+            );
+            assert.strictEqual(session.getState().dirty, false);
         });
 
     await check('mixed equipment cell pattern is one atomic undoable gesture',
@@ -2622,6 +2775,8 @@ async function main() {
                 saveEligibility: 'eligible',
                 writable: true,
                 prototypeMode: true,
+                workflowScope: 'full_factory_generation',
+                fullFactoryProgramRevision: 'b'.repeat(64),
                 receiptChain: ['stage-receipt-1'],
             });
             const review = session.getState();
@@ -2629,6 +2784,14 @@ async function main() {
             assert.strictEqual(review.canUndo, true);
             assert.strictEqual(review.canSave, true);
             assert.strictEqual(review.generatedDraft.runId, 'fgr-generated-01');
+            assert.strictEqual(
+                review.generatedDraft.workflowScope,
+                'full_factory_generation'
+            );
+            assert.strictEqual(
+                review.generatedDraft.fullFactoryProgramRevision,
+                'b'.repeat(64)
+            );
             assert.strictEqual(review.layout.zones.length, 1);
             await assert.rejects(
                 session.createRectangleZone(
@@ -2700,6 +2863,868 @@ async function main() {
             assert.strictEqual(undone.dirty, false);
             assert.strictEqual(undone.generatedDraft, null);
         });
+
+    await check('authority-lost design Undo restores local history and blocks Save or apply',
+        async () => {
+            let rootUndoFrame = null;
+            let prepareApplyCalls = 0;
+            let undoAcknowledgements = 0;
+            const authority = fakeAuthority(layout(), {
+                prepareDesignProposalApply: async request => {
+                    prepareApplyCalls += 1;
+                    rootUndoFrame = clone(request.rootUndoFrame);
+                    const candidateLayout = clone(rootUndoFrame.draftLayout);
+                    findPlacement(candidateLayout, 'pl-b').transform.position.x = 12;
+                    const resultLayoutRevision = canonicalHash(candidateLayout);
+                    const transactionBindingRevision = 'd'.repeat(64);
+                    return {
+                        transaction: {
+                            transaction: {
+                                transactionId: 'transaction-local-undo',
+                                proposalBinding: { resultLayoutRevision },
+                            },
+                            transactionRevision: 'prepared-local-undo',
+                        },
+                        transactionBindingRevision,
+                        candidateLayout,
+                        candidateOperations: [{
+                            op: 'move_placement',
+                            placementId: 'pl-b',
+                            position: { x: 12, y: 0, z: 2 },
+                            movementKind: 'automatic',
+                        }],
+                        expectedInstallationFingerprint: canonicalHash({
+                            commandJournalHash:
+                                request.expectedResultCommandJournalHash,
+                            draftRevision: resultLayoutRevision,
+                            editorGenerationId:
+                                request.expectedResultEditorGenerationId,
+                            proposalId: request.proposalId,
+                            proposalRevision: request.proposalRevision,
+                            transactionBindingRevision,
+                        }),
+                        adoption: {
+                            adoptionToken: 'adoption-local-undo',
+                            adoption: { adoptionId: 'adoption-local-undo' },
+                        },
+                    };
+                },
+                commitDesignProposalApply: async () => ({
+                    transaction: {
+                        transaction: {
+                            transactionId: 'transaction-local-undo',
+                        },
+                        transactionRevision: 'committed-local-undo',
+                    },
+                }),
+                acknowledgeDesignProposalApply: async () => ({
+                    transaction: { transactionRevision: 'active-local-undo' },
+                }),
+                recoverDesignProposalApply: async () => ({ recovered: true }),
+                prepareDesignUndo: async () => ({
+                    mode: 'local_only',
+                    readiness: 'stale_local_restore',
+                    rootUndoFrame: clone(rootUndoFrame),
+                }),
+                acknowledgeDesignUndo: async () => {
+                    undoAcknowledgements += 1;
+                },
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.movePlacements([{
+                placementId: 'pl-a',
+                position: { x: 3, y: 0, z: 1 },
+            }], 'Manual edit before proposal');
+            await session.applyDesignProposal({
+                proposalId: 'proposal-local-undo',
+                proposalRevision: 'a'.repeat(64),
+            });
+
+            const restored = await session.undoDesignProposal();
+            assert.strictEqual(byId(restored.layout, 'pl-a').transform.position.x, 3);
+            assert.strictEqual(byId(restored.layout, 'pl-b').transform.position.x, 4);
+            assert.strictEqual(restored.historyCursor, 1);
+            assert.strictEqual(restored.designAuthorityState, 'stale_local_restore');
+            assert.strictEqual(restored.canSave, false);
+            assert.strictEqual(undoAcknowledgements, 0);
+            await assert.rejects(
+                session.save(),
+                error => error.code === 'facility_design_base_rebind_required'
+            );
+            await assert.rejects(
+                session.applyDesignProposal({
+                    proposalId: 'proposal-after-authority-loss',
+                    proposalRevision: 'b'.repeat(64),
+                }),
+                error => error.code === 'facility_design_base_rebind_required'
+            );
+            assert.strictEqual(prepareApplyCalls, 1);
+
+            const nextUndo = await session.undo();
+            assert.strictEqual(byId(nextUndo.layout, 'pl-a').transform.position.x, 1);
+            assert.strictEqual(nextUndo.historyCursor, 0);
+            assert.strictEqual(nextUndo.designAuthorityState, 'stale_local_restore');
+        });
+
+    await check('authority-lost proposal Undo makes restored generation Undo local-only',
+        async () => {
+            const base = layout();
+            const generated = clone(base);
+            generated.displayName = 'Expired generated Facility';
+            let rootUndoFrame = null;
+            const generationUndoCalls = [];
+            const authority = fakeAuthority(base, {
+                undoGenerationDraft: async request => {
+                    generationUndoCalls.push(clone(request));
+                },
+                prepareDesignProposalApply: async request => {
+                    rootUndoFrame = clone(request.rootUndoFrame);
+                    const candidateLayout = clone(rootUndoFrame.draftLayout);
+                    findPlacement(candidateLayout, 'pl-b').transform.position.x = 14;
+                    const resultLayoutRevision = canonicalHash(candidateLayout);
+                    const transactionBindingRevision = 'e'.repeat(64);
+                    return {
+                        transaction: {
+                            transaction: {
+                                transactionId: 'transaction-generated-local',
+                                proposalBinding: { resultLayoutRevision },
+                            },
+                            transactionRevision: 'prepared-generated-local',
+                        },
+                        transactionBindingRevision,
+                        candidateLayout,
+                        candidateOperations: [{
+                            op: 'move_placement',
+                            placementId: 'pl-b',
+                            position: { x: 14, y: 0, z: 2 },
+                            movementKind: 'automatic',
+                        }],
+                        expectedInstallationFingerprint: canonicalHash({
+                            commandJournalHash:
+                                request.expectedResultCommandJournalHash,
+                            draftRevision: resultLayoutRevision,
+                            editorGenerationId:
+                                request.expectedResultEditorGenerationId,
+                            proposalId: request.proposalId,
+                            proposalRevision: request.proposalRevision,
+                            transactionBindingRevision,
+                        }),
+                        adoption: {
+                            adoptionToken: 'adoption-generated-local',
+                            adoption: { adoptionId: 'adoption-generated-local' },
+                        },
+                    };
+                },
+                commitDesignProposalApply: async () => ({
+                    transaction: {
+                        transaction: {
+                            transactionId: 'transaction-generated-local',
+                        },
+                        transactionRevision: 'committed-generated-local',
+                    },
+                }),
+                acknowledgeDesignProposalApply: async () => ({
+                    transaction: { transactionRevision: 'active-generated-local' },
+                }),
+                recoverDesignProposalApply: async () => ({ recovered: true }),
+                prepareDesignUndo: async () => ({
+                    mode: 'local_only',
+                    readiness: 'stale_local_restore',
+                    rootUndoFrame: clone(rootUndoFrame),
+                }),
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            session.installGenerationDraft({
+                runId: 'fgr-expired-before-local-undo',
+                status: 'running',
+                currentStageId: 'primary_circulation',
+                completedStageId: 'macro_departments',
+                baseLayoutRevision: authority.revision,
+                draftLayoutRevision: canonicalHash(generated),
+                draftLayout: generated,
+                cumulativeProposal: null,
+                saveEligibility: 'eligible',
+                writable: true,
+                prototypeMode: true,
+                receiptChain: ['stage-receipt-local'],
+            });
+            await session.applyDesignProposal({
+                proposalId: 'proposal-generated-local',
+                proposalRevision: 'c'.repeat(64),
+            });
+
+            const restored = await session.undoDesignProposal();
+            assert.strictEqual(restored.generatedDraft.authorityLost, true);
+            assert.strictEqual(restored.canSave, false);
+            const generationUndone = await session.undo();
+            assert.deepStrictEqual(generationUndoCalls, []);
+            assert.strictEqual(generationUndone.generatedDraft, null);
+            assert.deepStrictEqual(generationUndone.layout, base);
+            assert.strictEqual(
+                generationUndone.designAuthorityState,
+                'stale_local_restore'
+            );
+        });
+
+    await check('explicit Save consumes an installed design transaction once',
+        async () => {
+            let candidateLayout = null;
+            const saveCalls = [];
+            const authority = fakeAuthority(layout(), {
+                prepareDesignProposalApply: async request => {
+                    candidateLayout = clone(request.rootUndoFrame.draftLayout);
+                    findPlacement(candidateLayout, 'pl-b').transform.position.x = 16;
+                    const resultLayoutRevision = canonicalHash(candidateLayout);
+                    const transactionBindingRevision = 'f'.repeat(64);
+                    return {
+                        transaction: {
+                            transaction: {
+                                transactionId: 'transaction-design-save',
+                                proposalBinding: { resultLayoutRevision },
+                            },
+                            transactionRevision: 'prepared-design-save',
+                        },
+                        transactionBindingRevision,
+                        candidateLayout,
+                        candidateOperations: [{
+                            op: 'move_placement',
+                            placementId: 'pl-b',
+                            position: { x: 16, y: 0, z: 2 },
+                            movementKind: 'automatic',
+                        }],
+                        expectedInstallationFingerprint: canonicalHash({
+                            commandJournalHash:
+                                request.expectedResultCommandJournalHash,
+                            draftRevision: resultLayoutRevision,
+                            editorGenerationId:
+                                request.expectedResultEditorGenerationId,
+                            proposalId: request.proposalId,
+                            proposalRevision: request.proposalRevision,
+                            transactionBindingRevision,
+                        }),
+                        adoption: {
+                            adoptionToken: 'adoption-design-save',
+                            adoption: { adoptionId: 'adoption-design-save' },
+                        },
+                    };
+                },
+                commitDesignProposalApply: async () => ({
+                    transaction: {
+                        transaction: {
+                            transactionId: 'transaction-design-save',
+                        },
+                        transactionRevision: 'committed-design-save',
+                    },
+                }),
+                acknowledgeDesignProposalApply: async () => ({
+                    transaction: { transactionRevision: 'active-design-save' },
+                }),
+                recoverDesignProposalApply: async () => ({ recovered: true }),
+                saveDesignProposalDraft: async request => {
+                    saveCalls.push(clone(request));
+                    return {
+                        savedLayout: {
+                            layout: clone(candidateLayout),
+                            revision: 'saved-design-revision',
+                        },
+                        saveReceipt: {
+                            receiptId: 'receipt-design-save',
+                        },
+                        transaction: {
+                            transactionRevision: 'saved-design-transaction',
+                        },
+                    };
+                },
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            const applied = await session.applyDesignProposal({
+                proposalId: 'proposal-design-save',
+                proposalRevision: 'd'.repeat(64),
+            });
+            assert.strictEqual(applied.dirty, true);
+            const expectedDraftRevision = applied.draftRevision;
+            const expectedJournalHash = applied.commandJournalHash;
+
+            const saved = await session.save();
+            assert.deepStrictEqual(saveCalls, [{
+                transactionId: 'transaction-design-save',
+                expectedTransactionRevision: 'active-design-save',
+                observedDraftRevision: expectedDraftRevision,
+                observedCommandJournalHash: expectedJournalHash,
+                explicitApproval: true,
+            }]);
+            assert.deepStrictEqual(authority.applyCalls, []);
+            assert.strictEqual(saved.state.dirty, false);
+            assert.strictEqual(saved.state.designProposalDraft, null);
+            assert.strictEqual(saved.state.baseRevision, 'saved-design-revision');
+            assert.strictEqual(byId(saved.state.layout, 'pl-b').transform.position.x, 16);
+            assert.strictEqual(saved.receipt.receiptId, 'receipt-design-save');
+        });
+
+    await check('design replacement failure restores A and exact Undo restores O history',
+        async () => {
+            const preparedCalls = [];
+            const commitCalls = [];
+            const recoveryCalls = [];
+            const undoAcknowledgements = [];
+            let rootUndoFrame = null;
+            let activeProposalId = null;
+            const authority = fakeAuthority(layout(), {
+                prepareDesignProposalApply: async request => {
+                    preparedCalls.push(clone(request));
+                    if (!rootUndoFrame) rootUndoFrame = clone(request.rootUndoFrame);
+                    activeProposalId = request.proposalId;
+                    const candidateLayout = clone(request.rootUndoFrame.draftLayout);
+                    const targetX = request.proposalId === 'proposal-a' ? 11 : 21;
+                    findPlacement(candidateLayout, 'pl-b').transform.position.x = targetX;
+                    const resultLayoutRevision = canonicalHash(candidateLayout);
+                    const transactionBindingRevision = request.proposalId === 'proposal-a'
+                        ? 'binding-a' : 'binding-b';
+                    const transactionId = request.transactionId || 'transaction-design-one';
+                    const expectedInstallationFingerprint = canonicalHash({
+                        commandJournalHash:
+                            request.expectedResultCommandJournalHash,
+                        draftRevision: resultLayoutRevision,
+                        editorGenerationId:
+                            request.expectedResultEditorGenerationId,
+                        proposalId: request.proposalId,
+                        proposalRevision: request.proposalRevision,
+                        transactionBindingRevision,
+                    });
+                    return {
+                        transaction: {
+                            transaction: {
+                                transactionId,
+                                proposalBinding: { resultLayoutRevision },
+                            },
+                            transactionRevision: 'prepared-' + request.proposalId,
+                        },
+                        transactionBindingRevision,
+                        candidateLayout,
+                        candidateOperations: [{
+                            op: 'move_placement',
+                            placementId: 'pl-b',
+                            position: { x: targetX, y: 0, z: 2 },
+                            movementKind: 'automatic',
+                        }],
+                        expectedInstallationFingerprint,
+                        adoption: {
+                            adoptionToken: 'adoption-' + request.proposalId,
+                            adoption: { adoptionId: 'adoption-' + request.proposalId },
+                        },
+                    };
+                },
+                commitDesignProposalApply: async request => {
+                    commitCalls.push(clone(request));
+                    return {
+                        transaction: {
+                            transaction: {
+                                transactionId: request.transactionId,
+                            },
+                            transactionRevision: 'committed-' + activeProposalId,
+                        },
+                    };
+                },
+                acknowledgeDesignProposalApply: async () => {
+                    if (activeProposalId === 'proposal-b') {
+                        throw operationError(
+                            'facility_design_browser_acknowledgement_failed',
+                            'Injected proposal B installation failure'
+                        );
+                    }
+                    return {
+                        transaction: {
+                            transactionRevision: 'active-proposal-a',
+                        },
+                    };
+                },
+                recoverDesignProposalApply: async request => {
+                    recoveryCalls.push(clone(request));
+                    return { recovered: true };
+                },
+                prepareDesignUndo: async request => ({
+                    mode: 'coordinated',
+                    rootUndoFrame: clone(rootUndoFrame),
+                    transaction: {
+                        transactionRevision: 'undo-prepared-one',
+                    },
+                    request: clone(request),
+                }),
+                acknowledgeDesignUndo: async request => {
+                    undoAcknowledgements.push(clone(request));
+                    return { undone: true };
+                },
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.movePlacements([{
+                placementId: 'pl-a',
+                position: { x: 2, y: 0, z: 1 },
+            }], 'Manual edit one');
+            await session.movePlacements([{
+                placementId: 'pl-b',
+                position: { x: 5, y: 0, z: 2 },
+            }], 'Manual edit two');
+            const frameO = session.captureDesignEditorFrame();
+            assert.strictEqual(frameO.cursor, 2);
+
+            const stateA = await session.applyDesignProposal({
+                proposalId: 'proposal-a',
+                proposalRevision: 'a'.repeat(64),
+            });
+            assert.strictEqual(byId(stateA.layout, 'pl-a').transform.position.x, 2);
+            assert.strictEqual(byId(stateA.layout, 'pl-b').transform.position.x, 11);
+            assert.strictEqual(stateA.operations.length, 3);
+            assert.strictEqual(
+                stateA.designProposalDraft.transactionRevision,
+                'active-proposal-a'
+            );
+
+            await assert.rejects(
+                session.applyDesignProposal({
+                    proposalId: 'proposal-b',
+                    proposalRevision: 'b'.repeat(64),
+                }),
+                error => error.code
+                    === 'facility_design_browser_acknowledgement_failed'
+            );
+            const restoredA = session.getState();
+            assert.strictEqual(byId(restoredA.layout, 'pl-b').transform.position.x, 11);
+            assert.strictEqual(restoredA.operations.length, 3);
+            assert.strictEqual(restoredA.designProposalDraft.proposalId, 'proposal-a');
+            assert.strictEqual(recoveryCalls.length, 1);
+            assert.strictEqual(preparedCalls[1].transactionId, 'transaction-design-one');
+
+            const restoredO = await session.undoDesignProposal();
+            assert.strictEqual(byId(restoredO.layout, 'pl-a').transform.position.x, 2);
+            assert.strictEqual(byId(restoredO.layout, 'pl-b').transform.position.x, 5);
+            assert.strictEqual(restoredO.operations.length, 2);
+            assert.strictEqual(restoredO.designProposalDraft, null);
+            assert.strictEqual(undoAcknowledgements.length, 1);
+            assert.strictEqual(commitCalls.length, 2);
+
+            const oneMoreUndo = await session.undo();
+            assert.strictEqual(byId(oneMoreUndo.layout, 'pl-a').transform.position.x, 2);
+            assert.strictEqual(byId(oneMoreUndo.layout, 'pl-b').transform.position.x, 4);
+            assert.strictEqual(oneMoreUndo.operations.length, 1);
+        });
+
+    await check('lost design Undo acknowledgment retains a retryable recovery handle',
+        async () => {
+            let rootUndoFrame = null;
+            let recoveryRecord = null;
+            let prepareUndoCalls = 0;
+            let acknowledgeUndoCalls = 0;
+            let serverUndoCompleted = false;
+            const authority = fakeAuthority(layout(), {
+                prepareDesignProposalApply: async request => {
+                    rootUndoFrame = clone(request.rootUndoFrame);
+                    const candidateLayout = clone(rootUndoFrame.draftLayout);
+                    findPlacement(candidateLayout, 'pl-b').transform.position.x = 15;
+                    const resultLayoutRevision = canonicalHash(candidateLayout);
+                    const transactionBindingRevision = '9'.repeat(64);
+                    return {
+                        transaction: {
+                            transaction: {
+                                transactionId: 'transaction-undo-retry',
+                                proposalBinding: { resultLayoutRevision },
+                            },
+                            transactionRevision: 'prepared-undo-retry',
+                        },
+                        transactionBindingRevision,
+                        candidateLayout,
+                        candidateOperations: [{
+                            op: 'move_placement',
+                            placementId: 'pl-b',
+                            position: { x: 15, y: 0, z: 2 },
+                            movementKind: 'automatic',
+                        }],
+                        expectedInstallationFingerprint: canonicalHash({
+                            commandJournalHash:
+                                request.expectedResultCommandJournalHash,
+                            draftRevision: resultLayoutRevision,
+                            editorGenerationId:
+                                request.expectedResultEditorGenerationId,
+                            proposalId: request.proposalId,
+                            proposalRevision: request.proposalRevision,
+                            transactionBindingRevision,
+                        }),
+                        adoption: {
+                            adoptionToken: 'adoption-undo-retry',
+                            adoption: { adoptionId: 'adoption-undo-retry' },
+                        },
+                    };
+                },
+                commitDesignProposalApply: async () => ({
+                    transaction: {
+                        transaction: { transactionId: 'transaction-undo-retry' },
+                        transactionRevision: 'committed-undo-retry',
+                    },
+                }),
+                acknowledgeDesignProposalApply: async () => ({
+                    transaction: { transactionRevision: 'active-undo-retry' },
+                }),
+                recoverDesignProposalApply: async () => ({ recovered: true }),
+                prepareDesignUndo: async request => {
+                    prepareUndoCalls += 1;
+                    if (serverUndoCompleted) {
+                        return {
+                            mode: 'already_undone',
+                            readiness: 'ready',
+                            rootUndoFrame: clone(rootUndoFrame),
+                            transaction: {
+                                transaction: {
+                                    transactionId: request.transactionId,
+                                    status: 'undone',
+                                },
+                                transactionRevision: 'undone-retry',
+                            },
+                        };
+                    }
+                    return {
+                        mode: 'coordinated',
+                        readiness: 'undo_acknowledgment_pending',
+                        rootUndoFrame: clone(rootUndoFrame),
+                        transaction: {
+                            transaction: {
+                                transactionId: request.transactionId,
+                                proposalBinding: {
+                                    proposalId: 'proposal-undo-retry',
+                                    proposalRevision: 'a'.repeat(64),
+                                },
+                                installationBindingTransactionRevision:
+                                    '9'.repeat(64),
+                            },
+                            transactionRevision: 'undo-pending-retry',
+                        },
+                    };
+                },
+                acknowledgeDesignUndo: async () => {
+                    acknowledgeUndoCalls += 1;
+                    if (acknowledgeUndoCalls === 1) {
+                        serverUndoCompleted = true;
+                        throw operationError(
+                            'facility_design_undo_acknowledgment_failed',
+                            'Injected lost Undo acknowledgment'
+                        );
+                    }
+                    return { outcome: 'already_undone' };
+                },
+                persistDesignUndoRecovery: async record => {
+                    recoveryRecord = clone(record);
+                },
+                loadDesignUndoRecovery: async () => clone(recoveryRecord),
+                clearDesignUndoRecovery: async () => {
+                    recoveryRecord = null;
+                },
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.movePlacements([{
+                placementId: 'pl-a',
+                position: { x: 3, y: 0, z: 1 },
+            }], 'Manual edit retained by Undo');
+            await session.applyDesignProposal({
+                proposalId: 'proposal-undo-retry',
+                proposalRevision: 'a'.repeat(64),
+            });
+
+            await assert.rejects(
+                session.undoDesignProposal(),
+                error => error.code
+                    === 'facility_design_undo_acknowledgment_failed'
+            );
+            const pending = session.getState();
+            assert.strictEqual(byId(pending.layout, 'pl-a').transform.position.x, 3);
+            assert.strictEqual(byId(pending.layout, 'pl-b').transform.position.x, 4);
+            assert.strictEqual(pending.historyCursor, 1);
+            assert.strictEqual(
+                pending.designProposalDraft.status,
+                'undo_acknowledgment_pending'
+            );
+            assert.strictEqual(
+                pending.designAuthorityState,
+                'undo_acknowledgment_pending'
+            );
+            assert.strictEqual(pending.canSave, false);
+            assert.strictEqual(recoveryRecord.phase, 'acknowledgment_pending');
+
+            const reloaded = authority.makeSession();
+            reloaded.load(authority.initialReceipt());
+            const completed = await reloaded.resumeDesignUndoRecovery();
+            assert.strictEqual(completed.designProposalDraft, null);
+            assert.strictEqual(completed.designAuthorityState, 'ready');
+            assert.strictEqual(completed.historyCursor, 1);
+            assert.strictEqual(
+                byId(completed.layout, 'pl-a').transform.position.x,
+                3
+            );
+            assert.strictEqual(
+                byId(completed.layout, 'pl-b').transform.position.x,
+                4
+            );
+            assert.strictEqual(recoveryRecord, null);
+            assert.strictEqual(prepareUndoCalls, 2);
+            assert.strictEqual(acknowledgeUndoCalls, 1);
+
+            const priorUndo = await reloaded.undo();
+            assert.strictEqual(byId(priorUndo.layout, 'pl-a').transform.position.x, 1);
+            assert.strictEqual(priorUndo.historyCursor, 0);
+        });
+
+    await check('design proposal accepts the ordinary edit_route kernel operation',
+        async () => {
+            const base = layout();
+            base.routes.push({
+                routeId: 'rt-material',
+                label: 'Material route',
+                routeKind: 'material',
+                sourceEndpoint: {
+                    kind: 'world_point',
+                    position: { x: 0, y: 0, z: 0 },
+                },
+                targetEndpoint: {
+                    kind: 'world_point',
+                    position: { x: 10, y: 0, z: 0 },
+                },
+                routingMode: 'polyline',
+                centerline: [
+                    { x: 0, y: 0, z: 0 },
+                    { x: 10, y: 0, z: 0 },
+                ],
+                corridorWidth: 3,
+                routeFingerprint: 'f'.repeat(64),
+                sourceRevisions: { layoutBaseRevision: 'a'.repeat(64) },
+                requirements: [],
+                evidence: [],
+                extensions: {},
+            });
+            const authority = fakeAuthority(base, {
+                prepareDesignProposalApply: async request => {
+                    const candidateLayout = clone(request.rootUndoFrame.draftLayout);
+                    const route = findRoute(candidateLayout, 'rt-material');
+                    route.centerline = [
+                        { x: 0, y: 0, z: 0 },
+                        { x: 5, y: 0, z: 2 },
+                        { x: 10, y: 0, z: 0 },
+                    ];
+                    route.routeFingerprint = 'e'.repeat(64);
+                    const resultLayoutRevision = canonicalHash(candidateLayout);
+                    const transactionBindingRevision = 'binding-route';
+                    return {
+                        transaction: {
+                            transaction: {
+                                transactionId: 'transaction-route',
+                                proposalBinding: { resultLayoutRevision },
+                            },
+                            transactionRevision: 'prepared-route',
+                        },
+                        transactionBindingRevision,
+                        candidateLayout,
+                        candidateOperations: [{
+                            op: 'edit_route',
+                            routeId: 'rt-material',
+                            patch: {
+                                centerline: clone(route.centerline),
+                                routeFingerprint: route.routeFingerprint,
+                            },
+                        }],
+                        expectedInstallationFingerprint: canonicalHash({
+                            commandJournalHash:
+                                request.expectedResultCommandJournalHash,
+                            draftRevision: resultLayoutRevision,
+                            editorGenerationId:
+                                request.expectedResultEditorGenerationId,
+                            proposalId: request.proposalId,
+                            proposalRevision: request.proposalRevision,
+                            transactionBindingRevision,
+                        }),
+                        adoption: {
+                            adoptionToken: 'adoption-route',
+                            adoption: { adoptionId: 'adoption-route' },
+                        },
+                    };
+                },
+                commitDesignProposalApply: async request => ({
+                    transaction: {
+                        transaction: { transactionId: request.transactionId },
+                        transactionRevision: 'committed-route',
+                    },
+                }),
+                acknowledgeDesignProposalApply: async () => ({
+                    transaction: { transactionRevision: 'active-route' },
+                }),
+                recoverDesignProposalApply: async () => ({ recovered: true }),
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            const applied = await session.applyDesignProposal({
+                proposalId: 'proposal-route',
+                proposalRevision: 'a'.repeat(64),
+            });
+            assert.strictEqual(applied.operations[0].op, 'edit_route');
+            assert.strictEqual(applied.layout.routes[0].centerline.length, 3);
+        });
+
+    await check('approved construction installs once and exact Undo invalidates old approval', async () => {
+        const initial = layout();
+        const baseRevision = canonicalHash(initial);
+        let saves = 0, previews = 0;
+        const session = facilitySession.createSession({sessionId: 'browser-session',
+            previewOperations: async request => {
+                previews += 1;
+                assert.strictEqual(request.baseRevision, baseRevision);
+                const result = applyFakeOperations(initial, request.operations);
+                return {document: result.document, revision: canonicalHash(result.document), createdIds: result.createdIds};
+            }, applyOperations: async () => { saves += 1; throw new Error('Save forbidden'); },
+        });
+        session.load({layout: initial, revision: baseRevision});
+        const before = session.getState();
+        const operations = [{op: 'move_placement', placementId: 'pl-a', position: {x: 12, y: 0, z: 12}, movementKind: 'user'}];
+        const candidate = applyFakeOperations(initial, operations).document;
+        const approval = {approvalId: 'fca-' + 'a'.repeat(64), baseRevision,
+            candidateRevision: canonicalHash(candidate), operations,
+            binding: {expectedDraftRevision: baseRevision, editorGenerationId: before.editorGenerationId, sessionId: 'browser-session'}};
+        const foreign = {...approval, binding: {...approval.binding, sessionId: 'another-session'}};
+        await assert.rejects(session.installConstructionApproval(foreign), error => error.code === 'facility_command_stale');
+        assert.strictEqual(previews, 0);
+        await assert.rejects(session.installConstructionApproval({...approval, candidateRevision: 'b'.repeat(64)}),
+            error => error.code === 'facility_command_stale');
+        assert.deepStrictEqual(session.getState().layout, before.layout);
+        assert.deepStrictEqual(session.getState().history, before.history);
+        await session.installConstructionApproval(approval);
+        assert.deepStrictEqual(session.getState().layout, candidate);
+        assert.strictEqual(session.getState().history.length, 1);
+        const after = session.getState(), count = previews;
+        await session.installConstructionApproval(approval);
+        assert.strictEqual(previews, count);
+        assert.deepStrictEqual(session.getState(), after);
+        await session.undo();
+        assert.deepStrictEqual(session.getState().layout, before.layout);
+        assert.strictEqual(session.getState().draftRevision, before.draftRevision);
+        await assert.rejects(session.installConstructionApproval(approval), error => error.code === 'facility_command_stale');
+        assert.strictEqual(saves, 0);
+    });
+
+    await check('explicit construction builds attaches groups repeats retries and undoes without saving', async () => {
+        const initial = layout();
+        initial.placements = [];
+        initial.zones = [];
+        initial.floorMarkings = [];
+        const authority = fakeAuthority(initial);
+        const session = authority.makeSession();
+        session.load(authority.initialReceipt());
+        const catalog = [
+            { assetId: 'table', assetDefinitionRevision: 'rev-table', width: 3, depth: 2, height: 1,
+                supportSurfaces: [{ surfaceId: 'worktop', allowedSides: ['above'],
+                    localFrame: { origin: { x: 0, y: 1, z: 0 }, xAxis: { x: 1, y: 0, z: 0 },
+                        zAxis: { x: 0, y: 0, z: 1 }, normal: { x: 0, y: 1, z: 0 } },
+                    bounds: { minimumX: -1.5, maximumX: 1.5, minimumZ: -1, maximumZ: 1 } }] },
+            { assetId: 'device', assetDefinitionRevision: 'rev-device', width: 0.3, depth: 0.3, height: 0.2 },
+        ];
+        // These are trusted fixture placements, not model-authored coordinates.
+        await session.placeAssets([catalog[0], catalog[0], catalog[1]].map((asset, index) => ({
+            assetId: asset.assetId, assetDefinitionRevision: asset.assetDefinitionRevision,
+            worldPosition: { x: 10 + index * 5, y: 0, z: 10 },
+        })));
+        const [tableA, tableB, device] = session.getState().layout.placements.map(item => item.placementId);
+        const executor = constructionAdapter.createAdapter(constructionContract, facilityPatterns, session, () => catalog);
+        let sequence = 0;
+        const run = (commandId, args) => executor.execute({ commandId, arguments: args,
+            requestId: 'cell-test-' + (++sequence), expectedDraftRevision: session.getState().draftRevision });
+        session.select(device); // Dialog selection must not determine the target.
+        await run('cell-layout', { selectionIds: [tableA, tableB], strategyId: 'line',
+            targetBounds: { width: 15, depth: 8 }, gap: 0.5, rows: 1, orientation: 'preserve',
+            angleDegrees: 0, invertU: false, sourceUnit: 'm' });
+        await run('surface-stack', { supportId: tableA, childIds: [device], surfaceId: 'worktop',
+            itemGap: 0.05, inset: 0.05 });
+        const group = await run('create-cell-group', { selectionIds: [tableA, tableB, device], label: 'Assembly', envelopePadding: 0.2 });
+        assert.strictEqual(group.cells.length, 1);
+        assert.strictEqual(group.cells[0].memberIds.length, 3);
+        const beforePattern = clone(session.getState().layout);
+        const request = { commandId: 'linear-pattern', arguments: { seedIds: [group.cells[0].cellId],
+            count: 3, direction: 'north', spacing: 15, sourceUnit: 'm' },
+            requestId: 'repeat-cell', expectedDraftRevision: session.getState().draftRevision };
+        const receipt = await executor.execute(request);
+        assert.strictEqual(receipt.cells.length, 2);
+        assert.strictEqual(receipt.createdIds.length, 8);
+        const repeated = clone(session.getState().layout);
+        receipt.cells.forEach(cell => {
+            assert.strictEqual(cell.memberIds.length, 3);
+            const child = repeated.placements.find(item => cell.memberIds.includes(item.placementId) && item.assetId === 'device');
+            assert.ok(cell.memberIds.includes(child.snapRelationship.supportPlacementId));
+            assert.notStrictEqual(child.snapRelationship.supportPlacementId, tableA);
+        });
+        const previewCount = authority.previewCalls.length;
+        assert.deepStrictEqual(await executor.execute(request), receipt);
+        assert.strictEqual(authority.previewCalls.length, previewCount);
+        await assert.rejects(executor.execute({ ...request, arguments: { ...request.arguments, count: 4 } }),
+            error => error.code === 'facility_command_idempotency_conflict');
+        await assert.rejects(executor.execute({ ...request, requestId: 'stale', expectedDraftRevision: 'stale' }),
+            error => error.code === 'facility_command_stale');
+        await session.undo();
+        assert.deepStrictEqual(session.getState().layout, beforePattern);
+        await assert.rejects(executor.execute(request), error => error.code === 'facility_command_stale');
+        while (session.getState().canUndo) await session.undo();
+        assert.deepStrictEqual(session.getState().layout, initial);
+        assert.deepStrictEqual(authority.layout, initial);
+        assert.strictEqual(authority.applyCalls.length, 0);
+    });
+
+    await check('construction retries ignore object key order but preserve ordered inputs', async () => {
+        const authority = fakeAuthority(layout());
+        const session = authority.makeSession();
+        session.load(authority.initialReceipt());
+        const catalog = session.getState().layout.placements.map(item => ({ assetId: item.assetId,
+            assetDefinitionRevision: item.assetDefinitionRevision, width: 1, depth: 1, height: 1 }));
+        const executor = constructionAdapter.createAdapter(constructionContract, facilityPatterns, session, () => catalog);
+        const request = { commandId: 'cell-layout', requestId: 'ordered-cell',
+            expectedDraftRevision: session.getState().draftRevision,
+            arguments: { selectionIds: ['pl-a', 'pl-b'], strategyId: 'line',
+                targetBounds: { width: 10, depth: 6 }, sourceUnit: 'm', gap: 1, rows: 1,
+                orientation: 'preserve', angleDegrees: 0, invertU: false } };
+        const receipt = await executor.execute(request);
+        const after = session.getState();
+        const previews = authority.previewCalls.length;
+        const reordered = { arguments: { invertU: false, angleDegrees: 0, orientation: 'preserve',
+            rows: 1, gap: 1, sourceUnit: 'm', targetBounds: { depth: 6, width: 10 },
+            strategyId: 'line', selectionIds: ['pl-a', 'pl-b'] },
+            expectedDraftRevision: request.expectedDraftRevision, requestId: request.requestId,
+            commandId: request.commandId };
+        assert.notStrictEqual(JSON.stringify(request), JSON.stringify(reordered));
+        assert.deepStrictEqual(await executor.execute(reordered), receipt);
+        for (const changed of [{ selectionIds: ['pl-b', 'pl-a'] }, { gap: 2 }]) {
+            await assert.rejects(executor.execute({ ...reordered, arguments: { ...reordered.arguments, ...changed } }),
+                error => error.code === 'facility_command_idempotency_conflict');
+        }
+        assert.deepStrictEqual(session.getState(), after);
+        assert.strictEqual(authority.previewCalls.length, previews);
+        assert.strictEqual(authority.applyCalls.length, 0);
+    });
+
+    await check('construction validation and preview failures preserve exact local draft', async () => {
+        const initial = layout();
+        const failures = {};
+        const authority = fakeAuthority(initial, failures);
+        const session = authority.makeSession();
+        session.load(authority.initialReceipt());
+        const catalog = initial.placements.map(item => ({ assetId: item.assetId,
+            assetDefinitionRevision: item.assetDefinitionRevision, width: 1, depth: 1, height: 1 }));
+        const executor = constructionAdapter.createAdapter(constructionContract, facilityPatterns, session, () => catalog);
+        const request = { commandId: 'linear-pattern', requestId: 'failed-repeat', expectedDraftRevision: session.getState().draftRevision,
+            arguments: { seedIds: [initial.placements[0].placementId], count: 3, direction: 'east', spacing: 5, sourceUnit: 'm' } };
+        failures.previewFailure = operationError('spatial_conflict', 'Obstructed fixture');
+        await assert.rejects(executor.execute(request));
+        assert.deepStrictEqual(session.getState().layout, initial);
+        assert.strictEqual(session.getState().historyCursor, 0);
+        assert.strictEqual(authority.applyCalls.length, 0);
+        delete failures.previewFailure;
+        await executor.execute(request);
+        assert.strictEqual(session.getState().historyCursor, 1);
+    });
 
     process.stdout.write(`${checks}/${checks} facility layout session checks passed\n`);
 }

@@ -778,6 +778,89 @@ check('top plan renders zones routes and placements with stable IDs', () => {
     adapter.dispose();
 });
 
+check('top plan layer visibility is presentation-only and hierarchy-aware', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+    });
+    const input = layout();
+    input.zones[0].extensions = {
+        knowledgeFoundation: { entityKind: 'department' },
+    };
+    input.zones.push({
+        zoneId: 'zn-child-cell',
+        zoneType: 'workcell',
+        label: 'Child Cell',
+        boundary: [
+            { x: 1, z: 1 },
+            { x: 5, z: 1 },
+            { x: 5, z: 4 },
+            { x: 1, z: 4 },
+        ],
+        floorElevation: 0,
+        anchors: [],
+        evidence: [],
+        extensions: {
+            knowledgeFoundation: {
+                entityKind: 'cell',
+                parentZoneId: 'zn-cell',
+            },
+        },
+    });
+    input.floorMarkings = [{
+        markingId: 'fm-layer-test',
+        markingType: 'parking_box',
+        label: 'Parking',
+        semanticRole: 'parking',
+        transform: { position: { x: 2, y: 0, z: 6 } },
+        width: 1,
+        depth: 2,
+        fillColor: '#2563eb',
+        strokeColor: '#ffffff',
+        opacity: 1,
+    }];
+    const authoritative = JSON.stringify(input);
+    adapter.setLayout(input);
+    adapter.setLayerVisibility({
+        zones: false,
+        cells: true,
+        routes: false,
+        markings: false,
+        assets: false,
+    });
+    assert.strictEqual(
+        host.findByAttribute('data-zone-id', 'zn-cell').length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-zone-id', 'zn-child-cell').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-route-id', 'rt-material').length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-floor-marking-id', 'fm-layer-test').length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-placement-id', 'pl-machine').length,
+        0
+    );
+    assert.deepStrictEqual(adapter.getLayerVisibility(), {
+        zones: false,
+        cells: true,
+        routes: false,
+        markings: false,
+        assets: false,
+    });
+    assert.strictEqual(JSON.stringify(input), authoritative);
+    adapter.dispose();
+});
+
 check('top plan collapses a vertical stack into one counted footprint', () => {
     FakeResizeObserver.reset();
     const { documentRef, host } = makeHost();
@@ -901,6 +984,79 @@ check('zone labels at the plan boundary avoid a clamped top-outside slot', () =>
         label.getAttribute('data-zone-label-edge'),
         'top-outside'
     );
+    adapter.dispose();
+});
+
+check('zone labels use hierarchy-aware semantic zoom without overlap', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const source = layout([]);
+    source.routes = [];
+    source.zones = [
+        {
+            zoneId: 'zn-parent',
+            zoneType: 'workcell',
+            label: 'Assembly Department',
+            boundary: [
+                { x: 0, z: 0 }, { x: 40, z: 0 },
+                { x: 40, z: 20 }, { x: 0, z: 20 },
+            ],
+            floorElevation: 0,
+            anchors: [],
+            evidence: [],
+            extensions: { knowledgeFoundation: { entityKind: 'department' } },
+        },
+        ...[0, 1, 2, 3].map(index => ({
+            zoneId: `zn-child-${index + 1}`,
+            zoneType: 'workcell',
+            label: `Assembly Cell ${index + 1}`,
+            boundary: [
+                { x: index * 10, z: 0 },
+                { x: (index + 1) * 10, z: 0 },
+                { x: (index + 1) * 10, z: 20 },
+                { x: index * 10, z: 20 },
+            ],
+            floorElevation: 0,
+            anchors: [],
+            evidence: [],
+            extensions: {
+                knowledgeFoundation: {
+                    entityKind: 'subzone',
+                    parentZoneId: 'zn-parent',
+                },
+            },
+        })),
+    ];
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 20 },
+        getSize: () => ({ width: 900, height: 600 }),
+    });
+    adapter.setLayout(source);
+    assert.strictEqual(
+        host.findByAttribute('data-zone-label-for', 'zn-parent').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-zone-label-for', 'zn-child-1').length,
+        0
+    );
+    assert.strictEqual(adapter.getDiagnostics().zoneLabels.semanticLevel,
+        'overview');
+
+    adapter.zoomAt({ clientX: 450, clientY: 300 }, 2);
+    assert.strictEqual(
+        host.findByAttribute('data-zone-label-for', 'zn-parent').length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-zone-label-for', 'zn-child-1').length,
+        1
+    );
+    assert.strictEqual(adapter.getDiagnostics().zoneLabels.semanticLevel,
+        'detail');
+    assert.strictEqual(adapter.getDiagnostics().zoneLabels.labelOverlapArea, 0);
     adapter.dispose();
 });
 
@@ -1376,6 +1532,7 @@ check('top plan shows proposal footprints and original positions without picking
             placement('pl-machine', 'asset-machine', 20, 2),
             placement('pl-new', 'asset-rack', 15, 6),
         ]);
+        proposed.routes[0].centerline[1] = { x: 12, y: 0, z: 4 };
         const savedBefore = JSON.stringify(saved);
         const proposedBefore = JSON.stringify(proposed);
         adapter.setLayout(proposed);
@@ -1384,6 +1541,9 @@ check('top plan shows proposal footprints and original positions without picking
             newPlacementIds: ['pl-new'],
             movedPlacementIds: ['pl-machine'],
             removedPlacementIds: ['pl-rack'],
+            changedRouteIds: ['rt-material'],
+            beforeRoutes: [saved.routes[0]],
+            proposedRoutes: [proposed.routes[0]],
             beforePlacements: [
                 saved.placements[0],
                 saved.placements[1],
@@ -1426,6 +1586,20 @@ check('top plan shows proposal footprints and original positions without picking
             ).length,
             1
         );
+        assert.strictEqual(
+            host.findByAttribute(
+                'data-proposal-route-state',
+                'changed'
+            ).length,
+            1
+        );
+        assert.strictEqual(
+            host.findByAttribute(
+                'data-proposal-route-state',
+                'proposed'
+            ).length,
+            1
+        );
         const diagnostics = adapter.getDiagnostics();
         assert.strictEqual(diagnostics.proposalPreviewActive, true);
         assert.strictEqual(diagnostics.proposalBeforeCount, 2);
@@ -1454,6 +1628,514 @@ check('top plan shows proposal footprints and original positions without picking
         );
         adapter.dispose();
     });
+
+check('top plan paths toggle without removing the activity presentation', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(layout());
+    adapter.setActivityPresentation({
+        scenario: {
+            scenarioId: 'fas-lean-motion',
+            actors: [],
+            leanMotion: {
+                operatorPaths: [{
+                    pathId: 'operator-one',
+                    centerline: [
+                        { x: 2, z: 2 },
+                        { x: 8, z: 2 },
+                        { x: 8, z: 6 },
+                        { x: 2, z: 2 },
+                    ],
+                }],
+                pedestrianConnections: [{
+                    connectionId: 'connection-one',
+                    centerline: [
+                        { x: 5, z: 1 },
+                        { x: 8, z: 2 },
+                    ],
+                }],
+                assistanceGates: [{
+                    gateId: 'gate-one',
+                    position: { x: 8, z: 2 },
+                }],
+                materialHandoffs: [{
+                    handoffId: 'handoff-one',
+                    centerline: [
+                        { x: 1, z: 1 },
+                        { x: 5, z: 1 },
+                    ],
+                }],
+                fifoPoints: [{
+                    pointId: 'fifo-one',
+                    position: { x: 1, z: 1 },
+                }],
+            },
+        },
+        actorPayloads: {},
+    });
+    assert.strictEqual(
+        host.findByAttribute('data-lean-motion-kind', 'operator_path').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-lean-motion-kind',
+            'pedestrian_connection'
+        ).length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-lean-motion-kind', 'assistance_gate').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-lean-motion-kind', 'material_handoff').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-lean-motion-kind', 'fifo_point').length,
+        1
+    );
+
+    assert.strictEqual(adapter.setActivityPathsVisible(false), false);
+    assert.strictEqual(
+        host.findByAttribute('data-lean-motion-kind', 'operator_path').length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-lean-motion-kind',
+            'pedestrian_connection'
+        ).length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-lean-motion-kind', 'assistance_gate').length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-lean-motion-kind', 'material_handoff').length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-lean-motion-kind', 'fifo_point').length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-layer', 'activity-playback').length,
+        1
+    );
+
+    assert.strictEqual(adapter.setActivityPathsVisible(true), true);
+    assert.strictEqual(
+        host.findByAttribute('data-lean-motion-kind', 'operator_path').length,
+        1
+    );
+    adapter.dispose();
+});
+
+check('top plan renders v3 navigation paths from motion packages by actor class', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(layout());
+    adapter.setActivityPresentation({
+        scenario: {
+            schemaVersion: 'facility-activity-scenario-v7',
+            scenarioId: 'fas-navigation-plan',
+            actors: [{
+                actorId: 'actor-navigation-plan',
+                actorType: 'operator',
+                placementId: 'pl-machine',
+                motionPackageId: 'fmp-navigation-plan',
+            }],
+            leanMotion: {
+                operatorPaths: [],
+                pedestrianConnections: [],
+                assistanceGates: [],
+                materialHandoffs: [],
+                fifoPoints: [],
+            },
+        },
+        actorPayloads: {
+            'fmp-navigation-plan': {
+                package: {
+                    movement: {
+                        journeySolutionId: 'njs-navigation-plan',
+                        poses: [
+                            { x: 2, z: 2 },
+                            { x: 8, z: 2 },
+                            { x: 2, z: 2 },
+                        ],
+                    },
+                },
+                actorProfile: {
+                    footprint: [
+                        { x: -0.3, z: -0.25 },
+                        { x: 0.3, z: -0.25 },
+                        { x: 0.3, z: 0.25 },
+                        { x: -0.3, z: 0.25 },
+                    ],
+                },
+            },
+        },
+    });
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-navigation-activity-actor-type',
+            'operator'
+        ).length,
+        1
+    );
+    adapter.updateActivitySnapshot({
+        scenarioId: 'fas-navigation-plan',
+        actors: [{
+            actorId: 'actor-navigation-plan',
+            visible: true,
+            pose: { x: 5, z: 2, heading: 0, distanceMeters: 3 },
+        }],
+    });
+    const marker = host.findByAttribute(
+        'data-activity-actor-id',
+        'actor-navigation-plan'
+    )[0];
+    assert.strictEqual(marker.getAttribute('data-activity-distance-meters'), '3');
+    assert.strictEqual(
+        adapter.setActivityPathTypeVisible('operator', false),
+        false
+    );
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-navigation-activity-actor-type',
+            'operator'
+        ).length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-activity-actor-id',
+            'actor-navigation-plan'
+        ).length,
+        1
+    );
+    adapter.dispose();
+});
+
+check('top plan renders all Packaging cycle legs with semantic path styles', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(layout());
+    const phases = [
+        ['carry_in', 'fmp-carry-in', '#2563eb', null],
+        ['carry_out', 'fmp-carry-out', '#d97706', null],
+        ['return_empty', 'fmp-return-empty', '#059669', '9 6'],
+    ];
+    const actorPayloads = {};
+    phases.forEach(function (entry, index) {
+        actorPayloads[entry[1]] = {
+            package: {
+                movement: {
+                    journeySolutionId: 'njs-' + entry[0],
+                    poses: [
+                        { x: 2 + index, z: 2 + index },
+                        { x: 4 + index, z: 2 + index },
+                    ],
+                },
+            },
+            actorProfile: { footprint: [] },
+        };
+    });
+    adapter.setActivityPresentation({
+        scenario: {
+            schemaVersion: 'facility-activity-scenario-v7',
+            scenarioId: 'fas-packaging-plan',
+            actors: [{
+                actorId: 'actor-packaging-plan',
+                actorType: 'operator',
+                placementId: 'pl-machine',
+                motionPackageId: 'fmp-carry-in',
+                cycleMotionPackageIds: phases.map(item => item[1]),
+                loopMode: 'closed_path',
+            }],
+            leanMotion: {
+                operatorPaths: [],
+                pedestrianConnections: [],
+                assistanceGates: [],
+                materialHandoffs: [],
+                fifoPoints: [],
+            },
+        },
+        actorPayloads,
+        candidatePresentation: {
+            handoffs: [],
+            programEvidence: [{
+                actorPlacementId: 'pl-machine',
+                pathSegments: phases.map(item => ({
+                    phase: item[0],
+                    motionPackageId: item[1],
+                })),
+            }],
+        },
+    });
+
+    phases.forEach(function (entry) {
+        const line = host.findByAttribute(
+            'data-navigation-activity-path-phase',
+            entry[0]
+        )[0];
+        assert(line);
+        assert.strictEqual(line.getAttribute('stroke'), entry[2]);
+        assert.strictEqual(line.getAttribute('stroke-dasharray'), entry[3]);
+    });
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-navigation-activity-actor-id',
+            'actor-packaging-plan'
+        ).length,
+        3
+    );
+    adapter.dispose();
+});
+
+check('top plan renders Inspection A-B-C and dashed return paths', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(layout());
+    const phases = [
+        ['inspection_pick', 'fmp-inspection-pick', '#2563eb', null],
+        ['inspection_place', 'fmp-inspection-place', '#2563eb', null],
+        ['return_empty', 'fmp-inspection-return', '#059669', '9 6'],
+    ];
+    const actorPayloads = {};
+    phases.forEach(function (entry, index) {
+        actorPayloads[entry[1]] = {
+            package: {
+                movement: {
+                    journeySolutionId: 'njs-' + entry[0],
+                    poses: [
+                        { x: 2 + index, z: 2 + index },
+                        { x: 4 + index, z: 2 + index },
+                    ],
+                },
+            },
+            actorProfile: { footprint: [] },
+        };
+    });
+    adapter.setActivityPresentation({
+        scenario: {
+            schemaVersion: 'facility-activity-scenario-v7',
+            scenarioId: 'fas-inspection-plan',
+            actors: [{
+                actorId: 'actor-inspection-plan',
+                actorType: 'operator',
+                placementId: 'pl-machine',
+                motionPackageId: 'fmp-inspection-pick',
+                cycleMotionPackageIds: phases.map(item => item[1]),
+                loopMode: 'closed_path',
+            }],
+            leanMotion: {
+                operatorPaths: [],
+                pedestrianConnections: [],
+                assistanceGates: [],
+                materialHandoffs: [],
+                fifoPoints: [],
+            },
+        },
+        actorPayloads,
+        candidatePresentation: {
+            handoffs: [],
+            programEvidence: [{
+                actorPlacementId: 'pl-machine',
+                pathSegments: phases.map(item => ({
+                    phase: item[0],
+                    motionPackageId: item[1],
+                })),
+            }],
+        },
+    });
+
+    phases.forEach(function (entry) {
+        const line = host.findByAttribute(
+            'data-navigation-activity-path-phase',
+            entry[0]
+        )[0];
+        assert(line);
+        assert.strictEqual(line.getAttribute('stroke'), entry[2]);
+        assert.strictEqual(line.getAttribute('stroke-dasharray'), entry[3]);
+    });
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-navigation-activity-actor-id',
+            'actor-inspection-plan'
+        ).length,
+        3
+    );
+    adapter.dispose();
+});
+
+check('top plan borrows an existing operator without rendering a duplicate', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(layout([
+        placement('pl-existing-operator', 'asset-operator', 4, 3),
+    ]));
+    assert.strictEqual(
+        host.findByAttribute('data-placement-id', 'pl-existing-operator').length,
+        1
+    );
+
+    adapter.setActivityPresentation({
+        scenario: {
+            scenarioId: 'fas-existing-operator',
+            actors: [{
+                actorId: 'actor-existing-operator',
+                actorType: 'operator',
+                placementId: 'pl-existing-operator',
+                motionPackageId: 'fmp-existing-operator',
+            }],
+            leanMotion: {
+                operatorPaths: [],
+                pedestrianConnections: [],
+                assistanceGates: [],
+                materialHandoffs: [],
+                fifoPoints: [],
+            },
+        },
+        actorPayloads: {
+            'fmp-existing-operator': {
+                vehicleProfile: {
+                    footprint: [
+                        { x: -0.3, z: -0.25 },
+                        { x: 0.3, z: -0.25 },
+                        { x: 0.3, z: 0.25 },
+                        { x: -0.3, z: 0.25 },
+                    ],
+                },
+            },
+        },
+    });
+    adapter.updateActivitySnapshot({
+        scenarioId: 'fas-existing-operator',
+        actors: [{
+            actorId: 'actor-existing-operator',
+            visible: true,
+            pose: { x: 6, z: 3, heading: 0, distanceMeters: 2 },
+        }],
+    });
+    assert.strictEqual(
+        host.findByAttribute('data-placement-id', 'pl-existing-operator').length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-activity-placement-id',
+            'pl-existing-operator'
+        ).length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-activity-borrowed-placement', 'true').length,
+        1
+    );
+
+    adapter.clearActivityPresentation();
+    assert.strictEqual(
+        host.findByAttribute('data-placement-id', 'pl-existing-operator').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-activity-placement-id',
+            'pl-existing-operator'
+        ).length,
+        0
+    );
+    adapter.dispose();
+});
+
+check('top plan isolates invalid manual segments and keeps actor visibility independent', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(layout([
+        placement('pl-navigation-operator', 'asset-operator', 4, 3),
+    ]));
+    adapter.setNavigationAuthoringPreview({
+        actorPlacementId: 'pl-navigation-operator',
+        actorClass: 'pedestrian',
+        points: [
+            { x: 4, z: 3 },
+            { x: 8, z: 3 },
+            { x: 12, z: 5 },
+        ],
+        selectedPointIndex: 1,
+        validationStatus: 'invalid',
+        validation: { invalidSegmentIndexes: [1] },
+        pathsVisible: true,
+        pose: { x: 6, z: 3, heading: 0, normalizedTime: 0.25 },
+    });
+    assert.strictEqual(
+        host.findByAttribute('data-navigation-invalid-segment', '1').length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-navigation-preview-actor',
+            'pl-navigation-operator'
+        ).length,
+        1
+    );
+    assert.strictEqual(
+        host.findByAttribute('data-placement-id', 'pl-navigation-operator').length,
+        1
+    );
+    adapter.setNavigationPathsVisible(false);
+    assert.strictEqual(
+        host.findByAttribute('data-navigation-invalid-segment', '1').length,
+        0
+    );
+    assert.strictEqual(
+        host.findByAttribute(
+            'data-navigation-preview-actor',
+            'pl-navigation-operator'
+        ).length,
+        1
+    );
+    adapter.setNavigationAuthoringPreview(null);
+    assert.strictEqual(
+        host.findByAttribute('data-placement-id', 'pl-navigation-operator').length,
+        1
+    );
+    adapter.dispose();
+});
 
 Promise.all(pendingChecks).then(() => {
     process.stdout.write(

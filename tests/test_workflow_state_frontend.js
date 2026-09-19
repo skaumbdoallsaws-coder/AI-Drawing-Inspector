@@ -35,11 +35,11 @@ check('agent sessions own stable workflow continuity fields', () => {
     assert(body.includes('workflowStateEvent: null'));
 });
 
-check('workflow fields persist with the existing chat snapshot', () => {
+check('workflow fields are suppressed only when server memory is authoritative', () => {
     const body = functionBody('serializeSessionForPersistence');
     assert(body.includes('chatSessionId: session.chatSessionId'));
-    assert(body.includes('workflowState: session.workflowState'));
-    assert(body.includes('workflowStateEvent: session.workflowStateEvent'));
+    assert(body.includes('workflowState: _serverMemoryAuthoritative() ? null : session.workflowState'));
+    assert(body.includes('workflowStateEvent: _serverMemoryAuthoritative()'));
 });
 
 check('new and cleared chats rotate the session identity', () => {
@@ -63,17 +63,21 @@ check('asset identity excludes active tab and live viewport state', () => {
 
 check('requests carry the stable session ID', () => {
     assert(source.includes('session_id: originSession.chatSessionId'));
+    assert(source.includes('agentSessionId: conversation'));
+    assert(source.includes('clientTurnId: _newClientTurnId()'));
 });
 
-check('workflow mirror travels only in session context', () => {
+check('workflow mirror travels outside enforce mode', () => {
     const body = functionBody('buildAgentAttachments');
     assert(body.includes('att.session.skill_workflow_state'));
+    assert(body.includes('!_serverMemoryAuthoritative()'));
     assert(body.includes('asset_identity: _workflowAssetIdentity()'));
 });
 
 check('server response updates semantic state without viewport replay', () => {
     const body = functionBody('_applyServerWorkflowState');
     assert(body.includes('session.workflowState ='));
+    assert(body.includes('if (_serverMemoryAuthoritative())'));
     assert(body.includes('scheduleChatRegistrySave()'));
     assert(!body.includes('_dispatchUiAction'));
     assert(!body.includes('playMotion'));

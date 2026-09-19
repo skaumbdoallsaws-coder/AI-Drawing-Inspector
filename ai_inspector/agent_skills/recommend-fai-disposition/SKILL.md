@@ -27,4 +27,4 @@ Base the recommendation on computed FAI evidence and explicitly available dispos
 
 ## Output
 
-Use no more than two sentences. For a policy-covered case: final disposition and next action; then the decisive measurement and policy basis. Do not list alternatives or unsupported repair methods.
+Use two sentences for a policy-covered case: final disposition and next action; then the decisive measurement and policy basis. When no approved policy matches, use no more than three sentences: conclusion; decisive measurement and policy gap; then the required authority. Do not list alternatives or unsupported repair methods.

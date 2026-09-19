@@ -9,9 +9,15 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
 from .repository import ProcessMapConflictError, load_named_process_map
+from .spatial import (
+    PROCESS_MAP_SPATIAL_VERSION,
+    SpatialGeometryError,
+    compile_spatial_scene,
+    diagnose_spatial_scene,
+)
 
 
-PROCESS_MAP_DIGEST_VERSION = 2
+PROCESS_MAP_DIGEST_VERSION = 3
 PROCESS_MAP_DIGEST_MAX_TOKENS = 3500
 
 
@@ -309,17 +315,134 @@ def _source_occurrence_records(
     return records, children.get(None, [])
 
 
+def _compact_spatial_digest(
+    process_map: Mapping[str, Any],
+    revision: str,
+) -> dict[str, Any]:
+    """Compile bounded trusted spatial facts without exposing route geometry."""
+
+    try:
+        scene = compile_spatial_scene(process_map, revision=revision)
+        diagnostics = diagnose_spatial_scene(scene)
+    except SpatialGeometryError as exc:
+        reason = (
+            "spatial_limit_exceeded"
+            if "spatial" in str(exc) and "limit" in str(exc)
+            else "invalid_spatial_geometry"
+        )
+        return {
+            "spatial_version": PROCESS_MAP_SPATIAL_VERSION,
+            "status": "not_computed",
+            "reason": reason,
+            "node_count": len(process_map.get("canvasNodes") or []),
+            "edge_count": len(process_map.get("canvasEdges") or []),
+            "group_count": len(process_map.get("canvasGroups") or []),
+        }
+
+    metrics = diagnostics["metrics"]
+    metric_names = {
+        "nodeOverlaps": "node_overlaps",
+        "nodeClearanceViolations": "node_clearance_violations",
+        "minimumNodeClearance": "minimum_node_clearance",
+        "nodeGroupHeaderIntersections": "node_group_header_intersections",
+        "edgeNodeIntersections": "edge_node_intersections",
+        "edgeGroupHeaderIntersections": "edge_group_header_intersections",
+        "edgeCrossings": "edge_crossings",
+        "backwardEdges": "backward_edges",
+        "routeLength": "route_length",
+        "routeBends": "route_bends",
+        "routeDetourOpportunities": "route_detour_opportunities",
+        "meanDetourRatio": "mean_detour_ratio",
+        "alignmentDeviation": "alignment_deviation",
+        "alignmentWarnings": "alignment_warnings",
+        "denseRegions": "dense_regions",
+        "openRegions": "open_regions",
+    }
+    always_include_metrics = {
+        "nodeOverlaps",
+        "edgeNodeIntersections",
+        "edgeCrossings",
+        "backwardEdges",
+    }
+    conditional_metrics = {
+        "minimumNodeClearance": bool(
+            metrics["nodeOverlaps"] or metrics["nodeClearanceViolations"]
+        ),
+        "routeLength": bool(metrics["routeDetourOpportunities"]),
+        "routeBends": bool(metrics["routeDetourOpportunities"]),
+        "meanDetourRatio": bool(metrics["routeDetourOpportunities"]),
+        "alignmentDeviation": bool(metrics["alignmentWarnings"]),
+    }
+    compact_metrics = {
+        target: metrics[source]
+        for source, target in metric_names.items()
+        if source in always_include_metrics
+        or (source in conditional_metrics and conditional_metrics[source])
+        or (
+            source not in conditional_metrics
+            and metrics[source] not in (0, 0.0, None)
+        )
+    }
+    layout_policy = diagnostics["layoutPolicy"]
+    regions = diagnostics["regions"]
+    compact_policy: dict[str, Any] = {
+        "flow_direction": layout_policy["flowDirection"],
+    }
+    if metrics["nodeClearanceViolations"]:
+        compact_policy["node_clearance"] = layout_policy["nodeClearance"]
+    if metrics["alignmentWarnings"]:
+        compact_policy["grid_size"] = layout_policy["gridSize"]
+    result: dict[str, Any] = {
+        "spatial_version": diagnostics["spatialVersion"],
+        "status": "computed",
+        "layout_policy": compact_policy,
+        "world_region_count": metrics["worldRegionCount"],
+        "layout_metrics": compact_metrics,
+        "problem_ids": [
+            str(item.get("problemId") or "")
+            for item in diagnostics["problems"]
+            if item.get("problemId")
+        ],
+        "open_regions": [
+            {
+                "region_id": item["regionId"],
+                "relative_location": item["relativeLocation"],
+            }
+            for item in regions
+            if item["classification"] == "open"
+        ],
+        "dense_regions": [
+            {
+                "region_id": item["regionId"],
+                "relative_location": item["relativeLocation"],
+                "node_count": len(item["nodeIds"]),
+            }
+            for item in regions
+            if item["classification"] == "dense"
+        ],
+    }
+    if diagnostics["truncatedProblems"]:
+        result["truncation"] = {
+            "problem_ids": f"and {diagnostics['truncatedProblems']} more"
+        }
+    return result
+
+
 def _fit_budget(digest: dict[str, Any], maximum_tokens: int) -> dict[str, Any]:
     result = copy.deepcopy(digest)
     truncation = result.setdefault("truncation", {})
-    paths: list[tuple[dict[str, Any], str, str, int]] = []
-    paths.append((result, "nodes", "nodes", 12))
-    paths.append((result, "groups", "groups", 4))
-    paths.append((result, "logical_connections", "logical_connections", 10))
+    # Lower-priority records are trimmed first. The complete product catalog is
+    # the authority for scopes that have not yet been placed on the canvas, so
+    # it must outlive duplicated summaries such as typed edge lists.
+    paths: list[tuple[int, dict[str, Any], str, str, int]] = []
+    paths.append((5, result, "nodes", "nodes", 12))
+    paths.append((3, result, "groups", "groups", 4))
+    paths.append((5, result, "logical_connections", "logical_connections", 10))
     source_structure = result.get("product_structure")
     if isinstance(source_structure, dict):
         paths.append(
             (
+                6,
                 source_structure,
                 "occurrences",
                 "product_structure.occurrences",
@@ -328,15 +451,15 @@ def _fit_budget(digest: dict[str, Any], maximum_tokens: int) -> dict[str, Any]:
         )
     findings = result.get("validator_findings")
     if isinstance(findings, list):
-        paths.append((result, "validator_findings", "validator_findings", 8))
+        paths.append((2, result, "validator_findings", "validator_findings", 8))
     references = result.get("references")
     if isinstance(references, dict):
-        paths.append((references, "nodes", "references.nodes", 4))
-        paths.append((references, "edges", "references.edges", 4))
+        paths.append((1, references, "nodes", "references.nodes", 4))
+        paths.append((1, references, "edges", "references.edges", 4))
     typed = result.get("typed_edges")
     if isinstance(typed, dict):
         for kind in sorted(typed):
-            paths.append((typed, kind, f"typed_edges.{kind}", 6))
+            paths.append((0, typed, kind, f"typed_edges.{kind}", 0))
     derived = result.get("derived")
     if isinstance(derived, dict):
         for key in (
@@ -350,7 +473,17 @@ def _fit_budget(digest: dict[str, Any], maximum_tokens: int) -> dict[str, Any]:
         ):
             if isinstance(derived.get(key), list):
                 minimum = 8 if key in {"entry_nodes", "terminal_nodes"} else 2
-                paths.append((derived, key, f"derived.{key}", minimum))
+                paths.append((4, derived, key, f"derived.{key}", minimum))
+    spatial = result.get("spatial")
+    if isinstance(spatial, dict):
+        for key, minimum in (
+            ("problem_ids", 4),
+            ("open_regions", 2),
+            ("dense_regions", 2),
+        ):
+            if isinstance(spatial.get(key), list):
+                priority = 3 if key == "problem_ids" else 1
+                paths.append((priority, spatial, key, f"spatial.{key}", minimum))
 
     result["estimated_tokens"] = 0
     while True:
@@ -361,19 +494,19 @@ def _fit_budget(digest: dict[str, Any], maximum_tokens: int) -> dict[str, Any]:
             result["estimated_tokens"] = estimate
         if estimate_digest_tokens(result) <= maximum_tokens:
             break
-        candidate = max(
+        candidate = min(
             (
-                (len(container.get(key) or []), container, key, path, minimum)
-                for container, key, path, minimum in paths
+                (priority, -len(container.get(key) or []), path, container, key, minimum)
+                for priority, container, key, path, minimum in paths
                 if isinstance(container.get(key), list)
                 and len(container[key]) > minimum
             ),
             default=None,
-            key=lambda item: (item[0], item[3]),
+            key=lambda item: (item[0], item[1], item[2]),
         )
         if candidate is None:
             raise ValueError("process-map digest cannot fit its configured token budget")
-        _length, container, key, path, _minimum = candidate
+        _priority, _negative_length, path, container, key, _minimum = candidate
         container[key].pop()
         previous = truncation.get(path, "and 0 more")
         count = int(previous.split()[1]) + 1
@@ -437,6 +570,15 @@ def build_process_map_digest(
         }
         if node.get("nodeKind") == "process_step":
             record["processType"] = str(node.get("processType") or "operation")
+            properties = node.get("properties")
+            if isinstance(properties, Mapping):
+                compact_properties = {
+                    str(key): str(value)
+                    for key, value in sorted(properties.items())
+                    if isinstance(value, str) and value.strip()
+                }
+                if compact_properties:
+                    record["properties"] = compact_properties
         elif node.get("nodeKind") == "product_occurrence":
             record["occurrenceId"] = occurrence_id
             if occurrence and occurrence.get("kind"):
@@ -597,6 +739,7 @@ def build_process_map_digest(
             "precedence_cycles": _cycles(adjacency),
             "sequence_conflicts": sequence_conflicts,
         },
+        "spatial": _compact_spatial_digest(process_map, revision),
     }
     if truncation:
         digest["truncation"] = truncation

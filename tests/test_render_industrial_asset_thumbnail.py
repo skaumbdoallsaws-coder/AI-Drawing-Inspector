@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from ai_inspector.industrial_assets.artifacts import build_aabb_proxy_glb
+
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL_PATH = ROOT / "tools" / "render_industrial_asset_thumbnail.py"
@@ -247,6 +249,35 @@ def test_offline_renderer_is_nonblank_bounded_and_repeatable(tmp_path):
         assert image.format == "PNG"
         assert image.size == (320, 240)
     assert json.loads(evidence_path.read_text(encoding="ascii")) == first_evidence
+
+
+def test_renderer_applies_source_transform_before_bounds_and_framing(tmp_path):
+    source = tmp_path / "long-z-up.glb"
+    source.write_bytes(build_aabb_proxy_glb({
+        "minimum": {"x": -1.0, "y": -3.0, "z": 0.0},
+        "maximum": {"x": 1.0, "y": 3.0, "z": 1.0},
+    }))
+    output = tmp_path / "upright.png"
+    rotate_x_negative_90 = [
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, -1.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    ]
+
+    evidence = RENDERER.render_industrial_asset_thumbnail(
+        source,
+        output,
+        width=320,
+        height=240,
+        source_transform=rotate_x_negative_90,
+    )
+
+    assert evidence["geometry"]["bounds"]["size"] == pytest.approx(
+        [2.0, 1.0, 6.0]
+    )
+    assert evidence["renderer"]["sourceTransform"] == rotate_x_negative_90
+    assert evidence["passed"] is True
 
 
 def test_genuine_local_module_failure_is_fatal(tmp_path, monkeypatch):

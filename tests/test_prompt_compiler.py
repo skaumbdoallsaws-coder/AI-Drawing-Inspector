@@ -110,19 +110,31 @@ def test_external_prompt_registry_is_ascii_versioned_and_mode_selective():
     assert all(module.content.encode("ascii") for module in modules)
     assert "ACTIVE MODE: REPORT / FAI" not in "\n".join(m.content for m in modules)
 
+    fai_format = registry.get("sage.policy.fai-inverted-pyramid")
+    assert fai_format.version == "1.0.0"
+    assert fai_format.content.count("[FORMAT EXAMPLE - SYNTHETIC DATA]") == 8
+    assert fai_format.content.count("\nAssistant:\n**") == 8
+    assert "teach response structure only" in fai_format.content
+    for real_demo_fact in ("100001", "100006", "wrist-pin", "pin bore"):
+        assert real_demo_fact not in fai_format.content.lower()
 
-def test_compiled_impact_prompt_is_small_and_has_no_legacy_protocols():
+
+def test_compiled_impact_prompt_is_bounded_and_has_no_legacy_protocols():
     plan, reason = server._compose_production_skill_prompt(_impact_route(), mode="assembly")
     assert reason == "" and plan is not None
-    assert plan["accounting"]["total_chars"] < 10_000
-    assert plan["accounting"]["total_chars"] < len(server.DEVIATION_ANALYST_PROMPT) / 2
+    assert plan["accounting"]["total_chars"] < 17_000
+    assert plan["accounting"]["total_chars"] < len(server.DEVIATION_ANALYST_PROMPT)
     assert [item["id"] for item in plan["prompt_modules"]] == [
         "sage.identity",
         "sage.engineering-honesty",
         "sage.response-style",
         "sage.mode.assembly",
+        "sage.policy.fai-inverted-pyramid",
         "sage.policy.fai-assembly-impact",
     ]
+    assert plan["prompt"].count("SUPPLIER FAI INVERTED-PYRAMID RESPONSE FORMAT") == 1
+    assert plan["prompt"].count("[FORMAT EXAMPLE - SYNTHETIC DATA]") == 8
+    assert plan["resolved_policy"]["output"]["maximum_sentences"] == 3
     for banned in ("HIGHLIGHT_PARTS:", "[UI_ACTIONS]", "<tool_calls>", "EXPLODE_LEVEL"):
         assert banned not in plan["prompt"]
     assert "do not add a hold, escalation, disposition" in plan["prompt"].lower()
@@ -148,6 +160,38 @@ def test_safe_fai_fallback_is_read_only_and_compiled():
     assert plan["allowed_tools"] == []
     assert "provider-native" not in plan["prompt"]
     assert "DETERMINISTIC MOTION PACKAGE" not in plan["prompt"]
+
+
+def test_fai_format_examples_do_not_leak_into_other_workflows():
+    route = {
+        "route_version": 2,
+        "speech_act": "question",
+        "primary_workflow": "process-map-analysis",
+        "continue_existing_workflow": False,
+        "workflow_confidence": 0.99,
+        "intents": [{
+            "kind": "analyze_process_map",
+            "targets": [],
+            "requested_effects": [],
+        }],
+        "skill_candidates": [{
+            "id": "analyze-process-map",
+            "role": "primary",
+            "confidence": 0.99,
+        }],
+        "requested_side_effects": {
+            "viewport_write": False,
+            "asset_write": False,
+            "system_write": False,
+        },
+        "needs_clarification": False,
+    }
+    plan, reason = server._compose_production_skill_prompt(route, mode="training")
+    assert reason == "" and plan is not None
+    assert "SUPPLIER FAI INVERTED-PYRAMID RESPONSE FORMAT" not in plan["prompt"]
+    assert "sage.policy.fai-inverted-pyramid" not in {
+        item["id"] for item in plan["prompt_modules"]
+    }
 
 
 def test_selected_skill_context_filters_unrelated_data_and_motion():

@@ -229,8 +229,8 @@ def test_store_insert_or_ignore_dedupes_by_event_id(tmp_path: Path):
 def test_store_schema_version_persisted(tmp_path: Path):
     store = TelemetryStore(db_path=tmp_path / "m.sqlite")
     store.write(TelemetryEvent())  # triggers init
-    # v2: Phase 3 added httpStatus + stage columns.
-    assert store.schema_version() == 3
+    # v5 adds privacy-bounded Sage-memory rollout fields.
+    assert store.schema_version() == 6
 
 
 def test_store_creates_parent_directory(tmp_path: Path):
@@ -700,7 +700,7 @@ def test_store_persists_streaming_columns(tmp_path: Path):
         assert row.streamDurationMs == 900.0
         assert row.pipelineLatencyMs == 20.0
         assert row.finalizeDeltaChars == 4
-        assert store.schema_version() == 3
+        assert store.schema_version() == 6
     finally:
         store.close()
 
@@ -778,7 +778,7 @@ def test_store_migrates_v1_database_to_v2(tmp_path: Path):
         assert len(rows) == 1
         assert rows[0].httpStatus == 200
         assert rows[0].stage == "total"
-        assert store.schema_version() == 3
+        assert store.schema_version() == 6
     finally:
         store.close()  # truncate WAL so tmp_path cleanup can rmtree on Windows
 
@@ -896,6 +896,35 @@ def test_record_workflow_stage_basic(tmp_path: Path):
     assert e.partNumber == "1020001"
     assert e.provider == "none"
     assert e.estimatedCostUsd == 0.0  # workflow events have no token cost
+
+
+def test_record_workflow_stage_persists_bounded_feedback_metadata(tmp_path: Path):
+    store = TelemetryStore(db_path=tmp_path / "feedback-telemetry.sqlite")
+    try:
+        event = record_workflow_stage(
+            workflow="agent_chat_feedback",
+            stage="recorded",
+            latency_ms=2.5,
+            route="/api/agent/chat/feedback",
+            agentType="deviation-analyst",
+            feedbackRating="down",
+            feedbackReasonCount=2,
+            feedbackHasCorrection=True,
+            feedbackLinkedTurn=True,
+            feedbackLinkedRun=True,
+            store=store,
+        )
+
+        assert event is not None
+        persisted = store.query_recent(1)[0]
+        assert persisted.feedbackRating == "down"
+        assert persisted.feedbackReasonCount == 2
+        assert persisted.feedbackHasCorrection is True
+        assert persisted.feedbackLinkedTurn is True
+        assert persisted.feedbackLinkedRun is True
+        assert store.schema_version() == 6
+    finally:
+        store.close()
 
 
 def test_record_workflow_stage_error_path(tmp_path: Path):

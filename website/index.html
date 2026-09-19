@@ -13,7 +13,7 @@
   <meta property="og:url" content="https://inspectorpro.io">
   <link rel="canonical" href="https://inspectorpro.io">
   <link rel="icon" href="assets/images/logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/style.css?v=e7275609ee">
+  <link rel="stylesheet" href="css/style.css?v=a081bd114d">
   <style>
     /* Fade-in animation */
     .fade-in {
@@ -705,7 +705,9 @@
         <!-- Hidden by the script whenever the active workflow has a single
              output, so the heading never sits above an empty row. -->
         <div class="wf-doc-picker" data-wf-picker hidden>
-          <p class="wf-picker-label">Choose a document type</p>
+          <!-- Text and tablist label are both rewritten per workflow: not
+               every workflow chooses between documents. -->
+          <p class="wf-picker-label" data-wf-picker-label>Choose a document type</p>
           <div class="wf-doc-nav" role="tablist" aria-label="Document types" data-wf-demos></div>
         </div>
         <p class="wf-caption" data-wf-caption></p>
@@ -825,7 +827,7 @@
   <div>&copy; 2026 InspectorPro. All rights reserved.</div>
 </footer>
 
-<script src="js/main.js?v=e20ef28e5c"></script>
+<script src="js/main.js?v=1ae400f0d2"></script>
 </body>
 </html>
 

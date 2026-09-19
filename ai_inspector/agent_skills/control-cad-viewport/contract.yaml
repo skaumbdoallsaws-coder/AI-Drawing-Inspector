@@ -1,6 +1,6 @@
 schema_version: 1
 skill_id: control-cad-viewport
-version: 1.0.0
+version: 1.0.1
 intents:
   - change_viewport_state
   - visualize_engineering_context
@@ -18,7 +18,7 @@ side_effect_policy:
     - highlight_features
 output_contract:
   format: concise_action_confirmation
-  maximum_sentences: 2
+  maximum_sentences: 3
 failure_behavior:
   missing_required_context: request_clarification
   contradictory_context: refuse_side_effect

@@ -16,6 +16,12 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 from .canonical import canonical_layout_bytes, canonicalize_layout, layout_revision
 from .diff import build_exact_layout_diff, facility_layout_diff_hash
 from .errors import FacilityValidationError
+from .navigation_contract import (
+    FacilityNavigationContractError,
+    canonicalize_facility_navigation_extension,
+    navigation_identity_index,
+    validate_navigation_writer_authority,
+)
 from .plan_settings import PLAN_SETTINGS_EXTENSION_KEY, normalize_plan_settings
 from .routing import persisted_route_fingerprint
 from .validate import validate_layout
@@ -37,6 +43,7 @@ _LAYOUT_PROVENANCE_COMMANDS = frozenset((
     "mirror",
     "swap",
     "duplicate",
+    "industrial_pattern_module_source",
 ))
 _LAYOUT_STRATEGIES = frozenset((
     "line",
@@ -49,6 +56,7 @@ _LAYOUT_STRATEGIES = frozenset((
     "spine",
     "herringbone",
     "cluster",
+    "deterministic_industrial_pattern_set",
 ))
 
 
@@ -511,7 +519,14 @@ def _op_edit_zone(
     zone = _find(document, "zones", "zoneId", zone_id, "Zone")
     for key, value in patch.items():
         zone[str(key)] = deepcopy(value)
-    if {"boundary", "anchors", "floorElevation"}.intersection(patch):
+    if operation.get("layoutProvenance") is not None:
+        _set_or_stale_layout_provenance(
+            zone,
+            operation,
+            container="extensions",
+            manually_edited=False,
+        )
+    elif {"boundary", "anchors", "floorElevation"}.intersection(patch):
         _set_or_stale_layout_provenance(
             zone,
             operation,
@@ -1170,6 +1185,78 @@ def _aisle_route(
             "invalid_operation_field",
             "clearanceEvidenceStatus is unsupported.",
         )
+    source_zone_id = aisle.get(
+        "sourceZoneId", existing_extension.get("sourceZoneId")
+    )
+    target_zone_id = aisle.get(
+        "targetZoneId", existing_extension.get("targetZoneId")
+    )
+    via_zone_ids = aisle.get(
+        "viaZoneIds", existing_extension.get("viaZoneIds", [])
+    )
+    area_accounting = aisle.get(
+        "areaAccounting", existing_extension.get("areaAccounting", "overlay")
+    )
+    width_authority = aisle.get(
+        "widthAuthority", existing_extension.get("widthAuthority", "unknown")
+    )
+    obstacle_awareness = aisle.get(
+        "obstacleAwareness", existing_extension.get("obstacleAwareness")
+    )
+    if obstacle_awareness is not None and not isinstance(
+        obstacle_awareness, Mapping
+    ):
+        _fail(
+            "invalid_operation_field",
+            "obstacleAwareness must be an object.",
+        )
+    routing_mode = str(
+        aisle.get(
+            "routingMode",
+            current.get(
+                "routingMode",
+                "vehicle" if aisle_kind == "forklift" else "polyline",
+            ),
+        )
+    )
+    if routing_mode not in {"orthogonal", "polyline", "vehicle"}:
+        _fail("invalid_operation_field", "routingMode is unsupported.")
+    vehicle_profile_ref = aisle.get(
+        "vehicleProfileRef", current.get("vehicleProfileRef")
+    )
+    if vehicle_profile_ref is not None and not isinstance(
+        vehicle_profile_ref, Mapping
+    ):
+        _fail(
+            "invalid_operation_field",
+            "vehicleProfileRef must be an object.",
+        )
+    swept_envelope = aisle.get(
+        "sweptEnvelope", current.get("sweptEnvelope")
+    )
+    if swept_envelope is not None and not isinstance(swept_envelope, Mapping):
+        _fail("invalid_operation_field", "sweptEnvelope must be an object.")
+    if source_zone_id is not None:
+        source_zone_id = _clean_id(source_zone_id, "sourceZoneId", "zn")
+    if target_zone_id is not None:
+        target_zone_id = _clean_id(target_zone_id, "targetZoneId", "zn")
+    if not isinstance(via_zone_ids, list):
+        _fail("invalid_operation_field", "viaZoneIds must be an array.")
+    normalized_via_zone_ids = [
+        _clean_id(item, "viaZoneIds", "zn") for item in via_zone_ids
+    ]
+    if len(set(normalized_via_zone_ids)) != len(normalized_via_zone_ids):
+        _fail("invalid_operation_field", "viaZoneIds must be unique.")
+    if area_accounting not in {"overlay"}:
+        _fail(
+            "invalid_operation_field",
+            "areaAccounting must be overlay for generated circulation.",
+        )
+    if width_authority not in {"user_authored", "policy_authored", "unknown"}:
+        _fail(
+            "invalid_operation_field",
+            "widthAuthority is unsupported.",
+        )
     route_kind = {
         "forklift": "forklift",
         "pedestrian": "operator",
@@ -1186,14 +1273,18 @@ def _aisle_route(
             "kind": "world_point",
             "position": deepcopy(centerline[-1]),
         },
-        "routingMode": "vehicle" if aisle_kind == "forklift" else "polyline",
+        "routingMode": routing_mode,
         "centerline": centerline,
         "corridorWidth": width,
         "routeFingerprint": "0" * 64,
         "sourceRevisions": deepcopy(
-            current.get("sourceRevisions")
-            if isinstance(current.get("sourceRevisions"), Mapping)
-            else {"layoutBaseRevision": base_revision}
+            aisle.get("sourceRevisions")
+            if isinstance(aisle.get("sourceRevisions"), Mapping)
+            else (
+                current.get("sourceRevisions")
+                if isinstance(current.get("sourceRevisions"), Mapping)
+                else {"layoutBaseRevision": base_revision}
+            )
         ),
         "requirements": deepcopy(
             current.get("requirements")
@@ -1212,8 +1303,46 @@ def _aisle_route(
                 "direction": direction,
                 "color": color,
                 "clearanceEvidenceStatus": str(status),
+                **(
+                    {"sourceZoneId": source_zone_id}
+                    if source_zone_id is not None
+                    else {}
+                ),
+                **(
+                    {"targetZoneId": target_zone_id}
+                    if target_zone_id is not None
+                    else {}
+                ),
+                **(
+                    {"viaZoneIds": normalized_via_zone_ids}
+                    if source_zone_id is not None or target_zone_id is not None
+                    else {}
+                ),
+                **(
+                    {
+                        "areaAccounting": str(area_accounting),
+                        "widthAuthority": str(width_authority),
+                    }
+                    if source_zone_id is not None or target_zone_id is not None
+                    else {}
+                ),
+                **(
+                    {"obstacleAwareness": deepcopy(dict(obstacle_awareness))}
+                    if isinstance(obstacle_awareness, Mapping)
+                    else {}
+                ),
             },
         },
+        **(
+            {"vehicleProfileRef": deepcopy(dict(vehicle_profile_ref))}
+            if isinstance(vehicle_profile_ref, Mapping)
+            else {}
+        ),
+        **(
+            {"sweptEnvelope": deepcopy(dict(swept_envelope))}
+            if isinstance(swept_envelope, Mapping)
+            else {}
+        ),
     }
     route["routeFingerprint"] = persisted_route_fingerprint(route)
     return route
@@ -1708,6 +1837,209 @@ def _op_set_plan_settings(
     return [], []
 
 
+def _navigation_record_ids(value: Any) -> set[str]:
+    if not isinstance(value, Mapping):
+        return set()
+    fields = (
+        ("anchors", "navigationAnchorId"),
+        ("movementPrograms", "movementProgramId"),
+        ("manualPathConstraints", "manualPathConstraintId"),
+        ("handoffPrograms", "handoffProgramId"),
+    )
+    return {
+        str(item.get(identity_field))
+        for collection, identity_field in fields
+        for item in value.get(collection, [])
+        if isinstance(item, Mapping) and item.get(identity_field)
+    }
+
+
+def _op_set_facility_navigation(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    """Replace durable navigation intent from one explicit Plan gesture."""
+
+    unknown = sorted(
+        set(operation) - {"op", "facilityNavigation", "authoringSource"}
+    )
+    if unknown:
+        _fail(
+            "invalid_operation_field",
+            "set_facility_navigation contains unsupported fields.",
+            details={"unknownFields": unknown},
+        )
+    authoring_source = operation.get("authoringSource")
+    if authoring_source not in {"plan_pointer", "sage_semantic"}:
+        _fail(
+            "facility_navigation_coordinate_authority_forbidden",
+            "Navigation intent requires the Plan pointer or the coordinate-free Sage semantic surface.",
+        )
+    requested = operation.get("facilityNavigation")
+    identities = navigation_identity_index(document)
+    try:
+        navigation = canonicalize_facility_navigation_extension(
+            requested,
+            identities,
+        )
+        if authoring_source == "plan_pointer":
+            validate_navigation_writer_authority(
+                navigation,
+                identities,
+                writer_kind="user",
+            )
+    except FacilityNavigationContractError as error:
+        _fail(error.code, str(error), details=error.details)
+    extensions = document.setdefault("extensions", {})
+    if not isinstance(extensions, dict):
+        _fail("invalid_layout_shape", "extensions must be an object.")
+    previous = extensions.get("facilityNavigation")
+    if authoring_source == "sage_semantic":
+        previous_value = previous if isinstance(previous, Mapping) else {
+            "schemaVersion": navigation["schemaVersion"],
+            "anchors": [],
+            "movementPrograms": [],
+            "manualPathConstraints": [],
+            "handoffPrograms": [],
+        }
+        for collection in ("manualPathConstraints", "handoffPrograms"):
+            if _canonical_json_bytes(previous_value.get(collection, [])) != (
+                _canonical_json_bytes(navigation.get(collection, []))
+            ):
+                _fail(
+                    "facility_navigation_writer_authority_forbidden",
+                    "Sage semantic intent cannot create or change path coordinates or handoffs.",
+                    details={"collection": collection},
+                )
+        previous_anchors = {
+            str(item.get("navigationAnchorId")): item
+            for item in previous_value.get("anchors", [])
+            if isinstance(item, Mapping) and item.get("navigationAnchorId")
+        }
+        next_anchors = {
+            str(item.get("navigationAnchorId")): item
+            for item in navigation.get("anchors", [])
+            if isinstance(item, Mapping) and item.get("navigationAnchorId")
+        }
+        removed_anchor_ids = sorted(set(previous_anchors) - set(next_anchors))
+        changed_anchor_ids = sorted(
+            anchor_id
+            for anchor_id in set(previous_anchors) & set(next_anchors)
+            if _canonical_json_bytes(previous_anchors[anchor_id])
+            != _canonical_json_bytes(next_anchors[anchor_id])
+        )
+        added_anchor_ids = sorted(set(next_anchors) - set(previous_anchors))
+        if removed_anchor_ids or changed_anchor_ids or len(added_anchor_ids) > 21:
+            _fail(
+                "facility_navigation_writer_authority_forbidden",
+                "Sage cannot remove or alter existing anchors and may derive at most 21 placement-bound anchors per proposal.",
+                details={
+                    "removedAnchorIds": removed_anchor_ids,
+                    "changedAnchorIds": changed_anchor_ids,
+                    "addedAnchorIds": added_anchor_ids,
+                },
+            )
+        placement_revisions = {
+            str(item.get("placementId")): str(
+                item.get("assetDefinitionRevision") or ""
+            )
+            for item in document.get("placements", [])
+            if isinstance(item, Mapping) and item.get("placementId")
+        }
+        for anchor_id in added_anchor_ids:
+            anchor = next_anchors[anchor_id]
+            derived = anchor.get("derivedPositionRef")
+            owner = anchor.get("ownerRef")
+            source_kind = (
+                str(derived.get("sourceKind") or "")
+                if isinstance(derived, Mapping) else ""
+            )
+            source_id = (
+                str(derived.get("sourceId") or "")
+                if isinstance(derived, Mapping) else ""
+            )
+            expected_kind = (
+                "actor_home" if source_kind == "placement_transform"
+                else "station_operate"
+            )
+            if (
+                source_kind not in {"placement_transform", "placement_access"}
+                or source_id not in placement_revisions
+                or str(derived.get("sourceRevision") or "")
+                    != placement_revisions[source_id]
+                or not isinstance(owner, Mapping)
+                or owner.get("ownerKind") != "placement"
+                or str(owner.get("ownerId") or "") != source_id
+                or anchor.get("anchorKind") != expected_kind
+                or anchor.get("positionAuthority") != "derived"
+                or anchor.get("localPosition") is not None
+                or anchor.get("evidenceStatus") != "derived"
+                or anchor.get("reviewStatus") != "pending"
+                or anchor.get("actorClasses") != ["pedestrian"]
+                or anchor.get("evidence")
+                    != ["evidence:deterministic-placement-access-v1"]
+            ):
+                _fail(
+                    "facility_navigation_writer_authority_forbidden",
+                    "Sage may add only pending derived pedestrian anchors bound to exact existing placement revisions.",
+                    details={"navigationAnchorId": anchor_id},
+                )
+        previous_programs = {
+            str(item.get("movementProgramId")): item
+            for item in previous_value.get("movementPrograms", [])
+            if isinstance(item, Mapping) and item.get("movementProgramId")
+        }
+        next_programs = {
+            str(item.get("movementProgramId")): item
+            for item in navigation.get("movementPrograms", [])
+            if isinstance(item, Mapping) and item.get("movementProgramId")
+        }
+        removed = sorted(set(previous_programs) - set(next_programs))
+        changed = sorted(
+            program_id
+            for program_id, item in next_programs.items()
+            if program_id not in previous_programs
+            or _canonical_json_bytes(item)
+            != _canonical_json_bytes(previous_programs[program_id])
+        )
+        if removed or len(changed) != 1:
+            _fail(
+                "facility_navigation_semantic_diff_invalid",
+                "One Sage semantic proposal must upsert exactly one movement program and preserve all unrelated programs.",
+                details={"removedProgramIds": removed, "changedProgramIds": changed},
+            )
+        changed_program = next_programs[changed[0]]
+        if (
+            changed_program.get("evidenceStatus") not in {
+                "derived", "inferred", "unknown"
+            }
+            or changed_program.get("reviewStatus") != "pending"
+        ):
+            _fail(
+                "facility_navigation_writer_authority_forbidden",
+                "Sage semantic proposals must remain non-authored and pending review.",
+                details={"movementProgramId": changed[0]},
+            )
+        required_anchor_ids = set(changed_program.get("requiredAnchorIds") or [])
+        if not set(added_anchor_ids).issubset(required_anchor_ids):
+            _fail(
+                "facility_navigation_semantic_diff_invalid",
+                "Every newly derived anchor must be used by the one changed movement program.",
+                details={
+                    "movementProgramId": changed[0],
+                    "unusedAnchorIds": sorted(
+                        set(added_anchor_ids) - required_anchor_ids
+                    ),
+                },
+            )
+    previous_ids = _navigation_record_ids(previous)
+    next_ids = _navigation_record_ids(navigation)
+    extensions["facilityNavigation"] = navigation
+    return sorted(next_ids - previous_ids), sorted(previous_ids | next_ids)
+
+
 def _op_clear_layout_contents(
     document: Dict[str, Any],
     _operation: Mapping[str, Any],
@@ -1781,6 +2113,7 @@ _HANDLERS: Dict[str, _Handler] = {
     "edit_process_binding": _op_edit_process_binding,
     "detach_process_binding": _op_detach_process_binding,
     "set_plan_settings": _op_set_plan_settings,
+    "set_facility_navigation": _op_set_facility_navigation,
     "clear_layout_contents": _op_clear_layout_contents,
 }
 
@@ -1964,6 +2297,76 @@ def apply_facility_layout_operations(
         "findings": findings,
         "canonicalDiff": canonical_diff,
         "diffHash": diff_hash,
+        "operationResults": operation_results,
+    }
+
+
+def apply_prevalidated_facility_layout_operations(
+    layout: Mapping[str, Any],
+    operations: Sequence[Mapping[str, Any]],
+    *,
+    base_revision: str,
+) -> Dict[str, Any]:
+    """Apply one immutable plan batch without repeated whole-layout audits.
+
+    The caller must first validate the complete operation plan and must pass a
+    canonical document produced by this kernel. Handlers still validate every
+    operation. Full layout validation and the cumulative diff remain required
+    after the final batch.
+    """
+
+    if not isinstance(layout, Mapping):
+        raise FacilityLayoutOperationError(
+            "layout_not_object", "layout must be an object."
+        )
+    if not isinstance(operations, Sequence) or isinstance(operations, (str, bytes)):
+        raise FacilityLayoutOperationError(
+            "operations_not_array", "operations must be an array."
+        )
+    if len(operations) > MAX_OPERATION_BATCH:
+        raise FacilityLayoutOperationError(
+            "operations_too_large",
+            f"An operation batch can contain at most {MAX_OPERATION_BATCH} operations.",
+        )
+
+    after = deepcopy(dict(layout))
+    operation_results: List[Dict[str, Any]] = []
+    for index, raw_operation in enumerate(operations):
+        if not isinstance(raw_operation, Mapping):
+            raise FacilityLayoutOperationError(
+                "operation_not_object",
+                f"Operation {index} must be an object.",
+                operation_index=index,
+            )
+        operation = deepcopy(dict(raw_operation))
+        operation_name = operation.get("op")
+        handler = _HANDLERS.get(operation_name) if isinstance(operation_name, str) else None
+        if handler is None:
+            raise FacilityLayoutOperationError(
+                "unknown_facility_layout_operation",
+                f"Operation {index} has unsupported op '{operation_name}'.",
+                operation_index=index,
+            )
+        try:
+            created, affected = handler(after, operation, index, base_revision)
+            affected.extend(_apply_seed_layout_provenance(after, operation))
+        except FacilityLayoutOperationError as exc:
+            if exc.operation_index is None:
+                exc.operation_index = index
+                exc.details["operationIndex"] = index
+            raise
+        operation_results.append(
+            {
+                "index": index,
+                "op": operation_name,
+                "createdIds": sorted(set(created)),
+                "affectedIds": sorted(set(affected)),
+            }
+        )
+
+    return {
+        "schemaVersion": 1,
+        "document": canonicalize_layout(after),
         "operationResults": operation_results,
     }
 

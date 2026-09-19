@@ -172,8 +172,8 @@ def test_ui_and_agent_metadata_match_independent_runtime_surfaces() -> None:
         agent_tool_ids=sorted(generated_tool_ids),
     ) == {
         "status": "pass",
-        "uiCommandCount": 39,
-        "agentToolCount": 15,
+            "uiCommandCount": 40,
+        "agentToolCount": 23,
     }
 
 

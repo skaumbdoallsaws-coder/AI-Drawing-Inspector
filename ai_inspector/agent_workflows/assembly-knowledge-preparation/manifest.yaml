@@ -1,0 +1,20 @@
+schema_version: 1
+id: assembly-knowledge-preparation
+version: 1.0.0
+description: Assess and explain revision-bound Assembly Knowledge preparation without granting extraction, spend, publication, approval, or Process Map write authority.
+agents:
+  - sage
+entry_signals:
+  - assembly knowledge package readiness or review question
+  - ask what remains before process-map planning can begin
+required_assets: []
+optional_assets:
+  - process_map
+stages:
+  - inspect_trusted_package_state
+  - report_readiness_and_source_currency
+  - identify_review_or_preparation_blockers
+  - name_the_next_operator_controlled_action
+completion:
+  - readiness is stated without promotion
+  - no extraction, provider call, approval, or persistent write is claimed

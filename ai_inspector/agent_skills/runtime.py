@@ -281,17 +281,33 @@ class PromptBuild:
 class SkillRuntimeSettings:
     enabled: bool
     shadow: bool
+    router_provider: str
     router_model: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "SkillRuntimeSettings":
         source = os.environ if env is None else env
-        router_model = (source.get("INSPECTORPRO_SKILL_ROUTER_MODEL") or "claude-haiku-4-5").strip()
+        router_provider = (
+            source.get("INSPECTORPRO_SKILL_ROUTER_PROVIDER") or "anthropic"
+        ).strip().lower()
+        if router_provider not in {"anthropic", "openai"}:
+            raise SkillRuntimeError(
+                "INSPECTORPRO_SKILL_ROUTER_PROVIDER must be anthropic or openai"
+            )
+        default_model = (
+            "gpt-4o-mini"
+            if router_provider == "openai"
+            else "claude-haiku-4-5"
+        )
+        router_model = (
+            source.get("INSPECTORPRO_SKILL_ROUTER_MODEL") or default_model
+        ).strip()
         if not router_model:
             raise SkillRuntimeError("INSPECTORPRO_SKILL_ROUTER_MODEL must not be blank")
         return cls(
             enabled=_parse_env_bool(source.get("INSPECTORPRO_SKILLS_ENABLED"), False),
             shadow=_parse_env_bool(source.get("INSPECTORPRO_SKILLS_SHADOW"), False),
+            router_provider=router_provider,
             router_model=router_model,
         )
 
@@ -299,6 +315,7 @@ class SkillRuntimeSettings:
         return {
             "enabled": self.enabled,
             "shadow": self.shadow,
+            "router_provider": self.router_provider,
             "router_model": self.router_model,
         }
 

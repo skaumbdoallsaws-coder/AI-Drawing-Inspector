@@ -30,7 +30,7 @@ from .models import TelemetryEvent
 # columns onto an existing table (CREATE TABLE IF NOT EXISTS does not).
 #
 # v2 (Phase 3) — added httpStatus + stage columns (additive).
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 6
 
 # SCHEMA_SQL handles the fresh-DB case (CREATE TABLE IF NOT EXISTS) and
 # indexes that reference columns present since the original Phase 1
@@ -69,7 +69,46 @@ CREATE TABLE IF NOT EXISTS telemetry_events (
     partNumber TEXT,
     documentKind TEXT,
     httpStatus INTEGER,
-    stage TEXT
+    stage TEXT,
+    processMapProductId TEXT,
+    processMapId TEXT,
+    processMapRevision TEXT,
+    processMapOperation TEXT,
+    processMapOutcome TEXT,
+    processMapScope TEXT,
+    processMapSpatialEngineVersion INTEGER,
+    processMapPolicyVersion INTEGER,
+    processMapNodeCount INTEGER,
+    processMapEdgeCount INTEGER,
+    processMapScopedNodeCount INTEGER,
+    processMapScopedEdgeCount INTEGER,
+    processMapCandidatesEvaluated INTEGER,
+    processMapMovedNodeCount INTEGER,
+    processMapRejectionCountsJson TEXT,
+    processMapMetricsBeforeJson TEXT,
+    processMapMetricsAfterJson TEXT,
+    processMapFallbackReason TEXT,
+    memoryMode TEXT,
+    memoryClassification TEXT,
+    memoryAuthoritative INTEGER,
+    memoryContextTokens INTEGER,
+    memoryLegacyTokens INTEGER,
+    memoryOmissionCount INTEGER,
+    memoryReplayed INTEGER,
+    memoryRevisionOutcome TEXT,
+    memoryRetentionDeletedCount INTEGER,
+    memorySummaryRevision INTEGER,
+    memoryWorkflowStateRevision INTEGER,
+    memoryContextManifestId TEXT,
+    memoryEnvelopeSha256 TEXT,
+    memorySourceRevisionSha256 TEXT,
+    memoryResultRevisionSha256 TEXT,
+    memoryFallbackMode TEXT,
+    feedbackRating TEXT,
+    feedbackReasonCount INTEGER,
+    feedbackHasCorrection INTEGER,
+    feedbackLinkedTurn INTEGER,
+    feedbackLinkedRun INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_telemetry_timestamp ON telemetry_events (timestampUtc);
@@ -104,6 +143,45 @@ _ADDITIVE_COLUMNS = [
     ("streamDurationMs",     "REAL"),     # added v3
     ("pipelineLatencyMs",    "REAL"),     # added v3
     ("finalizeDeltaChars",   "INTEGER"),  # added v3
+    ("processMapProductId",             "TEXT"),     # added v4
+    ("processMapId",                    "TEXT"),     # added v4
+    ("processMapRevision",              "TEXT"),     # added v4
+    ("processMapOperation",             "TEXT"),     # added v4
+    ("processMapOutcome",               "TEXT"),     # added v4
+    ("processMapScope",                 "TEXT"),     # added v4
+    ("processMapSpatialEngineVersion",  "INTEGER"),  # added v4
+    ("processMapPolicyVersion",         "INTEGER"),  # added v4
+    ("processMapNodeCount",             "INTEGER"),  # added v4
+    ("processMapEdgeCount",             "INTEGER"),  # added v4
+    ("processMapScopedNodeCount",       "INTEGER"),  # added v4
+    ("processMapScopedEdgeCount",       "INTEGER"),  # added v4
+    ("processMapCandidatesEvaluated",   "INTEGER"),  # added v4
+    ("processMapMovedNodeCount",        "INTEGER"),  # added v4
+    ("processMapRejectionCountsJson",   "TEXT"),     # added v4
+    ("processMapMetricsBeforeJson",     "TEXT"),     # added v4
+    ("processMapMetricsAfterJson",      "TEXT"),     # added v4
+    ("processMapFallbackReason",        "TEXT"),     # added v4
+    ("memoryMode",                      "TEXT"),     # added v5
+    ("memoryClassification",            "TEXT"),     # added v5
+    ("memoryAuthoritative",              "INTEGER"),  # added v5
+    ("memoryContextTokens",              "INTEGER"),  # added v5
+    ("memoryLegacyTokens",               "INTEGER"),  # added v5
+    ("memoryOmissionCount",              "INTEGER"),  # added v5
+    ("memoryReplayed",                   "INTEGER"),  # added v5
+    ("memoryRevisionOutcome",            "TEXT"),     # added v5
+    ("memoryRetentionDeletedCount",      "INTEGER"),  # added v5
+    ("memorySummaryRevision",            "INTEGER"),  # added v5
+    ("memoryWorkflowStateRevision",      "INTEGER"),  # added v5
+    ("memoryContextManifestId",          "TEXT"),     # added v5
+    ("memoryEnvelopeSha256",             "TEXT"),     # added v5
+    ("memorySourceRevisionSha256",       "TEXT"),     # added v5
+    ("memoryResultRevisionSha256",       "TEXT"),     # added v5
+    ("memoryFallbackMode",               "TEXT"),     # added v5
+    ("feedbackRating",                   "TEXT"),     # added v6
+    ("feedbackReasonCount",              "INTEGER"),  # added v6
+    ("feedbackHasCorrection",            "INTEGER"),  # added v6
+    ("feedbackLinkedTurn",               "INTEGER"),  # added v6
+    ("feedbackLinkedRun",                "INTEGER"),  # added v6
 ]
 
 # Path convention (§6 of the plan). Override at runtime with the env var.

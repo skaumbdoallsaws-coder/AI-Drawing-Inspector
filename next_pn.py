@@ -8,6 +8,12 @@ Usage:
 import sys
 from pathlib import Path
 
+from ai_inspector.parts_manual.part_numbers import (
+    PART_NUMBER_REGISTRY_FILENAME,
+    load_part_number_registry,
+    registered_part_numbers,
+)
+
 LIBRARY = Path("400S_Sorted_Library")
 
 def get_used_numbers():
@@ -23,6 +29,9 @@ def get_used_numbers():
     # Also scan assembly subdirectories
     for f in LIBRARY.glob("assemblies/*_assembly.json"):
         used.add(f.stem.replace("_assembly", ""))
+    registry_path = LIBRARY / PART_NUMBER_REGISTRY_FILENAME
+    if registry_path.is_file():
+        used.update(registered_part_numbers(load_part_number_registry(registry_path)))
     return used
 
 

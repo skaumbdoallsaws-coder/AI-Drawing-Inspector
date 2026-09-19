@@ -1,0 +1,24 @@
+schema_version: 1
+id: facility-layout-analysis
+version: 1.0.0
+description: Analyze one trusted Facility Layout and present evidence-backed findings without creating a preview or changing layout state.
+agents:
+  - sage
+entry_signals:
+  - review, inspect, explain, compare, count, or audit the active Facility Layout
+  - request a table, chart, graph, summary, or KPI from trusted Facility Layout data
+  - ask about zones, assets, routes, findings, clearances, or process bindings without requesting a spatial change
+required_assets:
+  - facility_layout
+optional_assets:
+  - process_map
+stages:
+  - observe_revision_bound_layout
+  - resolve_analysis_question
+  - inspect_bounded_authority
+  - compute_supported_analysis
+  - present_findings
+completion:
+  - findings and visualizations use exact values from trusted context
+  - unsupported engineering conclusions remain explicitly unverified
+  - no ghost preview, approval, or persistent write is requested

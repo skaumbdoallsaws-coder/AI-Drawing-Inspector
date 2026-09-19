@@ -302,6 +302,18 @@ FACILITY_COMMAND_SEMANTICS = (
     _command("bulk-zones", "Bulk Zones", "create", "draft_edit", "zone_set", "Create several named zones from exact dimensions."),
     _command("aisle", "Aisle", "create", "draft_edit", "route", "Author a semantic corridor with a centerline, width, and traffic role."),
     _command("floor-marking", "Floor Marking", "create", "draft_edit", "marking", "Author communication paint such as arrows, lanes, crossings, or keep-clear markings."),
+    _command(
+        "motion-path",
+        "Motion Path",
+        "create",
+        "draft_edit",
+        "navigation_intent",
+        "Open Plan pointer authoring for one selected existing actor; only user-authored pointer input may establish path coordinates.",
+        preconditions=(
+            "exactly one existing actor placement is selected",
+            "manual navigation authoring is enabled",
+        ),
+    ),
     _command("rotate", "Rotate 90", "arrange", "draft_edit", "selection", "Rotate selected placements by a quarter turn.", preconditions=("one or more unlocked placements",), multi_select=True),
     _command("duplicate", "Duplicate", "arrange", "draft_edit", "selection", "Create independent copies while preserving relative geometry for a group.", preconditions=("one or more duplicable entities",), multi_select=True),
     _command("delete", "Delete", "arrange", "draft_edit", "selection", "Remove selected authored entities after reference checks.", preconditions=("selection is not protected by references",), multi_select=True),
@@ -337,6 +349,10 @@ FACILITY_COMMAND_SEMANTICS = (
 
 
 AGENT_TOOL_SEMANTICS = (
+    _command("preview_facility_cell_layout", "Preview cell arrangement", "agent_preview", "preview", "selection", "Arrange existing placements in an immutable candidate; no editor change or Save.", agent_availability="sage_preview"),
+    _command("preview_facility_surface_stack", "Preview surface attachment", "agent_preview", "preview", "selection", "Attach existing children to a published surface in the candidate.", agent_availability="sage_preview"),
+    _command("preview_facility_create_cell_group", "Preview persistent cell", "agent_preview", "preview", "selection", "Group explicit candidate IDs; return the cell ID and membership.", agent_availability="sage_preview"),
+    _command("preview_facility_linear_pattern", "Preview repeated cells", "agent_preview", "preview", "selection", "Repeat seeds by total count and pitch; remap cell and support IDs.", agent_availability="sage_preview"),
     _command("search_industrial_assets", "Search industrial assets", "agent_read", "read", "catalog", "Find trusted planning-ready assets by category, capability, or text.", agent_availability="sage_read"),
     _command("inspect_facility_entities", "Inspect facility entities", "agent_read", "read", "layout", "Read exact revision-bound placements, zones, markings, routes, or utilities.", agent_availability="sage_read"),
     _command("inspect_facility_region", "Inspect facility region", "agent_read", "read", "region", "Read one stable zone or shell feature without model-authored geometry.", agent_availability="sage_read"),
@@ -350,6 +366,10 @@ AGENT_TOOL_SEMANTICS = (
     _command("preview_facility_move", "Preview exact Facility move", "agent_preview", "preview", "selection", "Translate selected or exactly resolved placements by a cardinal distance in an authoritative validated unsaved draft while preserving rotation.", agent_availability="sage_preview"),
     _command("build_facility_layout_preview", "Build Facility Layout preview", "agent_preview", "preview", "layout", "Compile one semantic plan into a synchronized, validated 2D/3D ghost preview.", agent_availability="sage_preview"),
     _command("generate_facility_departments_draft", "Generate facility and departments", "agent_preview", "preview", "layout", "Build or explicitly replace a facility envelope and labeled macro departments through a resumable deterministic draft run; the saved layout remains unchanged until Save.", agent_availability="sage_preview"),
+    _command("inspect_facility_design_brief", "Inspect facility design brief", "agent_read", "read", "design_brief", "Read the bounded active design objective, constraints, priorities, unknowns, decisions, and exact stable-ID referents.", agent_availability="sage_preview"),
+    _command("update_facility_design_brief", "Update facility design brief", "agent_design", "design_state_edit", "design_brief", "Create an immutable design-brief revision from a validated semantic patch without changing Facility Layout geometry.", agent_availability="sage_preview"),
+    _command("run_facility_design_preview", "Run facility design preview", "agent_preview", "preview", "design_proposal", "Start or resume a bounded deterministic baseline, candidate, evaluation, and recovery workflow; return at most two unsaved proposals.", agent_availability="sage_preview"),
+    _command("apply_facility_design_proposal_draft", "Apply facility design proposal", "agent_preview", "draft_edit", "design_proposal", "Install one exactly selected, revision-bound proposal as the cumulative unsaved editor draft without saving it.", agent_availability="sage_write"),
     _command("present_chat_visualization", "Present visualization", "presentation", "read", "chat", "Render an InspectorPro-owned chart from exact supplied values.", agent_availability="sage_presentation"),
     _command("present_chat_table", "Present table", "presentation", "read", "chat", "Render an InspectorPro-owned structured table from exact supplied values.", agent_availability="sage_presentation"),
 )
@@ -4676,6 +4696,7 @@ def analyze_facility_cell_alternatives(
     strategies: Sequence[str] = _CELL_COMPARISON_STRATEGIES,
     preferred_gap_meters: float = 1.0,
     invert_u: bool = False,
+    sequence_placement_ids: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Compare bounded cell layouts without changing the authoritative state."""
 
@@ -4845,6 +4866,24 @@ def analyze_facility_cell_alternatives(
     sequence_ids.extend(
         item for item in station_ids if item not in sequence_ids
     )
+    if sequence_placement_ids:
+        requested_sequence = [
+            str(item) for item in sequence_placement_ids if str(item)
+        ]
+        if (
+            len(requested_sequence) != len(station_ids)
+            or len(set(requested_sequence)) != len(requested_sequence)
+            or set(requested_sequence) != set(station_ids)
+        ):
+            raise ValueError(
+                "sequencePlacementIds must contain every cell station exactly once"
+            )
+        sequence_ids = requested_sequence
+        travel_record = {
+            **travel_record,
+            "metricId": "user_authored_process_sequence_center_distance",
+            "evidenceStatus": "authored",
+        }
     if len(station_ids) < 2:
         return {
             "analysis": "cell_alternatives",
@@ -5042,6 +5081,187 @@ def analyze_facility_cell_alternatives(
                 "quaternion": deepcopy(transform.get("quaternion")),
                 "rotationPreserved": True,
             })
+
+        # A registered strategy defines relative station geometry, not a
+        # requirement that its envelope sit on the exact zone centroid. Search
+        # a small deterministic set of bounded translations so an otherwise
+        # valid line/L/U can occupy free space beside an authored route or
+        # fixed resource. The strategy shape, station order, rotation, and
+        # requested gaps remain unchanged.
+        arrangement_dx = 0.0
+        arrangement_dz = 0.0
+        positioning_shapes = list(candidate_shapes.values())
+        if clearance_complete:
+            authored_clearances = [
+                shape for shape in candidate_clearances.values()
+                if shape is not None
+            ]
+            if len(authored_clearances) == len(candidate_shapes):
+                positioning_shapes = authored_clearances
+        positioning_union = _union_shapes(positioning_shapes)
+        if positioning_union is not None:
+            low_x, low_z, high_x, high_z = positioning_union.bounds
+            minimum_dx = minimum_x - low_x
+            maximum_dx = maximum_x - high_x
+            minimum_dz = minimum_z - low_z
+            maximum_dz = maximum_z - high_z
+
+            def _axis_offsets(minimum: float, maximum: float) -> list[float]:
+                values = (
+                    0.0,
+                    minimum,
+                    minimum / 2.0,
+                    maximum / 2.0,
+                    maximum,
+                )
+                unique: list[float] = []
+                for value in values:
+                    if not any(
+                        abs(value - existing) <= GEOMETRY_EPSILON
+                        for existing in unique
+                    ):
+                        unique.append(value)
+                return unique
+
+            translation_candidates = [
+                (dx, dz)
+                for dx in _axis_offsets(minimum_dx, maximum_dx)
+                for dz in _axis_offsets(minimum_dz, maximum_dz)
+            ]
+            translation_candidates.sort(
+                key=lambda item: (
+                    abs(item[0]) + abs(item[1]),
+                    abs(item[1]),
+                    abs(item[0]),
+                    item[1],
+                    item[0],
+                )
+            )
+            feasible_translations = []
+            for dx, dz in translation_candidates:
+                shifted_shapes = {
+                    placement_id: shapely_affinity.translate(
+                        shape,
+                        xoff=dx,
+                        yoff=dz,
+                    )
+                    for placement_id, shape in candidate_shapes.items()
+                }
+                shifted_clearances = {
+                    placement_id: (
+                        shapely_affinity.translate(
+                            clearance,
+                            xoff=dx,
+                            yoff=dz,
+                        )
+                        if clearance is not None else None
+                    )
+                    for placement_id, clearance in (
+                        candidate_clearances.items()
+                    )
+                }
+                if any(
+                    not zone_shape.covers(shape)
+                    for shape in shifted_shapes.values()
+                ):
+                    continue
+                if clearance_complete and any(
+                    clearance is None or not zone_shape.covers(clearance)
+                    for clearance in shifted_clearances.values()
+                ):
+                    continue
+                if external_union is not None and any(
+                    _shape_area(shape.intersection(external_union))
+                    > GEOMETRY_EPSILON
+                    for shape in shifted_shapes.values()
+                ):
+                    continue
+                if clearance_complete and external_union is not None and any(
+                    clearance is not None
+                    and clearance.intersects(external_union)
+                    for clearance in shifted_clearances.values()
+                ):
+                    continue
+                if clearance_complete and any(
+                    clearance is not None
+                    and other_id != placement_id
+                    and clearance.intersects(other_shape)
+                    for placement_id, clearance in shifted_clearances.items()
+                    for other_id, other_shape in shifted_shapes.items()
+                ):
+                    continue
+                if any(
+                    _shape_area(shape.intersection(protected_shape))
+                    > GEOMETRY_EPSILON
+                    for shape in shifted_shapes.values()
+                    for _, protected_shape in protected_shapes
+                ):
+                    continue
+                shifted_positions = {
+                    placement_id: (position[0] + dx, position[1] + dz)
+                    for placement_id, position in target_positions.items()
+                }
+                move_distance = sum(
+                    math.dist(
+                        current_positions[placement_id],
+                        shifted_positions[placement_id],
+                    )
+                    for placement_id in member_ids
+                )
+                feasible_translations.append(
+                    (move_distance, abs(dx) + abs(dz), dz, dx)
+                )
+            if feasible_translations:
+                _, _, arrangement_dz, arrangement_dx = min(
+                    feasible_translations
+                )
+                if (
+                    abs(arrangement_dx) > GEOMETRY_EPSILON
+                    or abs(arrangement_dz) > GEOMETRY_EPSILON
+                ):
+                    target_positions = {
+                        placement_id: (
+                            position[0] + arrangement_dx,
+                            position[1] + arrangement_dz,
+                        )
+                        for placement_id, position in target_positions.items()
+                    }
+                    candidate_shapes = {
+                        placement_id: shapely_affinity.translate(
+                            shape,
+                            xoff=arrangement_dx,
+                            yoff=arrangement_dz,
+                        )
+                        for placement_id, shape in candidate_shapes.items()
+                    }
+                    candidate_clearances = {
+                        placement_id: (
+                            shapely_affinity.translate(
+                                clearance,
+                                xoff=arrangement_dx,
+                                yoff=arrangement_dz,
+                            )
+                            if clearance is not None else None
+                        )
+                        for placement_id, clearance in (
+                            candidate_clearances.items()
+                        )
+                    }
+                    for transform in proposed_transforms:
+                        position = transform["position"]
+                        position["x"] = _round(
+                            float(position["x"]) + arrangement_dx
+                        )
+                        position["z"] = _round(
+                            float(position["z"]) + arrangement_dz
+                        )
+                    total_move = sum(
+                        math.dist(
+                            current_positions[placement_id],
+                            target_positions[placement_id],
+                        )
+                        for placement_id in member_ids
+                    )
         shape_values = [candidate_shapes[item] for item in member_ids]
         boundary_violations = [
             placement_id for placement_id, shape in candidate_shapes.items()
@@ -5142,7 +5362,15 @@ def analyze_facility_cell_alternatives(
             "clearanceConflicts": sorted(set(clearance_conflicts)),
             "guide": {
                 **guide,
-                "center": {"x": _round(center_x), "z": _round(center_z)},
+                "center": {
+                    "x": _round(center_x + arrangement_dx),
+                    "z": _round(center_z + arrangement_dz),
+                },
+                "zoneCenter": {"x": _round(center_x), "z": _round(center_z)},
+                "translationFromZoneCenter": {
+                    "x": _round(arrangement_dx),
+                    "z": _round(arrangement_dz),
+                },
                 "requiredWidthMeters": _round(required_width),
                 "requiredDepthMeters": _round(required_depth),
                 "preferredGapMeters": _round(gap),

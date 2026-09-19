@@ -40,7 +40,14 @@ def _registries():
         [SKILL_ROOT],
         workflow_ids=set(workflows.ids),
         known_agents={"sage", "iris", "scout"},
-        known_modes={"report_fai", "report", "drawing", "assembly", "training"},
+        known_modes={
+            "report_fai",
+            "report",
+            "drawing",
+            "assembly",
+            "training",
+            "facility_layout",
+        },
         known_tools_by_agent={
             "sage": {
                 "ui_actions",
@@ -50,7 +57,28 @@ def _registries():
                 "inspect_facility_region",
                 "inspect_facility_findings",
                 "inspect_process_bindings",
+                "inspect_facility_semantics",
+                "inspect_pattern_provenance",
+                "inspect_cell_layout_provenance",
+                "analyze_facility_spatial",
+                "analyze_facility_fit",
+                "preview_facility_move",
                 "build_facility_layout_preview",
+                "present_chat_visualization",
+                "present_chat_table",
+                "inspect_process_map_spatial_layout",
+                "propose_process_map_connection_route",
+                "propose_process_map_demo_metadata",
+                "propose_process_map_node_placement",
+                "build_process_map_preview",
+                "generate_operations_manual_draft",
+                "publish_operations_manual",
+                "generate_specification_sheet_draft",
+                "publish_specification_sheet",
+                "generate_parts_manual_draft",
+                "propose_parts_manual_structure",
+                "edit_parts_manual_composition",
+                "generate_and_publish_parts_manual",
             },
             "iris": set(),
             "scout": set(),
@@ -97,6 +125,32 @@ def _catalog(*, with_fai: bool = True, mode: str = "report_fai", facts=None):
         if with_fai
         else {"drawing.dimensions"},
         context_facts=facts or _facts(),
+    )
+
+
+def _facility_catalog(*, mode: str = "training"):
+    workflows, skills = _registries()
+    return build_candidate_catalog(
+        workflows,
+        skills,
+        agent="sage",
+        mode=mode,
+        available_assets={"facility_layout"},
+        available_context={
+            "facility_layout.digest",
+            "facility_layout.evidence",
+        },
+        context_facts={
+            "active_mode": mode,
+            "facility_layout": {
+                "identity": {"layoutId": "layout-local"},
+                "counts": {"zones": 6, "placements": 827},
+            },
+            "target_index": {
+                "facility_layout": ["layout-local"],
+                "facility_zone": ["zone-machining"],
+            },
+        },
     )
 
 
@@ -184,6 +238,133 @@ def test_route_validator_accepts_registered_read_only_route():
     }
 
 
+def test_route_validator_accepts_typed_facility_visualization_route():
+    route = _route(
+        speech_act="analyze",
+        workflow="facility-layout-analysis",
+        skill=False,
+        intent_kind="visualize_facility_data",
+        target_kind="facility_layout",
+        target_id="layout-local",
+    )
+    route["skill_candidates"] = [
+        {
+            "id": "analyze-facility-layout",
+            "role": "primary",
+            "confidence": 0.97,
+        }
+    ]
+    route["context_requirements"] = ["facility_layout.digest"]
+
+    cleaned = validate_route_response(route, _facility_catalog())
+
+    assert cleaned is not None
+    assert cleaned["primary_workflow"] == "facility-layout-analysis"
+    assert cleaned["intents"][0]["kind"] == "visualize_facility_data"
+    assert cleaned["skill_candidates"] == [
+        {
+            "id": "analyze-facility-layout",
+            "role": "primary",
+            "confidence": 0.97,
+        }
+    ]
+
+
+def test_facility_skills_are_eligible_in_the_live_facility_mode():
+    catalog = _facility_catalog(mode="facility_layout")
+
+    assert catalog.skill("analyze-facility-layout")["status"] == "eligible"
+    assert catalog.skill("generate-facility-layout")["status"] == "eligible"
+
+
+def test_typed_facility_intent_recovers_omitted_canonical_primary_skill():
+    raw = _route(
+        speech_act="analyze",
+        workflow="facility-layout-analysis",
+        skill=False,
+        intent_kind="compare_facility_entities",
+        target_kind="facility_layout",
+        target_id="layout-local",
+    )
+    raw["route_version"] = 2
+    raw.pop("context_requirements")
+    raw.pop("requested_side_effects")
+    raw.pop("clarification_question")
+
+    cleaned = validate_route_response(
+        raw,
+        _facility_catalog(mode="facility_layout"),
+    )
+
+    assert cleaned is not None
+    assert cleaned["skill_candidates"] == [{
+        "id": "analyze-facility-layout",
+        "role": "primary",
+        "confidence": 0.94,
+    }]
+    assert cleaned["context_requirements"] == ["facility_layout.digest"]
+
+
+def test_typed_process_intent_preserves_unavailable_workflow_for_clarification():
+    workflows, skills = _registries()
+    catalog = build_candidate_catalog(
+        workflows,
+        skills,
+        agent="sage",
+        mode="training",
+        available_assets=set(),
+        available_context=set(),
+        context_facts={"active_mode": "training", "target_index": {}},
+    )
+    raw = _route(
+        speech_act="analyze",
+        workflow=None,
+        skill=False,
+        intent_kind="analyze_process_map",
+        target_kind="process_map",
+        target_id=None,
+        clarification=True,
+    )
+    raw["route_version"] = 2
+    raw.pop("context_requirements")
+    raw.pop("requested_side_effects")
+
+    cleaned = validate_route_response(raw, catalog)
+
+    assert cleaned is not None
+    assert cleaned["primary_workflow"] == "process-map-analysis"
+    assert cleaned["workflow_confidence"] == 0.94
+    assert cleaned["skill_candidates"] == []
+    assert cleaned["needs_clarification"] is True
+
+
+def test_typed_fai_intent_preserves_unavailable_workflow_for_clarification():
+    raw = _route(
+        workflow=None,
+        skill=False,
+        clarification=True,
+    )
+    raw["route_version"] = 2
+    raw.pop("context_requirements")
+    raw.pop("requested_side_effects")
+
+    cleaned = validate_route_response(raw, _catalog(with_fai=False))
+
+    assert cleaned is not None
+    assert cleaned["primary_workflow"] == "supplier-fai-disposition"
+    assert cleaned["skill_candidates"] == []
+    assert cleaned["needs_clarification"] is True
+
+
+def test_route_validator_normalizes_registered_skill_intent_alias():
+    raw = _route(intent_kind="trace_assembly_impact")
+
+    cleaned = validate_route_response(raw, _catalog())
+
+    assert cleaned is not None
+    assert cleaned["intents"][0]["kind"] == "explain_assembly_impact"
+
+
 def test_route_validator_rejects_unknown_ids_unavailable_skills_and_extra_keys():
     catalog = _catalog()
     unknown_workflow = _route()
@@ -201,16 +382,44 @@ def test_route_validator_rejects_unknown_ids_unavailable_skills_and_extra_keys()
     unavailable = _catalog(with_fai=False)
     assert validate_route_response(_route(), unavailable) is None
 
-    no_workflow = _route(workflow=None)
+    no_workflow = _route(
+        workflow=None,
+        intent_kind="other",
+        target_kind="unknown",
+        target_id=None,
+    )
     normalized = validate_route_response(no_workflow, catalog)
     assert normalized is not None
     assert normalized["primary_workflow"] is None
     assert normalized["skill_candidates"] == []
     assert normalized["context_requirements"] == []
 
-    no_workflow_unknown = _route(workflow=None)
+    no_workflow_unknown = _route(
+        workflow=None,
+        intent_kind="other",
+        target_kind="unknown",
+        target_id=None,
+    )
     no_workflow_unknown["skill_candidates"][0]["id"] = "invented-skill"
     assert validate_route_response(no_workflow_unknown, catalog) is None
+
+
+def test_route_validator_normalizes_model_greeting_alias_to_social():
+    greeting = _route(
+        workflow=None,
+        skill=False,
+        intent_kind="other",
+        target_kind="unknown",
+        target_id=None,
+    )
+    greeting["speech_act"] = "greet"
+
+    cleaned = validate_route_response(greeting, _catalog())
+
+    assert cleaned is not None
+    assert cleaned["speech_act"] == "social"
+    assert cleaned["primary_workflow"] is None
+    assert cleaned["skill_candidates"] == []
 
 
 def test_route_validator_rejects_read_only_writes_and_canonicalizes_effect_categories():
@@ -246,6 +455,15 @@ def test_route_validator_rejects_read_only_writes_and_canonicalizes_effect_categ
     cleaned = validate_route_response(long_clarification, catalog)
     assert cleaned is not None
     assert len(cleaned["clarification_question"]) == 240
+
+    blocked_command = _route(
+        speech_act="command",
+        skill=False,
+        clarification=True,
+    )
+    cleaned = validate_route_response(blocked_command, catalog)
+    assert cleaned is not None
+    assert cleaned["speech_act"] == "clarify"
 
 
 def test_route_validator_rejects_unknown_target_and_invalid_skill_roles():
@@ -684,6 +902,16 @@ def test_route_schema_matches_runtime_top_level_contract():
     assert set(schema["required"]) <= set(schema["properties"])
     assert schema["properties"]["route_version"] == {"const": 2}
     assert schema["additionalProperties"] is False
+    assert "visualize_facility_data" in schema["$defs"]["intent"][
+        "properties"
+    ]["kind"]["enum"]
+    assert "facility_layout" in schema["$defs"]["target"][
+        "properties"
+    ]["kind"]["enum"]
+    assert "confidence" in schema["$defs"]["intent"]["required"]
+    assert "label" in schema["$defs"]["target"]["required"]
+    assert "role" in schema["$defs"]["skillCandidate"]["required"]
+    assert "social" in schema["properties"]["speech_act"]["enum"]
 
 
 def test_compact_v2_route_derives_server_owned_fields():
@@ -703,6 +931,35 @@ def test_compact_v2_route_derives_server_owned_fields():
     assert cleaned["route_version"] == 2
     assert cleaned["context_requirements"] == ["fai.characteristics"]
     assert cleaned["requested_side_effects"]["viewport_write"] is False
+
+
+def test_v2_route_accepts_the_exact_verbose_shape_shown_to_the_model():
+    raw = _route(
+        speech_act="analyze",
+        workflow="facility-layout-analysis",
+        skill=False,
+        intent_kind="visualize_facility_data",
+        target_kind="facility_layout",
+        target_id="layout-local",
+    )
+    raw["route_version"] = 2
+    raw.pop("context_requirements")
+    raw.pop("requested_side_effects")
+    raw.pop("clarification_question")
+    raw["skill_candidates"] = [{
+        "id": "analyze-facility-layout",
+        "role": "primary",
+        "confidence": 0.97,
+    }]
+
+    cleaned = validate_route_response(raw, _facility_catalog())
+
+    assert cleaned is not None
+    assert cleaned["intents"][0]["confidence"] == 0.94
+    assert cleaned["intents"][0]["targets"][0]["label"] == (
+        "requested target"
+    )
+    assert cleaned["skill_candidates"][0]["role"] == "primary"
 
 
 def test_typed_intent_deterministically_selects_primary_skill():

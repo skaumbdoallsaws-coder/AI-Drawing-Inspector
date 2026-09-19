@@ -1,0 +1,32 @@
+:root { color-scheme: light dark; font: 12px system-ui,sans-serif; color: #263344; background: #f0f3f6; letter-spacing: 0; }
+* { box-sizing: border-box; }
+body { margin: 0; height: 116px; overflow: hidden; border-left: 1px solid #8b9aa9; }
+header { padding: 7px; display: grid; gap: 6px; }
+.top, form, .status { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.top { height: 30px; }
+strong { font-size: 12px; margin-right: 5px; }
+button { border: 1px solid transparent; background: transparent; color: inherit; width: 28px; height: 28px; flex: 0 0 28px; border-radius: 3px; font-size: 18px; cursor: pointer; }
+button:hover { background: #dce6ee; }
+button:focus-visible, input:focus-visible { outline: 2px solid #0076bb; outline-offset: -2px; }
+button:disabled { opacity: .4; cursor: default; }
+#tabs { display: flex; flex: 1; gap: 3px; overflow-x: auto; scrollbar-width: thin; min-width: 0; height: 32px; }
+.tab { display: flex; align-items: center; border-bottom: 2px solid transparent; max-width: 180px; min-width: 56px; flex: 1 0 80px; }
+.tab.active { border-bottom-color: #0076bb; background: #fff; }
+.tab button:first-child { flex: 1; width: auto; min-width: 0; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; padding: 3px; text-align: left; }
+.tab button:last-child { width: 20px; flex-basis: 20px; font-size: 16px; }
+.tab button:first-child { display:flex;align-items:center;gap:5px; }
+.tab-title { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.tab-favicon { display:block;width:16px;height:16px;flex:0 0 16px;background:currentColor;mask:url(../../static/assets/desktop-browser-globe.svg) center/contain no-repeat; }
+.tab-favicon.has-image { mask:none;background:none; }
+.tab-favicon img { display:block;width:16px;height:16px;object-fit:contain; }
+input { min-width: 0; width: 100%; height: 29px; border: 1px solid #a0aeba; border-radius: 3px; background: #fff; color: inherit; padding: 4px 7px; font: inherit; }
+.icon { display:block;width:18px;height:18px;margin:auto;background:currentColor;mask-position:center;mask-repeat:no-repeat;mask-size:contain; }
+.icon.detach { mask-image:url(icons/picture-in-picture-2.svg); }
+.icon.download { mask-image:url(icons/download.svg); }
+#more { appearance:none;width:28px;height:28px;flex:0 0 28px;border:0;border-radius:3px;background:transparent;color:inherit;text-align:center;font:20px system-ui;cursor:pointer; }
+#more option { font:13px system-ui;color:#24313f;background:#f0f3f6; }
+.status { height: 23px; font-size: 11px; }
+#status { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#cancel-downloads { font: inherit; width: auto; flex-basis: auto; margin-left: auto; white-space: nowrap; }
+[hidden] { display: none !important; }
+@media (prefers-color-scheme: dark) { :root { color: #e3e9ee; background: #202b36; } input,.tab.active { background: #131b23; } button:hover { background: #344658; } }

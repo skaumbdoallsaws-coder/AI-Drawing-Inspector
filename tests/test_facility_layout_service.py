@@ -11,9 +11,11 @@ from ai_inspector.facility_layout.authority_repository import (
     VehicleProfileRepository,
 )
 from ai_inspector.facility_layout.authorization import FacilityPrincipal
+from ai_inspector.facility_layout.canonical import layout_revision
 from ai_inspector.facility_layout.errors import (
     FacilityConflictError,
     FacilityLayoutError,
+    FacilityNotFoundError,
     FacilityValidationError,
 )
 from ai_inspector.facility_layout.operations import (
@@ -113,6 +115,9 @@ def _service(
     *,
     asset_resolver=_default_asset_resolver,
     process_map_resolver=None,
+    prototype_vehicle=False,
+    vehicle_asset_ref=None,
+    allow_prototype_motion=False,
 ):
     principal = _principal()
     documents = _authority_documents()
@@ -142,12 +147,28 @@ def _service(
         documents["policy_set"],
         "policySetId",
     )
-    vehicle = _publish(
-        vehicle_repository,
-        principal,
-        documents["vehicle_profile"],
-        "vehicleProfileId",
-    )
+    if prototype_vehicle:
+        vehicle_document = deepcopy(documents["vehicle_profile"])
+        vehicle_document.update({
+            "status": "draft",
+            "prototypeMode": True,
+            "prototypeLabel": "Prototype motion test profile",
+            "productionEligible": False,
+        })
+        if vehicle_asset_ref is not None:
+            vehicle_document["assetDefinitionRef"] = deepcopy(vehicle_asset_ref)
+        vehicle = vehicle_repository.create(
+            principal,
+            site_id="site-a",
+            document=vehicle_document,
+        ).envelope
+    else:
+        vehicle = _publish(
+            vehicle_repository,
+            principal,
+            documents["vehicle_profile"],
+            "vehicleProfileId",
+        )
     service = FacilityLayoutService(
         layout_repository=FacilityLayoutRepository(
             tmp_path / "layouts",
@@ -158,6 +179,7 @@ def _service(
         vehicle_repository=vehicle_repository,
         asset_definition_resolver=asset_resolver,
         process_map_resolver=process_map_resolver,
+        allow_prototype_motion=allow_prototype_motion,
     )
     return service, principal, shell, policy, vehicle
 
@@ -201,6 +223,44 @@ def _file_snapshot(root):
         path.relative_to(root).as_posix(): path.read_bytes()
         for path in sorted(root.rglob("*"))
         if path.is_file()
+    }
+
+
+def test_circulation_obstacle_context_uses_revision_bound_authority(tmp_path):
+    service, principal, shell, policy, vehicle = _service(tmp_path)
+    layout = _layout(shell, policy, layout_id="fl-g22-context")
+    placed = apply_facility_layout_operations(
+        layout,
+        [_placement_operation()],
+        base_revision=None,
+    )["document"]
+
+    context = service.circulation_obstacle_context(
+        principal,
+        "site-a",
+        placed,
+        vehicle_profile_ref={
+            "vehicleProfileId": vehicle.document["vehicleProfileId"],
+            "vehicleProfileRevision": vehicle.revision,
+        },
+    )
+
+    assert context["schemaVersion"] == 1
+    assert any(
+        obstacle["obstacleKind"] == "placement_footprint"
+        and obstacle["sourceRef"]
+        == placed["placements"][0]["placementId"]
+        for obstacle in context["obstacles"]
+    )
+    assert context["sourceRevisions"]["shell"] == shell.revision
+    assert context["sourceRevisions"]["policy"] == policy.revision
+    assert context["sourceRevisions"][
+        f"asset:{placed['placements'][0]['assetId']}"
+    ] == placed["placements"][0]["assetDefinitionRevision"]
+    assert context["vehicleProfile"] == {
+        "document": vehicle.document,
+        "revision": vehicle.revision,
+        "status": "published",
     }
 
 
@@ -305,8 +365,9 @@ def test_operation_preview_is_stable_read_only_and_matches_apply(tmp_path):
     assert applied["operationResult"] == {
         key: value
         for key, value in preview.items()
-        if key not in {"baseRevision", "dependencies"}
+        if key not in {"baseRevision", "dependencies", "revision"}
     }
+    assert preview["revision"] == layout_revision(preview["document"])
     assert applied["dependencies"] == preview["dependencies"]
 
 
@@ -838,6 +899,392 @@ def test_service_plans_forklift_route_from_trusted_zone_anchors(tmp_path):
     assert result["sourceRevisions"]["layout"] == created["revision"]
 
 
+def test_service_validates_manual_operator_path_without_mutating_layout(tmp_path):
+    def actor_resolver(_principal_value, _site_id, asset_id, revision):
+        resolved = _resolved_asset(asset_id, revision)
+        if asset_id == "asset-operator":
+            resolved["definition"]["category"] = "operators"
+        return resolved
+
+    service, principal, shell, policy, _vehicle = _service(
+        tmp_path,
+        asset_resolver=actor_resolver,
+    )
+    layout = _layout(shell, policy, layout_id="fl-manual-navigation")
+    actor = deepcopy(_placement_operation()["placement"])
+    actor.update({
+        "placementId": "pl-operator-manual",
+        "assetId": "asset-operator",
+    })
+    actor["transform"]["position"].update({"x": 2.0, "z": 2.0})
+    layout["placements"].append(actor)
+    created = service.create_layout(principal, "site-a", layout)
+
+    result = service.validate_manual_navigation_path(
+        principal,
+        "site-a",
+        "fl-manual-navigation",
+        created["revision"],
+        {
+            "actorPlacementId": "pl-operator-manual",
+            "actorClass": "pedestrian",
+            "actorProfileRef": {
+                "profileKind": "pedestrian",
+                "profileId": "pedestrian-profile:asset-operator",
+                "profileRevision": actor["assetDefinitionRevision"],
+            },
+            "constraintMode": "complete_override",
+            "direction": "forward",
+            "points": [{"x": 2, "z": 2}, {"x": 12, "z": 2}],
+        },
+    )
+    after = service.get_layout(
+        principal,
+        "site-a",
+        "fl-manual-navigation",
+    )
+    assert result["valid"] is True
+    assert result["mutated"] is False
+    assert after["revision"] == created["revision"]
+    assert after["layout"] == created["layout"]
+
+    with pytest.raises(FacilityValidationError) as mismatch:
+        service.validate_manual_navigation_path(
+            principal,
+            "site-a",
+            "fl-manual-navigation",
+            created["revision"],
+            {
+                "actorPlacementId": "pl-operator-manual",
+                "actorClass": "vehicle",
+                "actorProfileRef": {
+                    "profileKind": "vehicle",
+                    "profileId": "vehicle-forklift-a",
+                    "profileRevision": "a" * 64,
+                },
+                "constraintMode": "complete_override",
+                "direction": "forward",
+                "points": [{"x": 2, "z": 2}, {"x": 12, "z": 2}],
+            },
+        )
+    assert mismatch.value.code == "facility_navigation_actor_class_mismatch"
+
+
+def test_service_requires_explicit_mode_for_prototype_vehicle_path(tmp_path):
+    def actor_resolver(_principal_value, _site_id, asset_id, revision):
+        resolved = _resolved_asset(asset_id, revision)
+        if asset_id == "asset-forklift-navigation":
+            resolved["definition"]["category"] = "vehicle"
+        return resolved
+
+    placement_operation = _placement_operation()
+    placement_operation["placement"].update({
+        "placementId": "pl-forklift-navigation",
+        "assetId": "asset-forklift-navigation",
+    })
+    placement_operation["placement"]["transform"]["position"].update({
+        "x": 2.0,
+        "z": 2.0,
+    })
+    vehicle_asset_ref = {
+        "assetId": "asset-forklift-navigation",
+        "assetDefinitionRevision": placement_operation["placement"][
+            "assetDefinitionRevision"
+        ],
+    }
+    service, principal, shell, policy, vehicle = _service(
+        tmp_path,
+        asset_resolver=actor_resolver,
+        prototype_vehicle=True,
+        vehicle_asset_ref=vehicle_asset_ref,
+        allow_prototype_motion=True,
+    )
+    layout = _layout(shell, policy, layout_id="fl-prototype-navigation")
+    layout = apply_facility_layout_operations(
+        layout,
+        [placement_operation],
+        base_revision=None,
+    )["document"]
+    created = service.create_layout(principal, "site-a", layout)
+    request = {
+        "actorPlacementId": "pl-forklift-navigation",
+        "actorClass": "vehicle",
+        "actorProfileRef": {
+            "profileKind": "vehicle",
+            "profileId": vehicle.document["vehicleProfileId"],
+            "profileRevision": vehicle.revision,
+        },
+        "constraintMode": "complete_override",
+        "direction": "forward",
+        "points": [{"x": 2, "z": 2}, {"x": 12, "z": 2}],
+    }
+    with pytest.raises(FacilityNotFoundError):
+        service.validate_manual_navigation_path(
+            principal,
+            "site-a",
+            "fl-prototype-navigation",
+            created["revision"],
+            request,
+        )
+
+    result = service.validate_manual_navigation_path(
+        principal,
+        "site-a",
+        "fl-prototype-navigation",
+        created["revision"],
+        {**request, "prototypeMode": True},
+    )
+    assert result["prototypeMode"] is True
+    assert result["productionEligible"] is False
+    assert result["prototypeLabel"] == "Prototype motion test profile"
+    assert "not production eligible" in result["qualification"]
+    assert result["mutated"] is False
+
+
+def test_service_builds_and_revision_gates_browser_motion_package(tmp_path):
+    vehicle_placement_operation = _placement_operation()
+    vehicle_placement_operation["placement"]["transform"]["position"].update(
+        {"x": 24.0, "z": 10.0}
+    )
+    vehicle_asset_ref = {
+        "assetId": vehicle_placement_operation["placement"]["assetId"],
+        "assetDefinitionRevision": vehicle_placement_operation["placement"][
+            "assetDefinitionRevision"
+        ],
+    }
+    service, principal, shell, policy, vehicle = _service(
+        tmp_path,
+        prototype_vehicle=True,
+        vehicle_asset_ref=vehicle_asset_ref,
+        allow_prototype_motion=True,
+    )
+    layout = _layout(shell, policy, layout_id="fl-motion-service")
+    layout["zones"].append(
+        {
+            "zoneId": "zn-motion-aisle",
+            "zoneType": "aisle",
+            "label": "Motion aisle",
+            "boundary": [
+                {"x": 0.0, "z": 0.0},
+                {"x": 16.0, "z": 0.0},
+                {"x": 16.0, "z": 6.0},
+                {"x": 0.0, "z": 6.0},
+            ],
+            "floorElevation": 0.0,
+            "anchors": [],
+            "evidence": ["ev-motion-aisle"],
+        }
+    )
+    layout = apply_facility_layout_operations(
+        layout,
+        [vehicle_placement_operation],
+        base_revision=None,
+    )["document"]
+    created = service.create_layout(
+        principal,
+        "site-a",
+        layout,
+    )
+    route = {
+        "routeId": "rt-motion-main",
+        "routeKind": "material",
+        "sourceEndpoint": {
+            "kind": "world_point",
+            "position": {"x": 2.0, "y": 0.0, "z": 3.0},
+        },
+        "targetEndpoint": {
+            "kind": "world_point",
+            "position": {"x": 14.0, "y": 0.0, "z": 3.0},
+        },
+        "routingMode": "vehicle",
+        "centerline": [
+            {"x": 2.0, "y": 0.0, "z": 3.0},
+            {"x": 14.0, "y": 0.0, "z": 3.0},
+        ],
+        "corridorWidth": 6.0,
+        "routeFingerprint": "0" * 64,
+        "sourceRevisions": {
+            "layout": routing_layout_fingerprint(created["layout"]),
+            "shell": shell.revision,
+            "policy": policy.revision,
+        },
+        "requirements": [],
+        "evidence": [],
+    }
+    route["routeFingerprint"] = persisted_route_fingerprint(route)
+    routed = service.apply_operations(
+        principal,
+        "site-a",
+        "fl-motion-service",
+        created["revision"],
+        [{"op": "add_route", "route": route}],
+    )
+    motion_request = {
+        "routeId": "rt-motion-main",
+        "vehicleProfileRef": {
+            "vehicleProfileId": vehicle.document["vehicleProfileId"],
+            "vehicleProfileRevision": vehicle.revision,
+        },
+    }
+    service.allow_prototype_motion = False
+    with pytest.raises(FacilityLayoutError) as denied:
+        service.build_forklift_motion_package(
+            principal,
+            "site-a",
+            "fl-motion-service",
+            routed["revision"],
+            motion_request,
+        )
+    assert denied.value.code == "not_found"
+    service.allow_prototype_motion = True
+    summary = service.build_forklift_motion_package(
+        principal,
+        "site-a",
+        "fl-motion-service",
+        routed["revision"],
+        motion_request,
+    )
+
+    assert summary["summary"]["outcome"] == "accepted"
+    assert "poses" not in summary["summary"]
+    full = service.get_forklift_motion_package(
+        principal,
+        "site-a",
+        "fl-motion-service",
+        summary["packageId"],
+        active_revision=summary["layoutRevision"],
+    )
+    assert full["package"]["movement"]["outcome"] == "accepted"
+    assert full["vehicleProfile"]["vehicleProfileId"] == vehicle.document[
+        "vehicleProfileId"
+    ]
+    assert full["vehicleProfile"]["vehicleProfileRevision"] == vehicle.revision
+    assert full["prototypeMode"] is True
+    assert full["prototypeLabel"] == "Prototype motion test profile"
+    assert full["vehicleProfile"]["productionEligible"] is False
+
+    placed = routed
+    actual_request = deepcopy(motion_request)
+    actual_request["vehiclePlacementId"] = vehicle_placement_operation[
+        "placement"
+    ]["placementId"]
+    actual_summary = service.build_forklift_motion_package(
+        principal,
+        "site-a",
+        "fl-motion-service",
+        placed["revision"],
+        actual_request,
+    )
+    actual_full = service.get_forklift_motion_package(
+        principal,
+        "site-a",
+        "fl-motion-service",
+        actual_summary["packageId"],
+        active_revision=actual_summary["layoutRevision"],
+    )
+    assert actual_full["package"]["movement"]["vehiclePlacementId"] == (
+        vehicle_placement_operation["placement"]["placementId"]
+    )
+    with pytest.raises(FacilityConflictError) as caught:
+        service.get_forklift_motion_package(
+            principal,
+            "site-a",
+            "fl-motion-service",
+            summary["packageId"],
+            active_revision="stale-revision",
+        )
+    assert caught.value.code == "facility_motion_package_stale"
+
+
+def test_service_rejects_vehicle_placement_profile_asset_mismatch(tmp_path):
+    service, principal, shell, policy, vehicle = _service(
+        tmp_path,
+        prototype_vehicle=True,
+        vehicle_asset_ref={
+            "assetId": "asset-other-vehicle",
+            "assetDefinitionRevision": "f" * 64,
+        },
+        allow_prototype_motion=True,
+    )
+    layout = _layout(shell, policy, layout_id="fl-motion-binding")
+    layout["zones"].append({
+        "zoneId": "zn-motion-binding-aisle",
+        "zoneType": "aisle",
+        "label": "Motion binding aisle",
+        "boundary": [
+            {"x": 0.0, "z": 0.0},
+            {"x": 16.0, "z": 0.0},
+            {"x": 16.0, "z": 6.0},
+            {"x": 0.0, "z": 6.0},
+        ],
+        "floorElevation": 0.0,
+        "anchors": [],
+        "evidence": [],
+    })
+    vehicle_operation = _placement_operation()
+    vehicle_operation["placement"]["transform"]["position"].update(
+        {"x": 24.0, "z": 10.0}
+    )
+    layout = apply_facility_layout_operations(
+        layout,
+        [vehicle_operation],
+        base_revision=None,
+    )["document"]
+    created = service.create_layout(principal, "site-a", layout)
+    route = {
+        "routeId": "rt-motion-binding",
+        "routeKind": "material",
+        "sourceEndpoint": {
+            "kind": "world_point",
+            "position": {"x": 2.0, "y": 0.0, "z": 3.0},
+        },
+        "targetEndpoint": {
+            "kind": "world_point",
+            "position": {"x": 14.0, "y": 0.0, "z": 3.0},
+        },
+        "routingMode": "vehicle",
+        "centerline": [
+            {"x": 2.0, "y": 0.0, "z": 3.0},
+            {"x": 14.0, "y": 0.0, "z": 3.0},
+        ],
+        "corridorWidth": 6.0,
+        "routeFingerprint": "0" * 64,
+        "sourceRevisions": {
+            "layout": routing_layout_fingerprint(created["layout"]),
+            "shell": shell.revision,
+            "policy": policy.revision,
+        },
+        "requirements": [],
+        "evidence": [],
+    }
+    route["routeFingerprint"] = persisted_route_fingerprint(route)
+    routed = service.apply_operations(
+        principal,
+        "site-a",
+        "fl-motion-binding",
+        created["revision"],
+        [{"op": "add_route", "route": route}],
+    )
+    with pytest.raises(FacilityValidationError) as caught:
+        service.build_forklift_motion_package(
+            principal,
+            "site-a",
+            "fl-motion-binding",
+            routed["revision"],
+            {
+                "routeId": "rt-motion-binding",
+                "vehicleProfileRef": {
+                    "vehicleProfileId": vehicle.document["vehicleProfileId"],
+                    "vehicleProfileRevision": vehicle.revision,
+                },
+                "vehiclePlacementId": vehicle_operation["placement"][
+                    "placementId"
+                ],
+            },
+        )
+    assert caught.value.code == "facility_motion_vehicle_asset_binding_mismatch"
+
+
 def test_routing_differential_keeps_distinct_subjects():
     baseline = {
         "findings": [
@@ -968,3 +1415,244 @@ def test_process_binding_role_rejects_junction_as_assigned_work(tmp_path):
     assert {
         item["code"] for item in caught.value.details["findings"]
     } == {"process_binding_semantics_invalid"}
+
+
+def test_service_compiles_bounded_navigation_snapshot_and_isolates_package(
+    tmp_path,
+    monkeypatch,
+):
+    def actor_resolver(_principal, _site_id, asset_id, revision):
+        resolved = _resolved_asset(asset_id, revision)
+        if asset_id == "asset-operator":
+            resolved["definition"]["category"] = "people"
+        return resolved
+
+    service, principal, shell, policy, _vehicle = _service(
+        tmp_path,
+        asset_resolver=actor_resolver,
+    )
+    layout = _layout(shell, policy, layout_id="fl-navigation-snapshot")
+    layout["zones"] = [{
+        "zoneId": "zn-navigation-cell",
+        "zoneType": "workcell",
+        "label": "Navigation cell",
+        "boundary": [
+            {"x": 0.0, "z": 0.0}, {"x": 12.0, "z": 0.0},
+            {"x": 12.0, "z": 8.0}, {"x": 0.0, "z": 8.0},
+        ],
+        "floorElevation": 0.0,
+        "anchors": [],
+        "evidence": [],
+    }]
+    layout["placements"] = [
+        {
+            "placementId": "pl-nav-operator",
+            "assetId": "asset-operator",
+            "assetDefinitionRevision": "e" * 64,
+            "transform": {
+                "position": {"x": 2.0, "y": 0.0, "z": 2.0},
+                "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+                "scale": 1,
+            },
+            "positionMode": "manual",
+            "snapRelationship": None,
+            "metadata": {},
+        },
+        {
+            "placementId": "pl-nav-station",
+            "assetId": "asset-machine",
+            "assetDefinitionRevision": "f" * 64,
+            "transform": {
+                "position": {"x": 8.0, "y": 0.0, "z": 4.0},
+                "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+                "scale": 1,
+            },
+            "positionMode": "manual",
+            "snapRelationship": None,
+            "metadata": {},
+        },
+    ]
+    layout.setdefault("extensions", {})["facilityNavigation"] = {
+        "schemaVersion": 1,
+        "anchors": [
+            {
+                "navigationAnchorId": "na-nav-home",
+                "anchorKind": "actor_home",
+                "ownerRef": {"ownerKind": "placement", "ownerId": "pl-nav-operator"},
+                "interactionKind": "none",
+                "positionAuthority": "ui_authored",
+                "localPosition": {"x": 2.0, "z": 2.0},
+                "derivedPositionRef": None,
+                "approachDirections": ["any"],
+                "actorClasses": ["pedestrian"],
+                "evidenceStatus": "authored",
+                "evidence": ["ev-nav-pointer"],
+                "reviewStatus": "pending",
+            },
+            {
+                "navigationAnchorId": "na-nav-work",
+                "anchorKind": "station_operate",
+                "ownerRef": {"ownerKind": "placement", "ownerId": "pl-nav-station"},
+                "interactionKind": "operate",
+                "positionAuthority": "ui_authored",
+                "localPosition": {"x": 6.5, "z": 4.0},
+                "derivedPositionRef": None,
+                "approachDirections": ["any"],
+                "actorClasses": ["pedestrian"],
+                "evidenceStatus": "authored",
+                "evidence": ["ev-nav-pointer"],
+                "reviewStatus": "pending",
+            },
+        ],
+        "movementPrograms": [{
+            "movementProgramId": "nmp-nav-cycle",
+            "actorPlacementId": "pl-nav-operator",
+            "actorClass": "pedestrian",
+            "actorProfileRef": {
+                "profileKind": "pedestrian",
+                "profileId": "operator-profile:asset-operator",
+                "profileRevision": "e" * 64,
+            },
+            "orderedStops": [
+                {"stopId": "nst-nav-home", "navigationAnchorId": "na-nav-home", "interactionKind": "none", "required": True},
+                {"stopId": "nst-nav-work", "navigationAnchorId": "na-nav-work", "interactionKind": "operate", "required": True},
+            ],
+            "loopMode": "out_and_return",
+            "requiredRouteIds": [],
+            "requiredAnchorIds": ["na-nav-home", "na-nav-work"],
+            "forbiddenZoneIds": [],
+            "forbiddenRouteIds": [],
+            "manualPathConstraintIds": [],
+            "handoffProgramIds": [],
+            "sourceRevisions": {"layout": "0" * 64},
+            "evidenceStatus": "authored",
+            "evidence": ["ev-nav-pointer"],
+            "reviewStatus": "pending",
+        }],
+        "manualPathConstraints": [],
+        "handoffPrograms": [],
+    }
+    created = service.create_layout(principal, "site-a", layout)
+
+    result = service.compile_navigation_snapshot(
+        principal, "site-a", "fl-navigation-snapshot", created["revision"],
+        {"movementProgramId": "nmp-nav-cycle"},
+    )
+    assert result["mutated"] is False
+    assert result["actorPlacementId"] == "pl-nav-operator"
+    assert result["summary"]["canonicalBytes"] <= 8192
+    assert "freeSpacePolygons" not in result["summary"]
+    package_id = result["summary"]["navigationPackageId"]
+    package = service.get_navigation_snapshot_package(
+        principal, "site-a", "fl-navigation-snapshot", package_id,
+    )
+    assert package["navigationPackageId"] == package_id
+    assert package["canonicalBytes"] == len(json.dumps(
+        package, allow_nan=False, ensure_ascii=True,
+        separators=(",", ":"), sort_keys=True,
+    ).encode("ascii"))
+
+    planned = service.plan_actor_journey(
+        principal,
+        "site-a",
+        "fl-navigation-snapshot",
+        created["revision"],
+        {
+            "navigationPackageId": package_id,
+            "movementProgramId": "nmp-nav-cycle",
+        },
+    )
+    assert planned["mutated"] is False
+    assert planned["summary"]["outcome"] == "accepted"
+    assert "centerline" not in planned["summary"]
+    journey_id = planned["summary"]["journeySolutionId"]
+    full_journey = service.get_actor_journey(
+        principal, "site-a", "fl-navigation-snapshot", journey_id,
+    )
+    assert full_journey["journeySolutionId"] == journey_id
+    assert full_journey["actorPlacementId"] == "pl-nav-operator"
+
+    from ai_inspector.facility_layout import service as service_module
+    monkeypatch.setattr(
+        service_module,
+        "activity_visual_alignment",
+        lambda _ref: {
+            "forwardAxis": "+Z",
+            "authority": "curated_revision_bound_visual_review",
+            "evidenceArtifact": "tests/fixtures/operator-forward-axis-v1.json",
+        },
+    )
+    activity = service.build_navigation_activity_scenario(
+        principal,
+        "site-a",
+        "fl-navigation-snapshot",
+        created["revision"],
+        {
+            "journeySolutionIds": [journey_id],
+            "handoffResultIds": [],
+            "scenarioLabel": "Navigation service proof",
+            "prototypeMode": True,
+        },
+    )
+    assert activity["mutated"] is False
+    assert activity["summary"]["actorCount"] == 1
+    assert activity["summary"]["navigationDiagnostics"] == {
+        "pathBindingCount": 1,
+        "pathIntersectionCount": 0,
+        "sampledPairCount": 0,
+        "handoffResultCount": 0,
+        "generatedCollisionAvoidanceOffsets": False,
+    }
+    full_activity = service.get_prototype_activity_scenario(
+        principal,
+        "site-a",
+        "fl-navigation-snapshot",
+        activity["scenarioId"],
+        active_revision=created["revision"],
+    )
+    assert full_activity["scenario"]["schemaVersion"] == (
+        "facility-activity-scenario-v7"
+    )
+    motion_payload = next(iter(full_activity["actorPayloads"].values()))
+    assert motion_payload["package"]["schemaVersion"] == (
+        "facility-motion-package-v3"
+    )
+    assert motion_payload["actorProfile"]["geometryAuthority"] == (
+        "catalog_revision_bound"
+    )
+
+    with pytest.raises(FacilityValidationError) as journey_geometry_error:
+        service.plan_actor_journey(
+            principal,
+            "site-a",
+            "fl-navigation-snapshot",
+            created["revision"],
+            {
+                "navigationPackageId": package_id,
+                "movementProgramId": "nmp-nav-cycle",
+                "waypoints": [{"x": 1, "z": 1}],
+            },
+        )
+    assert journey_geometry_error.value.code == (
+        "facility_navigation_journey_unknown_field"
+    )
+
+    with pytest.raises(FacilityValidationError) as geometry_error:
+        service.compile_navigation_snapshot(
+            principal, "site-a", "fl-navigation-snapshot", created["revision"],
+            {"movementProgramId": "nmp-nav-cycle", "points": [{"x": 1, "z": 1}]},
+        )
+    assert geometry_error.value.code == "facility_navigation_snapshot_unknown_field"
+
+    with pytest.raises(FacilityConflictError) as stale:
+        service.compile_navigation_snapshot(
+            principal, "site-a", "fl-navigation-snapshot", "1" * 64,
+            {"movementProgramId": "nmp-nav-cycle"},
+        )
+    assert stale.value.code == "revision_conflict"
+
+    with pytest.raises(FacilityNotFoundError) as wrong_owner:
+        service.get_navigation_snapshot_package(
+            principal, "site-a", "fl-other-layout", package_id,
+        )
+    assert wrong_owner.value.code == "facility_navigation_package_unavailable"

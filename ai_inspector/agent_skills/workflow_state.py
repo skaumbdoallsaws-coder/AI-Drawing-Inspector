@@ -11,8 +11,19 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence
 
+from ai_inspector.memory.invalidation import (
+    REVISION_VECTOR_FIELDS,
+    changed_revision_dependencies,
+    filter_stale_evidence_refs,
+    normalize_revision_vector,
+    revalidate_entities,
+    revalidate_referents,
+    revalidate_workflow_stage,
+    revision_vector_sha256,
+)
 
-WORKFLOW_STATE_VERSION = 1
+
+WORKFLOW_STATE_VERSION = 2
 WORKFLOW_STATE_STATUSES = frozenset({"active", "completed"})
 _TOKEN_RE = re.compile(r"^[a-z0-9]+(?:[a-z0-9_.-]*[a-z0-9])?$")
 _SESSION_RE = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
@@ -217,7 +228,7 @@ def compact_execution_receipts(value: Any, *, limit: int = 8) -> list[dict[str, 
         return []
     cleaned: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for raw in value[-max(1, min(limit, 12)):]:
+    for raw in value[-max(1, min(limit, 40)):]:
         if not isinstance(raw, dict):
             continue
         receipt_id = _clean_text(raw.get("receipt_id"), 120)
@@ -242,7 +253,8 @@ def compact_execution_receipts(value: Any, *, limit: int = 8) -> list[dict[str, 
 def sanitize_workflow_state(
     value: Any,
     *,
-    expected_asset_fingerprint: str | None = None,
+    expected_scope_fingerprint: str | None = None,
+    expected_revision_vector: Mapping[str, Any] | None = None,
     now_epoch: float | None = None,
 ) -> dict[str, Any] | None:
     """Validate a browser mirror before it is allowed back into server state."""
@@ -252,17 +264,30 @@ def sanitize_workflow_state(
     version = _clean_text(value.get("version"), 30)
     stage = _clean_token(value.get("stage"), 80)
     status = _clean_token(value.get("status"), 20)
-    asset_fingerprint = _clean_text(value.get("asset_fingerprint"), 100)
+    scope_fingerprint = _clean_text(value.get("scope_fingerprint"), 100)
+    try:
+        revision_vector = normalize_revision_vector(value.get("revision_vector"))
+    except ValueError:
+        return None
+    revision_hash = _clean_text(value.get("revision_vector_sha256"), 64)
     if (
         not workflow_id
         or not _SEMVER_RE.fullmatch(version)
         or not stage
         or status not in WORKFLOW_STATE_STATUSES
-        or not asset_fingerprint
+        or not scope_fingerprint
+        or revision_hash != revision_vector_sha256(revision_vector)
     ):
         return None
-    if expected_asset_fingerprint and asset_fingerprint != expected_asset_fingerprint:
+    if expected_scope_fingerprint and scope_fingerprint != expected_scope_fingerprint:
         return None
+    if expected_revision_vector is not None:
+        try:
+            expected_revisions = normalize_revision_vector(expected_revision_vector)
+        except ValueError:
+            return None
+        if revision_vector != expected_revisions:
+            return None
     expires_at = _clean_text(value.get("expires_at"), 40)
     if expires_at and now_epoch is not None:
         try:
@@ -288,13 +313,234 @@ def sanitize_workflow_state(
         "last_execution_receipts": compact_execution_receipts(
             value.get("last_execution_receipts"), limit=8
         ),
+        "audit_receipts": compact_execution_receipts(
+            value.get("audit_receipts"), limit=40
+        ),
         "pending_clarification": _clean_text(value.get("pending_clarification"), 240) or None,
-        "asset_fingerprint": asset_fingerprint,
+        "scope_fingerprint": scope_fingerprint,
+        "revision_vector": revision_vector,
+        "revision_vector_sha256": revision_hash,
+        "invalidation_audit": _clean_invalidation_audit(
+            value.get("invalidation_audit")
+        ),
         "revision": revision,
         "created_at": _clean_text(value.get("created_at"), 40),
         "updated_at": _clean_text(value.get("updated_at"), 40),
         "expires_at": expires_at,
     }
+
+
+def migrate_workflow_state_v1_to_v2(
+    value: Any,
+    current_scope: Mapping[str, Any] | str | None,
+    current_revision_vector: Mapping[str, Any] | None,
+    target_index: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Read the frozen v1 mirror without guessing its combined identity hash."""
+
+    if not isinstance(value, dict) or value.get("state_version") != 1:
+        return None
+    legacy_identity = _clean_text(value.get("asset_fingerprint"), 100)
+    scope_fingerprint = (
+        _clean_text(current_scope.get("scopeFingerprint"), 100)
+        if isinstance(current_scope, Mapping)
+        else _clean_text(current_scope, 100)
+    )
+    if not legacy_identity or not scope_fingerprint or scope_fingerprint == "scope-v1:none":
+        return None
+    try:
+        revisions = normalize_revision_vector(current_revision_vector)
+    except ValueError:
+        return None
+
+    workflow_id = _clean_token(value.get("workflow_id"), 80)
+    version = _clean_text(value.get("version"), 30)
+    stage = _clean_token(value.get("stage"), 80)
+    status = _clean_token(value.get("status"), 20)
+    if (
+        not workflow_id
+        or not _SEMVER_RE.fullmatch(version)
+        or not stage
+        or status not in WORKFLOW_STATE_STATUSES
+    ):
+        return None
+    target_index = target_index if isinstance(target_index, Mapping) else {}
+    stage_result = revalidate_workflow_stage(
+        workflow_id,
+        stage,
+        REVISION_VECTOR_FIELDS,
+    )
+    receipts = compact_execution_receipts(value.get("last_execution_receipts"), limit=40)
+    revision = value.get("revision")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+        revision = 1
+    audit = [{
+        "event": "workflow_state_v1_migrated",
+        "actions": [
+            "scope_rebuilt_from_trusted_context",
+            "revision_vector_rebuilt_from_trusted_context",
+            "evidence_refs_dropped",
+            "active_receipts_moved_to_audit",
+        ],
+        "stageEvent": stage_result.event,
+        "warning": stage_result.warning,
+    }]
+    return {
+        "state_version": WORKFLOW_STATE_VERSION,
+        "workflow_id": workflow_id,
+        "version": version,
+        "status": "active",
+        "stage": stage_result.stage,
+        "objective": _clean_text(value.get("objective"), 180)
+        or _OBJECTIVE_BY_WORKFLOW.get(workflow_id, "Complete the selected workflow"),
+        "entities": revalidate_entities(
+            _clean_entities(value.get("entities")), target_index
+        ),
+        "evidence_refs": [],
+        "referents": revalidate_referents(
+            _clean_referents(value.get("referents")), target_index
+        ),
+        "milestones": _clean_milestones({}),
+        "last_execution_receipts": [],
+        "audit_receipts": receipts,
+        "pending_clarification": _clean_text(
+            value.get("pending_clarification"), 240
+        ) or None,
+        "scope_fingerprint": scope_fingerprint,
+        "revision_vector": revisions,
+        "revision_vector_sha256": revision_vector_sha256(revisions),
+        "invalidation_audit": audit,
+        "revision": revision + 1,
+        "created_at": _clean_text(value.get("created_at"), 40),
+        "updated_at": _clean_text(value.get("updated_at"), 40),
+        "expires_at": _clean_text(value.get("expires_at"), 40),
+    }
+
+
+def reconcile_workflow_state_v2(
+    value: Mapping[str, Any],
+    *,
+    current_scope_fingerprint: str,
+    current_revision_vector: Mapping[str, Any],
+    target_index: Mapping[str, Any] | None = None,
+    workflow_stages: Sequence[str] = (),
+    now_epoch: float | None = None,
+    invalidate_authorizations: bool = True,
+) -> WorkflowStateResult:
+    """Reconcile a validated v2 state against current trusted scope and revisions."""
+
+    state = sanitize_workflow_state(
+        dict(value),
+        expected_scope_fingerprint=current_scope_fingerprint,
+        now_epoch=now_epoch,
+    )
+    if state is None:
+        return WorkflowStateResult(None, "scope_changed")
+    revisions = normalize_revision_vector(current_revision_vector)
+    changed = changed_revision_dependencies(state.get("revision_vector"), revisions)
+    targets = target_index if isinstance(target_index, Mapping) else {}
+    revalidated_entities = revalidate_entities(state.get("entities") or {}, targets)
+    revalidated_referents = revalidate_referents(state.get("referents") or {}, targets)
+    targets_changed = (
+        revalidated_entities != state.get("entities")
+        or revalidated_referents != state.get("referents")
+    )
+    state["entities"] = revalidated_entities
+    state["referents"] = revalidated_referents
+    if not changed and not invalidate_authorizations:
+        return WorkflowStateResult(
+            state,
+            "targets_revalidated" if targets_changed else "same_scope_same_revisions",
+        )
+    stage_result = revalidate_workflow_stage(
+        state["workflow_id"],
+        state["stage"],
+        changed,
+        fallback_stages=workflow_stages,
+    )
+    authorization_invalidated = (
+        stage_result.event == "authorization_stage_invalidated"
+    )
+    if not changed and not authorization_invalidated:
+        return WorkflowStateResult(
+            state,
+            "targets_revalidated" if targets_changed else "same_scope_same_revisions",
+        )
+
+    active_receipts = compact_execution_receipts(
+        state.get("last_execution_receipts"), limit=40
+    )
+    state["audit_receipts"] = compact_execution_receipts(
+        [*(state.get("audit_receipts") or []), *active_receipts], limit=40
+    )
+    state["last_execution_receipts"] = []
+    state["evidence_refs"] = filter_stale_evidence_refs(
+        state.get("evidence_refs") or [], changed
+    )
+    state["stage"] = stage_result.stage
+    if stage_result.event != "stage_preserved":
+        state["status"] = "active"
+    milestones = _clean_milestones(state.get("milestones"))
+    milestones["visualization_succeeded"] = False
+    if stage_result.event == "authorization_stage_invalidated":
+        milestones["visualization_requested"] = False
+    state["milestones"] = milestones
+    state["revision_vector"] = revisions
+    state["revision_vector_sha256"] = revision_vector_sha256(revisions)
+    state["revision"] = int(state.get("revision") or 0) + 1
+    if now_epoch is not None:
+        state["updated_at"] = _utc_iso(now_epoch)
+    if changed:
+        old_revisions = normalize_revision_vector(value.get("revision_vector"))
+        removed = any(
+            field in old_revisions and field not in revisions for field in changed
+        )
+        event = (
+            "same_scope_dependency_removed"
+            if removed
+            else "same_scope_revision_advanced"
+        )
+    else:
+        event = "authorization_stage_invalidated"
+    audit = _clean_invalidation_audit(state.get("invalidation_audit"))
+    audit.append({
+        "event": event,
+        "changedDependencies": sorted(changed),
+        "stageEvent": stage_result.event,
+        "warning": stage_result.warning,
+        "targetsRevalidated": targets_changed,
+    })
+    state["invalidation_audit"] = audit[-20:]
+    return WorkflowStateResult(state, event)
+
+
+def _clean_invalidation_audit(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    cleaned: list[dict[str, Any]] = []
+    for raw in value[-20:]:
+        if not isinstance(raw, Mapping):
+            continue
+        event = _clean_token(raw.get("event"), 80)
+        if not event:
+            continue
+        row: dict[str, Any] = {"event": event}
+        dependencies = _clean_string_list(
+            raw.get("changedDependencies"), limit=10, item_limit=80
+        )
+        if dependencies:
+            row["changedDependencies"] = dependencies
+        actions = _clean_string_list(raw.get("actions"), limit=12, item_limit=100)
+        if actions:
+            row["actions"] = actions
+        for key in ("stageEvent", "warning"):
+            text = _clean_text(raw.get(key), 120)
+            if text:
+                row[key] = text
+        if "targetsRevalidated" in raw:
+            row["targetsRevalidated"] = bool(raw.get("targetsRevalidated"))
+        cleaned.append(row)
+    return cleaned
 
 
 def _merge_unique(existing: Sequence[str], additions: Sequence[str], *, limit: int = 30) -> list[str]:
@@ -306,7 +552,9 @@ def _merge_unique(existing: Sequence[str], additions: Sequence[str], *, limit: i
     return values[-limit:]
 
 
-def _merge_receipts(state: dict[str, Any], receipts: Sequence[Mapping[str, Any]]) -> bool:
+def merge_execution_receipts(
+    state: dict[str, Any], receipts: Sequence[Mapping[str, Any]]
+) -> bool:
     incoming = compact_execution_receipts(list(receipts), limit=8)
     if not incoming:
         return False
@@ -339,6 +587,24 @@ def _merge_receipts(state: dict[str, Any], receipts: Sequence[Mapping[str, Any]]
     state["milestones"] = milestones
     _apply_completion(state)
     return True
+
+
+def merge_audit_receipts(
+    state: dict[str, Any], receipts: Sequence[Mapping[str, Any]]
+) -> bool:
+    incoming = compact_execution_receipts(list(receipts), limit=40)
+    if not incoming:
+        return False
+    existing = compact_execution_receipts(state.get("audit_receipts"), limit=40)
+    by_id = {item["receipt_id"]: item for item in existing}
+    changed = False
+    for item in incoming:
+        if by_id.get(item["receipt_id"]) != item:
+            changed = True
+        by_id[item["receipt_id"]] = item
+    if changed:
+        state["audit_receipts"] = list(by_id.values())[-40:]
+    return changed
 
 
 def _apply_completion(state: dict[str, Any]) -> None:
@@ -381,12 +647,13 @@ def _route_effects(route: Mapping[str, Any]) -> list[str]:
     return effects
 
 
-def advance_workflow_state(
+def advance_workflow_state_v2(
     prior: Mapping[str, Any] | None,
     *,
     route: Mapping[str, Any],
     context_facts: Mapping[str, Any],
-    asset_fingerprint: str,
+    scope_fingerprint: str,
+    revision_vector: Mapping[str, Any],
     workflow_version: str,
     workflow_stages: Sequence[str],
     now_epoch: float,
@@ -397,12 +664,38 @@ def advance_workflow_state(
     if not workflow_id:
         return copy.deepcopy(dict(prior)) if prior else None
     now_iso = _utc_iso(now_epoch)
+    scope_fingerprint = _clean_text(scope_fingerprint, 100)
+    if not scope_fingerprint:
+        return None
+    try:
+        current_revisions = normalize_revision_vector(revision_vector)
+    except ValueError:
+        return None
     prior_state = sanitize_workflow_state(
         dict(prior) if prior else None,
-        expected_asset_fingerprint=asset_fingerprint,
+        expected_scope_fingerprint=scope_fingerprint,
         now_epoch=now_epoch,
     )
+    preserved_objective = ""
+    if prior_state:
+        reconciled = reconcile_workflow_state_v2(
+            prior_state,
+            current_scope_fingerprint=scope_fingerprint,
+            current_revision_vector=current_revisions,
+            target_index=(
+                context_facts.get("target_index")
+                if isinstance(context_facts.get("target_index"), Mapping)
+                else {}
+            ),
+            workflow_stages=workflow_stages,
+            now_epoch=now_epoch,
+            invalidate_authorizations=False,
+        )
+        prior_state = reconciled.state
     if prior_state and prior_state.get("workflow_id") != workflow_id:
+        prior_state = None
+    if prior_state and prior_state.get("version") != workflow_version:
+        preserved_objective = _clean_text(prior_state.get("objective"), 180)
         prior_state = None
     if prior_state and route.get("continue_existing_workflow") is False:
         prior_state = None
@@ -412,21 +705,35 @@ def advance_workflow_state(
         "version": workflow_version,
         "status": "active",
         "stage": workflow_stages[0] if workflow_stages else "identify_characteristic",
-        "objective": _OBJECTIVE_BY_WORKFLOW.get(workflow_id, "Complete the selected workflow"),
+        "objective": preserved_objective
+        or _OBJECTIVE_BY_WORKFLOW.get(workflow_id, "Complete the selected workflow"),
         "entities": {},
         "evidence_refs": [],
         "referents": {},
         "milestones": _clean_milestones({}),
         "last_execution_receipts": [],
+        "audit_receipts": [],
         "pending_clarification": None,
-        "asset_fingerprint": asset_fingerprint,
+        "scope_fingerprint": scope_fingerprint,
+        "revision_vector": current_revisions,
+        "revision_vector_sha256": revision_vector_sha256(current_revisions),
+        "invalidation_audit": (
+            [{
+                "event": "workflow_version_changed",
+                "actions": ["stage_specific_state_reset"],
+            }]
+            if preserved_objective
+            else []
+        ),
         "revision": 0,
         "created_at": now_iso,
         "updated_at": now_iso,
         "expires_at": _utc_iso(now_epoch + ttl_seconds),
     }
     state["version"] = workflow_version
-    state["asset_fingerprint"] = asset_fingerprint
+    state["scope_fingerprint"] = scope_fingerprint
+    state["revision_vector"] = current_revisions
+    state["revision_vector_sha256"] = revision_vector_sha256(current_revisions)
     state["updated_at"] = now_iso
     state["expires_at"] = _utc_iso(now_epoch + ttl_seconds)
     state["revision"] = int(state.get("revision") or 0) + 1
@@ -588,8 +895,19 @@ class WorkflowStateStore:
         self._wall_clock = wall_clock
         self._lock = threading.RLock()
         self._entries: OrderedDict[str, _Entry] = OrderedDict()
-        self._events = {"started": 0, "resumed": 0, "restored": 0, "expired": 0,
-                        "invalidated": 0, "abandoned": 0, "completed": 0, "evicted": 0}
+        self._events = {
+            "started": 0,
+            "resumed": 0,
+            "restored": 0,
+            "memory_expired": 0,
+            "scope_changed": 0,
+            "same_scope_revision_advanced": 0,
+            "same_scope_dependency_removed": 0,
+            "authorization_stage_invalidated": 0,
+            "abandoned": 0,
+            "completed": 0,
+            "evicted": 0,
+        }
 
     @staticmethod
     def valid_session_id(session_id: Any) -> str:
@@ -611,15 +929,21 @@ class WorkflowStateStore:
         self,
         session_id: Any,
         *,
-        asset_fingerprint: str | None,
+        scope_fingerprint: str | None,
+        revision_vector: Mapping[str, Any] | None,
+        target_index: Mapping[str, Any] | None = None,
         client_state: Any = None,
         receipts: Sequence[Mapping[str, Any]] = (),
     ) -> WorkflowStateResult:
         session_id = self.valid_session_id(session_id)
-        asset_fingerprint = _clean_text(asset_fingerprint, 100)
+        scope_fingerprint = _clean_text(scope_fingerprint, 100)
         if not session_id:
             return WorkflowStateResult(None, "invalid_session")
-        if not asset_fingerprint:
+        if not scope_fingerprint:
+            return WorkflowStateResult(None, "asset_context_unavailable")
+        try:
+            revisions = normalize_revision_vector(revision_vector)
+        except ValueError:
             return WorkflowStateResult(None, "asset_context_unavailable")
         now_mono = self._clock()
         now_epoch = self._wall_clock()
@@ -629,30 +953,67 @@ class WorkflowStateStore:
             if entry and entry.expires_monotonic <= now_mono:
                 del self._entries[session_id]
                 entry = None
-                prior_event = "expired"
-                self._events["expired"] += 1
-            if entry and entry.state.get("asset_fingerprint") != asset_fingerprint:
+                prior_event = "memory_expired"
+                self._events["memory_expired"] += 1
+            if entry and entry.state.get("scope_fingerprint") != scope_fingerprint:
                 del self._entries[session_id]
                 entry = None
-                prior_event = "invalidated_asset_change"
-                self._events["invalidated"] += 1
+                prior_event = "scope_changed"
+                self._events["scope_changed"] += 1
             if entry:
-                state = copy.deepcopy(entry.state)
-                changed = _merge_receipts(state, receipts)
+                reconciled = reconcile_workflow_state_v2(
+                    entry.state,
+                    current_scope_fingerprint=scope_fingerprint,
+                    current_revision_vector=revisions,
+                    target_index=target_index,
+                    now_epoch=now_epoch,
+                )
+                state = reconciled.state
+                if state is None:
+                    del self._entries[session_id]
+                    self._events["scope_changed"] += 1
+                    return reconciled
+                invalidated = reconciled.event in {
+                    "authorization_stage_invalidated",
+                    "same_scope_revision_advanced",
+                    "same_scope_dependency_removed",
+                }
+                changed = (
+                    merge_audit_receipts(state, receipts)
+                    if invalidated
+                    else merge_execution_receipts(state, receipts)
+                )
                 self._touch(session_id, state)
                 self._events["resumed"] += 1
+                if reconciled.event in self._events:
+                    self._events[reconciled.event] += 1
                 if state.get("status") == "completed":
                     self._events["completed"] += int(changed)
-                return WorkflowStateResult(copy.deepcopy(state), "receipts_reconciled" if changed else "resumed")
-            if prior_event in {"expired", "invalidated_asset_change"}:
+                if changed and not invalidated:
+                    event = "receipts_reconciled"
+                elif reconciled.event == "same_scope_same_revisions":
+                    event = "resumed"
+                else:
+                    event = reconciled.event
+                return WorkflowStateResult(copy.deepcopy(state), event)
+            if prior_event in {"memory_expired", "scope_changed"}:
                 return WorkflowStateResult(None, prior_event)
             mirror = sanitize_workflow_state(
                 client_state,
-                expected_asset_fingerprint=asset_fingerprint,
+                expected_scope_fingerprint=scope_fingerprint,
                 now_epoch=now_epoch,
             )
             if mirror:
-                _merge_receipts(mirror, receipts)
+                mirror_result = reconcile_workflow_state_v2(
+                    mirror,
+                    current_scope_fingerprint=scope_fingerprint,
+                    current_revision_vector=revisions,
+                    target_index=target_index,
+                    now_epoch=now_epoch,
+                )
+                mirror = mirror_result.state
+            if mirror:
+                merge_execution_receipts(mirror, receipts)
                 self._touch(session_id, mirror)
                 self._events["restored"] += 1
                 return WorkflowStateResult(copy.deepcopy(mirror), "restored_client_mirror")
@@ -662,24 +1023,26 @@ class WorkflowStateStore:
         self,
         session_id: Any,
         *,
-        asset_fingerprint: str,
+        scope_fingerprint: str,
+        revision_vector: Mapping[str, Any],
         route: Mapping[str, Any],
         context_facts: Mapping[str, Any],
         workflow_version: str,
         workflow_stages: Sequence[str],
     ) -> WorkflowStateResult:
         session_id = self.valid_session_id(session_id)
-        if not session_id or not asset_fingerprint:
+        if not session_id or not scope_fingerprint:
             return WorkflowStateResult(None, "invalid_session")
         with self._lock:
             entry = self._entries.get(session_id)
             prior = entry.state if entry and entry.expires_monotonic > self._clock() else None
             restarting = bool(prior and route.get("continue_existing_workflow") is False)
-            state = advance_workflow_state(
+            state = advance_workflow_state_v2(
                 prior,
                 route=route,
                 context_facts=context_facts,
-                asset_fingerprint=asset_fingerprint,
+                scope_fingerprint=scope_fingerprint,
+                revision_vector=revision_vector,
                 workflow_version=workflow_version,
                 workflow_stages=workflow_stages,
                 now_epoch=self._wall_clock(),

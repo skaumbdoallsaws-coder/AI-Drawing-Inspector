@@ -1,6 +1,6 @@
 {
   "artifactShapeValid": true,
-  "benchmarkId": "01094c29-9516-4a41-bd0e-38e039e9f434",
+  "benchmarkId": "56b34b52-fb7d-4be5-9a75-522701b13906",
   "blockers": [
     "smoke_profile_not_release_eligible"
   ],
@@ -10,7 +10,7 @@
       "available": true,
       "budgetId": "plan-frame-p95-standard",
       "limit": 22,
-      "measured": 8.96,
+      "measured": 16.635,
       "passed": null,
       "unit": "ms"
     },
@@ -19,7 +19,7 @@
       "available": true,
       "budgetId": "three-frame-p95-standard",
       "limit": 22,
-      "measured": 8.64,
+      "measured": 8.8,
       "passed": null,
       "unit": "ms"
     },
@@ -28,7 +28,7 @@
       "available": true,
       "budgetId": "three-picking-p95",
       "limit": 50,
-      "measured": 10.100000023841858,
+      "measured": 4.699999988079071,
       "passed": null,
       "unit": "ms"
     },
@@ -37,7 +37,7 @@
       "available": true,
       "budgetId": "idle-render-stop",
       "limit": 250,
-      "measured": 1.399999976158142,
+      "measured": 1.5,
       "passed": null,
       "unit": "ms"
     },
@@ -46,7 +46,7 @@
       "available": true,
       "budgetId": "memory-growth-after-20-remounts",
       "limit": 10,
-      "measured": 2.108463501890517,
+      "measured": 4.382873338661413,
       "passed": null,
       "unit": "percent"
     },
@@ -55,7 +55,7 @@
       "available": true,
       "budgetId": "javascript-heap",
       "limit": 419430400,
-      "measured": 5217719,
+      "measured": 7090667,
       "passed": null,
       "unit": "bytes"
     },
@@ -64,7 +64,7 @@
       "available": true,
       "budgetId": "overview-draw-calls",
       "limit": 300,
-      "measured": 10,
+      "measured": 15,
       "passed": null,
       "unit": "draw_calls"
     },
@@ -73,7 +73,7 @@
       "available": true,
       "budgetId": "visible-overview-triangles",
       "limit": 2000000,
-      "measured": 968880,
+      "measured": 968892,
       "passed": null,
       "unit": "triangles"
     },
@@ -122,20 +122,20 @@
         "language": "en-US",
         "platform": "Win32",
         "preciseMemoryInfo": {
-          "capturedAtMs": 1179.5,
+          "capturedAtMs": 1507.4000000059605,
           "jsHeapSizeLimit": 4395630592,
           "source": "performance.memory",
-          "totalJSHeapSize": 69534484,
-          "usedJSHeapSize": 61345636
+          "totalJSHeapSize": 66714572,
+          "usedJSHeapSize": 61468904
         },
-        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0",
         "viewport": {
           "devicePixelRatio": 1,
           "height": 960,
           "width": 1440
         }
       },
-      "version": "150.0.4078.105",
+      "version": "151.0.4129.107",
       "webgl": {
         "contextType": "webgl2",
         "maxRenderbufferSize": 16384,
@@ -148,11 +148,11 @@
         "version": "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
       }
     },
-    "hardwareFingerprintSha256": "eb56efd52d3577ef639c0f2cf93a30747a99ecaef3bd20b09f32a7494c332e34",
+    "hardwareFingerprintSha256": "321b407d7ab3fe1a164f7a0807bfd40ca6c9759f93172ad521903a275f05f791",
     "hardwareIdentity": {
       "browser": {
         "name": "Microsoft Edge",
-        "version": "150.0.4078.105"
+        "version": "151.0.4129.107"
       },
       "cpus": [
         {
@@ -164,7 +164,7 @@
       "gpus": [
         {
           "adapterRam": 2147479552,
-          "driverVersion": "32.0.101.7077",
+          "driverVersion": "32.0.101.7085",
           "name": "Intel(R) UHD Graphics"
         }
       ],
@@ -200,7 +200,7 @@
         "gpus": [
           {
             "adapterRam": 2147479552,
-            "driverVersion": "32.0.101.7077",
+            "driverVersion": "32.0.101.7085",
             "name": "Intel(R) UHD Graphics"
           }
         ],
@@ -243,12 +243,11 @@
     "routeCount": 1,
     "schemaVersion": 1,
     "unsupportedPlanFeatures": {
-      "placementClearanceVolumes": "Current TopPlanAdapter renders route corridor widths but does not expose per-placement clearance-volume elements.",
-      "visibleTextLabels": "Current TopPlanAdapter exposes object labels through aria-label rather than SVG text."
+      "placementClearanceVolumes": "Current TopPlanAdapter renders route corridor widths but does not expose per-placement clearance-volume elements."
     },
     "zoneCount": 1
   },
-  "generatedAtUtc": "2026-08-04T20:58:33Z",
+  "generatedAtUtc": "2026-08-29T06:19:46Z",
   "network": {
     "attemptedExternalRequestCount": 0,
     "externalRequestsBlocked": true,
@@ -292,9 +291,9 @@
     "smoke": true
   },
   "rawArtifact": {
-    "byteLength": 263187,
+    "byteLength": 426312,
     "path": "tests/fixtures/facility_layout/performance/facility-layout-release-performance-smoke-raw.json",
-    "sha256": "6fdb992581bc3214882f65082f07c62b228bab50cbda599d71bfe8870d422733"
+    "sha256": "0bc0d6a216fc291a450689918718f5519f9a375fa5718ca1dba7e6c955612f85"
   },
   "releaseEligible": false,
   "releaseGateMet": false,
@@ -305,16 +304,16 @@
       "local:cold": {
         "cacheState": "cold",
         "encodedBodyBytes": {
-          "maximum": 13495252,
-          "median": 13495252.0
+          "maximum": 13563239,
+          "median": 13563239.0
         },
         "networkProfile": "local",
         "stages": {
           "detail": {
-            "maximumMs": 215.1,
-            "medianMs": 215.1,
-            "p95Ms": 215.1,
-            "p99Ms": 215.1,
+            "maximumMs": 129.9,
+            "medianMs": 129.9,
+            "p95Ms": 129.9,
+            "p99Ms": 129.9,
             "sampleCount": 1
           },
           "footprint": {
@@ -325,89 +324,89 @@
             "sampleCount": 1
           },
           "manifest": {
-            "maximumMs": 2.1,
-            "medianMs": 2.1,
-            "p95Ms": 2.1,
-            "p99Ms": 2.1,
+            "maximumMs": 30.4,
+            "medianMs": 30.4,
+            "p95Ms": 30.4,
+            "p99Ms": 30.4,
             "sampleCount": 1
           },
           "overview": {
-            "maximumMs": 35.1,
-            "medianMs": 35.1,
-            "p95Ms": 35.1,
-            "p99Ms": 35.1,
+            "maximumMs": 63.7,
+            "medianMs": 63.7,
+            "p95Ms": 63.7,
+            "p99Ms": 63.7,
             "sampleCount": 1
           },
           "proxy": {
-            "maximumMs": 43.0,
-            "medianMs": 43.0,
-            "p95Ms": 43.0,
-            "p99Ms": 43.0,
+            "maximumMs": 151.2,
+            "medianMs": 151.2,
+            "p95Ms": 151.2,
+            "p99Ms": 151.2,
             "sampleCount": 1
           }
         },
         "total": {
-          "maximumMs": 448.4,
-          "medianMs": 448.4,
-          "p95Ms": 448.4,
-          "p99Ms": 448.4,
+          "maximumMs": 546.2,
+          "medianMs": 546.2,
+          "p95Ms": 546.2,
+          "p99Ms": 546.2,
           "sampleCount": 1
         },
         "transferredBytes": {
-          "maximum": 13496152,
-          "median": 13496152.0
+          "maximum": 13568939,
+          "median": 13568939.0
         }
       }
     },
     "idleRenderStop": {
-      "maximumMs": 1.4,
-      "medianMs": 1.4,
-      "p95Ms": 1.4,
-      "p99Ms": 1.4,
+      "maximumMs": 1.5,
+      "medianMs": 1.5,
+      "p95Ms": 1.5,
+      "p99Ms": 1.5,
       "sampleCount": 1
     },
     "picking": {
-      "maximumMs": 10.1,
-      "medianMs": 10.1,
-      "p95Ms": 10.1,
-      "p99Ms": 10.1,
+      "maximumMs": 4.7,
+      "medianMs": 4.7,
+      "p95Ms": 4.7,
+      "p99Ms": 4.7,
       "sampleCount": 1
     },
     "planFrames": {
       "callbackDurations": {
-        "maximumMs": 2.0,
-        "medianMs": 0.1,
-        "p95Ms": 1.415,
-        "p99Ms": 1.715,
-        "sampleCount": 58
+        "maximumMs": 13.0,
+        "medianMs": 1.9,
+        "p95Ms": 6.57,
+        "p99Ms": 11.812,
+        "sampleCount": 55
       },
-      "effectiveFps": 112.6037,
+      "effectiveFps": 105.4482,
       "frameIntervals": {
-        "maximumMs": 25.3,
+        "maximumMs": 16.9,
         "medianMs": 8.3,
-        "p95Ms": 8.96,
-        "p99Ms": 20.428,
-        "sampleCount": 57
+        "p95Ms": 16.635,
+        "p99Ms": 16.847,
+        "sampleCount": 54
       },
-      "framesOver22Ms": 1,
+      "framesOver22Ms": 0,
       "framesOver33Ms": 0,
       "longTaskCount": 0,
       "maximumLongTaskMs": 0.0,
-      "measuredWallDurationMs": 506.2,
+      "measuredWallDurationMs": 512.1,
       "runCount": 1
     },
     "planRenderLatency": {
-      "maximumMs": 0.6,
-      "medianMs": 0.6,
-      "p95Ms": 0.6,
-      "p99Ms": 0.6,
+      "maximumMs": 2.7,
+      "medianMs": 2.7,
+      "p95Ms": 2.7,
+      "p99Ms": 2.7,
       "sampleCount": 1
     },
     "remountMemoryGrowthPercent": {
-      "maximumMs": 2.1085,
-      "medianMs": 2.1085,
-      "p95Ms": 2.1085,
-      "p99Ms": 2.1085,
+      "maximumMs": 4.3829,
+      "medianMs": 4.3829,
+      "p95Ms": 4.3829,
+      "p99Ms": 4.3829,
       "sampleCount": 1
     },
     "threeFrames": {
@@ -418,19 +417,19 @@
         "p99Ms": null,
         "sampleCount": 0
       },
-      "effectiveFps": 51.0382,
+      "effectiveFps": 52.4072,
       "frameIntervals": {
-        "maximumMs": 823.6,
+        "maximumMs": 806.6,
         "medianMs": 8.3,
-        "p95Ms": 8.64,
-        "p99Ms": 237.016,
-        "sampleCount": 73
+        "p95Ms": 8.8,
+        "p99Ms": 216.45,
+        "sampleCount": 75
       },
       "framesOver22Ms": 1,
       "framesOver33Ms": 1,
       "longTaskCount": 0,
       "maximumLongTaskMs": 0.0,
-      "measuredWallDurationMs": 1430.3,
+      "measuredWallDurationMs": 1431.1,
       "runCount": 1
     }
   },

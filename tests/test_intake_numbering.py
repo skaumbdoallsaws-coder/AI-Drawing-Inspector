@@ -90,6 +90,33 @@ def test_used_part_numbers_includes_subdir_only_parts(numbering_library: Path):
     assert "1030009" in used
 
 
+def test_used_part_numbers_includes_registry_reservations(numbering_library: Path):
+    """An assigned number is taken before its full CAD package is promoted."""
+    (numbering_library / "part_number_registry.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "assignments": [
+                    {
+                        "partNumber": "1030040",
+                        "description": "Reserved Cap",
+                        "productId": "fixture",
+                        "sourcePath": "Fixture_Cap.SLDPRT",
+                        "sourceHash": "1" * 64,
+                        "sourceItemIds": ["item-cap"],
+                        "libraryEntryStatus": "number_assigned",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    used = server._intake_used_part_numbers(numbering_library)
+
+    assert "1030040" in used
+
+
 def test_used_part_numbers_includes_assembly_internal_partno_refs(tmp_path: Path,
                                                                    monkeypatch: pytest.MonkeyPatch):
     """Regression for the 1030031 Straight-Rail smoke bug: a part

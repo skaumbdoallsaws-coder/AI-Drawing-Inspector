@@ -161,8 +161,8 @@ def test_registry_preserves_exact_runtime_surface_and_owners() -> None:
     assert {item["commandId"] for item in tools} == {
         item["commandId"] for item in AGENT_TOOL_SEMANTICS
     }
-    assert len(commands) == 39
-    assert len(tools) == 15
+    assert len(commands) == 40
+    assert len(tools) == 23
     assert set(item["effect"] for item in commands) == set(FACILITY_COMMAND_EFFECTS)
     assert all(item["deterministicOwner"] for item in commands)
     assert len({item["commandId"] for item in commands}) == len(commands)
@@ -268,6 +268,93 @@ def test_department_defaults_are_disclosed_and_explicit_proportions_win() -> Non
     assert explicit["assumptions"] == []
 
 
+def test_authored_rows_support_equal_area_and_unequal_row_depths() -> None:
+    partition = validate_department_partition_request(
+        {
+            "count": 5,
+            "labels": ["Receiving", "Machining", "Assembly", "Inspection", "Shipping"],
+            "proportions": None,
+            "arrangement": "row_stack",
+            "orientation": "horizontal",
+            "rows": [
+                {
+                    "labels": ["Receiving", "Machining"],
+                    "proportion": None,
+                },
+                {
+                    "labels": ["Assembly", "Inspection", "Shipping"],
+                    "proportion": None,
+                },
+            ],
+        }
+    )
+
+    assert partition["proportions"] == pytest.approx([0.2] * 5)
+    assert [row["proportion"] for row in partition["rows"]] == pytest.approx(
+        [0.4, 0.6]
+    )
+    assert partition["rowOrder"] == "north_to_south"
+    assert partition["areaSizing"] == "equal_area"
+    assert partition["assumptions"] == ["equal_area_partition"]
+
+
+def test_authored_row_depths_derive_unequal_department_areas() -> None:
+    partition = validate_department_partition_request(
+        {
+            "count": 5,
+            "labels": ["Receiving", "Machining", "Assembly", "Inspection", "Shipping"],
+            "proportions": None,
+            "arrangement": "row_stack",
+            "rows": [
+                {
+                    "labels": ["Receiving", "Machining"],
+                    "proportion": 1,
+                },
+                {
+                    "labels": ["Assembly", "Inspection", "Shipping"],
+                    "proportion": 1,
+                },
+            ],
+        }
+    )
+
+    assert partition["proportions"] == pytest.approx(
+        [0.25, 0.25, 1 / 6, 1 / 6, 1 / 6]
+    )
+    assert [row["proportion"] for row in partition["rows"]] == [0.5, 0.5]
+    assert partition["areaSizing"] == "authored_row_proportions"
+    assert partition["assumptions"] == ["equal_width_within_authored_rows"]
+
+
+def test_authored_rows_reject_inconsistent_or_incomplete_area_programs() -> None:
+    request = {
+        "count": 3,
+        "labels": ["Receiving", "Assembly", "Shipping"],
+        "proportions": [0.2, 0.3, 0.5],
+        "arrangement": "row_stack",
+        "rows": [
+            {"labels": ["Receiving", "Assembly"], "proportion": 0.7},
+            {"labels": ["Shipping"], "proportion": 0.3},
+        ],
+    }
+    with pytest.raises(FacilityKnowledgeContractError) as conflict:
+        validate_department_partition_request(request)
+    assert conflict.value.code == "department_row_area_conflict"
+
+    duplicate = deepcopy(request)
+    duplicate["proportions"] = None
+    duplicate["rows"] = [
+        {"labels": ["Receiving", "Assembly"], "proportion": None},
+        {"labels": ["Assembly"], "proportion": None},
+    ]
+    with pytest.raises(FacilityKnowledgeContractError) as incomplete:
+        validate_department_partition_request(duplicate)
+    assert incomplete.value.code in {
+        "department_row_coverage_invalid",
+        "department_row_label_duplicate",
+    }
+
+
 def test_bounded_registry_query_is_exact_and_fails_closed() -> None:
     result = query_facility_knowledge(
         command_ids=["rectangle-zone", "bulk-zones"],
@@ -359,7 +446,7 @@ def test_full_registry_is_stable_and_complete() -> None:
     first = facility_knowledge_registry()
     second = facility_knowledge_registry()
     assert first == second
-    assert len(first["commands"]) == 39
-    assert len(first["agentTools"]) == 15
+    assert len(first["commands"]) == 40
+    assert len(first["agentTools"]) == 23
     assert len(first["cellStrategies"]) == 10
     assert len(first["stages"]) == len(FACILITY_GENERATION_STAGES) == 10

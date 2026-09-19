@@ -12,6 +12,9 @@ const MODULE_PATH = path.join(
     'facility_layout_three_adapter.js'
 );
 const runtime = require(MODULE_PATH);
+globalThis.InspectorProFacilityNavigationAuthoring = require(
+    '../static/facility_layout_navigation_authoring.js'
+);
 
 let nextUuid = 1;
 
@@ -170,6 +173,16 @@ class FakeMatrix4 {
     multiplyMatrices(left, right) {
         this.multiplied = { left, right };
         this.composed = left.composed;
+        return this;
+    }
+
+    makeScale(x, y, z) {
+        this.composed = {
+            position: { x: 0, y: 0, z: 0 },
+            quaternion: { x: 0, y: 0, z: 0, w: 1 },
+            scale: { x, y, z },
+        };
+        this.elements = null;
         return this;
     }
 
@@ -404,7 +417,22 @@ class FakeInstancedMesh extends FakeMesh {
     }
 
     setMatrixAt(index, matrix) {
-        this.matrices[index] = matrix;
+        const copy = new FakeMatrix4();
+        copy.composed = matrix.composed
+            ? JSON.parse(JSON.stringify(matrix.composed)) : null;
+        copy.multiplied = matrix.multiplied;
+        copy.elements = matrix.elements ? matrix.elements.slice() : null;
+        this.matrices[index] = copy;
+    }
+
+    getMatrixAt(index, target) {
+        const matrix = this.matrices[index];
+        target.composed = matrix && matrix.composed
+            ? JSON.parse(JSON.stringify(matrix.composed)) : null;
+        target.multiplied = matrix ? matrix.multiplied : null;
+        target.elements = matrix && matrix.elements
+            ? matrix.elements.slice() : null;
+        return target;
     }
 
     setColorAt(index, color) {
@@ -595,10 +623,12 @@ function createFrameScheduler() {
         cancel(id) {
             callbacks.delete(id);
         },
-        flush() {
+        flush(timestamp) {
             const current = Array.from(callbacks.entries());
             callbacks.clear();
-            current.forEach(([, callback]) => callback(16));
+            current.forEach(([, callback]) => callback(
+                timestamp === undefined ? 16 : timestamp
+            ));
         },
         get pendingCount() {
             return callbacks.size;
@@ -638,6 +668,7 @@ function createThree() {
 
 const REV_A = 'a'.repeat(64);
 const REV_B = 'b'.repeat(64);
+const REV_C = 'c'.repeat(64);
 
 function transform(x, y, z, quaternion) {
     return {
@@ -672,6 +703,629 @@ function asset(assetId, revision, bounds) {
             },
         },
     };
+}
+
+function motionPayload(options) {
+    const value = options || {};
+    const layoutRevision = value.layoutRevision || REV_B;
+    const movement = {
+        outcome: value.outcome || 'accepted',
+        movementId: value.movementId || 'movement-one',
+        routeId: value.routeId || 'route-one',
+        vehicleProfileRef: {
+            vehicleProfileId: 'vehicle-profile-one',
+            vehicleProfileRevision: REV_A,
+        },
+        routeFingerprint: 'route-fingerprint-one',
+        plannerDurationEstimateSeconds: value.duration || 5,
+        distanceMeters: 10,
+        poses: [
+            { x: 1, z: 2, heading: Math.PI - 0.1, gear: 'reverse' },
+            { x: 11, z: 2, heading: -Math.PI + 0.1, gear: 'forward' },
+        ],
+        cumulativeDistance: [0, 10],
+        carriedPlacementIds: value.carriedPlacementIds || [],
+        sweptEnvelope: {
+            valid: true,
+            sampledPoseCount: 6,
+            projectedSampleCount: 6,
+            sampleSpacingMeters: 2,
+            effectiveWidthMeters: 1,
+            effectiveLengthMeters: 2,
+            sweptEnvelopeRevision: 'facility-swept-envelope-v1',
+            sweptBounds: {
+                minimum: { x: 0, z: 1.5 },
+                maximum: { x: 12, z: 2.5 },
+            },
+            geometry: {
+                polygons: [{
+                    exterior: [
+                        { x: 0, z: 1.5 },
+                        { x: 12, z: 1.5 },
+                        { x: 12, z: 2.5 },
+                        { x: 0, z: 2.5 },
+                    ],
+                    holes: [],
+                }],
+                ringOrientation: {
+                    exterior: 'counterclockwise',
+                    holes: 'clockwise',
+                },
+                startVertexRule: 'lowest_x_then_z_lexicographic',
+                precisionDecimals: 6,
+                polygonSortKey: 'first_vertex_then_area',
+            },
+            findings: [],
+        },
+        clearance: {
+            sampleSpacingMeters: 2,
+            samples: [0, 2, 4, 6, 8, 10].map(distance => ({
+                distanceMeters: distance,
+                nearestObstacleIds: ['obstacle-one'],
+                clearanceMeters: 3 + distance / 10,
+            })),
+        },
+    };
+    if (value.vehiclePlacementId) {
+        movement.vehiclePlacementId = value.vehiclePlacementId;
+    }
+    if (value.laneBinding) movement.laneBinding = value.laneBinding;
+    if (value.poses) {
+        movement.poses = value.poses;
+        movement.cumulativeDistance = value.cumulativeDistance;
+        movement.distanceMeters = value.cumulativeDistance.at(-1);
+    }
+    return {
+        package: {
+            schemaVersion: 'facility-motion-package-v1',
+            packageId: value.packageId || 'fmp-one',
+            plannerVersions: {
+                routingEngineVersion: 'facility-routing-v1',
+                routerVersion: 'heading-lattice-v1',
+            },
+            layoutRevision,
+            obstacleContextRevision: 'obstacles-one',
+            qualification: (
+                'Replays one deterministically planned traversal against '
+                + 'nominal geometry at an exact vehicle revision. It does not '
+                + 'establish throughput, congestion, traffic safety, or '
+                + 'regulatory compliance.'
+            ),
+            movement,
+        },
+        vehicleProfile: {
+            vehicleProfileId: 'vehicle-profile-one',
+            vehicleProfileRevision: REV_A,
+            displayName: 'Fixture forklift',
+            overallDimensions: { length: 2, width: 1, height: 2 },
+            footprint: [
+                { x: -1, z: -0.5 },
+                { x: 1, z: -0.5 },
+                { x: 1, z: 0.5 },
+                { x: -1, z: 0.5 },
+            ],
+        },
+    };
+}
+
+function motionPayloadV2(options) {
+    const value = options || {};
+    const payload = motionPayload(value);
+    const packageValue = payload.package;
+    packageValue.schemaVersion = 'facility-motion-package-v2';
+    packageValue.generationLayoutRevision = packageValue.layoutRevision;
+    delete packageValue.layoutRevision;
+    packageValue.validationContextFingerprint = value.validationFingerprint || REV_A;
+    packageValue.validationContextSpec = {
+        schemaVersion: 'facility-motion-validation-context-spec-v1',
+    };
+    if (value.includeActiveFingerprint !== false) {
+        payload.activeValidationContextFingerprint = value.activeFingerprint || REV_A;
+    }
+    return payload;
+}
+
+function navigationMotionPayload(options) {
+    const value = options || {};
+    const placementId = value.placementId || 'actor-placement';
+    const packageId = value.packageId || 'fmp-navigation-one';
+    return {
+        package: {
+            schemaVersion: 'facility-motion-package-v3',
+            packageId,
+            plannerVersions: {
+                pedestrian: 'facility-pedestrian-journey-v1',
+                motion_serializer: 'facility-motion-package-v3',
+            },
+            generationLayoutRevision: REV_B,
+            validationContextFingerprint: REV_A,
+            navigationSnapshotId: 'nss-navigation-one',
+            qualification: (
+                'Replays one accepted revision-bound navigation journey for an existing '
+                + 'placed actor on a shared display clock. Presentation timing is not process '
+                + 'timing and does not establish throughput, congestion, staffing, traffic '
+                + 'safety, or regulatory compliance.'
+            ),
+            movement: {
+                outcome: 'accepted',
+                movementId: 'fmm-navigation-one',
+                movementProgramId: 'nmp-navigation-one',
+                journeySolutionId: 'njs-navigation-one',
+                navigationSnapshotId: 'nss-navigation-one',
+                actorClass: 'pedestrian',
+                actorPlacementId: placementId,
+                actorProfileRef: {
+                    profileKind: 'pedestrian',
+                    profileId: 'operator-profile-one',
+                    profileRevision: REV_A,
+                },
+                presentationDurationSeconds: 8,
+                presentationTimingAuthority: 'derived_display_only',
+                distanceMeters: 16,
+                poses: value.poses || [
+                    { x: 1, z: 2, heading: 0, gear: 'forward' },
+                    { x: 9, z: 2, heading: 0, gear: 'forward' },
+                    { x: 1, z: 2, heading: Math.PI, gear: 'forward' },
+                ],
+                cumulativeDistance: value.cumulativeDistance || [0, 8, 16],
+                validation: {
+                    identity: 'pass',
+                    topology: 'pass',
+                    direction: 'pass',
+                    physical: 'pass',
+                    authority: 'pass',
+                    stale: 'pass',
+                },
+                sourceRevisions: { layout: REV_B },
+            },
+        },
+        actorProfile: {
+            profileKind: 'pedestrian',
+            profileId: 'operator-profile-one',
+            profileRevision: REV_A,
+            footprint: [
+                { x: -0.3, z: -0.3 },
+                { x: 0.3, z: -0.3 },
+                { x: 0.3, z: 0.3 },
+                { x: -0.3, z: 0.3 },
+            ],
+            overallDimensions: { length: 0.6, width: 0.6, height: 1.8 },
+        },
+        activeValidationContextFingerprint: REV_A,
+    };
+}
+
+function navigationActivityPayload() {
+    const motion = navigationMotionPayload({ placementId: 'actor-placement' });
+    const actor = {
+        actorId: 'actor-navigation-one',
+        actorType: 'operator',
+        label: 'Existing operator',
+        motionPackageId: motion.package.packageId,
+        returnMotionPackageId: null,
+        endTransferMotionPackageId: null,
+        startTransferMotionPackageId: null,
+        cycleMotionPackageIds: [],
+        placementId: 'actor-placement',
+        assetDefinitionRef: {
+            assetId: 'activity-asset',
+            assetDefinitionRevision: REV_A,
+        },
+        routeId: 'nmp-navigation-one',
+        departmentZoneIds: ['zone-one'],
+        startOffsetSeconds: 0,
+        repeat: true,
+        loopMode: 'journey_cycle',
+        endpointTurnSeconds: 0,
+        visualAlignment: {
+            forwardAxis: '+Z',
+            authority: 'curated_revision_bound_visual_review',
+            evidenceArtifact: 'fixture.glb',
+        },
+    };
+    return {
+        scenario: {
+            schemaVersion: 'facility-activity-scenario-v7',
+            scenarioId: 'fas-navigation-one',
+            layoutRevision: REV_B,
+            label: 'Navigation activity',
+            qualification: (
+                'Prototype navigation playback presents accepted revision-bound actor '
+                + 'journeys on one shared display clock. Path intersections and sampled '
+                + 'center proximity are presentation diagnostics, not safety, capacity, '
+                + 'staffing, timing, or regulatory findings.'
+            ),
+            prototypeMode: true,
+            repeat: true,
+            cycleDurationSeconds: 8,
+            actors: [actor],
+            leanMotion: activityPayload().scenario.leanMotion,
+            navigationPresentation: {
+                schemaVersion: 'facility-navigation-presentation-v1',
+                qualification: (
+                    'Derived display diagnostics preserve accepted journey geometry and do not '
+                    + 'reschedule actors or alter paths to conceal visual overlap.'
+                ),
+                sharedClock: true,
+                processTimingClaimed: false,
+                generatedCollisionAvoidanceOffsets: false,
+                phaseOffsets: [{
+                    actorId: actor.actorId,
+                    offsetSeconds: 0,
+                    authority: 'none',
+                }],
+                pathBindings: [{
+                    pathBindingId: 'npb-navigation-one',
+                    actorId: actor.actorId,
+                    actorClass: 'pedestrian',
+                    journeySolutionId: 'njs-navigation-one',
+                    motionPackageId: motion.package.packageId,
+                    closed: true,
+                }],
+                pathIntersections: [],
+                sampledProximity: {
+                    sampleCount: 21,
+                    pairMinimums: [],
+                    qualification: (
+                        'Center-distance samples on the shared display clock; '
+                        + 'not a collision or safety assessment.'
+                    ),
+                },
+                handoffResultIds: [],
+            },
+            stationaryEvidence: {
+                placementCount: 1,
+                assetTypeCount: 1,
+                reason: 'Fixed machinery has no revision-bound track.',
+                evidenceStatus: 'unknown',
+            },
+            unavailableActivity: [],
+        },
+        actorPayloads: { [motion.package.packageId]: motion },
+    };
+}
+
+function reviewedCycleNavigationActivityPayload(options) {
+    const inspection = options && options.inspection === true;
+    const segmentSpecs = inspection ? [
+        {
+            phase: 'inspection_pick',
+            poses: [
+                { x: 0, z: 0, heading: 0, gear: 'forward' },
+                { x: 2, z: 0, heading: 0, gear: 'forward' },
+            ],
+            distance: 2,
+        },
+        {
+            phase: 'inspection_place',
+            poses: [
+                { x: 2, z: 0, heading: 0, gear: 'forward' },
+                { x: 4, z: 0, heading: 0, gear: 'forward' },
+            ],
+            distance: 2,
+        },
+        {
+            phase: 'return_empty',
+            poses: [
+                { x: 4, z: 0, heading: Math.PI / 2, gear: 'forward' },
+                { x: 4, z: 2, heading: Math.PI, gear: 'forward' },
+                { x: 0, z: 2, heading: -Math.PI / 2, gear: 'forward' },
+                { x: 0, z: 0, heading: -Math.PI / 2, gear: 'forward' },
+            ],
+            distance: 8,
+            cumulativeDistance: [0, 2, 6, 8],
+        },
+    ] : [
+        {
+            phase: 'carry_in',
+            poses: [
+                { x: 0, z: 0, heading: 0, gear: 'forward' },
+                { x: 2, z: 0, heading: 0, gear: 'forward' },
+            ],
+            distance: 2,
+        },
+        {
+            phase: 'carry_out',
+            poses: [
+                { x: 2, z: 0, heading: Math.PI / 2, gear: 'forward' },
+                { x: 2, z: 2, heading: Math.PI / 2, gear: 'forward' },
+            ],
+            distance: 2,
+        },
+        {
+            phase: 'return_empty',
+            poses: [
+                { x: 2, z: 2, heading: -3 * Math.PI / 4, gear: 'forward' },
+                { x: 0, z: 0, heading: -3 * Math.PI / 4, gear: 'forward' },
+            ],
+            distance: Math.sqrt(8),
+        },
+    ];
+    const segments = segmentSpecs.map(function (spec) {
+        const family = inspection ? 'inspection' : 'packaging';
+        const packageId = 'fmp-' + family + '-' + spec.phase;
+        const payload = navigationMotionPayload({
+            placementId: 'actor-placement',
+            packageId,
+            poses: spec.poses,
+            cumulativeDistance: spec.cumulativeDistance
+                || [0, spec.distance],
+        });
+        Object.assign(payload.package.movement, {
+            movementId: 'fmm-' + family + '-' + spec.phase,
+            movementProgramId: 'nmp-' + family + '-' + spec.phase,
+            journeySolutionId: 'njs-' + family + '-' + spec.phase,
+            presentationDurationSeconds: 2,
+            distanceMeters: spec.distance,
+        });
+        return { spec, payload };
+    });
+    const result = navigationActivityPayload();
+    const actor = result.scenario.actors[0];
+    actor.motionPackageId = segments[0].payload.package.packageId;
+    actor.cycleMotionPackageIds = segments.map(function (segment) {
+        return segment.payload.package.packageId;
+    });
+    actor.routeId = segments[0].payload.package.movement.movementProgramId;
+    actor.loopMode = 'closed_path';
+    actor.endpointTurnSeconds = 1;
+    result.scenario.cycleDurationSeconds = 9;
+    result.scenario.navigationPresentation.pathBindings[0].journeySolutionId =
+        segments[0].payload.package.movement.journeySolutionId;
+    result.scenario.navigationPresentation.pathBindings[0].motionPackageId =
+        segments[0].payload.package.packageId;
+    result.actorPayloads = Object.fromEntries(segments.map(function (segment) {
+        return [segment.payload.package.packageId, segment.payload];
+    }));
+    result.candidatePresentation = {
+        schemaVersion: 'facility-reference-movement-candidates-v1',
+        sourceLayoutId: 'fl-reference-manual-20260812',
+        sourceLayoutRevision: REV_A,
+        authority: 'inferred_candidate',
+        reviewStatus: 'pending',
+        productionEligible: false,
+        candidateCounts: {
+            operators: 1,
+            vehicles: 0,
+            handoffs: 0,
+            displayedActors: 1,
+            displayedHandoffs: 0,
+            unavailableActors: 0,
+            partialPrograms: 0,
+            suppressedStationaryOperators: 0,
+        },
+        suppressedOperatorPlacementIds: [],
+        handoffs: [],
+        [inspection ? 'inspectionPathLegend' : 'packagingPathLegend']:
+            inspection ? [
+                {
+                    phase: 'inspection_pick',
+                    label: 'Pick to inspect',
+                    lineStyle: 'solid',
+                },
+                {
+                    phase: 'inspection_place',
+                    label: 'Inspect to place',
+                    lineStyle: 'solid',
+                },
+                {
+                    phase: 'return_empty',
+                    label: 'Return empty',
+                    lineStyle: 'dashed',
+                },
+            ] : [
+                { phase: 'carry_in', label: 'Carry in', lineStyle: 'solid' },
+                { phase: 'carry_out', label: 'Carry out', lineStyle: 'solid' },
+                {
+                    phase: 'return_empty',
+                    label: 'Return empty',
+                    lineStyle: 'dashed',
+                },
+            ],
+        programEvidence: [{
+            actorPlacementId: actor.placementId,
+            pathSegments: segments.map(function (segment) {
+                return {
+                    phase: segment.spec.phase,
+                    movementProgramId:
+                        segment.payload.package.movement.movementProgramId,
+                    motionPackageId: segment.payload.package.packageId,
+                    distanceMeters: segment.spec.distance,
+                    turnCount: 0,
+                };
+            }),
+            interactionPauseSeconds: 1,
+            timingAuthority: 'derived_display_only',
+        }],
+        qualification: inspection
+            ? 'Reviewed Inspection sequence; prototype timing only.'
+            : 'Reviewed Packaging sequence; prototype timing only.',
+        presentationFingerprint: REV_B,
+    };
+    return result;
+}
+
+function packagingNavigationActivityPayload() {
+    return reviewedCycleNavigationActivityPayload({ inspection: false });
+}
+
+function inspectionNavigationActivityPayload() {
+    return reviewedCycleNavigationActivityPayload({ inspection: true });
+}
+
+function activityPayload(options) {
+    const value = options || {};
+    const actorPlacementId = value.placementId || 'actor-placement';
+    const payload = motionPayload({
+        layoutRevision: REV_B,
+        vehiclePlacementId: actorPlacementId,
+    });
+    payload.package.movement.poses = [
+        { x: 1, z: 2, heading: 0, gear: 'forward' },
+        { x: 11, z: 2, heading: 0, gear: 'forward' },
+    ];
+    payload.package.movement.cumulativeDistance = [0, 10];
+    payload.package.movement.plannerDurationEstimateSeconds = 5;
+    return {
+        scenario: {
+            schemaVersion: 'facility-activity-scenario-v6',
+            scenarioId: 'fas-fixture',
+            layoutRevision: REV_B,
+            label: 'Fixture activity',
+            qualification: (
+                'Prototype activity playback presents independently revision-bound '
+                + 'route results on one shared display clock. It is not a discrete-event '
+                + 'simulation and does not establish traffic safety, throughput, '
+                + 'utilization, staffing, machine cycles, or regulatory compliance.'
+            ),
+            prototypeMode: true,
+            repeat: true,
+            cycleDurationSeconds: 12,
+            actors: [{
+                actorId: 'actor-fixture',
+                actorType: value.actorType || 'operator',
+                label: 'Fixture actor',
+                motionPackageId: payload.package.packageId,
+                returnMotionPackageId: null,
+                endTransferMotionPackageId: null,
+                startTransferMotionPackageId: null,
+                cycleMotionPackageIds: [],
+                placementId: actorPlacementId,
+                assetDefinitionRef: {
+                    assetId: value.assetId || 'activity-asset',
+                    assetDefinitionRevision: REV_A,
+                },
+                routeId: payload.package.movement.routeId,
+                departmentZoneIds: ['zone-one'],
+                startOffsetSeconds: 0,
+                repeat: true,
+                loopMode: 'ping_pong',
+                endpointTurnSeconds: 1,
+                visualAlignment: {
+                    forwardAxis: value.forwardAxis || '+Z',
+                    authority: 'curated_revision_bound_visual_review',
+                    evidenceArtifact: 'fixture.glb',
+                },
+            }],
+            leanMotion: value.leanMotion || {
+                schemaVersion: 'facility-lean-motion-v3',
+                qualification: (
+                    'Derived prototype motion borrows existing placed operator identities, '
+                    + 'assigns them to nearby placed stations, and routes the responsible '
+                    + 'endpoint operators to derived FIFO handoff points. Material handoff '
+                    + 'lines show workpiece transfer relationships, not operator walking. '
+                    + 'The routes are geometrically feasible paths, not time-optimal standard '
+                    + 'work, and do not establish staffing, task frequency, synchronized '
+                    + 'transfer timing, capacity, traffic safety, or compliance.'
+                ),
+                evidenceStatus: 'derived',
+                operatorPaths: [],
+                pedestrianConnections: [],
+                assistanceGates: [],
+                materialHandoffs: [],
+                fifoPoints: [],
+            },
+            stationaryEvidence: {
+                placementCount: 0,
+                assetTypeCount: 0,
+                reason: 'No stationary fixture assets.',
+                evidenceStatus: 'unknown',
+            },
+            unavailableActivity: [],
+        },
+        actorPayloads: {
+            [payload.package.packageId]: payload,
+        },
+    };
+}
+
+function pairedLaneActivityPayload() {
+    const actorPlacementId = 'actor-placement';
+    const routeId = 'route-one';
+    const lane = (travelDirection, z, markingId) => ({
+        schemaVersion: 1,
+        bindingVersion: 'facility-motion-lane-binding-v1',
+        status: 'direction_markings',
+        travelDirection,
+        routeId,
+        sourceMarkingIds: [markingId],
+        lateralOffsetMeters: travelDirection === 'forward' ? -2 : 2,
+        laneCenterline: travelDirection === 'forward'
+            ? [{ x: 1, y: 0, z }, { x: 11, y: 0, z }]
+            : [{ x: 11, y: 0, z }, { x: 1, y: 0, z }],
+        evidenceStatus: 'derived',
+        qualification: 'Fixture direction-marking lane.',
+    });
+    const create = (packageId, poses, cumulativeDistance, duration, laneBinding) => (
+        motionPayload({
+            packageId,
+            movementId: packageId + '-movement',
+            routeId,
+            layoutRevision: REV_B,
+            vehiclePlacementId: actorPlacementId,
+            poses,
+            cumulativeDistance,
+            duration,
+            laneBinding,
+        })
+    );
+    const outbound = create(
+        'fmp-outbound',
+        [
+            { x: 1, z: 2, heading: 0, gear: 'forward' },
+            { x: 11, z: 2, heading: 0, gear: 'forward' },
+        ],
+        [0, 10],
+        5,
+        lane('forward', 2, 'marking-forward')
+    );
+    const endTransfer = create(
+        'fmp-end-transfer',
+        [
+            { x: 11, z: 2, heading: 0, gear: 'forward' },
+            { x: 12, z: 3, heading: Math.PI / 2, gear: 'forward' },
+            { x: 11, z: 4, heading: Math.PI, gear: 'forward' },
+        ],
+        [0, Math.SQRT2, 2 * Math.SQRT2],
+        1
+    );
+    const returnLane = create(
+        'fmp-return',
+        [
+            { x: 11, z: 4, heading: Math.PI, gear: 'forward' },
+            { x: 1, z: 4, heading: Math.PI, gear: 'forward' },
+        ],
+        [0, 10],
+        5,
+        lane('reverse', 4, 'marking-reverse')
+    );
+    const startTransfer = create(
+        'fmp-start-transfer',
+        [
+            { x: 1, z: 4, heading: Math.PI, gear: 'forward' },
+            { x: 0, z: 3, heading: -Math.PI / 2, gear: 'forward' },
+            { x: 1, z: 2, heading: 0, gear: 'forward' },
+        ],
+        [0, Math.SQRT2, 2 * Math.SQRT2],
+        1
+    );
+    const payload = activityPayload({ actorType: 'vehicle' });
+    const actor = payload.scenario.actors[0];
+    actor.motionPackageId = outbound.package.packageId;
+    actor.returnMotionPackageId = returnLane.package.packageId;
+    actor.endTransferMotionPackageId = endTransfer.package.packageId;
+    actor.startTransferMotionPackageId = startTransfer.package.packageId;
+    actor.loopMode = 'paired_lanes';
+    actor.endpointTurnSeconds = 0;
+    actor.routeId = routeId;
+    payload.scenario.cycleDurationSeconds = 12;
+    payload.actorPayloads = {
+        [outbound.package.packageId]: outbound,
+        [returnLane.package.packageId]: returnLane,
+        [endTransfer.package.packageId]: endTransfer,
+        [startTransfer.package.packageId]: startTransfer,
+    };
+    return payload;
 }
 
 function prototype(THREE, name) {
@@ -1586,6 +2240,62 @@ test('heavy large-layout visuals defer until their placement is selected', async
     data.adapter.dispose();
 });
 
+test('manual preview waits for an in-flight deferred exact visual', async () => {
+    const data = fixture({
+        largeLayoutDetailThreshold: 2,
+        largeLayoutHeavyVisualBytes: 100,
+        assetResolver: request => {
+            if (request.stage === 'manifest') {
+                return asset(request.assetId, request.assetDefinitionRevision);
+            }
+            if (request.stage === 'footprint') {
+                return prototype(data.THREE, request.stage);
+            }
+            if (request.stage === 'overview') {
+                const overview = prototype(data.THREE, request.stage);
+                overview.byteSize = 101;
+                return overview;
+            }
+            return null;
+        },
+    });
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: {
+            placements: [
+                placement('pl-a', 'asset-heavy', REV_A, 1, 0, 2),
+                placement('pl-b', 'asset-heavy', REV_A, 4, 0, 2),
+            ],
+            routes: [],
+            floorMarkings: [],
+        },
+        assetCatalog: [asset('asset-heavy', REV_A)],
+    });
+
+    data.adapter.setSelection(['pl-a']);
+    await Promise.resolve();
+    const loaded = await data.adapter.navigationPreview.load({
+        previewId: 'nav-preview-deferred-one',
+        layoutRevision: REV_B,
+        actorPlacementId: 'pl-a',
+        actorClass: 'pedestrian',
+        points: [{ x: 1, z: 2 }, { x: 3, z: 2 }],
+        loopMode: 'one_way',
+        direction: 'forward',
+        visualForwardAxis: '+X',
+        validationStatus: 'validated',
+        pathsVisible: true,
+    }, REV_B);
+    assert.strictEqual(loaded.exactCatalogVisual, true);
+    assert.strictEqual(loaded.sourcePlacementSuppressed, true);
+    assert.strictEqual(loaded.duplicateVisiblePlacementCount, 0);
+    assert.strictEqual(
+        data.adapter.getDiagnostics().representationGroups[0].representation,
+        'overview'
+    );
+    data.adapter.dispose();
+});
+
 test('resolves every asset progressively in the required deterministic order', async () => {
     const calls = [];
     const data = fixture({
@@ -1974,9 +2684,12 @@ test('Fit mutates only camera and controls while model and scene roots stay fixe
     const renderer = FakeRenderer.instances.at(-1);
     data.scheduler.flush();
     const cameraBefore = Object.assign({}, renderer.lastRender.camera.position);
+    data.host.clientWidth = 1200;
+    data.host.clientHeight = 500;
     assert.strictEqual(data.adapter.fit(), true);
     data.scheduler.flush();
     const after = data.adapter.getDiagnostics();
+    assert.strictEqual(renderer.lastRender.camera.aspect, 2.4);
     assert.deepStrictEqual(after.modelRootTransform, before);
     assert.strictEqual(after.lastFit.rootUnchanged, true);
     assert.notDeepStrictEqual(
@@ -2064,6 +2777,23 @@ test('Fit Facility Fit Layout and Top View frame shared world data without movin
         assert.strictEqual(diagnostics.camera.position.x, 20);
         assert.strictEqual(diagnostics.camera.position.z, 15);
         assert(diagnostics.camera.position.y > 0);
+        assert.deepStrictEqual(diagnostics.modelRootTransform, before);
+
+        assert.strictEqual(data.adapter.topView({
+            minimum: { x: 5, y: 0, z: 10 },
+            maximum: { x: 15, y: 3, z: 20 },
+        }), true);
+        diagnostics = data.adapter.getDiagnostics();
+        assert.deepStrictEqual(diagnostics.camera.target, {
+            x: 10,
+            y: 0,
+            z: 15,
+        });
+        assert.deepStrictEqual(diagnostics.lastFit.size, {
+            x: 10,
+            y: 3,
+            z: 10,
+        });
         assert.deepStrictEqual(diagnostics.modelRootTransform, before);
         data.adapter.dispose();
     });
@@ -2747,6 +3477,1425 @@ test('3D viewport projects semantic aisles from native route coordinates', async
     data.adapter.dispose();
 });
 
+test('3D layer visibility hides presentation objects without changing scene data', async () => {
+    const data = fixture();
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: {
+            placements: [
+                placement('pl-layer', 'asset-machine', REV_A, 2, 0, 2),
+            ],
+            routes: [{
+                routeId: 'rt-layer',
+                routeKind: 'material',
+                centerline: [
+                    { x: 0, y: 0, z: 0 },
+                    { x: 8, y: 0, z: 0 },
+                ],
+                corridorWidth: 2,
+                extensions: {
+                    facilityAisle: {
+                        schemaVersion: 1,
+                        aisleKind: 'material',
+                        direction: 'two_way',
+                    },
+                },
+            }],
+            floorMarkings: [{
+                markingId: 'fm-layer',
+                markingType: 'parking_box',
+                label: 'Layer marking',
+                semanticRole: 'parking',
+                transform: { position: { x: 4, y: 0, z: 4 } },
+                width: 2,
+                depth: 3,
+            }],
+        },
+        assetCatalog: [asset('asset-machine', REV_A)],
+    });
+    data.scheduler.flush();
+    const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+    let aisle = null;
+    let marking = null;
+    scene.traverse(object => {
+        if (object.userData.facilityAisle === true) aisle = object;
+        if (object.userData.facilityFloorMarking === true) marking = object;
+    });
+    assert(aisle);
+    assert(marking);
+    const before = data.adapter.getDiagnostics();
+    assert.strictEqual(before.placementCount, 1);
+    assert.strictEqual(before.routeCount, 1);
+    assert.strictEqual(before.floorMarkingCount, 1);
+    data.adapter.setLayerVisibility({
+        assets: false,
+        routes: false,
+        markings: false,
+    });
+    assert.strictEqual(aisle.visible, false);
+    assert.strictEqual(marking.visible, false);
+    assert.deepStrictEqual(data.adapter.getLayerVisibility(), {
+        zones: true,
+        cells: true,
+        routes: false,
+        markings: false,
+        assets: false,
+    });
+    const after = data.adapter.getDiagnostics();
+    assert.strictEqual(after.placementCount, 1);
+    assert.strictEqual(after.routeCount, 1);
+    assert.strictEqual(after.floorMarkingCount, 1);
+    data.adapter.setLayerVisibility({
+        assets: true,
+        routes: true,
+        markings: true,
+    });
+    assert.strictEqual(aisle.visible, true);
+    assert.strictEqual(marking.visible, true);
+    data.adapter.dispose();
+});
+
+test('motion sampler follows arc length and takes the shortest heading arc', () => {
+    const movement = motionPayload().package.movement;
+    const midpoint = runtime.sampleFacilityMotionAtDistance(movement, 5);
+    assert.strictEqual(midpoint.x, 6);
+    assert.strictEqual(midpoint.z, 2);
+    assert.strictEqual(midpoint.gear, 'reverse');
+    assert.ok(Math.abs(Math.abs(midpoint.heading) - Math.PI) < 1e-9);
+    assert.deepStrictEqual(
+        runtime.sampleFacilityMotionAtDistance(movement, 0),
+        runtime.sampleFacilityMotionAtDistance(movement, 0)
+    );
+});
+
+test('manual navigation preview moves the exact existing GLB and restores it',
+    async () => {
+        const data = fixture({
+            assetResolver: request => {
+                if (request.stage === 'manifest') {
+                    return asset(
+                        request.assetId,
+                        request.assetDefinitionRevision
+                    );
+                }
+                if (request.stage === 'overview') {
+                    return prototype(data.THREE, request.assetId);
+                }
+                return null;
+            },
+        });
+        const actor = placement(
+            'operator-nav-one',
+            'asset-operator',
+            REV_A,
+            2,
+            0,
+            2
+        );
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({
+            layout: {
+                placements: [actor],
+                routes: [],
+                floorMarkings: [],
+            },
+            assetCatalog: [asset('asset-operator', REV_A)],
+        });
+        while (data.scheduler.pendingCount) data.scheduler.flush();
+
+        const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+        let source = null;
+        scene.traverse(object => {
+            if (object.userData
+                    && object.userData.placementId === 'operator-nav-one') {
+                source = object;
+            }
+        });
+        assert(source);
+        assert.notStrictEqual(source.visible, false);
+
+        const loaded = await data.adapter.navigationPreview.load({
+            previewId: 'nav-preview-operator-one',
+            layoutRevision: REV_B,
+            actorPlacementId: 'operator-nav-one',
+            actorClass: 'pedestrian',
+            points: [{ x: 2, z: 2 }, { x: 10, z: 2 }],
+            loopMode: 'closed_loop',
+            direction: 'forward',
+            visualForwardAxis: '+X',
+            validationStatus: 'validated',
+            pathsVisible: true,
+        }, REV_B);
+        assert.strictEqual(loaded.exactCatalogVisual, true);
+        assert.strictEqual(loaded.sourcePlacementSuppressed, true);
+        assert.strictEqual(loaded.duplicateVisiblePlacementCount, 0);
+        assert.strictEqual(source.visible, false);
+
+        data.adapter.navigationPreview.seek(0.5);
+        data.scheduler.flush(1000);
+        let state = data.adapter.navigationPreview.getState();
+        assert.strictEqual(state.pose.x, 6);
+        assert.strictEqual(state.pose.z, 2);
+        assert.strictEqual(state.pose.heading, 0);
+        assert.strictEqual(state.visualYawRadians, 0);
+        assert.strictEqual(
+            data.adapter.navigationPreview.setPathsVisible(false),
+            false
+        );
+        state = data.adapter.navigationPreview.getState();
+        assert.strictEqual(state.pathsVisible, false);
+        assert.strictEqual(state.exactCatalogVisual, true);
+
+        assert.strictEqual(
+            data.adapter.navigationPreview.dispose('test_dispose'),
+            true
+        );
+        assert.notStrictEqual(source.visible, false);
+        assert.strictEqual(
+            data.adapter.navigationPreview.getState().loaded,
+            false
+        );
+        data.adapter.dispose();
+    });
+
+test('motion playback refuses stale revisions and uses the one owned frame loop', async () => {
+    const data = fixture({ prefersReducedMotion: true });
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: { placements: [], routes: [], floorMarkings: [] },
+        assetCatalog: [],
+    });
+    while (data.scheduler.pendingCount) data.scheduler.flush();
+    assert.throws(
+        () => data.adapter.motion.load(motionPayload(), REV_A),
+        error => error && error.code === 'facility_motion_package_stale'
+    );
+
+    const loaded = data.adapter.motion.load(motionPayload(), REV_B);
+    assert.strictEqual(loaded.status, 'ready');
+    assert.strictEqual(loaded.playing, false);
+    assert.strictEqual(loaded.prefersReducedMotion, true);
+    assert.strictEqual(data.scheduler.pendingCount, 1);
+    data.scheduler.flush(1000);
+    let state = data.adapter.motion.getState();
+    assert.strictEqual(state.pose.x, 1);
+    assert.strictEqual(state.clearanceAtValidatedSample.distanceMeters, 0);
+    assert.strictEqual(data.scheduler.pendingCount, 0);
+
+    assert.strictEqual(data.adapter.motion.play(), true);
+    assert.strictEqual(data.scheduler.pendingCount, 1);
+    data.scheduler.flush(2000);
+    assert.strictEqual(data.scheduler.pendingCount, 1);
+    data.scheduler.flush(3000);
+    state = data.adapter.motion.getState();
+    assert.strictEqual(state.elapsedSeconds, 1);
+    assert.strictEqual(state.distanceMeters, 2);
+    assert.strictEqual(state.clearanceAtValidatedSample.distanceMeters, 2);
+    assert.strictEqual(data.scheduler.pendingCount, 1);
+
+    const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+    let footprint = null;
+    let ribbon = null;
+    scene.traverse(object => {
+        if (object.userData.facilityMotionVehicleFootprint) footprint = object;
+        if (object.userData.facilityMotionRibbon) ribbon = object;
+    });
+    assert(footprint);
+    assert(ribbon);
+    assert.strictEqual(data.adapter.motion.pause(), true);
+    data.adapter.motion.seek(2.6);
+    data.scheduler.flush(4000);
+    state = data.adapter.motion.getState();
+    assert.strictEqual(state.playing, false);
+    assert.ok([4, 6].includes(
+        state.clearanceAtValidatedSample.distanceMeters
+    ));
+    assert.strictEqual(
+        state.distanceMeters,
+        state.clearanceAtValidatedSample.distanceMeters
+    );
+    data.adapter.dispose();
+    assert.strictEqual(data.scheduler.pendingCount, 0);
+});
+
+test('motion v2 uses the recomputed context gate instead of full layout equality', async () => {
+    const data = fixture({ prefersReducedMotion: true });
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: { placements: [], routes: [], floorMarkings: [] },
+        assetCatalog: [],
+    });
+    while (data.scheduler.pendingCount) data.scheduler.flush();
+
+    const unrelatedRevision = motionPayloadV2();
+    const loaded = data.adapter.motion.load(unrelatedRevision, REV_C);
+    assert.strictEqual(loaded.status, 'ready');
+    data.adapter.motion.dispose();
+
+    assert.throws(
+        () => data.adapter.motion.load(motionPayloadV2({
+            includeActiveFingerprint: false,
+        }), REV_B),
+        error => error
+            && error.code === 'facility_motion_validation_context_unavailable'
+    );
+    assert.throws(
+        () => data.adapter.motion.load(motionPayloadV2({
+            activeFingerprint: REV_C,
+        }), REV_B),
+        error => error && error.code === 'facility_motion_package_stale'
+    );
+    data.adapter.dispose();
+});
+
+test('motion disposal restores reparented vehicle and carried placement state', async () => {
+    const data = fixture({
+        assetResolver: request => {
+            if (request.stage === 'manifest') {
+                return asset(request.assetId, request.assetDefinitionRevision);
+            }
+            if (request.stage === 'overview') {
+                return prototype(data.THREE, request.assetId);
+            }
+            return null;
+        },
+    });
+    const vehicle = placement('vehicle-one', 'forklift', REV_A, 4, 0, 5);
+    const carried = placement('load-one', 'pallet', REV_A, 5, 1, 5);
+    carried.snapRelationship = { supportPlacementId: 'vehicle-one' };
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: {
+            placements: [vehicle, carried],
+            routes: [],
+            floorMarkings: [],
+        },
+        assetCatalog: [asset('forklift', REV_A), asset('pallet', REV_A)],
+    });
+    while (data.scheduler.pendingCount) data.scheduler.flush();
+    assert.strictEqual(
+        data.adapter.getDiagnostics().representationGroups[0]
+            .prototypeMeshCount,
+        1
+    );
+    const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+    const byId = {};
+    scene.traverse(object => {
+        const id = object.userData && object.userData.placementId;
+        if (id) byId[id] = object;
+    });
+    const before = {};
+    ['vehicle-one', 'load-one'].forEach(id => {
+        before[id] = {
+            parent: byId[id].parent,
+            index: byId[id].parent.children.indexOf(byId[id]),
+            position: Object.assign({}, byId[id].position),
+            quaternion: Object.assign({}, byId[id].quaternion),
+            scale: Object.assign({}, byId[id].scale),
+            visible: byId[id].visible !== false,
+        };
+    });
+    data.adapter.setSelection(['vehicle-one']);
+    data.adapter.motion.load(motionPayload({
+        vehiclePlacementId: 'vehicle-one',
+        carriedPlacementIds: ['load-one'],
+    }), REV_B);
+    data.scheduler.flush(1000);
+    let motionState = data.adapter.motion.getState();
+    assert.strictEqual(motionState.vehiclePresentation, 'placed_asset');
+    assert.strictEqual(motionState.following, true);
+    assert.strictEqual(data.adapter.motion.setFollow(false), false);
+    assert.strictEqual(data.adapter.motion.getState().following, false);
+    assert.strictEqual(data.adapter.motion.setFollow(true), true);
+    assert.notStrictEqual(byId['vehicle-one'].parent, before['vehicle-one'].parent);
+    assert.strictEqual(byId['vehicle-one'].parent, byId['load-one'].parent);
+
+    assert.strictEqual(data.adapter.motion.dispose('test_dispose'), true);
+    ['vehicle-one', 'load-one'].forEach(id => {
+        assert.strictEqual(byId[id].parent, before[id].parent);
+        assert.strictEqual(byId[id].parent.children.indexOf(byId[id]), before[id].index);
+        assert.deepStrictEqual(Object.assign({}, byId[id].position), before[id].position);
+        assert.deepStrictEqual(
+            Object.assign({}, byId[id].quaternion),
+            before[id].quaternion
+        );
+        assert.deepStrictEqual(Object.assign({}, byId[id].scale), before[id].scale);
+        assert.strictEqual(byId[id].visible !== false, before[id].visible);
+    });
+    assert.deepStrictEqual(
+        data.adapter.getDiagnostics().selectedPlacementIds,
+        ['vehicle-one']
+    );
+    data.adapter.dispose();
+});
+
+test('activity actors face travel, turn at endpoints, and ping-pong without teleporting',
+    async () => {
+        const data = fixture({
+            assetResolver: request => {
+                if (request.stage === 'manifest') {
+                    return asset(
+                        request.assetId,
+                        request.assetDefinitionRevision
+                    );
+                }
+                if (request.stage === 'overview') {
+                    return prototype(data.THREE, request.assetId);
+                }
+                return null;
+            },
+        });
+        const parkedQuaternion = {
+            x: 0,
+            y: Math.sin(Math.PI / 4),
+            z: 0,
+            w: Math.cos(Math.PI / 4),
+        };
+        const actorPlacement = placement(
+            'actor-placement',
+            'activity-asset',
+            REV_A,
+            40,
+            0,
+            40,
+            parkedQuaternion
+        );
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({
+            layout: {
+                placements: [actorPlacement],
+                routes: [],
+                floorMarkings: [],
+            },
+            assetCatalog: [asset('activity-asset', REV_A)],
+        });
+        while (data.scheduler.pendingCount) data.scheduler.flush();
+        const zeroTurnPayload = activityPayload();
+        zeroTurnPayload.scenario.actors[0].endpointTurnSeconds = 0;
+        await assert.rejects(
+            data.adapter.activity.load(zeroTurnPayload, REV_B),
+            error => error && error.code === 'facility_activity_visual_alignment_invalid'
+        );
+        await data.adapter.activity.load(activityPayload(), REV_B);
+        data.scheduler.flush(1000);
+
+        const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+        let rootObject = null;
+        scene.traverse(object => {
+            if (object.userData.facilityActivityActorId === 'actor-fixture') {
+                rootObject = object;
+            }
+        });
+        assert(rootObject);
+        const rootYaw = () => 2 * Math.atan2(
+            rootObject.quaternion.y,
+            rootObject.quaternion.w
+        );
+        let state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'outbound');
+        assert.ok(Math.abs(state.actors[0].pose.heading) < 1e-9);
+        assert.ok(Math.abs(rootYaw() - Math.PI / 2) < 1e-9);
+        assert.deepStrictEqual(
+            Object.assign({}, rootObject.children[0].quaternion),
+            { x: 0, y: 0, z: 0, w: 1 }
+        );
+
+        data.adapter.activity.seek(5.5);
+        data.scheduler.flush(2000);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'turn_at_end');
+        assert.strictEqual(state.actors[0].travelDirection, 'turning');
+        assert.ok(Math.abs(state.actors[0].pose.heading - Math.PI / 2) < 1e-9);
+        assert.ok(Math.abs(rootYaw()) < 1e-9);
+
+        data.adapter.activity.seek(7);
+        data.scheduler.flush(3000);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'return');
+        assert.strictEqual(state.actors[0].travelDirection, 'return');
+        assert.ok(Math.abs(Math.abs(state.actors[0].pose.heading) - Math.PI) < 1e-9);
+        assert.ok(Math.abs(rootYaw() + Math.PI / 2) < 1e-9);
+        assert.ok(state.actors[0].pose.x < 11);
+
+        data.adapter.activity.seek(11.5);
+        data.scheduler.flush(4000);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'turn_at_start');
+        assert.ok(Math.abs(state.actors[0].pose.x - 1) < 1e-9);
+        assert.ok(Math.abs(state.actors[0].pose.heading - Math.PI / 2) < 1e-9);
+
+        data.adapter.activity.play();
+        data.scheduler.flush(5000);
+        data.scheduler.flush(6000);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.elapsedSeconds, 0.5);
+        assert.strictEqual(state.actors[0].playbackPhase, 'outbound');
+        assert.ok(state.actors[0].pose.x > 1);
+        assert.ok(Math.abs(state.actors[0].pose.heading) < 1e-9);
+        data.adapter.dispose();
+    });
+
+test('repeating activity wraps the authoritative shared clock for unequal actor cycles',
+    async () => {
+        const data = fixture({
+            assetResolver: request => {
+                if (request.stage === 'manifest') {
+                    return asset(
+                        request.assetId,
+                        request.assetDefinitionRevision
+                    );
+                }
+                if (request.stage === 'overview') {
+                    return prototype(data.THREE, request.assetId);
+                }
+                return null;
+            },
+        });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({
+            layout: {
+                placements: [
+                    placement('actor-placement', 'activity-asset', REV_A, 1, 0, 2),
+                    placement('actor-placement-two', 'activity-asset', REV_A, 20, 0, 2),
+                ],
+                routes: [],
+                floorMarkings: [],
+            },
+            assetCatalog: [asset('activity-asset', REV_A)],
+        });
+        while (data.scheduler.pendingCount) data.scheduler.flush();
+
+        const payload = activityPayload();
+        const shorter = motionPayload({
+            packageId: 'fmp-shorter-cycle',
+            movementId: 'movement-shorter-cycle',
+            routeId: 'route-shorter-cycle',
+            layoutRevision: REV_B,
+            vehiclePlacementId: 'actor-placement-two',
+            duration: 3,
+        });
+        shorter.package.movement.poses = [
+            { x: 20, z: 2, heading: 0, gear: 'forward' },
+            { x: 26, z: 2, heading: 0, gear: 'forward' },
+        ];
+        shorter.package.movement.cumulativeDistance = [0, 6];
+        shorter.package.movement.distanceMeters = 6;
+        payload.actorPayloads[shorter.package.packageId] = shorter;
+        payload.scenario.actors.push(Object.assign({}, payload.scenario.actors[0], {
+            actorId: 'actor-shorter-cycle',
+            label: 'Shorter-cycle actor',
+            motionPackageId: shorter.package.packageId,
+            placementId: 'actor-placement-two',
+            routeId: 'route-shorter-cycle',
+        }));
+
+        await data.adapter.activity.load(payload, REV_B);
+        data.scheduler.flush(1000);
+        data.adapter.activity.seek(11.5);
+        data.scheduler.flush(2000);
+        data.adapter.activity.play();
+        data.scheduler.flush(5000);
+        data.scheduler.flush(6000);
+
+        const state = data.adapter.activity.getState();
+        assert.strictEqual(state.elapsedSeconds, 0.5);
+        assert.strictEqual(state.actors[0].playbackPhase, 'outbound');
+        assert.strictEqual(state.actors[1].playbackPhase, 'outbound');
+        assert.ok(state.actors[1].pose.x > 20);
+        data.adapter.dispose();
+    });
+
+test('activity lean-motion paths toggle independently from moving actors',
+    async () => {
+        const data = fixture({
+            assetResolver: request => {
+                if (request.stage === 'manifest') {
+                    return asset(
+                        request.assetId,
+                        request.assetDefinitionRevision
+                    );
+                }
+                if (request.stage === 'overview') {
+                    return prototype(data.THREE, request.assetId);
+                }
+                return null;
+            },
+        });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({
+            layout: {
+                placements: [
+                    placement(
+                        'actor-placement',
+                        'activity-asset',
+                        REV_A,
+                        40,
+                        0,
+                        40
+                    ),
+                    placement(
+                        'actor-placement-two',
+                        'activity-asset',
+                        REV_A,
+                        50,
+                        0,
+                        40
+                    ),
+                ],
+                routes: [],
+                floorMarkings: [],
+            },
+            assetCatalog: [asset('activity-asset', REV_A)],
+        });
+        while (data.scheduler.pendingCount) data.scheduler.flush();
+        const payload = activityPayload();
+        const createOperatorLeg = (
+            packageId,
+            placementId,
+            routeId,
+            poses
+        ) => motionPayload({
+            packageId,
+            movementId: `${packageId}-movement`,
+            routeId,
+            layoutRevision: REV_B,
+            vehiclePlacementId: placementId,
+            poses,
+            cumulativeDistance: [0, Math.hypot(
+                poses[1].x - poses[0].x,
+                poses[1].z - poses[0].z
+            )],
+            duration: 2,
+        });
+        const operatorOneLocal = createOperatorLeg(
+            'fmp-operator-one-local',
+            'actor-placement',
+            'operator-one-route',
+            [
+                { x: 1, z: 2, heading: 0, gear: 'forward' },
+                { x: 2, z: 2, heading: 0, gear: 'forward' },
+            ]
+        );
+        const operatorOneOut = createOperatorLeg(
+            'fmp-operator-one-out',
+            'actor-placement',
+            'connection-one:outbound',
+            [
+                { x: 2, z: 2, heading: 0, gear: 'forward' },
+                { x: 4, z: 1, heading: 0, gear: 'forward' },
+            ]
+        );
+        const operatorOneReturn = createOperatorLeg(
+            'fmp-operator-one-return',
+            'actor-placement',
+            'connection-one:return',
+            [
+                { x: 4, z: 1, heading: Math.PI, gear: 'forward' },
+                { x: 1, z: 2, heading: Math.PI, gear: 'forward' },
+            ]
+        );
+        const operatorTwoLocal = createOperatorLeg(
+            'fmp-operator-two-local',
+            'actor-placement-two',
+            'operator-two-route',
+            [
+                { x: 11, z: 2, heading: Math.PI, gear: 'forward' },
+                { x: 10, z: 2, heading: Math.PI, gear: 'forward' },
+            ]
+        );
+        const operatorTwoOut = createOperatorLeg(
+            'fmp-operator-two-out',
+            'actor-placement-two',
+            'connection-two:outbound',
+            [
+                { x: 10, z: 2, heading: Math.PI, gear: 'forward' },
+                { x: 8, z: 1, heading: Math.PI, gear: 'forward' },
+            ]
+        );
+        const operatorTwoReturn = createOperatorLeg(
+            'fmp-operator-two-return',
+            'actor-placement-two',
+            'connection-two:return',
+            [
+                { x: 8, z: 1, heading: 0, gear: 'forward' },
+                { x: 11, z: 2, heading: 0, gear: 'forward' },
+            ]
+        );
+        const firstActor = payload.scenario.actors[0];
+        firstActor.motionPackageId = operatorOneLocal.package.packageId;
+        firstActor.cycleMotionPackageIds = [
+            operatorOneLocal.package.packageId,
+            operatorOneOut.package.packageId,
+            operatorOneReturn.package.packageId,
+        ];
+        firstActor.routeId = 'operator-one-route';
+        firstActor.loopMode = 'closed_path';
+        firstActor.endpointTurnSeconds = 0.45;
+        const secondActor = Object.assign({}, firstActor, {
+            actorId: 'actor-other',
+            label: 'Fixture actor two',
+            motionPackageId: operatorTwoLocal.package.packageId,
+            cycleMotionPackageIds: [
+                operatorTwoLocal.package.packageId,
+                operatorTwoOut.package.packageId,
+                operatorTwoReturn.package.packageId,
+            ],
+            placementId: 'actor-placement-two',
+            routeId: 'operator-two-route',
+            departmentZoneIds: ['zone-two'],
+        });
+        payload.scenario.actors = [firstActor, secondActor];
+        payload.actorPayloads = {
+            [operatorOneLocal.package.packageId]: operatorOneLocal,
+            [operatorOneOut.package.packageId]: operatorOneOut,
+            [operatorOneReturn.package.packageId]: operatorOneReturn,
+            [operatorTwoLocal.package.packageId]: operatorTwoLocal,
+            [operatorTwoOut.package.packageId]: operatorTwoOut,
+            [operatorTwoReturn.package.packageId]: operatorTwoReturn,
+        };
+        payload.scenario.leanMotion = {
+                schemaVersion: 'facility-lean-motion-v3',
+                qualification: (
+                    'Derived prototype motion borrows existing placed operator identities, '
+                    + 'assigns them to nearby placed stations, and routes the responsible '
+                    + 'endpoint operators to derived FIFO handoff points. Material handoff '
+                    + 'lines show workpiece transfer relationships, not operator walking. '
+                    + 'The routes are geometrically feasible paths, not time-optimal standard '
+                    + 'work, and do not establish staffing, task frequency, synchronized '
+                    + 'transfer timing, capacity, traffic safety, or compliance.'
+                ),
+                evidenceStatus: 'derived',
+                operatorPaths: [
+                    {
+                        pathId: 'operator-path-one',
+                        actorId: 'actor-fixture',
+                        zoneId: 'zone-one',
+                        pathKind: 'cell_work_loop',
+                        segmentIndex: 0,
+                        segmentCount: 1,
+                        assignedPlacementIds: ['bench-one'],
+                        centerline: [
+                            { x: 1, z: 2 },
+                            { x: 4, z: 2 },
+                            { x: 4, z: 5 },
+                            { x: 1, z: 5 },
+                            { x: 1, z: 2 },
+                        ],
+                        closed: true,
+                        evidenceStatus: 'derived',
+                    },
+                    {
+                        pathId: 'operator-path-two',
+                        actorId: 'actor-other',
+                        zoneId: 'zone-two',
+                        pathKind: 'cell_work_loop',
+                        segmentIndex: 0,
+                        segmentCount: 1,
+                        assignedPlacementIds: ['bench-two'],
+                        centerline: [
+                            { x: 8, z: 2 },
+                            { x: 11, z: 2 },
+                            { x: 11, z: 5 },
+                            { x: 8, z: 5 },
+                            { x: 8, z: 2 },
+                        ],
+                        closed: true,
+                        evidenceStatus: 'derived',
+                    },
+                ],
+                pedestrianConnections: [
+                    {
+                        connectionId: 'connection-one',
+                        actorId: 'actor-fixture',
+                        pathId: 'operator-path-one',
+                        zoneId: 'zone-one',
+                        fifoPointId: 'fifo-one',
+                        handoffIds: ['handoff-one'],
+                        role: 'output',
+                        motionPackageIds: [
+                            operatorOneOut.package.packageId,
+                            operatorOneReturn.package.packageId,
+                        ],
+                        centerline: [
+                            { x: 2, z: 2 },
+                            { x: 4, z: 1 },
+                            { x: 2, z: 2 },
+                        ],
+                        closed: true,
+                        evidenceStatus: 'derived',
+                    },
+                    {
+                        connectionId: 'connection-two',
+                        actorId: 'actor-other',
+                        pathId: 'operator-path-two',
+                        zoneId: 'zone-two',
+                        fifoPointId: 'fifo-two',
+                        handoffIds: ['handoff-one'],
+                        role: 'input',
+                        motionPackageIds: [
+                            operatorTwoOut.package.packageId,
+                            operatorTwoReturn.package.packageId,
+                        ],
+                        centerline: [
+                            { x: 10, z: 2 },
+                            { x: 8, z: 1 },
+                            { x: 10, z: 2 },
+                        ],
+                        closed: true,
+                        evidenceStatus: 'derived',
+                    },
+                ],
+                assistanceGates: [{
+                    gateId: 'gate-one',
+                    zoneId: 'zone-one',
+                    participantPathIds: [
+                        'operator-path-one',
+                        'operator-path-two',
+                    ],
+                    participantActorIds: ['actor-fixture', 'actor-other'],
+                    position: { x: 7, z: 2 },
+                    evidenceStatus: 'derived',
+                }],
+                materialHandoffs: [{
+                    handoffId: 'handoff-one',
+                    fromZoneId: 'zone-one',
+                    toZoneId: 'zone-two',
+                    fromPointId: 'fifo-one',
+                    toPointId: 'fifo-two',
+                    fromPathId: 'operator-path-one',
+                    toPathId: 'operator-path-two',
+                    fromActorId: 'actor-fixture',
+                    toActorId: 'actor-other',
+                    fromConnectionId: 'connection-one',
+                    toConnectionId: 'connection-two',
+                    centerline: [
+                        { x: 4, z: 1 },
+                        { x: 8, z: 1 },
+                    ],
+                    evidenceStatus: 'derived',
+                }],
+                fifoPoints: [
+                    {
+                        pointId: 'fifo-one',
+                        zoneId: 'zone-one',
+                        role: 'output',
+                        position: { x: 4, z: 1 },
+                        evidenceStatus: 'derived',
+                    },
+                    {
+                        pointId: 'fifo-two',
+                        zoneId: 'zone-two',
+                        role: 'input',
+                        position: { x: 8, z: 1 },
+                        evidenceStatus: 'derived',
+                    },
+                ],
+            };
+
+        await data.adapter.activity.load(payload, REV_B);
+        data.scheduler.flush(1000);
+        let state = data.adapter.activity.getState();
+        assert.strictEqual(state.pathsVisible, true);
+        assert.deepStrictEqual(state.leanMotionCounts, {
+            operatorPaths: 2,
+            pedestrianConnections: 2,
+            assistanceGates: 1,
+            materialHandoffs: 1,
+            fifoPoints: 2,
+            renderedObjects: 8,
+        });
+        assert.strictEqual(state.actors[0].visible, true);
+        assert.strictEqual(state.borrowedPlacementCount, 2);
+        assert.deepStrictEqual(state.duplicateVisiblePlacementIds, []);
+
+        const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+        let pathRoot = null;
+        const kinds = [];
+        scene.traverse(object => {
+            if (object.name === 'FacilityLeanMotionPaths') pathRoot = object;
+            if (object.userData && object.userData.facilityLeanMotionKind) {
+                kinds.push(object.userData.facilityLeanMotionKind);
+            }
+        });
+        assert(pathRoot);
+        assert.deepStrictEqual(kinds.sort(), [
+            'assistance_gate',
+            'fifo_point',
+            'fifo_point',
+            'material_handoff',
+            'operator_path',
+            'operator_path',
+            'pedestrian_connection',
+            'pedestrian_connection',
+        ]);
+
+        assert.strictEqual(data.adapter.activity.setPathsVisible(false), false);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.pathsVisible, false);
+        assert.strictEqual(pathRoot.visible, false);
+        assert.strictEqual(state.actors[0].visible, true);
+
+        assert.strictEqual(data.adapter.activity.setPathsVisible(true), true);
+        assert.strictEqual(pathRoot.visible, true);
+        data.adapter.dispose();
+    });
+
+test('navigation activity replays a v3 journey with exact visual and class path controls',
+    async () => {
+        const data = fixture({
+            assetResolver: request => {
+                if (request.stage === 'manifest') {
+                    return asset(
+                        request.assetId,
+                        request.assetDefinitionRevision
+                    );
+                }
+                if (request.stage === 'overview') {
+                    return prototype(data.THREE, request.assetId);
+                }
+                return null;
+            },
+        });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({
+            layout: {
+                placements: [placement(
+                    'actor-placement',
+                    'activity-asset',
+                    REV_A,
+                    1,
+                    0,
+                    2
+                )],
+                routes: [],
+                floorMarkings: [],
+            },
+            assetCatalog: [asset('activity-asset', REV_A)],
+        });
+        while (data.scheduler.pendingCount) data.scheduler.flush();
+        const payload = navigationActivityPayload();
+        await data.adapter.activity.load(payload, REV_B);
+        data.adapter.activity.play();
+        data.scheduler.flush(0);
+        data.scheduler.flush(4000);
+        let state = data.adapter.activity.getState();
+
+        assert.strictEqual(state.borrowedPlacementCount, 1);
+        assert.deepStrictEqual(state.duplicateVisiblePlacementIds, []);
+        assert.strictEqual(state.actors[0].exactCatalogVisual, true);
+        assert.strictEqual(state.actors[0].sourcePlacementSuppressed, true);
+        assert.strictEqual(state.actors[0].visible, true);
+        assert(state.actors[0].pose.x > 1);
+        assert(Math.abs(state.actors[0].pose.heading) < 1e-6);
+        let navigationPath = null;
+        FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+            if (object.userData
+                    && object.userData.facilityActivityPathActorType
+                        === 'operator') {
+                navigationPath = object;
+            }
+        });
+        assert(navigationPath);
+        assert.strictEqual(navigationPath.visible, true);
+
+        assert.strictEqual(
+            data.adapter.activity.setPathTypeVisible('operator', false),
+            false
+        );
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.visiblePathTypes.operator, false);
+        assert.strictEqual(navigationPath.visible, false);
+        assert.strictEqual(state.actors[0].visible, true);
+        assert.strictEqual(data.adapter.activity.setPathsVisible(false), false);
+        assert.strictEqual(state.actors[0].visible, true);
+        data.adapter.dispose();
+    });
+
+test('packaging activity uses three semantic path legs and loops the existing operator',
+    async () => {
+        const data = fixture({
+            assetResolver: request => {
+                if (request.stage === 'manifest') {
+                    return asset(
+                        request.assetId,
+                        request.assetDefinitionRevision
+                    );
+                }
+                if (request.stage === 'overview') {
+                    return prototype(data.THREE, request.assetId);
+                }
+                return null;
+            },
+        });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({
+            layout: {
+                placements: [placement(
+                    'actor-placement',
+                    'activity-asset',
+                    REV_A,
+                    1,
+                    0,
+                    2
+                )],
+                routes: [],
+                floorMarkings: [],
+            },
+            assetCatalog: [asset('activity-asset', REV_A)],
+        });
+        while (data.scheduler.pendingCount) data.scheduler.flush();
+        const payload = packagingNavigationActivityPayload();
+        await data.adapter.activity.load(payload, REV_B);
+
+        const paths = new Map();
+        FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+            const phase = object.userData
+                && object.userData.facilityActivityPathPhase;
+            if (phase) paths.set(phase, object);
+        });
+        assert.deepStrictEqual(Array.from(paths.keys()).sort(), [
+            'carry_in',
+            'carry_out',
+            'return_empty',
+        ]);
+        assert.strictEqual(paths.get('carry_in').material.color.getHex(), '#2563eb');
+        assert.strictEqual(paths.get('carry_out').material.color.getHex(), '#d97706');
+        assert.strictEqual(paths.get('return_empty').material.color.getHex(), '#059669');
+        assert(
+            paths.get('return_empty').geometry.attributes.position.count
+                > paths.get('carry_in').geometry.attributes.position.count
+        );
+
+        data.adapter.activity.seek(2.5);
+        data.scheduler.flush(1000);
+        let state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'local_turn_1');
+        assert.strictEqual(
+            state.actors[0].currentMotionPackageId,
+            'fmp-packaging-carry_in'
+        );
+        assert.deepStrictEqual(state.duplicateVisiblePlacementIds, []);
+        assert.deepStrictEqual(state.visibleSourcePlacementIds, []);
+        assert.deepStrictEqual(
+            state.candidatePresentation.packagingPathLegend.map(
+                item => item.phase
+            ),
+            ['carry_in', 'carry_out', 'return_empty']
+        );
+
+        data.adapter.activity.seek(3.5);
+        data.scheduler.flush(2000);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'local_path_2');
+        assert.strictEqual(
+            state.actors[0].currentMotionPackageId,
+            'fmp-packaging-carry_out'
+        );
+
+        data.adapter.activity.seek(6.5);
+        data.scheduler.flush(3000);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'local_path_3');
+        assert.strictEqual(
+            state.actors[0].currentMotionPackageId,
+            'fmp-packaging-return_empty'
+        );
+
+        data.adapter.activity.seek(9.25);
+        data.scheduler.flush(4000);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'local_path_1');
+        assert.strictEqual(
+            state.actors[0].currentMotionPackageId,
+            'fmp-packaging-carry_in'
+        );
+        data.adapter.dispose();
+    });
+
+test('inspection activity uses A-B-C paths and a perimeter empty return',
+    async () => {
+        const data = fixture({
+            assetResolver: request => {
+                if (request.stage === 'manifest') {
+                    return asset(
+                        request.assetId,
+                        request.assetDefinitionRevision
+                    );
+                }
+                if (request.stage === 'overview') {
+                    return prototype(data.THREE, request.assetId);
+                }
+                return null;
+            },
+        });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({
+            layout: {
+                placements: [placement(
+                    'actor-placement',
+                    'activity-asset',
+                    REV_A,
+                    1,
+                    0,
+                    2
+                )],
+                routes: [],
+                floorMarkings: [],
+            },
+            assetCatalog: [asset('activity-asset', REV_A)],
+        });
+        while (data.scheduler.pendingCount) data.scheduler.flush();
+        await data.adapter.activity.load(
+            inspectionNavigationActivityPayload(),
+            REV_B
+        );
+
+        const paths = new Map();
+        FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+            const phase = object.userData
+                && object.userData.facilityActivityPathPhase;
+            if (phase) paths.set(phase, object);
+        });
+        assert.deepStrictEqual(Array.from(paths.keys()).sort(), [
+            'inspection_pick',
+            'inspection_place',
+            'return_empty',
+        ]);
+        assert.strictEqual(
+            paths.get('inspection_pick').material.color.getHex(),
+            '#2563eb'
+        );
+        assert.strictEqual(
+            paths.get('inspection_place').material.color.getHex(),
+            '#2563eb'
+        );
+        assert.strictEqual(
+            paths.get('return_empty').material.color.getHex(),
+            '#059669'
+        );
+        assert(
+            paths.get('return_empty').geometry.attributes.position.count
+                > paths.get('inspection_place').geometry.attributes.position.count
+        );
+
+        data.adapter.activity.seek(2.5);
+        data.scheduler.flush(1000);
+        let state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'local_turn_1');
+        assert.strictEqual(
+            state.actors[0].currentMotionPackageId,
+            'fmp-inspection-inspection_pick'
+        );
+        assert.deepStrictEqual(state.duplicateVisiblePlacementIds, []);
+        assert.deepStrictEqual(state.visibleSourcePlacementIds, []);
+        assert.deepStrictEqual(
+            state.candidatePresentation.inspectionPathLegend.map(
+                item => item.phase
+            ),
+            ['inspection_pick', 'inspection_place', 'return_empty']
+        );
+
+        data.adapter.activity.seek(3.5);
+        data.scheduler.flush(2000);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'local_path_2');
+        assert.strictEqual(
+            state.actors[0].currentMotionPackageId,
+            'fmp-inspection-inspection_place'
+        );
+
+        data.adapter.activity.seek(6.5);
+        data.scheduler.flush(3000);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'local_path_3');
+        assert.strictEqual(
+            state.actors[0].currentMotionPackageId,
+            'fmp-inspection-return_empty'
+        );
+
+        data.adapter.activity.seek(9.25);
+        data.scheduler.flush(4000);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.actors[0].playbackPhase, 'local_path_1');
+        data.adapter.dispose();
+    });
+
+test('reference activity suppresses non-animated operator placements and restores them',
+    async () => {
+        const data = fixture({
+            assetResolver: request => {
+                if (request.stage === 'manifest') {
+                    return asset(
+                        request.assetId,
+                        request.assetDefinitionRevision
+                    );
+                }
+                if (request.stage === 'overview') {
+                    return prototype(data.THREE, request.assetId);
+                }
+                return null;
+            },
+        });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({
+            layout: {
+                placements: [
+                    placement(
+                        'actor-placement',
+                        'activity-asset',
+                        REV_A,
+                        1,
+                        0,
+                        2
+                    ),
+                    placement(
+                        'stationary-operator',
+                        'asset-operator',
+                        REV_A,
+                        3,
+                        0,
+                        2
+                    ),
+                ],
+                routes: [],
+                floorMarkings: [],
+            },
+            assetCatalog: [
+                asset('activity-asset', REV_A),
+                asset('asset-operator', REV_A),
+            ],
+        });
+        while (data.scheduler.pendingCount) data.scheduler.flush();
+        const payload = navigationActivityPayload();
+        payload.candidatePresentation = {
+            schemaVersion: 'facility-reference-movement-candidates-v1',
+            sourceLayoutId: 'fl-reference-manual-20260812',
+            sourceLayoutRevision: 'a'.repeat(64),
+            authority: 'inferred_candidate',
+            reviewStatus: 'pending',
+            productionEligible: false,
+            candidateCounts: {
+                operators: 1,
+                vehicles: 0,
+                handoffs: 0,
+                displayedActors: 1,
+                displayedHandoffs: 0,
+                unavailableActors: 0,
+                partialPrograms: 0,
+                suppressedStationaryOperators: 1,
+            },
+            suppressedOperatorPlacementIds: ['stationary-operator'],
+            handoffs: [],
+            qualification: 'Candidate presentation only.',
+            presentationFingerprint: 'b'.repeat(64),
+        };
+        await data.adapter.activity.load(payload, REV_B);
+        let state = data.adapter.activity.getState();
+        assert.strictEqual(state.borrowedPlacementCount, 1);
+        assert.strictEqual(state.suppressedStationaryOperatorCount, 1);
+        assert.deepStrictEqual(state.duplicateVisiblePlacementIds, []);
+        assert.deepStrictEqual(state.visibleSourcePlacementIds, []);
+        assert.strictEqual(
+            state.candidatePresentation.candidateCounts
+                .suppressedStationaryOperators,
+            1
+        );
+
+        const enteredDrone = data.adapter.enterDrone({ ignoreSelection: true });
+        assert.strictEqual(enteredDrone.active, true);
+        state = data.adapter.activity.getState();
+        assert.deepStrictEqual(state.visibleSourcePlacementIds, []);
+
+        assert.strictEqual(data.adapter.exitDrone('test_complete'), true);
+        state = data.adapter.activity.getState();
+        assert.deepStrictEqual(state.visibleSourcePlacementIds, []);
+
+        assert.strictEqual(data.adapter.activity.dispose('test'), true);
+        state = data.adapter.activity.getState();
+        assert.strictEqual(state.loaded, false);
+        assert.strictEqual(state.suppressedStationaryOperatorCount, 0);
+        data.adapter.dispose();
+    });
+
+test('Drone culling preserves activity ownership of repeated operator instances',
+    async () => {
+        const data = fixture({
+            assetResolver: request => {
+                if (request.stage === 'manifest') {
+                    return asset(
+                        request.assetId,
+                        request.assetDefinitionRevision
+                    );
+                }
+                if (request.stage === 'overview') {
+                    return prototype(data.THREE, request.assetId);
+                }
+                return null;
+            },
+        });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({
+            layout: {
+                placements: [
+                    placement(
+                        'actor-placement',
+                        'asset-operator',
+                        REV_A,
+                        1,
+                        0,
+                        2
+                    ),
+                    placement(
+                        'stationary-operator',
+                        'asset-operator',
+                        REV_A,
+                        3,
+                        0,
+                        2
+                    ),
+                ],
+                routes: [],
+                floorMarkings: [],
+            },
+            assetCatalog: [asset('asset-operator', REV_A)],
+        });
+        while (data.scheduler.pendingCount) data.scheduler.flush();
+        const payload = navigationActivityPayload();
+        payload.scenario.actors[0].assetDefinitionRef.assetId =
+            'asset-operator';
+        payload.candidatePresentation = {
+            schemaVersion: 'facility-reference-movement-candidates-v1',
+            sourceLayoutId: 'fl-reference-manual-20260812',
+            sourceLayoutRevision: REV_A,
+            authority: 'inferred_candidate',
+            reviewStatus: 'pending',
+            productionEligible: false,
+            candidateCounts: {
+                operators: 1,
+                vehicles: 0,
+                handoffs: 0,
+                displayedActors: 1,
+                displayedHandoffs: 0,
+                unavailableActors: 0,
+                partialPrograms: 0,
+                suppressedStationaryOperators: 1,
+            },
+            suppressedOperatorPlacementIds: ['stationary-operator'],
+            handoffs: [],
+            qualification: 'Candidate presentation only.',
+            presentationFingerprint: REV_B,
+        };
+
+        await data.adapter.activity.load(payload, REV_B);
+        const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+        let baseInstances = null;
+        scene.traverse(object => {
+            if (object.isInstancedMesh
+                    && object.userData
+                    && Array.isArray(
+                        object.userData.facilityInstancePlacementIds
+                    )) {
+                baseInstances = object;
+            }
+        });
+        assert(baseInstances);
+
+        data.adapter.enterDrone({ ignoreSelection: true });
+        assert.strictEqual(baseInstances.count, 0);
+        assert.deepStrictEqual(
+            data.adapter.activity.getState().visibleSourcePlacementIds,
+            []
+        );
+
+        data.adapter.exitDrone('test_complete');
+        assert.strictEqual(baseInstances.count, 0);
+        assert.deepStrictEqual(
+            data.adapter.activity.getState().visibleSourcePlacementIds,
+            []
+        );
+
+        data.adapter.activity.dispose('test');
+        assert.strictEqual(baseInstances.count, 2);
+        assert.deepStrictEqual(
+            baseInstances.userData.facilityInstancePlacementIds,
+            ['actor-placement', 'stationary-operator']
+        );
+        data.adapter.dispose();
+    });
+
+test('activity vehicles transfer between marked lanes for a closed two-way loop',
+    async () => {
+        const data = fixture({
+            assetResolver: request => {
+                if (request.stage === 'manifest') {
+                    return asset(
+                        request.assetId,
+                        request.assetDefinitionRevision
+                    );
+                }
+                if (request.stage === 'overview') {
+                    return prototype(data.THREE, request.assetId);
+                }
+                return null;
+            },
+        });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({
+            layout: {
+                placements: [placement(
+                    'actor-placement',
+                    'activity-asset',
+                    REV_A,
+                    40,
+                    0,
+                    40
+                )],
+                routes: [],
+                floorMarkings: [],
+            },
+            assetCatalog: [asset('activity-asset', REV_A)],
+        });
+        while (data.scheduler.pendingCount) data.scheduler.flush();
+        await data.adapter.activity.load(pairedLaneActivityPayload(), REV_B);
+
+        data.adapter.activity.seek(5.5);
+        data.scheduler.flush(1000);
+        let actor = data.adapter.activity.getState().actors[0];
+        assert.strictEqual(actor.playbackPhase, 'lane_change_at_end');
+        assert.strictEqual(actor.currentMotionPackageId, 'fmp-end-transfer');
+        assert.ok(Math.abs(actor.pose.x - 12) < 1e-9);
+        assert.ok(Math.abs(actor.pose.z - 3) < 1e-9);
+
+        data.adapter.activity.seek(6.5);
+        data.scheduler.flush(2000);
+        actor = data.adapter.activity.getState().actors[0];
+        assert.strictEqual(actor.playbackPhase, 'return');
+        assert.strictEqual(actor.currentMotionPackageId, 'fmp-return');
+        assert.ok(actor.pose.x < 11);
+        assert.ok(Math.abs(actor.pose.z - 4) < 1e-9);
+        assert.ok(Math.abs(Math.abs(actor.pose.heading) - Math.PI) < 1e-9);
+        assert.ok(Math.sin(actor.visualYawRadians) < -0.999999);
+        assert.ok(Math.abs(Math.cos(actor.visualYawRadians)) < 1e-9);
+
+        data.adapter.activity.seek(11.5);
+        data.scheduler.flush(3000);
+        actor = data.adapter.activity.getState().actors[0];
+        assert.strictEqual(actor.playbackPhase, 'lane_change_at_start');
+        assert.ok(Math.abs(actor.pose.x) < 1e-9);
+        assert.ok(Math.abs(actor.pose.z - 3) < 1e-9);
+
+        data.adapter.activity.seek(0.5);
+        data.scheduler.flush(4000);
+        actor = data.adapter.activity.getState().actors[0];
+        assert.strictEqual(actor.playbackPhase, 'outbound');
+        assert.strictEqual(actor.currentMotionPackageId, 'fmp-outbound');
+        assert.ok(actor.pose.x > 1);
+        assert.ok(Math.abs(actor.pose.z - 2) < 1e-9);
+        assert.ok(Math.sin(actor.visualYawRadians) > 0.999999);
+        assert.ok(Math.abs(Math.cos(actor.visualYawRadians)) < 1e-9);
+        data.adapter.dispose();
+    });
+
 test('3D direction arrows use procedural floor-paint geometry', async () => {
     const data = fixture();
     data.adapter.mount(data.host);
@@ -2839,12 +4988,21 @@ test('full-layout proposal overlays show before and proposed states outside pick
                 placement('pl-a', 'asset-machine', REV_A, 10, 0, 0),
                 placement('pl-new', 'asset-machine', REV_A, 20, 0, 0),
             ],
+            routes: [{
+                routeId: 'rt-proposal',
+                centerline: [
+                    { x: 0, y: 0, z: 2 },
+                    { x: 20, y: 0, z: 2 },
+                ],
+                corridorWidth: 2,
+            }],
         };
         const proposal = {
             active: true,
             newPlacementIds: ['pl-new'],
             movedPlacementIds: ['pl-a'],
             removedPlacementIds: ['pl-removed'],
+            changedRouteIds: ['rt-proposal'],
             beforePlacements: [
                 placement('pl-a', 'asset-machine', REV_A, 0, 0, 0),
                 placement(
@@ -2857,6 +5015,15 @@ test('full-layout proposal overlays show before and proposed states outside pick
                 ),
             ],
             proposedPlacements: proposedLayout.placements,
+            beforeRoutes: [{
+                routeId: 'rt-proposal',
+                centerline: [
+                    { x: 0, y: 0, z: 4 },
+                    { x: 20, y: 0, z: 4 },
+                ],
+                corridorWidth: 2,
+            }],
+            proposedRoutes: proposedLayout.routes,
         };
         const proposedBefore = JSON.stringify(proposedLayout);
         const previewBefore = JSON.stringify(proposal);
@@ -2874,7 +5041,9 @@ test('full-layout proposal overlays show before and proposed states outside pick
             }
         });
         roles.sort();
-        assert.deepStrictEqual(roles, ['before', 'moved', 'new', 'removed']);
+        assert.deepStrictEqual(roles, [
+            'before', 'before', 'moved', 'new', 'proposed', 'removed',
+        ]);
         let diagnostics = data.adapter.getDiagnostics();
         assert.strictEqual(diagnostics.proposalPreviewActive, true);
         assert.strictEqual(diagnostics.proposalBeforeCount, 2);
@@ -3124,7 +5293,7 @@ test('remounting a populated adapter replays its authoritative scene', async () 
 
     const secondHost = new FakeElement('second-host');
     data.adapter.mount(secondHost);
-    await settleAsync(16);
+    await settleAsync(32);
 
     const diagnostics = data.adapter.getDiagnostics();
     assert.strictEqual(diagnostics.status, 'ready');

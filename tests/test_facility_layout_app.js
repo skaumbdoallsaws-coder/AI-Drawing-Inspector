@@ -67,6 +67,8 @@ function fixture() {
 
 test('loads canonical receipt before mounting one shared workspace', async () => {
     const value = fixture();
+    const motionPanelHost = { ownerDocument: {}, marker: 'motion-host' };
+    value.options.motionPanelHost = motionPanelHost;
     const app = App.createFacilityLayoutApp(value.options);
     await app.ready;
     assert.strictEqual(value.calls[0], 'reload');
@@ -74,6 +76,7 @@ test('loads canonical receipt before mounting one shared workspace', async () =>
     assert.strictEqual(value.calls[2][0], 'workspace');
     assert.strictEqual(value.calls[2][1].session, value.session);
     assert.strictEqual(value.calls[2][1].assetCatalog, value.options.assetCatalog);
+    assert.strictEqual(value.calls[2][1].motionPanelHost, motionPanelHost);
     assert.strictEqual(app.getState().loaded, true);
     assert.strictEqual(app.getState().workspace.viewMode, 'plan');
 });
@@ -86,6 +89,18 @@ test('accepts an initial receipt without a read request', async () => {
     assert.deepStrictEqual(value.calls.map(item => (
         Array.isArray(item) ? item[0] : item
     )), ['load', 'workspace']);
+});
+
+test('resumes a persisted design Undo before mounting the workspace', async () => {
+    const value = fixture();
+    value.session.resumeDesignUndoRecovery = async () => {
+        value.calls.push('resume-design-undo');
+    };
+    const app = App.createFacilityLayoutApp(value.options);
+    await app.ready;
+    assert.deepStrictEqual(value.calls.map(item => (
+        Array.isArray(item) ? item[0] : item
+    )), ['reload', 'load', 'resume-design-undo', 'workspace']);
 });
 
 test('suspend and resume preserve the loaded app until final destroy', async () => {

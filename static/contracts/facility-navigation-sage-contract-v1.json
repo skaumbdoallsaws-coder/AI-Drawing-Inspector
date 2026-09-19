@@ -1,0 +1,66 @@
+{
+  "contractId": "facility-navigation-sage-contract-v1",
+  "contractVersion": 1,
+  "authorityBoundary": {
+    "modelMayChoose": [
+      "existingActorPlacementId",
+      "existingNavigationAnchorIds",
+      "existingRouteAndZoneIds",
+      "existingJourneyAndProgramIds",
+      "loopModeFromClosedVocabulary"
+    ],
+    "modelMayNotSupply": [
+      "coordinates",
+      "pathGeometry",
+      "actorGeometry",
+      "clearanceValues",
+      "vehicleProperties",
+      "safetyOrComplianceApproval",
+      "saveApproval",
+      "humanAuthority"
+    ],
+    "proposalAuthority": "inferred_pending",
+    "manualGeometryPreserved": true,
+    "saveRequiresLaterExplicitApproval": true
+  },
+  "readTools": [
+    "observe_navigation_context",
+    "compile_navigation_snapshot",
+    "plan_actor_journey",
+    "validate_actor_journey",
+    "compare_journey_alternatives"
+  ],
+  "terminalTools": [
+    {
+      "name": "propose_navigation_intent",
+      "effect": "unsaved_preview",
+      "maximumChangedMovementPrograms": 1
+    },
+    {
+      "name": "build_activity_scenario",
+      "effect": "read_only_viewport",
+      "prototypeModeRequired": true,
+      "maximumActors": 24
+    }
+  ],
+  "budgets": {
+    "maximumCallsPerTurn": 10,
+    "maximumToolResponseBytes": 16384,
+    "maximumContextBytes": 38400,
+    "maximumNavigationSummaryBytes": 8192,
+    "maximumRecordsPerObservation": 50
+  },
+  "deterministicRefusals": [
+    "facility_navigation_coordinate_authority_forbidden",
+    "facility_navigation_engineering_authority_unavailable",
+    "facility_navigation_actor_ambiguous",
+    "facility_navigation_actor_profile_unavailable",
+    "facility_navigation_snapshot_stale"
+  ],
+  "evaluation": {
+    "fixture": "tests/fixtures/facility_layout/navigation/nav8-held-out-intent-cases-v1.json",
+    "fixtureSha256": "88df25add9f09779bbec594cdcdceb0cb3757d398b3c134f5dbac67388c595cf",
+    "minimumIntentAccuracy": 0.95,
+    "requiredRefusalAccuracy": 1.0
+  }
+}

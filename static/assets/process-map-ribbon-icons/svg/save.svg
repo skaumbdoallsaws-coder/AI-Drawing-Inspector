@@ -1,0 +1,29 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Save</title>
+      <defs>
+  <linearGradient id="save-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#63CFFF"/>
+    <stop offset="1" stop-color="#2F7EEA"/>
+  </linearGradient>
+  <linearGradient id="save-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="save-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+  <linearGradient id="save-label" x1="10" y1="8" x2="22" y2="17" gradientUnits="userSpaceOnUse"><stop stop-color="#F8FCFF"/><stop offset="1" stop-color="#CBEAFF"/></linearGradient>
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#save-shadow)">
+  <path d="M6 4.8H23.2L27.2 8.8V27.2H6V4.8Z" fill="url(#save-g)" stroke="#174D86" stroke-width="1.1"/>
+  <path d="M10 5.8H21.5V14.8H10V5.8Z" fill="url(#save-label)" stroke="#2369A9" stroke-width="0.9"/>
+  <path d="M18.6 6V12.5" stroke="#4B8FC9" stroke-width="1.2"/>
+  <path d="M10 20.8C10 18.9 11.5 17.5 13.4 17.5H19.8C21.7 17.5 23.2 18.9 23.2 20.8V27.2H10V20.8Z" fill="#EAF7FF" stroke="#2369A9" stroke-width="0.9"/>
+  <circle cx="16.6" cy="22.1" r="2.4" fill="#78CFFF" stroke="#2369A9" stroke-width="0.8"/>
+  <path d="M8 6.6H20" stroke="#BFEAFF" stroke-width="1" opacity="0.7"/>
+</g>
+
+      </g>
+    </svg>

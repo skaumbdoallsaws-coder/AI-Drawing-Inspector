@@ -1,0 +1,23 @@
+schema_version: 1
+id: process-map-generation
+version: 1.0.0
+description: Generate one evidence-aware Process Map proposal for explicit user review and atomic approval.
+agents:
+  - sage
+entry_signals:
+  - build, generate, or create a complete process map for a named assembly
+  - create process stages, branches, and connections automatically
+required_assets:
+  - process_map
+optional_assets: []
+stages:
+  - observe_saved_and_live_state
+  - resolve_product_scope
+  - draft_semantic_process_plan
+  - validate_semantics_and_evidence
+  - build_complete_ghost_preview
+  - await_explicit_approval
+completion:
+  - one complete revision-bound preview is shown
+  - assumptions and unresolved items are reported
+  - no persistent write occurs before explicit approval

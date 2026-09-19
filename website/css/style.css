@@ -1307,12 +1307,13 @@ img { max-width: 100%; display: block; }
 .wf-doc-picker { margin-top: 24px; }
 .wf-doc-picker[hidden] { display: none; }
 
-/* Five fixed tracks rather than wrapping flex: the brief requires all five
-   outputs on one desktop row, and a grid cannot drop the last card to a
-   second line however long its label runs. */
+/* Fixed tracks rather than wrapping flex: every output has to stay on one
+   desktop row, and a grid cannot drop the last card to a second line however
+   long its label runs. The count comes from the workflow being rendered, so a
+   two-demo workflow fills its column instead of leaving three empty tracks. */
 .wf-doc-nav {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--wf-doc-count, 5), minmax(0, 1fr));
   gap: 8px;
 }
 .wf-doc {

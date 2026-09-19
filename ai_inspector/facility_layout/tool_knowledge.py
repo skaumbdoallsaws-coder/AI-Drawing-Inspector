@@ -44,7 +44,7 @@ _GENERIC_SUPPORT_COMMAND_IDS = frozenset({
 _STAGE_CORE_COMMAND_IDS: Mapping[str, tuple[str, ...]] = {
     "facility_envelope": (),
     "macro_departments": ("rectangle-zone", "polygon-zone", "bulk-zones"),
-    "primary_circulation": ("aisle",),
+    "primary_circulation": ("aisle", "floor-marking"),
     "department_subdivisions": (
         "rectangle-zone",
         "polygon-zone",
@@ -86,6 +86,10 @@ _STAGE_CORE_COMMAND_IDS: Mapping[str, tuple[str, ...]] = {
 }
 
 _AGENT_TOOL_STAGES: Mapping[str, tuple[str, ...]] = {
+    "preview_facility_cell_layout": ("seed_cells", "repeated_modules"),
+    "preview_facility_surface_stack": ("seed_cells",),
+    "preview_facility_create_cell_group": ("seed_cells",),
+    "preview_facility_linear_pattern": ("repeated_modules",),
     "search_industrial_assets": (
         "department_resources",
         "seed_cells",
@@ -142,6 +146,13 @@ _AGENT_TOOL_STAGES: Mapping[str, tuple[str, ...]] = {
     ),
     "generate_facility_departments_draft": tuple(
         item["stageId"] for item in FACILITY_GENERATION_STAGES
+    ),
+    "inspect_facility_design_brief": ("review_and_save",),
+    "update_facility_design_brief": ("review_and_save",),
+    "run_facility_design_preview": ("deterministic_validation",),
+    "apply_facility_design_proposal_draft": (
+        "deterministic_validation",
+        "review_and_save",
     ),
     "present_chat_visualization": tuple(
         item["stageId"] for item in FACILITY_GENERATION_STAGES
@@ -242,13 +253,18 @@ def _command_index_card(command: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _command_selection_guide(command: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    guide = {
         **_command_index_card(command),
         "inputFields": list(command["inputContract"]["fields"]),
-        "correctUse": command["correctUseCases"][0],
         "prohibitedUse": command["prohibitedUses"][0],
         "requiredCapabilities": list(command["requiredCapabilities"]),
     }
+    # Keep full input names within the stage budget without repeating identical
+    # prose. Distinct correct-use guidance is still preserved.
+    correct_use = command["correctUseCases"][0]
+    if correct_use != guide["semanticIntent"]:
+        guide["correctUse"] = correct_use
+    return guide
 
 
 def _agent_tool_guide(tool: Mapping[str, Any]) -> dict[str, Any]:
@@ -277,6 +293,13 @@ def _agent_tool_index_guide(tool: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _mutation_path(command: Mapping[str, Any]) -> dict[str, str]:
+    if command["commandId"] in {"cell-layout", "surface-stack", "create-cell-group", "linear-pattern"}:
+        return {
+            "preview": "preview_facility_" + command["commandId"].replace("-", "_"),
+            "validation": "facility.service.preview_operations",
+            "receipt": "construction-preview",
+            "undo": "undo",
+        }
     effect = command["effect"]
     if effect == "draft_edit":
         return {

@@ -1,0 +1,83 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>InspectorPro.PackageSchema</name>
+    </assembly>
+    <members>
+        <member name="T:InspectorPro.PackageSchema.AssemblyExtraction">
+            <summary>
+            Assembly extraction payload. Mirrors schemas/v1/assembly.schema.json
+            — which in turn mirrors the existing
+            400S_Sorted_Library/assemblies/&lt;asm&gt;_assembly.json shape exactly
+            per Phase-1 Decision 2 ("match the existing shape").
+            <para>
+            Linear units are METERS (matching the existing library convention).
+            No <c>units</c> field is emitted — backward-compatible with the
+            manually-authored files. Mate angles are radians; mate distances
+            are meters.
+            </para>
+            </summary>
+        </member>
+        <member name="P:InspectorPro.PackageSchema.AssemblyExtraction.MateRelationships">
+            <summary>
+            Pairwise component-pair summary synthesised from <see cref="P:InspectorPro.PackageSchema.AssemblyExtraction.Mates"/>.
+            Mirrors the existing library shape. The extractor always emits
+            <c>inspectionRequirements: []</c> — downstream tooling populates.
+            </summary>
+        </member>
+        <member name="T:InspectorPro.PackageSchema.ComponentTransform">
+            <summary>
+            Component transform from <c>IComponent2.Transform2</c>. Translation
+            in meters, rotation a 3x3 row-major matrix flattened to 9 numbers.
+            Collections use empty defaults — Newtonsoft's default
+            ObjectCreationHandling.Auto appends to non-empty defaults during
+            deserialization, which would silently double element counts.
+            </summary>
+        </member>
+        <member name="P:InspectorPro.PackageSchema.ComponentTransform.Quaternion">
+            <summary>
+            Always emitted (matches library shape). Empty list when the
+            rotation matrix is degenerate; otherwise [x, y, z, w].
+            </summary>
+        </member>
+        <member name="T:InspectorPro.PackageSchema.DrawingMap">
+            <summary>
+            Drawing map. Mirrors schemas/v1/drawing_map.schema.json.
+            Coordinates are millimetres from the top-left of the sheet.
+            </summary>
+        </member>
+        <member name="T:InspectorPro.PackageSchema.Manifest">
+            <summary>
+            Top-level manifest for an .inspectorpkg package. Mirrors
+            schemas/v1/manifest.schema.json. Field shape is contractual —
+            changes require an ADR + schemaVersion bump.
+            </summary>
+        </member>
+        <member name="T:InspectorPro.PackageSchema.PartExtraction">
+            <summary>
+            Part extraction payload. Mirrors schemas/v1/part.schema.json.
+            All linear dimensions in mm; masses in kg; moments in kg*mm^2.
+            Active-config-only payload per Phase-1 Decision 3; other
+            configurations appear in <see cref="P:InspectorPro.PackageSchema.PartExtraction.Configurations"/> as
+            metadata-only summaries.
+            </summary>
+        </member>
+        <member name="T:InspectorPro.PackageSchema.PartBoundingBox">
+            <summary>
+            Part axis-aligned bounding box plus optional tight feature-derived
+            bounding box. Named <c>PartBoundingBox</c> to avoid collision with
+            any future drawing-side bounding box type.
+            </summary>
+        </member>
+        <member name="T:InspectorPro.PackageSchema.SchemaResources">
+            <summary>
+            Reads embedded JSON schema files shipped with this assembly.
+            Callers do not need filesystem access to the repo's schemas/ folder.
+            </summary>
+        </member>
+        <member name="M:InspectorPro.PackageSchema.SchemaResources.LoadSchemaJson(System.String)">
+            <summary>Loads an embedded schema as a JSON string.</summary>
+            <param name="name">e.g. "manifest.schema.json"</param>
+        </member>
+    </members>
+</doc>

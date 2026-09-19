@@ -1,0 +1,28 @@
+schema_version: 1
+id: documentation-publication
+version: 1.0.0
+description: Generate evidence-backed document drafts or plan, compose, validate, and explicitly publish revision-bound technical documentation without changing source CAD geometry.
+agents:
+  - sage
+entry_signals:
+  - propose or edit an illustrated parts manual or Documentation figure
+  - generate, validate, publish, export, or open the complete parts-manual PDF
+  - build, create, generate, draft, or prepare an Operations and Maintenance Manual
+  - build, create, generate, draft, publish, or export a product Specification Sheet
+required_assets: []
+optional_assets:
+  - parent_assembly
+  - process_map
+stages:
+  - inspect_current_manual_state
+  - resolve_publication_authority
+  - validate_or_propose_manual_structure
+  - compile_documentation_scene
+  - capture_revision_bound_technical_figures
+  - validate_plan_renders_bom_and_callouts
+  - publish_pdf
+completion:
+  - every completed stage has a deterministic receipt
+  - an operations-manual draft stops before controlled publication and reports all release blockers
+  - publication is claimed only from a stage-published PDF artifact
+  - source CAD geometry and assembly transforms remain unchanged

@@ -110,7 +110,7 @@ def test_server_returns_two_sentence_decision_without_model_escalation():
     assert result is not None
     assert result["tool_source"] == "approved_disposition_policy"
     assert result["response"] == (
-        "Disposition: Scrap and replace this piston; do not assemble it. "
+        "**Scrap and replace this piston; do not assemble it.** "
         "The wrist-pin bore measured 32.00 mm, 1.95 mm above the 30.05 mm "
         "upper limit; this gross oversize condition is not eligible for "
         "use-as-is or rework."

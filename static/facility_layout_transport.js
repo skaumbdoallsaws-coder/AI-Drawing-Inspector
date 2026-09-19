@@ -178,9 +178,422 @@
         return request;
     }
 
+    function motionPackageRequest(value) {
+        const source = object(value, 'motion package request');
+        const allowed = new Set([
+            'routeId',
+            'vehicleProfileRef',
+            'vehiclePlacementId',
+            'load',
+            'allowReverse',
+            'travelDirection',
+        ]);
+        Object.keys(source).forEach(function (key) {
+            if (!allowed.has(key)) {
+                throw new TypeError(
+                    'motion package request field ' + key + ' is not supported'
+                );
+            }
+        });
+        const profile = object(
+            source.vehicleProfileRef,
+            'vehicleProfileRef'
+        );
+        const result = {
+            routeId: boundedIdentifier(source.routeId, 'routeId'),
+            vehicleProfileRef: {
+                vehicleProfileId: boundedIdentifier(
+                    profile.vehicleProfileId,
+                    'vehicleProfileId'
+                ),
+                vehicleProfileRevision: hash(
+                    profile.vehicleProfileRevision,
+                    'vehicleProfileRevision'
+                ),
+            },
+        };
+        if (source.vehiclePlacementId !== undefined) {
+            result.vehiclePlacementId = boundedIdentifier(
+                source.vehiclePlacementId,
+                'vehiclePlacementId'
+            );
+        }
+        if (source.load !== undefined) result.load = clone(object(source.load, 'load'));
+        if (source.allowReverse !== undefined) {
+            if (typeof source.allowReverse !== 'boolean') {
+                throw new TypeError('allowReverse must be a boolean');
+            }
+            result.allowReverse = source.allowReverse;
+        }
+        if (source.travelDirection !== undefined) {
+            if (!['forward', 'reverse'].includes(source.travelDirection)) {
+                throw new TypeError('travelDirection must be forward or reverse');
+            }
+            result.travelDirection = source.travelDirection;
+        }
+        return result;
+    }
+
+    function manualNavigationValidationRequest(value) {
+        const source = object(value, 'manual navigation validation request');
+        const allowed = new Set([
+            'actorPlacementId',
+            'actorClass',
+            'actorProfileRef',
+            'constraintMode',
+            'direction',
+            'points',
+            'prototypeMode',
+        ]);
+        Object.keys(source).forEach(function (key) {
+            if (!allowed.has(key)) {
+                throw new TypeError(
+                    'manual navigation validation field ' + key
+                        + ' is not supported'
+                );
+            }
+        });
+        if (!['pedestrian', 'vehicle'].includes(source.actorClass)) {
+            throw new TypeError('actorClass must be pedestrian or vehicle');
+        }
+        if (source.prototypeMode !== undefined
+                && typeof source.prototypeMode !== 'boolean') {
+            throw new TypeError('prototypeMode must be a boolean');
+        }
+        if (![
+            'guide', 'locked_segment', 'complete_override',
+            'avoid_region', 'preferred_corridor',
+        ].includes(source.constraintMode)) {
+            throw new TypeError('constraintMode is invalid');
+        }
+        if (!['forward', 'reverse', 'bidirectional'].includes(
+            source.direction
+        )) {
+            throw new TypeError('direction is invalid');
+        }
+        if (!Array.isArray(source.points)
+                || source.points.length < 2
+                || source.points.length > 2048) {
+            throw new TypeError(
+                'manual navigation points must contain 2 to 2048 points'
+            );
+        }
+        const points = source.points.map(function (value, index) {
+            const point = object(value, 'points[' + index + ']');
+            if (Object.keys(point).some(function (key) {
+                return !['x', 'z'].includes(key);
+            })) {
+                throw new TypeError('manual navigation points support x and z');
+            }
+            const x = Number(point.x);
+            const z = Number(point.z);
+            if (!Number.isFinite(x) || !Number.isFinite(z)) {
+                throw new TypeError('manual navigation points must be finite');
+            }
+            return { x: x, z: z };
+        });
+        const result = {
+            actorPlacementId: boundedIdentifier(
+                source.actorPlacementId,
+                'actorPlacementId'
+            ),
+            actorClass: source.actorClass,
+            constraintMode: source.constraintMode,
+            direction: source.direction,
+            points: points,
+        };
+        if (source.prototypeMode !== undefined) {
+            result.prototypeMode = source.prototypeMode;
+        }
+        if (source.actorProfileRef !== undefined) {
+            const profile = object(source.actorProfileRef, 'actorProfileRef');
+            const profileKind = nonEmptyString(
+                profile.profileKind,
+                'actorProfileRef.profileKind'
+            );
+            if (profileKind !== source.actorClass) {
+                throw new TypeError('actor profile kind must match actorClass');
+            }
+            result.actorProfileRef = {
+                profileKind: profileKind,
+                profileId: boundedIdentifier(
+                    profile.profileId,
+                    'actorProfileRef.profileId'
+                ),
+                profileRevision: hash(
+                    profile.profileRevision,
+                    'actorProfileRef.profileRevision'
+                ),
+            };
+        }
+        if (source.actorClass === 'vehicle' && !result.actorProfileRef) {
+            throw new TypeError(
+                'vehicle validation requires an exact actorProfileRef'
+            );
+        }
+        return result;
+    }
+
+    function navigationSnapshotRequest(value) {
+        const source = object(value, 'navigation snapshot request');
+        const allowed = new Set([
+            'movementProgramId',
+            'actorPlacementId',
+            'actorClass',
+            'actorProfileRef',
+            'prototypeMode',
+        ]);
+        Object.keys(source).forEach(function (key) {
+            if (!allowed.has(key)) {
+                throw new TypeError(
+                    'navigation snapshot field ' + key + ' is not supported'
+                );
+            }
+        });
+        const result = {};
+        if (source.movementProgramId !== undefined) {
+            result.movementProgramId = boundedIdentifier(
+                source.movementProgramId,
+                'movementProgramId'
+            );
+        }
+        if (source.actorPlacementId !== undefined) {
+            result.actorPlacementId = boundedIdentifier(
+                source.actorPlacementId,
+                'actorPlacementId'
+            );
+        }
+        if (source.actorClass !== undefined) {
+            if (!['pedestrian', 'vehicle'].includes(source.actorClass)) {
+                throw new TypeError('actorClass must be pedestrian or vehicle');
+            }
+            result.actorClass = source.actorClass;
+        }
+        if (source.prototypeMode !== undefined) {
+            if (typeof source.prototypeMode !== 'boolean') {
+                throw new TypeError('prototypeMode must be a boolean');
+            }
+            result.prototypeMode = source.prototypeMode;
+        }
+        if (source.actorProfileRef !== undefined) {
+            const profile = object(source.actorProfileRef, 'actorProfileRef');
+            result.actorProfileRef = {
+                profileKind: nonEmptyString(
+                    profile.profileKind,
+                    'actorProfileRef.profileKind'
+                ),
+                profileId: boundedIdentifier(
+                    profile.profileId,
+                    'actorProfileRef.profileId'
+                ),
+                profileRevision: hash(
+                    profile.profileRevision,
+                    'actorProfileRef.profileRevision'
+                ),
+            };
+        }
+        if (!result.movementProgramId
+                && (!result.actorPlacementId || !result.actorClass
+                    || !result.actorProfileRef)) {
+            throw new TypeError(
+                'navigation snapshot requires a movementProgramId or an exact actor binding'
+            );
+        }
+        return result;
+    }
+
+    function actorJourneyRequest(value) {
+        const source = object(value, 'actor journey request');
+        const allowed = new Set([
+            'navigationPackageId',
+            'movementProgramId',
+            'load',
+            'allowReverse',
+            'prototypeMode',
+        ]);
+        Object.keys(source).forEach(function (key) {
+            if (!allowed.has(key)) {
+                throw new TypeError(
+                    'actor journey field ' + key + ' is not supported'
+                );
+            }
+        });
+        const result = {
+            navigationPackageId: boundedIdentifier(
+                source.navigationPackageId,
+                'navigationPackageId',
+                80
+            ),
+            movementProgramId: boundedIdentifier(
+                source.movementProgramId,
+                'movementProgramId'
+            ),
+        };
+        if (source.load !== undefined) {
+            result.load = clone(object(source.load, 'load'));
+        }
+        ['allowReverse', 'prototypeMode'].forEach(function (field) {
+            if (source[field] !== undefined) {
+                if (typeof source[field] !== 'boolean') {
+                    throw new TypeError(field + ' must be a boolean');
+                }
+                result[field] = source[field];
+            }
+        });
+        return result;
+    }
+
+    function navigationHandoffRequest(value) {
+        const source = object(value, 'navigation handoff request');
+        const allowed = new Set([
+            'handoffProgramId',
+            'journeySolutionIds',
+        ]);
+        Object.keys(source).forEach(function (key) {
+            if (!allowed.has(key)) {
+                throw new TypeError(
+                    'navigation handoff field ' + key + ' is not supported'
+                );
+            }
+        });
+        if (!Array.isArray(source.journeySolutionIds)
+                || source.journeySolutionIds.length !== 2) {
+            throw new TypeError(
+                'journeySolutionIds must contain exactly two identities'
+            );
+        }
+        const journeySolutionIds = source.journeySolutionIds.map(
+            function (identity) {
+                return boundedIdentifier(identity, 'journeySolutionId', 80);
+            }
+        );
+        if (new Set(journeySolutionIds).size !== 2) {
+            throw new TypeError('journeySolutionIds must be distinct');
+        }
+        return {
+            handoffProgramId: boundedIdentifier(
+                source.handoffProgramId,
+                'handoffProgramId'
+            ),
+            journeySolutionIds: journeySolutionIds,
+        };
+    }
+
+    function navigationActivityRequest(value) {
+        const source = object(value, 'navigation activity request');
+        const allowed = new Set([
+            'journeySolutionIds',
+            'handoffResultIds',
+            'scenarioLabel',
+            'prototypeMode',
+        ]);
+        Object.keys(source).forEach(function (key) {
+            if (!allowed.has(key)) {
+                throw new TypeError(
+                    'navigation activity field ' + key + ' is not supported'
+                );
+            }
+        });
+        if (!Array.isArray(source.journeySolutionIds)
+                || !source.journeySolutionIds.length
+                || source.journeySolutionIds.length > 20) {
+            throw new TypeError(
+                'journeySolutionIds must contain between 1 and 20 identities'
+            );
+        }
+        const journeySolutionIds = source.journeySolutionIds.map(
+            identity => boundedIdentifier(identity, 'journeySolutionId', 80)
+        );
+        if (new Set(journeySolutionIds).size !== journeySolutionIds.length) {
+            throw new TypeError('journeySolutionIds must be unique');
+        }
+        if (source.prototypeMode !== true) {
+            throw new TypeError('prototypeMode must be true');
+        }
+        const result = {
+            journeySolutionIds: journeySolutionIds,
+            handoffResultIds: Array.isArray(source.handoffResultIds)
+                ? source.handoffResultIds.map(
+                    identity => boundedIdentifier(
+                        identity,
+                        'handoffResultId',
+                        80
+                    )
+                ) : [],
+            prototypeMode: true,
+        };
+        if (new Set(result.handoffResultIds).size
+                !== result.handoffResultIds.length) {
+            throw new TypeError('handoffResultIds must be unique');
+        }
+        if (source.scenarioLabel !== undefined) {
+            result.scenarioLabel = nonEmptyString(
+                source.scenarioLabel,
+                'scenarioLabel'
+            );
+        }
+        return result;
+    }
+
+    function activityScenarioRequest(value) {
+        const source = object(value, 'activity scenario request');
+        const allowed = new Set([
+            'preset',
+            'prototypeMode',
+            'scenarioLabel',
+            'maximumActors',
+        ]);
+        Object.keys(source).forEach(function (key) {
+            if (!allowed.has(key)) {
+                throw new TypeError(
+                    'activity scenario request field ' + key
+                        + ' is not supported'
+                );
+            }
+        });
+        if (![
+            'mobile_actors_on_authored_routes',
+            'reference_complete_navigation',
+            'reference_candidate_navigation',
+            'reference_downstream_navigation',
+            'reference_finished_goods_putaway',
+            'reference_finished_goods_dispatch',
+            'reference_receiving_putaway',
+        ].includes(source.preset)) {
+            throw new TypeError('activity scenario preset is unsupported');
+        }
+        if (source.prototypeMode !== true) {
+            throw new TypeError('activity scenario requires prototypeMode true');
+        }
+        const result = {
+            preset: source.preset,
+            prototypeMode: true,
+        };
+        if (source.scenarioLabel !== undefined) {
+            result.scenarioLabel = nonEmptyString(
+                source.scenarioLabel,
+                'scenarioLabel'
+            );
+        }
+        if (source.maximumActors !== undefined) {
+            if (!Number.isInteger(source.maximumActors)
+                    || source.maximumActors < 1
+                    || source.maximumActors > 24) {
+                throw new TypeError('maximumActors must be an integer from 1 to 24');
+            }
+            result.maximumActors = source.maximumActors;
+        }
+        return result;
+    }
+
     function errorFromResponse(response, body) {
         const envelope = body && typeof body === 'object'
-            ? (body.error || body)
+            ? (
+                body.error
+                || (body.detail && body.detail.error)
+                || body.detail
+                || body
+            )
             : {};
         const error = new Error(
             envelope.message
@@ -218,6 +631,8 @@
         const layoutUrl = baseUrl + '/api/facility-layouts/'
             + encodedSite + '/' + encodedLayout;
         const generationUrl = baseUrl + '/api/facility-layout-generation/'
+            + encodedSite + '/' + encodedLayout;
+        const designUrl = baseUrl + '/api/facility-layout-design/'
             + encodedSite + '/' + encodedLayout;
 
         async function request(path, method, body, requestOptions) {
@@ -266,16 +681,423 @@
             return result;
         }
 
+        async function designRequest(path, method, body, requestOptions, urlOverride) {
+            const requestConfig = requestOptions || {};
+            const init = {
+                method: method || 'GET',
+                cache: 'no-store',
+                credentials: options.credentials || 'same-origin',
+                headers: Object.assign({}, headers),
+            };
+            init.headers['X-InspectorPro-Session'] = sessionId;
+            if (requestConfig.signal) init.signal = requestConfig.signal;
+            if (body !== undefined) {
+                init.headers['Content-Type'] = 'application/json';
+                init.body = JSON.stringify(body);
+            }
+            const response = await fetchImpl(
+                (urlOverride || designUrl) + (path || ''), init
+            );
+            const result = await response.json().catch(function () {
+                return {};
+            });
+            if (!response.ok) throw errorFromResponse(response, result);
+            return result;
+        }
+
         return Object.freeze({
             apiVersion: API_VERSION,
             siteId: siteId,
             layoutId: layoutId,
             layoutUrl: layoutUrl,
             generationUrl: generationUrl,
+            designUrl: designUrl,
             sessionId: sessionId,
+            listGenerationPlanningSources: function () {
+                return designRequest('/sources', 'GET', undefined, {},
+                    baseUrl + '/api/facility-layout-planning/' + encodedSite + '/' + encodedLayout);
+            },
+            inspectGenerationPlanningPreview: function (summary, editorContext) {
+                return designRequest('/inspect', 'POST', {
+                    workspaceId: boundedIdentifier(summary.workspaceId, 'workspaceId'),
+                    request: {previewId: hash(summary.previewId, 'previewId'), previewRevision: hash(summary.previewRevision, 'previewRevision')},
+                    editorContext: editorContext,
+                }, {}, baseUrl + '/api/facility-layout-planning/' + encodedSite + '/' + encodedLayout);
+            },
+            getConstructionPreview: function (proposalId) {
+                const url = baseUrl + '/api/facility-layout-agent/' + encodedSite + '/' + encodedLayout + '/construction/';
+                return designRequest(boundedIdentifier(proposalId, 'proposalId'), 'GET', undefined, {}, url);
+            },
+            approveConstructionPreview: function (proposalId, binding) {
+                const url = baseUrl + '/api/facility-layout-agent/' + encodedSite + '/' + encodedLayout + '/construction/';
+                return designRequest(boundedIdentifier(proposalId, 'proposalId') + '/approve-unsaved', 'POST', {
+                    requestId: boundedIdentifier(binding.requestId, 'requestId'), sessionId: sessionId,
+                    editorGenerationId: boundedIdentifier(binding.editorGenerationId, 'editorGenerationId'),
+                    expectedDraftRevision: hash(binding.expectedDraftRevision, 'expectedDraftRevision'),
+                    candidateRevision: hash(binding.candidateRevision, 'candidateRevision'),
+                }, {}, url);
+            },
+            createDesignBrief: function (payload, requestOptions) {
+                const value = object(payload, 'design brief payload');
+                return designRequest('/briefs', 'POST', {
+                    briefId: value.briefId === undefined
+                        ? undefined
+                        : boundedIdentifier(value.briefId, 'briefId'),
+                    workspaceId: boundedIdentifier(
+                        value.workspaceId || 'workspace-facility-layout',
+                        'workspaceId'
+                    ),
+                    editorFrame: clone(object(value.editorFrame, 'editorFrame')),
+                    semanticIntent: clone(object(
+                        value.semanticIntent,
+                        'semanticIntent'
+                    )),
+                    sourceTurnRef: boundedIdentifier(
+                        value.sourceTurnRef,
+                        'sourceTurnRef',
+                        160
+                    ),
+                }, requestOptions);
+            },
+            inspectDesignBrief: function (payload, requestOptions) {
+                const value = object(payload, 'design brief inspection payload');
+                const briefId = boundedIdentifier(value.briefId, 'briefId');
+                const query = value.briefRevision
+                    ? '?briefRevision=' + encodeURIComponent(hash(
+                        value.briefRevision,
+                        'briefRevision'
+                    ))
+                    : '';
+                return designRequest(
+                    '/briefs/' + encodeURIComponent(briefId) + query,
+                    'GET',
+                    undefined,
+                    requestOptions
+                );
+            },
+            updateDesignBrief: function (payload, requestOptions) {
+                const value = object(payload, 'design brief update payload');
+                const briefId = boundedIdentifier(value.briefId, 'briefId');
+                return designRequest(
+                    '/briefs/' + encodeURIComponent(briefId) + '/revisions',
+                    'POST',
+                    {
+                        semanticIntent: clone(object(
+                            value.semanticIntent,
+                            'semanticIntent'
+                        )),
+                        sourceTurnRef: boundedIdentifier(
+                            value.sourceTurnRef,
+                            'sourceTurnRef',
+                            160
+                        ),
+                    },
+                    requestOptions
+                );
+            },
+            startDesignPreview: function (payload, requestOptions) {
+                const value = object(payload, 'design preview payload');
+                const briefId = boundedIdentifier(value.briefId, 'briefId');
+                const body = {
+                    briefRevision: hash(value.briefRevision, 'briefRevision'),
+                    workspaceId: boundedIdentifier(
+                        value.workspaceId || 'workspace-facility-layout',
+                        'workspaceId'
+                    ),
+                    clientGenerationId: boundedIdentifier(
+                        value.clientGenerationId,
+                        'clientGenerationId',
+                        160
+                    ),
+                    mode: value.mode === 'lab' ? 'lab' : 'production_sage',
+                };
+                if (value.runId) {
+                    body.runId = boundedIdentifier(value.runId, 'runId');
+                }
+                return designRequest(
+                    '/briefs/' + encodeURIComponent(briefId) + '/preview',
+                    'POST',
+                    body,
+                    requestOptions
+                );
+            },
+            continueDesignPreview: function (payload, requestOptions) {
+                const value = object(payload, 'design preview continuation payload');
+                const runId = boundedIdentifier(value.runId, 'runId');
+                return designRequest(
+                    '/runs/' + encodeURIComponent(runId) + '/continue',
+                    'POST',
+                    { maximumToolCalls: value.maximumToolCalls || 10 },
+                    requestOptions
+                );
+            },
+            cancelDesignPreview: function (payload, requestOptions) {
+                const value = object(payload, 'design preview cancellation payload');
+                const runId = boundedIdentifier(value.runId, 'runId');
+                return designRequest(
+                    '/runs/' + encodeURIComponent(runId) + '/cancel',
+                    'POST',
+                    {},
+                    requestOptions
+                );
+            },
+            inspectDesignProposal: function (payload, requestOptions) {
+                const value = object(payload, 'design proposal inspection payload');
+                const proposalId = boundedIdentifier(
+                    value.proposalId,
+                    'proposalId'
+                );
+                const query = '?proposalRevision=' + encodeURIComponent(hash(
+                    value.proposalRevision,
+                    'proposalRevision'
+                )) + '&includeCandidateLayout=' + (
+                    value.includeCandidateLayout === true ? 'true' : 'false'
+                );
+                return designRequest(
+                    '/proposals/' + encodeURIComponent(proposalId) + query,
+                    'GET',
+                    undefined,
+                    requestOptions
+                );
+            },
+            prepareDesignProposalApply: function (payload, requestOptions) {
+                const value = object(payload, 'design proposal apply payload');
+                const proposalId = boundedIdentifier(
+                    value.proposalId,
+                    'proposalId'
+                );
+                const body = {
+                    proposalRevision: hash(
+                        value.proposalRevision,
+                        'proposalRevision'
+                    ),
+                    rootUndoFrame: clone(object(
+                        value.rootUndoFrame,
+                        'rootUndoFrame'
+                    )),
+                    previousInstallationState: clone(object(
+                        value.previousInstallationState,
+                        'previousInstallationState'
+                    )),
+                    expectedResultEditorGenerationId: boundedIdentifier(
+                        value.expectedResultEditorGenerationId,
+                        'expectedResultEditorGenerationId',
+                        160
+                    ),
+                    expectedResultCommandJournalHash: hash(
+                        value.expectedResultCommandJournalHash,
+                        'expectedResultCommandJournalHash'
+                    ),
+                };
+                if (value.expectedSourceOwner) {
+                    body.expectedSourceOwner = clone(object(
+                        value.expectedSourceOwner,
+                        'expectedSourceOwner'
+                    ));
+                }
+                if (value.transactionId) {
+                    body.transactionId = boundedIdentifier(
+                        value.transactionId,
+                        'transactionId'
+                    );
+                    body.expectedTransactionRevision = hash(
+                        value.expectedTransactionRevision,
+                        'expectedTransactionRevision'
+                    );
+                }
+                return designRequest(
+                    '/proposals/' + encodeURIComponent(proposalId)
+                        + '/apply/prepare',
+                    'POST',
+                    body,
+                    requestOptions
+                );
+            },
+            commitDesignProposalApply: function (payload, requestOptions) {
+                const value = object(payload, 'design apply commit payload');
+                const transactionId = boundedIdentifier(
+                    value.transactionId,
+                    'transactionId'
+                );
+                return designRequest(
+                    '/transactions/' + encodeURIComponent(transactionId)
+                        + '/apply/commit',
+                    'POST',
+                    {
+                        expectedTransactionRevision: hash(
+                            value.expectedTransactionRevision,
+                            'expectedTransactionRevision'
+                        ),
+                        adoptionToken: opaqueToken(
+                            value.adoptionToken,
+                            'adoptionToken'
+                        ),
+                    },
+                    requestOptions
+                );
+            },
+            acknowledgeDesignProposalApply: function (payload, requestOptions) {
+                const value = object(payload, 'design apply acknowledgement');
+                const transactionId = boundedIdentifier(
+                    value.transactionId,
+                    'transactionId'
+                );
+                return designRequest(
+                    '/transactions/' + encodeURIComponent(transactionId)
+                        + '/apply/acknowledge',
+                    'POST',
+                    {
+                        expectedTransactionRevision: hash(
+                            value.expectedTransactionRevision,
+                            'expectedTransactionRevision'
+                        ),
+                        adoptionToken: opaqueToken(
+                            value.adoptionToken,
+                            'adoptionToken'
+                        ),
+                        observedInstallationFingerprint: hash(
+                            value.observedInstallationFingerprint,
+                            'observedInstallationFingerprint'
+                        ),
+                    },
+                    requestOptions
+                );
+            },
+            recoverDesignProposalApply: function (payload, requestOptions) {
+                const value = object(payload, 'design apply recovery payload');
+                const transactionId = boundedIdentifier(
+                    value.transactionId,
+                    'transactionId'
+                );
+                return designRequest(
+                    '/transactions/' + encodeURIComponent(transactionId)
+                        + '/apply/recover',
+                    'POST',
+                    {
+                        expectedTransactionRevision: hash(
+                            value.expectedTransactionRevision,
+                            'expectedTransactionRevision'
+                        ),
+                        observedInstallationFingerprint: hash(
+                            value.observedInstallationFingerprint,
+                            'observedInstallationFingerprint'
+                        ),
+                    },
+                    requestOptions
+                );
+            },
+            saveDesignProposalDraft: function (payload, requestOptions) {
+                const value = object(payload, 'design proposal save payload');
+                const transactionId = boundedIdentifier(
+                    value.transactionId,
+                    'transactionId'
+                );
+                return designRequest(
+                    '/transactions/' + encodeURIComponent(transactionId)
+                        + '/save',
+                    'POST',
+                    {
+                        expectedTransactionRevision: hash(
+                            value.expectedTransactionRevision,
+                            'expectedTransactionRevision'
+                        ),
+                        observedDraftRevision: hash(
+                            value.observedDraftRevision,
+                            'observedDraftRevision'
+                        ),
+                        observedCommandJournalHash: hash(
+                            value.observedCommandJournalHash,
+                            'observedCommandJournalHash'
+                        ),
+                        explicitApproval: value.explicitApproval === true,
+                    },
+                    requestOptions
+                );
+            },
+            inspectDesignUndo: function (payload, requestOptions) {
+                const value = object(payload, 'design undo inspection payload');
+                const transactionId = boundedIdentifier(
+                    value.transactionId,
+                    'transactionId'
+                );
+                return designRequest(
+                    '/transactions/' + encodeURIComponent(transactionId)
+                        + '/undo',
+                    'GET',
+                    undefined,
+                    requestOptions
+                );
+            },
+            prepareDesignUndo: function (payload, requestOptions) {
+                const value = object(payload, 'design undo prepare payload');
+                const transactionId = boundedIdentifier(
+                    value.transactionId,
+                    'transactionId'
+                );
+                return designRequest(
+                    '/transactions/' + encodeURIComponent(transactionId)
+                        + '/undo/prepare',
+                    'POST',
+                    {
+                        expectedTransactionRevision: hash(
+                            value.expectedTransactionRevision,
+                            'expectedTransactionRevision'
+                        ),
+                    },
+                    requestOptions
+                );
+            },
+            acknowledgeDesignUndo: function (payload, requestOptions) {
+                const value = object(payload, 'design undo acknowledgement');
+                const transactionId = boundedIdentifier(
+                    value.transactionId,
+                    'transactionId'
+                );
+                return designRequest(
+                    '/transactions/' + encodeURIComponent(transactionId)
+                        + '/undo/acknowledge',
+                    'POST',
+                    {
+                        expectedTransactionRevision: hash(
+                            value.expectedTransactionRevision,
+                            'expectedTransactionRevision'
+                        ),
+                        observedDraftRevision: hash(
+                            value.observedDraftRevision,
+                            'observedDraftRevision'
+                        ),
+                        observedCommandJournalHash: hash(
+                            value.observedCommandJournalHash,
+                            'observedCommandJournalHash'
+                        ),
+                    },
+                    requestOptions
+                );
+            },
             startG1Generation: function (payload, requestOptions) {
                 const value = object(payload, 'G1 generation payload');
                 return generationRequest('/g1', 'POST', value, requestOptions);
+            },
+            startFullFactoryGeneration: function (payload, requestOptions) {
+                const value = object(payload, 'full-factory generation payload');
+                return generationRequest(
+                    '/full-factory',
+                    'POST',
+                    value,
+                    requestOptions
+                );
+            },
+            startFacilityPlanningGeneration: function (payload, requestOptions) {
+                const value = object(
+                    payload,
+                    'Facility Planning generation payload'
+                );
+                return generationRequest(
+                    '/planning-package',
+                    'POST',
+                    value,
+                    requestOptions
+                );
             },
             continueGenerationRun: function (payload, requestOptions) {
                 const value = object(payload, 'generation continuation payload');
@@ -297,6 +1119,134 @@
                     '/runs/' + encodeURIComponent(runId),
                     'GET',
                     undefined,
+                    requestOptions
+                );
+            },
+            amendGenerationCirculation: function (payload, requestOptions) {
+                const value = object(payload, 'generation circulation payload');
+                const runId = boundedIdentifier(value.runId, 'runId');
+                return generationRequest(
+                    '/runs/' + encodeURIComponent(runId) + '/circulation',
+                    'POST',
+                    {
+                        expectedDraftRevision: nonEmptyString(
+                            value.expectedDraftRevision,
+                            'expectedDraftRevision'
+                        ),
+                        prototypeMode: value.prototypeMode === true,
+                        circulation: object(
+                            value.circulation,
+                            'circulation'
+                        ),
+                    },
+                    requestOptions
+                );
+            },
+            amendGenerationSubdivisions: function (payload, requestOptions) {
+                const value = object(payload, 'generation subdivision payload');
+                const runId = boundedIdentifier(value.runId, 'runId');
+                return generationRequest(
+                    '/runs/' + encodeURIComponent(runId) + '/subdivisions',
+                    'POST',
+                    {
+                        expectedDraftRevision: nonEmptyString(
+                            value.expectedDraftRevision,
+                            'expectedDraftRevision'
+                        ),
+                        prototypeMode: value.prototypeMode === true,
+                        subdivision: object(
+                            value.subdivision,
+                            'subdivision'
+                        ),
+                    },
+                    requestOptions
+                );
+            },
+            amendGenerationAssets: function (payload, requestOptions) {
+                const value = object(payload, 'generation asset payload');
+                const runId = boundedIdentifier(value.runId, 'runId');
+                return generationRequest(
+                    '/runs/' + encodeURIComponent(runId) + '/assets',
+                    'POST',
+                    {
+                        expectedDraftRevision: nonEmptyString(
+                            value.expectedDraftRevision,
+                            'expectedDraftRevision'
+                        ),
+                        prototypeMode: value.prototypeMode === true,
+                        assetPlacement: object(
+                            value.assetPlacement,
+                            'assetPlacement'
+                        ),
+                    },
+                    requestOptions
+                );
+            },
+            amendFacilityProgramResourceBatch: function (
+                payload,
+                requestOptions
+            ) {
+                const value = object(
+                    payload,
+                    'FacilityProgram resource amendment payload'
+                );
+                const runId = boundedIdentifier(value.runId, 'runId');
+                return generationRequest(
+                    '/runs/' + encodeURIComponent(runId)
+                        + '/facility-program/resource-batch',
+                    'POST',
+                    {
+                        expectedDraftRevision: nonEmptyString(
+                            value.expectedDraftRevision,
+                            'expectedDraftRevision'
+                        ),
+                        prototypeMode: value.prototypeMode === true,
+                        resourceBatchId: boundedIdentifier(
+                            value.resourceBatchId,
+                            'resourceBatchId'
+                        ),
+                        patch: object(value.patch, 'patch'),
+                    },
+                    requestOptions
+                );
+            },
+            amendGenerationCells: function (payload, requestOptions) {
+                const value = object(payload, 'generation cell payload');
+                const runId = boundedIdentifier(value.runId, 'runId');
+                return generationRequest(
+                    '/runs/' + encodeURIComponent(runId) + '/cells',
+                    'POST',
+                    {
+                        expectedDraftRevision: nonEmptyString(
+                            value.expectedDraftRevision,
+                            'expectedDraftRevision'
+                        ),
+                        prototypeMode: value.prototypeMode === true,
+                        cellComposition: object(
+                            value.cellComposition,
+                            'cellComposition'
+                        ),
+                    },
+                    requestOptions
+                );
+            },
+            amendGenerationCellReplication: function (payload, requestOptions) {
+                const value = object(payload, 'generation cell replication payload');
+                const runId = boundedIdentifier(value.runId, 'runId');
+                return generationRequest(
+                    '/runs/' + encodeURIComponent(runId) + '/cell-replication',
+                    'POST',
+                    {
+                        expectedDraftRevision: nonEmptyString(
+                            value.expectedDraftRevision,
+                            'expectedDraftRevision'
+                        ),
+                        prototypeMode: value.prototypeMode === true,
+                        cellReplication: object(
+                            value.cellReplication,
+                            'cellReplication'
+                        ),
+                    },
                     requestOptions
                 );
             },
@@ -351,6 +1301,146 @@
             },
             reloadLayout: function () {
                 return request('', 'GET');
+            },
+            createMotionPackage: function (payload, requestOptions) {
+                const value = object(payload, 'motion package payload');
+                return request('/motion-packages', 'POST', {
+                    baseRevision: hash(value.baseRevision, 'baseRevision'),
+                    operations: operationBatch(value.operations || []),
+                    request: motionPackageRequest(value.request),
+                }, requestOptions);
+            },
+            getMotionPackage: function (payload, requestOptions) {
+                const value = object(payload, 'motion package fetch payload');
+                const packageId = boundedIdentifier(
+                    value.packageId,
+                    'packageId',
+                    80
+                );
+                const activeRevision = hash(
+                    value.activeRevision,
+                    'activeRevision'
+                );
+                return request(
+                    '/motion-packages/' + encodeURIComponent(packageId)
+                        + '?activeRevision=' + encodeURIComponent(activeRevision),
+                    'GET',
+                    undefined,
+                    requestOptions
+                );
+            },
+            validateManualNavigationPath: function (payload, requestOptions) {
+                const value = object(
+                    payload,
+                    'manual navigation validation payload'
+                );
+                return request('/navigation/manual-path/validate', 'POST', {
+                    baseRevision: hash(value.baseRevision, 'baseRevision'),
+                    operations: operationBatch(value.operations || []),
+                    request: manualNavigationValidationRequest(value.request),
+                }, requestOptions);
+            },
+            compileNavigationSnapshot: function (payload, requestOptions) {
+                const value = object(payload, 'navigation snapshot payload');
+                return request('/navigation/snapshots/compile', 'POST', {
+                    baseRevision: hash(value.baseRevision, 'baseRevision'),
+                    operations: operationBatch(value.operations || []),
+                    request: navigationSnapshotRequest(value.request),
+                }, requestOptions);
+            },
+            getNavigationPackage: function (payload, requestOptions) {
+                const value = object(payload, 'navigation package fetch payload');
+                const packageId = boundedIdentifier(
+                    value.packageId,
+                    'packageId',
+                    80
+                );
+                return request(
+                    '/navigation/packages/' + encodeURIComponent(packageId),
+                    'GET',
+                    undefined,
+                    requestOptions
+                );
+            },
+            planActorJourney: function (payload, requestOptions) {
+                const value = object(payload, 'actor journey payload');
+                return request('/navigation/journeys/plan', 'POST', {
+                    baseRevision: hash(value.baseRevision, 'baseRevision'),
+                    operations: operationBatch(value.operations || []),
+                    request: actorJourneyRequest(value.request),
+                }, requestOptions);
+            },
+            getActorJourney: function (payload, requestOptions) {
+                const value = object(payload, 'actor journey fetch payload');
+                const journeySolutionId = boundedIdentifier(
+                    value.journeySolutionId,
+                    'journeySolutionId',
+                    80
+                );
+                return request(
+                    '/navigation/journeys/'
+                        + encodeURIComponent(journeySolutionId),
+                    'GET',
+                    undefined,
+                    requestOptions
+                );
+            },
+            compileNavigationHandoff: function (payload, requestOptions) {
+                const value = object(payload, 'navigation handoff payload');
+                return request('/navigation/handoffs/compile', 'POST', {
+                    baseRevision: hash(value.baseRevision, 'baseRevision'),
+                    operations: operationBatch(value.operations || []),
+                    request: navigationHandoffRequest(value.request),
+                }, requestOptions);
+            },
+            getNavigationHandoff: function (payload, requestOptions) {
+                const value = object(payload, 'navigation handoff fetch payload');
+                const resultId = boundedIdentifier(
+                    value.handoffResultId,
+                    'handoffResultId',
+                    80
+                );
+                return request(
+                    '/navigation/handoffs/' + encodeURIComponent(resultId),
+                    'GET',
+                    undefined,
+                    requestOptions
+                );
+            },
+            buildNavigationActivityScenario: function (payload, requestOptions) {
+                const value = object(payload, 'navigation activity payload');
+                return request('/navigation/activity-scenarios', 'POST', {
+                    baseRevision: hash(value.baseRevision, 'baseRevision'),
+                    operations: operationBatch(value.operations || []),
+                    request: navigationActivityRequest(value.request),
+                }, requestOptions);
+            },
+            createActivityScenario: function (payload, requestOptions) {
+                const value = object(payload, 'activity scenario payload');
+                return request('/activity-scenarios', 'POST', {
+                    baseRevision: hash(value.baseRevision, 'baseRevision'),
+                    operations: operationBatch(value.operations || []),
+                    request: activityScenarioRequest(value.request),
+                }, requestOptions);
+            },
+            getActivityScenario: function (payload, requestOptions) {
+                const value = object(payload, 'activity scenario fetch payload');
+                const scenarioId = boundedIdentifier(
+                    value.scenarioId,
+                    'scenarioId',
+                    80
+                );
+                const activeRevision = hash(
+                    value.activeRevision,
+                    'activeRevision'
+                );
+                return request(
+                    '/activity-scenarios/' + encodeURIComponent(scenarioId)
+                        + '?activeRevision=' + encodeURIComponent(activeRevision),
+                    'GET',
+                    undefined,
+                    requestOptions
+                );
             },
             spatialDiagnostics: function (payload, requestOptions) {
                 const value = payload || {};

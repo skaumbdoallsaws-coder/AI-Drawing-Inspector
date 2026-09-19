@@ -15,6 +15,7 @@ from ai_inspector.facility_layout.observation import (
     FacilityObservationError,
     build_facility_layout_observation,
     facility_layout_read_tool_specs,
+    sanitize_facility_layout_live_facts,
     trusted_facility_source,
 )
 from ai_inspector.facility_layout.planner import validate_layout_request
@@ -23,6 +24,7 @@ from ai_inspector.facility_layout.semantic_plan import (
     SEMANTIC_FACILITY_PREVIEW_TOOL,
     SemanticFacilityPlanError,
     compile_semantic_facility_plan,
+    compile_semantic_process_binding_operations,
     facility_layout_move_tool_spec,
     facility_layout_preview_tool_spec,
     validate_semantic_facility_plan,
@@ -114,6 +116,31 @@ def _observation(
     plan = deepcopy(golden["plan"])
     plan["sourceRevisions"]["layout"] = revision
     return observation, plan
+
+
+def test_live_selection_preserves_validated_user_order() -> None:
+    live = sanitize_facility_layout_live_facts(
+        {
+            "selection": {
+                "placementIds": [
+                    "operator-01",
+                    "table-03",
+                    "table-01",
+                    "table-03",
+                    "unknown-placement",
+                ],
+            },
+        },
+        known_ids={
+            "placementIds": {"operator-01", "table-01", "table-03"},
+        },
+    )
+
+    assert live["selection"]["placementIds"] == [
+        "operator-01",
+        "table-03",
+        "table-01",
+    ]
 
 
 def _error_codes(caught: pytest.ExceptionInfo) -> set[str]:
@@ -216,6 +243,42 @@ def test_semantic_plan_compiles_deterministically_to_exact_p8_request(
         "assumptionCount": 1,
         "unresolvedCount": 4,
     }
+
+
+def test_semantic_process_bindings_resolve_only_from_exact_planner_ids(
+    golden: dict,
+) -> None:
+    observation, plan = _observation(golden)
+    compiled = compile_semantic_facility_plan(
+        plan,
+        state=observation["state"],
+        evidence=observation["evidence"],
+    )
+    alternative = {
+        "instancePlacements": {
+            "cnc-row:0": "pl-cnc-row-01",
+            "cnc-row:1": "pl-cnc-row-02",
+            "inspection-station:0": "pl-inspection-station-01",
+        },
+        "ghostPreview": {"routeProposals": []},
+    }
+    first = compile_semantic_process_binding_operations(compiled, alternative)
+    second = compile_semantic_process_binding_operations(
+        deepcopy(compiled), deepcopy(alternative)
+    )
+    assert first == second
+    binding = first["operations"][0]["processBinding"]
+    assert binding["placementIds"] == ["pl-cnc-row-01", "pl-cnc-row-02"]
+    assert binding["routeIds"] == []
+    assert first["mappings"][0]["bindingIntentId"] == (
+        "binding-milling-resource"
+    )
+
+    broken = deepcopy(alternative)
+    broken["instancePlacements"].pop("cnc-row:1")
+    with pytest.raises(SemanticFacilityPlanError) as caught:
+        compile_semantic_process_binding_operations(compiled, broken)
+    assert caught.value.code == "semantic_process_binding_placement_unavailable"
 
 
 @pytest.mark.parametrize(
@@ -536,6 +599,16 @@ def test_skill_package_loads_with_only_the_p9_tool_surface(
         "analyze_facility_fit",
         "preview_facility_move",
         "build_facility_layout_preview",
+        "generate_full_factory_draft",
+        "generate_facility_planning_prototype_draft",
+        "amend_facility_program_resource_batch_draft",
+        "observe_navigation_context",
+        "compile_navigation_snapshot",
+        "plan_actor_journey",
+        "validate_actor_journey",
+        "compare_journey_alternatives",
+        "propose_navigation_intent",
+        "build_activity_scenario",
     }
     registry = SkillRegistry.from_roots(
         [root],
@@ -552,6 +625,11 @@ def test_skill_package_loads_with_only_the_p9_tool_surface(
     assert package.contract.explicit_request_tools == (
         "preview_facility_move",
         "build_facility_layout_preview",
+        "generate_full_factory_draft",
+        "generate_facility_planning_prototype_draft",
+        "amend_facility_program_resource_batch_draft",
+        "propose_navigation_intent",
+        "build_activity_scenario",
     )
     body = package.body.lower()
     for phrase in (

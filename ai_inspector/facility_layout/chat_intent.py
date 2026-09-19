@@ -8,6 +8,7 @@ request to modify the layout.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Iterable, Literal, Mapping, Sequence
 
@@ -82,7 +83,7 @@ _COMPLETE_FACILITY_DIMENSIONS = re.compile(
 )
 _COMPLETE_DEPARTMENT_COUNT = re.compile(
     rf"\b(?P<count>\d{{1,2}}|{_COUNT_WORD_PATTERN})\s+"
-    r"(?:(?:equal|equally)(?:[-\s]+sized)?\s+)?"
+    r"(?:(?:equal(?:[-\s]+(?:sized|area))?|equally[-\s]+sized)\s+)?"
     r"(?:macro\s+)?departments?\b",
     re.IGNORECASE,
 )
@@ -97,8 +98,33 @@ _DEPARTMENT_LABELS = re.compile(
     re.IGNORECASE,
 )
 _EQUAL_DEPARTMENTS = re.compile(
-    r"\b(?:equal|equally)(?:[-\s]+sized)?\s+(?:macro\s+)?departments?\b"
+    r"\b(?:equal(?:[-\s]+(?:sized|area))?|equally[-\s]+sized)\s+"
+    r"(?:macro\s+)?departments?\b"
     r"|\bdepartments?\s+(?:of\s+)?(?:equal|the\s+same)\s+(?:area|size)\b",
+    re.IGNORECASE,
+)
+_ROW_POSITION_PATTERN = (
+    r"(?:top|upper|north|first|1st|1|second|2nd|2|third|3rd|3|fourth|4th|4|"
+    r"fifth|5th|sixth|6th|seventh|7th|eighth|8th|ninth|9th|"
+    r"tenth|10th|middle|center|central|bottom|lower|south|last)"
+)
+_STRUCTURED_ROW_CUE = re.compile(
+    rf"\b(?:{_ROW_POSITION_PATTERN})\s+row\b"
+    r"|\brow\s+\d{1,2}\b"
+    rf"|\b(?:in|into|across|using)\s+"
+    rf"(?:\d{{1,2}}|{_COUNT_WORD_PATTERN})\s+rows?\b"
+    r"|\b(?:departments?|zones?)\b[^.!?]{0,80}\b(?:above|below)\b",
+    re.IGNORECASE,
+)
+_UNEQUAL_AREA_CUE = re.compile(
+    r"%|\bpercent(?:age)?s?\b|\b(?:area\s+)?(?:proportions?|weights?)\b"
+    r"|\b(?:twice|double|half)\s+(?:the\s+)?(?:area|size)\b",
+    re.IGNORECASE,
+)
+_DEPARTMENT_REPARTITION_ACTION = re.compile(
+    r"\b(?:arrange|rearrange|organize|organise|partition|repartition|"
+    r"divide|split|put|place|position|redistribute|reconfigure|change|"
+    r"resize|make|use)\w*\b",
     re.IGNORECASE,
 )
 
@@ -138,11 +164,18 @@ _SPATIAL_TARGET = re.compile(
 _DIRECT_MUTATION = re.compile(
     r"\b(?:mov(?:e|es|ed|ing)|plac(?:e|es|ed|ing)|add(?:s|ed|ing)?|"
     r"remov(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|"
+    r"chang(?:e|es|ed|ing)|set(?:s|ting)?|"
+    r"increas(?:e|es|ed|ing)|decreas(?:e|es|ed|ing)|"
+    r"reduc(?:e|es|ed|ing)|reorient(?:s|ed|ing)?|"
     r"resiz(?:e|es|ed|ing)|rotat(?:e|es|ed|ing)|"
     r"duplicat(?:e|es|ed|ing)|mirror(?:s|ed|ing)?|"
     r"swap(?:s|ped|ping)?|stack(?:s|ed|ing)?|attach(?:es|ed|ing)?|"
     r"(?<!keep-)clear(?:s|ed|ing)?|shift(?:s|ed|ing)?|reposition(?:s|ed|ing)?|"
     r"relocat(?:e|es|ed|ing))\b"
+)
+_SPACE_MUTATION = re.compile(
+    r"(?:^|\b(?:and|then|please)\s+|\b(?:can|could|would)\s+you\s+)"
+    r"spac(?:e|es|ed|ing)\b"
 )
 _AMBIGUOUS_ACTION = re.compile(
     r"\b(?:(?:build|create|generate|design|draft|propose|arrange|"
@@ -522,27 +555,354 @@ def _canonical_dimension_unit(value: str) -> tuple[str, float] | None:
 def _parse_department_labels(value: str, count: int) -> list[str] | None:
     raw = str(value or "").strip().strip(" .")
     raw = re.sub(r"\s+respectively\s*$", "", raw, flags=re.IGNORECASE)
-    raw = re.sub(
-        r"\s+(?:(?:in|as|using)\s+(?:a\s+)?(?:single\s+)?"
-        r"(?:rows?|columns?|grid)(?:\s+(?:layout|arrangement))?"
-        r"|arranged\s+(?:horizontally|vertically))\s*$",
-        "",
+    candidates = [raw]
+    trailing_program = re.search(
+        r"\s*,?\s+(?=(?:with|arranged|put|place|position|using)\b"
+        r"[^.!?]*\b(?:rows?|above|below|percent(?:age)?s?|"
+        r"proportions?|weights?)\b)",
         raw,
         flags=re.IGNORECASE,
     )
-    pieces = [
-        re.sub(r"^\s*and\s+", "", item, flags=re.IGNORECASE)
-        .strip()
-        .strip("\"'")
-        for item in re.split(r"\s*[,;]\s*", raw)
+    if trailing_program is not None:
+        candidates.insert(0, raw[:trailing_program.start()].rstrip(" ,;"))
+    for candidate in candidates:
+        candidate = re.sub(
+            r"\s+(?:(?:in|as|using)\s+(?:a\s+)?(?:single\s+)?"
+            r"(?:rows?|columns?|grid)(?:\s+(?:layout|arrangement))?"
+            r"|arranged\s+(?:horizontally|vertically))\s*$",
+            "",
+            candidate,
+            flags=re.IGNORECASE,
+        )
+        pieces = [
+            re.sub(r"^\s*and\s+", "", item, flags=re.IGNORECASE)
+            .strip()
+            .strip("\"'")
+            for item in re.split(r"\s*[,;]\s*", candidate)
+        ]
+        labels = [item for item in pieces if item]
+        if len(labels) != count:
+            continue
+        folded = [item.casefold() for item in labels]
+        if len(set(folded)) == len(folded):
+            return labels
+    return None
+
+
+def _row_position_rank(value: str) -> int:
+    normalized = str(value or "").strip().lower()
+    if normalized.isdigit() and 1 <= int(normalized) <= 50:
+        return int(normalized) - 1
+    named = {
+        "top": 0,
+        "upper": 0,
+        "north": 0,
+        "first": 0,
+        "1st": 0,
+        "second": 1,
+        "2nd": 1,
+        "third": 2,
+        "3rd": 2,
+        "fourth": 3,
+        "4th": 3,
+        "fifth": 4,
+        "5th": 4,
+        "sixth": 5,
+        "6th": 5,
+        "seventh": 6,
+        "7th": 6,
+        "eighth": 7,
+        "8th": 7,
+        "ninth": 8,
+        "9th": 8,
+        "tenth": 9,
+        "10th": 9,
+        "middle": 500,
+        "center": 500,
+        "central": 500,
+        "bottom": 1000,
+        "lower": 1000,
+        "south": 1000,
+        "last": 1000,
+    }
+    return named[normalized]
+
+
+def _rows_with_authored_proportions(
+    text: str,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Bind an explicit percentage vector to north-to-south rows."""
+
+    percentages = [
+        float(item)
+        for item in re.findall(r"(\d+(?:\.\d+)?)\s*%", text)
     ]
-    labels = [item for item in pieces if item]
-    if len(labels) != count:
-        return None
-    folded = [item.casefold() for item in labels]
-    if len(set(folded)) != len(folded):
-        return None
-    return labels
+    if len(percentages) != len(rows) or not math.isclose(
+        sum(percentages),
+        100.0,
+        abs_tol=1e-6,
+    ):
+        return rows
+    return [
+        {
+            "labels": list(row["labels"]),
+            "proportion": percentages[index],
+        }
+        for index, row in enumerate(rows)
+    ]
+
+
+def _labels_in_fragment(fragment: str, labels: list[str]) -> list[str]:
+    matches = []
+    for label in labels:
+        match = re.search(
+            rf"(?<!\w){re.escape(label)}(?!\w)",
+            fragment,
+            flags=re.IGNORECASE,
+        )
+        if match is not None:
+            matches.append((match.start(), label))
+    return [label for _, label in sorted(matches)]
+
+
+def _balanced_row_counts(department_count: int, row_count: int) -> list[int]:
+    base, remainder = divmod(department_count, row_count)
+    return [
+        base + (1 if index < remainder else 0)
+        for index in range(row_count)
+    ]
+
+
+def _rows_from_counts(labels: list[str], counts: list[int]) -> list[dict[str, Any]]:
+    if not counts or any(count < 1 for count in counts) or sum(counts) != len(labels):
+        return []
+    rows = []
+    cursor = 0
+    for count in counts:
+        rows.append(
+            {
+                "labels": labels[cursor:cursor + count],
+                "proportion": None,
+            }
+        )
+        cursor += count
+    return rows
+
+
+def _parse_department_rows(
+    text: str,
+    labels: list[str],
+) -> tuple[list[dict[str, Any]] | None, bool]:
+    """Parse authored north-to-south row membership without coordinates."""
+
+    cue = _STRUCTURED_ROW_CUE.search(text) is not None
+    if not cue:
+        return None, False
+
+    prefix_markers = list(re.finditer(
+        rf"(?:\b(?P<position>{_ROW_POSITION_PATTERN})\s+row\b"
+        rf"|\brow\s+(?P<number>\d{{1,2}})\b)"
+        r"\s*(?::|=|contains?|has|with)?\s*",
+        text,
+        flags=re.IGNORECASE,
+    ))
+    prefix_entries: list[dict[str, Any]] = []
+    for index, marker in enumerate(prefix_markers):
+        next_start = (
+            prefix_markers[index + 1].start()
+            if index + 1 < len(prefix_markers)
+            else len(text)
+        )
+        fragment = text[marker.end():next_start]
+        members = _labels_in_fragment(fragment, labels)
+        position = marker.group("position") or marker.group("number")
+        prefix_entries.append({
+            "rank": _row_position_rank(position),
+            "members": members,
+        })
+    if (
+        prefix_entries
+        and len({item["rank"] for item in prefix_entries})
+        == len(prefix_entries)
+    ):
+        ordered = sorted(prefix_entries, key=lambda item: item["rank"])
+        member_rows = [item["members"] for item in ordered]
+        flattened = [label for row in member_rows for label in row]
+        if (
+            all(member_rows)
+            and len(flattened) == len(labels)
+            and {item.casefold() for item in flattened}
+            == {item.casefold() for item in labels}
+        ):
+            return _rows_with_authored_proportions(
+                text,
+                [
+                    {"labels": row, "proportion": None}
+                    for row in member_rows
+                ],
+            ), True
+
+    markers = list(re.finditer(
+        rf"(?:in|on)\s+(?:the\s+)?(?:"
+        rf"(?P<position>{_ROW_POSITION_PATTERN})\s+row\b"
+        rf"|row\s+(?P<number>\d{{1,2}})\b)",
+        text,
+        flags=re.IGNORECASE,
+    ))
+    entries: list[dict[str, Any]] = []
+    previous_end = 0
+    for marker in markers:
+        fragment = text[previous_end:marker.start()]
+        if previous_end == 0:
+            starts = [
+                match.end()
+                for match in re.finditer(
+                    r"(?:^|[.;!?]|\b(?:with|put|place|position|arrange|keep)\b)",
+                    fragment,
+                    flags=re.IGNORECASE,
+                )
+            ]
+            if starts:
+                fragment = fragment[max(starts):]
+        fragment = re.sub(
+            r"^\s*(?:and|then)\s+",
+            "",
+            fragment,
+            flags=re.IGNORECASE,
+        ).strip(" ,;:")
+        members = _labels_in_fragment(fragment, labels)
+        count_matches = list(re.finditer(
+            rf"\b(?P<count>\d{{1,2}}|{_COUNT_WORD_PATTERN})\b"
+            r"(?:\s+(?:departments?|zones?))?\s*$",
+            fragment,
+            flags=re.IGNORECASE,
+        ))
+        row_count = (
+            _parse_bounded_count(count_matches[-1].group("count"))
+            if count_matches else None
+        )
+        entries.append(
+            {
+                "rank": _row_position_rank(
+                    marker.group("position") or marker.group("number")
+                ),
+                "members": members,
+                "count": row_count,
+            }
+        )
+        previous_end = marker.end()
+
+    if entries and len({item["rank"] for item in entries}) == len(entries):
+        ordered = sorted(entries, key=lambda item: item["rank"])
+        member_rows = [item["members"] for item in ordered]
+        flattened = [label for row in member_rows for label in row]
+        if (
+            all(member_rows)
+            and len(flattened) == len(labels)
+            and {item.casefold() for item in flattened}
+            == {item.casefold() for item in labels}
+        ):
+            return _rows_with_authored_proportions(
+                text,
+                [
+                    {"labels": row, "proportion": None}
+                    for row in member_rows
+                ],
+            ), True
+        counts = [item["count"] for item in ordered]
+        if all(isinstance(item, int) for item in counts):
+            counted_rows = _rows_from_counts(
+                labels,
+                [int(item) for item in counts],
+            )
+            if counted_rows:
+                return _rows_with_authored_proportions(
+                    text,
+                    counted_rows,
+                ), True
+
+    above_below = re.search(
+        rf"\b(?P<above>\d{{1,2}}|{_COUNT_WORD_PATTERN})\s+"
+        r"(?:(?:departments?|zones?)\s+)?(?:above|on\s+top)\b"
+        rf"[^.!?]{{0,80}}\b(?P<below>\d{{1,2}}|{_COUNT_WORD_PATTERN})\s+"
+        r"(?:(?:departments?|zones?)\s+)?(?:below|on\s+the\s+bottom)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if above_below is not None:
+        counts = [
+            _parse_bounded_count(above_below.group("above")),
+            _parse_bounded_count(above_below.group("below")),
+        ]
+        if all(isinstance(item, int) for item in counts):
+            counted_rows = _rows_from_counts(
+                labels,
+                [int(item) for item in counts],
+            )
+            if counted_rows:
+                return _rows_with_authored_proportions(
+                    text,
+                    counted_rows,
+                ), True
+
+    row_count_match = re.search(
+        rf"\b(?:in|into|across|using)\s+"
+        rf"(?P<count>\d{{1,2}}|{_COUNT_WORD_PATTERN})\s+rows?\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if row_count_match is not None:
+        row_count = _parse_bounded_count(row_count_match.group("count"))
+        if row_count is not None and row_count <= len(labels):
+            return _rows_with_authored_proportions(
+                text,
+                _rows_from_counts(
+                    labels,
+                    _balanced_row_counts(len(labels), row_count),
+                ),
+            ), True
+    return None, True
+
+
+def _parse_department_proportions(
+    text: str,
+    labels: list[str],
+) -> tuple[list[float] | None, bool]:
+    """Parse complete authored area shares; partial sizing fails closed."""
+
+    cue = _UNEQUAL_AREA_CUE.search(text) is not None
+    if not cue:
+        return None, False
+    percentages_by_label = []
+    for label in labels:
+        matches = list(re.finditer(
+            rf"(?<!\w){re.escape(label)}(?!\w)"
+            r"\s*(?::|=|\bat\b|\bis\b|\bgets?\b|\boccup(?:y|ies)\b)?\s*"
+            r"(?P<value>\d+(?:\.\d+)?)\s*%",
+            text,
+            flags=re.IGNORECASE,
+        ))
+        if not matches:
+            percentages_by_label = []
+            break
+        percentages_by_label.append(float(matches[-1].group("value")))
+    if len(percentages_by_label) == len(labels):
+        if math.isclose(sum(percentages_by_label), 100.0, abs_tol=1e-6):
+            return percentages_by_label, True
+        return None, True
+
+    percentages = [
+        float(item)
+        for item in re.findall(r"(\d+(?:\.\d+)?)\s*%", text)
+    ]
+    if len(percentages) == len(labels) and math.isclose(
+        sum(percentages),
+        100.0,
+        abs_tol=1e-6,
+    ):
+        return percentages, True
+    return None, True
 
 
 def parse_complete_facility_generation_request(
@@ -590,6 +950,23 @@ def parse_complete_facility_generation_request(
     labels = _parse_department_labels(labels_match.group("labels"), count)
     if labels is None:
         return None
+    rows, row_cue = _parse_department_rows(text, labels)
+    if row_cue and rows is None:
+        return None
+    authored_proportions, area_cue = _parse_department_proportions(
+        text,
+        labels,
+    )
+    authored_row_proportions = bool(
+        rows
+        and all(row.get("proportion") is not None for row in rows)
+    )
+    if (
+        area_cue
+        and authored_proportions is None
+        and not authored_row_proportions
+    ):
+        return None
 
     raw_unit1 = dimensions.group("unit1") or dimensions.group("unit2")
     raw_unit2 = dimensions.group("unit2") or dimensions.group("unit1")
@@ -600,10 +977,13 @@ def parse_complete_facility_generation_request(
     width = float(dimensions.group("width")) * unit1[1]
     depth = float(dimensions.group("depth")) * unit2[1]
 
-    arrangement = "deterministic_grid"
-    if re.search(r"\b(?:in|as)\s+(?:a\s+)?(?:single\s+)?rows?\b", positive):
+    arrangement = "row_stack" if rows is not None else "deterministic_grid"
+    if rows is None and re.search(
+        r"\b(?:in|as)\s+(?:a\s+)?(?:single\s+)?rows?\b",
+        positive,
+    ):
         arrangement = "rows"
-    elif re.search(
+    elif rows is None and re.search(
         r"\b(?:in|as)\s+(?:a\s+)?(?:single\s+)?columns?\b",
         positive,
     ):
@@ -626,12 +1006,17 @@ def parse_complete_facility_generation_request(
             "count": count,
             "labels": labels,
             "proportions": (
-                [1.0 / count] * count
-                if _EQUAL_DEPARTMENTS.search(positive)
-                else None
+                authored_proportions
+                if authored_proportions is not None
+                else (
+                    [1.0 / count] * count
+                    if _EQUAL_DEPARTMENTS.search(positive)
+                    else None
+                )
             ),
             "arrangement": arrangement,
             "orientation": orientation,
+            "rows": rows,
         },
         "execution_mode": (
             "preview_only"
@@ -641,6 +1026,137 @@ def parse_complete_facility_generation_request(
             )
             else "authorized_draft_run"
         ),
+    }
+
+
+def parse_facility_department_repartition_request(
+    message: str,
+    current_program: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Compile a bounded follow-up against a trusted department program.
+
+    The current envelope, labels, shares, and rows must come from server-owned
+    saved state or a server-owned generation run. The user supplies only the
+    semantic change; this parser never accepts or creates authored coordinates.
+    """
+
+    envelope = current_program.get("facility_envelope")
+    departments = current_program.get("departments")
+    if not isinstance(envelope, Mapping) or not isinstance(
+        departments,
+        Mapping,
+    ):
+        return None
+    raw_labels = departments.get("labels")
+    if not isinstance(raw_labels, Sequence) or isinstance(
+        raw_labels,
+        (str, bytes),
+    ):
+        return None
+    labels = [str(item or "").strip() for item in raw_labels]
+    if (
+        not labels
+        or any(not item for item in labels)
+        or len({item.casefold() for item in labels}) != len(labels)
+    ):
+        return None
+
+    text = _SPACE.sub(" ", str(message or "").strip())
+    positive = " ".join(_positive_clauses(text.lower()))
+    if (
+        not positive
+        or _INTERROGATIVE_PREFIX.search(positive) is not None
+    ):
+        return None
+    rows, row_cue = _parse_department_rows(positive, labels)
+    proportions, area_cue = _parse_department_proportions(
+        positive,
+        labels,
+    )
+    new_department_proportions = proportions is not None
+    if not row_cue and not area_cue:
+        return None
+    if (
+        _DEPARTMENT_REPARTITION_ACTION.search(positive) is None
+        and not row_cue
+    ):
+        return None
+    if row_cue and rows is None:
+        return None
+    authored_row_proportions = bool(
+        rows
+        and all(row.get("proportion") is not None for row in rows)
+    )
+    if area_cue and proportions is None and not authored_row_proportions:
+        return None
+
+    current_rows = departments.get("rows")
+    if rows is None and isinstance(current_rows, Sequence) and not isinstance(
+        current_rows,
+        (str, bytes),
+    ):
+        rows = [
+            {
+                "labels": [str(label) for label in row.get("labels", [])],
+                "proportion": row.get("proportion"),
+            }
+            for row in current_rows
+            if isinstance(row, Mapping)
+        ] or None
+    if new_department_proportions and rows is not None:
+        rows = [
+            {"labels": list(row["labels"]), "proportion": None}
+            for row in rows
+        ]
+    current_proportions = departments.get("proportions")
+    if authored_row_proportions and not new_department_proportions:
+        proportions = None
+    elif proportions is None:
+        if (
+            isinstance(current_proportions, Sequence)
+            and not isinstance(current_proportions, (str, bytes))
+            and len(current_proportions) == len(labels)
+        ):
+            proportions = [float(item) for item in current_proportions]
+        else:
+            proportions = [1.0 / len(labels)] * len(labels)
+
+    try:
+        width = float(envelope.get("width"))
+        depth = float(envelope.get("depth"))
+    except (TypeError, ValueError):
+        return None
+    source_unit = str(envelope.get("source_unit") or "m")
+    if _canonical_dimension_unit(source_unit) is None:
+        return None
+    return {
+        "facility_envelope": {
+            "width": width,
+            "depth": depth,
+            "source_unit": source_unit,
+            "display_name": str(
+                envelope.get("display_name") or "Facility Layout"
+            ),
+            "grid_size": envelope.get("grid_size"),
+        },
+        "departments": {
+            "count": len(labels),
+            "labels": labels,
+            "proportions": proportions,
+            "arrangement": (
+                "row_stack"
+                if rows is not None
+                else str(
+                    departments.get("arrangement")
+                    or "deterministic_grid"
+                )
+            ),
+            "orientation": str(
+                departments.get("orientation") or "auto"
+            ),
+            "rows": rows,
+        },
+        "execution_mode": "authorized_draft_run",
     }
 
 
@@ -704,6 +1220,14 @@ def classify_facility_layout_request(message: str) -> FacilityLayoutIntent:
 
     for clause in clauses:
         presentation = _PRESENTATION_TARGET.search(clause)
+        spacing_mutation = _SPACE_MUTATION.search(clause)
+        if spacing_mutation is not None:
+            target = _first_target_after_action(
+                clause,
+                spacing_mutation.end(),
+            )
+            if target == "spatial" or has_facility_scope:
+                return "generation"
         for mutation in _DIRECT_MUTATION.finditer(clause):
             # Interrogative descriptions such as "How does material move?"
             # and "Why are these racks arranged in rows?" ask for analysis.
@@ -863,6 +1387,12 @@ def facility_layout_action_mode(
     normalized = _normalized(message)
     if _COMMIT_ACTION.search(normalized):
         return "COMMIT"
+    from ai_inspector.facility_layout.navigation_intent import (
+        is_navigation_semantic_request,
+        navigation_action_mode,
+    )
+    if is_navigation_semantic_request(message):
+        return navigation_action_mode(message)
     resolved = intent or classify_facility_layout_request(message)
     if resolved == "generation":
         return "PREVIEW"
@@ -915,6 +1445,22 @@ def facility_layout_tool_authorization(
             )
         ),
     )
+    from ai_inspector.facility_layout.navigation_intent import (
+        BUILD_ACTIVITY_SCENARIO_TOOL,
+        NAVIGATION_READ_TOOL_NAMES,
+        PROPOSE_NAVIGATION_INTENT_TOOL,
+        is_navigation_semantic_request,
+    )
+    if is_navigation_semantic_request(message):
+        allowed = set(NAVIGATION_READ_TOOL_NAMES)
+        allowed.add(
+            PROPOSE_NAVIGATION_INTENT_TOOL
+            if mode == "PREVIEW"
+            else BUILD_ACTIVITY_SCENARIO_TOOL
+        )
+        plan["allowedToolNames"] = frozenset(allowed)
+        plan["requiredObservationTool"] = "observe_navigation_context"
+        plan["viewportNavigationAuthorized"] = mode == "READ_ONLY"
     return {
         "mode": mode,
         "intent": intent,
@@ -940,6 +1486,11 @@ def classify_facility_request_kind(
 
     normalized = _normalized(message)
     resolved = intent or classify_facility_layout_request(message)
+    from ai_inspector.facility_layout.navigation_intent import (
+        is_navigation_semantic_request,
+    )
+    if is_navigation_semantic_request(message):
+        return "navigate"
     if _PRESENTATION_TARGET.search(normalized) and re.search(
         r"\b(?:chart|graph|plot|heat\s*map|pareto|histogram|pie|donut)\b",
         normalized,
@@ -1147,6 +1698,7 @@ __all__ = [
     "is_facility_layout_generation_request",
     "is_precise_facility_translation_request",
     "parse_complete_facility_generation_request",
+    "parse_facility_department_repartition_request",
     "parse_precise_facility_translation",
     "requested_facility_metric",
     "requested_facility_spatial_analyses",

@@ -51,9 +51,15 @@ namespace SolidWorksExtractor.Services
                 // Extract assembly identity
                 assembly.Identity = ExtractAssemblyIdentity(doc);
 
+                // Extract user-created FeatureManager folders for semantic grouping
+                Console.WriteLine("Extracting FeatureManager folder paths...");
+                var featureTreeFolderMap = BuildFeatureTreeFolderMap(doc);
+                if (featureTreeFolderMap.Count > 0)
+                    Console.WriteLine($"  Found folder paths for {featureTreeFolderMap.Count} component references");
+
                 // Extract component hierarchy
                 Console.WriteLine("Extracting component hierarchy...");
-                assembly.RootComponent = ExtractComponentHierarchy(assyDoc, extractPartData, assembly);
+                assembly.RootComponent = ExtractComponentHierarchy(assyDoc, extractPartData, assembly, featureTreeFolderMap);
 
                 // Flatten component list
                 FlattenComponents(assembly.RootComponent, assembly.Components);
@@ -107,19 +113,29 @@ namespace SolidWorksExtractor.Services
         /// <summary>
         /// Extract component hierarchy starting from root
         /// </summary>
-        private ComponentData ExtractComponentHierarchy(IAssemblyDoc assyDoc, bool extractPartData, AssemblyData assembly)
+        private ComponentData ExtractComponentHierarchy(
+            IAssemblyDoc assyDoc,
+            bool extractPartData,
+            AssemblyData assembly,
+            Dictionary<string, List<string>> featureTreeFolderMap)
         {
             // Get root component
             IConfiguration config = (IConfiguration)((IModelDoc2)assyDoc).GetActiveConfiguration();
             IComponent2 rootComp = (IComponent2)config.GetRootComponent3(true);
 
-            return ExtractComponent(rootComp, null, 0, extractPartData, assembly);
+            return ExtractComponent(rootComp, null, 0, extractPartData, assembly, featureTreeFolderMap);
         }
 
         /// <summary>
         /// Extract a single component and its children recursively
         /// </summary>
-        private ComponentData ExtractComponent(IComponent2 comp, ComponentData parent, int level, bool extractPartData, AssemblyData assembly)
+        private ComponentData ExtractComponent(
+            IComponent2 comp,
+            ComponentData parent,
+            int level,
+            bool extractPartData,
+            AssemblyData assembly,
+            Dictionary<string, List<string>> featureTreeFolderMap)
         {
             if (comp == null)
                 return null;
@@ -167,6 +183,10 @@ namespace SolidWorksExtractor.Services
                 // Transform
                 compData.Transform = ExtractTransform(comp);
 
+                // FeatureManager folder path. If a subcomponent is not directly present in
+                // the top-level tree folder, inherit the semantic group from its parent.
+                ApplyFeatureTreePath(comp, compData, parent, featureTreeFolderMap);
+
                 // Custom properties from component
                 compData.Properties = GetComponentProperties(comp);
 
@@ -202,7 +222,7 @@ namespace SolidWorksExtractor.Services
                     foreach (object childObj in children)
                     {
                         IComponent2 childComp = (IComponent2)childObj;
-                        var childData = ExtractComponent(childComp, compData, level + 1, extractPartData, assembly);
+                        var childData = ExtractComponent(childComp, compData, level + 1, extractPartData, assembly, featureTreeFolderMap);
                         if (childData != null)
                         {
                             compData.Children.Add(childData);
@@ -216,6 +236,321 @@ namespace SolidWorksExtractor.Services
             }
 
             return compData;
+        }
+
+        /// <summary>
+        /// Build a map from component display/tree names to user-created FeatureManager folders.
+        /// This is separate from IComponent2.GetChildren(), which returns model hierarchy only.
+        /// </summary>
+        private Dictionary<string, List<string>> BuildFeatureTreeFolderMap(IModelDoc2 doc)
+        {
+            var map = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                IFeature feature = (IFeature)doc.FirstFeature();
+                int visited = 0;
+                const int maxFeatures = 10000;
+
+                while (feature != null && visited < maxFeatures)
+                {
+                    WalkFeatureForComponentFolders(feature, new List<string>(), map, ref visited, maxFeatures, 0);
+                    feature = (IFeature)feature.GetNextFeature();
+                }
+
+                if (visited >= maxFeatures)
+                    Console.WriteLine("  Warning: FeatureManager folder traversal stopped at feature limit");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  Warning: FeatureManager folder traversal failed: {ex.Message}");
+            }
+
+            return map;
+        }
+
+        private void WalkFeatureForComponentFolders(
+            IFeature feature,
+            List<string> parentPath,
+            Dictionary<string, List<string>> map,
+            ref int visited,
+            int maxFeatures,
+            int depth)
+        {
+            if (feature == null || visited >= maxFeatures || depth > 64)
+                return;
+
+            visited++;
+
+            string typeName = "";
+            string featureName = "";
+
+            try { typeName = feature.GetTypeName2() ?? ""; } catch { }
+            try { featureName = feature.Name ?? ""; } catch { }
+
+            bool folderLike = IsFolderTypeName(typeName);
+            var path = new List<string>(parentPath);
+
+            if (folderLike && IsUserFeatureManagerFolder(feature, featureName))
+            {
+                string folderName = CleanFeatureTreeText(featureName);
+                if (!string.IsNullOrWhiteSpace(folderName))
+                    path.Add(folderName);
+
+                TryMapComponentsFromFolderFeature(feature, path, map);
+            }
+            else if (path.Count > 0)
+            {
+                TryMapComponentFeature(feature, path, map);
+            }
+
+            try
+            {
+                IFeature subFeature = (IFeature)feature.GetFirstSubFeature();
+                while (subFeature != null && visited < maxFeatures)
+                {
+                    WalkFeatureForComponentFolders(subFeature, path, map, ref visited, maxFeatures, depth + 1);
+                    subFeature = (IFeature)subFeature.GetNextSubFeature();
+                }
+            }
+            catch { }
+        }
+
+        private void TryMapComponentsFromFolderFeature(
+            IFeature folderFeature,
+            List<string> folderPath,
+            Dictionary<string, List<string>> map)
+        {
+            if (folderFeature == null || folderPath == null || folderPath.Count == 0)
+                return;
+
+            object specific = null;
+            try { specific = folderFeature.GetSpecificFeature2(); } catch { }
+            if (specific == null)
+                return;
+
+            object rawFeatures = null;
+            try
+            {
+                dynamic dyn = specific;
+                rawFeatures = dyn.GetFeatures();
+            }
+            catch { }
+
+            foreach (object obj in ToObjectArray(rawFeatures))
+            {
+                IFeature containedFeature = obj as IFeature;
+                TryMapComponentFeature(containedFeature, folderPath, map);
+            }
+
+            object rawComponents = null;
+            try
+            {
+                dynamic dyn = specific;
+                rawComponents = dyn.GetComponents();
+            }
+            catch { }
+
+            foreach (object obj in ToObjectArray(rawComponents))
+            {
+                AddFeatureTreeMapEntry(map, GetTreeComponentName(obj), folderPath);
+            }
+        }
+
+        private void TryMapComponentFeature(
+            IFeature feature,
+            List<string> folderPath,
+            Dictionary<string, List<string>> map)
+        {
+            if (feature == null || folderPath == null || folderPath.Count == 0)
+                return;
+
+            string featureName = "";
+            string selectionName = "";
+
+            try { featureName = feature.Name ?? ""; } catch { }
+            try
+            {
+                string selectionType;
+                selectionName = feature.GetNameForSelection(out selectionType) ?? "";
+            }
+            catch { }
+
+            AddFeatureTreeMapEntry(map, featureName, folderPath);
+            AddFeatureTreeMapEntry(map, selectionName, folderPath);
+
+            object specific = null;
+            try { specific = feature.GetSpecificFeature2(); } catch { }
+            AddFeatureTreeMapEntry(map, GetTreeComponentName(specific), folderPath);
+        }
+
+        private bool IsUserFeatureManagerFolder(IFeature feature, string displayText)
+        {
+            if (feature == null)
+                return false;
+
+            string typeName = "";
+            string featureName = "";
+
+            try { typeName = feature.GetTypeName2() ?? ""; } catch { }
+            try { featureName = feature.Name ?? ""; } catch { }
+
+            bool folderLike = IsFolderTypeName(typeName);
+
+            if (!folderLike)
+                return false;
+
+            string name = CleanFeatureTreeText(string.IsNullOrWhiteSpace(displayText) ? featureName : displayText)
+                .ToLowerInvariant();
+
+            if (string.IsNullOrWhiteSpace(name))
+                return false;
+
+            string[] systemFolders =
+            {
+                "history",
+                "annotations",
+                "sensors",
+                "comments",
+                "equations",
+                "lights",
+                "cameras",
+                "mates",
+                "mate references",
+                "solid bodies",
+                "surface bodies",
+                "cut list",
+                "design binder"
+            };
+
+            return !systemFolders.Any(name.StartsWith);
+        }
+
+        private bool IsFolderTypeName(string typeName)
+        {
+            return !string.IsNullOrWhiteSpace(typeName)
+                && (typeName.IndexOf("Folder", StringComparison.OrdinalIgnoreCase) >= 0
+                    || string.Equals(typeName, "FtrFolder", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private IEnumerable<object> ToObjectArray(object value)
+        {
+            if (value == null)
+                yield break;
+
+            object[] objectArray = value as object[];
+            if (objectArray != null)
+            {
+                foreach (object item in objectArray)
+                    yield return item;
+                yield break;
+            }
+
+            System.Array array = value as System.Array;
+            if (array != null)
+            {
+                foreach (object item in array)
+                    yield return item;
+                yield break;
+            }
+
+            yield return value;
+        }
+
+        private void AddFeatureTreeMapEntry(
+            Dictionary<string, List<string>> map,
+            string key,
+            List<string> path)
+        {
+            key = CleanFeatureTreeText(key);
+            if (string.IsNullOrWhiteSpace(key) || path == null || path.Count == 0)
+                return;
+
+            if (!map.ContainsKey(key) || path.Count > map[key].Count)
+                map[key] = new List<string>(path);
+        }
+
+        private string GetTreeComponentName(object itemObject)
+        {
+            if (itemObject == null)
+                return "";
+
+            IComponent2 component = itemObject as IComponent2;
+            if (component != null)
+                return component.Name2;
+
+            try
+            {
+                dynamic dyn = itemObject;
+                string name2 = dyn.Name2 as string;
+                if (!string.IsNullOrWhiteSpace(name2))
+                    return name2;
+            }
+            catch { }
+
+            try
+            {
+                dynamic dyn = itemObject;
+                string name = dyn.Name as string;
+                if (!string.IsNullOrWhiteSpace(name))
+                    return name;
+            }
+            catch { }
+
+            return "";
+        }
+
+        private void ApplyFeatureTreePath(
+            IComponent2 comp,
+            ComponentData compData,
+            ComponentData parent,
+            Dictionary<string, List<string>> featureTreeFolderMap)
+        {
+            List<string> path = null;
+
+            if (featureTreeFolderMap != null && featureTreeFolderMap.Count > 0)
+            {
+                foreach (string key in GetComponentLookupKeys(comp, compData))
+                {
+                    if (featureTreeFolderMap.TryGetValue(key, out path))
+                        break;
+                }
+            }
+
+            if ((path == null || path.Count == 0) && parent?.FeatureTreePath != null && parent.FeatureTreePath.Count > 0)
+                path = parent.FeatureTreePath;
+
+            if (path == null || path.Count == 0)
+                return;
+
+            compData.FeatureTreePath = new List<string>(path);
+            compData.SemanticGroup = path[path.Count - 1];
+        }
+
+        private IEnumerable<string> GetComponentLookupKeys(IComponent2 comp, ComponentData compData)
+        {
+            if (compData != null)
+            {
+                yield return compData.Name;
+                yield return compData.Name2;
+            }
+
+            if (comp != null)
+            {
+                string name = "";
+                string name2 = "";
+
+                try { name = comp.Name; } catch { }
+                try { name2 = comp.Name2; } catch { }
+
+                yield return name;
+                yield return name2;
+            }
+        }
+
+        private string CleanFeatureTreeText(string text)
+        {
+            return string.IsNullOrWhiteSpace(text) ? "" : string.Join(" ", text.Trim().Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries));
         }
 
         /// <summary>

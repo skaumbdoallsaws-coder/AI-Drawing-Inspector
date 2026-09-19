@@ -808,6 +808,15 @@ Semantic actions:
 
 The partition solver, not Sage, calculates polygons and coordinates.
 
+Current qualification note (2026-08-27): the enabled G1.1 production path is
+limited to rectangular envelopes, complete labelled department programs,
+equal or complete authored area shares, arbitrary authored row membership,
+and unsaved draft replacement. Polygon envelopes, partial allocation,
+adjacency solving, minimum-area constraints, and dependency-aware local edits
+remain future capabilities. They are tracked in
+`docs/facility-layout-intelligence-backlog.md` and must not be treated as
+current G1.1 acceptance criteria.
+
 Exit gates:
 
 - exact normalized facility dimensions and units;

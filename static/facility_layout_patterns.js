@@ -232,7 +232,7 @@
         }) || null;
     }
 
-    function catalogDimensions(record) {
+    function catalogDimensions(record, strict) {
         const source = record && typeof record === 'object' ? record : {};
         const dimensions = source.dimensions
             && typeof source.dimensions === 'object'
@@ -276,6 +276,10 @@
         if (!(height > EPSILON)) {
             height = finite(maximum.y, NaN) - finite(minimum.y, NaN);
         }
+        if (strict && (!(width > EPSILON) || !(depth > EPSILON)
+                || !(height > EPSILON) || ![width, depth, height].every(Number.isFinite))) {
+            throw new TypeError('Published asset dimensions are unavailable');
+        }
         return {
             width: width > EPSILON ? width : 1.2,
             depth: depth > EPSILON ? depth : 0.8,
@@ -288,10 +292,14 @@
         return { width: dimensions.width, depth: dimensions.depth };
     }
 
-    function normalizedItem(kind, value, catalog) {
+    function normalizedItem(kind, value, catalog, strict) {
         if (kind === 'placement') {
             const record = catalogRecord(catalog, value) || {};
-            const dimensions = catalogDimensions(record);
+            if (strict && (!value.assetDefinitionRevision
+                    || record.assetDefinitionRevision !== value.assetDefinitionRevision)) {
+                throw new TypeError('Exact asset revision is unavailable');
+            }
+            const dimensions = catalogDimensions(record, strict);
             const transform = value.transform || {};
             const position = transform.position || {};
             const scale = Math.max(EPSILON, finite(transform.scale, 1));
@@ -458,7 +466,8 @@
         }
         return identifiers.map(function (identifier) {
             if (placements.has(identifier)) {
-                return normalizedItem('placement', placements.get(identifier), catalog);
+                return normalizedItem('placement', placements.get(identifier), catalog,
+                    settings.strictGeometry === true);
             }
             if (markings.has(identifier)) {
                 return normalizedItem(

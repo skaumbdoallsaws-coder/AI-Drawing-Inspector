@@ -10,8 +10,13 @@ import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from ai_inspector.process_map import spatialize_semantic_suggestions
+
+
 OUT_DIR = ROOT / "runtime_logs"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 APP_URL = os.environ.get("SMOKE_APP_URL", "http://127.0.0.1:8023/")
@@ -114,6 +119,75 @@ def _synthetic_process_map() -> dict:
         "canvasEdges": [],
         "viewport": {"x": 0, "y": 0, "scale": 1},
     }
+
+
+def _synthetic_routing_process_map() -> dict:
+    process_map = _synthetic_process_map()
+    process_map["layoutVersion"] = 3
+    process_map["canvasNodes"] = [
+        {
+            "nodeId": "route-source",
+            "nodeKind": "process_step",
+            "processType": "operation",
+            "name": "Source operation",
+            "position": {"x": 80, "y": 240},
+            "portOrientation": "horizontal",
+            "portOrder": "input_first",
+        },
+        {
+            "nodeId": "route-obstacle",
+            "nodeKind": "process_step",
+            "processType": "inspection",
+            "name": "Unrelated inspection",
+            "position": {"x": 480, "y": 190},
+            "portOrientation": "horizontal",
+            "portOrder": "input_first",
+        },
+        {
+            "nodeId": "route-target",
+            "nodeKind": "process_step",
+            "processType": "output",
+            "name": "Target output",
+            "position": {"x": 900, "y": 240},
+            "portOrientation": "horizontal",
+            "portOrder": "input_first",
+        },
+    ]
+    process_map["canvasEdges"] = [
+        {
+            "edgeId": "route-edge",
+            "from": {"nodeId": "route-source", "port": "out"},
+            "to": {"nodeId": "route-target", "port": "in"},
+            "kind": "precedence",
+        }
+    ]
+    process_map["canvasGroups"] = []
+    return process_map
+
+
+def _synthetic_phase7_arrangement_map(grouped: bool = False) -> dict:
+    fixture = json.loads(
+        (ROOT / "tests" / "fixtures" / "process_map_spatial" / "phase7_arrangement.json")
+        .read_text(encoding="utf-8")
+    )
+    process_map = copy.deepcopy(fixture["groupMap" if grouped else "ungroupedMap"])
+    process_map.update({
+        "mapId": "default",
+        "productId": "racing-bike",
+        "productName": "Phase 7 Arrangement Fixture",
+        "displayName": "Phase 7 Arrangement Fixture",
+        "association": {"productId": "racing-bike"},
+        "status": "active",
+        "createdAt": "2026-07-22T00:00:00Z",
+        "updatedAt": "2026-07-22T00:00:00Z",
+        "sourceStructureRevision": "structure-rev-1",
+        "viewport": {"x": 0, "y": 0, "scale": 1},
+    })
+    for node in process_map["canvasNodes"]:
+        node.setdefault("name", f"Phase 7 {node['nodeId'].upper()}")
+        node.setdefault("portOrientation", "horizontal")
+        node.setdefault("portOrder", "input_first")
+    return process_map
 
 
 def _synthetic_map_entry(store: dict, map_id: str) -> dict | None:
@@ -245,6 +319,19 @@ def _install_synthetic_process_map_route(page, store: dict) -> None:
         fulfill(route, status, result)
 
     page.route("**/api/training/process-map/racing-bike", handler)
+
+
+def _install_spatial_telemetry_route(page, events: list[dict]) -> None:
+    def handler(route) -> None:
+        payload = route.request.post_data_json or {}
+        events.append(copy.deepcopy(payload))
+        route.fulfill(
+            status=202,
+            content_type="application/json",
+            body=json.dumps({"success": True}),
+        )
+
+    page.route("**/api/training/process-map-spatial-events", handler)
 
 
 def _install_synthetic_map_management_routes(page, store: dict) -> None:
@@ -459,6 +546,18 @@ def _install_synthetic_map_management_routes(page, store: dict) -> None:
     page.route("**/api/training/process-map-templates", template_handler)
     page.route("**/api/training/process-maps/racing-bike", collection_handler)
     page.route("**/api/training/process-maps/racing-bike/**", named_handler)
+    page.route(
+        "**/api/builder/process-maps/policy",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "success": True,
+                "writeEnabled": store.get("builderWriteEnabled", True),
+                "contractVersion": 1,
+            }),
+        ),
+    )
 
 
 def _install_synthetic_suggestion_route(page, store: dict) -> None:
@@ -498,23 +597,32 @@ def _install_synthetic_suggestion_route(page, store: dict) -> None:
             ) in existing:
                 continue
             suggestions.append(copy.deepcopy(suggestion))
+        spatial_summary = None
+        if store.get("spatializeSuggestions"):
+            spatialized = spatialize_semantic_suggestions(store["map"], suggestions)
+            suggestions = spatialized["suggestions"]
+            spatial_summary = spatialized["summary"]
+        response_body = {
+            "success": True,
+            "schemaVersion": 1,
+            "engineVersion": "synthetic-1",
+            "productId": "racing-bike",
+            "mapId": "default",
+            "revision": store["revision"],
+            "suggestions": suggestions,
+            "summary": {
+                "returned": len(suggestions),
+                "edgeSuggestions": sum(1 for item in suggestions if item.get("edge")),
+                "placementSuggestions": sum(1 for item in suggestions if item.get("placement")),
+                "annotations": sum(1 for item in suggestions if item.get("annotation")),
+            },
+        }
+        if spatial_summary is not None:
+            response_body["spatialSummary"] = spatial_summary
         route.fulfill(
             status=200,
             content_type="application/json",
-            body=json.dumps({
-                "success": True,
-                "schemaVersion": 1,
-                "engineVersion": "synthetic-1",
-                "productId": "racing-bike",
-                "mapId": "default",
-                "revision": store["revision"],
-                "suggestions": suggestions,
-                "summary": {
-                    "returned": len(suggestions),
-                    "edgeSuggestions": sum(1 for item in suggestions if item.get("edge")),
-                    "annotations": sum(1 for item in suggestions if item.get("annotation")),
-                },
-            }),
+            body=json.dumps(response_body),
         )
 
     page.route(
@@ -552,6 +660,628 @@ def _install_synthetic_agent_route(page, store: dict, captured: list[dict]) -> N
         )
 
     page.route("**/api/agent/chat", handler)
+
+
+def _install_synthetic_semantic_agent_route(
+    page,
+    semantic_plan: dict,
+    captured: list[dict],
+) -> None:
+    def handler(route) -> None:
+        request = route.request
+        if request.method != "POST":
+            route.fallback()
+            return
+        payload = copy.deepcopy(request.post_data_json or {})
+        captured.append(payload)
+        message = str(payload.get("message") or "")
+        if "build and visually validate" not in message.lower():
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "response": "The saved process map has one linear flow.",
+                    "tool_calls": [],
+                    "workflow_state": None,
+                }),
+            )
+            return
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "response": "Preparing one complete process-map proposal.",
+                "tool_calls": [{
+                    "name": "build_process_map_preview",
+                    "args": {
+                        "scope_occurrence_id": "module-a",
+                        "semantic_plan": copy.deepcopy(semantic_plan),
+                    },
+                }],
+                "skill_runtime": {
+                    "workflow": {"id": "process-map-generation"},
+                },
+                "workflow_state": None,
+            }),
+        )
+
+    page.route("**/api/agent/chat", handler)
+
+
+def _install_synthetic_spatial_proposal_routes(page, store: dict) -> None:
+    proposal_node = {
+        "nodeId": "pmn-agent-browser",
+        "nodeKind": "product_occurrence",
+        "sourceOccurrenceId": "part-a-1",
+        "itemIdSnapshot": "RB-003",
+        "nameSnapshot": "Repeated Part A",
+        "position": {"x": 100, "y": 220},
+        "portOrientation": "horizontal",
+        "portOrder": "input_first",
+    }
+    proposal = {
+        "success": True,
+        "proposalId": "pm-proposal-browser",
+        "action": "apply_operations",
+        "productId": "racing-bike",
+        "mapId": "default",
+        "baseRevision": "phase6-rev-1",
+        "diffHash": "d" * 64,
+        "spatialBindingHash": "b" * 64,
+        "preview": {"nodes": [proposal_node], "edges": [], "groups": []},
+        "summary": {
+            "action": "place_card",
+            "label": "Repeated Part A",
+            "message": "Placed Repeated Part A.",
+        },
+    }
+
+    def fulfill(route, status: int, payload: dict) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def proposal_handler(route) -> None:
+        payload = copy.deepcopy(route.request.post_data_json or {})
+        store.setdefault("spatialEvents", []).append({"kind": "proposal", "body": payload})
+        if payload.get("baseRevision") != store["revision"]:
+            fulfill(route, 409, {"error": "revision_conflict", "currentRevision": store["revision"]})
+            return
+        response = copy.deepcopy(proposal)
+        response["baseRevision"] = store["revision"]
+        fulfill(route, 200, response)
+
+    def approval_handler(route) -> None:
+        payload = copy.deepcopy(route.request.post_data_json or {})
+        store.setdefault("spatialEvents", []).append({"kind": "approval", "body": payload})
+        valid = (
+            payload.get("baseRevision") == store["revision"]
+            and payload.get("diffHash") == proposal["diffHash"]
+            and payload.get("spatialBindingHash") == proposal["spatialBindingHash"]
+            and payload.get("explicitApproval") is True
+        )
+        if not valid:
+            fulfill(route, 403, {"error": "approval_binding_mismatch"})
+            return
+        store["approvalKey"] = payload.get("idempotencyKey")
+        fulfill(route, 200, {
+            "success": True,
+            "approvalToken": "phase6-approval-token",
+            "proposalId": proposal["proposalId"],
+            "diffHash": proposal["diffHash"],
+            "spatialBindingHash": proposal["spatialBindingHash"],
+        })
+
+    def apply_handler(route) -> None:
+        payload = copy.deepcopy(route.request.post_data_json or {})
+        store.setdefault("spatialEvents", []).append({"kind": "apply", "body": payload})
+        valid = (
+            payload.get("approvalToken") == "phase6-approval-token"
+            and payload.get("baseRevision") == store["revision"]
+            and payload.get("diffHash") == proposal["diffHash"]
+            and payload.get("spatialBindingHash") == proposal["spatialBindingHash"]
+            and payload.get("idempotencyKey") == store.get("approvalKey")
+        )
+        if not valid:
+            fulfill(route, 403, {"error": "approval_binding_mismatch"})
+            return
+        saved_map = copy.deepcopy(store["map"])
+        saved_map["canvasNodes"] = [
+            *saved_map.get("canvasNodes", []),
+            copy.deepcopy(proposal_node),
+        ]
+        saved_map["layoutVersion"] = 3
+        store["map"] = saved_map
+        store["revision"] = "phase6-rev-2"
+        fulfill(route, 200, {
+            "success": True,
+            "map": copy.deepcopy(saved_map),
+            "revision": store["revision"],
+            "findings": [],
+            "productStructure": copy.deepcopy(store["structure"]),
+            "structureRevision": "structure-rev-1",
+            "receipt": {
+                "receiptId": "phase6-receipt",
+                "proposalId": proposal["proposalId"],
+                "diffHash": proposal["diffHash"],
+                "spatialBindingHash": proposal["spatialBindingHash"],
+                "outcome": copy.deepcopy(proposal["summary"]),
+            },
+        })
+
+    page.route(
+        "**/api/builder/process-maps/racing-bike/default/spatial-proposals",
+        proposal_handler,
+    )
+    page.route(
+        "**/api/builder/process-map-proposals/pm-proposal-browser/approve",
+        approval_handler,
+    )
+    page.route("**/api/builder/process-map-apply", apply_handler)
+
+
+def _install_synthetic_semantic_proposal_routes(page, store: dict) -> None:
+    preview_nodes = [
+        {
+            "nodeId": "semantic-part-a-1",
+            "nodeKind": "product_occurrence",
+            "sourceOccurrenceId": "part-a-1",
+            "itemIdSnapshot": "RB-003",
+            "nameSnapshot": "Repeated Part A",
+            "position": {"x": 80, "y": 80},
+            "positionMode": "auto",
+            "portOrientation": "horizontal",
+            "portOrder": "input_first",
+        },
+        {
+            "nodeId": "semantic-part-a-2",
+            "nodeKind": "product_occurrence",
+            "sourceOccurrenceId": "part-a-2",
+            "itemIdSnapshot": "RB-003",
+            "nameSnapshot": "Repeated Part A",
+            "position": {"x": 80, "y": 310},
+            "positionMode": "auto",
+            "portOrientation": "horizontal",
+            "portOrder": "input_first",
+        },
+        {
+            "nodeId": "semantic-junction",
+            "nodeKind": "junction",
+            "junctionType": "parallel_and",
+            "position": {"x": 440, "y": 195},
+            "positionMode": "auto",
+            "portOrientation": "horizontal",
+            "portOrder": "input_first",
+        },
+        {
+            "nodeId": "semantic-stage",
+            "nodeKind": "process_step",
+            "processType": "operation",
+            "name": "Join Module A parts",
+            "position": {"x": 600, "y": 195},
+            "positionMode": "auto",
+            "portOrientation": "horizontal",
+            "portOrder": "input_first",
+        },
+        {
+            "nodeId": "semantic-module-a",
+            "nodeKind": "product_occurrence",
+            "sourceOccurrenceId": "module-a",
+            "nameSnapshot": "Module A",
+            "position": {"x": 1000, "y": 195},
+            "positionMode": "auto",
+            "portOrientation": "horizontal",
+            "portOrder": "input_first",
+        },
+    ]
+    preview_edges = [
+        {
+            "edgeId": "semantic-edge-a1",
+            "from": {"nodeId": "semantic-part-a-1", "port": "out"},
+            "to": {"nodeId": "semantic-junction", "port": "in"},
+            "kind": "precedence",
+        },
+        {
+            "edgeId": "semantic-edge-a2",
+            "from": {"nodeId": "semantic-part-a-2", "port": "out"},
+            "to": {"nodeId": "semantic-junction", "port": "in"},
+            "kind": "precedence",
+        },
+        {
+            "edgeId": "semantic-edge-junction",
+            "from": {"nodeId": "semantic-junction", "port": "out"},
+            "to": {"nodeId": "semantic-stage", "port": "in"},
+            "kind": "precedence",
+        },
+        {
+            "edgeId": "semantic-edge-output",
+            "from": {"nodeId": "semantic-stage", "port": "out"},
+            "to": {"nodeId": "semantic-module-a", "port": "in"},
+            "kind": "precedence",
+        },
+    ]
+    proposal = {
+        "success": True,
+        "proposalId": "pm-semantic-proposal-browser",
+        "action": "apply_operations",
+        "productId": "racing-bike",
+        "mapId": "default",
+        "baseRevision": store["revision"],
+        "diffHash": "d" * 64,
+        "managedProposalType": "semantic_process_map",
+        "semanticBindingHash": "c" * 64,
+        "preview": {
+            "nodes": preview_nodes,
+            "edges": preview_edges,
+            "groups": [],
+        },
+        "summary": {
+            "message": "Review the complete Module A process-map proposal.",
+            "requiredOccurrenceCount": 2,
+            "operationCount": 1,
+            "junctionCount": 1,
+            "connectionCount": 4,
+            "assumptionCount": 1,
+            "unresolvedCount": 0,
+        },
+        "createdIds": {
+            "nodeIds": [node["nodeId"] for node in preview_nodes],
+            "edgeIds": [edge["edgeId"] for edge in preview_edges],
+        },
+        "visualValidation": {
+            "schemaVersion": 1,
+            "status": "corrected",
+            "correctionCount": 2,
+            "labelCorrectionCount": 1,
+            "membershipCorrectionCount": 1,
+            "unresolvedItems": [],
+            "artifact": {
+                "artifactId": "visual-fixture",
+                "assetHash": "e" * 64,
+                "width": 1200,
+                "height": 900,
+                "url": (
+                    "/api/builder/process-map-proposals/"
+                    "pm-semantic-proposal-browser/visual-validation-image"
+                ),
+            },
+        },
+        "warnings": [],
+        "unresolvedItems": [],
+    }
+
+    def fulfill(route, status: int, payload: dict) -> None:
+        route.fulfill(
+            status=status,
+            content_type="application/json",
+            body=json.dumps(payload),
+        )
+
+    def proposal_handler(route) -> None:
+        payload = copy.deepcopy(route.request.post_data_json or {})
+        store.setdefault("semanticEvents", []).append(
+            {"kind": "proposal", "body": payload}
+        )
+        delay_seconds = float(store.get("semanticProposalDelaySeconds") or 0)
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+        response = copy.deepcopy(proposal)
+        response["baseRevision"] = store["revision"]
+        fulfill(route, 200, response)
+
+    def approval_handler(route) -> None:
+        payload = copy.deepcopy(route.request.post_data_json or {})
+        store.setdefault("semanticEvents", []).append(
+            {"kind": "approval", "body": payload}
+        )
+        valid = (
+            payload.get("baseRevision") == store["revision"]
+            and payload.get("diffHash") == proposal["diffHash"]
+            and payload.get("semanticBindingHash")
+                == proposal["semanticBindingHash"]
+            and payload.get("explicitApproval") is True
+        )
+        if not valid:
+            fulfill(route, 403, {"error": "approval_binding_mismatch"})
+            return
+        store["semanticApprovalKey"] = payload.get("idempotencyKey")
+        fulfill(
+            route,
+            200,
+            {
+                "success": True,
+                "approvalToken": "semantic-approval-token",
+                "proposalId": proposal["proposalId"],
+                "diffHash": proposal["diffHash"],
+                "semanticBindingHash": proposal["semanticBindingHash"],
+            },
+        )
+
+    def apply_handler(route) -> None:
+        payload = copy.deepcopy(route.request.post_data_json or {})
+        store.setdefault("semanticEvents", []).append(
+            {"kind": "apply", "body": payload}
+        )
+        valid = (
+            payload.get("approvalToken") == "semantic-approval-token"
+            and payload.get("baseRevision") == store["revision"]
+            and payload.get("diffHash") == proposal["diffHash"]
+            and payload.get("semanticBindingHash")
+                == proposal["semanticBindingHash"]
+            and payload.get("idempotencyKey")
+                == store.get("semanticApprovalKey")
+        )
+        if not valid:
+            fulfill(route, 403, {"error": "approval_binding_mismatch"})
+            return
+        store["map"]["layoutVersion"] = 3
+        store["map"]["canvasNodes"] = copy.deepcopy(preview_nodes)
+        store["map"]["canvasEdges"] = copy.deepcopy(preview_edges)
+        store["map"]["canvasGroups"] = []
+        previous_revision = store["revision"]
+        store["revision"] = "semantic-rev-2"
+        fulfill(
+            route,
+            200,
+            {
+                **_synthetic_loaded_map_payload(store, "default"),
+                "receipt": {
+                    "receiptId": "semantic-receipt",
+                    "proposalId": proposal["proposalId"],
+                    "action": "apply_operations",
+                    "productId": "racing-bike",
+                    "mapId": "default",
+                    "baseRevision": previous_revision,
+                    "revision": store["revision"],
+                    "diffHash": proposal["diffHash"],
+                    "semanticBindingHash": proposal["semanticBindingHash"],
+                    "createdIds": copy.deepcopy(proposal["createdIds"]),
+                    "warnings": [],
+                    "unresolvedItems": [],
+                    "outcome": copy.deepcopy(proposal["summary"]),
+                },
+            },
+        )
+
+    page.route(
+        "**/api/builder/process-maps/racing-bike/default/semantic-proposals",
+        proposal_handler,
+    )
+    page.route(
+        "**/api/builder/process-map-proposals/pm-semantic-proposal-browser/approve",
+        approval_handler,
+    )
+    page.route("**/api/builder/process-map-apply", apply_handler)
+
+
+def _install_synthetic_metadata_proposal_routes(page, store: dict) -> None:
+    node = copy.deepcopy(store["map"]["canvasNodes"][0])
+    edge = copy.deepcopy(store["map"]["canvasEdges"][0])
+    node["referenceIds"] = ["demo-machine", "demo-node-requirement"]
+    edge["label"] = "Install demo component"
+    edge["referenceIds"] = ["demo-route-requirement"]
+    catalog = [
+        {
+            "referenceId": "demo-machine",
+            "kind": "machine",
+            "name": "Wheel assembly fixture",
+            "knowledgeStatus": "illustrative",
+            "demoData": True,
+            "sourcePlanId": "front-wheel-brake-demo",
+            "sourceRevision": "A",
+            "sourcePlanHash": "a" * 64,
+            "sourceResourceId": "res-wheel-fixture",
+            "populatedBy": "Sage",
+            "populatedAt": "2026-07-22T12:00:00Z",
+        },
+        {
+            "referenceId": "demo-node-requirement",
+            "kind": "requirement",
+            "name": "Demo component: WI-FW-001 3.1",
+            "identifier": "WI-FW-001",
+            "revision": "A",
+            "clause": "3.1",
+            "details": "Illustrative card requirement.",
+            "knowledgeStatus": "illustrative",
+            "demoData": True,
+            "sourcePlanId": "front-wheel-brake-demo",
+            "sourceRevision": "A",
+            "sourcePlanHash": "a" * 64,
+            "sourceRequirementId": "part-demo:requirement:1",
+            "populatedBy": "Sage",
+            "populatedAt": "2026-07-22T12:00:00Z",
+        },
+        {
+            "referenceId": "demo-route-requirement",
+            "kind": "requirement",
+            "name": "Install demo component: WI-FW-001 3.2",
+            "identifier": "WI-FW-001",
+            "revision": "A",
+            "clause": "3.2",
+            "details": "Illustrative routing requirement.",
+            "knowledgeStatus": "illustrative",
+            "demoData": True,
+            "sourcePlanId": "front-wheel-brake-demo",
+            "sourceRevision": "A",
+            "sourcePlanHash": "a" * 64,
+            "sourceRequirementId": "route-demo:requirement:1",
+            "populatedBy": "Sage",
+            "populatedAt": "2026-07-22T12:00:00Z",
+        },
+    ]
+    proposal = {
+        "success": True,
+        "proposalId": "pm-metadata-proposal-browser",
+        "action": "apply_operations",
+        "productId": "racing-bike",
+        "mapId": "default",
+        "baseRevision": store["revision"],
+        "diffHash": "e" * 64,
+        "managedProposalType": "process_metadata",
+        "preview": {"nodes": [node], "edges": [edge], "groups": []},
+        "summary": {
+            "message": "Illustrative Front Wheel metadata proposal ready.",
+            "nodeRequirementSetsPopulated": 1,
+            "routeNamesPopulated": 1,
+            "routeRequirementSetsPopulated": 1,
+            "illustrativeRequirements": 2,
+            "unresolvedCount": 0,
+            "demoData": True,
+        },
+    }
+
+    def fulfill(route, status: int, payload: dict) -> None:
+        route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+
+    def proposal_handler(route) -> None:
+        payload = copy.deepcopy(route.request.post_data_json or {})
+        store.setdefault("metadataEvents", []).append({"kind": "proposal", "body": payload})
+        response = copy.deepcopy(proposal)
+        response["baseRevision"] = store["revision"]
+        fulfill(route, 200, response)
+
+    def approval_handler(route) -> None:
+        payload = copy.deepcopy(route.request.post_data_json or {})
+        store.setdefault("metadataEvents", []).append({"kind": "approval", "body": payload})
+        valid = (
+            payload.get("baseRevision") == store["revision"]
+            and payload.get("diffHash") == proposal["diffHash"]
+            and payload.get("explicitApproval") is True
+            and "spatialBindingHash" not in payload
+        )
+        if not valid:
+            fulfill(route, 403, {"error": "approval_binding_mismatch"})
+            return
+        store["metadataApprovalKey"] = payload.get("idempotencyKey")
+        fulfill(route, 200, {
+            "success": True,
+            "approvalToken": "metadata-approval-token",
+            "proposalId": proposal["proposalId"],
+            "diffHash": proposal["diffHash"],
+        })
+
+    def apply_handler(route) -> None:
+        payload = copy.deepcopy(route.request.post_data_json or {})
+        store.setdefault("metadataEvents", []).append({"kind": "apply", "body": payload})
+        valid = (
+            payload.get("approvalToken") == "metadata-approval-token"
+            and payload.get("baseRevision") == store["revision"]
+            and payload.get("diffHash") == proposal["diffHash"]
+            and payload.get("idempotencyKey") == store.get("metadataApprovalKey")
+            and "spatialBindingHash" not in payload
+        )
+        if not valid:
+            fulfill(route, 403, {"error": "approval_binding_mismatch"})
+            return
+        saved_map = copy.deepcopy(store["map"])
+        saved_map["canvasNodes"][0] = node
+        saved_map["canvasEdges"][0] = edge
+        saved_map["referenceCatalog"] = catalog
+        saved_map["processPlanImports"] = [{
+            "sourcePlanId": "front-wheel-brake-demo",
+            "sourceRevision": "A",
+            "sourcePlanHash": "a" * 64,
+            "demoData": True,
+            "disclaimer": "Illustrative demo data only.",
+            "populatedBy": "Sage",
+            "populatedAt": "2026-07-22T12:00:00Z",
+        }]
+        store["map"] = saved_map
+        store["revision"] = "metadata-rev-2"
+        fulfill(route, 200, {
+            "success": True,
+            "map": copy.deepcopy(saved_map),
+            "revision": store["revision"],
+            "findings": [],
+            "productStructure": copy.deepcopy(store["structure"]),
+            "structureRevision": "structure-rev-1",
+            "receipt": {
+                "receiptId": "metadata-receipt",
+                "proposalId": proposal["proposalId"],
+                "diffHash": proposal["diffHash"],
+                "outcome": copy.deepcopy(proposal["summary"]),
+            },
+        })
+
+    page.route(
+        "**/api/builder/process-maps/racing-bike/default/demo-metadata-proposals",
+        proposal_handler,
+    )
+    page.route(
+        "**/api/builder/process-map-proposals/pm-metadata-proposal-browser/approve",
+        approval_handler,
+    )
+    page.route("**/api/builder/process-map-apply", apply_handler)
+
+
+def _install_synthetic_metadata_chat_stream(page, captured: list[dict]) -> None:
+    page.route(
+        "**/api/agent/chat/streaming-status",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({
+                "enabled": True,
+                "agents": ["sage"],
+                "high_risk_modes": False,
+            }),
+        ),
+    )
+
+    def handler(route) -> None:
+        payload = copy.deepcopy(route.request.post_data_json or {})
+        captured.append(payload)
+        response_id = "stream-metadata-smoke"
+        events = [
+            {
+                "v": 1,
+                "event": "response_started",
+                "response_id": response_id,
+                "seq": 0,
+                "ts": 1,
+                "message_id": "assistant-metadata-smoke",
+                "agent_type": "deviation-analyst",
+            },
+            {
+                "v": 1,
+                "event": "action_bundle_validated",
+                "response_id": response_id,
+                "seq": 1,
+                "ts": 2,
+                "source": "native",
+            },
+            {
+                "v": 1,
+                "event": "response_completed",
+                "response_id": response_id,
+                "seq": 2,
+                "ts": 3,
+                "final": {
+                    "response": "",
+                    "tool_calls": [{
+                        "name": "propose_process_map_demo_metadata",
+                        "args": {
+                            "scope_occurrence_id": "module-a",
+                            "fill_mode": "fill_missing",
+                        },
+                    }],
+                    "tool_call_count": 1,
+                    "tool_source": "native",
+                },
+                "usage": {},
+                "timings": {},
+            },
+        ]
+        body = "".join(
+            "data: " + json.dumps(event, separators=(",", ":")) + "\n\n"
+            for event in events
+        )
+        route.fulfill(
+            status=200,
+            content_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
+            body=body,
+        )
+
+    page.route("**/api/agent/chat/v2/stream", handler)
 
 
 def _wait_for_process_flow_entry(page) -> None:
@@ -601,6 +1331,93 @@ def _drag_connection(page, from_id: str, to_id: str) -> None:
     page.mouse.down()
     page.mouse.move(input_box["x"] + input_box["width"] / 2, input_box["y"] + input_box["height"] / 2, steps=8)
     page.mouse.up()
+
+
+def _sketch_connection(page, from_id: str, to_id: str) -> list[dict]:
+    page.evaluate("window.__processMapFlow.editor.setCanvasInteractionMode('select')")
+    output_box = page.locator(
+        f".pm-node[data-node-id='{from_id}'] .pm-port-out"
+    ).bounding_box()
+    input_box = page.locator(
+        f".pm-node[data-node-id='{to_id}'] .pm-port-in"
+    ).bounding_box()
+    viewport_box = page.locator(".pm-viewport").bounding_box()
+    assert output_box is not None and input_box is not None and viewport_box is not None
+    start = {
+        "x": output_box["x"] + output_box["width"] / 2,
+        "y": output_box["y"] + output_box["height"] / 2,
+    }
+    end = {
+        "x": input_box["x"] + input_box["width"] / 2,
+        "y": input_box["y"] + input_box["height"] / 2,
+    }
+    center_y = (start["y"] + end["y"]) / 2
+    preferred_sign = 1 if center_y < viewport_box["y"] + viewport_box["height"] / 2 else -1
+    screen_points = None
+    for signed_offset in (
+        preferred_sign * 90,
+        preferred_sign * 150,
+        preferred_sign * 220,
+        preferred_sign * -90,
+        preferred_sign * -150,
+    ):
+        route_y = max(
+            viewport_box["y"] + 50,
+            min(viewport_box["y"] + viewport_box["height"] - 50, center_y + signed_offset),
+        )
+        candidates = [
+            {"x": start["x"] + (end["x"] - start["x"]) * 0.34, "y": route_y},
+            {
+                "x": start["x"] + (end["x"] - start["x"]) * 0.68,
+                "y": route_y + (28 if signed_offset > 0 else -28),
+            },
+        ]
+        unobstructed = page.evaluate(
+            """points => points.every(point => {
+                const target = document.elementFromPoint(point.x, point.y);
+                return target && !target.closest(
+                    '.pm-node, .pm-junction, button, input, select, textarea, '
+                    + '.pm-group-header, .pm-group-resize'
+                );
+            })""",
+            candidates,
+        )
+        if unobstructed:
+            screen_points = candidates
+            break
+    assert screen_points is not None
+    page.locator(
+        f".pm-node[data-node-id='{from_id}'] .pm-port-out"
+    ).dispatch_event(
+        "pointerdown",
+        {"button": 0, "clientX": start["x"], "clientY": start["y"], "pointerId": 501},
+    )
+    for index, point in enumerate(screen_points):
+        page.locator(".pm-viewport").dispatch_event(
+            "pointermove",
+            {
+                "button": 0,
+                "clientX": point["x"],
+                "clientY": point["y"],
+                "pointerId": 502 + index,
+            },
+        )
+        page.locator(".pm-viewport").dispatch_event(
+            "pointerdown",
+            {
+                "button": 0,
+                "clientX": point["x"],
+                "clientY": point["y"],
+                "pointerId": 502 + index,
+            },
+        )
+    page.locator(
+        f".pm-node[data-node-id='{to_id}'] .pm-port-in"
+    ).dispatch_event(
+        "pointerdown",
+        {"button": 0, "clientX": end["x"], "clientY": end["y"], "pointerId": 510},
+    )
+    return screen_points
 
 
 def _edge_screen_point(page, edge_id: str, fraction: float = 0.5) -> dict:
@@ -776,7 +1593,8 @@ def run() -> int:
             "live_catalog_and_saved_placements_remain_separate",
             live_payload["map"]["schemaVersion"] == 3
             and len(live_payload["productStructure"]["occurrences"]) > 0
-            and live_page.locator(".pm-node").count() == len(live_payload["map"]["canvasNodes"])
+            and live_page.locator(".pm-node, .pm-junction").count()
+            == len(live_payload["map"]["canvasNodes"])
             and (
                 live_page.locator(".pm-empty-state:visible").count() == 1
             ) == (len(live_payload["map"]["canvasNodes"]) == 0),
@@ -820,6 +1638,40 @@ def run() -> int:
             ),
             viewport_surfaces,
         )
+        spatial_runtime = live_page.evaluate(
+            """async () => {
+                const runtime = window.InspectorProProcessMapSpatial;
+                if (!runtime) return { available: false };
+                const contract = await runtime.loadSpatialContract();
+                const transform = { x: 88, y: -40, scale: 0.28 };
+                const source = { x: 410.5, y: -23.25 };
+                const viewport = runtime.worldToViewport(source, transform);
+                const restored = runtime.viewportToWorld(viewport, transform);
+                return {
+                    available: true,
+                    contractId: runtime.CONTRACT_ID,
+                    envelopeMatchesEditor:
+                        contract.geometry.nodeEnvelopes.default.width
+                            === window.InspectorProProcessMap.NODE_WIDTH
+                        && contract.geometry.nodeEnvelopes.default.height
+                            === window.InspectorProProcessMap.NODE_HEIGHT
+                        && contract.geometry.junction.hitDiameter
+                            === window.InspectorProProcessMap.JUNCTION_HIT_SIZE,
+                    delta: Math.max(
+                        Math.abs(restored.x - source.x),
+                        Math.abs(restored.y - source.y)
+                    ),
+                };
+            }"""
+        )
+        record(
+            "shared_spatial_runtime_is_loaded_and_coordinate_stable",
+            spatial_runtime.get("available") is True
+            and spatial_runtime.get("contractId") == "process-map-spatial-contract-v1"
+            and spatial_runtime.get("envelopeMatchesEditor") is True
+            and spatial_runtime.get("delta", 1) < 1e-9,
+            spatial_runtime,
+        )
         live_context.close()
 
         fallback_context = browser.new_context(viewport={"width": 1400, "height": 900})
@@ -859,6 +1711,38 @@ def run() -> int:
         _install_synthetic_map_management_routes(page, store)
         _install_synthetic_suggestion_route(page, store)
         _install_synthetic_agent_route(page, store, analysis_requests)
+        page.route(
+            "**/api/training/process-map-spatial-placement-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": True}),
+            ),
+        )
+        page.route(
+            "**/api/training/process-map-spatial-analysis-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": True}),
+            ),
+        )
+        page.route(
+            "**/api/training/process-map-auto-routing-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": False}),
+            ),
+        )
+        page.route(
+            "**/api/training/process-map-agent-layout-write-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": False}),
+            ),
+        )
         page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
         _open_process_flow(page)
 
@@ -1013,7 +1897,80 @@ def run() -> int:
             and summary.get_attribute("data-required-remaining") == "2"
             and page.get_by_role("button", name="Previous required part").count() == 1
             and page.get_by_role("button", name="Next required part").count() == 1
+            and page.get_by_role(
+                "button", name="Preview all remaining required parts in an organized layout"
+            ).count() == 1
             and page.get_by_role("button", name="Clear required-part highlights").count() == 1,
+        )
+        map_before_batch = page.evaluate(
+            "JSON.stringify(window.__processMapFlow.editor.processMap)"
+        )
+        page.get_by_role(
+            "button", name="Preview all remaining required parts in an organized layout"
+        ).click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.batchPlacementPlan"
+            " && document.querySelectorAll('.pm-batch-placement-ghost').length === 2"
+        )
+        batch_preview = page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const entries = editor.batchPlacementPlan.entries;
+                return {
+                    nodeCount: editor.processMap.canvasNodes.length,
+                    dirty: editor.dirty,
+                    historyDepth: editor.history.undoStack.length,
+                    positions: entries.map(entry => ({
+                        id: entry.sourceOccurrenceId,
+                        x: entry.candidate.position.x,
+                        y: entry.candidate.position.y,
+                    })),
+                };
+            }"""
+        )
+        first_preview, second_preview = batch_preview["positions"]
+        previews_overlap = not (
+            first_preview["x"] + 270 < second_preview["x"]
+            or second_preview["x"] + 270 < first_preview["x"]
+            or first_preview["y"] + 146 < second_preview["y"]
+            or second_preview["y"] + 146 < first_preview["y"]
+        )
+        record(
+            "phase5_required_parts_batch_is_preview_only_and_overlap_free",
+            batch_preview["nodeCount"] == 0
+            and batch_preview["dirty"] is False
+            and batch_preview["historyDepth"] == 0
+            and not previews_overlap
+            and page.evaluate("JSON.stringify(window.__processMapFlow.editor.processMap)")
+                == map_before_batch,
+            batch_preview,
+        )
+        page.screenshot(
+            path=str(OUT_DIR / "process_flow_required_parts_batch_preview.png"),
+            full_page=False,
+        )
+        page.get_by_role(
+            "button", name="Add every previewed required part as one undoable change"
+        ).click()
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 2"
+            " && !window.__processMapFlow.editor.batchPlacementPlan"
+        )
+        record(
+            "phase5_required_parts_batch_commits_atomically_in_one_history_entry",
+            page.evaluate("window.__processMapFlow.editor.history.undoStack.length") == 1
+            and page.locator(".pm-batch-placement-ghost").count() == 0
+            and page.locator(".pm-required-summary").get_attribute("data-required-placed") == "2",
+        )
+        page.evaluate("window.__processMapFlow.editor.undo()")
+        page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 0"
+        )
+        record(
+            "phase5_one_undo_restores_the_exact_pre_batch_map",
+            page.evaluate("JSON.stringify(window.__processMapFlow.editor.processMap)")
+                == map_before_batch
+            and page.locator(".pm-required-summary").get_attribute("data-required-placed") == "0",
         )
         page.screenshot(
             path=str(OUT_DIR / "process_flow_required_parts.png"),
@@ -1133,17 +2090,82 @@ def run() -> int:
             {"events": store["events"], "requests": len(analysis_requests)},
         )
         record(
-            "analyze_sends_only_saved_identity_not_browser_graph",
-            process_map_reference
-            == {
+            "analyze_sends_identity_and_whitelisted_live_state_not_browser_graph",
+            {
+                key: process_map_reference.get(key)
+                for key in ("productId", "mapId", "revision")
+            } == {
                 "productId": "racing-bike",
                 "mapId": "default",
                 "revision": "rev-2",
             }
+            and set(process_map_reference) == {
+                "productId", "mapId", "revision", "state", "receipts"
+            }
+            and set(process_map_reference.get("state", {})) == {
+                "dirty", "conflict", "editable", "selection", "agentFocus",
+                "activeProposal"
+            }
+            and process_map_reference["state"]["dirty"] is False
+            and process_map_reference["state"]["conflict"] is False
+            and process_map_reference["state"]["editable"] is True
+            and process_map_reference["state"]["agentFocus"] is None
+            and process_map_reference["state"]["activeProposal"] is None
+            and process_map_reference.get("receipts") == []
             and analysis_attachments.get("session", {}).get("active_mode") == "training"
             and "process_map_graph" not in json.dumps(analysis_payload)
             and "process_map_digest" not in json.dumps(analysis_payload),
             process_map_reference,
+        )
+        page.evaluate(
+            """() => {
+                if (window._agentPanel && window._agentPanel.classList.contains('open')
+                    && window._toggleAgentPanel) {
+                    window._toggleAgentPanel();
+                }
+            }"""
+        )
+        page.wait_for_timeout(400)
+
+        page.get_by_role(
+            "button", name="Ask Sage to analyze card and wire layout"
+        ).click()
+        deadline = time.time() + 15
+        while len(analysis_requests) < 2 and time.time() < deadline:
+            page.wait_for_timeout(50)
+        layout_payload = analysis_requests[-1] if len(analysis_requests) >= 2 else {}
+        layout_reference = (
+            layout_payload.get("inspection_context", {})
+            .get("attachments", {})
+            .get("process_map", {})
+        )
+        record(
+            "layout_analysis_is_one_read_only_saved_revision_turn",
+            len(analysis_requests) == 2
+            and store["putCount"] == 1
+            and {
+                key: layout_reference.get(key)
+                for key in ("productId", "mapId", "revision")
+            } == {
+                "productId": "racing-bike",
+                "mapId": "default",
+                "revision": "rev-2",
+            }
+            and set(layout_reference) == {
+                "productId", "mapId", "revision", "state", "receipts"
+            }
+            and layout_reference.get("state", {}).get("dirty") is False
+            and layout_reference.get("state", {}).get("conflict") is False
+            and layout_reference.get("receipts") == []
+            and "Analyze only the spatial layout" in layout_payload.get("message", "")
+            and "Do not change the map" in layout_payload.get("message", "")
+            and "process_map_graph" not in json.dumps(layout_payload)
+            and "spatial_scene" not in json.dumps(layout_payload),
+            {
+                "requests": len(analysis_requests),
+                "putCount": store["putCount"],
+                "reference": layout_reference,
+            },
         )
         page.evaluate(
             """() => {
@@ -2049,7 +3071,7 @@ def run() -> int:
                 "button", name="Delete selected card, connection, or group"
             ).is_disabled()
             and page.locator(
-                "[data-process-map-command='processSelectGroup'] svg"
+                "[data-process-map-command='processSelectGroup'] img.ribbon-process-icon"
             ).count() == 1,
         )
         page.get_by_role(
@@ -2597,7 +3619,7 @@ def run() -> int:
                 for node in store["map"]["canvasNodes"]
             )
             and len(store["map"].get("referenceCatalog", [])) == 2
-            and store["map"].get("layoutVersion") == 2
+            and store["map"].get("layoutVersion") == 3
             and len(store["map"].get("canvasGroups", [])) == 1
             and store["map"]["canvasGroups"][0].get("label") == "Final inspection cell"
             and first_id in store["map"]["canvasGroups"][0].get("memberNodeIds", [])
@@ -2815,7 +3837,7 @@ def run() -> int:
         page.wait_for_selector("#trainingProcessMapRibbonHost [data-process-map-command='processSave']")
         expected_process_commands = {
             "processUndo", "processRedo", "processDelete", "processStep",
-            "processGroup", "processSuggestions", "processAnalyze", "processZoomOut",
+            "processGroup", "processCleanUp", "processJunction", "processSuggestions", "processAnalyze", "processAnalyzeLayout", "processZoomOut",
             "processZoomIn", "processFit", "3dmodel", "processSave", "processClear",
             "processSelectGroup",
         }
@@ -2833,6 +3855,358 @@ def run() -> int:
             and page.locator("[data-process-map-command='processBack']:visible").count() == 0
             and page.locator("[data-process-map-command='processReload']:visible").count() == 0,
             sorted(actual_process_commands),
+        )
+
+        premium_icon_state = page.evaluate(
+            """() => {
+                const icons = Array.from(document.querySelectorAll(
+                    '#trainingProcessMapRibbonHost .ribbon-process-icon'
+                ));
+                return {
+                    count: icons.length,
+                    loaded: icons.every(icon => icon.complete && icon.naturalWidth > 0),
+                    sources: icons.map(icon => icon.getAttribute('src')),
+                };
+            }"""
+        )
+        record(
+            "process_map_ribbon_uses_loaded_premium_svg_family",
+            premium_icon_state["count"] >= 16
+            and premium_icon_state["loaded"]
+            and all(
+                source.startswith("/static/assets/process-map-ribbon-icons/svg/")
+                and source.endswith(".svg")
+                for source in premium_icon_state["sources"]
+            ),
+            premium_icon_state,
+        )
+
+        baseline_logic_fingerprint = page.evaluate(
+            "window.InspectorProProcessMap.mapFingerprint(window.__processMapFlow.editor.processMap)"
+        )
+        junction_toggle = page.locator(".pm-ribbon-split-toggle")
+        junction_toggle.click()
+        junction_choices = page.locator(".pm-junction-menu-item").evaluate_all(
+            "items => items.map(item => item.dataset.junctionType)"
+        )
+        record(
+            "add_junction_split_menu_exposes_stage_parallel_merge_and_split",
+            junction_choices == ["operation_stage", "parallel_and", "merge", "split"],
+            junction_choices,
+        )
+        page.locator(".pm-junction-menu-item[data-junction-type='operation_stage']").click()
+        page.wait_for_function(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const node = editor.processMap.canvasNodes.find(
+                    item => item.nodeId === editor.selectedNodeId
+                );
+                return node && node.nodeKind === 'process_step'
+                    && node.name === 'New Operation / Stage';
+            }"""
+        )
+        stage_id = page.evaluate("window.__processMapFlow.editor.selectedNodeId")
+
+        toolbar_layout = page.locator(".pm-card-toolbar").evaluate(
+            """toolbar => {
+                const controls = Array.from(toolbar.children).filter(element =>
+                    !element.hidden
+                    && element.matches('button, select')
+                );
+                const rectangles = controls.map(element => {
+                    const rect = element.getBoundingClientRect();
+                    return {
+                        command: element.dataset.cardCommand
+                            || element.dataset.contextCommand || element.textContent.trim(),
+                        left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+                    };
+                });
+                const overlaps = [];
+                for (let first = 0; first < rectangles.length; first += 1) {
+                    for (let second = first + 1; second < rectangles.length; second += 1) {
+                        const a = rectangles[first];
+                        const b = rectangles[second];
+                        if (a.left < b.right && a.right > b.left
+                            && a.top < b.bottom && a.bottom > b.top) {
+                            overlaps.push([a.command, b.command]);
+                        }
+                    }
+                }
+                return { rectangles, overlaps };
+            }"""
+        )
+        record(
+            "stage_context_toolbar_commands_have_distinct_hit_areas",
+            toolbar_layout["overlaps"] == []
+            and len(toolbar_layout["rectangles"]) >= 7,
+            toolbar_layout,
+        )
+
+        page.get_by_role("button", name="Edit card label").click()
+        page.wait_for_selector(".pm-card-toolbar-editor[data-editor-mode='label']")
+        editor_containment = page.locator(".pm-card-toolbar").evaluate(
+            """toolbar => {
+                const outer = toolbar.getBoundingClientRect();
+                const editor = toolbar.querySelector('.pm-card-toolbar-editor').getBoundingClientRect();
+                const actions = Array.from(toolbar.querySelectorAll(
+                    '.pm-card-toolbar-editor-actions button'
+                )).map(button => {
+                    const rect = button.getBoundingClientRect();
+                    return {
+                        label: button.textContent.trim(),
+                        left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+                    };
+                });
+                const contained = [editor].concat(actions).every(rect =>
+                    rect.left >= outer.left - 0.5 && rect.right <= outer.right + 0.5
+                    && rect.top >= outer.top - 0.5 && rect.bottom <= outer.bottom + 0.5
+                );
+                return {
+                    contained,
+                    outer: { left: outer.left, top: outer.top, right: outer.right, bottom: outer.bottom },
+                    editor: { left: editor.left, top: editor.top, right: editor.right, bottom: editor.bottom },
+                    actions,
+                };
+            }"""
+        )
+        record(
+            "inline_label_editor_and_actions_stay_inside_floating_surface",
+            editor_containment["contained"]
+            and [item["label"] for item in editor_containment["actions"]] == ["Cancel", "Save"],
+            editor_containment,
+        )
+        page.get_by_role("button", name="Cancel editing").click()
+
+        stage_port_layout = page.evaluate(
+            """({ stageId, upperId, lowerId }) => {
+                const editor = window.__processMapFlow.editor;
+                window.__pmStagePortOriginalMap = window.InspectorProProcessMap.cloneMap(
+                    editor.processMap
+                );
+                window.__pmStagePortOriginalTransform = { ...editor.transform };
+                const positions = {
+                    [upperId]: { x: 80, y: 90 },
+                    [lowerId]: { x: 80, y: 330 },
+                    [stageId]: { x: 540, y: 210 },
+                };
+                let next = window.InspectorProProcessMap.cloneMap(editor.processMap);
+                next.canvasNodes = next.canvasNodes.filter(node => positions[node.nodeId])
+                    .map(node => ({
+                        ...node,
+                        position: positions[node.nodeId],
+                        portOrientation: 'horizontal',
+                        portOrder: 'input_first',
+                    }));
+                next.canvasEdges = [];
+                next.canvasGroups = [];
+                next = window.InspectorProProcessMap.addEdge(next, {
+                    edgeId: 'smoke-upper-stage',
+                    logicalConnectionId: 'smoke-upper-stage',
+                    from: { nodeId: upperId, port: 'out' },
+                    to: { nodeId: stageId, port: 'in' },
+                    kind: 'precedence',
+                });
+                next = window.InspectorProProcessMap.addEdge(next, {
+                    edgeId: 'smoke-lower-stage',
+                    logicalConnectionId: 'smoke-lower-stage',
+                    from: { nodeId: lowerId, port: 'out' },
+                    to: { nodeId: stageId, port: 'in' },
+                    kind: 'precedence',
+                });
+                editor.processMap = next;
+                editor.renderGraph({ fit: false });
+                editor.fit();
+                const ports = Array.from(document.querySelectorAll(
+                    `.pm-node[data-node-id="${stageId}"] .pm-port-in`
+                )).map(port => {
+                    const rect = port.getBoundingClientRect();
+                    return {
+                        edgeId: port.dataset.edgeId,
+                        x: rect.left + rect.width / 2,
+                        y: rect.top + rect.height / 2,
+                    };
+                }).sort((left, right) => left.y - right.y || left.x - right.x);
+                const geometries = ['smoke-upper-stage', 'smoke-lower-stage'].map(edgeId => {
+                    const geometry = editor.edgeGeometries[edgeId];
+                    return {
+                        edgeId,
+                        endpoint: geometry && geometry.points[geometry.points.length - 1],
+                        slot: editor.inputPortLayout.byEdge[edgeId],
+                    };
+                });
+                return { ports, geometries };
+            }""",
+            {
+                "stageId": stage_id,
+                "upperId": first_id,
+                "lowerId": part_b_id,
+            },
+        )
+        record(
+            "operation_stage_renders_one_distinct_anchor_per_incoming_wire",
+            len(stage_port_layout["ports"]) == 2
+            and stage_port_layout["ports"][0]["edgeId"] != stage_port_layout["ports"][1]["edgeId"]
+            and abs(stage_port_layout["ports"][0]["y"] - stage_port_layout["ports"][1]["y"]) > 12
+            and {
+                item["slot"]["index"] for item in stage_port_layout["geometries"]
+            } == {0, 1}
+            and len({item["endpoint"]["y"] for item in stage_port_layout["geometries"]}) == 2,
+            stage_port_layout,
+        )
+        page.screenshot(
+            path=str(OUT_DIR / "process_flow_stage_multi_input_toolbar_fixed.png"),
+            full_page=False,
+        )
+        page.evaluate(
+            """stageId => {
+                const editor = window.__processMapFlow.editor;
+                editor.processMap = window.__pmStagePortOriginalMap;
+                editor.transform = window.__pmStagePortOriginalTransform;
+                delete window.__pmStagePortOriginalMap;
+                delete window.__pmStagePortOriginalTransform;
+                editor.renderGraph({ fit: false });
+                editor.select(stageId);
+            }""",
+            stage_id,
+        )
+        page.get_by_role("button", name="Edit manufacturing details for this process step").click()
+        page.get_by_label("Description", exact=True).fill(
+            "Install both lower panels before the upper fairing."
+        )
+        page.get_by_label("Duration").fill("12 min")
+        page.get_by_label("Torque / requirements").fill("10 N m")
+        page.get_by_label("Inspection requirements").fill("Verify flushness.")
+        page.get_by_role("button", name="Save manufacturing details").click()
+        page.wait_for_function(
+            """nodeId => {
+                const node = window.__processMapFlow.editor.processMap.canvasNodes.find(
+                    item => item.nodeId === nodeId
+                );
+                return node && node.properties && node.properties.duration === '12 min'
+                    && node.properties.torqueRequirements === '10 N m';
+            }""",
+            arg=stage_id,
+        )
+        stage_properties = page.evaluate(
+            """nodeId => window.__processMapFlow.editor.processMap.canvasNodes.find(
+                item => item.nodeId === nodeId
+            ).properties""",
+            stage_id,
+        )
+        record(
+            "operation_stage_edits_manufacturing_details_on_native_node",
+            stage_properties == {
+                "description": "Install both lower panels before the upper fairing.",
+                "duration": "12 min",
+                "torqueRequirements": "10 N m",
+                "inspectionRequirements": "Verify flushness.",
+            },
+            stage_properties,
+        )
+        page.locator(".pm-viewport").focus()
+        page.keyboard.press("Control+c")
+        before_paste_count = page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length"
+        )
+        page.keyboard.press("Control+v")
+        page.wait_for_function(
+            "count => window.__processMapFlow.editor.processMap.canvasNodes.length === count + 1",
+            arg=before_paste_count,
+        )
+        pasted_stage_state = page.evaluate(
+            """originalId => {
+                const editor = window.__processMapFlow.editor;
+                const selected = Array.from(editor.selectedNodeIds);
+                const copy = editor.processMap.canvasNodes.find(
+                    node => selected.includes(node.nodeId) && node.nodeId !== originalId
+                );
+                return copy && {
+                    nodeKind: copy.nodeKind,
+                    processType: copy.processType,
+                    properties: copy.properties,
+                };
+            }""",
+            stage_id,
+        )
+        record(
+            "operation_stage_copy_paste_preserves_authored_details",
+            pasted_stage_state is not None
+            and pasted_stage_state["nodeKind"] == "process_step"
+            and pasted_stage_state["processType"] == "operation"
+            and pasted_stage_state["properties"] == stage_properties,
+            pasted_stage_state,
+        )
+        page.screenshot(
+            path=str(OUT_DIR / "process_flow_operation_stage_premium_icons.png"),
+            full_page=False,
+        )
+        for _ in range(3):
+            page.evaluate("window.__processMapFlow.editor.undo()")
+            page.wait_for_timeout(30)
+
+        semantic_results = {}
+        for junction_type in ("parallel_and", "merge", "split"):
+            junction_toggle.click()
+            page.locator(
+                f".pm-junction-menu-item[data-junction-type='{junction_type}']"
+            ).click()
+            page.wait_for_function(
+                """expected => {
+                    const editor = window.__processMapFlow.editor;
+                    const node = editor.processMap.canvasNodes.find(
+                        item => item.nodeId === editor.selectedNodeId
+                    );
+                    return node && node.nodeKind === 'junction'
+                        && node.junctionType === expected;
+                }""",
+                arg=junction_type,
+            )
+            semantic_results[junction_type] = page.evaluate(
+                """() => {
+                    const editor = window.__processMapFlow.editor;
+                    const node = editor.processMap.canvasNodes.find(
+                        item => item.nodeId === editor.selectedNodeId
+                    );
+                    const element = document.querySelector(
+                        `.pm-junction[data-node-id="${node.nodeId}"]`
+                    );
+                    return {
+                        type: node.junctionType,
+                        renderedClass: element.className,
+                        ariaLabel: element.getAttribute('aria-label'),
+                    };
+                }"""
+            )
+            page.evaluate("window.__processMapFlow.editor.undo()")
+            page.wait_for_timeout(30)
+        record(
+            "semantic_junction_choices_create_distinct_native_nodes",
+            all(
+                result["type"] == junction_type
+                and f"pm-junction-type-{junction_type}" in result["renderedClass"]
+                and result["ariaLabel"]
+                for junction_type, result in semantic_results.items()
+            ),
+            semantic_results,
+        )
+
+        page.get_by_role("button", name="Add the last-used operation stage or junction type").click()
+        page.wait_for_function(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const node = editor.processMap.canvasNodes.find(
+                    item => item.nodeId === editor.selectedNodeId
+                );
+                return node && node.junctionType === 'split';
+            }"""
+        )
+        page.evaluate("window.__processMapFlow.editor.undo()")
+        page.wait_for_timeout(30)
+        record(
+            "add_junction_main_action_reuses_last_selected_type_and_undo_restores_map",
+            page.evaluate(
+                "window.InspectorProProcessMap.mapFingerprint(window.__processMapFlow.editor.processMap)"
+            ) == baseline_logic_fingerprint,
         )
         page.screenshot(path=str(OUT_DIR / "process_flow_source_tree_authored.png"), full_page=False)
 
@@ -3095,7 +4469,9 @@ def run() -> int:
             "clear_map_command_empties_viewport_without_touching_source_tree",
             clear_initially_disabled
             and clear_command.is_disabled()
-            and page.locator("[data-process-map-command='processClear'] svg").count() == 1
+            and page.locator(
+                "[data-process-map-command='processClear'] img.ribbon-process-icon"
+            ).count() == 1
             and page.locator(".pm-empty-state:visible").count() == 1
             and page.evaluate(
                 "window.__processMapFlow.editor.productStructure.occurrences.length"
@@ -3312,6 +4688,2958 @@ def run() -> int:
             ) == "marquee-a,marquee-b,marquee-c",
         )
         context.close()
+
+        # -- Multi-occurrence source-tree selection and atomic drag/drop --
+
+        multi_store = {
+            "map": _synthetic_process_map(),
+            "structure": _synthetic_structure(),
+            "revision": "rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+        }
+        multi_context = browser.new_context(viewport={"width": 1600, "height": 1000})
+        multi_page = multi_context.new_page()
+        _install_cached_three_route(multi_page)
+        multi_page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
+        _install_synthetic_process_map_route(multi_page, multi_store)
+        _install_synthetic_map_management_routes(multi_page, multi_store)
+        _install_synthetic_suggestion_route(multi_page, multi_store)
+        def multi_status_handler(enabled: bool):
+            def handler(route) -> None:
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"success": True, "enabled": enabled}),
+                )
+
+            return handler
+
+        for status_route, enabled in (
+            ("process-map-spatial-placement-status", True),
+            ("process-map-spatial-analysis-status", True),
+            ("process-map-auto-routing-status", False),
+            ("process-map-agent-layout-write-status", False),
+        ):
+            multi_page.route(
+                f"**/api/training/{status_route}",
+                multi_status_handler(enabled),
+            )
+        multi_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(multi_page)
+        _expand(multi_page, "module-a")
+        _expand(multi_page, "module-b")
+
+        part_a_1_row = multi_page.locator(
+            ".pm-tree-row[data-occurrence-id='part-a-1']"
+        )
+        part_a_2_row = multi_page.locator(
+            ".pm-tree-row[data-occurrence-id='part-a-2']"
+        )
+        part_b_row = multi_page.locator(
+            ".pm-tree-row[data-occurrence-id='part-b']"
+        )
+        part_a_1_row.click(modifiers=["Control"])
+        part_a_2_row.click(modifiers=["Control"])
+        part_b_row.click(modifiers=["Control"])
+        selected_before_toggle = multi_page.evaluate(
+            "Array.from(window.__processMapFlow.editor.selectedOccurrenceIds).sort()"
+        )
+        part_a_2_row.click(modifiers=["Control"])
+        selected_after_toggle = multi_page.evaluate(
+            "Array.from(window.__processMapFlow.editor.selectedOccurrenceIds).sort()"
+        )
+        part_a_2_row.click(modifiers=["Control"])
+        part_a_1_row.click()
+        selected_after_plain_click = multi_page.evaluate(
+            "Array.from(window.__processMapFlow.editor.selectedOccurrenceIds).sort()"
+        )
+        part_a_2_row.click(modifiers=["Control"])
+        part_b_row.click(modifiers=["Control"])
+        record(
+            "ctrl_click_toggles_tree_occurrences_and_plain_click_resets_selection",
+            selected_before_toggle == ["part-a-1", "part-a-2", "part-b"]
+            and selected_after_toggle == ["part-a-1", "part-b"]
+            and selected_after_plain_click == ["part-a-1"]
+            and multi_page.locator(".pm-tree-row.selected").count() == 3
+            and multi_page.locator(".pm-structure-tree").get_attribute(
+                "aria-multiselectable"
+            ) == "true",
+            {
+                "beforeToggle": selected_before_toggle,
+                "afterToggle": selected_after_toggle,
+                "afterPlainClick": selected_after_plain_click,
+            },
+        )
+
+        multi_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const grouped = InspectorProProcessMap.addGroup(editor.processMap, {
+                    groupId: 'multi-drop-group',
+                    label: 'Multi-drop group',
+                    colorKey: 'blue',
+                    collapsed: false,
+                    position: { x: -50, y: 0 },
+                    size: { width: 900, height: 650 },
+                    memberNodeIds: [],
+                });
+                editor.commitMutation(grouped);
+                editor.transform = { x: 40, y: 30, scale: 1.2 };
+                editor.applyTransform();
+                editor.structureTree.addEventListener('dragstart', event => {
+                    window.__multiTreeDragPayload = event.dataTransfer.getData(
+                        'application/x-inspectorpro-occurrences'
+                    );
+                }, { once: true });
+            }
+            """
+        )
+        history_before_multi_drop = multi_page.evaluate(
+            "window.__processMapFlow.editor.history.undoStack.length"
+        )
+        multi_viewport = multi_page.locator(".pm-viewport")
+        world_drop = {"x": 300.0, "y": 250.0}
+        transform = multi_page.evaluate(
+            "({ ...window.__processMapFlow.editor.transform })"
+        )
+        multi_target = {
+            "x": transform["x"] + world_drop["x"] * transform["scale"],
+            "y": transform["y"] + world_drop["y"] * transform["scale"],
+        }
+        multi_page.keyboard.down("Control")
+        part_a_1_row.drag_to(
+            multi_viewport,
+            target_position=multi_target,
+            force=True,
+        )
+        multi_page.keyboard.up("Control")
+        multi_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 3"
+        )
+        multi_drop_state = multi_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const nodes = editor.processMap.canvasNodes;
+                const group = editor.processMap.canvasGroups.find(
+                    item => item.groupId === 'multi-drop-group'
+                );
+                const overlaps = (left, right) => (
+                    left.position.x < right.position.x + InspectorProProcessMap.NODE_WIDTH
+                    && left.position.x + InspectorProProcessMap.NODE_WIDTH > right.position.x
+                    && left.position.y < right.position.y + InspectorProProcessMap.NODE_HEIGHT
+                    && left.position.y + InspectorProProcessMap.NODE_HEIGHT > right.position.y
+                );
+                return {
+                    sourceIds: nodes.map(node => node.sourceOccurrenceId).sort(),
+                    nodeIds: nodes.map(node => node.nodeId).sort(),
+                    groupMembers: group.memberNodeIds.slice().sort(),
+                    selectedCanvasNodes: Array.from(editor.selectedNodeIds).sort(),
+                    selectedTreeOccurrences: Array.from(editor.selectedOccurrenceIds).sort(),
+                    historyDepth: editor.history.undoStack.length,
+                    overlaps: nodes.some((node, index) => nodes.slice(index + 1).some(
+                        other => overlaps(node, other)
+                    )),
+                    payload: JSON.parse(window.__multiTreeDragPayload || '[]'),
+                };
+            }
+            """
+        )
+        record(
+            "ctrl_drag_places_selected_occurrences_as_one_non_overlapping_grouped_batch",
+            multi_drop_state["sourceIds"] == ["part-a-1", "part-a-2", "part-b"]
+            and multi_drop_state["groupMembers"] == multi_drop_state["nodeIds"]
+            and multi_drop_state["selectedCanvasNodes"] == multi_drop_state["nodeIds"]
+            and multi_drop_state["selectedTreeOccurrences"]
+            == ["part-a-1", "part-a-2", "part-b"]
+            and multi_drop_state["historyDepth"] == history_before_multi_drop + 1
+            and multi_drop_state["overlaps"] is False
+            and multi_drop_state["payload"] == ["part-a-1", "part-a-2", "part-b"],
+            multi_drop_state,
+        )
+        multi_page.screenshot(
+            path=str(OUT_DIR / "process_flow_multi_tree_drop.png"),
+            full_page=False,
+        )
+
+        multi_page.get_by_role("button", name="Undo process-map edit").click()
+        multi_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 0"
+        )
+        record(
+            "one_undo_removes_the_complete_multi_occurrence_drop",
+            multi_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasGroups[0]"
+                ".memberNodeIds.length === 0"
+            ),
+        )
+        multi_page.get_by_role("button", name="Redo process-map edit").click()
+        multi_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 3"
+        )
+        multi_page.get_by_role("button", name="Save process map").click()
+        multi_page.wait_for_function("!window.__processMapFlow.editor.dirty")
+        multi_page.reload(wait_until="networkidle")
+        _open_process_flow(multi_page)
+        multi_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 3"
+        )
+        record(
+            "multi_occurrence_drop_survives_save_and_reload_with_group_membership",
+            multi_page.evaluate(
+                """
+                () => {
+                    const map = window.__processMapFlow.editor.processMap;
+                    const nodeIds = map.canvasNodes.map(node => node.nodeId).sort();
+                    const group = map.canvasGroups.find(
+                        item => item.groupId === 'multi-drop-group'
+                    );
+                    return group && JSON.stringify(group.memberNodeIds.slice().sort())
+                        === JSON.stringify(nodeIds);
+                }
+                """
+            ),
+        )
+
+        _expand(multi_page, "module-a")
+        _expand(multi_page, "module-b")
+        for occurrence_id in ("part-a-1", "part-a-2", "part-b"):
+            multi_page.locator(
+                f".pm-tree-row[data-occurrence-id='{occurrence_id}']"
+            ).click(modifiers=["Control"])
+        duplicate_history = multi_page.evaluate(
+            "window.__processMapFlow.editor.history.undoStack.length"
+        )
+        _drag_tree_item(multi_page, "part-a-1", 400, 400)
+        record(
+            "repeating_a_multi_drop_selects_existing_cards_without_duplicates",
+            multi_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.length === 3"
+                " && window.__processMapFlow.editor.selectedNodeIds.size === 3"
+                " && window.__processMapFlow.editor.history.undoStack.length === 0"
+            )
+            and duplicate_history == 0
+            and "already on the map"
+            in multi_page.locator(".pm-editor-status").inner_text().lower(),
+        )
+        multi_context.close()
+
+        # -- Ctrl-drag duplicates cards without moving the source --
+
+        duplicate_store = {
+            "map": _synthetic_process_map(),
+            "structure": _synthetic_structure(),
+            "revision": "rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+        }
+        duplicate_context = browser.new_context(viewport={"width": 1600, "height": 1000})
+        duplicate_page = duplicate_context.new_page()
+        _install_cached_three_route(duplicate_page)
+        duplicate_page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
+        _install_synthetic_process_map_route(duplicate_page, duplicate_store)
+        _install_synthetic_map_management_routes(duplicate_page, duplicate_store)
+        _install_synthetic_suggestion_route(duplicate_page, duplicate_store)
+        duplicate_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(duplicate_page)
+        duplicate_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                let map = InspectorProProcessMap.addCanvasNode(editor.processMap, {
+                    nodeId: 'duplicate-stage-source',
+                    nodeKind: 'process_step',
+                    processType: 'operation',
+                    name: 'Install repeated bracket',
+                    note: 'Use fixture A',
+                    properties: { duration: '6 min' },
+                    position: { x: 100, y: 80 },
+                });
+                map = InspectorProProcessMap.addCanvasNode(map, {
+                    nodeId: 'duplicate-part-source',
+                    nodeKind: 'product_occurrence',
+                    sourceOccurrenceId: 'part-a-1',
+                    itemIdSnapshot: 'RB-003',
+                    nameSnapshot: 'Repeated Part A',
+                    position: { x: 100, y: 360 },
+                });
+                editor.commitMutation(map);
+                editor.history.clear();
+            }
+            """
+        )
+
+        def ctrl_drag_canvas_card(node_id: str, dx: float, dy: float) -> dict:
+            card = duplicate_page.locator(
+                f".pm-node[data-node-id='{node_id}'] .pm-node-card"
+            )
+            bounds = card.bounding_box()
+            assert bounds is not None
+            start_x = bounds["x"] + bounds["width"] / 2
+            start_y = bounds["y"] + bounds["height"] / 2
+            duplicate_page.keyboard.down("Control")
+            duplicate_page.mouse.move(start_x, start_y)
+            duplicate_page.mouse.down()
+            duplicate_page.mouse.move(start_x + dx / 2, start_y + dy / 2, steps=3)
+            ghost_visible = duplicate_page.locator(
+                ".pm-duplicate-drag-ghost"
+            ).count() == 1
+            duplicate_page.mouse.move(start_x + dx, start_y + dy, steps=3)
+            duplicate_page.mouse.up()
+            duplicate_page.keyboard.up("Control")
+            return {"ghostVisible": ghost_visible, "sourceBounds": bounds}
+
+        stage_source_before = duplicate_page.evaluate(
+            "({ ...window.__processMapFlow.editor.processMap.canvasNodes"
+            ".find(node => node.nodeId === 'duplicate-stage-source').position })"
+        )
+        stage_drag = ctrl_drag_canvas_card("duplicate-stage-source", 380, 40)
+        duplicate_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 3"
+        )
+        stage_duplicate_state = duplicate_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const source = editor.processMap.canvasNodes.find(
+                    node => node.nodeId === 'duplicate-stage-source'
+                );
+                const copy = editor.processMap.canvasNodes.find(
+                    node => node.nodeKind === 'process_step'
+                        && node.nodeId !== 'duplicate-stage-source'
+                );
+                return {
+                    sourcePosition: source.position,
+                    copy,
+                    selected: Array.from(editor.selectedNodeIds),
+                    historyDepth: editor.history.undoStack.length,
+                    ghostCount: document.querySelectorAll('.pm-duplicate-drag-ghost').length,
+                };
+            }
+            """
+        )
+        record(
+            "ctrl_drag_duplicates_a_stage_without_moving_the_source",
+            stage_drag["ghostVisible"]
+            and stage_duplicate_state["sourcePosition"] == stage_source_before
+            and stage_duplicate_state["copy"]["name"] == "Install repeated bracket"
+            and stage_duplicate_state["copy"]["note"] == "Use fixture A"
+            and stage_duplicate_state["copy"]["properties"] == {"duration": "6 min"}
+            and stage_duplicate_state["selected"] == [stage_duplicate_state["copy"]["nodeId"]]
+            and stage_duplicate_state["historyDepth"] == 1
+            and stage_duplicate_state["ghostCount"] == 0,
+            stage_duplicate_state,
+        )
+        duplicate_page.get_by_role("button", name="Undo process-map edit").click()
+        duplicate_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 2"
+        )
+        duplicate_page.get_by_role("button", name="Redo process-map edit").click()
+        duplicate_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 3"
+        )
+        record(
+            "one_undo_and_redo_round_trips_the_ctrl_drag_duplicate",
+            duplicate_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes"
+                ".filter(node => node.nodeKind === 'process_step').length === 2"
+            ),
+        )
+
+        part_source_before = duplicate_page.evaluate(
+            "({ ...window.__processMapFlow.editor.processMap.canvasNodes"
+            ".find(node => node.nodeId === 'duplicate-part-source').position })"
+        )
+        product_drag = ctrl_drag_canvas_card("duplicate-part-source", 380, 20)
+        duplicate_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 4"
+        )
+        product_duplicate_state = duplicate_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const products = editor.processMap.canvasNodes.filter(
+                    node => node.nodeKind === 'product_occurrence'
+                );
+                return {
+                    sourcePosition: products.find(
+                        node => node.nodeId === 'duplicate-part-source'
+                    ).position,
+                    occurrenceIds: products.map(node => node.sourceOccurrenceId).sort(),
+                    nodeIds: products.map(node => node.nodeId),
+                    selected: Array.from(editor.selectedNodeIds),
+                    historyDepth: editor.history.undoStack.length,
+                };
+            }
+            """
+        )
+        record(
+            "ctrl_drag_product_copy_uses_the_next_matching_physical_occurrence",
+            product_drag["ghostVisible"]
+            and product_duplicate_state["sourcePosition"] == part_source_before
+            and product_duplicate_state["occurrenceIds"] == ["part-a-1", "part-a-2"]
+            and product_duplicate_state["selected"][0]
+                in product_duplicate_state["nodeIds"]
+            and product_duplicate_state["historyDepth"] == 2,
+            product_duplicate_state,
+        )
+        before_refused_copy = duplicate_page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length"
+        )
+        refused_drag = ctrl_drag_canvas_card("duplicate-part-source", 0, 180)
+        record(
+            "ctrl_drag_refuses_to_duplicate_one_physical_occurrence_twice",
+            refused_drag["ghostVisible"] is False
+            and duplicate_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.length"
+            ) == before_refused_copy
+            and "no additional unplaced occurrence"
+                in duplicate_page.locator(".pm-editor-status").inner_text().lower(),
+        )
+        duplicate_page.get_by_role("button", name="Save process map").click()
+        duplicate_page.wait_for_function("!window.__processMapFlow.editor.dirty")
+        duplicate_page.reload(wait_until="networkidle")
+        _open_process_flow(duplicate_page)
+        record(
+            "ctrl_drag_duplicates_survive_save_and_reload",
+            duplicate_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.length === 4"
+                " && window.__processMapFlow.editor.processMap.canvasNodes"
+                ".filter(node => node.nodeKind === 'product_occurrence').length === 2"
+            ),
+        )
+        duplicate_page.screenshot(
+            path=str(OUT_DIR / "process_flow_ctrl_drag_duplicate.png"),
+            full_page=False,
+        )
+        duplicate_context.close()
+
+        # -- Phase 3: deterministic incremental placement and ghost previews --
+
+        spatial_store = {
+            "map": _synthetic_process_map(),
+            "structure": _synthetic_structure(),
+            "revision": "rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+        }
+        spatial_context = browser.new_context(viewport={"width": 1600, "height": 1000})
+        spatial_page = spatial_context.new_page()
+        _install_cached_three_route(spatial_page)
+        spatial_page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
+        _install_synthetic_process_map_route(spatial_page, spatial_store)
+        _install_synthetic_map_management_routes(spatial_page, spatial_store)
+        _install_synthetic_suggestion_route(spatial_page, spatial_store)
+        spatial_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(spatial_page)
+
+        def placement_plan_state():
+            return spatial_page.evaluate(
+                """() => {
+                    const editor = window.__processMapFlow.editor;
+                    return {
+                        hasPlan: !!editor.placementPlan,
+                        candidateCount: editor.placementPlan
+                            ? editor.placementPlan.candidates.length : 0,
+                        activeIndex: editor.placementPlan ? editor.placementPlan.activeIndex : null,
+                        nodeCount: editor.processMap.canvasNodes.length,
+                        dirty: editor.dirty,
+                    };
+                }"""
+            )
+
+        _expand(spatial_page, "module-a")
+        _expand(spatial_page, "module-b")
+        _drag_tree_item(spatial_page, "part-a-1", 300, 240)
+        spatial_page.wait_for_function("window.__processMapFlow.editor.processMap.canvasNodes.length === 1")
+        record(
+            "phase3_new_unplaced_occurrence_starts_with_no_card",
+            spatial_page.locator(".pm-node[data-node-id]").count() == 1
+            and spatial_page.locator(".pm-placement-ghost").count() == 0,
+        )
+
+        suggest_button = spatial_page.locator(
+            ".pm-tree-row[data-occurrence-id='part-a-2'] .pm-tree-suggest-position"
+        )
+        assert suggest_button.count() == 1
+        before_click_nodes = placement_plan_state()["nodeCount"]
+        suggest_button.click()
+        spatial_page.wait_for_selector(".pm-placement-ghost")
+        after_ghost_state = placement_plan_state()
+        record(
+            "phase3_no_card_exists_before_acceptance",
+            after_ghost_state["hasPlan"]
+            and after_ghost_state["nodeCount"] == before_click_nodes,
+            after_ghost_state,
+        )
+        ghost_box = spatial_page.locator(".pm-placement-ghost").bounding_box()
+        ghost_viewport_box = spatial_page.locator(".pm-viewport").bounding_box()
+        ghost_visible = (
+            ghost_box is not None
+            and ghost_viewport_box is not None
+            and ghost_box["x"] >= ghost_viewport_box["x"]
+            and ghost_box["y"] >= ghost_viewport_box["y"]
+            and ghost_box["x"] + ghost_box["width"]
+                <= ghost_viewport_box["x"] + ghost_viewport_box["width"]
+            and ghost_box["y"] + ghost_box["height"]
+                <= ghost_viewport_box["y"] + ghost_viewport_box["height"]
+        )
+        record(
+            "phase3_ghost_preview_screenshot",
+            ghost_visible
+            and spatial_page.locator(".pm-placement-ghost-metrics").count() == 1,
+            {
+                "ghost": ghost_box,
+                "viewport": ghost_viewport_box,
+                "metrics": spatial_page.locator(".pm-placement-ghost-metrics").inner_text(),
+            },
+        )
+        spatial_page.screenshot(path=str(OUT_DIR / "process_flow_placement_ghost_light.png"))
+
+        ghost_box_before_zoom = spatial_page.locator(".pm-placement-ghost").bounding_box()
+        node_box_before_zoom = spatial_page.locator(".pm-node[data-node-id]").first.bounding_box()
+        viewport_box = spatial_page.locator(".pm-viewport").bounding_box()
+        zoom_point = {
+            "x": viewport_box["x"] + viewport_box["width"] / 2,
+            "y": viewport_box["y"] + viewport_box["height"] / 2,
+        }
+        spatial_page.mouse.move(zoom_point["x"], zoom_point["y"])
+        spatial_page.mouse.wheel(0, -240)
+        spatial_page.wait_for_timeout(150)
+        ghost_box_after_zoom = spatial_page.locator(".pm-placement-ghost").bounding_box()
+        node_box_after_zoom = spatial_page.locator(".pm-node[data-node-id]").first.bounding_box()
+        ghost_scale = (
+            ghost_box_after_zoom["width"] / ghost_box_before_zoom["width"]
+            if ghost_box_before_zoom["width"]
+            else 0
+        )
+        node_scale = (
+            node_box_after_zoom["width"] / node_box_before_zoom["width"]
+            if node_box_before_zoom["width"]
+            else 0
+        )
+        record(
+            "phase3_ghost_follows_pan_and_zoom",
+            spatial_page.evaluate("!!window.__processMapFlow.editor.placementPlan")
+            and abs(ghost_scale - node_scale) < 0.02
+            and abs(ghost_scale - 1.0) > 0.01,
+            {"ghostScale": ghost_scale, "nodeScale": node_scale},
+        )
+
+        state_before_alt = placement_plan_state()
+        map_json_before_alt = spatial_page.evaluate(
+            "JSON.stringify(window.__processMapFlow.editor.processMap)"
+        )
+        if state_before_alt["candidateCount"] > 1:
+            alt_button = spatial_page.get_by_role("button", name="Cycle to the next suggested position")
+            alt_button.click()
+            spatial_page.wait_for_timeout(150)
+            state_after_alt = placement_plan_state()
+            map_json_after_alt = spatial_page.evaluate(
+                "JSON.stringify(window.__processMapFlow.editor.processMap)"
+            )
+            record(
+                "phase3_alternative_changes_preview_but_not_map_state",
+                state_after_alt["activeIndex"] != state_before_alt["activeIndex"]
+                and state_after_alt["nodeCount"] == state_before_alt["nodeCount"]
+                and state_after_alt["dirty"] == state_before_alt["dirty"]
+                and map_json_after_alt == map_json_before_alt
+                and spatial_page.locator(".pm-placement-ghost").count() == 1,
+                {"before": state_before_alt, "after": state_after_alt},
+            )
+        else:
+            record("phase3_alternative_changes_preview_but_not_map_state", True, "single_candidate_only")
+
+        dirty_before_dismiss = placement_plan_state()["dirty"]
+        dismiss_button = spatial_page.get_by_role(
+            "button", name="Discard this suggestion without changing the map"
+        )
+        dismiss_button.click()
+        spatial_page.wait_for_function("!window.__processMapFlow.editor.placementPlan")
+        dismiss_state = placement_plan_state()
+        record(
+            "phase3_dismiss_leaves_map_unchanged",
+            spatial_page.locator(".pm-placement-ghost").count() == 0
+            and dismiss_state["nodeCount"] == before_click_nodes
+            and dismiss_state["dirty"] == dirty_before_dismiss,
+            dismiss_state,
+        )
+
+        suggest_button.click()
+        spatial_page.wait_for_selector(".pm-placement-ghost")
+        tampered_accept = spatial_page.evaluate(
+            """async () => {
+                const editor = window.__processMapFlow.editor;
+                const candidate = editor.placementPlan.candidates[editor.placementPlan.activeIndex];
+                candidate.position = { x: 123456, y: -98765 };
+                const accepted = await editor.acceptPlacementPlan();
+                return {
+                    accepted,
+                    nodeCount: editor.processMap.canvasNodes.length,
+                    hasPlan: !!editor.placementPlan,
+                };
+            }"""
+        )
+        record(
+            "phase3_accept_rejects_candidate_geometry_not_returned_by_fresh_planner",
+            tampered_accept["accepted"] is False
+            and tampered_accept["nodeCount"] == before_click_nodes
+            and tampered_accept["hasPlan"] is False,
+            tampered_accept,
+        )
+
+        suggest_button.click()
+        spatial_page.wait_for_selector(".pm-placement-ghost")
+        candidate_position = spatial_page.evaluate(
+            "() => { const editor = window.__processMapFlow.editor; "
+            "const plan = editor.placementPlan; "
+            "return plan.candidates[plan.activeIndex].position; }"
+        )
+        accept_button = spatial_page.get_by_role("button", name="Place the card at this position")
+        accept_button.click()
+        spatial_page.wait_for_function("window.__processMapFlow.editor.processMap.canvasNodes.length === 2")
+        accepted_state = spatial_page.evaluate(
+            """() => {
+                const nodes = window.__processMapFlow.editor.processMap.canvasNodes;
+                const placed = nodes.find(n => n.sourceOccurrenceId === 'part-a-2');
+                return placed ? { position: placed.position, historyDepth:
+                    window.__processMapFlow.editor.history.undoStack.length } : null;
+            }"""
+        )
+        record(
+            "phase3_accept_creates_one_card_at_exact_candidate_position",
+            accepted_state is not None
+            and accepted_state["position"]["x"] == candidate_position["x"]
+            and accepted_state["position"]["y"] == candidate_position["y"]
+            and spatial_page.locator(".pm-placement-ghost").count() == 0,
+            {"accepted": accepted_state, "candidate": candidate_position},
+        )
+
+        spatial_page.get_by_role("button", name="Undo process-map edit").click()
+        spatial_page.wait_for_function("window.__processMapFlow.editor.processMap.canvasNodes.length === 1")
+        record(
+            "phase3_undo_removes_the_entire_accepted_placement",
+            spatial_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.some(n => n.sourceOccurrenceId === 'part-a-2')"
+            ) is False,
+        )
+
+        # Re-accept so the map has two placed cards for the lock scenario.
+        suggest_button.click()
+        spatial_page.wait_for_selector(".pm-placement-ghost")
+        spatial_page.get_by_role("button", name="Place the card at this position").click()
+        spatial_page.wait_for_function("window.__processMapFlow.editor.processMap.canvasNodes.length === 2")
+
+        placed_node_ids = spatial_page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasNodes.map(n => n.nodeId)"
+        )
+        # The placement preview may pan just enough to reveal the accepted
+        # candidate, so exercise locking on that newly visible card.
+        lock_target_id = placed_node_ids[-1]
+        spatial_page.wait_for_timeout(300)
+        spatial_page.locator(f".pm-node[data-node-id='{lock_target_id}'] .pm-node-card").click(
+            position={"x": 8, "y": 8}
+        )
+        spatial_page.wait_for_selector(
+            f".pm-node[data-node-id='{lock_target_id}'].selected"
+        )
+        spatial_page.wait_for_selector("button[aria-label='Lock card position']", state="visible")
+        spatial_page.get_by_role("button", name="Lock card position").click()
+        spatial_page.wait_for_function(
+            f"window.__processMapFlow.editor.processMap.canvasNodes"
+            f".find(n => n.nodeId === '{lock_target_id}').locked === true"
+        )
+        record(
+            "phase3_locked_card_shows_visible_lock_state",
+            spatial_page.locator(f".pm-node[data-node-id='{lock_target_id}'].position-locked").count() == 1
+            and spatial_page.locator(
+                f".pm-node[data-node-id='{lock_target_id}'] .pm-node-lock-indicator"
+            ).count() == 1,
+        )
+        position_before_drag = spatial_page.evaluate(
+            f"window.__processMapFlow.editor.processMap.canvasNodes"
+            f".find(n => n.nodeId === '{lock_target_id}').position"
+        )
+        locked_box = spatial_page.locator(f".pm-node[data-node-id='{lock_target_id}']").bounding_box()
+        spatial_page.mouse.move(
+            locked_box["x"] + locked_box["width"] / 2, locked_box["y"] + locked_box["height"] / 2
+        )
+        spatial_page.mouse.down()
+        spatial_page.mouse.move(locked_box["x"] + 220, locked_box["y"] + 160, steps=6)
+        spatial_page.mouse.up()
+        position_after_drag = spatial_page.evaluate(
+            f"window.__processMapFlow.editor.processMap.canvasNodes"
+            f".find(n => n.nodeId === '{lock_target_id}').position"
+        )
+        record(
+            "phase3_locked_cards_cannot_be_moved_by_manual_drag_or_planning",
+            position_before_drag == position_after_drag
+            and spatial_page.locator(
+                f".pm-node[data-node-id='{lock_target_id}'] .pm-card-toolbar-suggest"
+            ).count() == 0,
+            {"before": position_before_drag, "after": position_after_drag},
+        )
+
+        spatial_page.get_by_role("button", name="Save process map").click()
+        spatial_page.wait_for_function("!window.__processMapFlow.editor.dirty")
+        spatial_page.reload(wait_until="networkidle")
+        _open_process_flow(spatial_page)
+        spatial_page.wait_for_function("window.__processMapFlow.editor.processMap.canvasNodes.length === 2")
+        reload_state = spatial_page.evaluate(
+            f"""() => {{
+                const node = window.__processMapFlow.editor.processMap.canvasNodes
+                    .find(n => n.nodeId === '{lock_target_id}');
+                return node ? node.locked === true : false;
+            }}"""
+        )
+        record(
+            "phase3_save_reload_preserves_placement_and_lock_state",
+            reload_state is True
+            and spatial_page.evaluate("window.__processMapFlow.editor.processMap.canvasNodes.length") == 2,
+        )
+
+        for theme in ("light", "dark"):
+            spatial_page.evaluate("theme => document.documentElement.setAttribute('data-theme', theme)", theme)
+            lock_colors = spatial_page.locator(
+                f".pm-node[data-node-id='{lock_target_id}'] .pm-node-lock-indicator"
+            ).evaluate(
+                "el => { const s = getComputedStyle(el); "
+                "return { color: s.color, background: s.backgroundColor }; }"
+            )
+            record(
+                f"phase3_lock_indicator_readable_in_{theme}_theme",
+                lock_colors["color"] != lock_colors["background"],
+                lock_colors,
+            )
+        spatial_page.screenshot(path=str(OUT_DIR / "process_flow_placement_lock_dark.png"))
+        spatial_page.evaluate("document.documentElement.setAttribute('data-theme', 'light')")
+
+        _expand(spatial_page, "module-b")
+        rapid_errors_before = len(report["page_errors"])
+        for _ in range(4):
+            spatial_page.locator(
+                ".pm-tree-row[data-occurrence-id='part-b'] .pm-tree-suggest-position"
+            ).click()
+            spatial_page.wait_for_selector(".pm-placement-ghost")
+            spatial_page.get_by_role(
+                "button", name="Discard this suggestion without changing the map"
+            ).click()
+            spatial_page.wait_for_function("!window.__processMapFlow.editor.placementPlan")
+        record(
+            "phase3_rapid_plan_dismiss_churn_leaves_no_orphan_overlays",
+            spatial_page.locator(".pm-placement-ghost").count() == 0
+            and spatial_page.locator(".pm-placement-ghost-toolbar").count() == 0
+            and len(report["page_errors"]) == rapid_errors_before,
+        )
+
+        spatial_context.close()
+
+        # -- Phase 4: obstacle-aware orthogonal routing and shared geometry --
+
+        routing_store = {
+            "map": _synthetic_routing_process_map(),
+            "structure": _synthetic_structure(),
+            "revision": "route-rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+        }
+        routing_context = browser.new_context(viewport={"width": 1600, "height": 1000})
+        routing_page = routing_context.new_page()
+        _install_cached_three_route(routing_page)
+        routing_page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
+        _install_synthetic_process_map_route(routing_page, routing_store)
+        _install_synthetic_map_management_routes(routing_page, routing_store)
+        _install_synthetic_suggestion_route(routing_page, routing_store)
+        routing_page.route(
+            "**/api/training/process-map-spatial-placement-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": False}),
+            ),
+        )
+        routing_page.route(
+            "**/api/training/process-map-auto-routing-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": True}),
+            ),
+        )
+        routing_page.route(
+            "**/api/training/process-map-agent-layout-write-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": False}),
+            ),
+        )
+        routing_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(routing_page)
+        routing_page.wait_for_function(
+            "window.__processMapFlow.editor.autoRoutingEnabled === true"
+        )
+        connection_legend = routing_page.locator(".pm-connection-legend")
+        legend_state = {
+            "text": connection_legend.inner_text(),
+            "items": connection_legend.locator(".pm-connection-legend-item").count(),
+            "routeControls": routing_page.locator(
+                ".pm-edge-route-mode-button"
+            ).count(),
+            "routeMode": routing_page.locator(
+                ".pm-edge-route-mode-button[data-edge-route-mode='bezier_legacy']"
+            ).get_attribute("data-edge-route-mode"),
+        }
+        record(
+            "connection_legend_distinguishes_applied_and_unapplied_proposals",
+            legend_state["items"] == 4
+            and "Applied connection" in legend_state["text"]
+            and "Agent proposal" in legend_state["text"]
+            and "Route preview" in legend_state["text"]
+            and "Route needs review" in legend_state["text"]
+            and legend_state["routeControls"] == 3
+            and legend_state["routeMode"] == "bezier_legacy",
+            legend_state,
+        )
+
+        initial_route_state = routing_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const edge = editor.processMap.canvasEdges.find(item => item.edgeId === 'route-edge');
+                const visible = document.querySelector(".pm-edge[data-edge-id='route-edge']");
+                return {
+                    hasRouting: !!edge.routing,
+                    path: visible ? visible.getAttribute('d') : '',
+                    historyDepth: editor.history.undoStack.length,
+                };
+            }
+            """
+        )
+        record(
+            "phase4_flag_on_preserves_legacy_curve_until_user_previews_route",
+            not initial_route_state["hasRouting"]
+            and " C " in initial_route_state["path"],
+            initial_route_state,
+        )
+
+        routing_page.evaluate("window.__processMapFlow.editor.selectEdge('route-edge')")
+        routing_page.get_by_role(
+            "button", name="Preview an obstacle-aware orthogonal route"
+        ).click()
+        routing_page.wait_for_function("!!window.__processMapFlow.editor.routePlan")
+        route_preview_state = routing_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const edge = editor.processMap.canvasEdges.find(item => item.edgeId === 'route-edge');
+                const preview = document.querySelector('.pm-edge-route-preview');
+                return {
+                    mapStillLegacy: !edge.routing,
+                    previewPath: preview ? preview.getAttribute('d') : '',
+                    sourceDimmed: document.querySelector(
+                        ".pm-edge[data-edge-id='route-edge']"
+                    ).classList.contains('route-preview-source'),
+                    mapFingerprint: window.InspectorProProcessMap.mapFingerprint(editor.processMap),
+                };
+            }
+            """
+        )
+        routing_page.screenshot(path=str(OUT_DIR / "process_flow_route_preview_light.png"))
+        record(
+            "phase4_route_is_a_nonmutating_orthogonal_ghost_before_acceptance",
+            route_preview_state["mapStillLegacy"]
+            and " L " in route_preview_state["previewPath"]
+            and route_preview_state["sourceDimmed"],
+            route_preview_state,
+        )
+
+        routing_page.get_by_role(
+            "button", name="Apply the previewed obstacle-aware route"
+        ).click()
+        routing_page.wait_for_function(
+            "!window.__processMapFlow.editor.routePlan"
+            " && window.__processMapFlow.editor.processMap.canvasEdges[0].routing"
+            ".mode === 'orthogonal_auto'"
+        )
+        accepted_route_state = routing_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const edge = editor.processMap.canvasEdges.find(item => item.edgeId === 'route-edge');
+                const visible = document.querySelector(".pm-edge[data-edge-id='route-edge']");
+                const hit = document.querySelector(".pm-edge-hit[data-edge-id='route-edge']");
+                const scene = window.InspectorProProcessMapSpatial.compileSpatialScene(
+                    editor.processMap, { contract: editor._spatialContractCache }
+                );
+                const diagnostics = window.InspectorProProcessMapSpatial.diagnoseSpatialScene(
+                    scene, { contract: editor._spatialContractCache }
+                );
+                return {
+                    mode: edge.routing.mode,
+                    routerVersion: edge.routing.routerVersion,
+                    fingerprint: edge.routing.obstacleFingerprint,
+                    waypoints: edge.routing.waypoints,
+                    visiblePath: visible ? visible.getAttribute('d') : '',
+                    hitPath: hit ? hit.getAttribute('d') : '',
+                    historyDepth: editor.history.undoStack.length,
+                    edgeNodeIntersections: diagnostics.metrics.edgeNodeIntersections,
+                    staleToolbarCount: document.querySelectorAll(
+                        "[data-card-command='accept-route'], [data-card-command='dismiss-route']"
+                    ).length,
+                };
+            }
+            """
+        )
+        record(
+            "phase4_accept_commits_one_safe_route_with_matching_visible_and_hit_geometry",
+            accepted_route_state["mode"] == "orthogonal_auto"
+            and accepted_route_state["routerVersion"] == 1
+            and accepted_route_state["historyDepth"] == initial_route_state["historyDepth"] + 1
+            and accepted_route_state["visiblePath"] == accepted_route_state["hitPath"]
+            and " L " in accepted_route_state["visiblePath"]
+            and accepted_route_state["edgeNodeIntersections"] == 0
+            and accepted_route_state["staleToolbarCount"] == 0,
+            accepted_route_state,
+        )
+
+        routing_page.get_by_role("button", name="Undo process-map edit").click()
+        routing_page.wait_for_function(
+            "!window.__processMapFlow.editor.processMap.canvasEdges[0].routing"
+        )
+        route_removed_by_undo = routing_page.evaluate(
+            "document.querySelector(\".pm-edge[data-edge-id='route-edge']\").getAttribute('d')"
+        )
+        routing_page.get_by_role("button", name="Redo process-map edit").click()
+        routing_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasEdges[0].routing"
+            ".mode === 'orthogonal_auto'"
+        )
+        redone_route = routing_page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasEdges[0].routing"
+        )
+        record(
+            "phase4_route_apply_is_one_atomic_undo_redo_step",
+            " C " in route_removed_by_undo
+            and redone_route["obstacleFingerprint"] == accepted_route_state["fingerprint"]
+            and redone_route["waypoints"] == accepted_route_state["waypoints"],
+            {"undoPath": route_removed_by_undo, "redoRoute": redone_route},
+        )
+
+        reroute_committed = routing_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const moved = window.InspectorProProcessMap.moveNode(
+                    editor.processMap, 'route-obstacle', { x: 480, y: 520 }
+                );
+                return editor.commitMutation(moved);
+            }
+            """
+        )
+        routing_page.wait_for_function(
+            f"window.__processMapFlow.editor.processMap.canvasEdges[0].routing"
+            f".obstacleFingerprint !== '{accepted_route_state['fingerprint']}'"
+        )
+        refreshed_route = routing_page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasEdges[0].routing"
+        )
+        record(
+            "phase4_geometry_mutation_invalidates_and_refreshes_auto_route",
+            reroute_committed is True
+            and refreshed_route["obstacleFingerprint"] != accepted_route_state["fingerprint"],
+            refreshed_route,
+        )
+
+        routing_page.get_by_role("button", name="Save process map").click()
+        routing_page.wait_for_function("!window.__processMapFlow.editor.dirty")
+        routing_page.reload(wait_until="networkidle")
+        _open_process_flow(routing_page)
+        routing_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasEdges[0].routing"
+            ".mode === 'orthogonal_auto'"
+        )
+        reloaded_route_state = routing_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const visible = document.querySelector(".pm-edge[data-edge-id='route-edge']");
+                const hit = document.querySelector(".pm-edge-hit[data-edge-id='route-edge']");
+                return {
+                    routing: editor.processMap.canvasEdges[0].routing,
+                    dirty: editor.dirty,
+                    visiblePath: visible ? visible.getAttribute('d') : '',
+                    hitPath: hit ? hit.getAttribute('d') : '',
+                };
+            }
+            """
+        )
+        record(
+            "phase4_save_reload_restores_routed_geometry_without_dirtying_map",
+            reloaded_route_state["routing"]["mode"] == "orthogonal_auto"
+            and reloaded_route_state["routing"]["obstacleFingerprint"]
+                == refreshed_route["obstacleFingerprint"]
+            and reloaded_route_state["dirty"] is False
+            and reloaded_route_state["visiblePath"] == reloaded_route_state["hitPath"],
+            reloaded_route_state,
+        )
+
+        routing_page.evaluate("window.__processMapFlow.editor.selectEdge('route-edge')")
+        routing_page.get_by_role(
+            "button", name="Use a curved Bezier connection"
+        ).click()
+        routing_page.wait_for_function(
+            "!window.__processMapFlow.editor.processMap.canvasEdges[0].routing"
+        )
+        curved_route_state = routing_page.evaluate(
+            """
+            () => ({
+                path: document.querySelector(
+                    ".pm-edge[data-edge-id='route-edge']"
+                ).getAttribute('d'),
+                historyDepth: window.__processMapFlow.editor.history.undoStack.length,
+            })
+            """
+        )
+        record(
+            "selected_orthogonal_connection_can_switch_back_to_curve",
+            " C " in curved_route_state["path"],
+            curved_route_state,
+        )
+        routing_page.get_by_role("button", name="Undo process-map edit").click()
+        routing_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasEdges[0].routing"
+            ".mode === 'orthogonal_auto'"
+        )
+
+        routing_page.get_by_role("button", name="New connections: Orthogonal").click()
+        routing_page.wait_for_function(
+            "window.__processMapFlow.editor.newEdgeRouteMode === 'orthogonal_auto'"
+            " && !window.__processMapFlow.editor.newEdgeRoutingLoading"
+        )
+        routing_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const next = window.InspectorProProcessMap.addCanvasNode(
+                    editor.processMap,
+                    {
+                        nodeId: 'route-new-target',
+                        nodeKind: 'process_step',
+                        processType: 'output',
+                        name: 'New routed output',
+                        position: { x: 900, y: 580 },
+                        portOrientation: 'horizontal',
+                        portOrder: 'input_first',
+                    }
+                );
+                editor.commitMutation(next);
+            }
+            """
+        )
+        _drag_connection(routing_page, "route-obstacle", "route-new-target")
+        routing_page.wait_for_function(
+            """
+            () => {
+                const edge = window.__processMapFlow.editor.processMap.canvasEdges.find(
+                    item => item.from.nodeId === 'route-obstacle'
+                        && item.to.nodeId === 'route-new-target'
+                );
+                return edge && edge.routing && edge.routing.mode === 'orthogonal_auto';
+            }
+            """
+        )
+        new_orthogonal_connection = routing_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const edge = editor.processMap.canvasEdges.find(
+                    item => item.from.nodeId === 'route-obstacle'
+                        && item.to.nodeId === 'route-new-target'
+                );
+                const path = document.querySelector(
+                    `.pm-edge[data-edge-id="${edge.edgeId}"]`
+                );
+                return {
+                    mode: edge.routing.mode,
+                    path: path && path.getAttribute('d'),
+                    preference: editor.newEdgeRouteMode,
+                };
+            }
+            """
+        )
+        record(
+            "new_connection_style_toggle_creates_orthogonal_manual_connections",
+            new_orthogonal_connection["mode"] == "orthogonal_auto"
+            and new_orthogonal_connection["preference"] == "orthogonal_auto"
+            and " L " in new_orthogonal_connection["path"],
+            new_orthogonal_connection,
+        )
+
+        routing_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                let next = window.InspectorProProcessMap.addCanvasNode(
+                    editor.processMap,
+                    {
+                        nodeId: 'route-sketch-source',
+                        nodeKind: 'process_step',
+                        processType: 'operation',
+                        name: 'Manual route source',
+                        position: { x: 120, y: 760 },
+                        portOrientation: 'horizontal',
+                        portOrder: 'input_first',
+                    }
+                );
+                next = window.InspectorProProcessMap.addCanvasNode(
+                    next,
+                    {
+                        nodeId: 'route-sketch-target',
+                        nodeKind: 'process_step',
+                        processType: 'output',
+                        name: 'Manual route target',
+                        position: { x: 980, y: 760 },
+                        portOrientation: 'horizontal',
+                        portOrder: 'input_first',
+                    }
+                );
+                editor.commitMutation(next);
+                editor.fit();
+            }
+            """
+        )
+        routing_page.get_by_role(
+            "button", name="Sketch connection with fixed points"
+        ).click()
+        routing_page.wait_for_function(
+            "window.__processMapFlow.editor.newEdgeRouteMode === 'polyline_manual'"
+        )
+        sketch_history_before = routing_page.evaluate(
+            "window.__processMapFlow.editor.history.undoStack.length"
+        )
+        _sketch_connection(
+            routing_page,
+            "route-sketch-source",
+            "route-sketch-target",
+        )
+        routing_page.wait_for_function(
+            """
+            () => {
+                const edge = window.__processMapFlow.editor.processMap.canvasEdges.find(
+                    item => item.from.nodeId === 'route-sketch-source'
+                        && item.to.nodeId === 'route-sketch-target'
+                );
+                return edge && edge.routing && edge.routing.mode === 'polyline_manual'
+                    && edge.routing.waypoints.length === 2;
+            }
+            """
+        )
+        manual_edge_state = routing_page.evaluate(
+            """
+            () => {
+                const editor = window.__processMapFlow.editor;
+                const edge = editor.processMap.canvasEdges.find(
+                    item => item.from.nodeId === 'route-sketch-source'
+                        && item.to.nodeId === 'route-sketch-target'
+                );
+                const path = document.querySelector(
+                    `.pm-edge[data-edge-id="${edge.edgeId}"]`
+                );
+                return {
+                    edgeId: edge.edgeId,
+                    routing: edge.routing,
+                    path: path && path.getAttribute('d'),
+                    historyDepth: editor.history.undoStack.length,
+                    sketchActive: !!editor.wireSketch,
+                };
+            }
+            """
+        )
+        record(
+            "manual_wire_sketch_commits_fixed_points_as_one_diagonal_polyline",
+            manual_edge_state["routing"]["mode"] == "polyline_manual"
+            and len(manual_edge_state["routing"]["waypoints"]) == 2
+            and "obstacleFingerprint" not in manual_edge_state["routing"]
+            and manual_edge_state["historyDepth"] == sketch_history_before + 1
+            and manual_edge_state["sketchActive"] is False
+            and " L " in manual_edge_state["path"],
+            manual_edge_state,
+        )
+
+        routing_page.get_by_role("button", name="Undo process-map edit").click()
+        routing_page.wait_for_function(
+            """
+            () => !window.__processMapFlow.editor.processMap.canvasEdges.some(
+                item => item.from.nodeId === 'route-sketch-source'
+                    && item.to.nodeId === 'route-sketch-target'
+            )
+            """
+        )
+        routing_page.get_by_role("button", name="Redo process-map edit").click()
+        routing_page.wait_for_function(
+            f"""() => window.__processMapFlow.editor.processMap.canvasEdges.some(
+                item => item.edgeId === '{manual_edge_state["edgeId"]}'
+                    && item.routing && item.routing.mode === 'polyline_manual'
+            )"""
+        )
+        record(
+            "manual_wire_sketch_undo_and_redo_restore_the_complete_route",
+            routing_page.evaluate(
+                f"""() => {{
+                    const edge = window.__processMapFlow.editor.processMap.canvasEdges.find(
+                        item => item.edgeId === '{manual_edge_state["edgeId"]}'
+                    );
+                    return edge && edge.routing.waypoints.length === 2;
+                }}"""
+            ) is True,
+        )
+
+        routing_page.evaluate(
+            f"window.__processMapFlow.editor.selectEdge('{manual_edge_state['edgeId']}')"
+        )
+        routing_page.wait_for_selector(".pm-edge-waypoint")
+        routing_page.evaluate(
+            "window.__processMapFlow.editor._closeCardToolbar('waypoint_test', false)"
+        )
+        waypoint_history_before = routing_page.evaluate(
+            "window.__processMapFlow.editor.history.undoStack.length"
+        )
+        waypoint_before = routing_page.evaluate(
+            f"""() => window.__processMapFlow.editor.processMap.canvasEdges.find(
+                edge => edge.edgeId === '{manual_edge_state["edgeId"]}'
+            ).routing.waypoints[0]"""
+        )
+        waypoint_handle = routing_page.locator(
+            ".pm-edge-waypoint[data-waypoint-index='0']"
+        )
+        waypoint_handle.hover()
+        waypoint_box = waypoint_handle.bounding_box()
+        assert waypoint_box is not None
+        routing_page.mouse.move(
+            waypoint_box["x"] + waypoint_box["width"] / 2,
+            waypoint_box["y"] + waypoint_box["height"] / 2,
+        )
+        routing_page.mouse.down()
+        routing_page.mouse.move(
+            waypoint_box["x"] + waypoint_box["width"] / 2 + 42,
+            waypoint_box["y"] + waypoint_box["height"] / 2 - 26,
+            steps=5,
+        )
+        routing_page.mouse.up()
+        routing_page.wait_for_function(
+            f"""() => {{
+                const point = window.__processMapFlow.editor.processMap.canvasEdges.find(
+                    edge => edge.edgeId === '{manual_edge_state["edgeId"]}'
+                ).routing.waypoints[0];
+                return point.x !== {waypoint_before["x"]} || point.y !== {waypoint_before["y"]};
+            }}"""
+        )
+        moved_waypoint_state = routing_page.evaluate(
+            f"""() => {{
+                const editor = window.__processMapFlow.editor;
+                return {{
+                    point: editor.processMap.canvasEdges.find(
+                        edge => edge.edgeId === '{manual_edge_state["edgeId"]}'
+                    ).routing.waypoints[0],
+                    historyDepth: editor.history.undoStack.length,
+                }};
+            }}"""
+        )
+        record(
+            "selected_manual_route_exposes_draggable_persisted_waypoints",
+            moved_waypoint_state["point"] != waypoint_before
+            and moved_waypoint_state["historyDepth"] == waypoint_history_before + 1,
+            {"before": waypoint_before, "after": moved_waypoint_state},
+        )
+
+        insertion_point = _edge_screen_point(
+            routing_page,
+            manual_edge_state["edgeId"],
+            0.55,
+        )
+        routing_page.mouse.dblclick(insertion_point["x"], insertion_point["y"])
+        routing_page.wait_for_function(
+            f"""() => window.__processMapFlow.editor.processMap.canvasEdges.find(
+                edge => edge.edgeId === '{manual_edge_state["edgeId"]}'
+            ).routing.waypoints.length === 3"""
+        )
+        record(
+            "double_clicking_manual_route_segment_inserts_a_fixed_point",
+            routing_page.locator(".pm-edge-waypoint").count() == 3,
+        )
+
+        removable = routing_page.locator(
+            ".pm-edge-waypoint[data-waypoint-index='1']"
+        )
+        removable.evaluate("(element) => element.focus()")
+        routing_page.keyboard.press("Delete")
+        routing_page.wait_for_function(
+            f"""() => window.__processMapFlow.editor.processMap.canvasEdges.find(
+                edge => edge.edgeId === '{manual_edge_state["edgeId"]}'
+            ).routing.waypoints.length === 2"""
+        )
+        record(
+            "delete_removes_only_the_selected_manual_route_point",
+            routing_page.evaluate(
+                f"""() => window.__processMapFlow.editor.processMap.canvasEdges.find(
+                    edge => edge.edgeId === '{manual_edge_state["edgeId"]}'
+                ).routing.waypoints.length"""
+            ) == 2,
+        )
+
+        cancellation_before = routing_page.evaluate(
+            "window.InspectorProProcessMap.mapFingerprint("
+            "window.__processMapFlow.editor.processMap)"
+        )
+        source_box = routing_page.locator(
+            ".pm-node[data-node-id='route-sketch-source'] .pm-port-out"
+        ).bounding_box()
+        viewport_box = routing_page.locator(".pm-viewport").bounding_box()
+        assert source_box is not None and viewport_box is not None
+        routing_page.locator(
+            ".pm-node[data-node-id='route-sketch-source'] .pm-port-out"
+        ).dispatch_event(
+            "pointerdown",
+            {
+                "button": 0,
+                "clientX": source_box["x"] + source_box["width"] / 2,
+                "clientY": source_box["y"] + source_box["height"] / 2,
+                "pointerId": 601,
+            },
+        )
+        routing_page.locator(".pm-viewport").dispatch_event(
+            "pointerdown",
+            {
+                "button": 0,
+                "clientX": viewport_box["x"] + viewport_box["width"] / 2,
+                "clientY": viewport_box["y"] + viewport_box["height"] - 80,
+                "pointerId": 602,
+            },
+        )
+        routing_page.locator(".pm-viewport").focus()
+        routing_page.keyboard.press("Backspace")
+        routing_page.keyboard.press("Escape")
+        cancellation_after = routing_page.evaluate(
+            """
+            () => ({
+                fingerprint: window.InspectorProProcessMap.mapFingerprint(
+                    window.__processMapFlow.editor.processMap
+                ),
+                sketchActive: !!window.__processMapFlow.editor.wireSketch,
+                pendingPaths: document.querySelectorAll('.pm-edge-sketch-pending').length,
+            })
+            """
+        )
+        record(
+            "backspace_and_escape_cancel_manual_wire_without_mutating_map",
+            cancellation_after["fingerprint"] == cancellation_before
+            and cancellation_after["sketchActive"] is False
+            and cancellation_after["pendingPaths"] == 0,
+            cancellation_after,
+        )
+
+        routing_page.get_by_role("button", name="Save process map").click()
+        routing_page.wait_for_function("!window.__processMapFlow.editor.dirty")
+        routing_page.reload(wait_until="networkidle")
+        _open_process_flow(routing_page)
+        routing_page.wait_for_function(
+            f"""() => {{
+                const edge = window.__processMapFlow.editor.processMap.canvasEdges.find(
+                    item => item.edgeId === '{manual_edge_state["edgeId"]}'
+                );
+                return edge && edge.routing && edge.routing.mode === 'polyline_manual'
+                    && edge.routing.waypoints.length === 2;
+            }}"""
+        )
+        record(
+            "manual_route_waypoints_survive_save_and_reload",
+            routing_page.evaluate(
+                f"""() => {{
+                    const edge = window.__processMapFlow.editor.processMap.canvasEdges.find(
+                        item => item.edgeId === '{manual_edge_state["edgeId"]}'
+                    );
+                    return !('obstacleFingerprint' in edge.routing);
+                }}"""
+            ) is True,
+        )
+        routing_page.screenshot(
+            path=str(OUT_DIR / "process_flow_manual_wire_sketch.png")
+        )
+        routing_context.close()
+
+        # -- Phase 5: spatialized semantic suggestions and next-card ghosts --
+
+        phase5_map = _synthetic_process_map()
+        phase5_map["layoutVersion"] = 3
+        phase5_map["canvasNodes"] = [
+            {
+                "nodeId": "phase5-anchor",
+                "nodeKind": "product_occurrence",
+                "sourceOccurrenceId": "part-a-1",
+                "nameSnapshot": "Repeated Part A",
+                "position": {"x": 80, "y": 240},
+            },
+            {
+                "nodeId": "phase5-obstacle",
+                "nodeKind": "process_step",
+                "processType": "inspection",
+                "name": "Unrelated inspection",
+                "position": {"x": 480, "y": 190},
+            },
+            {
+                "nodeId": "phase5-target",
+                "nodeKind": "process_step",
+                "processType": "output",
+                "name": "Target output",
+                "position": {"x": 900, "y": 240},
+            },
+        ]
+        phase5_map["canvasEdges"] = []
+        phase5_map["canvasGroups"] = []
+        phase5_connection_id = "pms-phase5-browser-connection"
+        phase5_placement_id = "pms-phase5-browser-placement"
+        phase5_store = {
+            "map": phase5_map,
+            "structure": _synthetic_structure(),
+            "revision": "phase5-rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+            "spatializeSuggestions": True,
+            "suggestions": [
+                {
+                    "suggestionId": phase5_connection_id,
+                    "ruleId": "synthetic_sequence",
+                    "ruleVersion": "1.0.0",
+                    "evidenceFingerprint": "phase5-evidence-connection",
+                    "confidence": "high",
+                    "edge": {
+                        "edgeId": "phase5-connection-edge",
+                        "logicalConnectionId": "phase5-connection-edge",
+                        "from": {"nodeId": "phase5-anchor", "port": "out"},
+                        "to": {"nodeId": "phase5-target", "port": "in"},
+                        "kind": "precedence",
+                    },
+                    "provenance": [{"source": "authored_precedence_pattern"}],
+                    "explanation": "Connect the reviewed operation to its output.",
+                    "validation": {"wouldCreateCycle": False, "duplicateOfExisting": False},
+                    "affectedIds": ["phase5-anchor", "phase5-target"],
+                },
+                {
+                    "suggestionId": phase5_placement_id,
+                    "ruleId": "synthetic_next_card",
+                    "ruleVersion": "1.0.0",
+                    "evidenceFingerprint": "phase5-evidence-placement",
+                    "confidence": "high",
+                    "placement": {
+                        "sourceOccurrenceId": "part-a-2",
+                        "nameSnapshot": "Repeated Part A",
+                        "itemIdSnapshot": "RB-003",
+                        "anchorNodeId": "phase5-anchor",
+                        "connectionDirection": "outgoing",
+                        "edgeKind": "precedence",
+                        "edgeId": "phase5-placement-edge",
+                    },
+                    "provenance": [{"source": "authored_precedence_pattern"}],
+                    "explanation": "Place the next reviewed sibling occurrence.",
+                    "validation": {"wouldCreateCycle": False, "duplicateOfExisting": False},
+                    "affectedIds": ["phase5-anchor", "part-a-2"],
+                },
+            ],
+        }
+        phase5_context = browser.new_context(viewport={"width": 1600, "height": 1000})
+        phase5_page = phase5_context.new_page()
+        _install_cached_three_route(phase5_page)
+        phase5_page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
+        _install_synthetic_process_map_route(phase5_page, phase5_store)
+        _install_synthetic_map_management_routes(phase5_page, phase5_store)
+        _install_synthetic_suggestion_route(phase5_page, phase5_store)
+        for status_url in (
+            "**/api/training/process-map-spatial-placement-status",
+            "**/api/training/process-map-auto-routing-status",
+            "**/api/training/process-map-agent-layout-write-status",
+        ):
+            phase5_page.route(
+                status_url,
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"success": True, "enabled": True}),
+                ),
+            )
+        phase5_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(phase5_page)
+        phase5_page.wait_for_function(
+            "window.__processMapFlow.editor.suggestions.length === 2"
+        )
+        record(
+            "phase5_spatialized_connection_and_next_card_are_preview_only",
+            phase5_page.locator(".pm-edge-ghost.spatialized").count() == 1
+            and phase5_page.locator(".pm-semantic-placement-ghost").count() == 1
+            and phase5_page.locator(".pm-semantic-placement-ghost-wire").count() == 1
+            and phase5_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.length"
+            ) == 3
+            and phase5_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasEdges.length"
+            ) == 0
+            and phase5_page.evaluate("window.__processMapFlow.editor.dirty") is False,
+        )
+        spatial_ghost_paths = phase5_page.evaluate(
+            """() => Array.from(document.querySelectorAll(
+                '.pm-edge-ghost.spatialized, .pm-semantic-placement-ghost-wire'
+            )).map(path => path.getAttribute('d'))"""
+        )
+        record(
+            "phase5_ghost_wires_use_exact_orthogonal_proposals",
+            len(spatial_ghost_paths) == 2
+            and all(" C " not in path and " L " in path for path in spatial_ghost_paths),
+            spatial_ghost_paths,
+        )
+        phase5_page.screenshot(
+            path=str(OUT_DIR / "process_flow_spatialized_suggestions.png"),
+            full_page=False,
+        )
+        phase5_page.get_by_role(
+            "button", name="Review evidence-backed process-flow suggestions"
+        ).click()
+        phase5_page.wait_for_selector(".pm-suggestion-panel:not([hidden])")
+        record(
+            "phase5_unplaced_semantic_target_is_labeled_as_a_next_card",
+            phase5_page.locator(
+                f".pm-suggestion-item[data-suggestion-id='{phase5_placement_id}']"
+            ).filter(has_text="Next card").count() == 1,
+        )
+        stale_result = phase5_page.evaluate(
+            f"""async () => {{
+                const editor = window.__processMapFlow.editor;
+                const suggestion = editor.suggestions.find(
+                    item => item.suggestionId === '{phase5_placement_id}'
+                );
+                suggestion.spatialProposal.proposalId = 'tampered-proposal';
+                const before = JSON.stringify(editor.processMap);
+                const accepted = await editor.acceptSuggestion('{phase5_placement_id}');
+                return {{ accepted, before, after: JSON.stringify(editor.processMap),
+                    suggestionCount: editor.suggestions.length }};
+            }}"""
+        )
+        record(
+            "phase5_stale_geometry_is_discarded_without_mutation",
+            stale_result["accepted"] is False
+            and stale_result["before"] == stale_result["after"]
+            and stale_result["suggestionCount"] == 0,
+            stale_result,
+        )
+        phase5_page.evaluate("window.__processMapFlow.editor.loadSuggestions()")
+        phase5_page.wait_for_function(
+            "window.__processMapFlow.editor.suggestions.length === 2"
+        )
+        phase5_page.evaluate(
+            f"window.__processMapFlow.editor.acceptSuggestion('{phase5_placement_id}')"
+        )
+        phase5_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 4"
+            " && window.__processMapFlow.editor.processMap.canvasEdges.length === 1"
+        )
+        accepted_phase5 = phase5_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const edge = editor.processMap.canvasEdges[0];
+                return {
+                    historyDepth: editor.history.undoStack.length,
+                    dirty: editor.dirty,
+                    edgeRouting: edge.routing,
+                    addedOccurrence: editor.processMap.canvasNodes.some(
+                        node => node.sourceOccurrenceId === 'part-a-2'
+                    ),
+                };
+            }"""
+        )
+        record(
+            "phase5_accept_next_card_commits_card_and_wire_atomically",
+            accepted_phase5["historyDepth"] == 1
+            and accepted_phase5["dirty"] is True
+            and accepted_phase5["addedOccurrence"] is True
+            and accepted_phase5["edgeRouting"]["mode"] == "orthogonal_auto"
+            and phase5_page.locator(".pm-semantic-placement-ghost").count() == 0,
+            accepted_phase5,
+        )
+        phase5_page.evaluate("window.__processMapFlow.editor.undo()")
+        record(
+            "phase5_one_undo_removes_both_the_suggested_card_and_wire",
+            phase5_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.length"
+            ) == 3
+            and phase5_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasEdges.length"
+            ) == 0,
+        )
+        phase5_context.close()
+
+        phase6_store = {
+            "map": _synthetic_process_map(),
+            "structure": _synthetic_structure(),
+            "revision": "phase6-rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+            "spatialEvents": [],
+        }
+        phase6_context = browser.new_context(viewport={"width": 1600, "height": 1000})
+        phase6_page = phase6_context.new_page()
+        _install_cached_three_route(phase6_page)
+        phase6_page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
+        _install_synthetic_process_map_route(phase6_page, phase6_store)
+        _install_synthetic_map_management_routes(phase6_page, phase6_store)
+        _install_synthetic_suggestion_route(phase6_page, phase6_store)
+        _install_synthetic_spatial_proposal_routes(phase6_page, phase6_store)
+        for status_url in (
+            "**/api/training/process-map-spatial-placement-status",
+            "**/api/training/process-map-auto-routing-status",
+            "**/api/training/process-map-agent-layout-write-status",
+        ):
+            phase6_page.route(
+                status_url,
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"success": True, "enabled": True}),
+                ),
+            )
+        phase6_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(phase6_page)
+        proposal_result = phase6_page.evaluate(
+            """async () => await window._trainRequestManagedSpatialProposal(
+                'propose_process_map_node_placement',
+                { targetKind: 'product_occurrence', occurrenceId: 'part-a-1' }
+            )"""
+        )
+        record(
+            "phase6_agent_proposal_is_exact_preview_without_map_mutation",
+            proposal_result.get("ok") is True
+            and proposal_result.get("previewPendingApproval") is True
+            and phase6_page.locator(".pm-managed-proposal-ghost").count() == 1
+            and phase6_page.locator(".pm-managed-proposal-review:not([hidden])").count() == 1
+            and phase6_page.locator(".pm-empty-state:visible").count() == 0
+            and phase6_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.length"
+            ) == 0
+            and phase6_page.evaluate("window.__processMapFlow.editor.dirty") is False,
+            proposal_result,
+        )
+        phase6_page.screenshot(
+            path=str(OUT_DIR / "process_flow_agent_proposal_preview.png"),
+            full_page=False,
+        )
+        phase6_page.locator(".pm-managed-proposal-dismiss").click()
+        record(
+            "phase6_dismiss_leaves_saved_map_byte_identical",
+            phase6_page.locator(".pm-managed-proposal-ghost").count() == 0
+            and phase6_page.locator(".pm-managed-proposal-review:not([hidden])").count() == 0
+            and phase6_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.length"
+            ) == 0
+            and phase6_page.evaluate("window.__processMapFlow.editor.dirty") is False,
+        )
+        phase6_page.evaluate(
+            """async () => await window._trainRequestManagedSpatialProposal(
+                'propose_process_map_node_placement',
+                { targetKind: 'product_occurrence', occurrenceId: 'part-a-1' }
+            )"""
+        )
+        phase6_page.locator(".pm-managed-proposal-approve").click()
+        phase6_page.wait_for_function(
+            "window.__processMapFlow.editor.processMap.canvasNodes.length === 1"
+            " && window.__processMapFlow.editor.revision === 'phase6-rev-2'"
+        )
+        applied_phase6 = phase6_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                return {
+                    dirty: editor.dirty,
+                    historyDepth: editor.history.undoStack.length,
+                    nodeIds: editor.processMap.canvasNodes.map(node => node.nodeId),
+                    proposalVisible: !!editor.managedProposalPlan,
+                };
+            }"""
+        )
+        spatial_events = phase6_store["spatialEvents"]
+        approval_event = next(
+            (item for item in spatial_events if item["kind"] == "approval"), None
+        )
+        apply_event = next(
+            (item for item in spatial_events if item["kind"] == "apply"), None
+        )
+        record(
+            "phase6_approval_applies_one_bound_diff_and_one_receipt",
+            applied_phase6["dirty"] is False
+            and applied_phase6["historyDepth"] == 1
+            and applied_phase6["nodeIds"] == ["pmn-agent-browser"]
+            and applied_phase6["proposalVisible"] is False
+            and approval_event is not None
+            and apply_event is not None
+            and phase6_page.locator("#toastContainer .toast.success").filter(
+                has_text="Placed Repeated Part A."
+            ).count() == 1
+            and approval_event["body"].get("spatialBindingHash") == "b" * 64
+            and apply_event["body"].get("spatialBindingHash") == "b" * 64
+            and approval_event["body"].get("idempotencyKey")
+                == apply_event["body"].get("idempotencyKey"),
+            {"editor": applied_phase6, "events": spatial_events},
+        )
+        phase6_page.evaluate("window.__processMapFlow.editor.undo()")
+        record(
+            "phase6_one_undo_restores_the_preproposal_map",
+            phase6_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.length"
+            ) == 0
+            and phase6_page.evaluate("window.__processMapFlow.editor.dirty") is True,
+        )
+        phase6_context.close()
+
+        semantic_store = {
+            "map": _synthetic_process_map(),
+            "structure": _synthetic_structure(),
+            "revision": "semantic-rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+            "semanticEvents": [],
+            "builderWriteEnabled": True,
+            "semanticProposalDelaySeconds": 3.4,
+        }
+        semantic_requests: list[dict] = []
+        semantic_context = browser.new_context(
+            viewport={"width": 1600, "height": 1000}
+        )
+        semantic_page = semantic_context.new_page()
+        _install_cached_three_route(semantic_page)
+        semantic_page.on(
+            "pageerror", lambda error: report["page_errors"].append(str(error))
+        )
+        _install_synthetic_process_map_route(semantic_page, semantic_store)
+        _install_synthetic_map_management_routes(semantic_page, semantic_store)
+        _install_synthetic_suggestion_route(semantic_page, semantic_store)
+        _install_synthetic_semantic_proposal_routes(
+            semantic_page, semantic_store
+        )
+        _install_synthetic_agent_route(
+            semantic_page, semantic_store, semantic_requests
+        )
+        for status_url in (
+            "**/api/training/process-map-spatial-placement-status",
+            "**/api/training/process-map-spatial-analysis-status",
+            "**/api/training/process-map-auto-routing-status",
+            "**/api/training/process-map-agent-layout-write-status",
+            "**/api/training/process-map-semantic-generation-status",
+        ):
+            semantic_page.route(
+                status_url,
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"success": True, "enabled": True}),
+                ),
+            )
+        semantic_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(semantic_page)
+        semantic_plan = {
+            "schemaVersion": 1,
+            "planId": "browser-module-a-plan",
+            "scope": {
+                "assemblyOccurrenceId": "module-a",
+                "label": "Module A",
+            },
+            "requiredOccurrences": [
+                {"occurrenceId": "part-a-1", "quantity": 1},
+                {"occurrenceId": "part-a-2", "quantity": 1},
+            ],
+            "operations": [
+                {
+                    "id": "op-join-module-a",
+                    "operationType": "operation",
+                    "label": "Join Module A parts",
+                    "inputs": [
+                        {"ref": "part-a-1", "type": "occurrence"},
+                        {"ref": "part-a-2", "type": "occurrence"},
+                    ],
+                    "output": {"ref": "module-a", "type": "occurrence"},
+                    "branchId": "main",
+                    "stageIndex": 1,
+                    "knowledgeStatus": "inferred",
+                    "evidence": [
+                        {
+                            "sourceType": "domain_heuristic",
+                            "sourceRef": "browser-fixture",
+                            "supports": "candidate-operation",
+                        }
+                    ],
+                    "properties": {},
+                }
+            ],
+            "intermediateResults": [],
+            "junctions": [
+                {
+                    "id": "junction-module-a",
+                    "junctionType": "parallel_and",
+                    "inputs": ["part-a-1", "part-a-2"],
+                    "outputs": ["op-join-module-a"],
+                    "knowledgeStatus": "inferred",
+                    "evidence": [
+                        {
+                            "sourceType": "domain_heuristic",
+                            "sourceRef": "browser-fixture",
+                            "supports": "candidate-flow-topology",
+                        }
+                    ],
+                }
+            ],
+            "branches": [{"id": "main", "label": "Main"}],
+            "evidence": [],
+            "assumptions": [
+                {
+                    "id": "review-sequence",
+                    "text": "Review the proposed assembly sequence.",
+                }
+            ],
+            "layoutHints": [
+                {
+                    "ref": "op-join-module-a",
+                    "branchId": "main",
+                    "stageIndex": 1,
+                }
+            ],
+            "unresolvedQuestions": [],
+        }
+        semantic_page.unroute("**/api/agent/chat")
+        _install_synthetic_semantic_agent_route(
+            semantic_page,
+            semantic_plan,
+            semantic_requests,
+        )
+        semantic_dialogs: list[str] = []
+
+        def dismiss_unexpected_semantic_dialog(dialog) -> None:
+            semantic_dialogs.append(dialog.message)
+            dialog.dismiss()
+
+        semantic_page.on("dialog", dismiss_unexpected_semantic_dialog)
+        short_generation_prompt = (
+            "Build and visually validate a complete Tricycle Assembly process "
+            "map. Show one ghost preview and wait for my approval. Do not commit it."
+        )
+        semantic_page.evaluate(
+            "prompt => window._agentContextSendPrompt(prompt)",
+            short_generation_prompt,
+        )
+        semantic_page.wait_for_function(
+            """() => {
+                const editor = window.__processMapFlow
+                    && window.__processMapFlow.editor;
+                const messages = Array.from(document.querySelectorAll(
+                    '.agent-msg.assistant'
+                ));
+                return !!(editor && editor.managedProposalPlan)
+                    && messages.some(message => message.textContent.includes(
+                        'Prepared one complete ghost preview'
+                    ));
+            }""",
+            timeout=30_000,
+        )
+        semantic_result = semantic_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const proposal = editor.managedProposalPlan;
+                const activeTab = document.querySelector(
+                    '.tab[aria-selected="true"]'
+                );
+                const messages = Array.from(document.querySelectorAll(
+                    '.agent-msg.assistant'
+                ));
+                return {
+                    ok: !!proposal,
+                    previewPendingApproval: !!proposal,
+                    semanticBindingHash: proposal && proposal.semanticBindingHash,
+                    createdIds: proposal && proposal.createdIds,
+                    activeTab: activeTab && activeTab.dataset.tab,
+                    assistantText: messages.length
+                        ? messages[messages.length - 1].textContent.trim()
+                        : '',
+                };
+            }"""
+        )
+        semantic_page.wait_for_function(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const reveal = editor.managedProposalReveal;
+                return !!(reveal && reveal.active)
+                    && reveal.visibleNodeIds.size > 0
+                    && reveal.visibleNodeIds.size < reveal.nodeIds.length
+                    && reveal.visibleEdgeIds.size > 0
+                    && reveal.visibleEdgeIds.size < reveal.edgeIds.length;
+            }""",
+            timeout=5_000,
+        )
+        semantic_progressive_state = semantic_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const reveal = editor.managedProposalReveal;
+                window.__semanticProposalForReducedMotion = JSON.parse(
+                    JSON.stringify(editor.managedProposalPlan)
+                );
+                return {
+                    status: editor.getAgentState().activeProposal.reveal.status,
+                    visibleNodeCount: reveal.visibleNodeIds.size,
+                    totalNodeCount: reveal.nodeIds.length,
+                    visibleEdgeCount: reveal.visibleEdgeIds.size,
+                    totalEdgeCount: reveal.edgeIds.length,
+                    pendingElementCount: document.querySelectorAll(
+                        '[data-managed-proposal-reveal-state="pending"]'
+                    ).length,
+                    approveDisabled: document.querySelector(
+                        '.pm-managed-proposal-approve'
+                    ).disabled,
+                    showAllVisible: !document.querySelector(
+                        '.pm-managed-proposal-show-all'
+                    ).hidden,
+                    savedNodeCount: editor.processMap.canvasNodes.length,
+                    dirty: editor.dirty,
+                };
+            }"""
+        )
+        semantic_page.wait_for_timeout(100)
+        semantic_page.screenshot(
+            path=str(OUT_DIR / "process_flow_semantic_progressive_build.png"),
+            full_page=False,
+        )
+        record(
+            "semantic_generation_progressively_reveals_validated_preview",
+            semantic_progressive_state["status"] == "building"
+            and 0 < semantic_progressive_state["visibleNodeCount"]
+                < semantic_progressive_state["totalNodeCount"]
+            and semantic_progressive_state["visibleEdgeCount"]
+                > 0
+            and semantic_progressive_state["visibleEdgeCount"]
+                < semantic_progressive_state["totalEdgeCount"]
+            and semantic_progressive_state["pendingElementCount"] > 0
+            and semantic_progressive_state["approveDisabled"] is True
+            and semantic_progressive_state["showAllVisible"] is True
+            and semantic_progressive_state["savedNodeCount"] == 0
+            and semantic_progressive_state["dirty"] is False,
+            semantic_progressive_state,
+        )
+        semantic_page.locator(".pm-managed-proposal-show-all").click()
+        semantic_page.wait_for_function(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const reveal = editor.managedProposalReveal;
+                return !!(reveal && reveal.completed && !reveal.active)
+                    && reveal.visibleNodeIds.size === reveal.nodeIds.length
+                    && reveal.visibleEdgeIds.size === reveal.edgeIds.length
+                    && !document.querySelector(
+                        '.pm-managed-proposal-approve'
+                    ).disabled;
+            }"""
+        )
+        semantic_show_all_state = semantic_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const reveal = editor.managedProposalReveal;
+                return {
+                    status: editor.getAgentState().activeProposal.reveal.status,
+                    skipped: reveal.skipped,
+                    revealedElementCount: document.querySelectorAll(
+                        '[data-managed-proposal-reveal-state="revealed"]'
+                    ).length,
+                    expectedElementCount:
+                        reveal.nodeIds.length + reveal.edgeIds.length,
+                    showAllHidden: document.querySelector(
+                        '.pm-managed-proposal-show-all'
+                    ).hidden,
+                    savedNodeCount: editor.processMap.canvasNodes.length,
+                    dirty: editor.dirty,
+                };
+            }"""
+        )
+        record(
+            "semantic_generation_show_all_finishes_without_committing",
+            semantic_show_all_state["status"] == "complete"
+            and semantic_show_all_state["skipped"] is True
+            and semantic_show_all_state["revealedElementCount"]
+                == semantic_show_all_state["expectedElementCount"]
+            and semantic_show_all_state["showAllHidden"] is True
+            and semantic_show_all_state["savedNodeCount"] == 0
+            and semantic_show_all_state["dirty"] is False,
+            semantic_show_all_state,
+        )
+        semantic_page.locator(".pm-managed-proposal-dismiss").click()
+        semantic_page.wait_for_function(
+            "() => !window.__processMapFlow.editor.managedProposalPlan"
+        )
+        reopened_for_natural_reveal = semantic_page.evaluate(
+            """() => window.__processMapFlow.editor.showManagedProposal(
+                window.__semanticProposalForReducedMotion
+            )"""
+        )
+        semantic_page.wait_for_function(
+            """() => {
+                const reveal =
+                    window.__processMapFlow.editor.managedProposalReveal;
+                return !!(reveal && reveal.active);
+            }"""
+        )
+        semantic_page.wait_for_function(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const reveal = editor.managedProposalReveal;
+                return !!(reveal && reveal.completed && !reveal.active)
+                    && reveal.visibleNodeIds.size === reveal.nodeIds.length
+                    && reveal.visibleEdgeIds.size === reveal.edgeIds.length;
+            }""",
+            timeout=10_000,
+        )
+        semantic_natural_reveal_state = semantic_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const reveal = editor.managedProposalReveal;
+                return {
+                    completed: reveal.completed,
+                    skipped: !!reveal.skipped,
+                    pendingElementCount: document.querySelectorAll(
+                        '[data-managed-proposal-reveal-state="pending"]'
+                    ).length,
+                    approveDisabled: document.querySelector(
+                        '.pm-managed-proposal-approve'
+                    ).disabled,
+                    savedNodeCount: editor.processMap.canvasNodes.length,
+                    dirty: editor.dirty,
+                };
+            }"""
+        )
+        record(
+            "semantic_generation_naturally_completes_before_approval",
+            reopened_for_natural_reveal is True
+            and semantic_natural_reveal_state["completed"] is True
+            and semantic_natural_reveal_state["skipped"] is False
+            and semantic_natural_reveal_state["pendingElementCount"] == 0
+            and semantic_natural_reveal_state["approveDisabled"] is False
+            and semantic_natural_reveal_state["savedNodeCount"] == 0
+            and semantic_natural_reveal_state["dirty"] is False,
+            semantic_natural_reveal_state,
+        )
+        semantic_page.wait_for_function(
+            """() => document.querySelectorAll(
+                '.pm-managed-proposal-wire'
+            ).length === 4"""
+        )
+        semantic_page.wait_for_function(
+            """() => {
+                const viewport = document.querySelector('.pm-viewport')
+                    .getBoundingClientRect();
+                return Array.from(document.querySelectorAll(
+                    '.pm-managed-proposal-wire'
+                )).every(path => {
+                    const rect = path.getBoundingClientRect();
+                    return path.getTotalLength() > 20
+                        && rect.right >= viewport.left
+                        && rect.left <= viewport.right
+                        && rect.bottom >= viewport.top
+                        && rect.top <= viewport.bottom;
+                });
+            }""",
+            timeout=10_000,
+        )
+        semantic_preview_geometry = semantic_page.evaluate(
+            """() => {
+                const viewport = document.querySelector('.pm-viewport')
+                    .getBoundingClientRect();
+                const wires = Array.from(document.querySelectorAll(
+                    '.pm-managed-proposal-wire'
+                ));
+                const visibleWires = wires.filter(path => {
+                    const rect = path.getBoundingClientRect();
+                    return path.getTotalLength() > 20
+                        && rect.right >= viewport.left
+                        && rect.left <= viewport.right
+                        && rect.bottom >= viewport.top
+                        && rect.top <= viewport.bottom;
+                });
+                const svg = document.querySelector(
+                    '.pm-placement-ghost-wire-layer'
+                );
+                return {
+                    wireCount: wires.length,
+                    visibleWireCount: visibleWires.length,
+                    junctionCount: document.querySelectorAll(
+                        '.pm-managed-proposal-junction'
+                    ).length,
+                    svgWidth: Number(svg.getAttribute('width')),
+                    svgHeight: Number(svg.getAttribute('height')),
+                    viewBox: svg.getAttribute('viewBox'),
+                };
+            }"""
+        )
+        record(
+            "semantic_generation_shows_one_complete_non_mutating_preview",
+            semantic_result.get("ok") is True
+            and semantic_result.get("previewPendingApproval") is True
+            and semantic_result.get("semanticBindingHash") == "c" * 64
+            and len(semantic_result.get("createdIds", {}).get("nodeIds", [])) == 5
+            and semantic_result.get("activeTab") == "training"
+            and "Prepared one complete ghost preview"
+                in semantic_result.get("assistantText", "")
+            and "reduced opacity" not in semantic_result.get("assistantText", "")
+            and semantic_dialogs == []
+            and semantic_page.locator(".pm-managed-proposal-ghost").count() == 4
+            and semantic_preview_geometry["junctionCount"] == 1
+            and semantic_preview_geometry["wireCount"] == 4
+            and semantic_preview_geometry["visibleWireCount"] == 4
+            and semantic_preview_geometry["svgWidth"] > 1000
+            and semantic_preview_geometry["svgHeight"] > 300
+            and semantic_preview_geometry["viewBox"]
+            and semantic_page.locator(".pm-managed-proposal-review:not([hidden])").count() == 1
+            and semantic_page.locator(
+                ".pm-managed-proposal-visual:not([hidden])"
+            ).count() == 1
+            and "Visual validation applied 2 inferred corrections."
+            in semantic_page.locator(".pm-managed-proposal-copy").inner_text()
+            and semantic_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.length"
+            ) == 0
+            and semantic_page.evaluate("window.__processMapFlow.editor.dirty") is False
+            and "coordinates" not in json.dumps(
+                semantic_store["semanticEvents"][0]["body"].get(
+                    "semanticPlan", {}
+                )
+            ),
+            {
+                "result": semantic_result,
+                "events": semantic_store["semanticEvents"],
+                "geometry": semantic_preview_geometry,
+                "dialogs": semantic_dialogs,
+            },
+        )
+        semantic_page.locator(".pm-managed-proposal-dismiss").click()
+        semantic_page.wait_for_function(
+            "() => !window.__processMapFlow.editor.managedProposalPlan"
+        )
+        semantic_page.emulate_media(reduced_motion="reduce")
+        reopened_for_reduced_motion = semantic_page.evaluate(
+            """() => window.__processMapFlow.editor.showManagedProposal(
+                window.__semanticProposalForReducedMotion
+            )"""
+        )
+        semantic_reduced_motion_state = semantic_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const reveal = editor.managedProposalReveal;
+                return {
+                    reopened: !!editor.managedProposalPlan,
+                    active: reveal && reveal.active,
+                    completed: reveal && reveal.completed,
+                    reducedMotion: reveal && reveal.reducedMotion,
+                    pendingElementCount: document.querySelectorAll(
+                        '[data-managed-proposal-reveal-state="pending"]'
+                    ).length,
+                    approveDisabled: document.querySelector(
+                        '.pm-managed-proposal-approve'
+                    ).disabled,
+                    showAllHidden: document.querySelector(
+                        '.pm-managed-proposal-show-all'
+                    ).hidden,
+                    savedNodeCount: editor.processMap.canvasNodes.length,
+                };
+            }"""
+        )
+        record(
+            "semantic_generation_reduced_motion_shows_complete_preview",
+            reopened_for_reduced_motion is True
+            and semantic_reduced_motion_state["reopened"] is True
+            and semantic_reduced_motion_state["active"] is False
+            and semantic_reduced_motion_state["completed"] is True
+            and semantic_reduced_motion_state["reducedMotion"] is True
+            and semantic_reduced_motion_state["pendingElementCount"] == 0
+            and semantic_reduced_motion_state["approveDisabled"] is False
+            and semantic_reduced_motion_state["showAllHidden"] is True
+            and semantic_reduced_motion_state["savedNodeCount"] == 0,
+            semantic_reduced_motion_state,
+        )
+        semantic_page.locator(".pm-managed-proposal-approve").click()
+        semantic_page.wait_for_function(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                return editor.processMap.canvasNodes.length === 5
+                    && editor.processMap.canvasEdges.length === 4
+                    && editor.revision === 'semantic-rev-2'
+                    && !editor.managedProposalPlan;
+            }""",
+            timeout=15_000,
+        )
+        semantic_page.evaluate(
+            "window._agentContextSendPrompt('Summarize the committed map receipt.')"
+        )
+        semantic_page.wait_for_function(
+            "() => document.querySelectorAll('.agent-msg.assistant').length > 0"
+        )
+        receipt_attachment = (
+            semantic_requests[-1]
+            .get("inspection_context", {})
+            .get("attachments", {})
+            .get("process_map", {})
+            .get("receipts", [])
+        )
+        semantic_events = semantic_store["semanticEvents"]
+        record(
+            "semantic_approval_is_bound_atomic_and_returns_receipt_to_sage",
+            [item["kind"] for item in semantic_events]
+                == ["proposal", "approval", "apply"]
+            and all(
+                item["body"].get("semanticBindingHash") == "c" * 64
+                for item in semantic_events[1:]
+            )
+            and len(receipt_attachment) == 1
+            and receipt_attachment[0].get("receiptId") == "semantic-receipt"
+            and receipt_attachment[0].get("revision") == "semantic-rev-2"
+            and len(
+                receipt_attachment[0].get("createdIds", {}).get("nodeIds", [])
+            ) == 5,
+            {
+                "events": semantic_events,
+                "receipts": receipt_attachment,
+            },
+        )
+        semantic_context.close()
+
+        phase7_store = {
+            "map": _synthetic_phase7_arrangement_map(),
+            "structure": _synthetic_structure(),
+            "revision": "phase7-rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+        }
+        phase7_context = browser.new_context(viewport={"width": 1600, "height": 1000})
+        phase7_page = phase7_context.new_page()
+        phase7_telemetry: list[dict] = []
+        _install_cached_three_route(phase7_page)
+        phase7_page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
+        _install_synthetic_process_map_route(phase7_page, phase7_store)
+        _install_synthetic_map_management_routes(phase7_page, phase7_store)
+        _install_synthetic_suggestion_route(phase7_page, phase7_store)
+        _install_spatial_telemetry_route(phase7_page, phase7_telemetry)
+        for status_url in (
+            "**/api/training/process-map-spatial-analysis-status",
+            "**/api/training/process-map-spatial-placement-status",
+            "**/api/training/process-map-auto-routing-status",
+            "**/api/training/process-map-agent-layout-write-status",
+        ):
+            phase7_page.route(
+                status_url,
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"success": True, "enabled": True}),
+                ),
+            )
+        phase7_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(phase7_page)
+        phase7_page.wait_for_function(
+            "window.__processMapFlow.editor.spatialPlacementEnabled === true"
+        )
+        clean_button = phase7_page.locator(
+            "[data-process-map-command='processCleanUp']"
+        )
+        phase7_initial = phase7_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                return {
+                    fingerprint: window.InspectorProProcessMap.mapFingerprint(editor.processMap),
+                    lockedPosition: {...editor.processMap.canvasNodes.find(node => node.nodeId === 'c').position},
+                    historyDepth: editor.history.undoStack.length,
+                    dirty: editor.dirty,
+                };
+            }"""
+        )
+        clean_button.click()
+        phase7_page.wait_for_function(
+            "window.__processMapFlow.editor.arrangementPlan !== null"
+        )
+        phase7_preview = phase7_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const state = editor.arrangementPlan;
+                return {
+                    scope: state.plan.scope.kind,
+                    planId: state.plan.planId,
+                    moveIds: state.plan.moves.map(move => move.nodeId).sort(),
+                    beforeHard: state.plan.metricsBefore.hardViolationCount,
+                    afterHard: state.plan.metricsAfter.hardViolationCount,
+                    fingerprint: window.InspectorProProcessMap.mapFingerprint(editor.processMap),
+                    historyDepth: editor.history.undoStack.length,
+                    dirty: editor.dirty,
+                };
+            }"""
+        )
+        record(
+            "phase7_full_map_cleanup_is_preview_only_and_preserves_locked_cards",
+            phase7_preview["scope"] == "full_map"
+            and phase7_preview["planId"] == "pm-arr-773a2993e219cf2e"
+            and "c" not in phase7_preview["moveIds"]
+            and phase7_preview["beforeHard"] > phase7_preview["afterHard"]
+            and phase7_preview["fingerprint"] == phase7_initial["fingerprint"]
+            and phase7_preview["historyDepth"] == phase7_initial["historyDepth"]
+            and phase7_preview["dirty"] is False
+            and phase7_page.locator("[data-arrangement-ghost]").count()
+                == len(phase7_preview["moveIds"])
+            and phase7_page.locator(".pm-arrangement-accept").count() == 1,
+            phase7_preview,
+        )
+        phase7_page.emulate_media(reduced_motion="reduce")
+        reduced_motion_state = phase7_page.evaluate(
+            """() => {
+                const ghost = document.querySelector('.pm-arrangement-ghost');
+                const style = ghost ? getComputedStyle(ghost) : null;
+                const status = document.querySelector('.pm-editor-status');
+                return {
+                    transition: style && style.transitionDuration,
+                    animation: style && style.animationName,
+                    live: status && status.getAttribute('aria-live'),
+                    atomic: status && status.getAttribute('aria-atomic'),
+                    busy: document.querySelector('[data-process-flow-editor]')
+                        .getAttribute('aria-busy'),
+                };
+            }"""
+        )
+        record(
+            "phase8_cleanup_preview_honors_reduced_motion_and_live_status",
+            reduced_motion_state["transition"] in {"0s", "0s, 0s"}
+            and reduced_motion_state["animation"] == "none"
+            and reduced_motion_state["live"] == "polite"
+            and reduced_motion_state["atomic"] == "true"
+            and reduced_motion_state["busy"] is None,
+            reduced_motion_state,
+        )
+        phase7_page.evaluate(
+            "document.documentElement.setAttribute('data-theme', 'light')"
+        )
+        phase7_page.screenshot(
+            path=str(OUT_DIR / "process_flow_phase8_cleanup_preview_light.png"),
+            full_page=False,
+        )
+        phase7_page.evaluate(
+            "document.documentElement.setAttribute('data-theme', 'dark')"
+        )
+        phase7_page.screenshot(
+            path=str(OUT_DIR / "process_flow_phase8_cleanup_preview_dark.png"),
+            full_page=False,
+        )
+        phase7_page.emulate_media(reduced_motion="no-preference")
+        phase7_page.locator(".pm-arrangement-accept").click()
+        phase7_page.wait_for_function(
+            "window.__processMapFlow.editor.arrangementPlan === null"
+        )
+        phase7_applied = phase7_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                return {
+                    historyDepth: editor.history.undoStack.length,
+                    dirty: editor.dirty,
+                    lockedPosition: {...editor.processMap.canvasNodes.find(node => node.nodeId === 'c').position},
+                    fingerprint: window.InspectorProProcessMap.mapFingerprint(editor.processMap),
+                };
+            }"""
+        )
+        record(
+            "phase7_apply_is_one_undoable_mutation_and_locked_position_is_exact",
+            phase7_applied["historyDepth"] == phase7_initial["historyDepth"] + 1
+            and phase7_applied["dirty"] is True
+            and phase7_applied["lockedPosition"] == phase7_initial["lockedPosition"]
+            and phase7_applied["fingerprint"] != phase7_initial["fingerprint"],
+            phase7_applied,
+        )
+        phase7_page.evaluate("window.__processMapFlow.editor.undo()")
+        record(
+            "phase7_one_undo_restores_exact_precleanup_map",
+            phase7_page.evaluate(
+                "window.InspectorProProcessMap.mapFingerprint(window.__processMapFlow.editor.processMap)"
+            ) == phase7_initial["fingerprint"],
+        )
+
+        phase7_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                const original = editor._ensureSpatialContract.bind(editor);
+                editor.__phase8OriginalEnsureSpatialContract = original;
+                editor._ensureSpatialContract = () => new Promise((resolve, reject) => {
+                    setTimeout(() => original().then(resolve, reject), 350);
+                });
+            }"""
+        )
+        clean_button.click()
+        phase7_page.wait_for_function(
+            "window.__processMapFlow.editor.arrangementPlanning === true"
+        )
+        cancellation_busy_state = phase7_page.evaluate(
+            """() => ({
+                label: document.querySelector(
+                    '[data-process-map-command="processCleanUp"] .ribbon-btn-label'
+                ).textContent,
+                ariaBusy: document.querySelector('[data-process-flow-editor]')
+                    .getAttribute('aria-busy'),
+                status: document.querySelector('.pm-editor-status').textContent,
+            })"""
+        )
+        clean_button.click()
+        phase7_page.wait_for_function(
+            "window.__processMapFlow.editor.arrangementPlanning === false"
+        )
+        phase7_page.wait_for_timeout(450)
+        record(
+            "phase8_cleanup_is_cancelable_and_superseded_result_never_lands",
+            cancellation_busy_state["label"] == "Cancel"
+            and cancellation_busy_state["ariaBusy"] == "true"
+            and "Planning a cleaner layout" in cancellation_busy_state["status"]
+            and phase7_page.evaluate(
+                "window.__processMapFlow.editor.arrangementPlan === null"
+            )
+            and phase7_page.locator("[data-arrangement-ghost]").count() == 0
+            and phase7_page.evaluate(
+                "window.InspectorProProcessMap.mapFingerprint(window.__processMapFlow.editor.processMap)"
+            ) == phase7_initial["fingerprint"],
+            cancellation_busy_state,
+        )
+        phase7_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                editor._ensureSpatialContract = editor.__phase8OriginalEnsureSpatialContract;
+                delete editor.__phase8OriginalEnsureSpatialContract;
+            }"""
+        )
+
+        phase7_page.evaluate(
+            "window.__processMapFlow.editor.setGraphSelection(['a', 'b'], [])"
+        )
+        record(
+            "phase7_selected_cards_switch_command_to_selection_scope",
+            clean_button.locator(".ribbon-btn-label").inner_text() == "Clean Selection",
+        )
+        clean_button.click()
+        phase7_page.wait_for_function(
+            "window.__processMapFlow.editor.arrangementPlan !== null"
+        )
+        selection_preview = phase7_page.evaluate(
+            """() => {
+                const state = window.__processMapFlow.editor.arrangementPlan;
+                return {
+                    scope: state.plan.scope.kind,
+                    nodeIds: state.plan.scope.nodeIds,
+                    moves: state.plan.moves.map(move => move.nodeId),
+                };
+            }"""
+        )
+        record(
+            "phase7_selection_cleanup_moves_only_requested_unlocked_cards",
+            selection_preview["scope"] == "selection"
+            and selection_preview["nodeIds"] == ["a", "b"]
+            and set(selection_preview["moves"]).issubset({"a", "b"}),
+            selection_preview,
+        )
+        phase7_page.locator(".pm-arrangement-dismiss").click()
+        record(
+            "phase7_dismiss_keeps_map_and_history_unchanged",
+            phase7_page.evaluate(
+                "window.InspectorProProcessMap.mapFingerprint(window.__processMapFlow.editor.processMap)"
+            ) == phase7_initial["fingerprint"]
+            and phase7_page.evaluate(
+                "window.__processMapFlow.editor.history.undoStack.length"
+            ) == phase7_initial["historyDepth"],
+        )
+
+        clean_button.click()
+        phase7_page.wait_for_function(
+            "window.__processMapFlow.editor.arrangementPlan !== null"
+        )
+        stale_before = phase7_page.evaluate(
+            "window.__processMapFlow.editor.history.undoStack.length"
+        )
+        phase7_page.evaluate(
+            "window.__processMapFlow.editor.processMap.canvasNodes.find(node => node.nodeId === 'a').position.x += 1"
+        )
+        phase7_page.locator(".pm-arrangement-accept").click()
+        phase7_page.wait_for_function(
+            "window.__processMapFlow.editor.arrangementPlan === null"
+        )
+        record(
+            "phase7_stale_preview_fails_closed_without_committing",
+            phase7_page.evaluate(
+                "window.__processMapFlow.editor.history.undoStack.length"
+            ) == stale_before
+            and "changed since this cleanup" in phase7_page.evaluate(
+                "window.__processMapFlow.editor.operationError"
+            ),
+        )
+        phase7_page.wait_for_timeout(150)
+        arrangement_outcomes = {
+            event.get("outcome") for event in phase7_telemetry
+            if event.get("operation") == "arrangement"
+        }
+        telemetry_keys: set[str] = set()
+
+        def collect_telemetry_keys(value) -> None:
+            if isinstance(value, dict):
+                telemetry_keys.update(str(key) for key in value)
+                for child in value.values():
+                    collect_telemetry_keys(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect_telemetry_keys(child)
+
+        collect_telemetry_keys(phase7_telemetry)
+        record(
+            "phase8_spatial_telemetry_records_outcomes_without_geometry_or_labels",
+            {"previewed", "accepted", "dismissed", "cancelled", "stale"}
+                .issubset(arrangement_outcomes)
+            and not {
+                "position", "positions", "point", "points", "route", "routes",
+                "waypoints", "label", "labels", "name", "note", "description",
+            }.intersection(telemetry_keys),
+            {
+                "eventCount": len(phase7_telemetry),
+                "arrangementOutcomes": sorted(arrangement_outcomes),
+                "keys": sorted(telemetry_keys),
+            },
+        )
+        phase7_context.close()
+
+        phase7_group_store = {
+            "map": _synthetic_phase7_arrangement_map(grouped=True),
+            "structure": _synthetic_structure(),
+            "revision": "phase7-group-rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+        }
+        phase7_group_context = browser.new_context(viewport={"width": 1600, "height": 1000})
+        phase7_group_page = phase7_group_context.new_page()
+        _install_cached_three_route(phase7_group_page)
+        phase7_group_page.on(
+            "pageerror", lambda error: report["page_errors"].append(str(error))
+        )
+        _install_synthetic_process_map_route(phase7_group_page, phase7_group_store)
+        _install_synthetic_map_management_routes(phase7_group_page, phase7_group_store)
+        _install_synthetic_suggestion_route(phase7_group_page, phase7_group_store)
+        phase7_group_page.route(
+            "**/api/training/process-map-spatial-placement-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": True}),
+            ),
+        )
+        phase7_group_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(phase7_group_page)
+        phase7_group_page.wait_for_function(
+            "window.__processMapFlow.editor.spatialPlacementEnabled === true"
+        )
+        phase7_group_initial = phase7_group_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                return {
+                    group: JSON.stringify(editor.processMap.canvasGroups[0]),
+                    lockedPosition: {...editor.processMap.canvasNodes.find(node => node.nodeId === 'c').position},
+                };
+            }"""
+        )
+        phase7_group_page.evaluate(
+            "window.__processMapFlow.editor.selectGroup('g')"
+        )
+        group_clean_button = phase7_group_page.locator(
+            "[data-process-map-command='processCleanUp']"
+        )
+        record(
+            "phase7_selected_group_switches_command_to_group_scope",
+            group_clean_button.locator(".ribbon-btn-label").inner_text() == "Clean Group",
+        )
+        group_clean_button.click()
+        phase7_group_page.wait_for_function(
+            "window.__processMapFlow.editor.arrangementPlan !== null"
+        )
+        group_preview = phase7_group_page.evaluate(
+            """() => {
+                const state = window.__processMapFlow.editor.arrangementPlan;
+                return {scope: state.plan.scope, planId: state.plan.planId};
+            }"""
+        )
+        phase7_group_page.locator(".pm-arrangement-accept").click()
+        phase7_group_page.wait_for_function(
+            "window.__processMapFlow.editor.arrangementPlan === null"
+        )
+        group_applied = phase7_group_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                return {
+                    group: JSON.stringify(editor.processMap.canvasGroups[0]),
+                    lockedPosition: {...editor.processMap.canvasNodes.find(node => node.nodeId === 'c').position},
+                    historyDepth: editor.history.undoStack.length,
+                };
+            }"""
+        )
+        record(
+            "phase7_group_cleanup_preserves_frame_and_locked_member",
+            group_preview["scope"].get("kind") == "group"
+            and group_preview["scope"].get("groupId") == "g"
+            and group_preview["scope"].get("nodeIds") == ["a", "b", "c"]
+            and group_preview["planId"] == "pm-arr-6ff5b6a0ac8cf727"
+            and group_applied["group"] == phase7_group_initial["group"]
+            and group_applied["lockedPosition"] == phase7_group_initial["lockedPosition"]
+            and group_applied["historyDepth"] == 1,
+            {"preview": group_preview, "applied": group_applied},
+        )
+        phase7_group_context.close()
+
+        routing_off_store = {
+            "map": _synthetic_routing_process_map(),
+            "structure": _synthetic_structure(),
+            "revision": "route-off-rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+        }
+        routing_off_context = browser.new_context(viewport={"width": 1600, "height": 1000})
+        routing_off_page = routing_off_context.new_page()
+        _install_cached_three_route(routing_off_page)
+        routing_off_page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
+        _install_synthetic_process_map_route(routing_off_page, routing_off_store)
+        _install_synthetic_map_management_routes(routing_off_page, routing_off_store)
+        _install_synthetic_suggestion_route(routing_off_page, routing_off_store)
+        routing_off_page.route(
+            "**/api/training/process-map-spatial-placement-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": False}),
+            ),
+        )
+        routing_off_page.route(
+            "**/api/training/process-map-auto-routing-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": False}),
+            ),
+        )
+        routing_off_page.route(
+            "**/api/training/process-map-agent-layout-write-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": False}),
+            ),
+        )
+        routing_off_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(routing_off_page)
+        routing_off_page.evaluate("window.__processMapFlow.editor.selectEdge('route-edge')")
+        routing_off_legacy_path = routing_off_page.locator(
+            ".pm-edge[data-edge-id='route-edge']"
+        ).get_attribute("d")
+        record(
+            "phase4_flag_off_preserves_legacy_geometry_and_exposes_no_route_command",
+            " C " in routing_off_legacy_path
+            and routing_off_page.locator(".pm-edge-toolbar-route").count() == 0
+            and not routing_off_page.evaluate(
+                "!!window.__processMapFlow.editor.processMap.canvasEdges[0].routing"
+            ),
+            routing_off_legacy_path,
+        )
+        routing_off_context.close()
+
+        # Flag-off: candidate generation UI must not appear at all.
+        flag_off_context = browser.new_context(viewport={"width": 1600, "height": 1000})
+        flag_off_page = flag_off_context.new_page()
+        _install_cached_three_route(flag_off_page)
+        flag_off_page.on("pageerror", lambda error: report["page_errors"].append(str(error)))
+        flag_off_store = {
+            "map": _synthetic_process_map(),
+            "structure": _synthetic_structure(),
+            "revision": "rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+        }
+        _install_synthetic_process_map_route(flag_off_page, flag_off_store)
+        _install_synthetic_map_management_routes(flag_off_page, flag_off_store)
+        _install_synthetic_suggestion_route(flag_off_page, flag_off_store)
+        _install_synthetic_spatial_proposal_routes(flag_off_page, flag_off_store)
+        flag_off_page.route(
+            "**/api/training/process-map-spatial-placement-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": False}),
+            ),
+        )
+        flag_off_page.route(
+            "**/api/training/process-map-spatial-analysis-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": False}),
+            ),
+        )
+        flag_off_page.route(
+            "**/api/training/process-map-auto-routing-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": False}),
+            ),
+        )
+        flag_off_page.route(
+            "**/api/training/process-map-agent-layout-write-status",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "enabled": False}),
+            ),
+        )
+        flag_off_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(flag_off_page)
+        flag_off_page.evaluate(
+            """async () => await window._trainRequestManagedSpatialProposal(
+                'propose_process_map_node_placement',
+                { targetKind: 'product_occurrence', occurrenceId: 'part-a-1' }
+            )"""
+        )
+        record(
+            "phase6_agent_write_flag_off_keeps_preview_read_only",
+            flag_off_page.locator(".pm-managed-proposal-ghost").count() == 1
+            and flag_off_page.locator(".pm-managed-proposal-approve").is_disabled()
+            and flag_off_page.evaluate(
+                "window.__processMapFlow.editor.processMap.canvasNodes.length"
+            ) == 0
+            and not any(
+                event["kind"] in {"approval", "apply"}
+                for event in flag_off_store.get("spatialEvents", [])
+            ),
+            flag_off_store.get("spatialEvents", []),
+        )
+        flag_off_page.locator(".pm-managed-proposal-dismiss").click()
+        _expand(flag_off_page, "module-a")
+        _drag_tree_item(flag_off_page, "part-a-1", 300, 240)
+        flag_off_page.wait_for_function("window.__processMapFlow.editor.processMap.canvasNodes.length === 1")
+        record(
+            "phase3_flag_off_hides_suggest_position_controls_entirely",
+            flag_off_page.locator(".pm-tree-suggest-position").count() == 0
+            and flag_off_page.locator(".pm-card-toolbar-suggest").count() == 0,
+        )
+        record(
+            "phase8_analysis_flag_off_disables_layout_analysis_fail_closed",
+            flag_off_page.locator(
+                "[data-process-map-command='processAnalyzeLayout']"
+            ).is_disabled()
+            and flag_off_page.evaluate(
+                "window.__processMapFlow.editor.analyzeLayout()"
+            ) is False,
+        )
+        flag_off_context.close()
+
+        metadata_store = {
+            "map": _synthetic_routing_process_map(),
+            "structure": _synthetic_structure(),
+            "revision": "metadata-rev-1",
+            "findings": [],
+            "putCount": 0,
+            "events": [],
+            "builderWriteEnabled": True,
+        }
+        metadata_context = browser.new_context(viewport={"width": 1600, "height": 1000})
+        metadata_page = metadata_context.new_page()
+        _install_cached_three_route(metadata_page)
+        metadata_page.on(
+            "pageerror", lambda error: report["page_errors"].append(str(error))
+        )
+        _install_synthetic_process_map_route(metadata_page, metadata_store)
+        _install_synthetic_map_management_routes(metadata_page, metadata_store)
+        _install_synthetic_suggestion_route(metadata_page, metadata_store)
+        _install_synthetic_metadata_proposal_routes(metadata_page, metadata_store)
+        metadata_chat_requests: list[dict] = []
+        _install_synthetic_metadata_chat_stream(
+            metadata_page, metadata_chat_requests
+        )
+        for status_path in (
+            "process-map-spatial-placement-status",
+            "process-map-spatial-analysis-status",
+            "process-map-auto-routing-status",
+            "process-map-agent-layout-write-status",
+        ):
+            metadata_page.route(
+                "**/api/training/" + status_path,
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps({"success": True, "enabled": False}),
+                ),
+            )
+        metadata_page.goto(APP_URL, wait_until="networkidle", timeout=60_000)
+        _open_process_flow(metadata_page)
+        metadata_page.wait_for_function(
+            "window.__processMapFlow.editor.managedProposalWriteEnabled === true"
+        )
+        metadata_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                editor.commitMutation(window.InspectorProProcessMap.moveNode(
+                    editor.processMap,
+                    'route-obstacle',
+                    {x: 520, y: 210}
+                ));
+                window._selectAgent('deviation-analyst');
+                window._agentContextSendPrompt(
+                    'Fill the missing card requirements, resources, route names, '
+                    + 'and routing requirements for this Front Wheel & Brake process map. '
+                    + 'Preserve existing authored values and report anything that cannot be matched.'
+                );
+            }"""
+        )
+        metadata_page.wait_for_selector(
+            ".pm-managed-proposal-review:not([hidden])", timeout=10_000
+        )
+        metadata_page.wait_for_function(
+            """() => Array.from(document.querySelectorAll('.agent-msg.assistant'))
+                .some(element => element.textContent.includes('requirements preview'))"""
+        )
+        metadata_preview = metadata_page.evaluate(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                return {
+                    referenceCount: (editor.processMap.referenceCatalog || []).length,
+                    processPlanImportCount: (editor.processMap.processPlanImports || []).length,
+                    agentLayoutWriteEnabled: editor.agentLayoutWriteEnabled,
+                    managedProposalWriteEnabled: editor.managedProposalWriteEnabled,
+                };
+            }"""
+        )
+        metadata_assistant_text = metadata_page.locator(
+            ".agent-msg.assistant"
+        ).last.inner_text()
+        metadata_review_copy = metadata_page.locator(
+            ".pm-managed-proposal-copy"
+        ).inner_text()
+        record(
+            "demo_metadata_preview_is_illustrative_and_non_mutating",
+            len(metadata_chat_requests) == 1
+            and metadata_page.locator(".pm-managed-proposal-ghost").count() == 1
+            and "Demo data is not production-approved" in metadata_review_copy
+            and "I prepared a requirements preview" in metadata_assistant_text
+            and "No response from agent" not in metadata_assistant_text
+            and metadata_preview["referenceCount"] == 0
+            and metadata_preview["processPlanImportCount"] == 0
+            and metadata_store["putCount"] == 1
+            and metadata_store["events"][-1]["kind"] == "save",
+            {
+                "assistant": metadata_assistant_text,
+                "review": metadata_review_copy,
+                "state": metadata_preview,
+                "requests": len(metadata_chat_requests),
+                "mapEvents": metadata_store["events"],
+            },
+        )
+        record(
+            "demo_metadata_approval_depends_on_builder_not_spatial_write",
+            metadata_preview["managedProposalWriteEnabled"] is True
+            and metadata_preview["agentLayoutWriteEnabled"] is False
+            and not metadata_page.locator(".pm-managed-proposal-approve").is_disabled(),
+            metadata_preview,
+        )
+        metadata_page.locator(".pm-managed-proposal-approve").click()
+        metadata_page.wait_for_function(
+            """() => {
+                const editor = window.__processMapFlow.editor;
+                return (editor.processMap.referenceCatalog || []).length === 3
+                    && !editor.managedProposalPlan;
+            }""",
+            timeout=15_000,
+        )
+        metadata_applied = metadata_page.evaluate(
+            """() => {
+                const map = window.__processMapFlow.editor.processMap;
+                const node = map.canvasNodes.find(item => item.nodeId === 'route-source');
+                const edge = map.canvasEdges.find(item => item.edgeId === 'route-edge');
+                return {
+                    nodeReferenceIds: node.referenceIds,
+                    edgeReferenceIds: edge.referenceIds,
+                    edgeLabel: edge.label,
+                    referenceCount: map.referenceCatalog.length,
+                    processPlanImportCount: map.processPlanImports.length,
+                };
+            }"""
+        )
+        metadata_events = metadata_store.get("metadataEvents", [])
+        record(
+            "demo_metadata_single_approval_persists_native_map_state",
+            metadata_applied == {
+                "nodeReferenceIds": ["demo-machine", "demo-node-requirement"],
+                "edgeReferenceIds": ["demo-route-requirement"],
+                "edgeLabel": "Install demo component",
+                "referenceCount": 3,
+                "processPlanImportCount": 1,
+            }
+            and [event["kind"] for event in metadata_events]
+                == ["proposal", "approval", "apply"]
+            and all(
+                "spatialBindingHash" not in event["body"]
+                for event in metadata_events[1:]
+            ),
+            {"map": metadata_applied, "events": metadata_events},
+        )
+        metadata_page.evaluate(
+            "window.__processMapFlow.editor.select('route-source')"
+        )
+        metadata_page.locator(".pm-card-toolbar-references").click()
+        record(
+            "demo_metadata_is_visible_in_existing_requirement_ui",
+            metadata_page.locator(".pm-reference-demo").count() == 2
+            and metadata_page.locator(
+                ".pm-node[data-node-id='route-source'] .pm-reference-badge-demo"
+            ).count() == 1,
+            {
+                "demoRows": metadata_page.locator(".pm-reference-demo").count(),
+                "demoBadges": metadata_page.locator(
+                    ".pm-node[data-node-id='route-source'] .pm-reference-badge-demo"
+                ).count(),
+            },
+        )
+        metadata_page.evaluate(
+            "window.__processMapFlow.editor.selectEdge('route-edge')"
+        )
+        metadata_page.locator(".pm-card-toolbar-references").click()
+        record(
+            "demo_route_requirement_is_visible_in_connection_editor",
+            metadata_page.locator(".pm-reference-demo").count() == 1
+            and metadata_page.evaluate(
+                """() => {
+                    const edge = window.__processMapFlow.editor.processMap.canvasEdges
+                        .find(item => item.edgeId === 'route-edge');
+                    return edge && edge.label === 'Install demo component';
+                }"""
+            ),
+            {
+                "demoRows": metadata_page.locator(".pm-reference-demo").count(),
+                "edgeLabel": metadata_applied["edgeLabel"],
+            },
+        )
+        metadata_page.screenshot(
+            path=str(OUT_DIR / "process_flow_demo_metadata_light.png"),
+            full_page=True,
+        )
+        metadata_context.close()
 
         record("no_browser_page_errors", not report["page_errors"], report["page_errors"])
         browser.close()

@@ -8,6 +8,8 @@
     'use strict';
 
     const API_VERSION = 1;
+    const generationView = typeof module === 'object' && module.exports
+        ? require('./facility_layout_generation_view.js') : root.InspectorProGenerationPlanningView;
     const ASSET_MIME = 'application/x-inspectorpro-facility-asset';
     const DEFAULT_GRID_SIZE = 0.5;
     const DEFAULT_DUPLICATE_OFFSET = Object.freeze({ x: 1, y: 0, z: 1 });
@@ -48,6 +50,13 @@
         wireframe: false,
         background: 'auto',
     });
+    const DEFAULT_LAYER_VISIBILITY = Object.freeze({
+        zones: true,
+        cells: true,
+        routes: true,
+        markings: true,
+        assets: true,
+    });
     const TOOL_MODES = Object.freeze([
         'select',
         'pan',
@@ -55,6 +64,7 @@
         'polygon-zone',
         'aisle',
         'floor-marking',
+        'motion-path',
     ]);
     const ZONE_PURPOSE_OPTIONS = Object.freeze([
         Object.freeze({ value: 'workcell', label: 'Department / equipment area' }),
@@ -288,6 +298,18 @@
             wireframe: input.wireframe === true,
             background: background,
         };
+    }
+
+    function normalizeLayerVisibility(value, fallback) {
+        const source = value && typeof value === 'object' ? value : {};
+        const base = fallback && typeof fallback === 'object'
+            ? fallback : DEFAULT_LAYER_VISIBILITY;
+        const output = {};
+        Object.keys(DEFAULT_LAYER_VISIBILITY).forEach(function (key) {
+            output[key] = typeof source[key] === 'boolean'
+                ? source[key] : base[key] !== false;
+        });
+        return output;
     }
 
     function cleanString(value, fallback) {
@@ -1815,6 +1837,44 @@
         return { added: added, changed: changed, removed: removed };
     }
 
+    function collectionChangeReview(before, after, identityKey) {
+        const beforeIndex = recordIndex(before, identityKey);
+        const afterIndex = recordIndex(after, identityKey);
+        const addedIds = [];
+        const changedIds = [];
+        const removedIds = [];
+        const beforeRecords = [];
+        const proposedRecords = [];
+        afterIndex.forEach(function (record, identifier) {
+            const original = beforeIndex.get(identifier);
+            if (!original) {
+                addedIds.push(identifier);
+                proposedRecords.push(clone(record));
+            } else if (JSON.stringify(original) !== JSON.stringify(record)) {
+                changedIds.push(identifier);
+                beforeRecords.push(clone(original));
+                proposedRecords.push(clone(record));
+            }
+        });
+        beforeIndex.forEach(function (record, identifier) {
+            if (afterIndex.has(identifier)) return;
+            removedIds.push(identifier);
+            beforeRecords.push(clone(record));
+        });
+        const byIdentifier = function (left, right) {
+            return String(left[identityKey]).localeCompare(
+                String(right[identityKey])
+            );
+        };
+        return {
+            addedIds: addedIds.sort(),
+            changedIds: changedIds.sort(),
+            removedIds: removedIds.sort(),
+            beforeRecords: beforeRecords.sort(byIdentifier),
+            proposedRecords: proposedRecords.sort(byIdentifier),
+        };
+    }
+
     function buildLayoutProposalReview(savedLayout, proposedLayout) {
         const before = savedLayout && typeof savedLayout === 'object'
             ? savedLayout : {};
@@ -1827,6 +1887,11 @@
         const removedPlacementIds = [];
         const beforePlacements = [];
         const proposedPlacements = [];
+        const routeReview = collectionChangeReview(
+            before.routes,
+            after.routes,
+            'routeId'
+        );
 
         afterIndex.forEach(function (placement, placementId) {
             const original = beforeIndex.get(placementId);
@@ -1863,6 +1928,11 @@
             removedPlacementIds: removedPlacementIds,
             beforePlacements: beforePlacements,
             proposedPlacements: proposedPlacements,
+            newRouteIds: routeReview.addedIds,
+            changedRouteIds: routeReview.changedIds,
+            removedRouteIds: routeReview.removedIds,
+            beforeRoutes: routeReview.beforeRecords,
+            proposedRoutes: routeReview.proposedRecords,
             zoneChanges: collectionChangeCounts(
                 before.zones,
                 after.zones,
@@ -1886,6 +1956,37 @@
             active: true,
             proposalId: cleanString(alternative.proposalId, ''),
             alternativeId: cleanString(alternative.alternativeId, ''),
+        }, buildLayoutProposalReview(savedLayout, proposedLayout));
+    }
+
+    function designProposalPreviewDescriptor(savedLayout, proposal, brief) {
+        const proposedLayout = proposal && proposal.candidateLayout;
+        if (!savedLayout || !proposedLayout) return null;
+        const body = brief && brief.semanticBody || {};
+        const preservedPlacementIds = [];
+        const preservedRouteIds = [];
+        (body.hardConstraints || []).filter(function (constraint) {
+            return constraint.status === 'active';
+        }).forEach(function (constraint) {
+            (constraint.targetRefs || []).forEach(function (ref) {
+                if (ref.entityKind === 'placement') {
+                    preservedPlacementIds.push(ref.entityId);
+                } else if (ref.entityKind === 'route') {
+                    preservedRouteIds.push(ref.entityId);
+                }
+            });
+        });
+        return Object.assign({
+            active: true,
+            proposalId: cleanString(proposal.proposalId, ''),
+            alternativeId: '',
+            reviewKind: 'facility_design_proposal',
+            preservedPlacementIds: Array.from(
+                new Set(preservedPlacementIds)
+            ).sort(),
+            preservedRouteIds: Array.from(
+                new Set(preservedRouteIds)
+            ).sort(),
         }, buildLayoutProposalReview(savedLayout, proposedLayout));
     }
 
@@ -2144,6 +2245,9 @@
         }
         this.layoutRuntime = options.layoutRuntime
             || (root && root.InspectorProFacilityLayout);
+        this.navigationRuntime = options.navigationRuntime
+            || (root && root.InspectorProFacilityNavigationAuthoring)
+            || null;
         if (!options.controller && (!this.layoutRuntime
                 || typeof this.layoutRuntime.createEditor !== 'function'
                 || typeof this.layoutRuntime.createTopPlanAdapter !== 'function')) {
@@ -2155,6 +2259,21 @@
             manualAuthoring: true,
             authoritativePreview: true,
             automaticRouting: true,
+            prototypeMotion: false,
+            navigationContract: true,
+            navigationManual: true,
+            navigationPedestrian: true,
+            navigationVehicle: true,
+            navigationHandoff: true,
+            navigationMultiActor: true,
+            navigationSageWrite: true,
+            designBrief: true,
+            designLoopPreview: true,
+            designLoopApply: true,
+            constructionPreview: false,
+            generationPlanning: false,
+            constructionApply: false,
+            agentWrite: true,
             fullLayoutProposals: true,
             atomicProposalApply: true,
         }, options.capabilities || {});
@@ -2188,6 +2307,88 @@
             currentSpeed: 0,
             nearestObstacleDistance: null,
             reason: null,
+        };
+        this.motionTransport = options.motionTransport || null;
+        this.designTransport = options.designTransport || null;
+        this.designTurnSequence = 0;
+        this.designPreviewGeneration = 0;
+        this.designState = {
+            active: false,
+            collapsed: false,
+            busy: false,
+            status: 'idle',
+            error: null,
+            attentionKind: null,
+            attentionRefs: [],
+            brief: null,
+            run: null,
+            baseline: null,
+            proposals: [],
+            selectedProposal: null,
+            transaction: null,
+            proposalPreviewVisible: false,
+            lastPreviewStartedAt: null,
+            lastPreviewVisibleAt: null,
+        };
+        this.designAttentionSelectionFrame = null;
+        this.motionPresentation = null;
+        this.motionLayoutFingerprint = null;
+        this.motionRequestPending = false;
+        this.motionState = {
+            loaded: false,
+            status: 'idle',
+            statusReason: null,
+            packageId: null,
+            movementId: null,
+            outcome: null,
+            vehiclePlacementId: null,
+            vehiclePresentation: null,
+            laneBinding: null,
+            following: false,
+            playing: false,
+            elapsedSeconds: 0,
+            durationSeconds: 0,
+            playbackRateMultiplier: 1,
+            distanceMeters: 0,
+            totalDistanceMeters: 0,
+            pose: null,
+            clearanceAtValidatedSample: null,
+            sampleSpacingMeters: null,
+            prefersReducedMotion: false,
+            qualification: null,
+            disclosure: null,
+            plannerDurationEstimate: false,
+            blocking: null,
+            prototypeMode: false,
+            prototypeLabel: null,
+        };
+        this.activityPresentation = null;
+        this.activityLayoutFingerprint = null;
+        this.activityRequestPending = false;
+        this.activityState = {
+            loaded: false,
+            scenarioId: null,
+            label: null,
+            status: 'idle',
+            statusReason: null,
+            playing: false,
+            elapsedSeconds: 0,
+            durationSeconds: 0,
+            playbackRateMultiplier: 1,
+            selectedActorId: null,
+            visibleActorTypes: {
+                vehicle: true,
+                operator: true,
+                mobile_equipment: true,
+            },
+            pathsVisible: true,
+            departmentZoneId: null,
+            actors: [],
+            stationaryEvidence: null,
+            unavailableActivity: [],
+            prototypeMode: false,
+            qualification: null,
+            disclosure: null,
         };
         this.walkthroughContextState = {
             focus: null,
@@ -2232,6 +2433,10 @@
         this.threeSettingsOpen = false;
         this.threeViewMenuOpen = false;
         this.threeViewpointsOpen = false;
+        this.layerPanelOpen = false;
+        this.layerVisibility = normalizeLayerVisibility(
+            options.layerVisibility
+        );
         this.threeOrientation = 'iso';
         this.threeVisualSettings = normalizeThreeVisualSettings(
             options.threeVisualSettings
@@ -2346,6 +2551,36 @@
             corridorWidth: 3.6,
             color: '#d9a514',
         };
+        this.navigationState = {
+            open: false,
+            drawing: false,
+            anchorPicking: false,
+            applying: false,
+            focusReturn: null,
+            sequence: 1,
+            actorPlacementId: null,
+            actorClass: null,
+            actorProfileId: '',
+            actorProfileRevision: '',
+            loopMode: 'closed_loop',
+            direction: 'forward',
+            constraintMode: 'complete_override',
+            points: [],
+            snapRefs: [],
+            lockedSegmentIndexes: [],
+            selectedPointIndex: null,
+            selectedSegmentIndex: null,
+            pathsVisible: true,
+            previewLoaded: false,
+            previewPlaying: false,
+            previewNormalizedTime: 0,
+            validationStatus: 'pending',
+            validation: null,
+            anchorKind: 'station_operate',
+            anchorOwnerPlacementId: '',
+            message: '',
+            lastConstraintId: null,
+        };
         this.gridSize = this.planSettings.gridSpacingMeters;
         const initialEnvironment = {
             worldBounds: worldBoundsFromPlanSettings(
@@ -2383,6 +2618,7 @@
         this.polygonPoints = [];
         this.suppressAdapterSelection = null;
         this.lastLayoutFingerprint = null;
+        this.lastThreeFitFingerprint = null;
         this.commandStates = {};
         this.unsubscribe = null;
         this.marqueeCleanup = null;
@@ -3441,6 +3677,1345 @@
         return panel;
     };
 
+    Workspace.prototype._buildLayerPanel = function () {
+        const panel = element(this.document, 'section', {
+            className: 'ip-flw-layer-panel',
+            'aria-label': 'Facility layer visibility',
+            hidden: true,
+        });
+        panel.appendChild(element(this.document, 'div', {
+            className: 'ip-flw-layer-panel-title',
+        }, 'Visible layers'));
+        [
+            ['zones', 'Departments'],
+            ['cells', 'Cells and child areas'],
+            ['routes', 'Routes'],
+            ['markings', 'Floor markings'],
+            ['assets', 'Assets'],
+        ].forEach(function (spec) {
+            const id = 'ip-flw-layer-' + spec[0];
+            const row = element(this.document, 'div', {
+                className: 'ip-flw-layer-check',
+            });
+            const input = element(this.document, 'input', {
+                id: id,
+                type: 'checkbox',
+                'data-facility-layer': spec[0],
+                'aria-label': 'Show ' + spec[1].toLowerCase(),
+            });
+            input.checked = this.layerVisibility[spec[0]] !== false;
+            append(row, input, element(this.document, 'label', {
+                for: id,
+            }, spec[1]));
+            panel.appendChild(row);
+        }, this);
+        panel.appendChild(element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-layer-show-all',
+            'data-layer-action': 'show-all',
+        }, 'Show all'));
+        this.layerPanel = panel;
+        return panel;
+    };
+
+    Workspace.prototype._buildMotionPanel = function () {
+        const docked = this.options.motionPanelHost
+            && this.options.motionPanelHost.ownerDocument === this.document
+            && typeof this.options.motionPanelHost.appendChild === 'function';
+        const panel = element(this.document, 'section', {
+            className: 'ip-flw-motion-panel',
+            'aria-label': 'Facility motion playback',
+            'data-motion-docked': docked ? 'true' : 'false',
+            hidden: true,
+        });
+        const header = element(this.document, 'div', {
+            className: 'ip-flw-motion-header',
+        });
+        this.motionTitle = element(this.document, 'strong', {
+            className: 'ip-flw-motion-title',
+        }, 'Motion playback');
+        this.motionOutcome = element(this.document, 'span', {
+            className: 'ip-flw-motion-outcome',
+        });
+        this.motionCloseButton = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-motion-close',
+            'data-motion-action': 'close',
+            title: 'Close motion playback',
+            'aria-label': 'Close motion playback',
+        }, 'Close');
+        append(
+            header,
+            this.motionTitle,
+            this.motionOutcome,
+            this.motionCloseButton
+        );
+        const controls = element(this.document, 'div', {
+            className: 'ip-flw-motion-controls',
+        });
+        this.motionPlayButton = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-motion-play',
+            'data-motion-action': 'toggle-play',
+        }, 'Play');
+        this.motionFollowButton = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-motion-follow',
+            'data-motion-action': 'toggle-follow',
+            title: 'Follow moving vehicle',
+            'aria-label': 'Follow moving vehicle',
+            'aria-pressed': 'false',
+        });
+        this.motionFollowButton.appendChild(element(this.document, 'span', {
+            className: 'ip-flw-motion-follow-icon',
+            'aria-hidden': 'true',
+        }));
+        this.motionScrubber = element(this.document, 'input', {
+            type: 'range',
+            className: 'ip-flw-motion-scrubber',
+            min: '0',
+            max: '0',
+            step: '0.001',
+            value: '0',
+            'aria-label': 'Motion time',
+            'data-motion-input': 'time',
+        });
+        this.motionRate = element(this.document, 'select', {
+            className: 'ip-flw-motion-rate',
+            'aria-label': 'Playback rate',
+            'data-motion-input': 'rate',
+        });
+        [0.5, 1, 2].forEach(function (rate) {
+            const option = element(this.document, 'option', {
+                value: String(rate),
+            }, rate + 'x');
+            if (rate === 1) option.selected = true;
+            this.motionRate.appendChild(option);
+        }, this);
+        this.motionPosition = element(this.document, 'span', {
+            className: 'ip-flw-motion-position',
+        });
+        append(
+            controls,
+            this.motionPlayButton,
+            this.motionFollowButton,
+            this.motionScrubber,
+            this.motionRate,
+            this.motionPosition
+        );
+        this.activityControls = element(this.document, 'div', {
+            className: 'ip-flw-activity-controls',
+            hidden: true,
+        });
+        this.activityTypeControls = element(this.document, 'div', {
+            className: 'ip-flw-activity-types',
+            role: 'group',
+            'aria-label': 'Visible activity actors',
+        });
+        [
+            ['vehicle', 'Vehicles'],
+            ['operator', 'People'],
+            ['mobile_equipment', 'Mobile equipment'],
+        ].forEach(function (spec) {
+            const label = element(this.document, 'label', {
+                className: 'ip-flw-activity-type',
+            });
+            const input = element(this.document, 'input', {
+                type: 'checkbox',
+                checked: true,
+                'data-activity-type': spec[0],
+            });
+            append(
+                label,
+                input,
+                element(this.document, 'span', {}, spec[1])
+            );
+            this.activityTypeControls.appendChild(label);
+        }, this);
+        const pathsLabel = element(this.document, 'label', {
+            className: 'ip-flw-activity-type',
+        });
+        this.activityPathsInput = element(this.document, 'input', {
+            type: 'checkbox',
+            checked: true,
+            'data-activity-paths': 'true',
+        });
+        append(
+            pathsLabel,
+            this.activityPathsInput,
+            element(this.document, 'span', {}, 'Paths')
+        );
+        this.activityTypeControls.appendChild(pathsLabel);
+        this.activityPathLegend = element(this.document, 'div', {
+            className: 'ip-flw-activity-path-legend',
+            'aria-label': 'Reviewed work-cycle movement phases',
+            hidden: true,
+        });
+        [
+            ['carry_in', 'Carry in'],
+            ['carry_out', 'Carry out'],
+            ['inspection_pick', 'Pick to inspect'],
+            ['inspection_place', 'Inspect to place'],
+            ['finished_goods_pick', 'Approach staged pallet'],
+            ['receiving_pick', 'Approach inbound pallet'],
+            ['loaded_putaway', 'Loaded put-away'],
+            ['empty_to_rack', 'Empty to rack'],
+            ['loaded_dispatch', 'Loaded to staging'],
+            ['return_empty', 'Return empty'],
+        ].forEach(function (spec) {
+            const item = element(this.document, 'span', {
+                className: 'ip-flw-activity-path-key',
+                'data-path-phase': spec[0],
+            });
+            append(
+                item,
+                element(this.document, 'span', {
+                    className: 'ip-flw-activity-path-swatch',
+                    'aria-hidden': 'true',
+                }),
+                element(this.document, 'span', {}, spec[1])
+            );
+            this.activityPathLegend.appendChild(item);
+        }, this);
+        this.activityActorSelect = element(this.document, 'select', {
+            className: 'ip-flw-activity-actor',
+            'aria-label': 'Activity actor',
+            'data-activity-input': 'actor',
+        });
+        this.activityFocusButton = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-activity-focus',
+            'data-motion-action': 'focus-actor',
+            title: 'Focus selected actor',
+        }, 'Focus');
+        this.activityDepartmentSelect = element(this.document, 'select', {
+            className: 'ip-flw-activity-department',
+            'aria-label': 'Filter activity by department',
+            'data-activity-input': 'department',
+        });
+        append(
+            this.activityControls,
+            this.activityTypeControls,
+            this.activityPathLegend,
+            this.activityActorSelect,
+            this.activityFocusButton,
+            this.activityDepartmentSelect
+        );
+        this.motionEvidence = element(this.document, 'div', {
+            className: 'ip-flw-motion-evidence',
+        });
+        this.motionDisclosure = element(this.document, 'div', {
+            className: 'ip-flw-motion-disclosure',
+            role: 'note',
+        });
+        append(
+            panel,
+            header,
+            controls,
+            this.activityControls,
+            this.motionEvidence,
+            this.motionDisclosure
+        );
+        this.motionPanel = panel;
+        return panel;
+    };
+
+    Workspace.prototype._renderMotionPanel = function () {
+        if (!this.motionPanel) return;
+        const activity = this.activityState || {};
+        const activityMode = activity.loaded === true;
+        const value = this.motionState || {};
+        const loaded = activityMode || value.loaded === true;
+        this.motionPanel.hidden = !loaded;
+        if (this.motionPanelVisible !== loaded) {
+            this.motionPanelVisible = loaded;
+            if (typeof this.options.onMotionPanelVisibilityChange
+                    === 'function') {
+                this.options.onMotionPanelVisibilityChange(loaded, this);
+            }
+        }
+        if (loaded) this.root.setAttribute('data-motion-loaded', 'true');
+        else this.root.removeAttribute('data-motion-loaded');
+        if (!loaded) return;
+        this.activityControls.hidden = !activityMode;
+        if (activityMode) {
+            this.motionPanel.setAttribute('data-motion-prototype', 'true');
+            this.motionPanel.setAttribute('data-activity-loaded', 'true');
+            this.motionTitle.textContent = cleanString(
+                activity.label,
+                'Prototype factory activity'
+            );
+            this.motionOutcome.textContent = cleanString(
+                activity.status,
+                'ready'
+            ).replace(/_/g, ' ');
+            this.motionOutcome.setAttribute('data-motion-outcome', 'accepted');
+            this.motionPlayButton.disabled = false;
+            this.motionPlayButton.textContent = activity.playing
+                ? 'Pause' : 'Play';
+            this.motionPlayButton.setAttribute(
+                'aria-pressed',
+                activity.playing ? 'true' : 'false'
+            );
+            this.motionFollowButton.hidden = true;
+            this.motionScrubber.disabled = false;
+            this.motionScrubber.max = String(Math.max(
+                0,
+                finite(activity.durationSeconds, 0)
+            ));
+            this.motionScrubber.value = String(Math.max(
+                0,
+                finite(activity.elapsedSeconds, 0)
+            ));
+            this.motionRate.disabled = false;
+            this.motionRate.value = String(
+                finite(activity.playbackRateMultiplier, 1)
+            );
+            this.motionPosition.textContent = finite(
+                activity.elapsedSeconds,
+                0
+            ).toFixed(1) + ' / ' + finite(
+                activity.durationSeconds,
+                0
+            ).toFixed(1) + ' s | ' + (
+                Array.isArray(activity.actors) ? activity.actors.length : 0
+            ) + ' actors';
+            const visibleTypes = activity.visibleActorTypes || {};
+            this.activityTypeControls.querySelectorAll(
+                '[data-activity-type]'
+            ).forEach(function (input) {
+                input.checked = visibleTypes[
+                    input.getAttribute('data-activity-type')
+                ] !== false;
+            });
+            this.activityPathsInput.checked = activity.pathsVisible !== false;
+            const actors = Array.isArray(activity.actors)
+                ? activity.actors : [];
+            const actorSignature = actors.map(function (actor) {
+                return actor.actorId + ':' + actor.label;
+            }).join('|');
+            if (this.activityActorSelect.dataset.signature
+                    !== actorSignature) {
+                while (this.activityActorSelect.firstChild) {
+                    this.activityActorSelect.removeChild(
+                        this.activityActorSelect.firstChild
+                    );
+                }
+                actors.forEach(function (actor) {
+                    this.activityActorSelect.appendChild(element(
+                        this.document,
+                        'option',
+                        { value: actor.actorId },
+                        actor.label
+                    ));
+                }, this);
+                this.activityActorSelect.dataset.signature = actorSignature;
+            }
+            this.activityActorSelect.value = cleanString(
+                activity.selectedActorId,
+                actors[0] && actors[0].actorId || ''
+            );
+            const departmentIds = Array.from(new Set(actors.reduce(
+                function (result, actor) {
+                    return result.concat(
+                        Array.isArray(actor.departmentZoneIds)
+                            ? actor.departmentZoneIds : []
+                    );
+                },
+                []
+            ))).sort();
+            const departmentSignature = departmentIds.join('|');
+            if (this.activityDepartmentSelect.dataset.signature
+                    !== departmentSignature) {
+                while (this.activityDepartmentSelect.firstChild) {
+                    this.activityDepartmentSelect.removeChild(
+                        this.activityDepartmentSelect.firstChild
+                    );
+                }
+                this.activityDepartmentSelect.appendChild(element(
+                    this.document,
+                    'option',
+                    { value: '' },
+                    'All departments'
+                ));
+                const zones = this.state && this.state.layout
+                    && Array.isArray(this.state.layout.zones)
+                    ? this.state.layout.zones : [];
+                departmentIds.forEach(function (zoneId) {
+                    const zone = zones.find(function (candidate) {
+                        return candidate.zoneId === zoneId;
+                    });
+                    this.activityDepartmentSelect.appendChild(element(
+                        this.document,
+                        'option',
+                        { value: zoneId },
+                        zone && zone.label ? zone.label : zoneId
+                    ));
+                }, this);
+                this.activityDepartmentSelect.dataset.signature =
+                    departmentSignature;
+            }
+            this.activityDepartmentSelect.value = cleanString(
+                activity.departmentZoneId,
+                ''
+            );
+            const typeCounts = actors.reduce(function (counts, actor) {
+                counts[actor.actorType] = (counts[actor.actorType] || 0) + 1;
+                return counts;
+            }, {});
+            const stationary = activity.stationaryEvidence || {};
+            const unavailable = Array.isArray(activity.unavailableActivity)
+                ? activity.unavailableActivity : [];
+            const candidates = activity.candidatePresentation;
+            const activePathLegend = [
+                ...(candidates && Array.isArray(
+                    candidates.packagingPathLegend
+                ) ? candidates.packagingPathLegend : []),
+                ...(candidates && Array.isArray(
+                    candidates.inspectionPathLegend
+                ) ? candidates.inspectionPathLegend : []),
+                ...(candidates && Array.isArray(
+                    candidates.finishedGoodsPathLegend
+                ) ? candidates.finishedGoodsPathLegend : []),
+                ...(candidates && Array.isArray(
+                    candidates.receivingPathLegend
+                ) ? candidates.receivingPathLegend : []),
+            ];
+            const activePathPhases = new Set(activePathLegend.map(function (item) {
+                return item && item.phase;
+            }).filter(Boolean));
+            const activePathLabels = new Map(activePathLegend.map(function (item) {
+                return [item && item.phase, item && item.label];
+            }).filter(function (item) {
+                return item[0] && item[1];
+            }));
+            Array.from(this.activityPathLegend.children).forEach(function (
+                item
+            ) {
+                item.hidden = !activePathPhases.has(item.dataset.pathPhase);
+                if (!item.hidden && activePathLabels.has(item.dataset.pathPhase)
+                        && item.children[1]) {
+                    item.children[1].textContent = activePathLabels.get(
+                        item.dataset.pathPhase
+                    );
+                }
+            });
+            this.activityPathLegend.hidden = activePathPhases.size === 0;
+            if (candidates && candidates.candidateCounts) {
+                const counts = candidates.candidateCounts;
+                this.motionEvidence.textContent = [
+                    finite(counts.operators, 0) + ' operator candidates',
+                    finite(counts.vehicles, 0) + ' vehicle candidates',
+                    finite(counts.handoffs, 0) + ' handoff candidates',
+                    finite(counts.displayedActors, 0) + ' actors displayed',
+                    finite(counts.displayedHandoffs, 0)
+                        + ' handoff links displayed',
+                    finite(counts.unavailableActors, 0)
+                        + ' unavailable candidates',
+                    finite(counts.partialPrograms, 0)
+                        + ' partial candidate programs',
+                    finite(counts.suppressedStationaryOperators, 0)
+                        + ' stationary operator figures suppressed',
+                ].join(' | ');
+                this.motionDisclosure.textContent = [
+                    cleanString(candidates.qualification, ''),
+                    cleanString(activity.disclosure, ''),
+                ].filter(Boolean).join(' ');
+            } else {
+                this.motionEvidence.textContent = [
+                    (typeCounts.vehicle || 0) + ' vehicles',
+                    (typeCounts.operator || 0) + ' people',
+                    (typeCounts.mobile_equipment || 0) + ' mobile equipment',
+                    finite(stationary.placementCount, 0)
+                        + ' fixed machines stationary: '
+                        + cleanString(stationary.reason, 'no kinematic track'),
+                    unavailable.length + ' unavailable activity assignments',
+                ].join(' | ');
+                this.motionDisclosure.textContent = activity.disclosure || '';
+            }
+            return;
+        }
+        this.motionPanel.removeAttribute('data-activity-loaded');
+        this.activityControls.hidden = true;
+        const prototypeMode = value.prototypeMode === true;
+        this.motionPanel.setAttribute(
+            'data-motion-prototype',
+            prototypeMode ? 'true' : 'false'
+        );
+        this.motionTitle.textContent = prototypeMode
+            ? 'Motion playback - prototype fixture'
+            : 'Motion playback';
+        this.motionOutcome.textContent = cleanString(
+            value.outcome,
+            value.status || 'ready'
+        ).replace(/_/g, ' ');
+        this.motionOutcome.setAttribute(
+            'data-motion-outcome',
+            value.outcome || ''
+        );
+        const replayable = value.outcome === 'accepted'
+            || value.outcome === 'envelope_refused';
+        this.motionPlayButton.disabled = !replayable;
+        this.motionPlayButton.textContent = value.playing ? 'Pause' : 'Play';
+        this.motionPlayButton.setAttribute(
+            'aria-pressed',
+            value.playing ? 'true' : 'false'
+        );
+        const placedAsset = value.vehiclePresentation === 'placed_asset';
+        this.motionFollowButton.hidden = !placedAsset;
+        this.motionFollowButton.disabled = !replayable || !placedAsset;
+        this.motionFollowButton.setAttribute(
+            'aria-pressed',
+            value.following ? 'true' : 'false'
+        );
+        this.motionFollowButton.title = value.following
+            ? 'Stop following moving vehicle'
+            : 'Follow moving vehicle';
+        this.motionScrubber.disabled = !replayable;
+        this.motionScrubber.max = String(Math.max(
+            0,
+            finite(value.durationSeconds, 0)
+        ));
+        this.motionScrubber.value = String(Math.max(
+            0,
+            finite(value.elapsedSeconds, 0)
+        ));
+        this.motionRate.disabled = !replayable;
+        this.motionRate.value = String(
+            finite(value.playbackRateMultiplier, 1)
+        );
+        const elapsed = finite(value.elapsedSeconds, 0);
+        const duration = finite(value.durationSeconds, 0);
+        const distance = finite(value.distanceMeters, 0);
+        this.motionPosition.textContent = elapsed.toFixed(1) + ' / '
+            + duration.toFixed(1) + ' s | ' + distance.toFixed(1) + ' m';
+        const evidence = [];
+        if (prototypeMode) {
+            evidence.push(cleanString(
+                value.prototypeLabel,
+                'Prototype fixture evidence - not a released vehicle profile'
+            ));
+        }
+        const lane = value.laneBinding;
+        if (lane && lane.status === 'direction_markings') {
+            evidence.push(
+                (lane.travelDirection === 'reverse' ? 'Reverse' : 'Forward')
+                + ' lane derived from '
+                + (Array.isArray(lane.sourceMarkingIds)
+                    ? lane.sourceMarkingIds.length : 0)
+                + ' authored direction markings; offset '
+                + finite(lane.lateralOffsetMeters, 0).toFixed(2) + ' m'
+            );
+        } else if (lane && lane.status === 'centerline_unmarked') {
+            evidence.push('No directional lane marking resolved; using route centerline');
+        }
+        const sample = value.clearanceAtValidatedSample;
+        if (sample) {
+            const sampleDistance = finite(sample.distanceMeters, 0);
+            if (sample.clearanceMeters === null
+                    || sample.clearanceMeters === undefined) {
+                evidence.push(
+                    'Clearance at validated sample '
+                    + sampleDistance.toFixed(2)
+                    + ' m: no obstacle in the analysed set'
+                );
+            } else {
+                evidence.push(
+                    'Clearance at validated sample '
+                    + sampleDistance.toFixed(2) + ' m: '
+                    + finite(sample.clearanceMeters, 0).toFixed(2) + ' m'
+                );
+            }
+        }
+        if (finite(value.sampleSpacingMeters, 0) > 0) {
+            evidence.push(
+                'Validation sample spacing: '
+                + finite(value.sampleSpacingMeters, 0).toFixed(3) + ' m'
+            );
+        }
+        if (value.plannerDurationEstimate && duration > 0) {
+            evidence.push(
+                'Estimated at profile maximum speed: '
+                + duration.toFixed(1) + ' s'
+            );
+        }
+        if (value.outcome === 'envelope_refused' && value.blocking) {
+            const obstacles = Array.isArray(value.blocking.blockingObstacleIds)
+                ? value.blocking.blockingObstacleIds.join(', ') : '';
+            evidence.push(
+                value.blocking.localized
+                    ? 'Playback stops at the validated blocking sample'
+                        + (obstacles ? ': ' + obstacles : '')
+                    : 'The refusal is not localized to a replayable sample'
+            );
+        }
+        if (value.outcome === 'unroutable') {
+            evidence.push('No trajectory was established for playback.');
+        }
+        this.motionEvidence.textContent = evidence.join(' | ');
+        this.motionDisclosure.textContent = value.disclosure || '';
+    };
+
+    Workspace.prototype._handleMotionState = function (value) {
+        this.motionState = Object.assign({}, this.motionState, value || {});
+        if (this.topAdapter && typeof this.topAdapter.updateMotionSnapshot
+                === 'function' && this.motionState.packageId) {
+            this.topAdapter.updateMotionSnapshot(this.motionState);
+        }
+        this._renderMotionPanel();
+        return clone(this.motionState);
+    };
+
+    Workspace.prototype._handleActivityState = function (value) {
+        this.activityState = Object.assign(
+            {},
+            this.activityState,
+            value || {}
+        );
+        if (this.topAdapter
+                && typeof this.topAdapter.updateActivitySnapshot === 'function'
+                && this.activityState.scenarioId) {
+            this.topAdapter.updateActivitySnapshot(this.activityState);
+        }
+        this._renderMotionPanel();
+        return clone(this.activityState);
+    };
+
+    Workspace.prototype._handleNavigationPreviewState = function (value) {
+        const snapshot = value || {};
+        this.navigationState.previewLoaded = Boolean(snapshot.loaded);
+        this.navigationState.previewPlaying = Boolean(snapshot.playing);
+        if (Number.isFinite(Number(snapshot.normalizedTime))) {
+            this.navigationState.previewNormalizedTime = Number(
+                snapshot.normalizedTime
+            );
+        }
+        if (this.navigationState.open && this.topAdapter
+                && typeof this.topAdapter.setNavigationAuthoringPreview
+                    === 'function') {
+            const descriptor = this._navigationPreviewDescriptor();
+            if (snapshot.pose) descriptor.pose = clone(snapshot.pose);
+            this.topAdapter.setNavigationAuthoringPreview(descriptor);
+        }
+        if (this.navigationState.open) this._renderNavigationDialog();
+        return clone(snapshot);
+    };
+
+    Workspace.prototype._handleMotionClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-motion-action',
+            this.motionPanel
+        );
+        if (!action || !this.threeAdapter) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (this.activityState.loaded && this.threeAdapter.activity) {
+            if (action === 'toggle-play') {
+                if (this.activityState.playing) {
+                    this.threeAdapter.activity.pause();
+                } else {
+                    this.threeAdapter.activity.play();
+                }
+            } else if (action === 'focus-actor') {
+                this.threeAdapter.activity.focusActor(
+                    this.activityState.selectedActorId
+                );
+            } else if (action === 'close') {
+                this.clearActivityPlayback('user_closed');
+            }
+            return;
+        }
+        if (!this.threeAdapter.motion) return;
+        if (action === 'toggle-play') {
+            if (this.motionState.playing) this.threeAdapter.motion.pause();
+            else this.threeAdapter.motion.play();
+        } else if (action === 'toggle-follow') {
+            this.threeAdapter.motion.setFollow(!this.motionState.following);
+        } else if (action === 'close') {
+            this.clearMotionPlayback('user_closed');
+        }
+    };
+
+    Workspace.prototype._handleMotionInput = function (event) {
+        if (!this.threeAdapter) return;
+        if (this.activityState.loaded && this.threeAdapter.activity) {
+            const activityInput = targetDataId(
+                event.target,
+                'data-activity-input',
+                this.motionPanel
+            );
+            const actorType = targetDataId(
+                event.target,
+                'data-activity-type',
+                this.motionPanel
+            );
+            const pathsInput = targetDataId(
+                event.target,
+                'data-activity-paths',
+                this.motionPanel
+            );
+            const motionInput = targetDataId(
+                event.target,
+                'data-motion-input',
+                this.motionPanel
+            );
+            if (motionInput === 'time') {
+                this.threeAdapter.activity.seek(
+                    finite(event.target.value, 0)
+                );
+            } else if (motionInput === 'rate') {
+                this.threeAdapter.activity.setRate(
+                    finite(event.target.value, 1)
+                );
+            } else if (activityInput === 'actor') {
+                this.threeAdapter.activity.selectActor(event.target.value);
+            } else if (activityInput === 'department') {
+                this.threeAdapter.activity.setDepartmentFilter(
+                    event.target.value
+                );
+            } else if (actorType) {
+                this.threeAdapter.activity.setActorTypeVisible(
+                    actorType,
+                    event.target.checked !== false
+                );
+                if (typeof this.threeAdapter.activity.setPathTypeVisible
+                        === 'function') {
+                    this.threeAdapter.activity.setPathTypeVisible(
+                        actorType,
+                        event.target.checked !== false
+                    );
+                }
+                if (this.topAdapter
+                        && typeof this.topAdapter.setActivityPathTypeVisible
+                            === 'function') {
+                    this.topAdapter.setActivityPathTypeVisible(
+                        actorType,
+                        event.target.checked !== false
+                    );
+                }
+            } else if (pathsInput) {
+                this.threeAdapter.activity.setPathsVisible(
+                    event.target.checked !== false
+                );
+                if (this.topAdapter
+                        && typeof this.topAdapter.setActivityPathsVisible
+                            === 'function') {
+                    this.topAdapter.setActivityPathsVisible(
+                        event.target.checked !== false
+                    );
+                }
+            }
+            return;
+        }
+        if (!this.threeAdapter.motion) return;
+        const input = targetDataId(
+            event.target,
+            'data-motion-input',
+            this.motionPanel
+        );
+        if (input === 'time') {
+            this.threeAdapter.motion.seek(finite(event.target.value, 0));
+        } else if (input === 'rate') {
+            this.threeAdapter.motion.setRate(finite(event.target.value, 1));
+        }
+    };
+
+    Workspace.prototype.startMotionPlayback = async function (request) {
+        if (this.destroyed || this.motionRequestPending) {
+            throw new Error('Facility motion playback is unavailable.');
+        }
+        if (!this.motionTransport
+                || typeof this.motionTransport.createMotionPackage !== 'function'
+                || typeof this.motionTransport.getMotionPackage !== 'function') {
+            const error = new Error('Facility motion transport is unavailable.');
+            error.code = 'facility_motion_transport_unavailable';
+            throw error;
+        }
+        if (!this.threeAdapter || !this.threeAdapter.motion
+                || typeof this.threeAdapter.motion.load !== 'function') {
+            const error = new Error('Facility motion renderer is unavailable.');
+            error.code = 'facility_motion_view_unavailable';
+            throw error;
+        }
+        const beforeState = this.session.getState();
+        const beforeFingerprint = JSON.stringify(beforeState.layout || {});
+        this.motionRequestPending = true;
+        try {
+            const created = await this.motionTransport.createMotionPackage({
+                baseRevision: beforeState.baseRevision,
+                operations: Array.isArray(beforeState.operations)
+                    ? beforeState.operations : [],
+                request: clone(request || {}),
+            });
+            const packageId = cleanString(created && created.packageId, '');
+            const activeRevision = cleanString(
+                created && created.layoutRevision,
+                ''
+            );
+            if (!packageId || !activeRevision) {
+                const error = new Error(
+                    'Facility motion package response is incomplete.'
+                );
+                error.code = 'facility_motion_package_response_invalid';
+                throw error;
+            }
+            const payload = await this.motionTransport.getMotionPackage({
+                packageId: packageId,
+                activeRevision: activeRevision,
+            });
+            const currentState = this.session.getState();
+            if (JSON.stringify(currentState.layout || {}) !== beforeFingerprint
+                    || currentState.baseRevision !== beforeState.baseRevision
+                    || JSON.stringify(currentState.operations || [])
+                        !== JSON.stringify(beforeState.operations || [])) {
+                const error = new Error(
+                    'The Facility Layout changed while motion was prepared.'
+                );
+                error.code = 'facility_motion_package_stale';
+                throw error;
+            }
+            if (this.controller && typeof this.controller.ready === 'function') {
+                await this.controller.ready();
+            }
+            this.motionState.prototypeMode = payload.prototypeMode === true;
+            this.motionState.prototypeLabel = cleanString(
+                payload.prototypeLabel,
+                null
+            );
+            if (this.activityState.loaded) {
+                this.clearActivityPlayback('motion_loaded');
+            }
+            if (this.topAdapter
+                    && typeof this.topAdapter.setMotionPresentation
+                        === 'function') {
+                this.topAdapter.setMotionPresentation(payload);
+            }
+            try {
+                this.threeAdapter.motion.load(payload, activeRevision);
+            } catch (error) {
+                if (this.topAdapter
+                        && typeof this.topAdapter.clearMotionPresentation
+                            === 'function') {
+                    this.topAdapter.clearMotionPresentation();
+                }
+                throw error;
+            }
+            this.motionPresentation = clone(payload);
+            this.motionLayoutFingerprint = beforeFingerprint;
+            this._renderMotionPanel();
+            return clone(created.summary || {
+                packageId: packageId,
+                outcome: payload.package
+                    && payload.package.movement
+                    && payload.package.movement.outcome,
+                qualification: payload.package
+                    && payload.package.qualification,
+            });
+        } catch (error) {
+            if (typeof this.options.onError === 'function') {
+                this.options.onError(error);
+            }
+            throw error;
+        } finally {
+            this.motionRequestPending = false;
+        }
+    };
+
+    Workspace.prototype.loadMotionPresentation = function (
+        payload,
+        activeRevision
+    ) {
+        if (!this.threeAdapter || !this.threeAdapter.motion) {
+            throw new Error('Facility motion renderer is unavailable.');
+        }
+        this.motionState.prototypeMode = payload
+            && payload.prototypeMode === true;
+        this.motionState.prototypeLabel = cleanString(
+            payload && payload.prototypeLabel,
+            null
+        );
+        if (this.activityState.loaded) {
+            this.clearActivityPlayback('motion_loaded');
+        }
+        if (this.topAdapter
+                && typeof this.topAdapter.setMotionPresentation === 'function') {
+            this.topAdapter.setMotionPresentation(payload);
+        }
+        try {
+            const state = this.threeAdapter.motion.load(
+                payload,
+                activeRevision
+            );
+            this.motionPresentation = clone(payload);
+            this.motionLayoutFingerprint = JSON.stringify(
+                this.state && this.state.layout || {}
+            );
+            return state;
+        } catch (error) {
+            if (this.topAdapter
+                    && typeof this.topAdapter.clearMotionPresentation
+                        === 'function') {
+                this.topAdapter.clearMotionPresentation();
+            }
+            throw error;
+        }
+    };
+
+    Workspace.prototype.clearMotionPlayback = function (reason) {
+        if (this.topAdapter
+                && typeof this.topAdapter.clearMotionPresentation === 'function') {
+            this.topAdapter.clearMotionPresentation();
+        }
+        if (this.threeAdapter && this.threeAdapter.motion
+                && typeof this.threeAdapter.motion.dispose === 'function') {
+            this.threeAdapter.motion.dispose(reason || 'cleared');
+        }
+        this.motionPresentation = null;
+        this.motionLayoutFingerprint = null;
+        this.motionState = Object.assign({}, this.motionState, {
+            loaded: false,
+            status: 'idle',
+            statusReason: reason || null,
+            packageId: null,
+            movementId: null,
+            outcome: null,
+            vehiclePlacementId: null,
+            vehiclePresentation: null,
+            laneBinding: null,
+            following: false,
+            playing: false,
+            elapsedSeconds: 0,
+            durationSeconds: 0,
+            distanceMeters: 0,
+            totalDistanceMeters: 0,
+            pose: null,
+            clearanceAtValidatedSample: null,
+            sampleSpacingMeters: null,
+            qualification: null,
+            disclosure: null,
+            blocking: null,
+            prototypeMode: false,
+            prototypeLabel: null,
+        });
+        this._renderMotionPanel();
+        return true;
+    };
+
+    Workspace.prototype.startActivityPlayback = async function (request) {
+        if (this.destroyed || this.activityRequestPending) {
+            throw new Error('Facility activity playback is unavailable.');
+        }
+        if (!this.motionTransport
+                || typeof this.motionTransport.createActivityScenario
+                    !== 'function'
+                || typeof this.motionTransport.getActivityScenario
+                    !== 'function') {
+            const error = new Error(
+                'Facility activity transport is unavailable.'
+            );
+            error.code = 'facility_activity_transport_unavailable';
+            throw error;
+        }
+        if (!this.threeAdapter || !this.threeAdapter.activity
+                || typeof this.threeAdapter.activity.load !== 'function') {
+            const error = new Error(
+                'Facility activity renderer is unavailable.'
+            );
+            error.code = 'facility_activity_view_unavailable';
+            throw error;
+        }
+        const beforeState = this.session.getState();
+        const beforeFingerprint = JSON.stringify(beforeState.layout || {});
+        this.activityRequestPending = true;
+        try {
+            const created = await this.motionTransport.createActivityScenario({
+                baseRevision: beforeState.baseRevision,
+                operations: Array.isArray(beforeState.operations)
+                    ? beforeState.operations : [],
+                request: clone(request || {}),
+            });
+            const scenarioId = cleanString(created && created.scenarioId, '');
+            const activeRevision = cleanString(
+                created && created.layoutRevision,
+                ''
+            );
+            if (!scenarioId || !activeRevision) {
+                const error = new Error(
+                    'Facility activity scenario response is incomplete.'
+                );
+                error.code = 'facility_activity_scenario_response_invalid';
+                throw error;
+            }
+            const payload = await this.motionTransport.getActivityScenario({
+                scenarioId: scenarioId,
+                activeRevision: activeRevision,
+            });
+            const currentState = this.session.getState();
+            if (JSON.stringify(currentState.layout || {}) !== beforeFingerprint
+                    || currentState.baseRevision !== beforeState.baseRevision
+                    || JSON.stringify(currentState.operations || [])
+                        !== JSON.stringify(beforeState.operations || [])) {
+                const error = new Error(
+                    'The Facility Layout changed while activity was prepared.'
+                );
+                error.code = 'facility_activity_scenario_stale';
+                throw error;
+            }
+            if (this.controller && typeof this.controller.ready === 'function') {
+                await this.controller.ready();
+            }
+            if (this.motionState.loaded) {
+                this.clearMotionPlayback('activity_loaded');
+            }
+            if (this.topAdapter
+                    && typeof this.topAdapter.setActivityPresentation
+                        === 'function') {
+                this.topAdapter.setActivityPresentation(payload);
+            }
+            try {
+                await this.threeAdapter.activity.load(
+                    payload,
+                    activeRevision
+                );
+            } catch (error) {
+                if (this.topAdapter
+                        && typeof this.topAdapter.clearActivityPresentation
+                            === 'function') {
+                    this.topAdapter.clearActivityPresentation();
+                }
+                throw error;
+            }
+            this.activityPresentation = clone(payload);
+            this.activityLayoutFingerprint = beforeFingerprint;
+            this._renderMotionPanel();
+            return clone(created.summary || {
+                scenarioId: scenarioId,
+                qualification: payload.scenario
+                    && payload.scenario.qualification,
+            });
+        } catch (error) {
+            if (typeof this.options.onError === 'function') {
+                this.options.onError(error);
+            }
+            throw error;
+        } finally {
+            this.activityRequestPending = false;
+        }
+    };
+
+    Workspace.prototype.startNavigationActivityPlayback = async function (request) {
+        if (this.destroyed || this.activityRequestPending) {
+            throw new Error('Facility navigation activity playback is unavailable.');
+        }
+        if (this.capabilities.navigationMultiActor !== true) {
+            const error = new Error(
+                'Facility navigation activity is disabled for this rollout stage.'
+            );
+            error.code = 'facility_feature_disabled';
+            throw error;
+        }
+        const transport = this.motionTransport;
+        if (!transport
+                || typeof transport.compileNavigationSnapshot !== 'function'
+                || typeof transport.planActorJourney !== 'function'
+                || typeof transport.buildNavigationActivityScenario !== 'function'
+                || typeof transport.getActivityScenario !== 'function') {
+            const error = new Error('Facility navigation activity transport is unavailable.');
+            error.code = 'facility_navigation_activity_transport_unavailable';
+            throw error;
+        }
+        if (!this.threeAdapter || !this.threeAdapter.activity
+                || typeof this.threeAdapter.activity.load !== 'function') {
+            const error = new Error('Facility navigation activity view is unavailable.');
+            error.code = 'facility_navigation_activity_view_unavailable';
+            throw error;
+        }
+        const input = request && typeof request === 'object' ? request : {};
+        const programIds = Array.isArray(input.movementProgramIds)
+            ? Array.from(new Set(input.movementProgramIds.map(String))) : [];
+        const suppliedJourneyIds = Array.isArray(input.journeySolutionIds)
+            ? Array.from(new Set(input.journeySolutionIds.map(String))) : [];
+        if ((!programIds.length && !suppliedJourneyIds.length)
+                || programIds.length + suppliedJourneyIds.length > 20
+                || input.prototypeMode !== true) {
+            const error = new Error(
+                'Navigation playback requires 1-20 existing program or journey IDs in prototype mode.'
+            );
+            error.code = 'facility_navigation_activity_request_invalid';
+            throw error;
+        }
+        const beforeState = this.session.getState();
+        const beforeFingerprint = JSON.stringify(beforeState.layout || {});
+        const beforeOperations = JSON.stringify(beforeState.operations || []);
+        const basePayload = {
+            baseRevision: beforeState.baseRevision,
+            operations: Array.isArray(beforeState.operations)
+                ? beforeState.operations : [],
+        };
+        this.activityRequestPending = true;
+        try {
+            const plannedJourneyIds = [];
+            for (const movementProgramId of programIds) {
+                const compiled = await transport.compileNavigationSnapshot({
+                    ...basePayload,
+                    request: {
+                        movementProgramId: movementProgramId,
+                        prototypeMode: true,
+                    },
+                });
+                const navigationPackageId = String(
+                    compiled && compiled.summary
+                    && compiled.summary.navigationPackageId || ''
+                );
+                if (!navigationPackageId) {
+                    const error = new Error('Navigation snapshot response is incomplete.');
+                    error.code = 'facility_navigation_snapshot_response_invalid';
+                    throw error;
+                }
+                const planned = await transport.planActorJourney({
+                    ...basePayload,
+                    request: {
+                        navigationPackageId: navigationPackageId,
+                        movementProgramId: movementProgramId,
+                        prototypeMode: true,
+                    },
+                });
+                const summary = planned && planned.summary || {};
+                const journeySolutionId = String(summary.journeySolutionId || '');
+                if (!journeySolutionId || summary.outcome !== 'accepted') {
+                    const error = new Error(
+                        'The requested movement program did not produce an accepted journey.'
+                    );
+                    error.code = String(
+                        summary.outcome || 'facility_navigation_journey_refused'
+                    );
+                    throw error;
+                }
+                plannedJourneyIds.push(journeySolutionId);
+            }
+            const journeySolutionIds = Array.from(new Set(
+                suppliedJourneyIds.concat(plannedJourneyIds)
+            ));
+            const created = await transport.buildNavigationActivityScenario({
+                ...basePayload,
+                request: {
+                    journeySolutionIds: journeySolutionIds,
+                    handoffResultIds: Array.isArray(input.handoffResultIds)
+                        ? Array.from(new Set(input.handoffResultIds.map(String)))
+                        : [],
+                    scenarioLabel: String(
+                        input.scenarioLabel || 'Sage navigation activity'
+                    ),
+                    prototypeMode: true,
+                },
+            });
+            const scenarioId = String(created && created.scenarioId || '');
+            const activeRevision = String(created && created.layoutRevision || '');
+            if (!scenarioId || !activeRevision) {
+                const error = new Error('Navigation activity response is incomplete.');
+                error.code = 'facility_navigation_activity_response_invalid';
+                throw error;
+            }
+            const payload = await transport.getActivityScenario({
+                scenarioId: scenarioId,
+                activeRevision: activeRevision,
+            });
+            const currentState = this.session.getState();
+            if (JSON.stringify(currentState.layout || {}) !== beforeFingerprint
+                    || currentState.baseRevision !== beforeState.baseRevision
+                    || JSON.stringify(currentState.operations || [])
+                        !== beforeOperations) {
+                const error = new Error(
+                    'The Facility Layout changed while navigation activity was prepared.'
+                );
+                error.code = 'facility_navigation_activity_stale';
+                throw error;
+            }
+            if (this.controller && typeof this.controller.ready === 'function') {
+                await this.controller.ready();
+            }
+            if (this.motionState.loaded) this.clearMotionPlayback('activity_loaded');
+            if (this.topAdapter
+                    && typeof this.topAdapter.setActivityPresentation === 'function') {
+                this.topAdapter.setActivityPresentation(payload);
+            }
+            try {
+                await this.threeAdapter.activity.load(payload, activeRevision);
+            } catch (error) {
+                if (this.topAdapter
+                        && typeof this.topAdapter.clearActivityPresentation === 'function') {
+                    this.topAdapter.clearActivityPresentation();
+                }
+                throw error;
+            }
+            this.activityPresentation = clone(payload);
+            this.activityLayoutFingerprint = beforeFingerprint;
+            this._renderMotionPanel();
+            return Object.assign({}, clone(created.summary || {}), {
+                scenarioId: scenarioId,
+                journeySolutionIds: journeySolutionIds,
+                plannedJourneyCount: plannedJourneyIds.length,
+                readOnlyPresentation: true,
+            });
+        } catch (error) {
+            if (typeof this.options.onError === 'function') this.options.onError(error);
+            throw error;
+        } finally {
+            this.activityRequestPending = false;
+        }
+    };
+
+    Workspace.prototype.loadActivityPresentation = async function (
+        payload,
+        activeRevision
+    ) {
+        if (!this.threeAdapter || !this.threeAdapter.activity) {
+            throw new Error('Facility activity renderer is unavailable.');
+        }
+        if (this.motionState.loaded) {
+            this.clearMotionPlayback('activity_loaded');
+        }
+        if (this.topAdapter
+                && typeof this.topAdapter.setActivityPresentation === 'function') {
+            this.topAdapter.setActivityPresentation(payload);
+        }
+        try {
+            const value = await this.threeAdapter.activity.load(
+                payload,
+                activeRevision
+            );
+            this.activityPresentation = clone(payload);
+            this.activityLayoutFingerprint = JSON.stringify(
+                this.state && this.state.layout || {}
+            );
+            return value;
+        } catch (error) {
+            if (this.topAdapter
+                    && typeof this.topAdapter.clearActivityPresentation
+                        === 'function') {
+                this.topAdapter.clearActivityPresentation();
+            }
+            throw error;
+        }
+    };
+
+    Workspace.prototype.clearActivityPlayback = function (reason) {
+        if (this.topAdapter
+                && typeof this.topAdapter.clearActivityPresentation
+                    === 'function') {
+            this.topAdapter.clearActivityPresentation();
+        }
+        if (this.threeAdapter && this.threeAdapter.activity
+                && typeof this.threeAdapter.activity.dispose === 'function') {
+            this.threeAdapter.activity.dispose(reason || 'cleared');
+        }
+        this.activityPresentation = null;
+        this.activityLayoutFingerprint = null;
+        this.activityState = Object.assign({}, this.activityState, {
+            loaded: false,
+            scenarioId: null,
+            label: null,
+            status: 'idle',
+            statusReason: reason || null,
+            playing: false,
+            elapsedSeconds: 0,
+            durationSeconds: 0,
+            selectedActorId: null,
+            departmentZoneId: null,
+            actors: [],
+            stationaryEvidence: null,
+            unavailableActivity: [],
+            prototypeMode: false,
+            qualification: null,
+            disclosure: null,
+        });
+        this._renderMotionPanel();
+        return true;
+    };
+
+    Workspace.prototype._renderLayerVisibility = function () {
+        if (!this.layerPanel) return;
+        Object.keys(DEFAULT_LAYER_VISIBILITY).forEach(function (key) {
+            const input = this.layerPanel.querySelector(
+                '[data-facility-layer="' + key + '"]'
+            );
+            if (input) input.checked = this.layerVisibility[key] !== false;
+        }, this);
+        this.layerPanel.hidden = !this.layerPanelOpen;
+        [this.planNavigation, this.threeNavigation].filter(Boolean)
+            .forEach(function (navigation) {
+                const attribute = navigation === this.planNavigation
+                    ? 'data-plan-command' : 'data-three-command';
+                const button = navigation.querySelector(
+                    '[' + attribute + '="layers"]'
+                );
+                if (button) {
+                    button.setAttribute(
+                        'aria-pressed',
+                        this.layerPanelOpen ? 'true' : 'false'
+                    );
+                    button.setAttribute(
+                        'aria-expanded',
+                        this.layerPanelOpen ? 'true' : 'false'
+                    );
+                }
+            }, this);
+    };
+
+    Workspace.prototype._applyLayerVisibility = function () {
+        [this.topAdapter, this.threeAdapter].filter(Boolean)
+            .forEach(function (adapter) {
+                if (typeof adapter.setLayerVisibility === 'function') {
+                    adapter.setLayerVisibility(this.layerVisibility);
+                }
+            }, this);
+        this._renderLayerVisibility();
+        return clone(this.layerVisibility);
+    };
+
+    Workspace.prototype._setLayerPanelOpen = function (open) {
+        this.layerPanelOpen = open === true;
+        if (this.layerPanelOpen) {
+            this.threeSettingsOpen = false;
+            this.threeViewMenuOpen = false;
+            this.threeViewpointsOpen = false;
+            if (this.threeSettingsPanel) this.threeSettingsPanel.hidden = true;
+        }
+        this._renderLayerVisibility();
+        this._renderThreeNavigationState();
+    };
+
+    Workspace.prototype._handleLayerPanelInput = function (event) {
+        const key = targetDataId(
+            event.target,
+            'data-facility-layer',
+            this.layerPanel
+        );
+        if (!key || !Object.prototype.hasOwnProperty.call(
+            DEFAULT_LAYER_VISIBILITY,
+            key
+        )) return;
+        this.layerVisibility[key] = event.target.checked === true;
+        this.layerVisibility = normalizeLayerVisibility(
+            this.layerVisibility
+        );
+        this._applyLayerVisibility();
+    };
+
+    Workspace.prototype._handleLayerPanelClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-layer-action',
+            this.layerPanel
+        );
+        if (action !== 'show-all') return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        this.layerVisibility = normalizeLayerVisibility(
+            DEFAULT_LAYER_VISIBILITY
+        );
+        this._applyLayerVisibility();
+    };
+
     Workspace.prototype._buildAssetBrowser = function () {
         this.assetBrowser = element(this.document, 'section', {
             className: 'ip-flw-asset-browser',
@@ -4234,6 +5809,338 @@
         );
         append(footer, this.aisleStatus, actions);
         append(this.aisleDialog, header, this.aisleBody, footer);
+    };
+
+    Workspace.prototype._buildNavigationDialog = function () {
+        this.navigationDialog = element(this.document, 'section', {
+            className: 'ip-flw-precision-dialog ip-flw-navigation-dialog',
+            role: 'dialog',
+            'aria-modal': 'false',
+            'aria-labelledby': 'ip-flw-navigation-title',
+            hidden: true,
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-precision-header',
+        });
+        append(header,
+            element(this.document, 'h2', {
+                id: 'ip-flw-navigation-title',
+            }, 'Author motion path'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-precision-close',
+                'data-navigation-action': 'close',
+                'aria-label': 'Close motion path tool',
+                title: 'Close',
+            }, 'X')
+        );
+        this.navigationBody = element(this.document, 'div', {
+            className: 'ip-flw-precision-body ip-flw-navigation-body',
+        });
+        const footer = element(this.document, 'footer', {
+            className: 'ip-flw-precision-footer',
+        });
+        this.navigationStatus = element(this.document, 'div', {
+            className: 'ip-flw-precision-status',
+            role: 'status',
+            'aria-live': 'polite',
+        });
+        const actions = element(this.document, 'div', {
+            className: 'ip-flw-precision-actions',
+        });
+        append(actions,
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-secondary-action',
+                'data-navigation-action': 'close',
+            }, 'Close'),
+            element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-primary-action',
+                'data-navigation-action': 'apply',
+            }, 'Apply path')
+        );
+        append(footer, this.navigationStatus, actions);
+        append(this.navigationDialog, header, this.navigationBody, footer);
+    };
+
+    Workspace.prototype._navigationField = function (
+        label,
+        field,
+        type,
+        value,
+        attributes
+    ) {
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        wrapper.appendChild(element(this.document, 'input', Object.assign({
+            type: type,
+            value: value,
+            'data-navigation-field': field,
+        }, attributes || {})));
+        return wrapper;
+    };
+
+    Workspace.prototype._navigationSelect = function (
+        label,
+        field,
+        options,
+        value
+    ) {
+        const wrapper = element(this.document, 'label', {
+            className: 'ip-flw-precision-field',
+        });
+        wrapper.appendChild(element(this.document, 'span', {}, label));
+        const select = element(this.document, 'select', {
+            'data-navigation-field': field,
+        });
+        options.forEach(function (option) {
+            select.appendChild(element(this.document, 'option', {
+                value: option[0],
+                selected: option[0] === value,
+            }, option[1]));
+        }, this);
+        wrapper.appendChild(select);
+        return wrapper;
+    };
+
+    Workspace.prototype._navigationActionButton = function (
+        action,
+        label,
+        disabled,
+        pressed
+    ) {
+        return element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-secondary-action',
+            'data-navigation-action': action,
+            disabled: Boolean(disabled),
+            'aria-pressed': pressed === undefined ? null
+                : (pressed ? 'true' : 'false'),
+        }, label);
+    };
+
+    Workspace.prototype._navigationActorRecord = function () {
+        const actorId = this.navigationState.actorPlacementId;
+        return this.state && this.state.layout
+            ? (this.state.layout.placements || []).find(function (item) {
+                return item.placementId === actorId;
+            }) || null : null;
+    };
+
+    Workspace.prototype._navigationActorLabel = function () {
+        const placement = this._navigationActorRecord();
+        return placement && placement.metadata
+            && (placement.metadata.instanceLabel
+                || placement.metadata.displayName)
+            || placement && placement.assetId
+            || this.navigationState.actorPlacementId
+            || 'No actor selected';
+    };
+
+    Workspace.prototype._renderNavigationDialog = function () {
+        if (!this.navigationDialog) return;
+        const navigation = this.navigationState;
+        this.navigationDialog.hidden = !navigation.open;
+        if (!navigation.open) return;
+        clearElement(this.navigationBody);
+        const actor = element(this.document, 'div', {
+            className: 'ip-flw-navigation-actor',
+        });
+        append(actor,
+            element(this.document, 'strong', {}, this._navigationActorLabel()),
+            element(this.document, 'span', {}, navigation.actorClass
+                ? navigation.actorClass.replace('_', ' ') : 'unknown actor')
+        );
+        const configuration = element(this.document, 'div', {
+            className: 'ip-flw-navigation-grid',
+        });
+        append(configuration,
+            this._navigationSelect('Loop', 'loopMode', [
+                ['one_way', 'One way'],
+                ['closed_loop', 'Closed loop'],
+                ['out_and_return', 'Out and return'],
+                ['paired_lane_return', 'Paired-lane return'],
+                ['task_cycle', 'Task cycle'],
+            ], navigation.loopMode),
+            this._navigationSelect('Direction', 'direction', [
+                ['forward', 'Forward'],
+                ['reverse', 'Reverse'],
+                ['bidirectional', 'Bidirectional'],
+            ], navigation.direction),
+            this._navigationSelect('Constraint', 'constraintMode', [
+                ['complete_override', 'Complete override'],
+                ['guide', 'Guide'],
+                ['locked_segment', 'Locked segment'],
+                ['preferred_corridor', 'Preferred corridor'],
+            ], navigation.constraintMode)
+        );
+        if (navigation.actorClass === 'vehicle') {
+            append(configuration,
+                this._navigationField(
+                    'Vehicle profile ID',
+                    'actorProfileId',
+                    'text',
+                    navigation.actorProfileId
+                ),
+                this._navigationField(
+                    'Exact profile revision',
+                    'actorProfileRevision',
+                    'text',
+                    navigation.actorProfileRevision,
+                    { maxlength: 64, spellcheck: 'false' }
+                )
+            );
+        }
+        const editActions = element(this.document, 'div', {
+            className: 'ip-flw-navigation-actions',
+        });
+        append(editActions,
+            this._navigationActionButton(
+                'draw',
+                navigation.drawing ? 'Drawing active' : 'Add waypoints',
+                false,
+                navigation.drawing
+            ),
+            this._navigationActionButton(
+                'finish',
+                'Finish drawing',
+                navigation.points.length < 2
+            ),
+            this._navigationActionButton(
+                'reverse',
+                'Reverse',
+                navigation.points.length < 2
+            ),
+            this._navigationActionButton(
+                'insert',
+                'Insert after selected',
+                navigation.selectedPointIndex === null
+                    || navigation.points.length < 2
+            ),
+            this._navigationActionButton(
+                'delete',
+                'Delete waypoint',
+                navigation.selectedPointIndex === null
+                    || navigation.points.length <= 2
+            ),
+            this._navigationActionButton(
+                'lock',
+                'Lock segment',
+                navigation.selectedPointIndex === null
+                    || navigation.selectedPointIndex
+                        >= navigation.points.length - 1,
+                navigation.lockedSegmentIndexes.includes(
+                    navigation.selectedPointIndex
+                )
+            )
+        );
+        const anchorActions = element(this.document, 'div', {
+            className: 'ip-flw-navigation-anchor-row',
+        });
+        const ownerOptions = (this.state.layout.placements || []).map(
+            function (placement) {
+                const label = placement.metadata
+                    && (placement.metadata.instanceLabel
+                        || placement.metadata.displayName)
+                    || placement.assetId || placement.placementId;
+                return [placement.placementId, label];
+            }
+        );
+        append(anchorActions,
+            this._navigationSelect('Anchor', 'anchorKind', [
+                ['station_operate', 'Station operate'],
+                ['station_load', 'Station load'],
+                ['station_unload', 'Station unload'],
+                ['station_inspect', 'Station inspect'],
+                ['fifo_input', 'FIFO input'],
+                ['fifo_output', 'FIFO output'],
+                ['cell_entrance', 'Cell entrance'],
+                ['crossing', 'Crossing'],
+                ['vehicle_parking', 'Vehicle parking'],
+                ['vehicle_turnaround', 'Vehicle turnaround'],
+                ['handoff_endpoint', 'Handoff endpoint'],
+            ], navigation.anchorKind),
+            this._navigationSelect(
+                'Anchor owner',
+                'anchorOwnerPlacementId',
+                ownerOptions,
+                navigation.anchorOwnerPlacementId
+            ),
+            this._navigationActionButton(
+                'add-anchor',
+                navigation.anchorPicking ? 'Click anchor point'
+                    : 'Place anchor',
+                !navigation.anchorOwnerPlacementId,
+                navigation.anchorPicking
+            )
+        );
+        const previewActions = element(this.document, 'div', {
+            className: 'ip-flw-navigation-actions',
+        });
+        append(previewActions,
+            this._navigationActionButton(
+                'preview',
+                navigation.previewPlaying ? 'Pause preview' : 'Play preview',
+                navigation.points.length < 2,
+                navigation.previewPlaying
+            ),
+            this._navigationActionButton(
+                'paths',
+                navigation.pathsVisible ? 'Hide paths' : 'Show paths',
+                false,
+                navigation.pathsVisible
+            ),
+            this._navigationActionButton(
+                'export',
+                'Export gold case',
+                !navigation.lastConstraintId
+            )
+        );
+        const timeline = this._navigationField(
+            'Preview position',
+            'previewNormalizedTime',
+            'range',
+            navigation.previewNormalizedTime,
+            { min: 0, max: 1, step: 0.001 }
+        );
+        const summary = element(this.document, 'p', {
+            className: 'ip-flw-property-note',
+        }, navigation.points.length + ' waypoint'
+            + (navigation.points.length === 1 ? '' : 's')
+            + '. Coordinates come only from Plan pointer input. '
+            + 'A pending path is navigation intent, not a safety, capacity, '
+            + 'timing, or compliance approval.');
+        append(
+            this.navigationBody,
+            actor,
+            configuration,
+            editActions,
+            anchorActions,
+            previewActions,
+            timeline,
+            summary
+        );
+        this.navigationStatus.textContent = navigation.message
+            || (navigation.drawing
+                ? 'Click the Plan to add waypoints; drag a waypoint to refine it.'
+                : navigation.anchorPicking
+                    ? 'Click the Plan to author the selected semantic anchor.'
+                    : 'Review the path, then apply it as one unsaved gesture.');
+        const apply = this.navigationDialog.querySelector(
+            '[data-navigation-action="apply"]'
+        );
+        if (apply) {
+            apply.disabled = navigation.applying
+                || navigation.points.length < 2
+                || (navigation.actorClass === 'vehicle'
+                    && (!navigation.actorProfileId
+                        || !/^[0-9a-f]{64}$/.test(
+                            navigation.actorProfileRevision
+                        )));
+        }
     };
 
     Workspace.prototype._planSettingsNumber = function (
@@ -5339,6 +7246,662 @@
         this.closeAisleDialog(true);
     };
 
+    Workspace.prototype._navigationSelectedActor = function () {
+        if (!this.state || !this.state.layout) return null;
+        const selected = new Set(this.state.selection || []);
+        const placements = (this.state.layout.placements || []).filter(
+            function (placement) {
+                return selected.has(placement.placementId);
+            }
+        );
+        if (placements.length !== 1) return null;
+        try {
+            const actorClass = this.navigationRuntime.detectActorClass(
+                placements[0]
+            );
+            return { placement: placements[0], actorClass: actorClass };
+        } catch (error) {
+            return null;
+        }
+    };
+
+    Workspace.prototype._navigationVisualForwardAxis = function () {
+        const placement = this._navigationActorRecord();
+        const catalog = placement ? catalogRecord(
+            this.assetCatalog,
+            placement.assetId,
+            placement.assetDefinitionRevision
+        ) : null;
+        const axis = placement && placement.metadata
+            && placement.metadata.visualForwardAxis
+            || catalog && catalog.visualAlignment
+                && catalog.visualAlignment.forwardAxis
+            || catalog && catalog.extensions
+                && catalog.extensions.visualAlignment
+                && catalog.extensions.visualAlignment.forwardAxis
+            || '+X';
+        return ['+X', '-X', '+Z', '-Z'].includes(axis) ? axis : '+X';
+    };
+
+    Workspace.prototype._navigationPreviewDescriptor = function () {
+        const navigation = this.navigationState;
+        let pose = null;
+        if (navigation.points.length >= 2) {
+            try {
+                pose = this.navigationRuntime.samplePathAtNormalizedTime(
+                    navigation.points,
+                    navigation.previewNormalizedTime
+                );
+            } catch (error) {
+                pose = null;
+            }
+        }
+        return {
+            actorPlacementId: navigation.actorPlacementId,
+            actorClass: navigation.actorClass,
+            points: clone(navigation.points),
+            selectedPointIndex: navigation.selectedPointIndex,
+            selectedSegmentIndex: navigation.selectedSegmentIndex,
+            lockedSegmentIndexes: navigation.lockedSegmentIndexes.slice(),
+            validationStatus: navigation.validationStatus,
+            validation: navigation.validation
+                ? clone(navigation.validation) : null,
+            pathsVisible: navigation.pathsVisible !== false,
+            pose: pose,
+        };
+    };
+
+    Workspace.prototype._syncNavigationAuthoringPreview = function () {
+        if (this.topAdapter) {
+            if (typeof this.topAdapter.setNavigationPathsVisible === 'function') {
+                this.topAdapter.setNavigationPathsVisible(
+                    this.navigationState.pathsVisible
+                );
+            }
+            if (typeof this.topAdapter.setNavigationAuthoringPreview
+                    === 'function') {
+                this.topAdapter.setNavigationAuthoringPreview(
+                    this.navigationState.open
+                        ? this._navigationPreviewDescriptor() : null
+                );
+            }
+        }
+        if (this.threeAdapter && this.threeAdapter.navigationPreview
+                && this.navigationState.previewLoaded) {
+            const preview = this.threeAdapter.navigationPreview;
+            if (typeof preview.setPathsVisible === 'function') {
+                preview.setPathsVisible(this.navigationState.pathsVisible);
+            }
+            if (typeof preview.updatePath === 'function') {
+                preview.updatePath({
+                    points: clone(this.navigationState.points),
+                    loopMode: this.navigationState.loopMode,
+                    direction: this.navigationState.direction,
+                    validationStatus: this.navigationState.validationStatus,
+                });
+            }
+            if (typeof preview.seek === 'function') {
+                preview.seek(this.navigationState.previewNormalizedTime);
+            }
+        }
+    };
+
+    Workspace.prototype.openNavigationDialog = function () {
+        if (!this.capabilities.manualAuthoring
+                || !this.navigationRuntime
+                || typeof this.navigationRuntime.buildManualPathIntent
+                    !== 'function'
+                || typeof this.session.setFacilityNavigation !== 'function'
+                || this.state.busy || this.state.conflict) return false;
+        const selected = this._navigationSelectedActor();
+        if (!selected) {
+            this._setError(new Error(
+                'Select exactly one existing operator or vehicle before authoring a motion path.'
+            ));
+            return false;
+        }
+        if (this.assetBrowserState.open) this.closeAssetBrowser(false);
+        if (this.precisionState.open) this.closePrecisionDialog(false);
+        if (this.patternState.open) this.closePatternDialog(false);
+        if (this.bulkZoneState.open) this.closeBulkZoneDialog(false);
+        if (this.cellGroupState.open) this.closeCellGroupDialog(false);
+        if (this.aisleState.open) this.closeAisleDialog(false);
+        this._closeSelectionToolbar('navigation_opened', false);
+        const placement = selected.placement;
+        const navigation = this.navigationRuntime.navigationFromLayout(
+            this.state.layout
+        );
+        const existingProgram = navigation.movementPrograms.find(
+            function (program) {
+                return program.actorPlacementId === placement.placementId;
+            }
+        );
+        const existingConstraint = existingProgram
+            ? navigation.manualPathConstraints.find(function (constraint) {
+                return (existingProgram.manualPathConstraintIds || [])
+                    .includes(constraint.manualPathConstraintId);
+            }) : null;
+        const embeddedProfile = placement.metadata
+            && placement.metadata.navigationProfileRef || null;
+        this.navigationState.focusReturn = this.document.activeElement;
+        this.navigationState.open = true;
+        this.navigationState.drawing = !existingConstraint;
+        this.navigationState.anchorPicking = false;
+        this.navigationState.applying = false;
+        this.navigationState.actorPlacementId = placement.placementId;
+        this.navigationState.actorClass = selected.actorClass;
+        this.navigationState.actorProfileId = existingProgram
+            && existingProgram.actorProfileRef.profileId
+            || embeddedProfile && (embeddedProfile.profileId
+                || embeddedProfile.vehicleProfileId) || '';
+        this.navigationState.actorProfileRevision = existingProgram
+            && existingProgram.actorProfileRef.profileRevision
+            || embeddedProfile && (embeddedProfile.profileRevision
+                || embeddedProfile.vehicleProfileRevision) || '';
+        this.navigationState.loopMode = existingProgram
+            && existingProgram.loopMode || 'closed_loop';
+        this.navigationState.direction = existingConstraint
+            && existingConstraint.direction || 'forward';
+        this.navigationState.constraintMode = existingConstraint
+            && existingConstraint.constraintMode || 'complete_override';
+        this.navigationState.points = existingConstraint
+            ? clone(existingConstraint.authoredPolyline)
+            : [{
+                x: finite(placement.transform
+                    && placement.transform.position
+                    && placement.transform.position.x, 0),
+                z: finite(placement.transform
+                    && placement.transform.position
+                    && placement.transform.position.z, 0),
+            }];
+        this.navigationState.snapRefs = existingConstraint
+            ? clone(existingConstraint.snapRefs || []) : [];
+        this.navigationState.lockedSegmentIndexes = existingConstraint
+            ? (existingConstraint.lockedSegmentIndexes || []).slice() : [];
+        this.navigationState.selectedPointIndex = 0;
+        this.navigationState.selectedSegmentIndex = 0;
+        this.navigationState.previewNormalizedTime = 0;
+        this.navigationState.validationStatus = existingConstraint
+            && existingConstraint.reviewStatus === 'confirmed'
+            ? 'validated' : existingConstraint
+                && existingConstraint.reviewStatus === 'rejected'
+                ? 'invalid' : 'pending';
+        this.navigationState.validation = null;
+        this.navigationState.anchorOwnerPlacementId = placement.placementId;
+        this.navigationState.message = existingConstraint
+            ? 'Existing UI-authored path loaded for editing.'
+            : 'Click the Plan to add the first path segment.';
+        this.navigationState.lastConstraintId = existingConstraint
+            && existingConstraint.manualPathConstraintId || null;
+        this.navigationDialog.hidden = false;
+        this.root.setAttribute('data-navigation-open', 'true');
+        this._setToolMode('motion-path');
+        this._renderNavigationDialog();
+        this._syncNavigationAuthoringPreview();
+        return true;
+    };
+
+    Workspace.prototype.closeNavigationDialog = function (restoreFocus) {
+        if (!this.navigationState.open) return false;
+        this._finishMovableDialogDrag(this.navigationDialog, true);
+        this.navigationState.open = false;
+        this.navigationState.drawing = false;
+        this.navigationState.anchorPicking = false;
+        this.navigationState.previewPlaying = false;
+        this.navigationDialog.hidden = true;
+        this.root.removeAttribute('data-navigation-open');
+        if (this.threeAdapter && this.threeAdapter.navigationPreview
+                && typeof this.threeAdapter.navigationPreview.dispose
+                    === 'function') {
+            this.threeAdapter.navigationPreview.dispose('authoring_closed');
+        }
+        this.navigationState.previewLoaded = false;
+        if (this.topAdapter
+                && typeof this.topAdapter.setNavigationAuthoringPreview
+                    === 'function') {
+            this.topAdapter.setNavigationAuthoringPreview(null);
+        }
+        if (this.toolMode === 'motion-path') this._setToolMode('select');
+        const target = this.navigationState.focusReturn;
+        this.navigationState.focusReturn = null;
+        this._renderToolbarState();
+        if (restoreFocus !== false && target
+                && typeof target.focus === 'function') target.focus();
+        return true;
+    };
+
+    Workspace.prototype._navigationSnapPoint = function (world) {
+        const candidates = [];
+        const layout = this.state.layout || {};
+        (layout.routes || []).forEach(function (route) {
+            (route.points || []).forEach(function (value, index) {
+                candidates.push({
+                    point: { x: value.x, z: value.z },
+                    refKind: 'route_point',
+                    refId: route.routeId + ':' + index,
+                });
+            });
+        });
+        (layout.floorMarkings || []).forEach(function (marking) {
+            const position = marking.transform && marking.transform.position;
+            if (position) candidates.push({
+                point: { x: position.x, z: position.z },
+                refKind: 'marking_center',
+                refId: marking.markingId,
+            });
+        });
+        const existing = this.navigationRuntime.navigationFromLayout(layout);
+        (existing.anchors || []).forEach(function (anchor) {
+            if (anchor.localPosition) candidates.push({
+                point: clone(anchor.localPosition),
+                refKind: 'navigation_anchor',
+                refId: anchor.navigationAnchorId,
+            });
+        });
+        const threshold = Math.max(0.25, this._activeSnapStep() * 0.75);
+        let best = null;
+        candidates.forEach(function (candidate) {
+            const distance = Math.hypot(
+                candidate.point.x - world.x,
+                candidate.point.z - world.z
+            );
+            if (distance <= threshold && (!best || distance < best.distance)) {
+                best = Object.assign({ distance: distance }, candidate);
+            }
+        });
+        return best || {
+            point: { x: world.x, z: world.z },
+            refKind: null,
+            refId: null,
+        };
+    };
+
+    Workspace.prototype._navigationAddPoint = function (world) {
+        const snapped = this._navigationSnapPoint(world);
+        const point = {
+            x: Number(Number(snapped.point.x).toFixed(6)),
+            z: Number(Number(snapped.point.z).toFixed(6)),
+        };
+        const points = this.navigationState.points;
+        if (points.length && this.navigationRuntime.samePoint(
+            points[points.length - 1], point
+        )) return false;
+        points.push(point);
+        const index = points.length - 1;
+        if (snapped.refKind) {
+            this.navigationState.snapRefs = this.navigationState.snapRefs
+                .filter(function (item) { return item.pointIndex !== index; });
+            this.navigationState.snapRefs.push({
+                pointIndex: index,
+                refKind: snapped.refKind,
+                refId: snapped.refId,
+            });
+        }
+        this.navigationState.selectedPointIndex = index;
+        this.navigationState.selectedSegmentIndex = Math.max(0, index - 1);
+        this.navigationState.validationStatus = 'pending';
+        this.navigationState.validation = null;
+        this.navigationState.message = snapped.refKind
+            ? 'Waypoint snapped to ' + snapped.refKind.replace('_', ' ') + '.'
+            : 'Waypoint authored from the Plan pointer.';
+        this._syncNavigationAuthoringPreview();
+        this._renderNavigationDialog();
+        return true;
+    };
+
+    Workspace.prototype._loadNavigationPreview = async function () {
+        if (!this.threeAdapter || !this.threeAdapter.navigationPreview
+                || typeof this.threeAdapter.navigationPreview.load
+                    !== 'function') {
+            throw new Error('The exact-actor 3D navigation preview is unavailable.');
+        }
+        const placement = this._navigationActorRecord();
+        const payload = {
+            previewId: this.navigationRuntime.stableId('nav-preview', {
+                actorPlacementId: placement.placementId,
+                sequence: this.navigationState.sequence,
+            }),
+            layoutRevision: this.state.baseRevision,
+            actorPlacementId: placement.placementId,
+            actorClass: this.navigationState.actorClass,
+            points: clone(this.navigationState.points),
+            loopMode: this.navigationState.loopMode,
+            direction: this.navigationState.direction,
+            visualForwardAxis: this._navigationVisualForwardAxis(),
+            validationStatus: this.navigationState.validationStatus,
+            pathsVisible: this.navigationState.pathsVisible,
+        };
+        await this.threeAdapter.navigationPreview.load(
+            payload,
+            this.state.baseRevision
+        );
+        this.navigationState.previewLoaded = true;
+        this.threeAdapter.navigationPreview.seek(
+            this.navigationState.previewNormalizedTime
+        );
+        return payload;
+    };
+
+    Workspace.prototype._applyNavigationPath = function () {
+        const navigation = this.navigationState;
+        let built;
+        try {
+            const existingNavigation = this.navigationRuntime
+                .navigationFromLayout(this.state.layout);
+            const existingConstraint = navigation.lastConstraintId
+                ? existingNavigation.manualPathConstraints.find(
+                    function (constraint) {
+                        return constraint.manualPathConstraintId
+                            === navigation.lastConstraintId;
+                    }
+                ) : null;
+            built = this.navigationRuntime.buildManualPathIntent(
+                this.state.layout,
+                {
+                    actorPlacementId: navigation.actorPlacementId,
+                    actorClass: navigation.actorClass,
+                    actorProfileRef: navigation.actorClass === 'vehicle'
+                        ? {
+                            profileKind: 'vehicle',
+                            profileId: navigation.actorProfileId,
+                            profileRevision: navigation.actorProfileRevision,
+                        } : null,
+                    points: clone(navigation.points),
+                    loopMode: navigation.loopMode,
+                    direction: navigation.direction,
+                    constraintMode: navigation.constraintMode,
+                    baseRevision: this.state.baseRevision,
+                    sequence: navigation.sequence,
+                    snapRefs: clone(navigation.snapRefs),
+                    lockedSegmentIndexes:
+                        navigation.lockedSegmentIndexes.slice(),
+                    movementProgramId: existingConstraint
+                        ? existingConstraint.movementProgramId : undefined,
+                    manualPathConstraintId:
+                        navigation.lastConstraintId || undefined,
+                }
+            );
+        } catch (error) {
+            navigation.message = error.message;
+            this._renderNavigationDialog();
+            return Promise.resolve(false);
+        }
+        navigation.applying = true;
+        navigation.message = navigation.constraintMode === 'complete_override'
+            ? 'Validating exact actor geometry...'
+            : 'Applying one unsaved navigation gesture...';
+        this._renderNavigationDialog();
+        const validation = navigation.constraintMode === 'complete_override'
+            ? Promise.resolve().then(function () {
+                if (!this.motionTransport
+                        || typeof this.motionTransport
+                            .validateManualNavigationPath !== 'function') {
+                    throw new Error(
+                        'Deterministic manual-path validation is unavailable.'
+                    );
+                }
+                return this.motionTransport.validateManualNavigationPath({
+                    baseRevision: this.state.baseRevision,
+                    operations: clone(this.state.operations || []),
+                    request: {
+                        actorPlacementId: navigation.actorPlacementId,
+                        actorClass: navigation.actorClass,
+                        actorProfileRef: clone(built.actorProfileRef),
+                        constraintMode: navigation.constraintMode,
+                        direction: navigation.direction,
+                        points: clone(built.points),
+                        prototypeMode: this.capabilities.prototypeMotion === true,
+                    },
+                });
+            }.bind(this)) : Promise.resolve(null);
+        return validation.then(function (result) {
+            if (result) {
+                navigation.validation = clone(result);
+                navigation.validationStatus = result.valid
+                    ? 'validated' : 'invalid';
+                this._syncNavigationAuthoringPreview();
+                if (!result.valid) {
+                    const first = Array.isArray(result.findings)
+                        ? result.findings[0] : null;
+                    navigation.applying = false;
+                    navigation.message = first && first.message
+                        ? first.message
+                        : 'The path intersects trusted geometry.';
+                    this._renderNavigationDialog();
+                    return false;
+                }
+                navigation.message = (
+                    'Geometry validated. Applying one unsaved navigation gesture...'
+                );
+                this._renderNavigationDialog();
+            }
+            return this._invoke('Author motion path', function () {
+                return this.session.setFacilityNavigation(
+                    built.facilityNavigation
+                );
+            }.bind(this));
+        }.bind(this)).then(function (result) {
+            if (result === false) return false;
+            navigation.applying = false;
+            navigation.drawing = false;
+            navigation.lastConstraintId = built.manualPathConstraintId;
+            navigation.sequence += 1;
+            navigation.message = (
+                'Path is an unsaved pending constraint. Save remains a separate '
+                + 'explicit approval.'
+            );
+            this._renderNavigationDialog();
+            this._syncNavigationAuthoringPreview();
+            return true;
+        }.bind(this)).catch(function (error) {
+            navigation.applying = false;
+            navigation.message = error.message;
+            this._renderNavigationDialog();
+            return false;
+        }.bind(this));
+    };
+
+    Workspace.prototype._placeNavigationAnchor = function (world) {
+        let built;
+        try {
+            built = this.navigationRuntime.addNavigationAnchor(
+                this.state.layout,
+                {
+                    ownerPlacementId:
+                        this.navigationState.anchorOwnerPlacementId,
+                    actorClass: this.navigationState.actorClass,
+                    anchorKind: this.navigationState.anchorKind,
+                    position: world,
+                    sequence: this.navigationState.sequence,
+                }
+            );
+        } catch (error) {
+            this.navigationState.message = error.message;
+            this._renderNavigationDialog();
+            return Promise.resolve(false);
+        }
+        this.navigationState.anchorPicking = false;
+        return this._invoke('Author navigation anchor', function () {
+            return this.session.setFacilityNavigation(
+                built.facilityNavigation
+            );
+        }.bind(this)).then(function () {
+            this.navigationState.sequence += 1;
+            this.navigationState.message = 'Semantic anchor added as one unsaved gesture.';
+            this._setToolMode('motion-path');
+            this._renderNavigationDialog();
+            return true;
+        }.bind(this));
+    };
+
+    Workspace.prototype._exportNavigationGold = function () {
+        const artifact = this.navigationRuntime.goldArtifact(
+            this.state.layout,
+            this.navigationState.lastConstraintId,
+            this.navigationState.validation
+        );
+        if (typeof this.options.onNavigationGoldExport === 'function') {
+            this.options.onNavigationGoldExport(clone(artifact));
+            return artifact;
+        }
+        if (root && typeof root.Blob === 'function'
+                && root.URL && typeof root.URL.createObjectURL === 'function') {
+            const url = root.URL.createObjectURL(new root.Blob([
+                JSON.stringify(artifact, null, 2),
+            ], { type: 'application/json' }));
+            const link = this.document.createElement('a');
+            link.href = url;
+            link.download = this.navigationState.lastConstraintId + '.json';
+            link.click();
+            root.URL.revokeObjectURL(url);
+        }
+        return artifact;
+    };
+
+    Workspace.prototype._handleNavigationChange = function (event) {
+        const field = targetDataId(
+            event.target,
+            'data-navigation-field',
+            this.navigationDialog
+        );
+        if (!field) return;
+        if (field === 'previewNormalizedTime') {
+            this.navigationState.previewNormalizedTime = Math.min(
+                1,
+                Math.max(0, finite(event.target.value, 0))
+            );
+            this._syncNavigationAuthoringPreview();
+            return;
+        }
+        this.navigationState[field] = String(event.target.value || '');
+        this.navigationState.validationStatus = 'pending';
+        this.navigationState.validation = null;
+        this._syncNavigationAuthoringPreview();
+        this._renderNavigationDialog();
+    };
+
+    Workspace.prototype._handleNavigationClick = function (event) {
+        const action = targetDataId(
+            event.target,
+            'data-navigation-action',
+            this.navigationDialog
+        );
+        if (!action) return;
+        const navigation = this.navigationState;
+        if (action === 'close') this.closeNavigationDialog(true);
+        else if (action === 'draw') {
+            navigation.drawing = true;
+            navigation.anchorPicking = false;
+            this._setToolMode('motion-path');
+            navigation.message = 'Click the Plan to add waypoints.';
+        } else if (action === 'finish') {
+            navigation.drawing = false;
+            navigation.message = 'Drawing complete. Review or preview before applying.';
+        } else if (action === 'reverse') {
+            navigation.points = this.navigationRuntime.reversePath(
+                navigation.points
+            );
+            navigation.selectedPointIndex = null;
+            navigation.selectedSegmentIndex = null;
+            navigation.snapRefs = [];
+            navigation.lockedSegmentIndexes = [];
+            navigation.validationStatus = 'pending';
+        } else if (action === 'insert'
+                && navigation.selectedPointIndex !== null
+                && navigation.selectedPointIndex
+                    < navigation.points.length - 1) {
+            const index = navigation.selectedPointIndex;
+            const left = navigation.points[index];
+            const right = navigation.points[index + 1];
+            navigation.points = this.navigationRuntime.insertWaypoint(
+                navigation.points,
+                index,
+                { x: (left.x + right.x) / 2, z: (left.z + right.z) / 2 }
+            );
+            navigation.selectedPointIndex = index + 1;
+            navigation.selectedSegmentIndex = index;
+            navigation.validationStatus = 'pending';
+        } else if (action === 'delete'
+                && navigation.selectedPointIndex !== null) {
+            navigation.points = this.navigationRuntime.deleteWaypoint(
+                navigation.points,
+                navigation.selectedPointIndex
+            );
+            navigation.selectedPointIndex = null;
+            navigation.selectedSegmentIndex = null;
+            navigation.snapRefs = [];
+            navigation.lockedSegmentIndexes = [];
+            navigation.validationStatus = 'pending';
+        } else if (action === 'lock'
+                && navigation.selectedPointIndex !== null
+                && navigation.selectedPointIndex
+                    < navigation.points.length - 1) {
+            const index = navigation.selectedPointIndex;
+            navigation.lockedSegmentIndexes =
+                navigation.lockedSegmentIndexes.includes(index)
+                    ? navigation.lockedSegmentIndexes.filter(function (item) {
+                        return item !== index;
+                    }) : navigation.lockedSegmentIndexes.concat([index])
+                        .sort(function (left, right) { return left - right; });
+        } else if (action === 'add-anchor') {
+            navigation.anchorPicking = true;
+            navigation.drawing = false;
+            navigation.message = 'Click the Plan to place the semantic anchor.';
+            this._setToolMode('motion-path');
+        } else if (action === 'paths') {
+            navigation.pathsVisible = !navigation.pathsVisible;
+        } else if (action === 'preview') {
+            Promise.resolve(navigation.previewLoaded
+                ? true : this._loadNavigationPreview()).then(function () {
+                if (!this.threeAdapter || !this.threeAdapter.navigationPreview) {
+                    return;
+                }
+                if (navigation.previewPlaying) {
+                    this.threeAdapter.navigationPreview.pause();
+                    navigation.previewPlaying = false;
+                } else {
+                    this.threeAdapter.navigationPreview.play();
+                    navigation.previewPlaying = true;
+                }
+                this._renderNavigationDialog();
+            }.bind(this)).catch(function (error) {
+                navigation.message = error.message;
+                this._renderNavigationDialog();
+            }.bind(this));
+        } else if (action === 'apply') {
+            this._applyNavigationPath();
+        } else if (action === 'export') {
+            try {
+                this._exportNavigationGold();
+                navigation.message = 'Gold evaluation artifact exported.';
+            } catch (error) {
+                navigation.message = error.message;
+            }
+        }
+        this._syncNavigationAuthoringPreview();
+        this._renderNavigationDialog();
+    };
+
+    Workspace.prototype._handleNavigationKeyDown = function (event) {
+        const key = String(event && event.key || '').toLowerCase();
+        if (key === 'escape') {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            if (this.navigationState.drawing
+                    || this.navigationState.anchorPicking) {
+                this.navigationState.drawing = false;
+                this.navigationState.anchorPicking = false;
+                this._renderNavigationDialog();
+            } else {
+                this.closeNavigationDialog(true);
+            }
+        } else if (key === 'enter' && this.navigationState.drawing) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this.navigationState.drawing = false;
+            this.navigationState.message = 'Drawing complete.';
+            this._renderNavigationDialog();
+        }
+    };
+
     Workspace.prototype._patternSeed = function (includeZones) {
         if (!this.patternRuntime
                 || typeof this.patternRuntime.collectSelection !== 'function') {
@@ -6432,6 +8995,850 @@
         );
     };
 
+    Workspace.prototype._designEntityLabel = function (reference) {
+        const ref = reference || {};
+        const id = String(ref.entityId || ref.placementId || ref.routeId || '');
+        const layout = this.state && this.state.layout || {};
+        const collections = [
+            ['placements', 'placementId'],
+            ['routes', 'routeId'],
+            ['zones', 'zoneId'],
+        ];
+        for (let index = 0; index < collections.length; index += 1) {
+            const collection = collections[index];
+            const record = (layout[collection[0]] || []).find(function (item) {
+                return item[collection[1]] === id;
+            });
+            if (record) {
+                return String(
+                    record.label
+                    || record.metadata && record.metadata.instanceLabel
+                    || id
+                );
+            }
+        }
+        return id || 'Bound item';
+    };
+
+    Workspace.prototype._buildDesignPanel = function () {
+        this.designPanel = element(this.document, 'aside', {
+            className: 'ip-flw-design-panel',
+            'aria-label': 'Facility design brief and alternatives',
+            hidden: true,
+        });
+        const header = element(this.document, 'header', {
+            className: 'ip-flw-design-header',
+        });
+        this.designPanelTitle = element(this.document, 'div', {
+            className: 'ip-flw-design-heading',
+        });
+        append(this.designPanelTitle,
+            element(this.document, 'strong', {}, 'Design brief'),
+            element(this.document, 'span', {
+                className: 'ip-flw-design-status',
+                'data-design-status': 'idle',
+            }, 'Idle')
+        );
+        this.designPanelToggle = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-design-toggle',
+            'data-design-action': 'toggle',
+            'aria-label': 'Collapse Facility design brief',
+            title: 'Collapse Facility design brief',
+        }, '>');
+        append(header, this.designPanelTitle, this.designPanelToggle);
+        this.designPanelBody = element(this.document, 'div', {
+            className: 'ip-flw-design-body',
+        });
+        this.designObjective = element(this.document, 'section', {
+            className: 'ip-flw-design-section',
+            'aria-label': 'Active objective',
+        });
+        this.designSource = element(this.document, 'div', {
+            className: 'ip-flw-design-source',
+            'aria-label': 'Bound Facility design source',
+        });
+        this.designLocks = element(this.document, 'div', {
+            className: 'ip-flw-design-chips',
+            'aria-label': 'Active geometry locks',
+        });
+        this.designPreferences = element(this.document, 'div', {
+            className: 'ip-flw-design-preferences',
+        });
+        this.designProposalList = element(this.document, 'div', {
+            className: 'ip-flw-design-proposals',
+            role: 'radiogroup',
+            'aria-label': 'Measured Facility design alternatives',
+        });
+        this.designLegend = element(this.document, 'div', {
+            className: 'ip-flw-design-legend',
+            'aria-label': 'Proposal comparison legend',
+        });
+        this.designQualification = element(this.document, 'p', {
+            className: 'ip-flw-design-qualification',
+        }, 'Unsaved proposals. Geometry and metrics are deterministic; no safety, capacity, or global-optimality claim.');
+        append(this.designPanelBody,
+            this.designObjective,
+            this.designSource,
+            this.designLocks,
+            this.designPreferences,
+            this.designProposalList,
+            this.designLegend,
+            this.designQualification
+        );
+        append(this.designPanel, header, this.designPanelBody);
+        return this.designPanel;
+    };
+
+    Workspace.prototype._renderDesignPanel = function () {
+        if (!this.designPanel) return;
+        if (this.generationPlanningView && this.generationPlanningView.render()) return;
+        if (this.constructionPreview) {
+            this._renderConstructionPreview();
+            return;
+        }
+        if (this.constructionPanelBody) this.constructionPanelBody.hidden = true;
+        this.designPanelBody.hidden = false;
+        this.designPanelTitle.querySelector('strong').textContent = 'Design brief';
+        const design = this.designState;
+        this.designPanel.hidden = !design.active;
+        this.designPanel.setAttribute(
+            'data-collapsed',
+            design.collapsed ? 'true' : 'false'
+        );
+        this.root.setAttribute(
+            'data-design-pane-open',
+            design.active
+                ? (design.collapsed ? 'collapsed' : 'true')
+                : 'false'
+        );
+        this.designPanelToggle.textContent = design.collapsed ? '<' : '>';
+        this.designPanelToggle.setAttribute(
+            'aria-label',
+            design.collapsed
+                ? 'Expand Facility design brief'
+                : 'Collapse Facility design brief'
+        );
+        const status = this.designPanelTitle.querySelector(
+            '.ip-flw-design-status'
+        );
+        const noImprovement = design.run
+            && design.run.terminalReason
+                === 'facility_design_no_improved_alternative';
+        status.textContent = design.busy
+            ? 'Evaluating'
+            : design.error
+                ? design.attentionKind === 'stale'
+                    ? 'Stale source'
+                    : design.attentionKind === 'ambiguous'
+                        ? 'Choose a target'
+                        : 'Needs attention'
+                : design.transaction
+                    ? 'Unsaved draft'
+                    : design.proposals.length
+                        ? 'Ready'
+                        : noImprovement
+                            ? 'No improvement'
+                        : design.status === 'active'
+                            ? 'Evaluating'
+                            : 'Brief ready';
+        status.setAttribute(
+            'data-design-status',
+            design.error
+                ? (design.attentionKind || 'error')
+                : design.transaction
+                    ? 'draft'
+                    : noImprovement
+                        ? 'no_improvement'
+                        : design.status
+        );
+        this.root.setAttribute(
+            'data-design-attention',
+            design.attentionKind || 'none'
+        );
+        clearElement(this.designObjective);
+        clearElement(this.designSource);
+        clearElement(this.designLocks);
+        clearElement(this.designPreferences);
+        clearElement(this.designProposalList);
+        clearElement(this.designLegend);
+        const body = design.brief && design.brief.semanticBody || {};
+        const objective = body.objective || {};
+        const targets = objective.targetRefs || [];
+        const endpoints = design.run && design.run.objectiveEndpoints;
+        const endpointText = endpoints && endpoints.source && endpoints.target
+            ? this._designEntityLabel(endpoints.source)
+                + ' to '
+                + this._designEntityLabel(endpoints.target)
+            : targets.length
+                ? 'Targets: ' + targets.slice(0, 2).map(
+                    this._designEntityLabel.bind(this)
+                ).join(', ')
+                : 'Revision-bound transfer';
+        this.designObjective.appendChild(element(
+            this.document,
+            'h3',
+            {},
+            'Reduce loaded material travel'
+        ));
+        this.designObjective.appendChild(element(
+            this.document,
+            'p',
+            {},
+            endpointText
+        ));
+        const base = body.baseStateRef || {};
+        if (base.baseRevision) {
+            const sourceLabel = base.baseKind === 'saved_layout'
+                ? 'Saved layout'
+                : base.baseKind === 'editor_draft'
+                    ? 'Unsaved editor draft'
+                    : 'Unsaved generated draft';
+            append(this.designSource,
+                element(this.document, 'strong', {}, sourceLabel),
+                element(this.document, 'span', {},
+                    'Base ' + String(base.baseRevision).slice(0, 12)),
+                element(this.document, 'span', {},
+                    'Layout ' + String(base.layoutRevision || '').slice(0, 12))
+            );
+        }
+        (body.hardConstraints || []).filter(function (item) {
+            return item.status === 'active';
+        }).forEach(function (constraint) {
+            (constraint.targetRefs || []).forEach(function (ref) {
+                this.designLocks.appendChild(element(this.document, 'span', {
+                    className: 'ip-flw-design-chip',
+                    title: 'Geometry locked by the active design brief',
+                }, this._designEntityLabel(ref)));
+            }, this);
+        }, this);
+        const preferences = (body.preferences || []).filter(function (item) {
+            return item.status === 'active';
+        });
+        this.designPreferences.textContent = preferences.length
+            ? 'Preference: ' + preferences.map(function (item) {
+                return String(item.metricId || 'measured metric');
+            }).join(', ')
+            : 'Metrics shown separately; no hidden combined score.';
+        if (design.baseline) {
+            const baselineMetrics = design.baseline.metrics || [];
+            const baselineDistance = baselineMetrics.find(function (metric) {
+                return metric.metricId === 'loadedRouteDistanceMeters';
+            });
+            const baselinePerShift = baselineMetrics.find(function (metric) {
+                return metric.metricId === 'loadedTravelMetersPerShift';
+            });
+            const baseline = element(this.document, 'div', {
+                className: 'ip-flw-design-baseline',
+                'aria-label': 'Current measured baseline',
+            });
+            append(baseline,
+                element(this.document, 'strong', {}, 'Current baseline'),
+                element(this.document, 'span', {}, baselineDistance
+                    ? Number(baselineDistance.value).toFixed(2) + ' m loaded route'
+                    : 'Loaded-route metric unavailable'),
+                element(this.document, 'span', {}, baselinePerShift
+                    ? Number(baselinePerShift.value).toFixed(2) + ' m per shift'
+                    : 'Per-shift metric unavailable')
+            );
+            this.designProposalList.appendChild(baseline);
+        }
+        if (design.error) {
+            const errorBox = element(
+                this.document,
+                'div',
+                { className: 'ip-flw-design-error', role: 'alert' },
+                ''
+            );
+            append(errorBox,
+                element(this.document, 'strong', {},
+                    design.attentionKind === 'ambiguous'
+                        ? 'More than one exact target matches'
+                        : design.attentionKind === 'stale'
+                            ? 'The design source changed'
+                            : 'Design request blocked'),
+                element(this.document, 'span', {},
+                    design.error.message || String(design.error)),
+                element(this.document, 'code', {},
+                    String(design.error.code || 'facility_design_failed'))
+            );
+            if (design.attentionRefs.length) {
+                const candidates = element(this.document, 'div', {
+                    className: 'ip-flw-design-error-targets',
+                    'aria-label': 'Affected Facility entities',
+                });
+                design.attentionRefs.forEach(function (ref) {
+                    candidates.appendChild(element(this.document, 'span', {
+                        className: 'ip-flw-design-chip',
+                        'data-design-attention-entity': ref.entityId,
+                    }, this._designEntityLabel(ref)));
+                }, this);
+                errorBox.appendChild(candidates);
+            }
+            this.designProposalList.appendChild(errorBox);
+        } else if (design.busy) {
+            this.designProposalList.appendChild(element(
+                this.document,
+                'div',
+                { className: 'ip-flw-design-empty', role: 'status' },
+                'Measuring the baseline and bounded alternatives...'
+            ));
+        } else if (!design.proposals.length) {
+            this.designProposalList.appendChild(element(
+                this.document,
+                'div',
+                { className: 'ip-flw-design-empty' },
+                noImprovement
+                    ? 'No objective-improved alternative was found in the reviewed bounded candidate set. No geometry was changed.'
+                    : 'No measured alternatives yet.'
+            ));
+        }
+        design.proposals.forEach(function (proposal, index) {
+            const selected = design.selectedProposal
+                && design.selectedProposal.proposalId === proposal.proposalId;
+            const option = element(this.document, 'div', {
+                className: 'ip-flw-design-proposal',
+                'data-selected': selected ? 'true' : 'false',
+            });
+            const choose = element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-design-proposal-select',
+                role: 'radio',
+                'aria-checked': selected ? 'true' : 'false',
+                'data-design-action': 'select',
+                'data-proposal-id': proposal.proposalId,
+                title: 'Select this exact measured proposal',
+            });
+            const distance = (proposal.metrics || []).find(function (metric) {
+                return metric.metricId === 'loadedRouteDistanceMeters';
+            });
+            const moved = (proposal.metrics || []).find(function (metric) {
+                return metric.metricId === 'movedPlacementCount';
+            });
+            append(choose,
+                element(this.document, 'strong', {},
+                    (proposal.classification
+                        && proposal.classification.preferred)
+                        ? 'Preferred alternative'
+                        : 'Alternative ' + (index + 1)),
+                element(this.document, 'span', {}, distance
+                    ? Number(distance.value).toFixed(2) + ' m loaded route'
+                    : 'Route metric unavailable'),
+                element(this.document, 'span', {}, moved
+                    ? Number(moved.value).toFixed(0) + ' equipment moves'
+                    : 'Disruption metric unavailable')
+            );
+            option.appendChild(choose);
+            if (selected
+                    && this.capabilities.designLoopApply
+                    && this.capabilities.agentWrite) {
+                const apply = element(this.document, 'button', {
+                    type: 'button',
+                    className: 'ip-flw-design-apply',
+                    'data-design-action': 'apply',
+                    disabled: design.busy,
+                }, 'Apply unsaved');
+                option.appendChild(apply);
+            }
+            this.designProposalList.appendChild(option);
+        }, this);
+        if (design.selectedProposal && design.proposalPreviewVisible) {
+            [
+                ['changed', 'Changed geometry'],
+                ['preserved', 'Locked and preserved'],
+            ].forEach(function (item) {
+                this.designLegend.appendChild(element(this.document, 'span', {
+                    'data-design-legend': item[0],
+                }, item[1]));
+            }, this);
+        }
+    };
+
+    Workspace.prototype._nextDesignTurnRef = function () {
+        this.designTurnSequence += 1;
+        return 'facility-design-turn-' + Date.now().toString(36)
+            + '-' + this.designTurnSequence.toString(36);
+    };
+
+    Workspace.prototype._assertCurrentDesignGeneration = function (generation) {
+        if (generation === this.designPreviewGeneration) return;
+        const error = new Error('Facility design work was superseded by a newer correction');
+        error.code = 'facility_design_preview_superseded';
+        throw error;
+    };
+
+    Workspace.prototype._clearDesignAttention = function () {
+        const frame = this.designAttentionSelectionFrame;
+        this.designAttentionSelectionFrame = null;
+        this.designState.attentionKind = null;
+        this.designState.attentionRefs = [];
+        if (frame && this.session
+                && typeof this.session.selectMany === 'function') {
+            this.session.selectMany(frame);
+        }
+    };
+
+    Workspace.prototype._setDesignError = function (error) {
+        const details = error && error.details && typeof error.details === 'object'
+            ? error.details : {};
+        const candidates = Array.isArray(details.candidates)
+            ? details.candidates : [];
+        const code = String(error && error.code || 'facility_design_failed');
+        let kind = 'blocked';
+        let refs = candidates.filter(function (candidate) {
+            return candidate && candidate.entityKind && candidate.entityId;
+        }).map(function (candidate) {
+            return {
+                entityKind: candidate.entityKind,
+                entityId: candidate.entityId,
+            };
+        });
+        if (refs.length || code.includes('ambiguous')) {
+            kind = 'ambiguous';
+        } else if (/(?:stale|revision|base_scope|source_changed|mismatch)/.test(code)) {
+            kind = 'stale';
+            const body = this.designState.brief
+                && this.designState.brief.semanticBody || {};
+            refs = (body.objective && body.objective.targetRefs || []).concat(
+                (body.hardConstraints || []).filter(function (constraint) {
+                    return constraint.status === 'active';
+                }).flatMap(function (constraint) {
+                    return constraint.targetRefs || [];
+                })
+            );
+        }
+        const unique = new Map();
+        refs.forEach(function (ref) {
+            const key = String(ref.entityKind) + ':' + String(ref.entityId);
+            if (!unique.has(key)) unique.set(key, clone(ref));
+        });
+        this.designState.error = error;
+        this.designState.attentionKind = kind;
+        this.designState.attentionRefs = Array.from(unique.values());
+        if (this.designState.attentionRefs.length
+                && this.session
+                && typeof this.session.selectMany === 'function') {
+            if (!this.designAttentionSelectionFrame) {
+                const state = this.session.getState();
+                this.designAttentionSelectionFrame = clone(state.selection || []);
+            }
+            this.session.selectMany(this.designState.attentionRefs.map(function (ref) {
+                return ref.entityId;
+            }));
+        }
+    };
+
+    Workspace.prototype.showConstructionPreview = async function (summary) {
+        if (!this.capabilities.constructionPreview || !this.designTransport) {
+            throw new Error('Sage construction previews are not enabled');
+        }
+        const before = this.session.getState();
+        const token = {};
+        this.constructionRequest = token;
+        if (this.assetBrowserState.open) this.closeAssetBrowser(false);
+        if (before.dirty || before.busy || before.history.length || before.draftRevision !== summary.baseRevision) {
+            throw new Error('The construction base changed. Existing edits were not changed.');
+        }
+        const proposal = await this.designTransport.getConstructionPreview(summary.proposalId);
+        const current = this.session.getState();
+        if (this.constructionRequest !== token || current.editorGenerationId !== before.editorGenerationId
+                || current.draftRevision !== proposal.baseRevision
+                || proposal.candidateRevision !== summary.candidateRevision) {
+            throw new Error('A newer editor state superseded this construction preview');
+        }
+        this.constructionPreview = {proposal: proposal, frame: before, busy: false, error: null, partial: summary.partial === true,
+            requestId: 'apply-' + proposal.proposalId.slice(4, 36) + '-' + before.editorGenerationId};
+        this.root.setAttribute('data-construction-preview', 'true');
+        this.designState.collapsed = false;
+        this._renderDesignPanel();
+        this._syncController();
+        return {proposalId: proposal.proposalId, candidateRevision: proposal.candidateRevision, editorChanged: false};
+    };
+
+    Workspace.prototype.dismissConstructionPreview = function () {
+        if (this.constructionPreview && this.constructionPreview.busy) return;
+        this.constructionPreview = null;
+        this.constructionRequest = null;
+        this.root.removeAttribute('data-construction-preview');
+        this._syncDesignProposalPreview(false);
+        this._renderDesignPanel();
+        this._syncController();
+    };
+
+    Workspace.prototype.applyConstructionPreview = async function () {
+        const review = this.constructionPreview;
+        if (!review || review.busy || review.partial || !this.capabilities.constructionApply || !this.capabilities.agentWrite) {
+            throw new Error('Construction application is unavailable');
+        }
+        if (this.session.getState().editorGenerationId !== review.frame.editorGenerationId) {
+            throw new Error('The editor changed; request another construction preview');
+        }
+        review.busy = true;
+        review.error = null;
+        this._renderDesignPanel();
+        try {
+            const approval = await this.designTransport.approveConstructionPreview(review.proposal.proposalId, {
+                requestId: review.requestId, editorGenerationId: review.frame.editorGenerationId,
+                expectedDraftRevision: review.frame.draftRevision, candidateRevision: review.proposal.candidateRevision,
+            });
+            const result = await this.session.installConstructionApproval(approval);
+            review.busy = false;
+            this.dismissConstructionPreview();
+            return result;
+        } catch (error) {
+            review.error = error.message;
+            throw error;
+        } finally {
+            review.busy = false;
+            this._renderDesignPanel();
+        }
+    };
+
+    Workspace.prototype._renderConstructionPreview = function () {
+        const review = this.constructionPreview;
+        this.designPanel.hidden = false;
+        this.designPanelBody.hidden = true;
+        this.designPanel.setAttribute('data-collapsed', this.designState.collapsed ? 'true' : 'false');
+        this.root.setAttribute('data-design-pane-open', this.designState.collapsed ? 'collapsed' : 'true');
+        this.designPanelToggle.textContent = this.designState.collapsed ? '<' : '>';
+        this.designPanelTitle.querySelector('strong').textContent = 'Sage construction';
+        this.designPanelTitle.querySelector('.ip-flw-design-status').textContent = review.busy ? 'Applying' : review.partial ? 'Partial preview' : 'Preview only';
+        if (!this.constructionPanelBody) {
+            this.constructionPanelBody = element(this.document, 'div', {className: 'ip-flw-design-body ip-flw-construction-body'});
+            this.designPanel.appendChild(this.constructionPanelBody);
+        }
+        const body = this.constructionPanelBody;
+        body.hidden = this.designState.collapsed;
+        while (body.firstChild) body.removeChild(body.firstChild);
+        const proposal = review.proposal;
+        append(body, element(this.document, 'strong', {}, proposal.commandCount + ' construction steps'),
+            element(this.document, 'p', {}, proposal.candidateLayout.placements.length + ' placements; '
+                + proposal.candidateLayout.zones.length + ' zones in the candidate.'),
+            element(this.document, 'p', {className: 'ip-flw-design-qualification'}, proposal.validationScope));
+        const state = this.session.getState();
+        const stale = state.editorGenerationId !== review.frame.editorGenerationId;
+        const apply = element(this.document, 'button', {type: 'button', 'data-construction-action': 'apply',
+            disabled: review.busy || stale || review.partial || !this.capabilities.constructionApply || !this.capabilities.agentWrite},
+            'Apply to unsaved draft');
+        apply.addEventListener('click', function () { this.applyConstructionPreview().catch(function () {}); }.bind(this));
+        const dismiss = element(this.document, 'button', {type: 'button', 'data-construction-action': 'dismiss',
+            disabled: review.busy}, 'Dismiss');
+        dismiss.addEventListener('click', this.dismissConstructionPreview.bind(this));
+        const actions = element(this.document, 'div', {className: 'ip-flw-construction-actions'});
+        append(actions, apply, dismiss);
+        append(body, actions);
+        if (review.partial) append(body, element(this.document, 'p', {role: 'alert'}, 'A later construction step failed. This partial candidate cannot be applied.'));
+        if (review.error || stale) append(body, element(this.document, 'p', {role: 'alert'},
+            review.error || 'The editor changed. Request another preview.'));
+    };
+
+    Workspace.prototype._syncDesignProposalPreview = function (visible) {
+        const descriptor = visible
+            ? designProposalPreviewDescriptor(
+                this.state && this.state.layout,
+                this.designState.selectedProposal,
+                this.designState.brief
+            )
+            : null;
+        [this.topAdapter, this.threeAdapter].filter(Boolean).forEach(
+            function (adapter) {
+                if (typeof adapter.setProposalPreview === 'function') {
+                    adapter.setProposalPreview(descriptor);
+                }
+            }
+        );
+        this.designState.proposalPreviewVisible = Boolean(descriptor);
+        return descriptor;
+    };
+
+    Workspace.prototype.getDesignReference = function () {
+        const design = this.designState;
+        if (!design.brief) return null;
+        const result = {
+            briefId: design.brief.briefId,
+            briefRevision: design.brief.briefRevision,
+        };
+        if (design.run && design.run.runId && design.run.runRevision) {
+            result.runId = design.run.runId;
+            result.runRevision = design.run.runRevision;
+        }
+        if (design.selectedProposal) {
+            result.selectedProposal = {
+                proposalId: design.selectedProposal.proposalId,
+                proposalRevision: design.selectedProposal.proposalRevision,
+            };
+        }
+        const sessionState = this.session.getState();
+        if (sessionState.designProposalDraft) {
+            result.transactionId =
+                sessionState.designProposalDraft.transactionId;
+            result.transactionRevision =
+                sessionState.designProposalDraft.transactionRevision;
+        }
+        return result;
+    };
+
+    Workspace.prototype.updateDesignBriefFromIntent = async function (intent) {
+        if (!this.designTransport) {
+            throw new Error('Facility design transport is not configured');
+        }
+        if (!this.capabilities.designLoopPreview) {
+            const error = new Error('Facility design preview is disabled');
+            error.code = 'facility_feature_disabled';
+            throw error;
+        }
+        const generation = ++this.designPreviewGeneration;
+        const priorRunId = this.designState.run && this.designState.run.runId;
+        this._clearDesignAttention();
+        this._syncDesignProposalPreview(false);
+        this.designState.active = true;
+        this.designState.collapsed = false;
+        this.designState.busy = true;
+        this.designState.error = null;
+        this._renderDesignPanel();
+        try {
+            if (priorRunId && typeof this.designTransport.cancelDesignPreview === 'function') {
+                await this.designTransport.cancelDesignPreview({ runId: priorRunId });
+                this._assertCurrentDesignGeneration(generation);
+            }
+            const sourceTurnRef = this._nextDesignTurnRef();
+            let result;
+            if (!this.designState.brief) {
+                result = await this.designTransport.createDesignBrief({
+                    workspaceId: 'workspace-facility-layout',
+                    editorFrame: this.session.captureDesignEditorFrame(),
+                    semanticIntent: clone(intent),
+                    sourceTurnRef: sourceTurnRef,
+                });
+            } else {
+                const exactIntent = Object.assign({}, clone(intent), {
+                    brief_id: this.designState.brief.briefId,
+                    expected_brief_revision:
+                        this.designState.brief.briefRevision,
+                });
+                result = await this.designTransport.updateDesignBrief({
+                    briefId: this.designState.brief.briefId,
+                    semanticIntent: exactIntent,
+                    sourceTurnRef: sourceTurnRef,
+                });
+            }
+            this._assertCurrentDesignGeneration(generation);
+            this.designState.brief = clone(result.brief);
+            this.designState.run = null;
+            this.designState.baseline = null;
+            this.designState.proposals = [];
+            this.designState.selectedProposal = null;
+            this.designState.transaction = null;
+            this.designState.status = 'brief_ready';
+            this.designState.error = null;
+            return clone(result);
+        } catch (error) {
+            if (generation === this.designPreviewGeneration) {
+                this._setDesignError(error);
+                this.designState.status = 'blocked';
+            }
+            throw error;
+        } finally {
+            if (generation === this.designPreviewGeneration) {
+                this.designState.busy = false;
+                this._renderDesignPanel();
+            }
+        }
+    };
+
+    Workspace.prototype.runDesignPreview = async function (request) {
+        if (!this.designState.brief || !this.designTransport) {
+            throw new Error('Create a Facility design brief before previewing it');
+        }
+        const generation = ++this.designPreviewGeneration;
+        this._clearDesignAttention();
+        this._syncDesignProposalPreview(false);
+        this.designState.active = true;
+        this.designState.collapsed = false;
+        this.designState.busy = true;
+        this.designState.error = null;
+        this.designState.lastPreviewStartedAt = Date.now();
+        this._renderDesignPanel();
+        try {
+            const input = request || {};
+            let summary;
+            if (this.designState.run
+                    && this.designState.run.briefRevision
+                        === this.designState.brief.briefRevision
+                    && input.run_id === this.designState.run.runId) {
+                summary = await this.designTransport.continueDesignPreview({
+                    runId: this.designState.run.runId,
+                    maximumToolCalls: 10,
+                });
+            } else {
+                summary = await this.designTransport.startDesignPreview({
+                    briefId: this.designState.brief.briefId,
+                    briefRevision: this.designState.brief.briefRevision,
+                    workspaceId: 'workspace-facility-layout',
+                    clientGenerationId: this._nextDesignTurnRef(),
+                    mode: input.mode === 'lab' ? 'lab' : 'production_sage',
+                });
+            }
+            this._assertCurrentDesignGeneration(generation);
+            let continuationRequests = 0;
+            while (summary.continuationRequired) {
+                continuationRequests += 1;
+                if (continuationRequests > 4) {
+                    const error = new Error(
+                        'Facility design preview exceeded its browser continuation limit'
+                    );
+                    error.code = 'facility_design_continuation_limit_exceeded';
+                    throw error;
+                }
+                summary = await this.designTransport.continueDesignPreview({
+                    runId: summary.runId,
+                    maximumToolCalls: 10,
+                });
+                this._assertCurrentDesignGeneration(generation);
+            }
+            const proposals = [];
+            for (const ref of summary.proposalRefs || []) {
+                const inspected = await this.designTransport.inspectDesignProposal({
+                    proposalId: ref.artifactId,
+                    proposalRevision: ref.artifactRevision,
+                    includeCandidateLayout: true,
+                });
+                this._assertCurrentDesignGeneration(generation);
+                proposals.push({
+                    proposalId: inspected.proposal.proposalId,
+                    proposalRevision: inspected.proposal.proposalRevision,
+                    classification: clone(inspected.proposal.classification),
+                    resultLayoutRevision:
+                        inspected.proposal.resultLayoutRevision,
+                    diffHash: inspected.proposal.diffHash,
+                    metrics: clone(inspected.evaluation.metrics || []),
+                    candidateLayout: clone(
+                        inspected.candidate
+                            && inspected.candidate.candidateLayout || null
+                    ),
+                });
+            }
+            this.designState.run = clone(summary);
+            this.designState.baseline = clone(summary.baseline || null);
+            this.designState.proposals = proposals.slice(0, 2);
+            this.designState.selectedProposal =
+                this.designState.proposals.find(function (proposal) {
+                    return proposal.classification
+                        && proposal.classification.preferred;
+                }) || this.designState.proposals[0] || null;
+            this.designState.status = summary.status;
+            this.designState.lastPreviewVisibleAt = Date.now();
+            this._syncDesignProposalPreview(true);
+            return {
+                summary: clone(summary),
+                proposals: clone(this.designState.proposals),
+                selectedProposal: clone(this.designState.selectedProposal),
+            };
+        } catch (error) {
+            if (generation === this.designPreviewGeneration) {
+                this._setDesignError(error);
+                this.designState.status = 'blocked';
+            }
+            throw error;
+        } finally {
+            if (generation === this.designPreviewGeneration) {
+                this.designState.busy = false;
+                this._renderDesignPanel();
+            }
+        }
+    };
+
+    Workspace.prototype.inspectDesignBrief = async function () {
+        if (!this.designState.brief || !this.designTransport) {
+            throw new Error('No active Facility design brief');
+        }
+        const result = await this.designTransport.inspectDesignBrief({
+            briefId: this.designState.brief.briefId,
+            briefRevision: this.designState.brief.briefRevision,
+        });
+        this.designState.brief = clone(result.brief);
+        this.designState.active = true;
+        this._renderDesignPanel();
+        return clone(result);
+    };
+
+    Workspace.prototype.selectDesignProposal = function (proposalId) {
+        const selected = this.designState.proposals.find(function (proposal) {
+            return proposal.proposalId === proposalId;
+        });
+        if (!selected) throw new Error('Unknown Facility design proposal');
+        this.designState.selectedProposal = selected;
+        this._syncDesignProposalPreview(true);
+        this._renderDesignPanel();
+        return clone(selected);
+    };
+
+    Workspace.prototype.applySelectedDesignProposal = async function () {
+        const selected = this.designState.selectedProposal;
+        if (!selected) throw new Error('Select one exact Facility design proposal');
+        if (!this.capabilities.designLoopApply || !this.capabilities.agentWrite) {
+            const error = new Error('Facility design proposal application is disabled');
+            error.code = 'facility_feature_disabled';
+            throw error;
+        }
+        this.designState.busy = true;
+        this.designState.error = null;
+        this._clearDesignAttention();
+        this._syncDesignProposalPreview(false);
+        this._renderDesignPanel();
+        try {
+            const state = await this.session.applyDesignProposal(selected);
+            this.designState.transaction = clone(state.designProposalDraft);
+            this.designState.status = 'unsaved_draft';
+            return clone(state);
+        } catch (error) {
+            this._setDesignError(error);
+            this._syncDesignProposalPreview(true);
+            throw error;
+        } finally {
+            this.designState.busy = false;
+            this._renderDesignPanel();
+        }
+    };
+
+    Workspace.prototype.undoDesignProposal = async function () {
+        this.designState.busy = true;
+        this.designState.error = null;
+        this._clearDesignAttention();
+        this._syncDesignProposalPreview(false);
+        this._renderDesignPanel();
+        try {
+            const state = await this.session.undoDesignProposal();
+            this.designState.transaction = null;
+            this.designState.status = this.designState.proposals.length
+                ? 'preview_ready' : 'brief_ready';
+            return clone(state);
+        } catch (error) {
+            this._setDesignError(error);
+            throw error;
+        } finally {
+            this.designState.busy = false;
+            this._renderDesignPanel();
+        }
+    };
+
+    Workspace.prototype._handleDesignPanelClick = function (event) {
+        const target = event.target && event.target.closest
+            ? event.target.closest('[data-design-action]') : null;
+        if (!target) return;
+        const action = target.getAttribute('data-design-action');
+        if (action === 'toggle') {
+            this.designState.collapsed = !this.designState.collapsed;
+            this._renderDesignPanel();
+        } else if (action === 'select') {
+            this.selectDesignProposal(target.getAttribute('data-proposal-id'));
+        } else if (action === 'apply') {
+            this._invoke('Apply Facility design proposal', function () {
+                return this.applySelectedDesignProposal();
+            }.bind(this));
+        }
+    };
+
     Workspace.prototype._build = function () {
         clearElement(this.root);
         setClassToken(this.root, 'ip-flw-root', true);
@@ -6519,6 +9926,13 @@
             'aria-controls': 'ip-flw-three-view',
         }, '3D');
         append(this.viewTabs, this.planTab, this.threeTab);
+        if (this.capabilities.generationPlanning && generationView) {
+            this.generationPlanningView = generationView.create(this, element);
+            const planning = element(this.document, 'button', {type: 'button', title: 'Generation planning',
+                className: 'ip-flw-view-tab', 'data-generation-planning': 'open'}, 'Planning');
+            planning.addEventListener('click', this.generationPlanningView.open);
+            this.viewTabs.appendChild(planning);
+        }
 
         this.viewportStack = element(this.document, 'div', {
             className: 'ip-flw-viewport-stack',
@@ -6596,6 +10010,7 @@
             ['reset-view', 'Reset Plan view', 'R'],
             ['grid', 'Show grid', 'G'],
             ['snap', 'Snap to grid', '#'],
+            ['layers', 'Layer visibility', 'L'],
             ['unit', 'Display distances in feet', 'm'],
         ].forEach(function (item) {
             this.planNavigation.appendChild(this._planNavigationButton(
@@ -6664,6 +10079,7 @@
         );
         [
             ['display-settings', 'Display settings', 'display', false],
+            ['layers', 'Layer visibility', 'stack', false],
             ['orbit', 'Orbit view', 'orbit', true],
             [
                 'walkthrough',
@@ -6813,14 +10229,21 @@
             'aria-hidden': 'true',
         });
         this._buildFloorMarkingPalette();
+        const motionPanel = this._buildMotionPanel();
         append(this.viewportStack,
             this.planView,
             this.threeView,
+            this._buildLayerPanel(),
             this.floorMarkingPalette,
             this.ghostOverlay,
             this.advisoryLiveRegion,
             this.gestureOverlay
         );
+        if (motionPanel.getAttribute('data-motion-docked') === 'true') {
+            this.options.motionPanelHost.appendChild(motionPanel);
+        } else {
+            this.viewportStack.appendChild(motionPanel);
+        }
         this.validationNotice = element(this.document, 'div', {
             className: 'ip-flw-validation-notice',
             role: 'note',
@@ -6946,6 +10369,7 @@
             className: 'ip-flw-properties-body',
         });
         append(this.propertiesPane, propertyHeader, this.propertiesBody);
+        this._buildDesignPanel();
 
         this.statusBar = element(this.document, 'div', {
             className: 'ip-flw-statusbar',
@@ -6965,7 +10389,12 @@
         this.shell = element(this.document, 'div', {
             className: 'ip-flw-shell',
         });
-        append(this.shell, this.viewportPane, this.propertiesPane);
+        append(
+            this.shell,
+            this.viewportPane,
+            this.propertiesPane,
+            this.designPanel
+        );
         this._buildAssetBrowser();
         this._buildPrecisionDialog();
         this._buildPatternDialog();
@@ -6973,6 +10402,7 @@
         this._buildBulkZoneDialog();
         this._buildCellGroupDialog();
         this._buildAisleDialog();
+        this._buildNavigationDialog();
         this._buildClearAllDialog();
         append(
             this.root,
@@ -6985,6 +10415,7 @@
             this.bulkZoneDialog,
             this.cellGroupDialog,
             this.aisleDialog,
+            this.navigationDialog,
             this.clearAllDialog,
             this.statusBar
         );
@@ -6993,6 +10424,9 @@
         this._renderPatternDialog();
         this._renderPlanSettingsDialog();
         this._renderAisleDialog();
+        this._renderNavigationDialog();
+        this._renderMotionPanel();
+        this._renderDesignPanel();
         this._setViewMode('plan');
         this._setToolMode('select');
         this._renderThreeNavigationState();
@@ -7083,6 +10517,39 @@
             );
         }
         if (this.threeAdapter
+                && typeof this.threeAdapter.setMotionStateHandler
+                    === 'function') {
+            this.threeAdapter.setMotionStateHandler(
+                this._handleMotionState.bind(this)
+            );
+        } else if (this.threeAdapter
+                && typeof this.threeAdapter.getMotionState === 'function') {
+            this._handleMotionState(this.threeAdapter.getMotionState());
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setActivityStateHandler
+                    === 'function') {
+            this.threeAdapter.setActivityStateHandler(
+                this._handleActivityState.bind(this)
+            );
+        } else if (this.threeAdapter
+                && typeof this.threeAdapter.getActivityState === 'function') {
+            this._handleActivityState(this.threeAdapter.getActivityState());
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter
+                    .setNavigationPreviewStateHandler === 'function') {
+            this.threeAdapter.setNavigationPreviewStateHandler(
+                this._handleNavigationPreviewState.bind(this)
+            );
+        } else if (this.threeAdapter
+                && typeof this.threeAdapter.getNavigationPreviewState
+                    === 'function') {
+            this._handleNavigationPreviewState(
+                this.threeAdapter.getNavigationPreviewState()
+            );
+        }
+        if (this.threeAdapter
                 && typeof this.threeAdapter.setWalkthroughContextHandler
                     === 'function') {
             this.threeAdapter.setWalkthroughContextHandler(function (value) {
@@ -7111,6 +10578,7 @@
             );
             this._renderThreeVisualSettings();
         }
+        this._applyLayerVisibility();
         // _build() establishes the initial tab state before adapters exist.
         // Reconcile once mounting finishes so a real 3D adapter immediately
         // enables the segmented control.
@@ -7394,6 +10862,36 @@
             'click',
             this._handleThreeSettingsClick.bind(this)
         );
+        this._listen(
+            this.layerPanel,
+            'change',
+            this._handleLayerPanelInput.bind(this)
+        );
+        this._listen(
+            this.layerPanel,
+            'click',
+            this._handleLayerPanelClick.bind(this)
+        );
+        this._listen(
+            this.motionPanel,
+            'click',
+            this._handleMotionClick.bind(this)
+        );
+        this._listen(
+            this.designPanel,
+            'click',
+            this._handleDesignPanelClick.bind(this)
+        );
+        this._listen(
+            this.motionPanel,
+            'input',
+            this._handleMotionInput.bind(this)
+        );
+        this._listen(
+            this.motionPanel,
+            'change',
+            this._handleMotionInput.bind(this)
+        );
         ['pointerdown', 'dblclick', 'wheel'].forEach(function (type) {
             this._listen(this.planNavigation, type, function (event) {
                 if (typeof event.stopPropagation === 'function') {
@@ -7403,6 +10901,20 @@
         }, this);
         ['pointerdown', 'dblclick', 'wheel'].forEach(function (type) {
             this._listen(this.threeNavigation, type, function (event) {
+                if (typeof event.stopPropagation === 'function') {
+                    event.stopPropagation();
+                }
+            });
+        }, this);
+        ['pointerdown', 'dblclick', 'wheel'].forEach(function (type) {
+            this._listen(this.layerPanel, type, function (event) {
+                if (typeof event.stopPropagation === 'function') {
+                    event.stopPropagation();
+                }
+            });
+        }, this);
+        ['pointerdown', 'dblclick', 'wheel'].forEach(function (type) {
+            this._listen(this.motionPanel, type, function (event) {
                 if (typeof event.stopPropagation === 'function') {
                     event.stopPropagation();
                 }
@@ -7591,6 +11103,26 @@
             'keydown',
             this._handleAisleKeyDown.bind(this)
         );
+        this._listen(
+            this.navigationDialog,
+            'click',
+            this._handleNavigationClick.bind(this)
+        );
+        this._listen(
+            this.navigationDialog,
+            'input',
+            this._handleNavigationChange.bind(this)
+        );
+        this._listen(
+            this.navigationDialog,
+            'change',
+            this._handleNavigationChange.bind(this)
+        );
+        this._listen(
+            this.navigationDialog,
+            'keydown',
+            this._handleNavigationKeyDown.bind(this)
+        );
         [
             [this.precisionDialog, 'positioning panel'],
             [this.patternDialog, 'pattern panel'],
@@ -7598,6 +11130,7 @@
             [this.bulkZoneDialog, 'bulk zone editor'],
             [this.cellGroupDialog, 'manufacturing cell panel'],
             [this.aisleDialog, 'semantic aisle panel'],
+            [this.navigationDialog, 'motion path panel'],
             [this.clearAllDialog, 'clear layout confirmation'],
         ].forEach(function (item) {
             this._connectMovableDialog(item[0], item[1]);
@@ -8753,6 +12286,7 @@
     };
 
     Workspace.prototype._handleDrop = function (event) {
+        if (this.generationPlanningView && this.generationPlanningView.activeLayout()) return;
         if (!this.capabilities.manualAuthoring) return;
         const payload = this._payloadForEvent(event);
         if (!payload) return;
@@ -9376,6 +12910,11 @@
     };
 
     Workspace.prototype._handlePlanPointerDown = function (event) {
+        if (this.generationPlanningView && this.generationPlanningView.activeLayout()) {
+            this.pointerGesture = {kind: 'pan', clientX: finite(event.clientX, 0), clientY: finite(event.clientY, 0)};
+            this._beginPointerCapture(event);
+            return;
+        }
         if (targetDataId(
             event.target,
             'data-plan-settings-trigger',
@@ -9397,6 +12936,53 @@
             return;
         }
         const world = this._eventWorld(event);
+        if (this.toolMode === 'motion-path' && this.navigationState.open) {
+            const waypointValue = targetDataId(
+                event.target,
+                'data-navigation-waypoint-index',
+                this.planView
+            );
+            if (waypointValue !== null && waypointValue !== undefined) {
+                const waypointIndex = Number(waypointValue);
+                if (Number.isInteger(waypointIndex)
+                        && waypointIndex >= 0
+                        && waypointIndex
+                            < this.navigationState.points.length) {
+                    if (typeof event.preventDefault === 'function') {
+                        event.preventDefault();
+                    }
+                    this.navigationState.selectedPointIndex = waypointIndex;
+                    this.navigationState.selectedSegmentIndex = Math.min(
+                        waypointIndex,
+                        Math.max(0, this.navigationState.points.length - 2)
+                    );
+                    this.pointerGesture = {
+                        kind: 'navigation-waypoint',
+                        waypointIndex: waypointIndex,
+                        start: world,
+                        last: world,
+                    };
+                    this._beginPointerCapture(event);
+                    this._syncNavigationAuthoringPreview();
+                    this._renderNavigationDialog();
+                    return;
+                }
+            }
+            if (this.navigationState.anchorPicking) {
+                if (typeof event.preventDefault === 'function') {
+                    event.preventDefault();
+                }
+                this._placeNavigationAnchor({ x: world.x, z: world.z });
+                return;
+            }
+            if (this.navigationState.drawing) {
+                if (typeof event.preventDefault === 'function') {
+                    event.preventDefault();
+                }
+                this._navigationAddPoint(world);
+                return;
+            }
+        }
         const placementId = targetDataId(
             event.target,
             'data-placement-id',
@@ -9605,7 +13191,27 @@
             return;
         }
         this.pointerGesture.last = world;
-        if (this.pointerGesture.kind === 'move') {
+        if (this.pointerGesture.kind === 'navigation-waypoint') {
+            const snapped = this._navigationSnapPoint(world);
+            const index = this.pointerGesture.waypointIndex;
+            this.navigationState.points[index] = {
+                x: Number(Number(snapped.point.x).toFixed(6)),
+                z: Number(Number(snapped.point.z).toFixed(6)),
+            };
+            this.navigationState.snapRefs = this.navigationState.snapRefs
+                .filter(function (item) { return item.pointIndex !== index; });
+            if (snapped.refKind) {
+                this.navigationState.snapRefs.push({
+                    pointIndex: index,
+                    refKind: snapped.refKind,
+                    refId: snapped.refId,
+                });
+            }
+            this.navigationState.validationStatus = 'pending';
+            this.navigationState.validation = null;
+            this.navigationState.message = 'Waypoint moved by Plan pointer.';
+            this._syncNavigationAuthoringPreview();
+        } else if (this.pointerGesture.kind === 'move') {
             const delta = this._worldDelta(this.pointerGesture.start, world);
             if (this.pointerGesture.duplicateIntent) {
                 const distance = Math.hypot(
@@ -9696,6 +13302,14 @@
         if (!gesture) return;
         if (gesture.kind === 'pan') return;
         const end = this._eventWorld(event);
+        if (gesture.kind === 'navigation-waypoint') {
+            this.navigationState.message = (
+                'Waypoint updated locally. Apply path to create one unsaved gesture.'
+            );
+            this._syncNavigationAuthoringPreview();
+            this._renderNavigationDialog();
+            return;
+        }
         if (gesture.kind === 'move') {
             const delta = this._worldDelta(gesture.start, end);
             if (gesture.duplicateIntent) {
@@ -9876,6 +13490,7 @@
     };
 
     Workspace.prototype._handlePlanDoubleClick = function (event) {
+        if (this.generationPlanningView && this.generationPlanningView.activeLayout()) return;
         const trigger = targetDataId(
             event.target,
             'data-plan-settings-trigger',
@@ -10162,6 +13777,8 @@
                 'snapToGrid',
                 !this.planPreferences.snapToGrid
             );
+        } else if (command === 'layers') {
+            this._setLayerPanelOpen(!this.layerPanelOpen);
         } else if (command === 'unit') {
             this._setPlanPreference(
                 'unit',
@@ -10215,6 +13832,8 @@
     Workspace.prototype._setThreeViewpointsOpen = function (open) {
         this.threeViewpointsOpen = open === true;
         if (this.threeViewpointsOpen) {
+            this.layerPanelOpen = false;
+            if (this.layerPanel) this.layerPanel.hidden = true;
             this.threeSettingsOpen = false;
             this.threeViewMenuOpen = false;
             if (this.threeSettingsPanel) this.threeSettingsPanel.hidden = true;
@@ -11226,6 +14845,8 @@
     Workspace.prototype._setThreeViewMenuOpen = function (open) {
         this.threeViewMenuOpen = open === true;
         if (this.threeViewMenuOpen) {
+            this.layerPanelOpen = false;
+            if (this.layerPanel) this.layerPanel.hidden = true;
             this.threeSettingsOpen = false;
             this.threeViewpointsOpen = false;
             if (this.threeSettingsPanel) this.threeSettingsPanel.hidden = true;
@@ -11487,9 +15108,12 @@
                 this.threeAdapter.fit();
             }
         } else if (command === 'display-settings') {
+            this._setLayerPanelOpen(false);
             this.threeSettingsOpen = !this.threeSettingsOpen;
             this.threeViewpointsOpen = false;
             this.threeSettingsPanel.hidden = !this.threeSettingsOpen;
+        } else if (command === 'layers') {
+            this._setLayerPanelOpen(!this.layerPanelOpen);
         } else if (command === 'grid') {
             this.threeGridVisible = !this.threeGridVisible;
             if (typeof this.threeAdapter.setGridVisible === 'function') {
@@ -11552,7 +15176,42 @@
         if (target && typeof target.focus === 'function') target.focus();
     };
 
+    // Explicit local construction boundary. Agent authorization/preview must
+    // still be performed by the host; this does not grant Sage write access.
+    Workspace.prototype.executeConstructionCommand = async function (request) {
+        if (!this.capabilities.manualAuthoring || this.destroyed) {
+            throw new Error('Manual construction is unavailable');
+        }
+        if (!this.constructionAdapterPromise) {
+            this.constructionAdapterPromise = Promise.resolve().then(async function () {
+                if (!root.InspectorProFacilityCommandAdapter) {
+                    throw new Error('Construction command adapter is unavailable');
+                }
+                const response = await root.fetch(
+                    '/static/contracts/facility-construction-commands-v1.json'
+                );
+                if (!response.ok) throw new Error('Construction contract could not be loaded');
+                return root.InspectorProFacilityCommandAdapter.createAdapter(
+                    await response.json(), this.patternRuntime, this.session,
+                    function () { return this.assetCatalog; }.bind(this)
+                );
+            }.bind(this)).catch(function (error) {
+                this.constructionAdapterPromise = null;
+                throw error;
+            }.bind(this));
+        }
+        const adapter = await this.constructionAdapterPromise;
+        if (!this.capabilities.manualAuthoring || this.destroyed) {
+            throw new Error('Manual construction is unavailable');
+        }
+        return adapter.execute(request);
+    };
+
     Workspace.prototype.executeCommand = function (command) {
+        if (this.generationPlanningView && this.generationPlanningView.activeLayout()
+                && !['pan', 'fit', 'fit-layout', 'top-view'].includes(command)) {
+            return Promise.reject(new Error('Exit the isolated generation preview before editing'));
+        }
         if (command === 'assets') {
             if (this.assetBrowserState.open) this.closeAssetBrowser(false);
             else this.openAssetBrowser();
@@ -11572,6 +15231,14 @@
         if (command === 'aisle') {
             if (this.aisleState.open) this.closeAisleDialog(true);
             else this.openAisleDialog();
+            return Promise.resolve(this.getState());
+        }
+        if (command === 'motion-path') {
+            if (this.navigationState.open) {
+                this.closeNavigationDialog(true);
+            } else {
+                this.openNavigationDialog();
+            }
             return Promise.resolve(this.getState());
         }
         if (PRECISION_MODES.includes(command)) {
@@ -11620,6 +15287,7 @@
             'ungroup-cell',
             'aisle',
             'floor-marking',
+            'motion-path',
             'rotate',
             'duplicate',
             'delete',
@@ -11786,6 +15454,30 @@
                 && mode === '3d') {
             this.threeAdapter.invalidate();
         }
+        if (mode === '3d'
+                && this.lastLayoutFingerprint
+                && this.threeAdapter) {
+            const fitFingerprint = this.lastLayoutFingerprint;
+            const ready = this.controller
+                && typeof this.controller.ready === 'function'
+                ? this.controller.ready() : Promise.resolve();
+            Promise.resolve(ready).then(function () {
+                if (this.destroyed || this.viewMode !== '3d'
+                        || this.lastLayoutFingerprint !== fitFingerprint) return;
+                if (this.motionState.loaded
+                        && this.motionState.vehiclePresentation === 'placed_asset'
+                        && this.threeAdapter.motion
+                        && typeof this.threeAdapter.motion.focus === 'function') {
+                    this.threeAdapter.motion.focus();
+                } else if (
+                    this.lastThreeFitFingerprint !== fitFingerprint
+                    && typeof this.threeAdapter.fitLayout === 'function'
+                ) {
+                    this.threeAdapter.fitLayout();
+                    this.lastThreeFitFingerprint = fitFingerprint;
+                }
+            }.bind(this));
+        }
         this._renderThreeNavigationState();
         if (plan) this._renderPlanSpatialOverlays();
         this._renderProperties();
@@ -11806,6 +15498,13 @@
             this.aisleState.drawing = false;
             this._setAislePreview(null);
             if (this.aisleState.open) this._renderAisleDialog();
+        }
+        if (mode !== 'motion-path' && this.navigationState) {
+            this.navigationState.drawing = false;
+            this.navigationState.anchorPicking = false;
+            if (this.navigationState.open) {
+                this._renderNavigationDialog();
+            }
         }
         this.polygonPoints = [];
         this._cancelPointerGesture();
@@ -12523,6 +16222,10 @@
             'floor-marking': manualEditingBlocked,
             aisle: manualEditingBlocked
                 || typeof this.session.createAisle !== 'function',
+            'motion-path': manualEditingBlocked
+                || !this.navigationRuntime
+                || typeof this.session.setFacilityNavigation !== 'function'
+                || !this._navigationSelectedActor(),
             'auto-arrange': !this.capabilities.fullLayoutProposals
                 || typeof this.session.requestLayoutProposal
                     !== 'function'
@@ -12598,6 +16301,8 @@
                     || (this.cellGroupState.open
                         && command !== 'create-cell-group')
                     || (this.aisleState.open && command !== 'aisle')
+                    || (this.navigationState.open
+                        && command !== 'motion-path')
                     || (this.clearAllState.open && command !== 'clear-all')
                 );
             }
@@ -12700,13 +16405,18 @@
     Workspace.prototype._syncController = function () {
         if (!this.state.layout || !this.controller) return;
         const layoutAlternative = activeLayoutAlternative(this.state);
-        const proposalPreview = proposalPreviewDescriptor(
+        const construction = this.constructionPreview;
+        const activeConstruction = construction && this.state.editorGenerationId === construction.frame.editorGenerationId
+            && this.state.draftRevision === construction.proposal.baseRevision ? construction.proposal : null;
+        const proposalPreview = activeConstruction
+            ? designProposalPreviewDescriptor(this.state.layout, activeConstruction, null) : proposalPreviewDescriptor(
             this.state,
             layoutAlternative
         );
-        const renderedLayout = layoutAlternative
+        const generationLayout = this.generationPlanningView && this.generationPlanningView.activeLayout();
+        const renderedLayout = generationLayout || (activeConstruction ? activeConstruction.candidateLayout : layoutAlternative
             ? layoutAlternative.ghostPreview.layout
-            : this.state.layout;
+            : this.state.layout);
         const layoutFingerprint = JSON.stringify(renderedLayout);
         if (layoutFingerprint !== this.lastLayoutFingerprint) {
             this.controller.setLayout(renderedLayout);
@@ -12772,11 +16482,57 @@
 
     Workspace.prototype._handleSessionState = function (state) {
         if (this.destroyed) return;
+        const nextState = state || this.session.getState();
+        const previousBaseRevision = this.state && this.state.baseRevision;
+        const previousSessionError = this.state && this.state.lastError;
+        if (this.motionPresentation && this.motionLayoutFingerprint
+                && JSON.stringify(nextState.layout || {})
+                    !== this.motionLayoutFingerprint) {
+            this.clearMotionPlayback('layout_changed');
+        }
+        if (this.activityPresentation && this.activityLayoutFingerprint
+                && JSON.stringify(nextState.layout || {})
+                    !== this.activityLayoutFingerprint) {
+            this.clearActivityPlayback('layout_changed');
+        }
         const hadLayoutProposal = Boolean(
             this.state && this.state.layoutProposal
         );
-        this.state = state || this.session.getState();
-        this.lastError = this.state.lastError || this.lastError;
+        this.state = nextState;
+        if (this.state.lastError) {
+            this.lastError = this.state.lastError;
+        } else if (previousSessionError && this.lastError === previousSessionError) {
+            // Clear the session error it just resolved, preserving a newer
+            // error raised by the workspace itself.
+            this.lastError = null;
+        }
+        if (this.navigationState.open) {
+            const actorExists = (this.state.layout.placements || []).some(
+                function (placement) {
+                    return placement.placementId
+                        === this.navigationState.actorPlacementId;
+                },
+                this
+            );
+            if (!actorExists) {
+                this.closeNavigationDialog(false);
+            } else if (previousBaseRevision
+                    && previousBaseRevision !== this.state.baseRevision) {
+                this.navigationState.drawing = false;
+                this.navigationState.anchorPicking = false;
+                this.navigationState.previewPlaying = false;
+                this.navigationState.validationStatus = 'invalid';
+                this.navigationState.validation = {
+                    code: 'facility_navigation_authoring_stale',
+                    expectedRevision: previousBaseRevision,
+                    currentRevision: this.state.baseRevision,
+                };
+                this.navigationState.message = (
+                    'The saved base revision changed. Reopen Motion Path before '
+                    + 'editing or applying this path.'
+                );
+            }
+        }
         if (this.state.layoutProposal) {
             this.root.setAttribute('data-full-layout-preview', 'true');
         } else {
@@ -12798,10 +16554,15 @@
         if (this.precisionState.open) this._renderPrecisionDialog();
         if (this.patternState.open) this._renderPatternDialog();
         if (this.planSettingsState.open) this._renderPlanSettingsDialog();
+        if (this.navigationState.open) {
+            this._renderNavigationDialog();
+            this._syncNavigationAuthoringPreview();
+        }
         this._renderToolbarState();
         this._renderThreeNavigationState();
         this._syncSelectionToolbar();
         this._renderCandidateControls();
+        this._renderDesignPanel();
         this._renderStatus();
         if (hadLayoutProposal && !this.state.layoutProposal) {
             this._restoreProposalFocus();
@@ -12881,7 +16642,19 @@
         else if (!modifier && key === 'v') command = 'select';
         else if (!modifier && key === 'h') command = 'pan';
         else if (!modifier && key === 'm') command = 'floor-marking';
-        else if (key === 'enter' && this.toolMode === 'polygon-zone') {
+        else if (!modifier && key === 'p' && event.shiftKey) {
+            command = 'motion-path';
+        } else if (key === 'enter' && this.toolMode === 'motion-path'
+                && this.navigationState.open
+                && this.navigationState.drawing) {
+            this.navigationState.drawing = false;
+            this.navigationState.message = 'Drawing complete.';
+            this._renderNavigationDialog();
+            if (typeof event.preventDefault === 'function') {
+                event.preventDefault();
+            }
+            return;
+        } else if (key === 'enter' && this.toolMode === 'polygon-zone') {
             if (this._finishPolygon() && typeof event.preventDefault === 'function') {
                 event.preventDefault();
             }
@@ -12889,6 +16662,10 @@
         } else if (key === 'escape') {
             if (typeof event.preventDefault === 'function') {
                 event.preventDefault();
+            }
+            if (this.navigationState.open) {
+                this.closeNavigationDialog(true);
+                return;
             }
             this.polygonPoints = [];
             this._cancelPointerGesture();
@@ -12934,7 +16711,15 @@
             bulkZones: clone(this.bulkZoneState),
             cellGroup: clone(this.cellGroupState),
             aisle: clone(this.aisleState),
+            navigation: clone(this.navigationState),
             floorMarking: clone(this.floorMarkingState),
+            layers: {
+                panelOpen: this.layerPanelOpen,
+                visibility: clone(this.layerVisibility),
+            },
+            motion: clone(this.motionState),
+            activity: clone(this.activityState),
+            design: clone(this.designState),
             recording: clone(this.recordingState),
             threeNavigation: {
                 mode: this.threeNavigationMode,
@@ -12980,6 +16765,18 @@
 
     Workspace.prototype.suspend = function () {
         if (this.destroyed || this.suspended) return false;
+        if (this.motionState.playing && this.threeAdapter
+                && this.threeAdapter.motion) {
+            this.threeAdapter.motion.pause();
+        }
+        if (this.activityState.playing && this.threeAdapter
+                && this.threeAdapter.activity) {
+            this.threeAdapter.activity.pause();
+        }
+        if (this.navigationState.previewPlaying && this.threeAdapter
+                && this.threeAdapter.navigationPreview) {
+            this.threeAdapter.navigationPreview.pause();
+        }
         this._cancelRecordingCountdown();
         if (this.recordingController
                 && ['recording', 'paused'].includes(
@@ -13017,6 +16814,7 @@
             this.bulkZoneDialog,
             this.cellGroupDialog,
             this.aisleDialog,
+            this.navigationDialog,
             this.clearAllDialog,
             this.statusBar,
         ].filter(function (child) {
@@ -13032,6 +16830,7 @@
         this.root.removeAttribute('data-walkthrough-active');
         this.root.removeAttribute('data-drone-active');
         this.root.removeAttribute('data-full-layout-preview');
+        this.root.removeAttribute('data-navigation-open');
         this.root.removeAttribute('data-asset-browser-open');
         this.root.removeAttribute('data-precision-open');
         this.root.removeAttribute('data-pattern-open');
@@ -13040,6 +16839,7 @@
         this.root.removeAttribute('data-cell-group-open');
         this.root.removeAttribute('data-aisle-open');
         this.root.removeAttribute('data-clear-all-open');
+        this.root.removeAttribute('data-design-pane-open');
         this.suspended = true;
         return true;
     };
@@ -13096,6 +16896,11 @@
             this.root.setAttribute('data-aisle-open', 'true');
             this._renderAisleDialog();
         }
+        if (this.navigationState.open) {
+            this.root.setAttribute('data-navigation-open', 'true');
+            this._renderNavigationDialog();
+            this._syncNavigationAuthoringPreview();
+        }
         if (this.clearAllState.open) {
             this.root.setAttribute('data-clear-all-open', 'true');
             this.clearAllDialog.hidden = false;
@@ -13109,6 +16914,8 @@
     Workspace.prototype.destroy = function () {
         if (this.destroyed) return false;
         this.destroyed = true;
+        this.clearMotionPlayback('workspace_destroyed');
+        this.clearActivityPlayback('workspace_destroyed');
         this._finishMovableDialogDrag(null, true);
         this._cancelRecordingCountdown();
         if (this.recordingController
@@ -13125,6 +16932,16 @@
                 && typeof this.threeAdapter.setDroneStateHandler
                     === 'function') {
             this.threeAdapter.setDroneStateHandler(null);
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter.setMotionStateHandler
+                    === 'function') {
+            this.threeAdapter.setMotionStateHandler(null);
+        }
+        if (this.threeAdapter
+                && typeof this.threeAdapter
+                    .setNavigationPreviewStateHandler === 'function') {
+            this.threeAdapter.setNavigationPreviewStateHandler(null);
         }
         if (this.threeAdapter
                 && typeof this.threeAdapter.setWalkthroughContextHandler
@@ -13176,6 +16993,11 @@
         this._setPatternPreview(null);
         this.suspended = false;
         this.suspendedChildren = [];
+        if (this.motionPanel
+                && this.motionPanel.getAttribute('data-motion-docked') === 'true'
+                && this.motionPanel.parentNode) {
+            this.motionPanel.parentNode.removeChild(this.motionPanel);
+        }
         clearElement(this.root);
         setClassToken(this.root, 'ip-flw-root', false);
         this.root.removeAttribute('data-facility-workspace');
@@ -13187,6 +17009,7 @@
         this.root.removeAttribute('data-asset-browser-open');
         this.root.removeAttribute('data-precision-open');
         this.root.removeAttribute('data-pattern-open');
+        this.root.removeAttribute('data-navigation-open');
         return true;
     };
 

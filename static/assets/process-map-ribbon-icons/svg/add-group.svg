@@ -1,0 +1,29 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Add Group</title>
+      <defs>
+  <linearGradient id="add-group-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFCB58"/>
+    <stop offset="1" stop-color="#F0941C"/>
+  </linearGradient>
+  <linearGradient id="add-group-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="add-group-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+  <linearGradient id="add-group-plus" x1="20" y1="19" x2="29" y2="29" gradientUnits="userSpaceOnUse"><stop stop-color="#6AE6AD"/><stop offset="1" stop-color="#1FA66E"/></linearGradient>
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#add-group-shadow)">
+  <path d="M5 9.5C5 8.1 6.1 7 7.5 7H13L15.2 9.5H24.5C25.9 9.5 27 10.6 27 12V23.2C27 24.7 25.8 26 24.3 26H7.7C6.2 26 5 24.8 5 23.3V9.5Z" fill="url(#add-group-g)" stroke="#9B5D00" stroke-width="1.1"/>
+  <rect x="8.2" y="13" width="6.1" height="6" rx="1.4" fill="#FFF5D6" stroke="#B97500" stroke-width="0.8"/>
+  <rect x="16.6" y="13" width="6.1" height="6" rx="1.4" fill="#FFF5D6" stroke="#B97500" stroke-width="0.8"/>
+  <path d="M7.2 10.8H24.8" stroke="#FFE6A6" stroke-width="1" opacity="0.9"/>
+  <circle cx="24.3" cy="24.3" r="5.1" fill="url(#add-group-plus)" stroke="#147B51" stroke-width="1"/>
+  <path d="M24.3 21.5V27.1M21.5 24.3H27.1" stroke="#fff" stroke-width="1.8"/>
+</g>
+
+      </g>
+    </svg>

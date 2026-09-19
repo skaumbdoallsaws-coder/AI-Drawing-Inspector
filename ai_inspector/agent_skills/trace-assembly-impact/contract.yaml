@@ -1,6 +1,6 @@
 schema_version: 1
 skill_id: trace-assembly-impact
-version: 1.0.1
+version: 1.0.2
 intents:
   - explain_assembly_impact
   - trace_affected_interface
@@ -16,7 +16,7 @@ side_effect_policy:
   require_explicit_user_request: []
 output_contract:
   format: concise_evidence_chain
-  maximum_sentences: 4
+  maximum_sentences: 3
 failure_behavior:
   missing_required_context: explain_local_effect_only
   contradictory_context: abstain_and_report_conflict

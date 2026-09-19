@@ -76,9 +76,13 @@ def test_kf0_crosswalk_preserves_its_snapshot_and_current_registry_evolution():
         if item["commandId"] != G1_FACILITY_GENERATION_TOOL
     ]
 
-    assert [item["commandId"] for item in commands] == [
-        item["commandId"] for item in live_commands
+    baseline_command_ids = [item["commandId"] for item in commands]
+    live_command_ids = [item["commandId"] for item in live_commands]
+    assert baseline_command_ids == [
+        command_id for command_id in live_command_ids
+        if command_id != "motion-path"
     ]
+    assert live_command_ids.count("motion-path") == 1
     assert [item["commandId"] for item in tools] == [
         item["commandId"] for item in kf0_live_tools
     ]
@@ -90,9 +94,14 @@ def test_kf0_crosswalk_preserves_its_snapshot_and_current_registry_evolution():
     assert len(live_tools) == 15
     assert crosswalk["commandRegistry"]["ribbonCount"] == 32
     assert crosswalk["commandRegistry"]["nonRibbonCount"] == 7
-    assert kf0._parse_ribbon_command_ids() == [
+    current_ribbon_ids = kf0._parse_ribbon_command_ids()
+    assert [
+        command_id for command_id in current_ribbon_ids
+        if command_id != "motion-path"
+    ] == [
         item["commandId"] for item in commands if item["uiSurface"] == "ribbon"
     ]
+    assert current_ribbon_ids.count("motion-path") == 1
     assert Counter(item["effect"] for item in commands) == {
         "draft_edit": 28,
         "viewport": 8,

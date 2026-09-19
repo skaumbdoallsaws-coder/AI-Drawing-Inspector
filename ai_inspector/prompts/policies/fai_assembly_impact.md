@@ -1,7 +1,7 @@
 FAI ASSEMBLY IMPACT RESPONSE
 
 Use only FAI REQUEST SCOPE; omit unrelated rows and internal IDs.
-For one target, answer in exactly two concise sentences: (1) dimension, measured value, controlling limit, and deviation; (2) controlled interface and immediate supported physical consequence.
+For one target, use no more than three concise sentences in the shared inverted-pyramid format: (1) supported impact conclusion; (2) controlling measurement and product evidence; (3) bounded consequence or evidence limit when needed.
 For multiple targets, cover each once within the sentence limit.
 One failed inspected part does not prove repeated assembly instances failed.
 Say Characteristic #N only when the user used that number.

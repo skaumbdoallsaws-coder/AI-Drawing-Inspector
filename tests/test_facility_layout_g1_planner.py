@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import random
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from ai_inspector.facility_layout.g1_planner import (
     compile_g1_department_operations,
     compile_g1_envelope_operations,
+    g1_department_semantic_type,
     validate_g1_department_result,
 )
 from ai_inspector.facility_layout.operations import (
@@ -185,3 +187,191 @@ def test_g1_never_invents_corridors_safety_separation_or_expansion() -> None:
     assert departments["expectedSummary"]["inventedCorridor"] is False
     assert departments["expectedSummary"]["inventedSafetySeparation"] is False
     assert departments["expectedSummary"]["inventedExpansionReserve"] is False
+
+
+def test_maintenance_department_remains_equipment_bearing() -> None:
+    assert g1_department_semantic_type("Maintenance") == (
+        "workcell",
+        "maintenance",
+    )
+    assert g1_department_semantic_type("Maintenance Shop") == (
+        "workcell",
+        "maintenance_shop",
+    )
+    assert g1_department_semantic_type("Service Clearance") == (
+        "service",
+        "service_clearance",
+    )
+
+
+def test_authored_two_plus_three_rows_fill_the_envelope_with_equal_areas() -> None:
+    layout = _layout()
+    envelope = compile_g1_envelope_operations(
+        layout,
+        {
+            "width": 100,
+            "depth": 80,
+            "sourceUnit": "m",
+            "displayName": "Row Plant",
+        },
+    )
+    draft = apply_facility_layout_operations(
+        layout, envelope["operations"]
+    )["document"]
+    request = {
+        "count": 5,
+        "labels": ["Receiving", "Machining", "Assembly", "Inspection", "Shipping"],
+        "proportions": None,
+        "arrangement": "row_stack",
+        "orientation": "horizontal",
+        "rows": [
+            {"labels": ["Receiving", "Machining"], "proportion": None},
+            {
+                "labels": ["Assembly", "Inspection", "Shipping"],
+                "proportion": None,
+            },
+        ],
+    }
+    compiled = compile_g1_department_operations(draft, request)
+    result = apply_facility_layout_operations(
+        draft, compiled["operations"]
+    )["document"]
+    validation = validate_g1_department_result(
+        result, compiled["expectedSummary"]
+    )
+
+    assert validation["status"] == "valid"
+    assert validation["rowOrder"] == "north_to_south"
+    assert validation["areaShares"] == pytest.approx([0.2] * 5)
+    assert validation["coversFacilityArea"] is True
+    zones = {zone["label"]: zone for zone in result["zones"]}
+    receiving = zones["Receiving"]["boundary"]
+    assembly = zones["Assembly"]["boundary"]
+    assert min(point["z"] for point in receiving) == pytest.approx(48.0)
+    assert max(point["z"] for point in receiving) == pytest.approx(80.0)
+    assert max(point["x"] for point in receiving) == pytest.approx(50.0)
+    assert min(point["z"] for point in assembly) == pytest.approx(0.0)
+    assert max(point["z"] for point in assembly) == pytest.approx(48.0)
+    assert max(point["x"] for point in assembly) == pytest.approx(100 / 3)
+
+
+def test_four_authored_rows_support_uneven_membership_and_unequal_areas() -> None:
+    layout = _layout()
+    envelope = compile_g1_envelope_operations(
+        layout,
+        {
+            "width": 160,
+            "depth": 100,
+            "sourceUnit": "m",
+            "displayName": "Four Row Plant",
+        },
+    )
+    draft = apply_facility_layout_operations(
+        layout, envelope["operations"]
+    )["document"]
+    labels = [
+        "Receiving",
+        "Stores",
+        "Machining",
+        "Automation",
+        "Assembly",
+        "Inspection",
+        "Packing",
+        "Shipping",
+    ]
+    request = {
+        "count": len(labels),
+        "labels": labels,
+        "proportions": [5, 10, 15, 20, 10, 10, 15, 15],
+        "arrangement": "row_stack",
+        "orientation": "horizontal",
+        "rows": [
+            {"labels": ["Receiving"], "proportion": None},
+            {
+                "labels": ["Stores", "Machining", "Automation"],
+                "proportion": None,
+            },
+            {
+                "labels": ["Assembly", "Inspection"],
+                "proportion": None,
+            },
+            {
+                "labels": ["Packing", "Shipping"],
+                "proportion": None,
+            },
+        ],
+    }
+
+    compiled = compile_g1_department_operations(draft, request)
+    result = apply_facility_layout_operations(
+        draft, compiled["operations"]
+    )["document"]
+    validation = validate_g1_department_result(
+        result, compiled["expectedSummary"]
+    )
+
+    assert validation["status"] == "valid"
+    assert validation["areaShares"] == pytest.approx(
+        [0.05, 0.10, 0.15, 0.20, 0.10, 0.10, 0.15, 0.15]
+    )
+    row_ranges = {
+        (
+            min(point["z"] for point in zone["boundary"]),
+            max(point["z"] for point in zone["boundary"]),
+        )
+        for zone in result["zones"]
+    }
+    assert len(row_ranges) == 4
+    assert validation["coversFacilityArea"] is True
+
+
+def test_row_reorganization_preserves_semantic_zone_ids_and_unequal_areas() -> None:
+    layout = _layout()
+    envelope = compile_g1_envelope_operations(
+        layout,
+        {
+            "width": 120,
+            "depth": 90,
+            "sourceUnit": "m",
+            "displayName": "Flexible Row Plant",
+        },
+    )
+    draft = apply_facility_layout_operations(
+        layout, envelope["operations"]
+    )["document"]
+    labels = ["Receiving", "Machining", "Assembly", "Inspection", "Shipping"]
+    base_request = {
+        "count": 5,
+        "labels": labels,
+        "proportions": [10, 20, 30, 15, 25],
+        "arrangement": "row_stack",
+        "rows": [
+            {"labels": ["Receiving", "Machining"], "proportion": None},
+            {
+                "labels": ["Assembly", "Inspection", "Shipping"],
+                "proportion": None,
+            },
+        ],
+    }
+    first = compile_g1_department_operations(draft, base_request)
+    changed_request = deepcopy(base_request)
+    changed_request["rows"] = [
+        {
+            "labels": ["Receiving", "Assembly", "Inspection"],
+            "proportion": None,
+        },
+        {"labels": ["Machining", "Shipping"], "proportion": None},
+    ]
+    second = compile_g1_department_operations(draft, changed_request)
+
+    assert first["expectedSummary"]["zoneIds"] == second["expectedSummary"]["zoneIds"]
+    result = apply_facility_layout_operations(
+        draft, first["operations"]
+    )["document"]
+    validation = validate_g1_department_result(
+        result, first["expectedSummary"]
+    )
+    assert validation["status"] == "valid"
+    assert validation["areaShares"] == pytest.approx(
+        [0.1, 0.2, 0.3, 0.15, 0.25]
+    )

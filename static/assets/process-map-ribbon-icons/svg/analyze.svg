@@ -1,0 +1,31 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Analyze</title>
+      <defs>
+  <linearGradient id="analyze-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#60CCFF"/>
+    <stop offset="1" stop-color="#2F7EEA"/>
+  </linearGradient>
+  <linearGradient id="analyze-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="analyze-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+  <linearGradient id="analyze-accent" x1="9" y1="12" x2="20" y2="21" gradientUnits="userSpaceOnUse"><stop stop-color="#66E2AE"/><stop offset="1" stop-color="#21A66F"/></linearGradient>
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#analyze-shadow)">
+  <circle cx="14.2" cy="14.2" r="8.5" fill="#F3FAFF" stroke="url(#analyze-g)" stroke-width="2.2"/>
+  <path d="M20.4 20.4L27 27" stroke="url(#analyze-g)" stroke-width="3.1"/>
+  <path d="M9.5 16.5L12.5 13.8L15 15.5L18.7 10.8" stroke="url(#analyze-accent)" stroke-width="1.9"/>
+  <circle cx="9.5" cy="16.5" r="1.2" fill="#55D49B"/>
+  <circle cx="12.5" cy="13.8" r="1.2" fill="#55D49B"/>
+  <circle cx="15" cy="15.5" r="1.2" fill="#55D49B"/>
+  <circle cx="18.7" cy="10.8" r="1.2" fill="#55D49B"/>
+  <path d="M8.5 8.6C10.6 6.7 13 5.9 15.3 6.2" stroke="#BDEBFF" stroke-width="1"/>
+</g>
+
+      </g>
+    </svg>

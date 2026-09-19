@@ -7,12 +7,16 @@ from pathlib import Path
 
 import pytest
 
+import ai_inspector.facility_layout.routing as routing_module
 from ai_inspector.facility_layout.routing import (
+    FacilityRoutingResourceError,
     PROCESS_SEMANTICS,
     build_aisle_topology,
     estimate_aisle_distance,
     generate_connector_candidates,
+    normalized_cardinal_route_heading,
     plan_forklift_route,
+    projected_swept_sample_count,
     persisted_route_fingerprint,
     resolve_endpoint,
     routing_layout_fingerprint,
@@ -632,6 +636,100 @@ def test_independent_swept_volume_rejects_tampered_collision_and_tight_turn():
     }
 
 
+def test_swept_sample_budget_binds_before_dense_pose_allocation(monkeypatch):
+    fixture = _goldens()
+    poses = [
+        {"x": 0.0, "z": 2.0, "heading": 0.0, "gear": "forward"},
+        {"x": 10.0, "z": 2.0, "heading": 0.0, "gear": "forward"},
+    ]
+    assert projected_swept_sample_count(poses, 0.1) == 101
+    entered = []
+
+    def forbidden(*_args, **_kwargs):
+        entered.append(True)
+        raise AssertionError("dense allocation must not run")
+
+    monkeypatch.setattr(routing_module, "_interpolate_poses", forbidden)
+    with pytest.raises(FacilityRoutingResourceError) as caught:
+        validate_swept_volume(
+            poses,
+            fixture["vehicleProfile"],
+            traversable_polygons=[_rectangle(-1.0, 0.0, 11.0, 4.0)],
+            sample_spacing_meters=0.1,
+            maximum_sample_count=100,
+        )
+    assert caught.value.code == "facility_route_sample_budget_exceeded"
+    assert caught.value.details["projectedSampleCount"] == 101
+    assert entered == []
+
+
+def test_swept_sample_boundary_and_clearance_are_exact_and_reproducible():
+    fixture = _goldens()
+    poses = [
+        {"x": 0.0, "z": 2.0, "heading": 0.0, "gear": "forward"},
+        {"x": 10.0, "z": 2.0, "heading": 0.0, "gear": "forward"},
+    ]
+    kwargs = {
+        "traversable_polygons": [_rectangle(-1.0, 0.0, 11.0, 4.0)],
+        "obstacles": [
+            {
+                "obstacleId": "north-wall",
+                "boundary": _rectangle(-1.0, 3.0, 11.0, 3.5),
+            }
+        ],
+        "sample_spacing_meters": 0.1,
+        "maximum_sample_count": 101,
+    }
+    first = validate_swept_volume(poses, fixture["vehicleProfile"], **kwargs)
+    second = validate_swept_volume(poses, fixture["vehicleProfile"], **kwargs)
+
+    below_boundary = validate_swept_volume(
+        [poses[0], {**poses[1], "x": 9.9}],
+        fixture["vehicleProfile"],
+        **kwargs,
+    )
+
+    assert first == second
+    assert below_boundary["sampledPoseCount"] == 100
+    assert first["sampledPoseCount"] == first["projectedSampleCount"] == 101
+    assert len(first["clearance"]["samples"]) == 101
+    assert first["clearance"]["samples"][0] == {
+        "distanceMeters": 0.0,
+        "nearestObstacleIds": ["north-wall"],
+        "clearanceMeters": 0.6,
+    }
+    assert first["geometry"]["ringOrientation"] == {
+        "exterior": "counterclockwise",
+        "holes": "clockwise",
+    }
+
+
+def test_every_swept_error_is_localized_or_explicitly_unlocalized():
+    fixture = _goldens()
+    result = validate_swept_volume(
+        [
+            {"x": 2.0, "z": 2.0, "heading": 0.0, "gear": "forward"},
+            {
+                "x": 2.1,
+                "z": 2.1,
+                "heading": math.pi / 2.0,
+                "gear": "reverse",
+            },
+        ],
+        fixture["vehicleProfile"] | {"reversePolicy": "prohibited"},
+        traversable_polygons=[_rectangle(0.0, 0.0, 10.0, 10.0)],
+        allow_reverse=False,
+    )
+    assert result["valid"] is False
+    assert result["findings"]
+    assert all(
+        isinstance(item.get("location"), dict)
+        and isinstance(item["location"].get("localized"), bool)
+        for item in result["findings"]
+        if item["severity"] == "error"
+    )
+
+
 def test_route_fingerprints_and_findings_are_stable_and_input_bound():
     fixture = _goldens()
     straight = fixture["scenarios"][0]
@@ -958,6 +1056,19 @@ def test_swept_volume_rejects_gap_between_traversable_polygons():
     assert {
         item["code"] for item in result["findings"]
     } == {"route_width_insufficient"}
+
+
+def test_motion_heading_normalizes_only_sub_tenth_degree_drafting_drift():
+    normalized = normalized_cardinal_route_heading(
+        {"x": 7.62, "z": 94.7928},
+        {"x": 291.6936, "z": 95.0976},
+    )
+    assert normalized == 0.0
+    with pytest.raises(ValueError, match="0.1-degree"):
+        normalized_cardinal_route_heading(
+            {"x": 0.0, "z": 0.0},
+            {"x": 10.0, "z": 1.0},
+        )
 
 
 def test_route_source_revision_is_bound_to_current_spatial_state():

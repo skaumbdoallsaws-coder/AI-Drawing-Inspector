@@ -1,0 +1,31 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>3D View</title>
+          <defs>
+      <linearGradient id="view-3d-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#86D6FF"/>
+        <stop offset="1" stop-color="#3B8EF3"/>
+      </linearGradient>
+      <linearGradient id="view-3d-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+        <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+      </linearGradient>
+      <filter id="view-3d-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+        <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+      </filter>
+
+<linearGradient id="view-3d-left" x1="5" y1="12" x2="16" y2="27" gradientUnits="userSpaceOnUse"><stop stop-color="#5EBBFF"/><stop offset="1" stop-color="#2C78D1"/></linearGradient>
+<linearGradient id="view-3d-right" x1="16" y1="12" x2="27" y2="27" gradientUnits="userSpaceOnUse"><stop stop-color="#3B8EF3"/><stop offset="1" stop-color="#1E5DB0"/></linearGradient>
+
+    </defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#view-3d-shadow)">
+  <path d="M16 3.8L27 9.8L16 16L5 9.8L16 3.8Z" fill="url(#view-3d-g)" stroke="#1D5A9A" stroke-width="1"/>
+  <path d="M5 9.8L16 16V28L5 21.8V9.8Z" fill="url(#view-3d-left)" stroke="#1D5A9A" stroke-width="1"/>
+  <path d="M27 9.8L16 16V28L27 21.8V9.8Z" fill="url(#view-3d-right)" stroke="#174D86" stroke-width="1"/>
+  <path d="M16 16V28M5 9.8L16 16L27 9.8" stroke="#CBEAFF" stroke-width="0.85" opacity="0.65"/>
+  <path d="M9.1 9.6L16 5.9L22.8 9.6" stroke="#E5F6FF" stroke-width="1" opacity="0.8"/>
+</g>
+
+      </g>
+    </svg>

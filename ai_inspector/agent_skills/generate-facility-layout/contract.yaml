@@ -1,8 +1,10 @@
 schema_version: 1
 skill_id: generate-facility-layout
-version: 1.5.0
+version: 1.10.0
 intents:
   - generate_facility_layout
+  - propose_actor_navigation
+  - present_actor_navigation
 required_evidence:
   - facility_layout_digest
 forbidden_context:
@@ -14,6 +16,11 @@ side_effect_policy:
   require_explicit_user_request:
     - preview_facility_move
     - build_facility_layout_preview
+    - generate_full_factory_draft
+    - generate_facility_planning_prototype_draft
+    - amend_facility_program_resource_batch_draft
+    - propose_navigation_intent
+    - build_activity_scenario
 output_contract:
   format: concise_facility_layout_proposal
   maximum_sentences: 6

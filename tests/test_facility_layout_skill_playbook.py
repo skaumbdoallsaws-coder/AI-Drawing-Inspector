@@ -25,6 +25,16 @@ FACILITY_TOOLS = {
     "analyze_facility_fit",
     "preview_facility_move",
     "build_facility_layout_preview",
+    "generate_full_factory_draft",
+    "generate_facility_planning_prototype_draft",
+    "amend_facility_program_resource_batch_draft",
+    "observe_navigation_context",
+    "compile_navigation_snapshot",
+    "plan_actor_journey",
+    "validate_actor_journey",
+    "compare_journey_alternatives",
+    "propose_navigation_intent",
+    "build_activity_scenario",
 }
 
 
@@ -52,7 +62,7 @@ def _package():
 def test_factory_playbook_loads_as_the_authoritative_facility_skill() -> None:
     package = _package()
 
-    assert package.manifest.version == "1.5.0"
+    assert package.manifest.version == "1.10.0"
     assert package.contract is not None
     assert package.contract.version == package.manifest.version
     assert set(package.manifest.allowed_tools) == FACILITY_TOOLS
@@ -60,6 +70,11 @@ def test_factory_playbook_loads_as_the_authoritative_facility_skill() -> None:
     assert package.contract.explicit_request_tools == (
         "preview_facility_move",
         "build_facility_layout_preview",
+        "generate_full_factory_draft",
+        "generate_facility_planning_prototype_draft",
+        "amend_facility_program_resource_batch_draft",
+        "propose_navigation_intent",
+        "build_activity_scenario",
     )
     assert package.manifest.requires_context == ("facility_layout.digest",)
     assert set(package.manifest.optional_context) == {

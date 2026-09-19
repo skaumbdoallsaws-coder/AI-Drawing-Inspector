@@ -64,7 +64,7 @@ def test_contract_is_ascii_strict_and_covers_existing_actions():
     assert all(byte < 128 for byte in raw)
     contract = load_ui_action_contract()
     assert contract["contract_version"] == 1
-    assert len(contract["actions"]) == 23
+    assert len(contract["actions"]) == 25
     assert {
         "set_part_highlight",
         "set_part_display",
@@ -73,10 +73,12 @@ def test_contract_is_ascii_strict_and_covers_existing_actions():
         "compare_supplier_specs",
         "set_process_map_part_scope",
         "clear_process_map_part_scope",
+        "set_process_map_focus",
+        "clear_process_map_focus",
     } <= set(contract["actions"])
     assert tool_policy_metadata() == {
         "contract_version": 1,
-        "action_count": 23,
+        "action_count": 25,
         "max_actions": 25,
         "receipt_schema": "execution-receipt.schema.json",
     }
@@ -130,6 +132,41 @@ def test_server_tool_guard_applies_the_same_contract():
         "deviation-analyst",
     )
     assert guarded[0]["args"]["actions"][0]["scope_occurrence_id"] == "bodywork-1"
+
+    focus_bundle = {
+        "workspace": "process_map",
+        "actions": [{
+            "type": "set_process_map_focus",
+            "target_occurrence_id": "bodywork-1",
+            "direction": "upstream",
+            "include_routes": True,
+            "fit_view": True,
+        }],
+    }
+    guarded = server.sanitize_tool_calls(
+        [{"name": "ui_actions", "args": focus_bundle}],
+        "deviation-analyst",
+    )
+    assert guarded[0]["args"]["actions"][0]["target_occurrence_id"] == "bodywork-1"
+
+    multi_focus_bundle = {
+        "workspace": "process_map",
+        "actions": [{
+            "type": "set_process_map_focus",
+            "target_node_ids": ["stage-front", "stage-rear"],
+            "labels": ["Front Wheel", "Rear Wheel"],
+            "direction": "upstream",
+            "include_routes": True,
+        }],
+    }
+    guarded = server.sanitize_tool_calls(
+        [{"name": "ui_actions", "args": multi_focus_bundle}],
+        "deviation-analyst",
+    )
+    assert guarded[0]["args"]["actions"][0]["target_node_ids"] == [
+        "stage-front",
+        "stage-rear",
+    ]
 
 
 def test_receipt_sanitizer_is_strict_bounded_and_deduplicated():
@@ -194,7 +231,7 @@ def test_internal_status_reports_phase4_tool_policy():
             os.environ["INSPECTORPRO_SKILLS_SHADOW"] = previous_shadow
     assert result["phase"] == 5
     assert result["tool_policy"]["contract_version"] == 1
-    assert result["tool_policy"]["action_count"] == 23
+    assert result["tool_policy"]["action_count"] == 25
 
 
 def test_receipt_schema_is_ascii_and_closed():

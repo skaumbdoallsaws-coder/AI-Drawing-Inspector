@@ -98,12 +98,12 @@ def test_golden_alternatives_are_pinned_and_complete(golden: dict) -> None:
         "c1525710fe2ab9ee3635c39b2ca180eafd79d2083deb4652441b111fc3ac7be6"
     )
     assert [item["alternativeId"] for item in result["alternatives"]] == [
-        "fla-p8-7cf91aa59efced130a3046b3",
-        "fla-p8-630ce6b84995e62edf92f804",
-        "fla-p8-bd282762eaea2002a74c3af4",
+        "fla-p8-cb81c87a6d17a04d3ea9e35f",
+        "fla-p8-1cddbcb20279f2d734d1d48c",
+        "fla-p8-4373e4cdae6256f10cecc3e8",
     ]
     assert result["selectedAlternativeId"] == (
-        "fla-p8-7cf91aa59efced130a3046b3"
+        "fla-p8-cb81c87a6d17a04d3ea9e35f"
     )
     assert result["rejectedAlternatives"] == []
     for alternative in result["alternatives"]:

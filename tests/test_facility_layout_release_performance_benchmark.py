@@ -97,10 +97,18 @@ def test_artifact_has_every_required_raw_measurement_family():
         "zones": 1,
     }
     assert facts["renderedCounts"] == facts["layoutCounts"]
-    assert facts["layerOrder"] == ["zones", "routes", "placements"]
+    assert facts["layerOrder"] == [
+        "environment",
+        "zones",
+        "routes",
+        "floor-markings",
+        "placements",
+        "zone-labels",
+    ]
     assert facts["labels"]["accessibilityLabelCount"] == 7
-    assert facts["labels"]["visibleTextLabelsSupported"] is False
-    assert facts["labels"]["unavailableReason"]
+    assert facts["labels"]["visibleTextLabelsSupported"] is True
+    assert facts["labels"]["visibleTextLabelCount"] > 0
+    assert facts["labels"]["unavailableReason"] is None
     assert facts["clearances"]["routeCorridorCount"] == 1
     assert (
         facts["clearances"]["placementClearanceVolumesSupported"]

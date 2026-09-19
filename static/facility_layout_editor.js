@@ -14,6 +14,13 @@
     const DEFAULT_PLAN_MAJOR_GRID_SPACING = 5;
     const METERS_TO_FEET = 3.280839895;
     const MAX_PLAN_GRID_LINES = 512;
+    const DEFAULT_LAYER_VISIBILITY = Object.freeze({
+        zones: true,
+        cells: true,
+        routes: true,
+        markings: true,
+        assets: true,
+    });
     const DEFAULT_FALLBACK_FOOTPRINT = Object.freeze([
         Object.freeze({ x: -0.6, z: -0.4 }),
         Object.freeze({ x: 0.6, z: -0.4 }),
@@ -32,6 +39,22 @@
 
     function finiteOr(value, fallback) {
         return finite(value) ? value : fallback;
+    }
+
+    function normalizeLayerVisibility(value, fallback) {
+        const source = value && typeof value === 'object' ? value : {};
+        const base = fallback && typeof fallback === 'object'
+            ? fallback : DEFAULT_LAYER_VISIBILITY;
+        const output = {};
+        Object.keys(DEFAULT_LAYER_VISIBILITY).forEach(function (key) {
+            output[key] = typeof source[key] === 'boolean'
+                ? source[key] : base[key] !== false;
+        });
+        return output;
+    }
+
+    function zonePresentationLayer(zone) {
+        return zone && zone.parentZoneId ? 'cells' : 'zones';
     }
 
     function assertLayout(layout) {
@@ -272,10 +295,16 @@
         layout.zones.forEach(function (zone) {
             const polygon = normalizePointList(zone && zone.boundary);
             if (!polygon) return;
+            const knowledge = zone.extensions
+                && zone.extensions.knowledgeFoundation || {};
             geometry.zones.push({
                 zoneId: zone.zoneId,
                 zoneType: zone.zoneType,
                 label: zone.label,
+                parentZoneId: knowledge.parentZoneId || null,
+                entityKind: knowledge.entityKind || (
+                    knowledge.parentZoneId ? 'subzone' : 'department'
+                ),
                 fillColor: zone.extensions && zone.extensions.style
                     && zone.extensions.style.fillColor,
                 points: polygon,
@@ -723,6 +752,63 @@
         }).join(' ');
     }
 
+    function activityDisplayOffsetPoints(points, requestedOffset) {
+        const offset = Number(requestedOffset);
+        if (!Array.isArray(points) || points.length < 2
+                || !Number.isFinite(offset) || Math.abs(offset) <= 1e-9) {
+            return points;
+        }
+        return points.map(function (point, index) {
+            const previous = points[Math.max(0, index - 1)];
+            const next = points[Math.min(points.length - 1, index + 1)];
+            let dx = Number(next.x) - Number(previous.x);
+            let dz = Number(next.z) - Number(previous.z);
+            if (dx < -1e-9 || (Math.abs(dx) <= 1e-9 && dz < 0)) {
+                dx *= -1;
+                dz *= -1;
+            }
+            const length = Math.hypot(dx, dz);
+            if (!Number.isFinite(length) || length <= 1e-9) return point;
+            return Object.assign({}, point, {
+                x: Number(point.x) - (dz / length) * offset,
+                z: Number(point.z) + (dx / length) * offset,
+            });
+        });
+    }
+
+    function motionFootprintPoints(profile, pose) {
+        const footprint = profile && profile.footprint;
+        if (!Array.isArray(footprint) || footprint.length < 3
+                || !pose || !finite(pose.x) || !finite(pose.z)) return [];
+        const heading = finiteOr(pose.heading, 0);
+        const cosine = Math.cos(heading);
+        const sine = Math.sin(heading);
+        return footprint.map(function (point) {
+            const x = finiteOr(point && point.x, 0);
+            const z = finiteOr(point && point.z, 0);
+            return {
+                x: pose.x + cosine * x - sine * z,
+                z: pose.z + sine * x + cosine * z,
+            };
+        });
+    }
+
+    function motionPolygonPath(polygon, projection) {
+        const rings = [polygon && polygon.exterior].concat(
+            Array.isArray(polygon && polygon.holes) ? polygon.holes : []
+        );
+        return rings.filter(function (ring) {
+            return Array.isArray(ring) && ring.length >= 3;
+        }).map(function (ring) {
+            const points = ring.map(function (point) {
+                return projectTopPlanPoint(point, projection);
+            });
+            return 'M ' + points.map(function (point) {
+                return point.x + ' ' + point.y;
+            }).join(' L ') + ' Z';
+        }).join(' ');
+    }
+
     function removeChildren(element) {
         while (element.firstChild) element.removeChild(element.firstChild);
     }
@@ -872,10 +958,13 @@
                     && Math.abs(minY - row.y) > 0.5 ? 1 : 0;
                 candidates.push({
                     rect: rect,
+                    equipmentOverlapArea: equipmentOverlap,
+                    labelOverlapArea: labelOverlap,
                     score: [
-                        equipmentOverlap > 0 || labelOverlap > 0 ? 1 : 0,
-                        equipmentOverlap,
+                        labelOverlap > 0 ? 1 : 0,
                         labelOverlap,
+                        equipmentOverlap > 0 ? 1 : 0,
+                        equipmentOverlap,
                         outsideClampPenalty,
                         rowIndex >= 2 ? 1 : 0,
                         rowIndex,
@@ -892,7 +981,11 @@
             }
             return 0;
         });
-        return candidates[0].rect;
+        const selected = candidates[0];
+        return Object.assign({}, selected.rect, {
+            equipmentOverlapArea: selected.equipmentOverlapArea,
+            labelOverlapArea: selected.labelOverlapArea,
+        });
     }
 
     function categorySymbol(value) {
@@ -1267,8 +1360,17 @@
             newPlacementIds: identifiers('newPlacementIds'),
             movedPlacementIds: identifiers('movedPlacementIds'),
             removedPlacementIds: identifiers('removedPlacementIds'),
+            preservedPlacementIds: identifiers('preservedPlacementIds'),
+            newRouteIds: identifiers('newRouteIds'),
+            changedRouteIds: identifiers('changedRouteIds'),
+            removedRouteIds: identifiers('removedRouteIds'),
+            preservedRouteIds: identifiers('preservedRouteIds'),
             beforePlacements: placements('beforePlacements'),
             proposedPlacements: placements('proposedPlacements'),
+            beforeRoutes: (Array.isArray(value.beforeRoutes)
+                ? value.beforeRoutes : []).map(clone),
+            proposedRoutes: (Array.isArray(value.proposedRoutes)
+                ? value.proposedRoutes : []).map(clone),
         };
     }
 
@@ -1301,12 +1403,32 @@
         this.transientFloorMarkingPreview = null;
         this.transientAislePreview = null;
         this.transientPatternPreview = null;
+        this.navigationAuthoringPreview = null;
+        this.navigationPathsVisible = true;
+        this.navigationMarker = null;
+        this.motionPresentation = null;
+        this.motionSnapshot = null;
+        this.motionMarker = null;
+        this.activityPresentation = null;
+        this.activitySnapshot = null;
+        this.activityMarkers = new Map();
+        this.activityPathsVisible = true;
+        this.activityPathTypesVisible = {
+            vehicle: true,
+            operator: true,
+            mobile_equipment: true,
+        };
         this.selection = null;
         this.selections = new Set();
         this.selectionHandler = null;
         this.viewportChangeHandler = null;
         this.renderCount = 0;
         this.observerCount = 0;
+        this.semanticBaseScale = null;
+        this.zoneLabelDiagnostics = null;
+        this.layerVisibility = normalizeLayerVisibility(
+            this.options.layerVisibility
+        );
         this.disposed = false;
         this.suspended = false;
 
@@ -1365,6 +1487,690 @@
         };
     };
 
+    TopPlanAdapter.prototype._appendMotionOverlay = function () {
+        this.motionMarker = null;
+        const packageValue = this.motionPresentation
+            && this.motionPresentation.package;
+        const profile = this.motionPresentation
+            && this.motionPresentation.vehicleProfile;
+        const movement = packageValue && packageValue.movement;
+        if (!movement || movement.outcome === 'unroutable'
+                || !this.projection) return false;
+        const layer = svgElement(this.document, 'g');
+        setAttributes(layer, {
+            'data-layer': 'motion-playback',
+            'data-motion-package-id': packageValue.packageId || '',
+            'data-motion-outcome': movement.outcome,
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+        });
+        const geometry = movement.sweptEnvelope
+            && movement.sweptEnvelope.geometry;
+        (geometry && Array.isArray(geometry.polygons)
+            ? geometry.polygons : []).forEach(function (polygon) {
+            const pathValue = motionPolygonPath(polygon, this.projection);
+            if (!pathValue) return;
+            const path = svgElement(this.document, 'path');
+            setAttributes(path, {
+                d: pathValue,
+                fill: movement.outcome === 'envelope_refused'
+                    ? '#d14343' : '#16a085',
+                'fill-opacity': movement.outcome === 'envelope_refused'
+                    ? '0.26' : '0.18',
+                stroke: movement.outcome === 'envelope_refused'
+                    ? '#b4232c' : '#087f71',
+                'stroke-width': '1.5',
+                'stroke-opacity': '0.9',
+                'fill-rule': 'evenodd',
+                'vector-effect': 'non-scaling-stroke',
+                'data-motion-ribbon': 'true',
+            });
+            layer.appendChild(path);
+        }, this);
+        const marker = svgElement(this.document, 'polygon');
+        setAttributes(marker, {
+            fill: movement.outcome === 'envelope_refused'
+                ? '#e04b4b' : '#00a6d6',
+            'fill-opacity': '0.96',
+            stroke: '#ffffff',
+            'stroke-width': '2',
+            'vector-effect': 'non-scaling-stroke',
+            'data-motion-vehicle': 'true',
+            'data-vehicle-profile-id': movement.vehicleProfileRef
+                && movement.vehicleProfileRef.vehicleProfileId || '',
+        });
+        layer.appendChild(marker);
+        this.motionMarker = marker;
+        this.svg.appendChild(layer);
+        this._updateMotionMarker();
+        return true;
+    };
+
+    TopPlanAdapter.prototype._appendNavigationOverlay = function () {
+        this.navigationMarker = null;
+        if (!this.projection) return false;
+        const pathsVisible = this.navigationPathsVisible !== false;
+        const navigation = this.layout && this.layout.extensions
+            && this.layout.extensions.facilityNavigation;
+        const durable = navigation
+            && Array.isArray(navigation.manualPathConstraints)
+            ? navigation.manualPathConstraints : [];
+        const preview = this.navigationAuthoringPreview;
+        if (!durable.length && (!preview || !Array.isArray(preview.points))) {
+            return false;
+        }
+        const layer = svgElement(this.document, 'g');
+        setAttributes(layer, {
+            'data-layer': 'facility-navigation',
+            'data-navigation-paths-visible': pathsVisible ? 'true' : 'false',
+        });
+        if (pathsVisible) {
+        durable.forEach(function (constraint) {
+            if (!constraint || !Array.isArray(constraint.authoredPolyline)
+                    || constraint.authoredPolyline.length < 2) return;
+            const path = svgElement(this.document, 'polyline');
+            const status = constraint.reviewStatus === 'confirmed'
+                ? 'validated' : constraint.reviewStatus === 'rejected'
+                    ? 'invalid' : 'pending';
+            setAttributes(path, {
+                points: pointString(
+                    constraint.authoredPolyline,
+                    this.projection
+                ),
+                fill: 'none',
+                stroke: status === 'validated' ? '#0f8f62'
+                    : status === 'invalid' ? '#c9363e' : '#d97706',
+                'stroke-width': status === 'validated' ? '3.5' : '3',
+                'stroke-opacity': '0.92',
+                'stroke-dasharray': status === 'pending' ? '9 5'
+                    : status === 'invalid' ? '4 4' : 'none',
+                'stroke-linejoin': 'round',
+                'stroke-linecap': 'round',
+                'vector-effect': 'non-scaling-stroke',
+                'pointer-events': 'none',
+                'data-navigation-constraint-id':
+                    constraint.manualPathConstraintId || '',
+                'data-navigation-status': status,
+                'data-navigation-authority':
+                    constraint.positionAuthority || '',
+            });
+            layer.appendChild(path);
+        }, this);
+        }
+        if (preview && Array.isArray(preview.points)
+                && preview.points.length >= 2) {
+            const status = preview.validationStatus || 'pending';
+            if (pathsVisible) {
+            const path = svgElement(this.document, 'polyline');
+            setAttributes(path, {
+                points: pointString(preview.points, this.projection),
+                fill: 'none',
+                stroke: status === 'validated' ? '#0f8f62'
+                    : status === 'invalid' ? '#c9363e' : '#0878d1',
+                'stroke-width': '4',
+                'stroke-opacity': '0.98',
+                'stroke-dasharray': status === 'pending' ? '10 5'
+                    : status === 'invalid' ? '4 4' : 'none',
+                'stroke-linejoin': 'round',
+                'stroke-linecap': 'round',
+                'vector-effect': 'non-scaling-stroke',
+                'data-navigation-authoring-path': 'true',
+                'data-navigation-status': status,
+                'data-navigation-authority': 'ui_authored',
+            });
+            layer.appendChild(path);
+            const invalidSegments = preview.validation
+                && Array.isArray(preview.validation.invalidSegmentIndexes)
+                ? new Set(preview.validation.invalidSegmentIndexes) : new Set();
+            invalidSegments.forEach(function (segmentIndex) {
+                const left = preview.points[segmentIndex];
+                const right = preview.points[segmentIndex + 1];
+                if (!left || !right) return;
+                const segment = svgElement(this.document, 'polyline');
+                setAttributes(segment, {
+                    points: pointString([left, right], this.projection),
+                    fill: 'none',
+                    stroke: '#c9363e',
+                    'stroke-width': '6',
+                    'stroke-opacity': '1',
+                    'stroke-dasharray': '4 3',
+                    'stroke-linejoin': 'round',
+                    'stroke-linecap': 'round',
+                    'vector-effect': 'non-scaling-stroke',
+                    'pointer-events': 'none',
+                    'data-navigation-invalid-segment': String(segmentIndex),
+                });
+                layer.appendChild(segment);
+            }, this);
+            preview.points.forEach(function (value, index) {
+                const center = projectTopPlanPoint(value, this.projection);
+                const handle = svgElement(this.document, 'circle');
+                setAttributes(handle, {
+                    cx: center.x,
+                    cy: center.y,
+                    r: index === preview.selectedPointIndex ? '7' : '5',
+                    fill: index === preview.selectedPointIndex
+                        ? '#ffffff' : '#0878d1',
+                    stroke: status === 'invalid' ? '#c9363e' : '#075b9e',
+                    'stroke-width': '2',
+                    'vector-effect': 'non-scaling-stroke',
+                    tabindex: '0',
+                    role: 'button',
+                    'aria-label': 'Motion path waypoint ' + (index + 1),
+                    'data-navigation-waypoint-index': String(index),
+                    'data-navigation-waypoint-authority': 'ui_authored',
+                });
+                layer.appendChild(handle);
+            }, this);
+            }
+            if (preview.pose && Number.isFinite(Number(preview.pose.x))
+                    && Number.isFinite(Number(preview.pose.z))) {
+                const placement = this.layout
+                    && (this.layout.placements || []).find(function (item) {
+                        return item.placementId === preview.actorPlacementId;
+                    });
+                const width = Math.max(0.3, finiteOr(
+                    placement && placement.width,
+                    preview.actorClass === 'vehicle' ? 1.8 : 0.6
+                ));
+                const depth = Math.max(0.3, finiteOr(
+                    placement && placement.depth,
+                    preview.actorClass === 'vehicle' ? 3.2 : 0.6
+                ));
+                const halfWidth = width / 2;
+                const halfDepth = depth / 2;
+                const cosine = Math.cos(finiteOr(preview.pose.heading, 0));
+                const sine = Math.sin(finiteOr(preview.pose.heading, 0));
+                const points = [
+                    { x: halfDepth, z: -halfWidth },
+                    { x: halfDepth, z: halfWidth },
+                    { x: -halfDepth, z: halfWidth },
+                    { x: -halfDepth, z: -halfWidth },
+                ].map(function (local) {
+                    return {
+                        x: preview.pose.x
+                            + local.x * cosine - local.z * sine,
+                        z: preview.pose.z
+                            + local.x * sine + local.z * cosine,
+                    };
+                });
+                const marker = svgElement(this.document, 'polygon');
+                setAttributes(marker, {
+                    points: pointString(points, this.projection),
+                    fill: preview.actorClass === 'vehicle'
+                        ? '#d97706' : '#2563eb',
+                    'fill-opacity': '0.96',
+                    stroke: '#ffffff',
+                    'stroke-width': '2',
+                    'vector-effect': 'non-scaling-stroke',
+                    'pointer-events': 'none',
+                    'data-navigation-preview-actor':
+                        preview.actorPlacementId || '',
+                    'data-navigation-preview-time': finiteOr(
+                        preview.pose.normalizedTime,
+                        0
+                    ),
+                    'data-navigation-preview-heading': finiteOr(
+                        preview.pose.heading,
+                        0
+                    ),
+                });
+                layer.appendChild(marker);
+                this.navigationMarker = marker;
+                const source = this.svg.querySelector
+                    ? this.svg.querySelector(
+                        '[data-placement-id="'
+                            + preview.actorPlacementId + '"]'
+                    ) : null;
+                if (source) {
+                    source.setAttribute('display', 'none');
+                    source.setAttribute(
+                        'data-navigation-source-suppressed',
+                        'true'
+                    );
+                }
+            }
+        }
+        this.svg.appendChild(layer);
+        return true;
+    };
+
+    TopPlanAdapter.prototype.setNavigationAuthoringPreview = function (value) {
+        if (this.disposed) return false;
+        this.navigationAuthoringPreview = value ? clone(value) : null;
+        this._render();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.setNavigationPathsVisible = function (requested) {
+        if (this.disposed) return false;
+        this.navigationPathsVisible = requested !== false;
+        this._render();
+        return this.navigationPathsVisible;
+    };
+
+    TopPlanAdapter.prototype._updateMotionMarker = function () {
+        if (!this.motionMarker || !this.projection
+                || !this.motionPresentation || !this.motionSnapshot
+                || !this.motionSnapshot.pose) return false;
+        const points = motionFootprintPoints(
+            this.motionPresentation.vehicleProfile,
+            this.motionSnapshot.pose
+        );
+        if (points.length < 3) return false;
+        setAttributes(this.motionMarker, {
+            points: pointString(points, this.projection),
+            'data-motion-distance-meters': finiteOr(
+                this.motionSnapshot.distanceMeters,
+                this.motionSnapshot.pose.distanceMeters || 0
+            ),
+            'data-motion-heading-radians': finiteOr(
+                this.motionSnapshot.pose.heading,
+                0
+            ),
+        });
+        return true;
+    };
+
+    TopPlanAdapter.prototype.setMotionPresentation = function (value) {
+        if (this.disposed) return false;
+        if (!value) {
+            this.motionPresentation = null;
+            this.motionSnapshot = null;
+            this.motionMarker = null;
+            this._render();
+            return true;
+        }
+        this.activityPresentation = null;
+        this.activitySnapshot = null;
+        this.activityMarkers.clear();
+        if (!value.package || !value.package.movement
+                || !value.package.packageId) {
+            throw new TypeError('Facility motion presentation is incomplete.');
+        }
+        this.motionPresentation = clone(value);
+        this.motionSnapshot = null;
+        this._render();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.updateMotionSnapshot = function (value) {
+        if (this.disposed || !this.motionPresentation) return false;
+        const snapshot = value && typeof value === 'object' ? clone(value) : null;
+        if (!snapshot || snapshot.packageId
+                !== this.motionPresentation.package.packageId) return false;
+        this.motionSnapshot = snapshot;
+        if (!this._updateMotionMarker()) this._render();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.clearMotionPresentation = function () {
+        return this.setMotionPresentation(null);
+    };
+
+    TopPlanAdapter.prototype._appendActivityOverlay = function () {
+        this.activityMarkers.clear();
+        const scenario = this.activityPresentation
+            && this.activityPresentation.scenario;
+        const payloads = this.activityPresentation
+            && this.activityPresentation.actorPayloads;
+        if (!scenario || !Array.isArray(scenario.actors)
+                || !payloads || !this.projection) return false;
+        const layer = svgElement(this.document, 'g');
+        setAttributes(layer, {
+            'data-layer': 'activity-playback',
+            'data-activity-scenario-id': scenario.scenarioId || '',
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+        });
+        const leanMotion = scenario.leanMotion;
+        if (leanMotion && this.activityPathsVisible !== false) {
+            (leanMotion.operatorPaths || []).forEach(function (path) {
+                const line = svgElement(this.document, 'polyline');
+                setAttributes(line, {
+                    points: pointString(path.centerline, this.projection),
+                    fill: 'none',
+                    stroke: '#2563eb',
+                    'stroke-width': '3.25',
+                    'stroke-opacity': '0.96',
+                    'stroke-linejoin': 'round',
+                    'stroke-linecap': 'round',
+                    'vector-effect': 'non-scaling-stroke',
+                    'data-lean-motion-path-id': path.pathId,
+                    'data-lean-motion-kind': 'operator_path',
+                });
+                layer.appendChild(line);
+            }, this);
+            (leanMotion.pedestrianConnections || []).forEach(function (connection) {
+                const line = svgElement(this.document, 'polyline');
+                setAttributes(line, {
+                    points: pointString(connection.centerline, this.projection),
+                    fill: 'none',
+                    stroke: '#0891b2',
+                    'stroke-width': '3',
+                    'stroke-opacity': '0.96',
+                    'stroke-dasharray': '8 5',
+                    'stroke-linejoin': 'round',
+                    'stroke-linecap': 'round',
+                    'vector-effect': 'non-scaling-stroke',
+                    'data-lean-motion-connection-id': connection.connectionId,
+                    'data-lean-motion-kind': 'pedestrian_connection',
+                });
+                layer.appendChild(line);
+            }, this);
+            (leanMotion.assistanceGates || []).forEach(function (gate) {
+                const center = projectTopPlanPoint(gate.position, this.projection);
+                const edge = projectTopPlanPoint({
+                    x: Number(gate.position.x) + 0.5,
+                    z: Number(gate.position.z),
+                }, this.projection);
+                const marker = svgElement(this.document, 'circle');
+                setAttributes(marker, {
+                    cx: center.x,
+                    cy: center.y,
+                    r: Math.max(3, Math.abs(edge.x - center.x)),
+                    fill: '#ecfeff',
+                    'fill-opacity': '0.9',
+                    stroke: '#06b6d4',
+                    'stroke-width': '2.5',
+                    'vector-effect': 'non-scaling-stroke',
+                    'data-lean-motion-gate-id': gate.gateId,
+                    'data-lean-motion-kind': 'assistance_gate',
+                });
+                layer.appendChild(marker);
+            }, this);
+            (leanMotion.materialHandoffs || []).forEach(function (handoff) {
+                const line = svgElement(this.document, 'polyline');
+                setAttributes(line, {
+                    points: pointString(handoff.centerline, this.projection),
+                    fill: 'none',
+                    stroke: '#059669',
+                    'stroke-width': '3',
+                    'stroke-opacity': '0.94',
+                    'stroke-linejoin': 'round',
+                    'stroke-linecap': 'round',
+                    'vector-effect': 'non-scaling-stroke',
+                    'data-lean-motion-handoff-id': handoff.handoffId,
+                    'data-lean-motion-kind': 'material_handoff',
+                });
+                layer.appendChild(line);
+            }, this);
+            (leanMotion.fifoPoints || []).forEach(function (point) {
+                const radius = 0.42;
+                const position = point.position;
+                const diamond = svgElement(this.document, 'polygon');
+                setAttributes(diamond, {
+                    points: pointString([
+                        { x: position.x, z: position.z - radius },
+                        { x: position.x + radius, z: position.z },
+                        { x: position.x, z: position.z + radius },
+                        { x: position.x - radius, z: position.z },
+                    ], this.projection),
+                    fill: '#f59e0b',
+                    stroke: '#92400e',
+                    'stroke-width': '1.5',
+                    'vector-effect': 'non-scaling-stroke',
+                    'data-lean-motion-fifo-id': point.pointId,
+                    'data-lean-motion-kind': 'fifo_point',
+                });
+                layer.appendChild(diamond);
+            }, this);
+        }
+        const candidatePresentation = this.activityPresentation
+            && this.activityPresentation.candidatePresentation;
+        if (candidatePresentation && this.activityPathsVisible !== false) {
+            const endpointKeys = new Set();
+            (candidatePresentation.handoffs || []).forEach(function (handoff) {
+                const line = svgElement(this.document, 'polyline');
+                setAttributes(line, {
+                    points: pointString(handoff.centerline, this.projection),
+                    fill: 'none',
+                    stroke: '#059669',
+                    'stroke-width': '3',
+                    'stroke-opacity': '0.9',
+                    'stroke-dasharray': '9 6',
+                    'stroke-linejoin': 'round',
+                    'stroke-linecap': 'round',
+                    'vector-effect': 'non-scaling-stroke',
+                    'data-navigation-candidate-handoff-id': handoff.candidateId,
+                    'data-navigation-candidate-review-status': handoff.reviewStatus,
+                });
+                layer.appendChild(line);
+                [
+                    handoff.centerline[0],
+                    handoff.centerline[handoff.centerline.length - 1],
+                ].forEach(function (position) {
+                    const key = Number(position.x).toFixed(6)
+                        + ':' + Number(position.z).toFixed(6);
+                    if (endpointKeys.has(key)) return;
+                    endpointKeys.add(key);
+                    const radius = 0.42;
+                    const diamond = svgElement(this.document, 'polygon');
+                    setAttributes(diamond, {
+                        points: pointString([
+                            { x: position.x, z: position.z - radius },
+                            { x: position.x + radius, z: position.z },
+                            { x: position.x, z: position.z + radius },
+                            { x: position.x - radius, z: position.z },
+                        ], this.projection),
+                        fill: '#f59e0b',
+                        stroke: '#92400e',
+                        'stroke-width': '1.5',
+                        'vector-effect': 'non-scaling-stroke',
+                        'data-navigation-candidate-handoff-endpoint': key,
+                    });
+                    layer.appendChild(diamond);
+                }, this);
+            }, this);
+        }
+        if ((scenario.schemaVersion === 'facility-activity-scenario-v7'
+                || candidatePresentation)
+                && this.activityPathsVisible !== false) {
+            const evidenceByPlacement = new Map(
+                candidatePresentation
+                    && Array.isArray(candidatePresentation.programEvidence)
+                    ? candidatePresentation.programEvidence.map(function (item) {
+                        return [item.actorPlacementId, item];
+                    }) : []
+            );
+            scenario.actors.forEach(function (actor) {
+                if (this.activityPathTypesVisible[actor.actorType] === false) {
+                    return;
+                }
+                const evidence = evidenceByPlacement.get(actor.placementId);
+                const segmentByPackage = new Map(
+                    evidence && Array.isArray(evidence.pathSegments)
+                        ? evidence.pathSegments.map(function (segment) {
+                            return [segment.motionPackageId, segment];
+                        }) : []
+                );
+                const packageIds = actor.loopMode === 'closed_path'
+                    && Array.isArray(actor.cycleMotionPackageIds)
+                    && actor.cycleMotionPackageIds.length
+                    ? actor.cycleMotionPackageIds : [actor.motionPackageId];
+                packageIds.forEach(function (packageId) {
+                    const payload = payloads[packageId];
+                    const movement = payload && payload.package
+                        && payload.package.movement;
+                    const poses = movement && movement.poses;
+                    if (!Array.isArray(poses) || poses.length < 2) return;
+                    const segment = segmentByPackage.get(packageId);
+                    const phase = segment && segment.phase;
+                    const line = svgElement(this.document, 'polyline');
+                    const loadedPhase = [
+                        'carry_out',
+                        'loaded_putaway',
+                        'loaded_dispatch',
+                    ].includes(phase);
+                    const emptyPhase = [
+                        'return_empty',
+                        'empty_to_rack',
+                    ].includes(phase);
+                    const color = loadedPhase
+                        ? '#d97706' : emptyPhase
+                            ? '#059669' : [
+                                'finished_goods_pick',
+                                'receiving_pick',
+                            ].includes(phase)
+                                ? '#2563eb' : actor.actorType === 'operator'
+                                ? '#2563eb'
+                                : actor.actorType === 'mobile_equipment'
+                                    ? '#0f8f62' : '#d97706';
+                    const displayPoses = activityDisplayOffsetPoints(
+                        poses,
+                        segment && segment.displayOffsetMeters
+                    );
+                    const attributes = {
+                        points: pointString(displayPoses, this.projection),
+                        fill: 'none',
+                        stroke: color,
+                        'stroke-width': '3.25',
+                        'stroke-opacity': '0.96',
+                        'stroke-linejoin': 'round',
+                        'stroke-linecap': 'round',
+                        'vector-effect': 'non-scaling-stroke',
+                        'data-navigation-activity-actor-id': actor.actorId,
+                        'data-navigation-activity-actor-type': actor.actorType,
+                        'data-navigation-activity-journey-id':
+                            movement.journeySolutionId || '',
+                        'data-navigation-activity-package-id': packageId,
+                        'data-navigation-activity-path-phase': phase || '',
+                        'data-navigation-activity-display-offset-meters':
+                            segment && Number.isFinite(Number(
+                                segment.displayOffsetMeters
+                            )) ? Number(segment.displayOffsetMeters) : 0,
+                    };
+                    if (emptyPhase) {
+                        attributes['stroke-dasharray'] = '9 6';
+                    }
+                    setAttributes(line, attributes);
+                    layer.appendChild(line);
+                }, this);
+            }, this);
+        }
+        scenario.actors.forEach(function (actor) {
+            const payload = payloads[actor.motionPackageId];
+            const marker = svgElement(this.document, 'polygon');
+            const color = actor.actorType === 'operator'
+                ? '#2563eb' : actor.actorType === 'mobile_equipment'
+                    ? '#0f8f62' : '#d97706';
+            setAttributes(marker, {
+                fill: color,
+                'fill-opacity': '0.94',
+                stroke: '#ffffff',
+                'stroke-width': '1.5',
+                'vector-effect': 'non-scaling-stroke',
+                'data-activity-actor-id': actor.actorId,
+                'data-activity-actor-type': actor.actorType,
+                'data-activity-placement-id': actor.placementId,
+                'data-activity-borrowed-placement': 'true',
+                display: 'none',
+            });
+            marker._facilityActivityProfile = payload
+                ? (payload.actorProfile || payload.vehicleProfile || null)
+                : null;
+            layer.appendChild(marker);
+            this.activityMarkers.set(actor.actorId, marker);
+        }, this);
+        this.svg.appendChild(layer);
+        this._updateActivityMarkers();
+        return true;
+    };
+
+    TopPlanAdapter.prototype._updateActivityMarkers = function () {
+        if (!this.projection || !this.activitySnapshot
+                || !Array.isArray(this.activitySnapshot.actors)) return false;
+        let updated = false;
+        this.activitySnapshot.actors.forEach(function (actor) {
+            const marker = this.activityMarkers.get(actor.actorId);
+            if (!marker) return;
+            if (!actor.visible || !actor.pose) {
+                marker.setAttribute('display', 'none');
+                return;
+            }
+            const points = motionFootprintPoints(
+                marker._facilityActivityProfile,
+                actor.pose
+            );
+            if (points.length < 3) {
+                marker.setAttribute('display', 'none');
+                return;
+            }
+            setAttributes(marker, {
+                points: pointString(points, this.projection),
+                display: 'inline',
+                'data-activity-distance-meters': finiteOr(
+                    actor.pose.distanceMeters,
+                    0
+                ),
+                'data-activity-heading-radians': finiteOr(
+                    actor.pose.heading,
+                    0
+                ),
+            });
+            updated = true;
+        }, this);
+        return updated;
+    };
+
+    TopPlanAdapter.prototype.setActivityPresentation = function (value) {
+        if (this.disposed) return false;
+        if (!value) {
+            this.activityPresentation = null;
+            this.activitySnapshot = null;
+            this.activityMarkers.clear();
+            this._render();
+            return true;
+        }
+        if (!value.scenario || !value.scenario.scenarioId
+                || !value.actorPayloads) {
+            throw new TypeError('Facility activity presentation is incomplete.');
+        }
+        this.motionPresentation = null;
+        this.motionSnapshot = null;
+        this.motionMarker = null;
+        this.activityPresentation = clone(value);
+        this.activitySnapshot = null;
+        this._render();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.updateActivitySnapshot = function (value) {
+        if (this.disposed || !this.activityPresentation) return false;
+        const snapshot = value && typeof value === 'object'
+            ? clone(value) : null;
+        if (!snapshot || snapshot.scenarioId
+                !== this.activityPresentation.scenario.scenarioId) {
+            return false;
+        }
+        this.activitySnapshot = snapshot;
+        if (!this._updateActivityMarkers()) this._render();
+        return true;
+    };
+
+    TopPlanAdapter.prototype.clearActivityPresentation = function () {
+        return this.setActivityPresentation(null);
+    };
+
+    TopPlanAdapter.prototype.setActivityPathsVisible = function (requested) {
+        if (this.disposed) return false;
+        this.activityPathsVisible = requested !== false;
+        this._render();
+        return this.activityPathsVisible;
+    };
+
+    TopPlanAdapter.prototype.setActivityPathTypeVisible = function (
+        actorType,
+        requested
+    ) {
+        if (!['vehicle', 'operator', 'mobile_equipment'].includes(actorType)) {
+            return false;
+        }
+        this.activityPathTypesVisible[actorType] = requested !== false;
+        this._render();
+        return this.activityPathTypesVisible[actorType];
+    };
+
     TopPlanAdapter.prototype._render = function () {
         if (this.disposed || this.suspended || !this.svg) return;
         const size = this._measure();
@@ -1373,6 +2179,8 @@
         });
         removeChildren(this.svg);
         this.renderProjection = null;
+        this.motionMarker = null;
+        this.activityMarkers.clear();
         this.environmentDiagnostics = null;
         this.renderCount += 1;
         if (!this.layout) {
@@ -1393,6 +2201,7 @@
                 size,
                 this.options.padding
             );
+            this.semanticBaseScale = this.projection.scale;
         }
 
         const environmentLayer = svgElement(this.document, 'g');
@@ -1409,7 +2218,9 @@
 
         const zoneLayer = svgElement(this.document, 'g');
         zoneLayer.setAttribute('data-layer', 'zones');
-        this.geometry.zones.forEach(function (zone) {
+        this.geometry.zones.filter(function (zone) {
+            return this.layerVisibility[zonePresentationLayer(zone)] !== false;
+        }, this).forEach(function (zone) {
             const selected = this.selections.has(zone.zoneId);
             const polygon = svgElement(this.document, 'polygon');
             setAttributes(polygon, {
@@ -1424,6 +2235,7 @@
                 'aria-label': zone.label,
                 'aria-selected': selected ? 'true' : 'false',
                 'data-zone-id': zone.zoneId,
+                'data-zone-presentation-layer': zonePresentationLayer(zone),
             });
             zoneLayer.appendChild(polygon);
         }, this);
@@ -1431,15 +2243,42 @@
 
         const routeLayer = svgElement(this.document, 'g');
         routeLayer.setAttribute('data-layer', 'routes');
-        this.geometry.routes.forEach(function (route) {
+        const proposalChangedRoutes = new Set(
+            this.proposalPreview
+                ? this.proposalPreview.changedRouteIds : []
+        );
+        const proposalRemovedRoutes = new Set(
+            this.proposalPreview
+                ? this.proposalPreview.removedRouteIds : []
+        );
+        const proposalPreservedRoutes = new Set(
+            this.proposalPreview
+                ? this.proposalPreview.preservedRouteIds : []
+        );
+        this.geometry.routes.filter(function () {
+            return this.layerVisibility.routes !== false;
+        }, this).forEach(function (route) {
             const selected = this.selections.has(route.routeId);
             const aisle = route.extensions && route.extensions.facilityAisle;
             const polyline = svgElement(this.document, 'polyline');
-            const routeColor = aisle && aisle.color
-                ? aisle.color
-                : (route.routeKind === 'forklift'
-                ? '#d97706'
-                : (route.routeKind === 'operator' ? '#2563eb' : '#5b6472'));
+            const proposalRouteState = proposalRemovedRoutes.has(route.routeId)
+                ? 'removed'
+                : proposalChangedRoutes.has(route.routeId)
+                    ? 'changed'
+                    : proposalPreservedRoutes.has(route.routeId)
+                        ? 'preserved' : '';
+            const routeColor = proposalRouteState === 'removed'
+                ? '#dc2626'
+                : proposalRouteState === 'changed'
+                    ? '#d97706'
+                    : proposalRouteState === 'preserved'
+                        ? '#087f5b'
+                        : aisle && aisle.color
+                            ? aisle.color
+                            : (route.routeKind === 'forklift'
+                                ? '#d97706'
+                                : (route.routeKind === 'operator'
+                                    ? '#2563eb' : '#5b6472'));
             setAttributes(polyline, {
                 points: pointString(route.points, this.projection),
                 fill: 'none',
@@ -1456,6 +2295,7 @@
                 'aria-label': route.label + ', facility aisle',
                 'aria-selected': selected ? 'true' : 'false',
                 'data-route-id': route.routeId,
+                'data-proposal-route-state': proposalRouteState,
             });
             routeLayer.appendChild(polyline);
             const centerline = svgElement(this.document, 'polyline');
@@ -1473,7 +2313,42 @@
             });
             routeLayer.appendChild(centerline);
         }, this);
-        if (this.transientAislePreview
+        if (this.proposalPreview && this.layerVisibility.routes !== false) {
+            this.proposalPreview.proposedRoutes.forEach(function (route) {
+                const points = (Array.isArray(route.centerline)
+                    ? route.centerline
+                    : Array.isArray(route.points) ? route.points : []).filter(
+                    function (point) {
+                        return point && Number.isFinite(Number(point.x))
+                            && Number.isFinite(Number(point.z));
+                    }
+                );
+                if (points.length < 2) return;
+                const proposed = svgElement(this.document, 'polyline');
+                setAttributes(proposed, {
+                    points: pointString(points, this.projection),
+                    fill: 'none',
+                    stroke: '#7c3aed',
+                    'stroke-width': Math.max(
+                        3,
+                        Number(route.corridorWidth || 1)
+                            * this.projection.scale
+                    ),
+                    'stroke-opacity': '0.68',
+                    'stroke-dasharray': '8 5',
+                    'stroke-linejoin': 'round',
+                    'stroke-linecap': 'round',
+                    'vector-effect': 'non-scaling-stroke',
+                    'pointer-events': 'none',
+                    'aria-hidden': 'true',
+                    'data-proposal-route-id': route.routeId || '',
+                    'data-proposal-route-state': 'proposed',
+                });
+                routeLayer.appendChild(proposed);
+            }, this);
+        }
+        if (this.layerVisibility.routes !== false
+                && this.transientAislePreview
                 && this.transientAislePreview.points.length >= 2) {
             const preview = this.transientAislePreview;
             const polyline = svgElement(this.document, 'polyline');
@@ -1498,7 +2373,9 @@
 
         const markingLayer = svgElement(this.document, 'g');
         markingLayer.setAttribute('data-layer', 'floor-markings');
-        this.geometry.floorMarkings.forEach(function (marking) {
+        this.geometry.floorMarkings.filter(function () {
+            return this.layerVisibility.markings !== false;
+        }, this).forEach(function (marking) {
             appendFloorMarkingGraphic(
                 this.document,
                 markingLayer,
@@ -1520,6 +2397,10 @@
         const removedProposalIds = new Set(
             this.proposalPreview
                 ? this.proposalPreview.removedPlacementIds : []
+        );
+        const preservedProposalIds = new Set(
+            this.proposalPreview
+                ? this.proposalPreview.preservedPlacementIds : []
         );
         const proposedById = new Map(
             (this.proposalPreview
@@ -1627,10 +2508,21 @@
                 stackInfoByPlacement.set(member.placementId, info);
             });
         });
+        const activityPlacementIds = new Set(
+            this.activityPresentation
+            && this.activityPresentation.scenario
+            && Array.isArray(this.activityPresentation.scenario.actors)
+                ? this.activityPresentation.scenario.actors.map(function (actor) {
+                    return actor.placementId;
+                }).filter(Boolean)
+                : []
+        );
         this.geometry.placements.filter(function (placement) {
+            if (this.layerVisibility.assets === false) return false;
+            if (activityPlacementIds.has(placement.placementId)) return false;
             const info = stackInfoByPlacement.get(placement.placementId);
             return !info || info.baseId === placement.placementId;
-        }).forEach(function (placement) {
+        }, this).forEach(function (placement) {
             const stackInfo = stackInfoByPlacement.get(placement.placementId);
             const selected = stackInfo
                 ? stackInfo.memberIds.some(function (placementId) {
@@ -1640,7 +2532,9 @@
             const proposalState = newProposalIds.has(placement.placementId)
                 ? 'new'
                 : (movedProposalIds.has(placement.placementId)
-                    ? 'moved' : '');
+                    ? 'moved'
+                    : (preservedProposalIds.has(placement.placementId)
+                        ? 'preserved' : ''));
             const screenBounds = projectedPointBounds(
                 placement.points,
                 this.projection
@@ -1683,8 +2577,10 @@
                 cardAttributes['data-stack-id'] = stackInfo.stackId;
                 cardAttributes['data-stack-count'] = stackInfo.count;
             }
-            if (proposalState) {
+            if (proposalState && proposalState !== 'preserved') {
                 cardAttributes['pointer-events'] = 'none';
+                cardAttributes['data-proposal-state'] = proposalState;
+            } else if (proposalState) {
                 cardAttributes['data-proposal-state'] = proposalState;
             }
             setAttributes(card, cardAttributes);
@@ -1703,20 +2599,28 @@
                     ? '#0ea5e9'
                     : (proposalState === 'moved'
                         ? '#8b5cf6'
-                        : (selected ? '#bfe3ff' : '#e8edf2')),
+                        : (proposalState === 'preserved'
+                            ? '#b7ead8'
+                            : (selected ? '#bfe3ff' : '#e8edf2'))),
                 stroke: proposalState === 'new'
                     ? '#0284c7'
                     : (proposalState === 'moved'
                         ? '#7c3aed'
-                        : (selected ? '#0878d1' : '#526273')),
+                        : (proposalState === 'preserved'
+                            ? '#087f5b'
+                            : (selected ? '#0878d1' : '#526273'))),
                 'stroke-width': selected ? '3' : '1.5',
                 'vector-effect': 'non-scaling-stroke',
                 'aria-hidden': 'true',
             };
-            if (proposalState) {
+            if (proposalState && proposalState !== 'preserved') {
                 attributes['fill-opacity'] = '0.24';
                 attributes['stroke-width'] = '2';
                 attributes['stroke-dasharray'] = '7 4';
+            } else if (proposalState === 'preserved') {
+                attributes['fill-opacity'] = '0.18';
+                attributes['stroke-width'] = '2';
+                attributes['stroke-dasharray'] = '3 3';
             }
             setAttributes(polygon, attributes);
             card.appendChild(polygon);
@@ -1863,7 +2767,8 @@
         zoneLabelLayer.setAttribute('data-layer', 'zone-labels');
         zoneLabelLayer.setAttribute('pointer-events', 'none');
         zoneLabelLayer.setAttribute('aria-hidden', 'true');
-        const labelObstacles = this.geometry.placements.map(function (placement) {
+        const labelObstacles = (this.layerVisibility.assets === false
+            ? [] : this.geometry.placements).map(function (placement) {
             const bounds = projectedPointBounds(placement.points, this.projection);
             return {
                 minX: bounds.minX - 3,
@@ -1873,7 +2778,37 @@
             };
         }, this);
         const occupiedLabels = [];
-        this.geometry.zones.forEach(function (zone) {
+        const suppressedZoneIds = [];
+        const childZones = this.geometry.zones.filter(function (zone) {
+            return Boolean(zone.parentZoneId);
+        });
+        const zoomRatio = this.projection.scale / Math.max(
+            1e-6,
+            finiteOr(this.semanticBaseScale, this.projection.scale)
+        );
+        const semanticLevel = childZones.length && zoomRatio >= 1.6
+            ? 'detail' : 'overview';
+        const labelZones = this.geometry.zones.filter(function (zone) {
+            if (this.layerVisibility[zonePresentationLayer(zone)] === false) {
+                return false;
+            }
+            if (this.selections.has(zone.zoneId)) return true;
+            if (!childZones.length) return true;
+            return semanticLevel === 'overview'
+                ? !zone.parentZoneId : Boolean(zone.parentZoneId);
+        }, this).sort(function (left, right) {
+            const leftSelected = this.selections.has(left.zoneId) ? 1 : 0;
+            const rightSelected = this.selections.has(right.zoneId) ? 1 : 0;
+            if (leftSelected !== rightSelected) return rightSelected - leftSelected;
+            const leftBounds = geometryBounds(left.points);
+            const rightBounds = geometryBounds(right.points);
+            const leftArea = (leftBounds.maxX - leftBounds.minX)
+                * (leftBounds.maxZ - leftBounds.minZ);
+            const rightArea = (rightBounds.maxX - rightBounds.minX)
+                * (rightBounds.maxZ - rightBounds.minZ);
+            return rightArea - leftArea || left.zoneId.localeCompare(right.zoneId);
+        }.bind(this));
+        labelZones.forEach(function (zone) {
             const selected = this.selections.has(zone.zoneId);
             const fullLabel = String(zone.label || zone.zoneId || 'Zone');
             const displayLabel = fullLabel.length > 42
@@ -1892,11 +2827,16 @@
                 occupiedLabels,
                 labelSize
             );
+            if (!selected && labelRect.labelOverlapArea > 1) {
+                suppressedZoneIds.push(zone.zoneId);
+                return;
+            }
             occupiedLabels.push(labelRect);
             const labelGroup = svgElement(this.document, 'g');
             setAttributes(labelGroup, {
                 'data-zone-label-for': zone.zoneId,
                 'data-zone-label-edge': labelRect.edge,
+                'data-zone-presentation-layer': zonePresentationLayer(zone),
             });
             const labelBackground = svgElement(this.document, 'rect');
             setAttributes(labelBackground, {
@@ -1926,6 +2866,31 @@
             labelGroup.appendChild(labelText);
             zoneLabelLayer.appendChild(labelGroup);
         }, this);
+        zoneLabelLayer.setAttribute('data-semantic-zoom-level', semanticLevel);
+        zoneLabelLayer.setAttribute(
+            'data-visible-zone-label-count',
+            String(occupiedLabels.length)
+        );
+        zoneLabelLayer.setAttribute(
+            'data-suppressed-zone-label-count',
+            String(suppressedZoneIds.length)
+        );
+        this.zoneLabelDiagnostics = {
+            semanticLevel: semanticLevel,
+            zoomRatio: zoomRatio,
+            visibleZoneIds: labelZones.map(function (zone) {
+                return zone.zoneId;
+            }).filter(function (zoneId) {
+                return !suppressedZoneIds.includes(zoneId);
+            }),
+            suppressedZoneIds: suppressedZoneIds,
+            labelOverlapArea: occupiedLabels.reduce(
+                function (total, item) {
+                    return total + finiteOr(item.labelOverlapArea, 0);
+                },
+                0
+            ),
+        };
         this.svg.appendChild(zoneLabelLayer);
         this._applyTransientPlacementMove();
         this._applyTransientPlacementDuplicate();
@@ -1954,6 +2919,9 @@
             ghostLayer.appendChild(ghost);
             this.svg.appendChild(ghostLayer);
         }
+        this._appendNavigationOverlay();
+        this._appendMotionOverlay();
+        this._appendActivityOverlay();
         this.renderProjection = Object.freeze(Object.assign(
             {},
             this.projection
@@ -2604,6 +3572,24 @@
         return true;
     };
 
+    TopPlanAdapter.prototype.setLayerVisibility = function (visibility) {
+        if (this.disposed) return false;
+        const next = normalizeLayerVisibility(
+            visibility,
+            this.layerVisibility
+        );
+        if (JSON.stringify(next) === JSON.stringify(this.layerVisibility)) {
+            return clone(this.layerVisibility);
+        }
+        this.layerVisibility = next;
+        this._render();
+        return clone(this.layerVisibility);
+    };
+
+    TopPlanAdapter.prototype.getLayerVisibility = function () {
+        return clone(this.layerVisibility);
+    };
+
     TopPlanAdapter.prototype.setEnvironmentSettings = function (settings) {
         if (this.disposed) return false;
         const source = settings && typeof settings === 'object' ? settings : {};
@@ -2633,6 +3619,12 @@
     TopPlanAdapter.prototype.setLayout = function (layout) {
         if (this.disposed) return false;
         const hadLayout = Boolean(this.layout);
+        this.motionPresentation = null;
+        this.motionSnapshot = null;
+        this.motionMarker = null;
+        this.activityPresentation = null;
+        this.activitySnapshot = null;
+        this.activityMarkers.clear();
         this.transientPlacementMove = null;
         this.transientPlacementDuplicate = null;
         this.transientFloorMarkingPreview = null;
@@ -2912,6 +3904,13 @@
             || (this.proposalPreview
                 && this.proposalPreview.beforePlacements.length)
         );
+        const viewport = this._measure();
+        const fitPadding = includeWorldBounds === false && hasLayoutContent
+            ? Math.max(
+                finiteOr(this.options.padding, DEFAULT_VIEW_PADDING),
+                Math.min(viewport.width, viewport.height) * 0.055
+            )
+            : this.options.padding;
         this.projection = createTopPlanProjection(
             proposalReviewBounds(
                 this.layout,
@@ -2919,9 +3918,10 @@
                 this.options,
                 includeWorldBounds !== false || !hasLayoutContent
             ),
-            this._measure(),
-            this.options.padding
+            viewport,
+            fitPadding
         );
+        this.semanticBaseScale = this.projection.scale;
         this._render();
         return clone(this.projection);
     };
@@ -2980,6 +3980,14 @@
         if (!this.projection) this.fit();
         const factor = Math.max(0.25, Math.min(4, finiteOr(requestedFactor, 1)));
         if (factor === 1) return true;
+        const hasChildZones = Boolean(this.geometry && this.geometry.zones.some(
+            function (zone) { return Boolean(zone.parentZoneId); }
+        ));
+        const previousSemanticLevel = hasChildZones
+            && this.projection.scale / Math.max(
+                1e-6,
+                finiteOr(this.semanticBaseScale, this.projection.scale)
+            ) >= 1.6 ? 'detail' : 'overview';
         const planPoint = clientPlanPoint(input, this.svg, this.projection);
         if (!planPoint) return false;
         const world = unprojectTopPlanPoint(planPoint, this.projection);
@@ -2992,7 +4000,13 @@
             offsetX: planPoint.x - (world.x - this.projection.minX) * scale,
             offsetY: planPoint.y - (this.projection.maxZ - world.z) * scale,
         }));
-        if (!this._applyProjectionTransform()) this._render();
+        const nextSemanticLevel = hasChildZones
+            && this.projection.scale / Math.max(
+                1e-6,
+                finiteOr(this.semanticBaseScale, this.projection.scale)
+            ) >= 1.6 ? 'detail' : 'overview';
+        if (nextSemanticLevel !== previousSemanticLevel) this._render();
+        else if (!this._applyProjectionTransform()) this._render();
         else this._notifyViewportChange();
         return true;
     };
@@ -3000,6 +4014,14 @@
     TopPlanAdapter.prototype.setScaleAt = function (input, requestedScale) {
         if (this.disposed || !this.layout) return false;
         if (!this.projection) this.fit();
+        const hasChildZones = Boolean(this.geometry && this.geometry.zones.some(
+            function (zone) { return Boolean(zone.parentZoneId); }
+        ));
+        const previousSemanticLevel = hasChildZones
+            && this.projection.scale / Math.max(
+                1e-6,
+                finiteOr(this.semanticBaseScale, this.projection.scale)
+            ) >= 1.6 ? 'detail' : 'overview';
         const scale = Math.max(1e-6, Math.min(1e6,
             finiteOr(requestedScale, this.projection.scale)
         ));
@@ -3011,7 +4033,13 @@
             offsetX: planPoint.x - (world.x - this.projection.minX) * scale,
             offsetY: planPoint.y - (this.projection.maxZ - world.z) * scale,
         }));
-        if (!this._applyProjectionTransform()) this._render();
+        const nextSemanticLevel = hasChildZones
+            && this.projection.scale / Math.max(
+                1e-6,
+                finiteOr(this.semanticBaseScale, this.projection.scale)
+            ) >= 1.6 ? 'detail' : 'overview';
+        if (nextSemanticLevel !== previousSemanticLevel) this._render();
+        else if (!this._applyProjectionTransform()) this._render();
         else this._notifyViewportChange();
         return true;
     };
@@ -3106,8 +4134,50 @@
                 ? clone(this.transientFloorMarkingPreview) : null,
             transientPatternPreview: this.transientPatternPreview
                 ? clone(this.transientPatternPreview) : null,
+            navigation: {
+                authoring: this.navigationAuthoringPreview
+                    ? clone(this.navigationAuthoringPreview) : null,
+                pathsVisible: this.navigationPathsVisible !== false,
+                markerVisible: Boolean(this.navigationMarker),
+                durableConstraintCount: this.layout
+                    && this.layout.extensions
+                    && this.layout.extensions.facilityNavigation
+                    && Array.isArray(
+                        this.layout.extensions.facilityNavigation
+                            .manualPathConstraints
+                    )
+                    ? this.layout.extensions.facilityNavigation
+                        .manualPathConstraints.length : 0,
+            },
             environment: this.environmentDiagnostics
                 ? clone(this.environmentDiagnostics) : null,
+            layerVisibility: clone(this.layerVisibility),
+            motion: {
+                loaded: Boolean(this.motionPresentation),
+                packageId: this.motionPresentation
+                    ? this.motionPresentation.package.packageId : null,
+                pose: this.motionSnapshot && this.motionSnapshot.pose
+                    ? clone(this.motionSnapshot.pose) : null,
+                markerVisible: Boolean(
+                    this.motionMarker && this.motionSnapshot
+                        && this.motionSnapshot.pose
+                ),
+            },
+            activity: {
+                loaded: Boolean(this.activityPresentation),
+                scenarioId: this.activityPresentation
+                    ? this.activityPresentation.scenario.scenarioId : null,
+                actorCount: this.activitySnapshot
+                    && Array.isArray(this.activitySnapshot.actors)
+                    ? this.activitySnapshot.actors.length : 0,
+                visibleMarkerCount: Array.from(
+                    this.activityMarkers.values()
+                ).filter(function (marker) {
+                    return marker.getAttribute('display') !== 'none';
+                }).length,
+            },
+            zoneLabels: this.zoneLabelDiagnostics
+                ? clone(this.zoneLabelDiagnostics) : null,
             projection: this.projection ? clone(this.projection) : null,
             placementIds: this.layout
                 ? this.layout.placements.map(function (placement) {
@@ -3191,8 +4261,16 @@
         this.transientPlacementDuplicate = null;
         this.transientZonePreview = null;
         this.transientPatternPreview = null;
+        this.navigationAuthoringPreview = null;
+        this.navigationMarker = null;
         this.transientFloorMarkingPreview = null;
         this.transientAislePreview = null;
+        this.motionPresentation = null;
+        this.motionSnapshot = null;
+        this.motionMarker = null;
+        this.activityPresentation = null;
+        this.activitySnapshot = null;
+        this.activityMarkers.clear();
     };
 
     function parseControllerArguments(layoutOrOptions, maybeOptions) {

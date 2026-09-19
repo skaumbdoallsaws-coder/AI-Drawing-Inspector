@@ -15,6 +15,9 @@ from ai_inspector.facility_layout.agent_runtime import (
 )
 from ai_inspector.facility_layout.authorization import FacilityPrincipal
 from ai_inspector.facility_layout.errors import FacilityValidationError
+from ai_inspector.facility_layout.knowledge_foundation import (
+    FACILITY_GENERATION_STAGES,
+)
 from ai_inspector.facility_layout.host import (
     LOCAL_LAYOUT_ID,
     LOCAL_SITE_ID,
@@ -224,6 +227,96 @@ def test_context_uses_active_plan_boundary_instead_of_starter_shell(host):
     }
 
 
+def test_context_and_read_tools_use_owned_active_generation_draft(host):
+    principal = host.principal()
+    saved = host.service.get_layout(
+        principal,
+        LOCAL_SITE_ID,
+        LOCAL_LAYOUT_ID,
+    )
+    started = host.generation_coordinator.start_g1_run(
+        tenant_id=principal.tenant_id,
+        site_id=LOCAL_SITE_ID,
+        workspace_id="workspace-facility-layout",
+        layout_id=LOCAL_LAYOUT_ID,
+        user_id=principal.principal_id,
+        session_id="session-active-generation-context",
+        base_layout=saved["layout"],
+        base_layout_revision=saved["revision"],
+        envelope_request={
+            "width": 100,
+            "depth": 80,
+            "sourceUnit": "m",
+            "displayName": "Generated Context",
+        },
+        department_request={
+            "count": 4,
+            "labels": ["Receiving", "Machining", "Assembly", "Shipping"],
+            "proportions": [1, 1, 1, 1],
+            "arrangement": "columns",
+            "orientation": "horizontal",
+        },
+        execution_mode="authorized_draft_run",
+        prototype_mode=True,
+    )
+    completed = started
+    for _ in FACILITY_GENERATION_STAGES:
+        completed = host.generation_coordinator.continue_run(
+            tenant_id=principal.tenant_id,
+            site_id=LOCAL_SITE_ID,
+            run_id=started["runId"],
+            current_base_layout=saved["layout"],
+            current_base_revision=saved["revision"],
+        )
+    live_facts = {
+        "generationDraft": {
+            "active": True,
+            "runId": completed["runId"],
+            "status": completed["status"],
+            "baseLayoutRevision": completed["baseLayoutRevision"],
+            "draftLayoutRevision": completed["draftLayoutRevision"],
+            "writable": True,
+        }
+    }
+    bundle = host.agent_runtime.resolve_context(
+        principal,
+        site_id=LOCAL_SITE_ID,
+        layout_id=LOCAL_LAYOUT_ID,
+        expected_revision=saved["revision"],
+        live_facts=live_facts,
+    )
+    assert bundle.base_layout_revision == saved["revision"]
+    assert bundle.generation_run_id == completed["runId"]
+    assert bundle.state["identity"]["revision"] == completed[
+        "draftLayoutRevision"
+    ]
+    assert [zone["label"] for zone in bundle.layout_document["zones"]] == [
+        "Receiving",
+        "Machining",
+        "Assembly",
+        "Shipping",
+    ]
+    assert bundle.layout_document["placements"] == []
+    assert bundle.layout_document != saved["layout"]
+
+    observed = host.agent_runtime.execute_read_tool(
+        principal,
+        site_id=LOCAL_SITE_ID,
+        layout_id=LOCAL_LAYOUT_ID,
+        expected_revision=saved["revision"],
+        tool_name="inspect_facility_entities",
+        arguments={
+            "entityKind": "zone",
+            "ids": [zone["zoneId"] for zone in bundle.layout_document["zones"]],
+            "pageSize": 10,
+        },
+        turn_id="turn-active-generation-read",
+        live_facts=live_facts,
+    )
+    assert len(observed["records"]) == 4
+    assert observed["revision"] == completed["draftLayoutRevision"]
+
+
 def test_stale_revision_rejects_before_observation(host):
     principal = host.principal()
     with pytest.raises(FacilityLayoutAgentRuntimeError) as caught:
@@ -239,7 +332,7 @@ def test_stale_revision_rejects_before_observation(host):
 
 
 def test_asset_search_cursor_is_opaque_and_scope_bound(host):
-    principal, current, _ = _context(host)
+    principal, current, bundle = _context(host)
     first = host.agent_runtime.execute_read_tool(
         principal,
         site_id=LOCAL_SITE_ID,
@@ -250,7 +343,10 @@ def test_asset_search_cursor_is_opaque_and_scope_bound(host):
         turn_id="turn-p9-search",
     )
     assert first["returnedCount"] == 1
-    assert first["totalCount"] == 4
+    # This test checks pagination over the bootstrap catalog, not a fixed
+    # inventory size. Compare against the independently loaded context.
+    assert first["totalCount"] == len(bundle.state["assets"])
+    assert first["totalCount"] > 1
     assert first["nextCursor"].startswith("flc1.")
     assert "assetId" not in first["nextCursor"]
 

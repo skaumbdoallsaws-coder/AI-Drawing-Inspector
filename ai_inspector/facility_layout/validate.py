@@ -13,6 +13,10 @@ from .canonical import (
     canonicalize_layout,
 )
 from .errors import FacilityCompatibilityError, FacilityValidationError
+from .navigation_contract import (
+    navigation_identity_index,
+    validate_facility_navigation_extension,
+)
 from .schema_v1 import (
     FORBIDDEN_LIVE_STATE_FIELDS,
     ID_PREFIXES,
@@ -716,8 +720,24 @@ def _facility_aisle_extension(route: Mapping[str, Any], path: str) -> None:
         "direction",
         "color",
         "clearanceEvidenceStatus",
+        "sourceZoneId",
+        "targetZoneId",
+        "viaZoneIds",
+        "areaAccounting",
+        "widthAuthority",
+        "obstacleAwareness",
     }
-    _required(aisle, fields, aisle_path)
+    _required(
+        aisle,
+        {
+            "schemaVersion",
+            "aisleKind",
+            "direction",
+            "color",
+            "clearanceEvidenceStatus",
+        },
+        aisle_path,
+    )
     _closed(aisle, fields, aisle_path)
     if aisle.get("schemaVersion") != 1:
         _fail(
@@ -752,6 +772,147 @@ def _facility_aisle_extension(route: Mapping[str, Any], path: str) -> None:
             "Facility aisle clearance evidence status is unsupported.",
             f"{aisle_path}.clearanceEvidenceStatus",
         )
+    source_zone_id = aisle.get("sourceZoneId")
+    target_zone_id = aisle.get("targetZoneId")
+    if (source_zone_id is None) != (target_zone_id is None):
+        _fail(
+            "invalid_layout_shape",
+            "Facility aisle sourceZoneId and targetZoneId must be supplied together.",
+            aisle_path,
+        )
+    if source_zone_id is not None:
+        _stable_id(
+            source_zone_id,
+            f"{aisle_path}.sourceZoneId",
+            prefix="zn",
+        )
+        _stable_id(
+            target_zone_id,
+            f"{aisle_path}.targetZoneId",
+            prefix="zn",
+        )
+        via_zone_ids = _stable_id_array(
+            aisle.get("viaZoneIds", []),
+            f"{aisle_path}.viaZoneIds",
+            maximum=LIMITS["zones"],
+        )
+        if len(via_zone_ids) != len(set(via_zone_ids)):
+            _fail(
+                "invalid_layout_shape",
+                "Facility aisle viaZoneIds must be unique.",
+                f"{aisle_path}.viaZoneIds",
+            )
+        if aisle.get("areaAccounting") != "overlay":
+            _fail(
+                "invalid_layout_shape",
+                "Generated Facility aisle areaAccounting must be overlay.",
+                f"{aisle_path}.areaAccounting",
+            )
+        if aisle.get("widthAuthority") not in {
+            "user_authored",
+            "policy_authored",
+            "unknown",
+        }:
+            _fail(
+                "invalid_layout_shape",
+                "Facility aisle widthAuthority is unsupported.",
+                f"{aisle_path}.widthAuthority",
+            )
+    raw_awareness = aisle.get("obstacleAwareness")
+    if raw_awareness is not None:
+        awareness_path = f"{aisle_path}.obstacleAwareness"
+        awareness = _object(raw_awareness, awareness_path)
+        awareness_fields = {
+            "schemaVersion",
+            "mode",
+            "obstacleContextRevision",
+            "minimumClearanceMeters",
+            "clearanceAuthority",
+            "evaluatedObstacleIds",
+            "avoidedObstacleIds",
+            "vehicleTurningValidated",
+        }
+        _required(awareness, awareness_fields, awareness_path)
+        _closed(awareness, awareness_fields, awareness_path)
+        if awareness.get("schemaVersion") != 1:
+            _fail(
+                "invalid_layout_shape",
+                "Obstacle awareness schemaVersion must be 1.",
+                f"{awareness_path}.schemaVersion",
+            )
+        if awareness.get("mode") != "static_geometry":
+            _fail(
+                "invalid_layout_shape",
+                "Obstacle awareness mode is unsupported.",
+                f"{awareness_path}.mode",
+            )
+        _revision(
+            awareness.get("obstacleContextRevision"),
+            f"{awareness_path}.obstacleContextRevision",
+        )
+        clearance = _number(
+            awareness.get("minimumClearanceMeters"),
+            f"{awareness_path}.minimumClearanceMeters",
+            minimum=0,
+        )
+        authority = awareness.get("clearanceAuthority")
+        if authority not in {
+            "geometric_non_overlap_only",
+            "user_authored",
+            "policy_authored",
+        }:
+            _fail(
+                "invalid_layout_shape",
+                "Obstacle clearance authority is unsupported.",
+                f"{awareness_path}.clearanceAuthority",
+            )
+        if clearance > 0 and authority == "geometric_non_overlap_only":
+            _fail(
+                "invalid_layout_shape",
+                "Positive obstacle clearance requires authored authority.",
+                f"{awareness_path}.clearanceAuthority",
+            )
+        evaluated = _array(
+            awareness.get("evaluatedObstacleIds"),
+            f"{awareness_path}.evaluatedObstacleIds",
+        )
+        avoided = _array(
+            awareness.get("avoidedObstacleIds"),
+            f"{awareness_path}.avoidedObstacleIds",
+        )
+        if len(evaluated) > LIMITS["floorMarkings"] or len(avoided) > len(evaluated):
+            _fail(
+                "document_limit_exceeded",
+                "Obstacle awareness record count is unsupported.",
+                awareness_path,
+            )
+        for field_name, values in (
+            ("evaluatedObstacleIds", evaluated),
+            ("avoidedObstacleIds", avoided),
+        ):
+            for index, value in enumerate(values):
+                _stable_id(
+                    value,
+                    f"{awareness_path}.{field_name}[{index}]",
+                )
+            if len(values) != len(set(values)):
+                _fail(
+                    "invalid_layout_shape",
+                    "Obstacle awareness IDs must be unique.",
+                    f"{awareness_path}.{field_name}",
+                )
+        if not set(avoided).issubset(set(evaluated)):
+            _fail(
+                "invalid_layout_shape",
+                "Avoided obstacles must be part of the evaluated set.",
+                f"{awareness_path}.avoidedObstacleIds",
+            )
+        if not isinstance(awareness.get("vehicleTurningValidated"), bool):
+            _fail(
+                "invalid_layout_shape",
+                "vehicleTurningValidated must be boolean.",
+                f"{awareness_path}.vehicleTurningValidated",
+            )
 
 
 def _polygon(value: Any, path: str) -> list[Any]:
@@ -1733,6 +1894,13 @@ def validate_layout(
     )
     _string(layout["createdAt"], "$.createdAt", minimum=1, maximum=64)
     _string(layout["updatedAt"], "$.updatedAt", minimum=1, maximum=64)
+
+    root_extensions = layout.get("extensions")
+    if isinstance(root_extensions, Mapping) and "facilityNavigation" in root_extensions:
+        validate_facility_navigation_extension(
+            root_extensions["facilityNavigation"],
+            navigation_identity_index(layout),
+        )
 
     if require_canonical:
         canonical = canonicalize_layout(layout)

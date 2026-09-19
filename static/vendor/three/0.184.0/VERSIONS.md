@@ -27,6 +27,7 @@ The core and every addon are the same version.
 | `examples/jsm/utils/BufferGeometryUtils.js` | 35539 | `d700b4c4584b9ff53a04692624d2363019f6d1df2978a207389168c6ae647a65` |
 | `examples/jsm/utils/SkeletonUtils.js` | 11535 | `b1632a703206c3d830de9fcbe515696770d04b71a15ee6b50afa6d2c3298c86f` |
 | `examples/jsm/controls/OrbitControls.js` | 40504 | `faabb4e8dfd9235ee4a9fd7c9a3d75f90f1689dbd4944bd6fd32117dacec5f93` |
+| `examples/jsm/controls/PointerLockControls.js` | 5890 | `40d58db8018b85038939d4d8bff7112d4b8a0ad0367b37ae6f969eeee4310c25` |
 | `examples/jsm/loaders/STLLoader.js` | 10715 | `023ed97f848b633d8bcd53d4db3b996d29d0c644088700691297c552257d480b` |
 | `examples/jsm/renderers/CSS2DRenderer.js` | 7384 | `dc5f4c5075a3a330b7e679da943343dd86a0f2d745422194b5287e48d7204197` |
 | `LICENSE` | 1081 | `8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc` |

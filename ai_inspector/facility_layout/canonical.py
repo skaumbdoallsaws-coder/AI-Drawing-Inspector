@@ -469,6 +469,20 @@ def canonicalize_layout(layout: Mapping[str, Any]) -> dict[str, Any]:
                     ("x", "y", "z"),
                     f"{segment_path}.centerline[{point_index}]",
                 )
+
+    root_extensions = result.get("extensions")
+    if isinstance(root_extensions, MutableMapping) and "facilityNavigation" in root_extensions:
+        from .navigation_contract import (
+            canonicalize_facility_navigation_extension,
+            navigation_identity_index,
+        )
+
+        root_extensions["facilityNavigation"] = (
+            canonicalize_facility_navigation_extension(
+                root_extensions["facilityNavigation"],
+                navigation_identity_index(result),
+            )
+        )
     return result
 
 
@@ -478,6 +492,21 @@ def canonical_layout_bytes(layout: Mapping[str, Any]) -> bytes:
 
     validate_layout(canonical, require_canonical=True)
     return _canonical_value_bytes(canonical)
+
+
+def trusted_canonical_layout_bytes(layout: Mapping[str, Any]) -> bytes:
+    """Serialize a document already canonicalized by the operation kernel.
+
+    This intentionally skips normalization and validation. It is only for
+    immutable, prevalidated operation-plan execution where each preceding
+    batch returned a canonical document.
+    """
+
+    return _canonical_value_bytes(layout)
+
+
+def trusted_canonical_layout_revision(layout: Mapping[str, Any]) -> str:
+    return hashlib.sha256(trusted_canonical_layout_bytes(layout)).hexdigest()
 
 
 def layout_revision(layout: Mapping[str, Any] | bytes | bytearray) -> str:

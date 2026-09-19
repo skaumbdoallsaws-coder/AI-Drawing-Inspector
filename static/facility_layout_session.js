@@ -9,6 +9,7 @@
     'use strict';
 
     const API_VERSION = 1;
+    const DESIGN_EDITOR_FRAME_VERSION = 'facility-design-editor-frame-v1';
     const DEFAULT_DUPLICATE_OFFSET = Object.freeze({ x: 1, y: 0, z: 1 });
     const DEFAULT_QUATERNION = Object.freeze({ x: 0, y: 0, z: 0, w: 1 });
     const ORDINARY_OPERATION_TYPES = Object.freeze([
@@ -27,7 +28,9 @@
         'delete_floor_marking',
         'add_aisle',
         'edit_aisle',
+        'edit_route',
         'delete_route',
+        'set_facility_navigation',
         'clear_layout_contents',
     ]);
     let idempotencySequence = 0;
@@ -35,6 +38,7 @@
     let placementSequence = 0;
     let attachmentSequence = 0;
     let patternSequence = 0;
+    let editorGenerationSequence = 0;
 
     function clone(value) {
         if (value === undefined) return undefined;
@@ -577,6 +581,97 @@
             result[key] = canonicalValue(value[key]);
         });
         return result;
+    }
+
+    function sha256Hex(value) {
+        let text = unescape(encodeURIComponent(String(value)));
+        const maxWord = Math.pow(2, 32);
+        const words = [];
+        const bitLength = text.length * 8;
+        const hash = [];
+        const constants = [];
+        const isComposite = {};
+        let primeCount = 0;
+        for (let candidate = 2; primeCount < 64; candidate += 1) {
+            if (!isComposite[candidate]) {
+                for (let multiple = 0; multiple < 313; multiple += candidate) {
+                    isComposite[multiple] = candidate;
+                }
+                if (primeCount < 8) {
+                    hash[primeCount] =
+                        (Math.pow(candidate, 0.5) * maxWord) | 0;
+                }
+                constants[primeCount] =
+                    (Math.pow(candidate, 1 / 3) * maxWord) | 0;
+                primeCount += 1;
+            }
+        }
+        text += '\x80';
+        while (text.length % 64 - 56) text += '\x00';
+        for (let index = 0; index < text.length; index += 1) {
+            words[index >> 2] = (words[index >> 2] || 0) |
+                text.charCodeAt(index) << ((3 - index) % 4) * 8;
+        }
+        words.push((bitLength / maxWord) | 0);
+        words.push(bitLength);
+        for (let block = 0; block < words.length; block += 16) {
+            const schedule = words.slice(block, block + 16);
+            const oldHash = hash.slice();
+            for (let round = 0; round < 64; round += 1) {
+                const w15 = schedule[round - 15];
+                const w2 = schedule[round - 2];
+                const a = hash[0];
+                const e = hash[4];
+                const word = round < 16 ? (schedule[round] || 0) : (
+                    schedule[round] = (
+                        schedule[round - 16]
+                        + ((w15 >>> 7 | w15 << 25)
+                            ^ (w15 >>> 18 | w15 << 14)
+                            ^ (w15 >>> 3))
+                        + schedule[round - 7]
+                        + ((w2 >>> 17 | w2 << 15)
+                            ^ (w2 >>> 19 | w2 << 13)
+                            ^ (w2 >>> 10))
+                    ) | 0
+                );
+                const temp1 = (
+                    hash[7]
+                    + ((e >>> 6 | e << 26)
+                        ^ (e >>> 11 | e << 21)
+                        ^ (e >>> 25 | e << 7))
+                    + ((e & hash[5]) ^ (~e & hash[6]))
+                    + constants[round]
+                    + word
+                ) | 0;
+                const temp2 = (
+                    ((a >>> 2 | a << 30)
+                        ^ (a >>> 13 | a << 19)
+                        ^ (a >>> 22 | a << 10))
+                    + ((a & hash[1])
+                        ^ (a & hash[2])
+                        ^ (hash[1] & hash[2]))
+                ) | 0;
+                hash.pop();
+                hash.unshift((temp1 + temp2) | 0);
+                hash[4] = (hash[4] + temp1) | 0;
+            }
+            for (let index = 0; index < 8; index += 1) {
+                hash[index] = (hash[index] + oldHash[index]) | 0;
+            }
+        }
+        return hash.map(function (word) {
+            return ('00000000' + (word >>> 0).toString(16)).slice(-8);
+        }).join('');
+    }
+
+    function canonicalHash(value) {
+        return sha256Hex(JSON.stringify(canonicalValue(value)));
+    }
+
+    function nextEditorGenerationId() {
+        editorGenerationSequence += 1;
+        return 'facility-editor-' + Date.now().toString(36)
+            + '-' + editorGenerationSequence.toString(36);
     }
 
     function sameStructuredValue(left, right) {
@@ -1203,6 +1298,10 @@
 
     function createSession(options) {
         const config = options || {};
+        if (config.operationIdNamespace !== undefined
+                && !/^[0-9a-f]{40}$/.test(config.operationIdNamespace)) {
+            throw new TypeError('operationIdNamespace must be a 40-character digest');
+        }
         if (typeof config.previewOperations !== 'function') {
             throw new TypeError('previewOperations transport is required');
         }
@@ -1213,6 +1312,7 @@
         let baseLayout = null;
         let baseRevision = null;
         let draftLayout = null;
+        let draftRevision = null;
         let batches = [];
         let cursor = 0;
         let selectedIds = [];
@@ -1221,10 +1321,22 @@
         let placementAlternatives = null;
         let layoutProposal = null;
         let generatedDraft = null;
+        let designProposalDraft = null;
+        let designAuthorityState = 'ready';
+        let editorGenerationId = nextEditorGenerationId();
         let recentReceiptIds = [];
         let busy = false;
         let conflict = null;
         let lastError = null;
+        // Installed only by an explicitly authorized desktop runtime. Ordinary web
+        // sessions retain their existing transport and editing behavior.
+        let desktopRecovery = null;
+        let desktopSequence = 0;
+        let desktopFreezeOwner = null;
+        let desktopPending = null;
+        let desktopRecoveryOwned = false;
+        let desktopStartupRecoveryPending = false;
+        const retiredDesktopIntents = new Set();
         const listeners = new Set();
 
         function requireLoaded() {
@@ -1232,6 +1344,7 @@
         }
 
         function notify() {
+            if (desktopRecovery) desktopSequence += 1;
             const snapshot = getState();
             listeners.forEach(function (listener) {
                 listener(snapshot);
@@ -1244,6 +1357,7 @@
         }
 
         function assertIdle() {
+            assertDesktopMutable();
             if (busy) {
                 const error = new Error('facility layout session is busy');
                 error.code = 'session_busy';
@@ -1251,8 +1365,521 @@
             }
         }
 
+        function desktopError(code, message) {
+            const error = new Error(message);
+            error.code = code;
+            return error;
+        }
+
+        function assertDesktopMutable() {
+            if (!desktopRecovery) return;
+            if (desktopFreezeOwner) throw desktopError(
+                'facility_desktop_frozen', 'Facility editor is frozen for a lifecycle decision');
+            if (desktopStartupRecoveryPending) throw desktopError(
+                'facility_desktop_recovery_unresolved', 'Startup recovery ownership and transaction inspection is unresolved');
+            if (desktopPending || desktopRecoveryOwned) throw desktopError(
+                'facility_desktop_recovery_unresolved', 'Facility recovery ownership or transaction is unresolved');
+            if (designAuthorityState !== 'ready') throw desktopError(
+                'facility_desktop_recovery_unresolved', 'Facility design authority must be resolved before another mutation');
+        }
+
+        function assertDesktopDispatch() {
+            if (desktopRecovery && desktopFreezeOwner) throw desktopError(
+                'facility_desktop_frozen', 'Lifecycle freeze prevents another transaction phase');
+        }
+
+        function desktopSnapshot() {
+            requireLoaded();
+            const state = getState();
+            return clone({ schemaVersion: 1,
+                rendererGeneration: desktopRecovery.rendererGeneration,
+                stateSequence: desktopSequence,
+                document: { documentId: baseLayout.layoutId, baseRevision: baseRevision,
+                    draftRevision: draftRevision },
+                editorFrame: captureDesignEditorFrame(),
+                designProposalDraft: designProposalDraft,
+                designAuthorityState: designAuthorityState,
+                camera: camera, ghostPlacement: ghost,
+                placementAlternatives: placementAlternatives, layoutProposal: layoutProposal,
+                dirty: state.dirty, busy: busy, conflict: conflict,
+                recoveryOwned: desktopRecoveryOwned,
+                startupRecoveryPending: desktopStartupRecoveryPending,
+                pendingOperations: desktopPending ? [desktopPending] : [],
+                // The session has no background-job registry. Expose its real
+                // busy state separately; the harness must cover other workflows.
+                activeJobs: [],
+            });
+        }
+
+        function beginDesktopOperation(kind, binding) {
+            if (!desktopRecovery) return;
+            assertDesktopMutable();
+            desktopPending = Object.assign({ kind: kind,
+                requestId: createIdempotencyKey(config), phase: 'starting', state: 'pending',
+                startingAuthorityState: designAuthorityState, responses: {} }, clone(binding || {}));
+            notify();
+        }
+
+        async function persistDesktopOperation() {
+            if (!desktopRecovery || !desktopPending) return;
+            await desktopRecovery.persistOperation(Object.assign({}, clone(desktopPending), {
+                snapshot: desktopSnapshot(),
+            }));
+        }
+
+        async function desktopTransport(phase, transport, payload) {
+            if (!desktopRecovery) return transport(payload);
+            if (!desktopPending) throw desktopError(
+                'facility_desktop_operation_missing', 'A transaction requires a recovery identity');
+            assertDesktopDispatch();
+            if (payload.transactionId) desktopPending.transactionId = payload.transactionId;
+            desktopPending.phase = phase + '-pending';
+            desktopPending.state = 'pending';
+            desktopPending.request = clone(payload);
+            notify();
+            // Await the actual durable hook, never an asynchronous Storage shim.
+            await persistDesktopOperation();
+            assertDesktopDispatch();
+            let response;
+            try {
+                response = await transport(payload);
+            } catch (error) {
+                desktopPending.phase = phase + '-unknown';
+                desktopPending.state = 'unknown';
+                notify();
+                try { await persistDesktopOperation(); }
+                catch (checkpointError) { error.recoveryCheckpointError = checkpointError; }
+                throw error;
+            }
+            const envelope = response && response.transaction;
+            const transaction = envelope && envelope.transaction;
+            if (transaction && transaction.transactionId) desktopPending.transactionId = transaction.transactionId;
+            desktopPending.phase = phase + '-received';
+            desktopPending.responses[phase] = clone(response);
+            notify();
+            await persistDesktopOperation();
+            return response;
+        }
+
+        async function completeDesktopOperation(resolution) {
+            if (!desktopRecovery || !desktopPending) return;
+            const operation = desktopPending;
+            const record = Object.assign({}, clone(desktopPending), {
+                resolution: resolution, snapshot: desktopSnapshot(),
+            });
+            await desktopRecovery.clearOperation(record);
+            // The native hook may adopt its independently verified result via
+            // acceptReconciliation while this await is pending.
+            if (desktopPending === null) return;
+            if (desktopPending !== operation) throw desktopError(
+                'facility_desktop_stale_state', 'Recovery owner changed during durable reconciliation');
+            desktopPending = null;
+            desktopRecoveryOwned = false;
+            notify();
+        }
+
+        function installDesktopRecovery(hooks) {
+            if (desktopRecovery) throw desktopError(
+                'facility_desktop_adapter_installed', 'Desktop recovery is already installed');
+            if (busy) throw desktopError('session_busy', 'Install recovery before starting work');
+            if (!hooks || typeof hooks.persistOperation !== 'function'
+                    || typeof hooks.clearOperation !== 'function') {
+                throw new TypeError('Async persistOperation and clearOperation hooks are required');
+            }
+            const recoveryBinding = hooks.binding ? clone(hooks.binding) : null;
+            if (recoveryBinding && Object.entries({ identity: ['backendId', 'storeId', 'principalId'],
+                document: ['tenantId', 'siteId', 'documentId'], owner: ['sessionId', 'ownerId'] }).some(function (entry) {
+                    return !recoveryBinding[entry[0]] || entry[1].some(function (key) {
+                        const value = recoveryBinding[entry[0]][key];
+                        return typeof value !== 'string' || !value || value.length > 512;
+                    });
+                })) throw desktopError('facility_desktop_recovery_binding', 'A complete native recovery binding is required');
+            desktopRecovery = { persistOperation: hooks.persistOperation,
+                clearOperation: hooks.clearOperation, rendererGeneration: nextEditorGenerationId(),
+                allowSave: hooks.allowSave !== false, binding: recoveryBinding };
+            // The desktop runtime starts blocked before native journal inspection.
+            // Ordinary web sessions and default hook installation stay unchanged.
+            desktopStartupRecoveryPending = hooks.startupRecoveryPending === true;
+            if (desktopStartupRecoveryPending) notify();
+            function expected(request, allowBusy) {
+                if (!request || request.expectedRendererGeneration !== desktopRecovery.rendererGeneration
+                        || request.expectedStateSequence !== desktopSequence || (busy && !allowBusy)) {
+                    throw desktopError('facility_desktop_stale_state', 'Recovery target state changed');
+                }
+            }
+            return Object.freeze({
+                snapshot: desktopSnapshot,
+                setStartupRecoveryGate: function (request) {
+                    expected(request, true);
+                    if (typeof request.blocked !== 'boolean') throw desktopError(
+                        'facility_desktop_recovery_binding', 'A native recovery gate decision is required');
+                    if (!request.blocked && (desktopPending || desktopRecoveryOwned)) throw desktopError(
+                        'facility_desktop_recovery_unresolved', 'An unresolved transaction or recovery owner cannot release the startup gate');
+                    if (desktopStartupRecoveryPending !== request.blocked) {
+                        desktopStartupRecoveryPending = request.blocked;
+                        notify();
+                    }
+                    return desktopSnapshot();
+                },
+                freeze: function (request) {
+                    if (!request || typeof request.intentId !== 'string' || !request.intentId
+                            || request.rendererGeneration !== desktopRecovery.rendererGeneration
+                            || request.stateSequence !== desktopSequence) {
+                        throw desktopError('facility_desktop_stale_state', 'Lifecycle freeze targets stale editor state');
+                    }
+                    if (retiredDesktopIntents.has(request.intentId) || retiredDesktopIntents.size >= 1024) throw desktopError(
+                        'facility_desktop_stale_intent', 'A completed lifecycle intent cannot freeze the editor again');
+                    if (desktopFreezeOwner && desktopFreezeOwner !== request.intentId) throw desktopError(
+                        'facility_desktop_freeze_owned', 'Another lifecycle intent owns the freeze');
+                    desktopFreezeOwner = request.intentId;
+                    return desktopSnapshot();
+                },
+                unfreeze: function (request) {
+                    if (request && !desktopFreezeOwner && retiredDesktopIntents.has(request.intentId)) return desktopSnapshot();
+                    if (!request || !desktopFreezeOwner || desktopFreezeOwner !== request.intentId) throw desktopError(
+                        'facility_desktop_freeze_owned', 'Only the owning lifecycle intent can release the freeze');
+                    retiredDesktopIntents.add(request.intentId);
+                    desktopFreezeOwner = null;
+                    return desktopSnapshot();
+                },
+                restoreRecovery: function (request) {
+                    expected(request);
+                    const snapshot = request.snapshot;
+                    const record = request.record;
+                    const localDraft = record && record.payload && record.payload.type === 'draft';
+                    if (!snapshot || snapshot.schemaVersion !== 1 || !snapshot.editorFrame
+                            || !snapshot.document || snapshot.document.documentId !== baseLayout.layoutId
+                            || snapshot.document.baseRevision !== baseRevision
+                            || snapshot.editorFrame.baseRevision !== baseRevision
+                            || !sameStructuredValue(snapshot.editorFrame.baseLayout, baseLayout)
+                            || !Array.isArray(snapshot.pendingOperations)
+                            || snapshot.pendingOperations.length !== (localDraft ? 0 : 1)) {
+                        throw desktopError('facility_desktop_recovery_binding', 'Recovery must match the loaded document and its base');
+                    }
+                    if (localDraft && (!desktopRecovery.binding || record.schemaVersion !== 1
+                            || record.payload.adapter !== 'facility-recovery-v1' || record.handle?.state !== 'reconciled'
+                            || !sameStructuredValue(record.identity, desktopRecovery.binding.identity)
+                            || !sameStructuredValue(record.payload.owner, desktopRecovery.binding.owner)
+                            || Object.keys(desktopRecovery.binding.document).some(function (key) {
+                                return record.document?.[key] !== desktopRecovery.binding.document[key];
+                            })
+                            || record.document.baseRevision !== snapshot.document.baseRevision
+                            || record.document.draftRevision !== snapshot.document.draftRevision
+                            || !sameStructuredValue(record.payload.snapshot, snapshot)
+                            || snapshot.designProposalDraft || snapshot.editorFrame.activeProposal
+                            || desktopPending || desktopRecoveryOwned || getState().dirty)) {
+                        throw desktopError('facility_desktop_recovery_binding', 'Local draft recovery requires the bound native checkpoint and an unmodified current draft');
+                    }
+                    const frame = snapshot.editorFrame;
+                    if (frame.schemaVersion !== DESIGN_EDITOR_FRAME_VERSION
+                            || !frame.draftLayout || frame.draftLayout.layoutId !== baseLayout.layoutId
+                            || !Array.isArray(frame.draftLayout.placements) || !Array.isArray(frame.draftLayout.zones)
+                            || frame.draftRevision !== snapshot.document.draftRevision
+                            || typeof frame.draftRevision !== 'string' || !frame.draftRevision
+                            || typeof frame.editorGenerationId !== 'string' || !frame.editorGenerationId
+                            || !Array.isArray(frame.batches)
+                            || frame.batches.some(batch => !batch || typeof batch.label !== 'string'
+                                || !batch.label || !Array.isArray(batch.operations))
+                            || !Number.isSafeInteger(frame.cursor) || frame.cursor < 0 || frame.cursor > frame.batches.length
+                            || !Array.isArray(frame.selectedIds)
+                            || frame.selectedIds.some(id => typeof id !== 'string' || !id)
+                            || !sameStructuredValue(frame.selectedIds, selectedIdsInLayout(frame.draftLayout, frame.selectedIds))
+                            || !Array.isArray(frame.recentReceiptIds)
+                            || frame.recentReceiptIds.length > 6 || frame.recentReceiptIds.some(id => typeof id !== 'string' || !id)
+                            || typeof snapshot.designAuthorityState !== 'string') {
+                        throw desktopError('facility_desktop_recovery_binding', 'Recovery frame is incomplete or would require lossy repair');
+                    }
+                    const operation = snapshot.pendingOperations[0];
+                    if (!localDraft && (!['apply', 'undo'].includes(operation.kind) || !operation.requestId
+                            || !['pending', 'unknown'].includes(operation.state))) throw desktopError(
+                        'facility_desktop_recovery_binding', 'Recovery transaction identity is incomplete');
+                    if (desktopPending && (desktopPending.requestId !== operation.requestId
+                            || desktopPending.transactionId !== operation.transactionId)) throw desktopError(
+                        'facility_desktop_recovery_binding', 'An unresolved transaction cannot be replaced');
+                    // Native ownership/binding must be verified before invoking
+                    // this installed-only method. It performs no network replay.
+                    restoreDesignEditorFrame(snapshot.editorFrame);
+                    designProposalDraft = clone(snapshot.designProposalDraft);
+                    designAuthorityState = snapshot.designAuthorityState;
+                    camera = clone(snapshot.camera);
+                    ghost = clone(snapshot.ghostPlacement);
+                    placementAlternatives = clone(snapshot.placementAlternatives);
+                    layoutProposal = clone(snapshot.layoutProposal);
+                    conflict = clone(snapshot.conflict);
+                    desktopPending = localDraft ? null : clone(operation);
+                    desktopRecoveryOwned = !localDraft;
+                    notify();
+                    return desktopSnapshot();
+                },
+                acceptReconciliation: function (request) {
+                    expected(request, true);
+                    if (!desktopPending || request.requestId !== desktopPending.requestId
+                            || request.transactionId !== desktopPending.transactionId
+                            || request.kind !== desktopPending.kind
+                            || !['applied', 'undone', 'not-applied'].includes(request.resolution)) {
+                        throw desktopError('facility_desktop_recovery_binding', 'Reconciliation does not match the pending transaction');
+                    }
+                    if (busy && !desktopPending.phase.endsWith('-received')) throw desktopError(
+                        'facility_desktop_recovery_state', 'A transport response is still in flight');
+                    const installed = designProposalDraft
+                        && designProposalDraft.transactionId === desktopPending.transactionId;
+                    if (request.resolution === 'applied' && (desktopPending.kind !== 'apply'
+                            || !installed || !['installation_pending', 'active'].includes(designProposalDraft.status)
+                            || typeof request.transactionRevision !== 'string' || !request.transactionRevision)) {
+                        throw desktopError('facility_desktop_recovery_state', 'The verified Apply result is not installed locally');
+                    }
+                    const undoPrepared = desktopPending.responses && desktopPending.responses['undo-prepare'];
+                    const undoRoot = installed && designProposalDraft.rootUndoFrame
+                        || undoPrepared && undoPrepared.rootUndoFrame;
+                    const completedUndo = !designProposalDraft && desktopPending.responses
+                        && (desktopPending.responses['undo-acknowledge']
+                            || (desktopPending.phase === 'undo-prepare-received' && undoPrepared
+                                && undoPrepared.mode === 'already_undone' && undoPrepared.readiness === 'ready'));
+                    if (request.resolution === 'undone' && (desktopPending.kind !== 'undo'
+                            || (!completedUndo && (!installed || designProposalDraft.status !== 'undo_acknowledgment_pending'))
+                            || !undoRoot || !sameStructuredValue(draftLayout, undoRoot.draftLayout)
+                            || !sameStructuredValue(batches, undoRoot.batches))) {
+                        throw desktopError('facility_desktop_recovery_state', 'The verified Undo root frame is not installed locally');
+                    }
+                    if (request.resolution === 'not-applied' && (desktopPending.kind !== 'apply' || installed)) {
+                        throw desktopError('facility_desktop_recovery_state', 'A locally installed transaction cannot be reported absent');
+                    }
+                    // Native adapter supplies an independently verified result.
+                    // Its durable write already finished. Do not call the async
+                    // clearOperation hook here (that would recurse into native).
+                    if (request.resolution === 'applied') {
+                        designProposalDraft.transactionRevision = request.transactionRevision;
+                        designProposalDraft.status = 'active';
+                        designAuthorityState = 'ready';
+                    } else if (request.resolution === 'undone') {
+                        designProposalDraft = null;
+                        designAuthorityState = 'ready';
+                    } else {
+                        designAuthorityState = 'ready';
+                    }
+                    desktopPending = null;
+                    desktopRecoveryOwned = false;
+                    // The native owner has verified and durably reconciled this
+                    // transaction. Its interruption is no longer a current error.
+                    lastError = null;
+                    notify();
+                    return desktopSnapshot();
+                },
+            });
+        }
+
         function currentOperations() {
             return flattenBatches(batches, cursor);
+        }
+
+        function activeProposalFrame() {
+            if (!designProposalDraft) return null;
+            return {
+                proposalId: designProposalDraft.proposalId,
+                proposalRevision: designProposalDraft.proposalRevision,
+                transactionId: designProposalDraft.transactionId,
+                transactionRevision: designProposalDraft.transactionRevision,
+                transactionBindingRevision:
+                    designProposalDraft.transactionBindingRevision,
+                status: designProposalDraft.status,
+            };
+        }
+
+        function currentCommandJournalHash() {
+            if (designProposalDraft
+                    && designProposalDraft.commandJournalHash) {
+                return designProposalDraft.commandJournalHash;
+            }
+            return canonicalHash({
+                baseRevision: baseRevision,
+                batches: clone(batches),
+                cursor: cursor,
+                generatedDraft: clone(generatedDraft),
+            });
+        }
+
+        function captureDesignEditorFrame() {
+            requireLoaded();
+            return {
+                schemaVersion: DESIGN_EDITOR_FRAME_VERSION,
+                baseLayout: clone(baseLayout),
+                baseRevision: baseRevision,
+                draftLayout: clone(draftLayout),
+                draftRevision: draftRevision,
+                batches: clone(batches),
+                cursor: cursor,
+                selectedIds: selectedIds.slice(),
+                generatedDraft: clone(generatedDraft),
+                recentReceiptIds: recentReceiptIds.slice(),
+                activeProposal: activeProposalFrame(),
+                editorGenerationId: editorGenerationId,
+                commandJournalHash: currentCommandJournalHash(),
+            };
+        }
+
+        function restoreDesignEditorFrame(frame) {
+            const value = object(frame, 'Facility design editor frame');
+            baseLayout = frozenClone(value.baseLayout);
+            baseRevision = nonEmptyString(
+                value.baseRevision,
+                'Facility design base revision'
+            );
+            draftLayout = frozenClone(value.draftLayout);
+            draftRevision = nonEmptyString(
+                value.draftRevision,
+                'Facility design draft revision'
+            );
+            batches = frozenClone(value.batches || []);
+            cursor = Math.max(0, Math.min(
+                batches.length,
+                Number(value.cursor) || 0
+            ));
+            selectedIds = selectedIdsInLayout(
+                draftLayout,
+                Array.isArray(value.selectedIds) ? value.selectedIds : []
+            );
+            generatedDraft = value.generatedDraft
+                ? frozenClone(value.generatedDraft) : null;
+            recentReceiptIds = Array.isArray(value.recentReceiptIds)
+                ? value.recentReceiptIds.slice(-6).map(String) : [];
+            editorGenerationId = nonEmptyString(
+                value.editorGenerationId,
+                'Facility design editor generation ID'
+            );
+            ghost = null;
+            placementAlternatives = null;
+            layoutProposal = null;
+            conflict = null;
+        }
+
+        async function persistDesignUndoRecovery(record) {
+            if (typeof config.persistDesignUndoRecovery !== 'function') return;
+            await config.persistDesignUndoRecovery(clone(record));
+        }
+
+        async function clearDesignUndoRecovery() {
+            if (typeof config.clearDesignUndoRecovery !== 'function') return;
+            await config.clearDesignUndoRecovery();
+        }
+
+        function pendingUndoFromPrepared(prepared, prior) {
+            const envelope = object(
+                prepared.transaction,
+                'Facility design Undo transaction'
+            );
+            const body = envelope.transaction
+                && typeof envelope.transaction === 'object'
+                ? envelope.transaction : {};
+            const binding = body.proposalBinding
+                && typeof body.proposalBinding === 'object'
+                ? body.proposalBinding : {};
+            return {
+                proposalId: nonEmptyString(
+                    binding.proposalId || (prior && prior.proposalId),
+                    'Facility design Undo proposalId'
+                ),
+                proposalRevision: nonEmptyString(
+                    binding.proposalRevision
+                        || (prior && prior.proposalRevision),
+                    'Facility design Undo proposalRevision'
+                ),
+                transactionId: nonEmptyString(
+                    body.transactionId || (prior && prior.transactionId),
+                    'Facility design Undo transactionId'
+                ),
+                transactionRevision: nonEmptyString(
+                    envelope.transactionRevision,
+                    'Facility design Undo transactionRevision'
+                ),
+                transactionBindingRevision:
+                    body.installationBindingTransactionRevision
+                        || (prior && prior.transactionBindingRevision) || null,
+                status: 'undo_acknowledgment_pending',
+                commandJournalHash: null,
+                rootUndoFrame: null,
+                previousInstallationState: prior
+                    && prior.previousInstallationState
+                    ? frozenClone(prior.previousInstallationState) : null,
+                authorityLost: false,
+            };
+        }
+
+        async function acknowledgePendingDesignUndo(pending, rootFrame) {
+            if (typeof config.acknowledgeDesignUndo !== 'function') {
+                throw new Error(
+                    'acknowledgeDesignUndo transport is not configured'
+                );
+            }
+            await desktopTransport('undo-acknowledge', config.acknowledgeDesignUndo, {
+                transactionId: pending.transactionId,
+                expectedTransactionRevision: pending.transactionRevision,
+                observedDraftRevision: rootFrame.draftRevision,
+                observedCommandJournalHash: rootFrame.commandJournalHash,
+            });
+            designProposalDraft = null;
+            designAuthorityState = 'ready';
+            await clearDesignUndoRecovery();
+            await completeDesktopOperation('undone');
+        }
+
+        async function installPreparedDesignUndo(prepared, prior) {
+            const rootFrame = object(
+                prepared.rootUndoFrame,
+                'Facility design root Undo frame'
+            );
+            restoreDesignEditorFrame(rootFrame);
+            if (prepared.mode === 'already_undone'
+                    && prepared.readiness === 'ready') {
+                designProposalDraft = null;
+                designAuthorityState = 'ready';
+                await clearDesignUndoRecovery();
+                await completeDesktopOperation('undone');
+                return;
+            }
+            if (prepared.mode === 'local_only'
+                    && prepared.readiness === 'stale_local_restore') {
+                designProposalDraft = null;
+                designAuthorityState = 'stale_local_restore';
+                if (generatedDraft) {
+                    const restoredGeneration = clone(generatedDraft);
+                    restoredGeneration.authorityLost = true;
+                    generatedDraft = frozenClone(restoredGeneration);
+                }
+                await clearDesignUndoRecovery();
+                await completeDesktopOperation('undone');
+                return;
+            }
+            if (prepared.mode !== 'coordinated') {
+                const error = new Error(
+                    'Facility design Undo returned an unsupported recovery mode'
+                );
+                error.code = 'facility_design_undo_mode_invalid';
+                throw error;
+            }
+            const pending = pendingUndoFromPrepared(prepared, prior);
+            pending.commandJournalHash = rootFrame.commandJournalHash;
+            pending.rootUndoFrame = frozenClone(rootFrame);
+            designProposalDraft = pending;
+            designAuthorityState = 'undo_acknowledgment_pending';
+            await persistDesignUndoRecovery({
+                schemaVersion: 1,
+                phase: 'acknowledgment_pending',
+                transactionId: pending.transactionId,
+                expectedTransactionRevision: pending.transactionRevision,
+            });
+            await acknowledgePendingDesignUndo(pending, rootFrame);
+        }
+
+        function designInstallationFingerprint(input) {
+            return canonicalHash({
+                commandJournalHash: input.commandJournalHash,
+                draftRevision: input.draftRevision,
+                editorGenerationId: input.editorGenerationId,
+                proposalId: input.proposalId || null,
+                proposalRevision: input.proposalRevision || null,
+                transactionBindingRevision:
+                    input.transactionBindingRevision || null,
+            });
         }
 
         function rememberReceipt(receipt) {
@@ -1276,6 +1903,7 @@
             baseLayout = layout;
             baseRevision = revision || baseRevision;
             draftLayout = layout;
+            draftRevision = revision || canonicalHash(layout);
             batches = [];
             cursor = 0;
             selectedIds = selectedIdsInLayout(layout, selectedIds);
@@ -1283,6 +1911,9 @@
             placementAlternatives = null;
             layoutProposal = null;
             generatedDraft = null;
+            designProposalDraft = null;
+            designAuthorityState = 'ready';
+            editorGenerationId = nextEditorGenerationId();
             conflict = null;
             lastError = null;
         }
@@ -1295,11 +1926,41 @@
             return {
                 receipt: receipt,
                 layout: frozenClone(layoutFromReceipt(receipt, 'preview receipt')),
+                revision: revisionFromReceipt(receipt, false),
                 createdIds: createdIdsFromReceipt(receipt),
             };
         }
 
-        async function commitGesture(label, operations, selectionPolicy) {
+        const constructionInstallations = new Map();
+
+        async function installConstructionApproval(approval) {
+            requireLoaded();
+            assertIdle();
+            const binding = approval && approval.binding || {};
+            const identifier = approval && approval.approvalId;
+            const signature = canonicalHash(approval);
+            const prior = constructionInstallations.get(identifier);
+            if (prior && prior.signature === signature && prior.generation === editorGenerationId
+                    && draftRevision === approval.candidateRevision) return getState();
+            if (!/^fca-[0-9a-f]{64}$/.test(identifier || '') || prior
+                    || binding.editorGenerationId !== editorGenerationId
+                    || binding.expectedDraftRevision !== draftRevision
+                    || approval.baseRevision !== baseRevision || cursor !== 0 || batches.length !== 0
+                    || generatedDraft || designProposalDraft
+                    || (config.sessionId && binding.sessionId !== config.sessionId)) {
+                const error = new Error('Construction approval is stale or belongs to another editor frame');
+                error.code = 'facility_command_stale';
+                throw error;
+            }
+            await commitGesture('Apply Sage construction', approval.operations, 'created', {
+                candidateRevision: approval.candidateRevision,
+                editorGenerationId: editorGenerationId,
+            });
+            constructionInstallations.set(identifier, {signature: signature, generation: editorGenerationId});
+            return getState();
+        }
+
+        async function commitGesture(label, operations, selectionPolicy, expectedResult) {
             requireLoaded();
             assertIdle();
             if (generatedDraft) {
@@ -1307,6 +1968,13 @@
                     'Save or undo the generated Facility draft before editing it'
                 );
                 error.code = 'generated_draft_review_required';
+                throw error;
+            }
+            if (designProposalDraft) {
+                const error = new Error(
+                    'Save or undo the Facility design proposal before editing it'
+                );
+                error.code = 'design_proposal_review_required';
                 throw error;
             }
             if (!Array.isArray(operations) || !operations.length) {
@@ -1325,8 +1993,16 @@
             setBusy(true);
             try {
                 const result = await preview(candidateOperations);
+                if (expectedResult && (result.revision !== expectedResult.candidateRevision
+                        || editorGenerationId !== expectedResult.editorGenerationId)) {
+                    const error = new Error('Construction result no longer matches the approved preview');
+                    error.code = 'facility_command_stale';
+                    throw error;
+                }
                 if (result.receipt.changed === false) {
                     draftLayout = result.layout;
+                    draftRevision = result.revision
+                        || canonicalHash(result.layout);
                     selectedIds = selectedIdsInLayout(
                         draftLayout,
                         selectedIds
@@ -1341,6 +2017,8 @@
                 batches = candidateBatches;
                 cursor = batches.length;
                 draftLayout = result.layout;
+                draftRevision = result.revision || canonicalHash(result.layout);
+                editorGenerationId = nextEditorGenerationId();
                 conflict = null;
                 lastError = null;
                 if (selectionPolicy === 'created') {
@@ -1382,6 +2060,8 @@
                 const result = await preview(flattenBatches(batches, normalizedCursor));
                 cursor = normalizedCursor;
                 draftLayout = result.layout;
+                draftRevision = result.revision || canonicalHash(result.layout);
+                editorGenerationId = nextEditorGenerationId();
                 selectedIds = selectedIdsInLayout(draftLayout, selectedIds);
                 ghost = null;
                 placementAlternatives = null;
@@ -1401,6 +2081,7 @@
 
         function getState() {
             const hasGeneratedDraft = Boolean(generatedDraft);
+            const hasDesignProposal = Boolean(designProposalDraft);
             return {
                 apiVersion: API_VERSION,
                 loaded: Boolean(baseLayout),
@@ -1416,13 +2097,31 @@
                     };
                 }),
                 historyCursor: cursor,
-                canUndo: (cursor > 0 || hasGeneratedDraft) && !busy,
-                canRedo: !hasGeneratedDraft && cursor < batches.length && !busy,
-                dirty: cursor > 0 || hasGeneratedDraft,
-                canSave: (cursor > 0 || hasGeneratedDraft)
+                canUndo: (cursor > 0 || hasGeneratedDraft || hasDesignProposal)
+                    && !busy && (!desktopRecovery || (designAuthorityState === 'ready' && !desktopFreezeOwner && !desktopPending && !desktopRecoveryOwned && !desktopStartupRecoveryPending)),
+                canRedo: !hasGeneratedDraft && !hasDesignProposal
+                    && cursor < batches.length && !busy
+                    && (!desktopRecovery || (designAuthorityState === 'ready' && !desktopFreezeOwner && !desktopPending && !desktopRecoveryOwned && !desktopStartupRecoveryPending)),
+                dirty: cursor > 0 || hasGeneratedDraft || hasDesignProposal,
+                canSave: (cursor > 0 || hasGeneratedDraft || hasDesignProposal)
+                    && designAuthorityState === 'ready'
+                    && (!desktopRecovery || desktopRecovery.allowSave)
+                    && (!desktopRecovery || (!busy && !desktopFreezeOwner && !desktopPending && !desktopRecoveryOwned && !desktopStartupRecoveryPending))
                     && (!hasGeneratedDraft
                         || generatedDraft.saveEligibility === 'eligible'),
                 generatedDraft: clone(generatedDraft),
+                designProposalDraft: designProposalDraft ? {
+                    proposalId: designProposalDraft.proposalId,
+                    proposalRevision: designProposalDraft.proposalRevision,
+                    transactionId: designProposalDraft.transactionId,
+                    transactionRevision: designProposalDraft.transactionRevision,
+                    status: designProposalDraft.status,
+                    authorityLost: designProposalDraft.authorityLost === true,
+                } : null,
+                designAuthorityState: designAuthorityState,
+                draftRevision: draftRevision,
+                editorGenerationId: editorGenerationId,
+                commandJournalHash: currentCommandJournalHash(),
                 busy: busy,
                 conflict: clone(conflict),
                 selection: selectedIds.slice(),
@@ -1475,12 +2174,14 @@
         }
 
         function setCameraState(nextCamera) {
+            assertDesktopMutable();
             camera = nextCamera === null ? null : frozenClone(object(nextCamera, 'camera'));
             notify();
             return clone(camera);
         }
 
         function select(id, selectionOptions) {
+            assertDesktopMutable();
             requireLoaded();
             const value = nonEmptyString(id, 'selection ID');
             const opts = selectionOptions || {};
@@ -1500,6 +2201,7 @@
         }
 
         function selectMany(ids, selectionOptions) {
+            assertDesktopMutable();
             requireLoaded();
             if (!Array.isArray(ids)) throw new TypeError('selection IDs must be an array');
             const valid = selectedIdsInLayout(draftLayout, ids.filter(function (id) {
@@ -1515,12 +2217,14 @@
         }
 
         function clearSelection() {
+            assertDesktopMutable();
             selectedIds = [];
             notify();
             return getState();
         }
 
         function beginGhostPlacement(asset) {
+            assertDesktopMutable();
             requireLoaded();
             object(asset, 'ghost asset');
             placementAlternatives = null;
@@ -1542,6 +2246,7 @@
         }
 
         function updateGhostPlacement(position, valid) {
+            assertDesktopMutable();
             if (!ghost) throw new Error('ghost placement is not active');
             ghost = {
                 ...ghost,
@@ -1553,6 +2258,7 @@
         }
 
         function cancelGhostPlacement() {
+            assertDesktopMutable();
             ghost = null;
             placementAlternatives = null;
             notify();
@@ -1909,6 +2615,12 @@
             draftLayout = frozenClone(
                 object(value.draftLayout, 'generated Facility draft layout')
             );
+            draftRevision = value.draftLayoutRevision
+                ? nonEmptyString(
+                    value.draftLayoutRevision,
+                    'generation draftLayoutRevision'
+                )
+                : canonicalHash(draftLayout);
             batches = [];
             cursor = 0;
             selectedIds = selectedIdsInLayout(draftLayout, selectedIds);
@@ -1929,12 +2641,343 @@
                 ),
                 writable: value.writable === true,
                 prototypeMode: value.prototypeMode === true,
+                workflowScope: value.workflowScope || null,
+                fullFactoryProgramRevision:
+                    value.fullFactoryProgramRevision || null,
                 receiptChain: Array.isArray(value.receiptChain)
                     ? value.receiptChain.map(String) : [],
             });
+            designProposalDraft = null;
+            editorGenerationId = nextEditorGenerationId();
             conflict = null;
             lastError = null;
             notify();
+            return getState();
+        }
+
+        async function applyDesignProposal(proposalReference) {
+            requireLoaded();
+            assertIdle();
+            if (designAuthorityState === 'stale_local_restore') {
+                const error = new Error(
+                    'Reload or rebind the Facility draft before applying another design proposal'
+                );
+                error.code = 'facility_design_base_rebind_required';
+                throw error;
+            }
+            const reference = object(
+                proposalReference,
+                'Facility design proposal reference'
+            );
+            const proposalId = nonEmptyString(
+                reference.proposalId,
+                'Facility design proposalId'
+            );
+            const proposalRevision = nonEmptyString(
+                reference.proposalRevision,
+                'Facility design proposalRevision'
+            );
+            [
+                'prepareDesignProposalApply',
+                'commitDesignProposalApply',
+                'acknowledgeDesignProposalApply',
+                'recoverDesignProposalApply',
+            ].forEach(function (name) {
+                if (typeof config[name] !== 'function') {
+                    throw new Error(name + ' transport is not configured');
+                }
+            });
+            const previousFrame = captureDesignEditorFrame();
+            const previousDesignProposal = designProposalDraft;
+            const rootFrame = designProposalDraft
+                ? clone(designProposalDraft.rootUndoFrame)
+                : clone(previousFrame);
+            const expectedEditorGenerationId = nextEditorGenerationId();
+            const expectedCommandJournalHash = canonicalHash({
+                rootCommandJournalHash: rootFrame.commandJournalHash,
+                proposalId: proposalId,
+                proposalRevision: proposalRevision,
+            });
+            let prepared = null;
+            let committed = null;
+            beginDesktopOperation('apply', { proposalId: proposalId, proposalRevision: proposalRevision });
+            setBusy(true);
+            try {
+                const preparePayload = {
+                    proposalId: proposalId,
+                    proposalRevision: proposalRevision,
+                    rootUndoFrame: rootFrame,
+                    previousInstallationState: previousFrame,
+                    expectedResultEditorGenerationId:
+                        expectedEditorGenerationId,
+                    expectedResultCommandJournalHash:
+                        expectedCommandJournalHash,
+                };
+                if (designProposalDraft) {
+                    preparePayload.transactionId =
+                        designProposalDraft.transactionId;
+                    preparePayload.expectedTransactionRevision =
+                        designProposalDraft.transactionRevision;
+                }
+                prepared = await desktopTransport('apply-prepare', config.prepareDesignProposalApply, preparePayload);
+                const preparedEnvelope = object(
+                    prepared.transaction,
+                    'Facility design prepared transaction'
+                );
+                const preparedBody = object(
+                    preparedEnvelope.transaction,
+                    'Facility design prepared transaction body'
+                );
+                const transactionId = nonEmptyString(
+                    preparedBody.transactionId,
+                    'Facility design transactionId'
+                );
+                const transactionBindingRevision = nonEmptyString(
+                    prepared.transactionBindingRevision,
+                    'Facility design transaction binding revision'
+                );
+                const candidateLayout = frozenClone(object(
+                    prepared.candidateLayout,
+                    'Facility design candidate layout'
+                ));
+                const candidateOperations = ordinaryOperations(
+                    prepared.candidateOperations,
+                    'Facility design candidate operations'
+                );
+                const resultDraftRevision = nonEmptyString(
+                    preparedBody.proposalBinding.resultLayoutRevision,
+                    'Facility design result layout revision'
+                );
+                const actualFingerprint = designInstallationFingerprint({
+                    draftRevision: resultDraftRevision,
+                    proposalId: proposalId,
+                    proposalRevision: proposalRevision,
+                    transactionBindingRevision: transactionBindingRevision,
+                    editorGenerationId: expectedEditorGenerationId,
+                    commandJournalHash: expectedCommandJournalHash,
+                });
+                if (actualFingerprint !== prepared.expectedInstallationFingerprint) {
+                    const error = new Error(
+                        'Facility design installation fingerprint did not match'
+                    );
+                    error.code = 'facility_design_installation_fingerprint_mismatch';
+                    error.details = {
+                        expectedInstallationFingerprint:
+                            prepared.expectedInstallationFingerprint,
+                        observedInstallationFingerprint: actualFingerprint,
+                        fingerprintInput: {
+                            draftRevision: resultDraftRevision,
+                            proposalId: proposalId,
+                            proposalRevision: proposalRevision,
+                            transactionBindingRevision:
+                                transactionBindingRevision,
+                            editorGenerationId: expectedEditorGenerationId,
+                            commandJournalHash: expectedCommandJournalHash,
+                        },
+                    };
+                    throw error;
+                }
+                const adoption = object(
+                    prepared.adoption,
+                    'Facility design adoption'
+                );
+                const adoptionToken = nonEmptyString(
+                    adoption.adoptionToken,
+                    'Facility design adoption token'
+                );
+                committed = await desktopTransport('apply-commit', config.commitDesignProposalApply, {
+                    transactionId: transactionId,
+                    expectedTransactionRevision:
+                        preparedEnvelope.transactionRevision,
+                    adoptionToken: adoptionToken,
+                });
+                assertDesktopDispatch();
+                const rootBatches = clone(rootFrame.batches || []).slice(
+                    0,
+                    Number(rootFrame.cursor) || 0
+                );
+                batches = frozenClone(rootBatches.concat([{
+                    label: 'Apply Facility design proposal',
+                    operations: clone(candidateOperations),
+                }]));
+                cursor = batches.length;
+                draftLayout = candidateLayout;
+                draftRevision = resultDraftRevision;
+                selectedIds = selectedIdsInLayout(
+                    draftLayout,
+                    previousFrame.selectedIds || []
+                );
+                generatedDraft = null;
+                editorGenerationId = expectedEditorGenerationId;
+                designProposalDraft = {
+                    proposalId: proposalId,
+                    proposalRevision: proposalRevision,
+                    transactionId: transactionId,
+                    transactionRevision:
+                        committed.transaction.transactionRevision,
+                    transactionBindingRevision: transactionBindingRevision,
+                    status: 'installation_pending',
+                    commandJournalHash: expectedCommandJournalHash,
+                    rootUndoFrame: frozenClone(rootFrame),
+                    previousInstallationState: frozenClone(previousFrame),
+                    authorityLost: false,
+                };
+                ghost = null;
+                placementAlternatives = null;
+                layoutProposal = null;
+                const acknowledged = await desktopTransport('apply-acknowledge', config.acknowledgeDesignProposalApply, {
+                    transactionId: transactionId,
+                    expectedTransactionRevision:
+                        committed.transaction.transactionRevision,
+                    adoptionToken: adoptionToken,
+                    observedInstallationFingerprint: actualFingerprint,
+                });
+                designProposalDraft.transactionRevision =
+                    acknowledged.transaction.transactionRevision;
+                designProposalDraft.status = 'active';
+                conflict = null;
+                lastError = null;
+                await completeDesktopOperation('applied');
+            } catch (error) {
+                if (desktopRecovery) {
+                    // A lost response is not permission to roll back or retry.
+                    // Keep the installed candidate/root frame and operation ID
+                    // until the native owner reconciles the backend transaction.
+                    designAuthorityState = 'desktop_recovery_required';
+                    lastError = error;
+                    try { await persistDesktopOperation(); }
+                    catch (checkpointError) { error.recoveryCheckpointError = checkpointError; }
+                    throw error;
+                }
+                restoreDesignEditorFrame(previousFrame);
+                designProposalDraft = previousDesignProposal;
+                if (committed && prepared) {
+                    const committedEnvelope = committed.transaction;
+                    const priorProposal = previousFrame.activeProposal;
+                    const observedPriorFingerprint =
+                        designInstallationFingerprint({
+                            draftRevision: previousFrame.draftRevision,
+                            proposalId: priorProposal
+                                && priorProposal.proposalId,
+                            proposalRevision: priorProposal
+                                && priorProposal.proposalRevision,
+                            transactionBindingRevision: priorProposal
+                                && priorProposal.transactionBindingRevision,
+                            editorGenerationId:
+                                previousFrame.editorGenerationId,
+                            commandJournalHash:
+                                previousFrame.commandJournalHash,
+                        });
+                    try {
+                        await config.recoverDesignProposalApply({
+                            transactionId:
+                                committedEnvelope.transaction.transactionId,
+                            expectedTransactionRevision:
+                                committedEnvelope.transactionRevision,
+                            observedInstallationFingerprint:
+                                observedPriorFingerprint,
+                        });
+                    } catch (_recoveryError) {
+                        error.recoveryError = _recoveryError;
+                    }
+                }
+                lastError = error;
+                throw error;
+            } finally {
+                setBusy(false);
+            }
+            return getState();
+        }
+
+        async function undoDesignProposal() {
+            requireLoaded();
+            assertIdle();
+            if (!designProposalDraft) return getState();
+            if (typeof config.prepareDesignUndo !== 'function') {
+                throw new Error('prepareDesignUndo transport is not configured');
+            }
+            const pending = designProposalDraft;
+            beginDesktopOperation('undo', { transactionId: pending.transactionId });
+            setBusy(true);
+            try {
+                if (pending.status === 'undo_acknowledgment_pending') {
+                    await acknowledgePendingDesignUndo(
+                        pending,
+                        object(
+                            pending.rootUndoFrame,
+                            'Facility design root Undo frame'
+                        )
+                    );
+                    conflict = null;
+                    lastError = null;
+                    return getState();
+                }
+                await persistDesignUndoRecovery({
+                    schemaVersion: 1,
+                    phase: 'preparing',
+                    transactionId: pending.transactionId,
+                    expectedTransactionRevision:
+                        pending.transactionRevision,
+                });
+                const prepared = await desktopTransport('undo-prepare', config.prepareDesignUndo, {
+                    transactionId: pending.transactionId,
+                    expectedTransactionRevision:
+                        pending.transactionRevision,
+                });
+                assertDesktopDispatch();
+                await installPreparedDesignUndo(prepared, pending);
+                conflict = null;
+                lastError = null;
+            } catch (error) {
+                lastError = error;
+                throw error;
+            } finally {
+                setBusy(false);
+            }
+            return getState();
+        }
+
+        async function resumeDesignUndoRecovery(record) {
+            requireLoaded();
+            assertIdle();
+            if (typeof config.prepareDesignUndo !== 'function') {
+                throw new Error('prepareDesignUndo transport is not configured');
+            }
+            let recovery = record;
+            if (recovery === undefined
+                    && typeof config.loadDesignUndoRecovery === 'function') {
+                recovery = await config.loadDesignUndoRecovery();
+            }
+            if (!recovery) return getState();
+            const value = object(
+                recovery,
+                'Facility design Undo recovery record'
+            );
+            const transactionId = nonEmptyString(
+                value.transactionId,
+                'Facility design Undo recovery transactionId'
+            );
+            const transactionRevision = nonEmptyString(
+                value.expectedTransactionRevision,
+                'Facility design Undo recovery transactionRevision'
+            );
+            beginDesktopOperation('undo', { transactionId: transactionId });
+            setBusy(true);
+            try {
+                const prepared = await desktopTransport('undo-prepare', config.prepareDesignUndo, {
+                    transactionId: transactionId,
+                    expectedTransactionRevision: transactionRevision,
+                });
+                assertDesktopDispatch();
+                await installPreparedDesignUndo(prepared, null);
+                conflict = null;
+                lastError = null;
+            } catch (error) {
+                lastError = error;
+                throw error;
+            } finally {
+                setBusy(false);
+            }
             return getState();
         }
 
@@ -2273,19 +3316,19 @@
         function nextStackId(sourceStackId) {
             stackSequence += 1;
             return String(sourceStackId || 'stack') + ':copy:'
-                + Date.now().toString(36) + ':' + stackSequence.toString(36);
+                + (config.operationIdNamespace || Date.now().toString(36)) + ':' + stackSequence.toString(36);
         }
 
         function nextPlacementId() {
             placementSequence += 1;
-            return 'pl-surface-copy-' + Date.now().toString(36) + '-'
+            return 'pl-surface-copy-' + (config.operationIdNamespace || Date.now().toString(36)) + '-'
                 + placementSequence.toString(36);
         }
 
         function nextAttachmentId(sourceAttachmentId) {
             attachmentSequence += 1;
             return String(sourceAttachmentId || 'surface') + ':copy:'
-                + Date.now().toString(36) + ':'
+                + (config.operationIdNamespace || Date.now().toString(36)) + ':'
                 + attachmentSequence.toString(36);
         }
 
@@ -3235,7 +4278,7 @@
             }
             const provenance = {
                 schemaVersion: 1,
-                provenanceId: 'layout-pattern:' + Date.now().toString(36)
+                provenanceId: 'layout-pattern:' + (config.operationIdNamespace || Date.now().toString(36))
                     + ':' + patternSequence.toString(36),
                 command: command,
                 authoredStrategy: result.mode === 'cell-layout'
@@ -3698,14 +4741,41 @@
             }], [id]);
         }
 
+        async function setFacilityNavigation(facilityNavigation) {
+            requireLoaded();
+            return commitGesture('Edit motion path', [{
+                op: 'set_facility_navigation',
+                authoringSource: 'plan_pointer',
+                facilityNavigation: clone(object(
+                    facilityNavigation,
+                    'facilityNavigation'
+                )),
+            }], 'preserve');
+        }
+
+        async function proposeFacilityNavigation(facilityNavigation) {
+            requireLoaded();
+            return commitGesture('Propose navigation intent', [{
+                op: 'set_facility_navigation',
+                authoringSource: 'sage_semantic',
+                facilityNavigation: clone(object(
+                    facilityNavigation,
+                    'facilityNavigation'
+                )),
+            }], 'preserve');
+        }
+
         async function undo() {
+            if (designProposalDraft) {
+                return undoDesignProposal();
+            }
             if (generatedDraft) {
                 requireLoaded();
                 assertIdle();
                 const pending = clone(generatedDraft);
                 setBusy(true);
                 try {
-                    if (pending.writable) {
+                    if (pending.writable && pending.authorityLost !== true) {
                         if (typeof config.undoGenerationDraft !== 'function') {
                             throw new Error(
                                 'Generated Facility undo transport is not configured'
@@ -3716,7 +4786,9 @@
                         });
                     }
                     draftLayout = baseLayout;
+                    draftRevision = baseRevision;
                     generatedDraft = null;
+                    editorGenerationId = nextEditorGenerationId();
                     selectedIds = selectedIdsInLayout(
                         draftLayout, selectedIds
                     );
@@ -3741,8 +4813,62 @@
         }
 
         async function save() {
+            if (desktopRecovery && !desktopRecovery.allowSave) throw desktopError(
+                'facility_desktop_save_disabled', 'Save is disabled in this desktop acceptance profile');
             requireLoaded();
+            if (designAuthorityState === 'stale_local_restore') {
+                const error = new Error(
+                    'Reload or rebind the Facility draft before saving it'
+                );
+                error.code = 'facility_design_base_rebind_required';
+                throw error;
+            }
             assertIdle();
+            // A lost native reply can leave no pending handle in this renderer
+            // while its design authority still requires recovery. Enforce the
+            // same authority requirement as canSave before every transport.
+            if (designAuthorityState !== 'ready') {
+                throw desktopError('facility_design_authority_unresolved',
+                    'Resolve Facility design authority before saving it');
+            }
+            if (designProposalDraft) {
+                if (typeof config.saveDesignProposalDraft !== 'function') {
+                    throw new Error(
+                        'Facility design save transport is not configured'
+                    );
+                }
+                const pending = clone(designProposalDraft);
+                let savedDesign = null;
+                setBusy(true);
+                try {
+                    savedDesign = await config.saveDesignProposalDraft({
+                        transactionId: pending.transactionId,
+                        expectedTransactionRevision:
+                            pending.transactionRevision,
+                        observedDraftRevision: draftRevision,
+                        observedCommandJournalHash:
+                            currentCommandJournalHash(),
+                        explicitApproval: true,
+                    });
+                    const savedSelection = selectedIds.slice();
+                    installReceipt(savedDesign.savedLayout, true);
+                    selectedIds = selectedIdsInLayout(
+                        draftLayout, savedSelection
+                    );
+                } catch (error) {
+                    const stale = conflictDetails(error);
+                    if (stale) conflict = stale;
+                    lastError = error;
+                    throw error;
+                } finally {
+                    setBusy(false);
+                }
+                return {
+                    state: getState(),
+                    receipt: clone(savedDesign.saveReceipt),
+                    designTransaction: clone(savedDesign.transaction),
+                };
+            }
             if (generatedDraft) {
                 if (generatedDraft.saveEligibility !== 'eligible') {
                     const error = new Error(
@@ -3818,13 +4944,22 @@
                 error.code = 'generated_draft_undo_required';
                 throw error;
             }
+            if (designProposalDraft) {
+                const error = new Error(
+                    'Use Undo to restore the pre-proposal Facility draft'
+                );
+                error.code = 'design_proposal_undo_required';
+                throw error;
+            }
             draftLayout = baseLayout;
+            draftRevision = baseRevision;
             batches = [];
             cursor = 0;
             selectedIds = selectedIdsInLayout(draftLayout, selectedIds);
             ghost = null;
             placementAlternatives = null;
             layoutProposal = null;
+            editorGenerationId = nextEditorGenerationId();
             conflict = null;
             lastError = null;
             notify();
@@ -3839,6 +4974,8 @@
             discardAndReload: reload,
             getState: getState,
             getOperations: currentOperations,
+            captureDesignEditorFrame: captureDesignEditorFrame,
+            installDesktopRecovery: installDesktopRecovery,
             subscribe: subscribe,
             setCameraState: setCameraState,
             select: select,
@@ -3856,6 +4993,10 @@
             requestLayoutProposal: requestLayoutProposal,
             installLayoutProposal: installLayoutProposal,
             installGenerationDraft: installGenerationDraft,
+            applyDesignProposal: applyDesignProposal,
+            installConstructionApproval: installConstructionApproval,
+            undoDesignProposal: undoDesignProposal,
+            resumeDesignUndoRecovery: resumeDesignUndoRecovery,
             cycleLayoutProposal: cycleLayoutProposal,
             dismissLayoutProposal: dismissLayoutProposal,
             approveAndApplyLayoutProposal: approveAndApplyLayoutProposal,
@@ -3886,6 +5027,8 @@
             editFloorMarking: editFloorMarking,
             createAisle: createAisle,
             editAisle: editAisle,
+            setFacilityNavigation: setFacilityNavigation,
+            proposeFacilityNavigation: proposeFacilityNavigation,
             undo: undo,
             redo: redo,
             save: save,

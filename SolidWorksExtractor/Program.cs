@@ -58,6 +58,8 @@ namespace SolidWorksExtractor
             string outputFile = null;
             string batchPartsFolder = null;
             string batchOutputFolder = null;
+            string occurrenceMapFile = null;
+            bool exportIdentityMasks = false;
             var drawingTargetViews = new List<string>();
             bool useActive = false;
             bool startIfNotRunning = false;
@@ -155,6 +157,11 @@ namespace SolidWorksExtractor
                 {
                     options.ExportGlb = true;
                 }
+                else if (arg == "--native-glb")
+                {
+                    options.ExportGlb = true;
+                    options.NativeGlb = true;
+                }
                 else if (arg == "--part-glb")
                 {
                     options.ExportPartGlb = true;
@@ -166,6 +173,15 @@ namespace SolidWorksExtractor
                 else if (arg == "--fea")
                 {
                     options.ExportFea = true;
+                }
+                else if (arg == "--identity-masks")
+                {
+                    exportIdentityMasks = true;
+                }
+                else if (arg == "--occurrence-map")
+                {
+                    if (i + 1 < args.Length)
+                        occurrenceMapFile = args[++i];
                 }
                 else if (!arg.StartsWith("-") && inputFile == null)
                 {
@@ -276,8 +292,25 @@ namespace SolidWorksExtractor
                             }
                         }
 
+                        // Native Save As is a bounded fallback for visually
+                        // complex library parts that exceed custom tessellation.
+                        if (options.ExportGlb && options.NativeGlb)
+                        {
+                            Console.WriteLine("  - Exporting native SolidWorks GLB 3D model...");
+                            string glbOutputDir = Path.GetDirectoryName(outputFile);
+                            string glbPartNumber = GetDeterministicPartNumber(partData, Path.GetFileName(doc.GetPathName()));
+                            string glbPath = ExportNativeGlb(doc, glbOutputDir, glbPartNumber);
+                            if (glbPath != null)
+                            {
+                                Console.WriteLine($"    Native part GLB saved: {Path.GetFileName(glbPath)}");
+                            }
+                            else
+                            {
+                                Console.WriteLine("    Warning: Native part GLB export produced no data");
+                            }
+                        }
                         // Export per-feature colored GLB
-                        if (options.ExportPartGlb)
+                        else if (options.ExportPartGlb)
                         {
                             Console.WriteLine("  - Exporting per-feature colored GLB...");
                             IPartDoc partDocInterface = doc as IPartDoc;
@@ -419,15 +452,81 @@ namespace SolidWorksExtractor
                             }
                         }
 
+                        if (exportIdentityMasks)
+                        {
+                            if (string.IsNullOrWhiteSpace(occurrenceMapFile))
+                                throw new InvalidOperationException(
+                                    "--identity-masks requires --occurrence-map <tsv>.");
+
+                            // Appearance and display-mode changes are not reliably
+                            // rendered by SaveBMP while CommandInProgress is true.
+                            connection.EnableBatchMode(false);
+                            int sharedColorPreference =
+                                (int)swUserPreferenceToggle_e.swColorsWireframeHLRShadedSame;
+                            bool sharedColorWasEnabled =
+                                connection.Application.GetUserPreferenceToggle(
+                                    sharedColorPreference);
+                            connection.Application.SetUserPreferenceToggle(
+                                sharedColorPreference, false);
+                            try
+                            {
+                                string viewOutputDir = Path.GetDirectoryName(outputFile);
+                                string assyName = assemblyData.Identity.AssemblyNumber
+                                    ?? Path.GetFileNameWithoutExtension(doc.GetPathName());
+                                var occurrenceMap =
+                                    OccurrenceMaskColorizer.ReadOccurrenceMap(occurrenceMapFile);
+                                var maskColorizer = new OccurrenceMaskColorizer(occurrenceMap);
+                                IReadOnlyList<OccurrenceMaskEntry> maskEntries = null;
+                                try
+                                {
+                                    Console.WriteLine("  - Applying occurrence identity colors...");
+                                    maskEntries = maskColorizer.Apply(assyDoc);
+                                    doc.GraphicsRedraw2();
+                                    var maskExporter = new ViewExporter();
+                                    maskExporter.ExportViews(
+                                        doc,
+                                        viewOutputDir,
+                                        assyName + "_identity_mask",
+                                        useShaded: true);
+                                    string legendPath = Path.Combine(
+                                        viewOutputDir,
+                                        assyName + "_identity_mask_legend.tsv");
+                                    OccurrenceMaskColorizer.WriteLegend(legendPath, maskEntries);
+                                    Console.WriteLine(
+                                        $"    Identity mask legend saved: {Path.GetFileName(legendPath)}");
+                                }
+                                finally
+                                {
+                                    maskColorizer.Restore(assyDoc);
+                                    doc.GraphicsRedraw2();
+                                }
+                            }
+                            finally
+                            {
+                                connection.Application.SetUserPreferenceToggle(
+                                    sharedColorPreference, sharedColorWasEnabled);
+                                connection.EnableBatchMode(true);
+                            }
+                        }
+
                         // Export colored GLB 3D model
                         if (options.ExportGlb)
                         {
-                            Console.WriteLine("  - Exporting colored GLB 3D model...");
-                            var glbExporter = new GlbExporter();
                             string glbOutputDir = Path.GetDirectoryName(outputFile);
                             string glbAssyName = assemblyData.Identity.AssemblyNumber
                                 ?? Path.GetFileNameWithoutExtension(doc.GetPathName());
-                            string glbPath = glbExporter.ExportGlb(assyDoc, glbOutputDir, glbAssyName);
+                            string glbPath = null;
+                            if (options.NativeGlb)
+                            {
+                                Console.WriteLine("  - Exporting native SolidWorks GLB 3D model...");
+                                glbPath = ExportNativeGlb(doc, glbOutputDir, glbAssyName);
+                            }
+                            else
+                            {
+                                Console.WriteLine("  - Exporting colored GLB 3D model...");
+                                var glbExporter = new GlbExporter();
+                                glbPath = glbExporter.ExportGlb(assyDoc, glbOutputDir, glbAssyName);
+                            }
                             if (glbPath != null)
                             {
                                 assemblyData.GlbExportPath = Path.GetFileName(glbPath);
@@ -817,6 +916,54 @@ namespace SolidWorksExtractor
             Console.WriteLine($"    - Planar faces: {part.Geometry.PlanarFaces.Count}");
             Console.WriteLine();
             Console.WriteLine($"  Verification checklist items: {part.VerificationChecklist.Count}");
+        }
+
+        /// <summary>
+        /// Print assembly extraction summary
+        /// </summary>
+        static string ExportNativeGlb(IModelDoc2 doc, string outputFolder, string baseName)
+        {
+            if (doc == null)
+            {
+                Console.WriteLine("    Warning: No SolidWorks document for native GLB export");
+                return null;
+            }
+            if (string.IsNullOrWhiteSpace(outputFolder))
+                outputFolder = Directory.GetCurrentDirectory();
+            if (!Directory.Exists(outputFolder))
+                Directory.CreateDirectory(outputFolder);
+
+            string safeBase = string.IsNullOrWhiteSpace(baseName)
+                ? Path.GetFileNameWithoutExtension(doc.GetPathName())
+                : baseName;
+            if (string.IsNullOrWhiteSpace(safeBase))
+                safeBase = "assembly";
+
+            string glbPath = Path.Combine(outputFolder, safeBase + "_colored.glb");
+            int errors = 0;
+            int warnings = 0;
+            try
+            {
+                bool ok = doc.Extension.SaveAs(
+                    glbPath,
+                    (int)swSaveAsVersion_e.swSaveAsCurrentVersion,
+                    (int)swSaveAsOptions_e.swSaveAsOptions_Silent,
+                    null,
+                    ref errors,
+                    ref warnings);
+                Console.WriteLine($"    Native SaveAs result: {ok}, errors={errors}, warnings={warnings}");
+                if (ok && File.Exists(glbPath))
+                {
+                    long fileSizeKb = new FileInfo(glbPath).Length / 1024;
+                    Console.WriteLine($"    Native GLB file size: {fileSizeKb} KB");
+                    return glbPath;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    Warning: Native GLB export failed: {ex.Message}");
+            }
+            return null;
         }
 
         /// <summary>
@@ -1311,9 +1458,12 @@ namespace SolidWorksExtractor
             Console.WriteLine("  --color-parts          Colorize parts in assembly views (default for full mode)");
             Console.WriteLine("  --no-color-parts       Skip part colorization in assembly views");
             Console.WriteLine("  --export-glb           Export colored GLB 3D model for assembly");
+            Console.WriteLine("  --native-glb           Export part or assembly GLB through SolidWorks Save As");
             Console.WriteLine("  --part-glb             Export per-feature colored GLB for a single part");
             Console.WriteLine("  --process-bodies       Export body-level GLB + process body sidecar for multibody parts");
             Console.WriteLine("  --fea                  Export FEA simulation results (stress GLB + results JSON)");
+            Console.WriteLine("  --identity-masks       Export occurrence-keyed identity-mask views");
+            Console.WriteLine("  --occurrence-map <tsv> Canonical componentName-to-occurrenceId mapping");
             Console.WriteLine();
             Console.WriteLine("Batch Mode:");
             Console.WriteLine("  --batch-parts scans a folder recursively for *.SLDPRT files");

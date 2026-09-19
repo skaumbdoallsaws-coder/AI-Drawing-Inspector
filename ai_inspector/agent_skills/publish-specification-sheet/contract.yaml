@@ -1,0 +1,27 @@
+schema_version: 1
+skill_id: publish-specification-sheet
+version: 1.0.0
+intents:
+  - generate_specification_sheet
+  - publish_specification_sheet
+  - analyze_specification_sheet
+required_evidence: []
+forbidden_context: []
+side_effect_policy:
+  default: prohibited
+  require_explicit_user_request:
+    - generate_specification_sheet_draft
+    - publish_specification_sheet
+output_contract:
+  format: concise_specification_sheet_receipt
+  maximum_sentences: 8
+failure_behavior:
+  missing_required_context: report_missing_evidence
+  contradictory_context: abstain_and_report_conflict
+compatible_models:
+  - claude-sonnet
+evaluation_suite: specification-sheet-v1
+context_budget:
+  maximum_tokens: 8000
+  priorities:
+    - assembly.parts

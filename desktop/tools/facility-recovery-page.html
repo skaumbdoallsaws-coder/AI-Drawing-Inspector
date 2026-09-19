@@ -1,0 +1,100 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>InspectorPro isolated facility recovery test</title>
+<link rel="stylesheet" href="/static/facility_layout_workspace.css">
+<style>html,body{margin:0;height:100%;font:14px system-ui;background:#111e2b;color:#edf4ff}body{display:flex;flex-direction:column}header{padding:8px 14px;background:#15344c;flex:none}#facility{flex:1;min-height:0;position:relative}button{font:inherit}</style>
+<script type="importmap">{"imports":{"three":"/static/vendor/three/0.184.0/build/three.module.min.js","three/addons/":"/static/vendor/three/0.184.0/examples/jsm/"}}</script>
+<script src="/static/facility_layout_editor.js"></script>
+<script src="/static/facility_layout_session.js"></script>
+<script src="/static/facility_layout_transport.js"></script>
+<script src="/static/facility_layout_patterns.js"></script>
+<script src="/static/facility_layout_navigation_authoring.js"></script>
+<script src="/static/facility_layout_three_adapter.js"></script>
+<script src="/static/facility_layout_workspace.js"></script>
+<script src="/static/facility_layout_app.js"></script>
+</head><body><header>Isolated copy of the manual layout Â· Recovery acceptance harness Â· Save and external browsing disabled</header><main id="facility"></main>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {PointerLockControls} from 'three/addons/controls/PointerLockControls.js';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+const clone = v => JSON.parse(JSON.stringify(v));
+const h = window.__facilityHarness = {ready:false,paused:null,errors:[],requests:[],loadedGlbs:[]};
+window.addEventListener('error',e=>h.errors.push(e.message));
+try {
+    if (!window.FacilityRecoveryTest || window.FacilityRecoveryTest.capabilities().mode !== 'isolated-facility-recovery-harness') throw new Error('Explicit desktop test harness is required');
+    const binding = await fetch('/__facility-recovery__/identity').then(r=>r.json());
+    const bootstrap = await fetch('/api/facility-layout-bootstrap').then(r=>r.json());
+    h.binding = binding;
+    let pause = null, release = null, drop = null, pauseBeforeAcknowledgement = false;
+    const transport = InspectorProFacilityTransport.createHttpTransport({siteId:binding.document.siteId,layoutId:binding.document.documentId,sessionId:binding.owner.sessionId});
+    const wrapped = {};
+    for (const [key,value] of Object.entries(transport)) wrapped[key] = value;
+    for (const name of ['acknowledgeDesignProposalApply','acknowledgeDesignUndo']) {
+        wrapped[name] = async value => {
+            const managed = window.FacilityRecoveryTest.capabilities().managedBackendRecovery === true;
+            const waitForRelease = async () => {
+                h.paused = {name,transactionId:value.transactionId,beforeAcknowledgement:pauseBeforeAcknowledgement};
+                try { await new Promise((resolve,reject) => {release=resolve;drop=reject;}); }
+                finally {h.paused=null;pause=null;release=null;drop=null;}
+            };
+            if (managed && pause === name && pauseBeforeAcknowledgement) await waitForRelease();
+            const result = await transport[name](value);
+            if (pause === name) {
+                await waitForRelease();
+            }
+            return result;
+        };
+    }
+    class AuditedLoader extends GLTFLoader {
+        load(url,onLoad,onProgress,onError) {
+            return super.load(url,gltf=>{let meshes=0;gltf.scene.traverse(n=>{if(n.isMesh)meshes++;});h.loadedGlbs.push({url,meshes});onLoad(gltf);},onProgress,error=>{h.errors.push('GLB '+url+': '+error.message);if(onError)onError(error);});
+        }
+    }
+    const app = InspectorProFacilityApp.createFacilityLayoutApp({
+        root:document.getElementById('facility'),siteId:binding.document.siteId,layoutId:binding.document.documentId,
+        transport:wrapped,assetCatalog:bootstrap.assetCatalog,capabilities:bootstrap.capabilities,
+        enableSpatialAdvisory:false,threeRuntime:InspectorProFacilityThree,
+        threeOptions:{THREE,OrbitControls,PointerLockControls,GLTFLoader:AuditedLoader,document,window,
+            placementFootprint:InspectorProFacilityLayout.placementFootprint,worldBounds:bootstrap.worldBounds || null},
+        designUndoRecovery:{load:async()=>null,persist:async()=>{},clear:async()=>{}},
+        onError:error=>h.errors.push(error.message),
+    });
+    await app.ready;
+    const facade = app.session.installDesktopRecovery({
+        startupRecoveryPending:true,
+        persistOperation:record=>window.FacilityRecoveryTest.persist(record),
+        clearOperation:record=>window.FacilityRecoveryTest.clear(record),
+    });
+    h.app=app;h.session=app.session;h.facade=facade;
+    h.snapshot=()=>facade.snapshot();
+    h.setStartupRecoveryGate=arg=>facade.setStartupRecoveryGate(arg);
+    h.freeze=arg=>{const result=facade.freeze(arg);document.getElementById('facility').inert=true;return result;};
+    h.unfreeze=arg=>{const result=facade.unfreeze(arg);document.getElementById('facility').inert=false;return result;};
+    h.restoreRecovery=arg=>facade.restoreRecovery(arg);
+    h.acceptReconciliation=arg=>facade.acceptReconciliation(arg);
+    h.beginApply=reference=>{pause='acknowledgeDesignProposalApply';h.operationError=null;h.operation=app.session.applyDesignProposal(reference).catch(e=>{h.operationError={code:e.code,message:e.message};});return true;};
+    h.beginUndo=()=>{pause='acknowledgeDesignUndo';h.operationError=null;h.operation=app.session.undoDesignProposal().catch(e=>{h.operationError={code:e.code,message:e.message};});return true;};
+    h.release=()=>{if(!release)throw new Error('No held acknowledgement');const next=release;release=null;next();return true;};
+    h.configureManagedHold=arg=>{if(window.FacilityRecoveryTest.capabilities().managedBackendRecovery!==true)throw new Error('Managed recovery harness required');pauseBeforeAcknowledgement=arg.beforeAcknowledgement===true;};
+    h.dropHeldAcknowledgement=()=>{if(window.FacilityRecoveryTest.capabilities().managedBackendRecovery!==true||!drop)throw new Error('Managed recovery held acknowledgment required');const reject=drop;drop=null;reject(Object.assign(new Error('Managed backend restart interrupted the held acknowledgment'),{code:'facility_transport_acknowledgement_lost'}));return true;};
+    h.settled=()=>h.operation;
+    h.assetEvidence=()=>{
+        const adapter=app.workspace.threeAdapter;
+        if(!adapter || typeof adapter.getDiagnostics!=='function') throw new Error('Actual Three adapter diagnostics are required');
+        const value=adapter.getDiagnostics(),placements=app.session.getState().layout.placements;
+        return {revision:'facility-assets-v1',catalogCount:app.workspace.assetCatalog.length,
+            referencedAssetIds:[...new Set(placements.map(p=>p.assetId))],placementIds:placements.map(p=>p.placementId),
+            loadedGlbs:clone(h.loadedGlbs),errors:clone(h.errors),diagnostics:{
+                status:value.status,statusReason:value.statusReason,mounted:value.mounted,suspended:value.suspended,
+                degraded:value.degraded,contextLost:value.contextLost,pendingLoads:value.pendingLoads,
+                placementCount:value.placementCount,assetGroupCount:value.assetGroupCount,
+                placementTransformAudit:clone(value.placementTransformAudit),rendering:clone(value.rendering),
+                representationGroups:value.representationGroups.map(group=>({assetId:group.assetId,
+                    assetDefinitionRevision:group.assetDefinitionRevision,representation:group.representation,
+                    placementIds:group.placementIds.slice(),meshCount:group.meshCount,prototypeMeshCount:group.prototypeMeshCount})),
+                loadTrace:clone(value.loadTrace),warnings:clone(value.warnings),
+            }};
+    };
+    h.ready=true;
+} catch(error) {h.error={message:error.message,stack:error.stack};}
+</script></body></html>

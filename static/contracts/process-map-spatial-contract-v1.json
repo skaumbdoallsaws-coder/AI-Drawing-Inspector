@@ -1,0 +1,124 @@
+{
+  "contractId": "process-map-spatial-contract-v1",
+  "contractVersion": 1,
+  "spatialVersion": 1,
+  "coordinateSpaces": {
+    "persisted": "world",
+    "interactive": "viewport",
+    "agentSummary": "normalized_region"
+  },
+  "geometry": {
+    "nodeEnvelopes": {
+      "default": {
+        "width": 270,
+        "height": 146
+      },
+      "product_occurrence": {
+        "width": 270,
+        "height": 146
+      },
+      "process_step": {
+        "width": 270,
+        "height": 146
+      }
+    },
+    "junction": {
+      "visualDiameter": 9,
+      "hitDiameter": 24
+    },
+    "groupHeaderHeight": 28,
+    "legacyBezierSamplingSegments": 32
+  },
+  "layoutPolicyDefaults": {
+    "flowDirection": "left_to_right",
+    "gridSize": 20,
+    "nodeClearance": 44,
+    "edgeClearance": 14,
+    "portLeadLength": 28,
+    "routeMode": "orthogonal_auto"
+  },
+  "diagnostics": {
+    "regionColumns": 4,
+    "regionRows": 2,
+    "denseOccupancyThreshold": 0.35,
+    "alignmentWarningThreshold": 5,
+    "detourRatioThreshold": 1.8
+  },
+  "flowDirections": [
+    "left_to_right",
+    "right_to_left",
+    "top_to_bottom",
+    "bottom_to_top"
+  ],
+  "routeModes": [
+    "bezier_legacy",
+    "orthogonal_auto",
+    "orthogonal_manual",
+    "polyline_manual"
+  ],
+  "hardRejections": [
+    "node_overlap",
+    "insufficient_node_clearance",
+    "group_containment_violation",
+    "group_header_intersection",
+    "edge_node_intersection",
+    "invalid_topology",
+    "duplicate_connection",
+    "precedence_cycle",
+    "locked_node_movement"
+  ],
+  "scoreTerms": [
+    {
+      "name": "edgeCrossings",
+      "preference": "minimize",
+      "unit": "count"
+    },
+    {
+      "name": "backwardEdges",
+      "preference": "minimize",
+      "unit": "count"
+    },
+    {
+      "name": "routeBends",
+      "preference": "minimize",
+      "unit": "count"
+    },
+    {
+      "name": "routeLength",
+      "preference": "minimize",
+      "unit": "world_unit"
+    },
+    {
+      "name": "minimumClearance",
+      "preference": "maximize",
+      "unit": "world_unit"
+    },
+    {
+      "name": "alignmentDeviation",
+      "preference": "minimize",
+      "unit": "world_unit"
+    },
+    {
+      "name": "existingNodeMovement",
+      "preference": "minimize",
+      "unit": "world_unit"
+    },
+    {
+      "name": "anchorProximity",
+      "preference": "minimize",
+      "unit": "world_unit"
+    },
+    {
+      "name": "regionPreference",
+      "preference": "minimize",
+      "unit": "boolean"
+    }
+  ],
+  "limits": {
+    "maximumNodes": 250,
+    "maximumEdges": 400,
+    "maximumGroups": 80,
+    "maximumCandidates": 96,
+    "maximumRoutePoints": 128
+  }
+}

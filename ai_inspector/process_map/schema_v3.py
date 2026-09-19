@@ -5,29 +5,65 @@ from __future__ import annotations
 import copy
 import math
 from collections import Counter, defaultdict
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
 
 PROCESS_MAP_PLACEMENT_SCHEMA_VERSION = 3
-PROCESS_MAP_LAYOUT_VERSION = 2
+PROCESS_MAP_LAYOUT_VERSION = 3
+PROCESS_MAP_GROUP_LAYOUT_VERSION = 2
 PRODUCT_STRUCTURE_SCHEMA_VERSION = 1
 PRODUCT_KINDS = frozenset({"assembly", "subassembly", "part"})
 CANVAS_NODE_KINDS = frozenset({"product_occurrence", "process_step", "junction"})
-JUNCTION_TYPES = frozenset({"wire_branch"})
+JUNCTION_TYPES = frozenset({"wire_branch", "parallel_and", "merge", "split"})
 PORT_ORIENTATIONS = frozenset({"horizontal", "vertical"})
 PORT_ORDERS = frozenset({"input_first", "output_first"})
+POSITION_MODES = frozenset({"auto", "manual", "locked"})
 PROCESS_STEP_TYPES = frozenset({"operation", "inspection", "decision", "input", "output"})
 EDGE_KINDS = frozenset({"precedence", "rework", "feedback", "material"})
+EDGE_ROUTE_MODES = frozenset(
+    {"bezier_legacy", "orthogonal_auto", "orthogonal_manual", "polyline_manual"}
+)
+LAYOUT_FLOW_DIRECTIONS = frozenset(
+    {"left_to_right", "right_to_left", "top_to_bottom", "bottom_to_top"}
+)
+LAYOUT_POLICY_ROUTE_MODES = frozenset(
+    {"bezier_legacy", "orthogonal_auto", "orthogonal_manual"}
+)
+LAYOUT_POLICY_NUMERIC_FIELDS = {
+    "gridSize": (4.0, 200.0),
+    "nodeClearance": (0.0, 500.0),
+    "edgeClearance": (0.0, 200.0),
+    "portLeadLength": (0.0, 240.0),
+}
+MAX_ROUTE_POINTS = 128
 REFERENCE_KINDS = frozenset({"machine", "tool", "requirement", "standard"})
+REFERENCE_KNOWLEDGE_STATUSES = frozenset(
+    {"authored", "derived", "inferred", "unknown", "illustrative"}
+)
 MAX_NODE_LABEL_LENGTH = 120
 MAX_NODE_NOTE_LENGTH = 2000
+PROCESS_STEP_PROPERTY_LIMITS = {
+    "description": 2000,
+    "resultLabel": 160,
+    "duration": 80,
+    "fastenersConsumables": 1000,
+    "torqueRequirements": 1000,
+    "inspectionRequirements": 1000,
+    "constraints": 1000,
+}
 MAX_REFERENCE_NAME_LENGTH = 160
 MAX_REFERENCE_IDENTIFIER_LENGTH = 120
 MAX_REFERENCE_REVISION_LENGTH = 80
 MAX_REFERENCE_CLAUSE_LENGTH = 120
 MAX_REFERENCE_DETAILS_LENGTH = 1000
+MAX_REFERENCE_SOURCE_ID_LENGTH = 160
+MAX_REFERENCE_SOURCE_HASH_LENGTH = 128
+MAX_REFERENCE_POPULATED_BY_LENGTH = 80
+MAX_REFERENCE_POPULATED_AT_LENGTH = 64
 MAX_REFERENCES_PER_TARGET = 24
 MAX_REFERENCE_CATALOG_ITEMS = 500
+MAX_PROCESS_PLAN_IMPORTS = 16
+MAX_PROCESS_PLAN_DISCLAIMER_LENGTH = 1000
 MAX_DISMISSED_SUGGESTIONS = 500
 MAX_SUGGESTION_ID_LENGTH = 128
 GROUP_COLOR_KEYS = frozenset(
@@ -37,6 +73,31 @@ MAX_GROUP_LABEL_LENGTH = 120
 MAX_GROUP_DESCRIPTION_LENGTH = 2000
 MIN_GROUP_WIDTH = 220
 MIN_GROUP_HEIGHT = 112
+SEMANTIC_KNOWLEDGE_STATUSES = frozenset({"authored", "derived", "inferred", "unknown"})
+SEMANTIC_EVIDENCE_SOURCE_TYPES = frozenset(
+    {
+        "procedure",
+        "work_instruction",
+        "standard",
+        "user_authored_map",
+        "assembly_structure",
+        "mate_relationship",
+        "geometry",
+        "domain_heuristic",
+        "user_statement",
+    }
+)
+MAX_SEMANTIC_EVIDENCE_ITEMS = 24
+MAX_SEMANTIC_ASSUMPTION_IDS = 24
+_AUTHORITATIVE_PROCESS_PROPERTIES = frozenset(
+    {
+        "duration",
+        "fastenersConsumables",
+        "torqueRequirements",
+        "inspectionRequirements",
+        "constraints",
+    }
+)
 
 
 Finding = Dict[str, Any]
@@ -94,6 +155,169 @@ def _finite_group_size(value: Any) -> bool:
             )
         )
     )
+
+
+def node_position_mode(node: Mapping[str, Any]) -> str:
+    """Return the effective position owner for old and current map records."""
+
+    mode = node.get("positionMode")
+    if mode in POSITION_MODES:
+        return str(mode)
+    return "locked" if node.get("locked") is True else "manual"
+
+
+def _validate_semantic_metadata(
+    value: Any,
+    *,
+    target_label: str,
+    node_id: Optional[str] = None,
+    edge_id: Optional[str] = None,
+) -> List[Finding]:
+    findings: List[Finding] = []
+    if value is None:
+        return findings
+    if not isinstance(value, dict):
+        return [
+            _finding(
+                "error",
+                "invalid_semantic_metadata",
+                f"{target_label} semantic metadata must be an object.",
+                node_id=node_id,
+                edge_id=edge_id,
+            )
+        ]
+    unknown = sorted(
+        set(value)
+        - {
+            "planId",
+            "semanticRef",
+            "knowledgeStatus",
+            "evidence",
+            "assumptionIds",
+            "branchId",
+            "stageIndex",
+            "intermediateResultId",
+        }
+    )
+    if unknown:
+        findings.append(
+            _finding(
+                "error",
+                "unknown_semantic_metadata_field",
+                f"{target_label} has unsupported semantic fields: {', '.join(unknown)}.",
+                node_id=node_id,
+                edge_id=edge_id,
+            )
+        )
+    for field in ("planId", "semanticRef"):
+        if _clean_id(value.get(field)) is None:
+            findings.append(
+                _finding(
+                    "error",
+                    "semantic_identity_missing",
+                    f"{target_label} semantic {field} is required.",
+                    node_id=node_id,
+                    edge_id=edge_id,
+                )
+            )
+    status = value.get("knowledgeStatus")
+    if status not in SEMANTIC_KNOWLEDGE_STATUSES:
+        findings.append(
+            _finding(
+                "error",
+                "invalid_semantic_knowledge_status",
+                f"{target_label} has unsupported semantic knowledgeStatus '{status}'.",
+                node_id=node_id,
+                edge_id=edge_id,
+            )
+        )
+    evidence = value.get("evidence", [])
+    if not isinstance(evidence, list) or len(evidence) > MAX_SEMANTIC_EVIDENCE_ITEMS:
+        findings.append(
+            _finding(
+                "error",
+                "invalid_semantic_evidence",
+                (
+                    f"{target_label} semantic evidence must be an array of at most "
+                    f"{MAX_SEMANTIC_EVIDENCE_ITEMS} items."
+                ),
+                node_id=node_id,
+                edge_id=edge_id,
+            )
+        )
+        evidence = []
+    for index, item in enumerate(evidence):
+        if not isinstance(item, dict):
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_semantic_evidence",
+                    f"{target_label} semantic evidence item {index} must be an object.",
+                    node_id=node_id,
+                    edge_id=edge_id,
+                )
+            )
+            continue
+        source_type = item.get("sourceType")
+        if source_type not in SEMANTIC_EVIDENCE_SOURCE_TYPES:
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_semantic_evidence_source",
+                    f"{target_label} has unsupported evidence sourceType '{source_type}'.",
+                    node_id=node_id,
+                    edge_id=edge_id,
+                )
+            )
+        if _clean_id(item.get("sourceRef")) is None:
+            findings.append(
+                _finding(
+                    "error",
+                    "semantic_evidence_source_missing",
+                    f"{target_label} evidence item {index} requires sourceRef.",
+                    node_id=node_id,
+                    edge_id=edge_id,
+                )
+            )
+    assumption_ids = value.get("assumptionIds", [])
+    if (
+        not isinstance(assumption_ids, list)
+        or len(assumption_ids) > MAX_SEMANTIC_ASSUMPTION_IDS
+        or any(_clean_id(item) is None for item in assumption_ids)
+    ):
+        findings.append(
+            _finding(
+                "error",
+                "invalid_semantic_assumptions",
+                (
+                    f"{target_label} semantic assumptionIds must contain at most "
+                    f"{MAX_SEMANTIC_ASSUMPTION_IDS} non-empty ids."
+                ),
+                node_id=node_id,
+                edge_id=edge_id,
+            )
+        )
+    if status in {"authored", "derived"} and not evidence:
+        findings.append(
+            _finding(
+                "error",
+                "authoritative_evidence_required",
+                f"{target_label} cannot be '{status}' without evidence.",
+                node_id=node_id,
+                edge_id=edge_id,
+            )
+        )
+    if status == "inferred" and not evidence and not assumption_ids:
+        findings.append(
+            _finding(
+                "error",
+                "inference_basis_required",
+                f"{target_label} inferred semantics require evidence or an assumption.",
+                node_id=node_id,
+                edge_id=edge_id,
+            )
+        )
+    return findings
 
 
 def _validate_reference_ids(
@@ -374,6 +598,15 @@ def migrate_to_placement_map(
         migrated.setdefault("canvasNodes", [])
         migrated.setdefault("canvasEdges", [])
         migrated.setdefault("canvasGroups", [])
+        for node in migrated["canvasNodes"]:
+            if not isinstance(node, dict):
+                continue
+            mode = node_position_mode(node)
+            node["positionMode"] = mode
+            if mode == "locked":
+                node["locked"] = True
+            else:
+                node.pop("locked", None)
         return migrated, []
 
     occurrences = {
@@ -410,6 +643,7 @@ def migrate_to_placement_map(
             "position": copy.deepcopy(node.get("position"))
             if _finite_position(node.get("position"))
             else _default_position(len(canvas_nodes)),
+            "positionMode": "locked" if node.get("locked") is True else "manual",
         }
         if source_occurrence is not None:
             placement.update(
@@ -537,14 +771,93 @@ def validate_placement_map(
                 "layoutVersion must be a positive integer when provided.",
             )
         )
-    if groups and layout_version != PROCESS_MAP_LAYOUT_VERSION:
+    if groups and (
+        not isinstance(layout_version, int)
+        or isinstance(layout_version, bool)
+        or layout_version < PROCESS_MAP_GROUP_LAYOUT_VERSION
+    ):
         findings.append(
             _finding(
                 "error",
                 "groups_require_layout_version_2",
-                f"canvasGroups require layoutVersion {PROCESS_MAP_LAYOUT_VERSION}.",
+                f"canvasGroups require layoutVersion {PROCESS_MAP_GROUP_LAYOUT_VERSION} or newer.",
             )
         )
+
+    layout_policy = process_map.get("layoutPolicy")
+    if layout_policy is not None:
+        if not isinstance(layout_policy, dict):
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_layout_policy",
+                    "layoutPolicy must be an object when provided.",
+                )
+            )
+        else:
+            unknown_policy_fields = sorted(
+                set(layout_policy)
+                - {
+                    "flowDirection",
+                    "gridSize",
+                    "nodeClearance",
+                    "edgeClearance",
+                    "portLeadLength",
+                    "routeMode",
+                }
+            )
+            if unknown_policy_fields:
+                findings.append(
+                    _finding(
+                        "error",
+                        "unknown_layout_policy_field",
+                        "layoutPolicy contains unsupported fields: "
+                        + ", ".join(unknown_policy_fields)
+                        + ".",
+                    )
+                )
+            flow_direction = layout_policy.get("flowDirection")
+            if (
+                flow_direction is not None
+                and flow_direction not in LAYOUT_FLOW_DIRECTIONS
+            ):
+                findings.append(
+                    _finding(
+                        "error",
+                        "invalid_layout_flow_direction",
+                        f"layoutPolicy flowDirection '{flow_direction}' is unsupported.",
+                    )
+                )
+            route_mode = layout_policy.get("routeMode")
+            if (
+                route_mode is not None
+                and route_mode not in LAYOUT_POLICY_ROUTE_MODES
+            ):
+                findings.append(
+                    _finding(
+                        "error",
+                        "invalid_layout_route_mode",
+                        f"layoutPolicy routeMode '{route_mode}' is unsupported.",
+                    )
+                )
+            for field, (minimum, maximum) in LAYOUT_POLICY_NUMERIC_FIELDS.items():
+                value = layout_policy.get(field)
+                if value is None:
+                    continue
+                if (
+                    not isinstance(value, (int, float))
+                    or isinstance(value, bool)
+                    or not math.isfinite(float(value))
+                    or float(value) < minimum
+                    or float(value) > maximum
+                ):
+                    findings.append(
+                        _finding(
+                            "error",
+                            "invalid_layout_policy_value",
+                            f"layoutPolicy {field} must be between {minimum:g} and {maximum:g}.",
+                        )
+                    )
 
     dismissed_suggestions = process_map.get("dismissedSuggestions", [])
     if not isinstance(dismissed_suggestions, list):
@@ -660,6 +973,49 @@ def validate_placement_map(
                         f"Catalog reference '{reference_id}' {field} must contain 1 to {maximum} characters when provided.",
                     )
                 )
+        knowledge_status = item.get("knowledgeStatus")
+        if (
+            knowledge_status is not None
+            and knowledge_status not in REFERENCE_KNOWLEDGE_STATUSES
+        ):
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_reference_knowledge_status",
+                    f"Catalog reference '{reference_id}' has unsupported knowledgeStatus '{knowledge_status}'.",
+                )
+            )
+        demo_data = item.get("demoData")
+        if demo_data is not None and not isinstance(demo_data, bool):
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_reference_demo_data",
+                    f"Catalog reference '{reference_id}' demoData must be a boolean.",
+                )
+            )
+        for field, maximum, code in (
+            ("sourcePlanId", MAX_REFERENCE_SOURCE_ID_LENGTH, "invalid_reference_source_plan_id"),
+            ("sourceRevision", MAX_REFERENCE_REVISION_LENGTH, "invalid_reference_source_revision"),
+            ("sourcePlanHash", MAX_REFERENCE_SOURCE_HASH_LENGTH, "invalid_reference_source_plan_hash"),
+            ("sourceRequirementId", MAX_REFERENCE_SOURCE_ID_LENGTH, "invalid_reference_source_requirement_id"),
+            ("sourceResourceId", MAX_REFERENCE_SOURCE_ID_LENGTH, "invalid_reference_source_resource_id"),
+            ("populatedBy", MAX_REFERENCE_POPULATED_BY_LENGTH, "invalid_reference_populated_by"),
+            ("populatedAt", MAX_REFERENCE_POPULATED_AT_LENGTH, "invalid_reference_populated_at"),
+        ):
+            value = item.get(field)
+            if value is not None and (
+                not isinstance(value, str)
+                or not value.strip()
+                or len(value.strip()) > maximum
+            ):
+                findings.append(
+                    _finding(
+                        "error",
+                        code,
+                        f"Catalog reference '{reference_id}' {field} must contain 1 to {maximum} characters when provided.",
+                    )
+                )
         if kind == "standard" and _clean_id(item.get("identifier")) is None:
             findings.append(
                 _finding(
@@ -684,6 +1040,74 @@ def validate_placement_map(
                 )
             )
         reference_identity_keys.add(identity)
+
+    process_plan_imports = process_map.get("processPlanImports", [])
+    if not isinstance(process_plan_imports, list):
+        findings.append(
+            _finding(
+                "error",
+                "process_plan_imports_not_array",
+                "processPlanImports must be an array.",
+            )
+        )
+        process_plan_imports = []
+    if len(process_plan_imports) > MAX_PROCESS_PLAN_IMPORTS:
+        findings.append(
+            _finding(
+                "error",
+                "too_many_process_plan_imports",
+                f"processPlanImports can contain at most {MAX_PROCESS_PLAN_IMPORTS} records.",
+            )
+        )
+    seen_plan_imports: Set[Tuple[str, str, str]] = set()
+    for index, item in enumerate(process_plan_imports):
+        if not isinstance(item, dict):
+            findings.append(
+                _finding(
+                    "error",
+                    "process_plan_import_not_object",
+                    f"Process-plan import at index {index} must be an object.",
+                )
+            )
+            continue
+        for field, maximum, code in (
+            ("sourcePlanId", MAX_REFERENCE_SOURCE_ID_LENGTH, "invalid_process_plan_id"),
+            ("sourceRevision", MAX_REFERENCE_REVISION_LENGTH, "invalid_process_plan_revision"),
+            ("sourcePlanHash", MAX_REFERENCE_SOURCE_HASH_LENGTH, "invalid_process_plan_hash"),
+            ("populatedBy", MAX_REFERENCE_POPULATED_BY_LENGTH, "invalid_process_plan_populated_by"),
+            ("populatedAt", MAX_REFERENCE_POPULATED_AT_LENGTH, "invalid_process_plan_populated_at"),
+            ("disclaimer", MAX_PROCESS_PLAN_DISCLAIMER_LENGTH, "invalid_process_plan_disclaimer"),
+        ):
+            value = item.get(field)
+            if not isinstance(value, str) or not value.strip() or len(value.strip()) > maximum:
+                findings.append(
+                    _finding(
+                        "error",
+                        code,
+                        f"Process-plan import at index {index} {field} must contain 1 to {maximum} characters.",
+                    )
+                )
+        if not isinstance(item.get("demoData"), bool):
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_process_plan_demo_data",
+                    f"Process-plan import at index {index} demoData must be a boolean.",
+                )
+            )
+        identity = tuple(
+            str(item.get(field) or "").strip().lower()
+            for field in ("sourcePlanId", "sourceRevision", "sourcePlanHash")
+        )
+        if identity in seen_plan_imports:
+            findings.append(
+                _finding(
+                    "error",
+                    "duplicate_process_plan_import",
+                    f"Process-plan import at index {index} duplicates an earlier import.",
+                )
+            )
+        seen_plan_imports.add(identity)
 
     known_occurrences = set(known_occurrence_ids) if known_occurrence_ids is not None else None
     nodes_by_id: Dict[str, Dict[str, Any]] = {}
@@ -715,6 +1139,45 @@ def validate_placement_map(
             findings.append(_finding("error", "unknown_port_orientation", f"Canvas node '{node_id}' has unsupported port orientation '{port_orientation}'.", node_id=node_id))
         if node_kind != "junction" and port_order is not None and port_order not in PORT_ORDERS:
             findings.append(_finding("error", "unknown_port_order", f"Canvas node '{node_id}' has unsupported port order '{port_order}'.", node_id=node_id))
+        locked = node.get("locked")
+        if locked is not None and not isinstance(locked, bool):
+            findings.append(_finding("error", "invalid_node_locked", f"Canvas node '{node_id}' locked must be a boolean.", node_id=node_id))
+        position_mode = node.get("positionMode")
+        if position_mode is not None and position_mode not in POSITION_MODES:
+            findings.append(
+                _finding(
+                    "error",
+                    "invalid_node_position_mode",
+                    f"Canvas node '{node_id}' has unsupported positionMode '{position_mode}'.",
+                    node_id=node_id,
+                )
+            )
+        effective_mode = node_position_mode(node)
+        if locked is True and effective_mode != "locked":
+            findings.append(
+                _finding(
+                    "error",
+                    "node_position_lock_mismatch",
+                    f"Canvas node '{node_id}' locked and positionMode values disagree.",
+                    node_id=node_id,
+                )
+            )
+        if effective_mode == "locked" and locked is False:
+            findings.append(
+                _finding(
+                    "error",
+                    "node_position_lock_mismatch",
+                    f"Canvas node '{node_id}' positionMode is locked but locked is false.",
+                    node_id=node_id,
+                )
+            )
+        findings.extend(
+            _validate_semantic_metadata(
+                node.get("semantic"),
+                target_label=f"Canvas node '{node_id}'",
+                node_id=node_id,
+            )
+        )
         label_override = node.get("labelOverride")
         note = node.get("note")
         if node_kind == "junction" and (label_override is not None or note is not None):
@@ -763,8 +1226,62 @@ def validate_placement_map(
             name = node.get("name")
             if not isinstance(name, str) or not name.strip() or len(name.strip()) > MAX_NODE_LABEL_LENGTH:
                 findings.append(_finding("error", "invalid_process_step_name", f"Process node '{node_id}' name must contain 1 to {MAX_NODE_LABEL_LENGTH} characters.", node_id=node_id))
+            properties = node.get("properties")
+            if properties is not None:
+                if not isinstance(properties, dict):
+                    findings.append(_finding(
+                        "error",
+                        "invalid_process_step_properties",
+                        f"Process node '{node_id}' properties must be an object.",
+                        node_id=node_id,
+                    ))
+                else:
+                    unknown_properties = sorted(set(properties) - set(PROCESS_STEP_PROPERTY_LIMITS))
+                    if unknown_properties:
+                        findings.append(_finding(
+                            "error",
+                            "unknown_process_step_property",
+                            f"Process node '{node_id}' has unsupported properties: {', '.join(unknown_properties)}.",
+                            node_id=node_id,
+                        ))
+                    for property_name, maximum in PROCESS_STEP_PROPERTY_LIMITS.items():
+                        value = properties.get(property_name)
+                        if value is not None and (
+                            not isinstance(value, str)
+                            or not value.strip()
+                            or len(value.strip()) > maximum
+                        ):
+                            findings.append(_finding(
+                                "error",
+                                "invalid_process_step_property",
+                                f"Process node '{node_id}' property '{property_name}' must contain 1 to {maximum} characters.",
+                                node_id=node_id,
+                            ))
+                    semantic = node.get("semantic")
+                    status = semantic.get("knowledgeStatus") if isinstance(semantic, dict) else None
+                    if status in {"inferred", "unknown"} and any(
+                        properties.get(name) for name in _AUTHORITATIVE_PROCESS_PROPERTIES
+                    ):
+                        findings.append(
+                            _finding(
+                                "error",
+                                "unsupported_authoritative_manufacturing_value",
+                                (
+                                    f"Process node '{node_id}' cannot present manufacturing "
+                                    "parameters as authoritative from inferred or unknown evidence."
+                                ),
+                                node_id=node_id,
+                            )
+                        )
         elif node_kind == "junction" and node.get("junctionType") not in JUNCTION_TYPES:
             findings.append(_finding("error", "unknown_junction_type", f"Junction node '{node_id}' has unsupported type '{node.get('junctionType')}'.", node_id=node_id))
+        if node_kind != "process_step" and node.get("properties") is not None:
+            findings.append(_finding(
+                "error",
+                "process_step_properties_not_allowed",
+                f"Canvas node '{node_id}' cannot define process-step properties.",
+                node_id=node_id,
+            ))
 
     seen_group_ids: Set[str] = set()
     member_group_ids: Dict[str, str] = {}
@@ -964,6 +1481,90 @@ def validate_placement_map(
                     edge_id=edge_id,
                 )
             )
+        routing = edge.get("routing")
+        if routing is not None:
+            if not isinstance(routing, dict):
+                findings.append(
+                    _finding(
+                        "error",
+                        "invalid_edge_routing",
+                        f"Canvas edge '{edge_id or index}' routing must be an object.",
+                        edge_id=edge_id,
+                    )
+                )
+            else:
+                route_mode = routing.get("mode")
+                if route_mode not in EDGE_ROUTE_MODES:
+                    findings.append(
+                        _finding(
+                            "error",
+                            "unknown_edge_route_mode",
+                            f"Canvas edge '{edge_id or index}' has unsupported route mode '{route_mode}'.",
+                            edge_id=edge_id,
+                        )
+                    )
+                elif route_mode != "bezier_legacy":
+                    if (
+                        not isinstance(layout_version, int)
+                        or isinstance(layout_version, bool)
+                        or layout_version < PROCESS_MAP_LAYOUT_VERSION
+                    ):
+                        findings.append(
+                            _finding(
+                                "error",
+                                "routing_requires_layout_version_3",
+                                f"Routed canvas edges require layoutVersion {PROCESS_MAP_LAYOUT_VERSION} or newer.",
+                                edge_id=edge_id,
+                            )
+                        )
+                    router_version = routing.get("routerVersion")
+                    if (
+                        not isinstance(router_version, int)
+                        or isinstance(router_version, bool)
+                        or router_version < 1
+                    ):
+                        findings.append(
+                            _finding(
+                                "error",
+                                "invalid_edge_router_version",
+                                f"Canvas edge '{edge_id or index}' requires a positive routerVersion.",
+                                edge_id=edge_id,
+                            )
+                        )
+                    waypoints = routing.get("waypoints")
+                    if not isinstance(waypoints, list) or len(waypoints) > MAX_ROUTE_POINTS:
+                        findings.append(
+                            _finding(
+                                "error",
+                                "invalid_edge_route_waypoints",
+                                f"Canvas edge '{edge_id or index}' route waypoints must be an array of at most {MAX_ROUTE_POINTS} points.",
+                                edge_id=edge_id,
+                            )
+                        )
+                    elif any(not _finite_position(waypoint) for waypoint in waypoints):
+                        findings.append(
+                            _finding(
+                                "error",
+                                "invalid_edge_route_waypoint",
+                                f"Canvas edge '{edge_id or index}' route waypoints require finite x and y values.",
+                                edge_id=edge_id,
+                            )
+                        )
+                    if route_mode in {"orthogonal_auto", "orthogonal_manual"}:
+                        obstacle_fingerprint = routing.get("obstacleFingerprint")
+                        if (
+                            not isinstance(obstacle_fingerprint, str)
+                            or not obstacle_fingerprint.strip()
+                            or len(obstacle_fingerprint.strip()) > 128
+                        ):
+                            findings.append(
+                                _finding(
+                                    "error",
+                                    "invalid_edge_obstacle_fingerprint",
+                                    f"Canvas edge '{edge_id or index}' requires an obstacleFingerprint.",
+                                    edge_id=edge_id,
+                                )
+                            )
         edge_reference_findings, edge_references = _validate_reference_ids(
             edge.get("referenceIds"),
             reference_ids,
@@ -972,10 +1573,30 @@ def validate_placement_map(
         )
         findings.extend(edge_reference_findings)
         used_reference_ids.update(edge_references)
+        findings.extend(
+            _validate_semantic_metadata(
+                edge.get("semantic"),
+                target_label=f"Canvas edge '{edge_id or index}'",
+                edge_id=edge_id,
+            )
+        )
         from_id, from_port = _edge_endpoint(edge, "from")
         to_id, to_port = _edge_endpoint(edge, "to")
         if from_id is None or to_id is None or from_port is None or to_port is None:
             findings.append(_finding("error", "invalid_edge_endpoint", f"Canvas edge '{edge_id or index}' requires nodeId and port on both endpoints.", edge_id=edge_id))
+            continue
+        if from_port != "out" or to_port != "in":
+            findings.append(
+                _finding(
+                    "error",
+                    "incompatible_edge_ports",
+                    (
+                        f"Canvas edge '{edge_id or index}' must connect an output port "
+                        "to an input port."
+                    ),
+                    edge_id=edge_id,
+                )
+            )
             continue
         if from_id not in nodes_by_id or to_id not in nodes_by_id:
             findings.append(_finding("error", "dangling_edge_endpoint", f"Canvas edge '{edge_id or index}' references a missing canvas node.", edge_id=edge_id))
@@ -1027,15 +1648,48 @@ def validate_placement_map(
         findings.append(_finding("error", "precedence_cycle", "Precedence cycle detected: " + " -> ".join(cycle) + "."))
 
     for node_id, node in nodes_by_id.items():
-        if node.get("nodeKind") != "process_step":
+        if node.get("nodeKind") == "process_step":
+            process_type = node.get("processType")
+            if process_type == "input" and incoming[node_id]:
+                findings.append(_finding("warning", "input_has_incoming_precedence", f"Input node '{node_id}' has an incoming precedence connection.", node_id=node_id))
+            if process_type == "output" and outgoing[node_id]:
+                findings.append(_finding("warning", "output_has_outgoing_precedence", f"Output node '{node_id}' has an outgoing precedence connection.", node_id=node_id))
+            if process_type == "decision" and outgoing[node_id] < 2:
+                findings.append(_finding("warning", "decision_has_fewer_than_two_outputs", f"Decision node '{node_id}' has fewer than two outgoing precedence connections.", node_id=node_id))
             continue
-        process_type = node.get("processType")
-        if process_type == "input" and incoming[node_id]:
-            findings.append(_finding("warning", "input_has_incoming_precedence", f"Input node '{node_id}' has an incoming precedence connection.", node_id=node_id))
-        if process_type == "output" and outgoing[node_id]:
-            findings.append(_finding("warning", "output_has_outgoing_precedence", f"Output node '{node_id}' has an outgoing precedence connection.", node_id=node_id))
-        if process_type == "decision" and outgoing[node_id] < 2:
-            findings.append(_finding("warning", "decision_has_fewer_than_two_outputs", f"Decision node '{node_id}' has fewer than two outgoing precedence connections.", node_id=node_id))
+        if node.get("nodeKind") != "junction":
+            continue
+        junction_type = node.get("junctionType")
+        if junction_type in {"parallel_and", "merge"}:
+            if incoming[node_id] < 2:
+                findings.append(_finding(
+                    "warning",
+                    "junction_has_fewer_than_two_inputs",
+                    f"Junction '{node_id}' has fewer than two incoming precedence connections.",
+                    node_id=node_id,
+                ))
+            if outgoing[node_id] > 1:
+                findings.append(_finding(
+                    "warning",
+                    "junction_has_multiple_outputs",
+                    f"Junction '{node_id}' has more than one outgoing precedence connection.",
+                    node_id=node_id,
+                ))
+        elif junction_type == "split":
+            if incoming[node_id] > 1:
+                findings.append(_finding(
+                    "warning",
+                    "split_junction_has_multiple_inputs",
+                    f"Split junction '{node_id}' has more than one incoming precedence connection.",
+                    node_id=node_id,
+                ))
+            if outgoing[node_id] < 2:
+                findings.append(_finding(
+                    "warning",
+                    "split_junction_has_fewer_than_two_outputs",
+                    f"Split junction '{node_id}' has fewer than two outgoing precedence connections.",
+                    node_id=node_id,
+                ))
     for reference_id in sorted(reference_ids - used_reference_ids):
         findings.append(
             _finding(

@@ -35,6 +35,74 @@
         wireframe: false,
         background: 'auto',
     });
+    const DEFAULT_LAYER_VISIBILITY = Object.freeze({
+        zones: true,
+        cells: true,
+        routes: true,
+        markings: true,
+        assets: true,
+    });
+    const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1 =
+        'facility-motion-package-v1';
+    const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V2 =
+        'facility-motion-package-v2';
+    const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V3 =
+        'facility-motion-package-v3';
+    const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION =
+        FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1;
+    const FACILITY_MOTION_QUALIFICATION = (
+        'Replays one deterministically planned traversal against nominal '
+        + 'geometry at an exact vehicle revision. It does not establish '
+        + 'throughput, congestion, traffic safety, or regulatory compliance.'
+    );
+    const FACILITY_MOTION_DISCLOSURE = (
+        'Nominal geometry playback at an exact revision-bound profile. '
+        + 'Sampled validation only; not vehicle dynamics, traffic, safety, '
+        + 'or regulatory validation.'
+    );
+    const FACILITY_NAVIGATION_MOTION_QUALIFICATION = (
+        'Replays one accepted revision-bound navigation journey for an existing '
+        + 'placed actor on a shared display clock. Presentation timing is not process '
+        + 'timing and does not establish throughput, congestion, staffing, traffic '
+        + 'safety, or regulatory compliance.'
+    );
+    const FACILITY_ACTIVITY_SCENARIO_SCHEMA_VERSION =
+        'facility-activity-scenario-v6';
+    const FACILITY_NAVIGATION_ACTIVITY_SCENARIO_SCHEMA_VERSION =
+        'facility-activity-scenario-v7';
+    const FACILITY_ACTIVITY_SCENARIO_QUALIFICATION = (
+        'Prototype activity playback presents independently revision-bound '
+        + 'route results on one shared display clock. It is not a discrete-event '
+        + 'simulation and does not establish traffic safety, throughput, '
+        + 'utilization, staffing, machine cycles, or regulatory compliance.'
+    );
+    const FACILITY_NAVIGATION_ACTIVITY_QUALIFICATION = (
+        'Prototype navigation playback presents accepted revision-bound actor '
+        + 'journeys on one shared display clock. Path intersections and sampled '
+        + 'center proximity are presentation diagnostics, not safety, capacity, '
+        + 'staffing, timing, or regulatory findings.'
+    );
+    const FACILITY_NAVIGATION_PRESENTATION_QUALIFICATION = (
+        'Derived display diagnostics preserve accepted journey geometry and do not '
+        + 'reschedule actors or alter paths to conceal visual overlap.'
+    );
+    const FACILITY_ACTIVITY_DISCLOSURE = (
+        'Prototype presentation of independently validated route traversals. '
+        + 'Fixed machines remain stationary without revision-bound kinematic '
+        + 'tracks; this is not a traffic or production simulation.'
+    );
+    const FACILITY_LEAN_MOTION_SCHEMA_VERSION = 'facility-lean-motion-v3';
+    const FACILITY_LEAN_MOTION_QUALIFICATION = (
+        'Derived prototype motion borrows existing placed operator identities, '
+        + 'assigns them to nearby placed stations, and routes the responsible '
+        + 'endpoint operators to derived FIFO handoff points. Material handoff '
+        + 'lines show workpiece transfer relationships, not operator walking. '
+        + 'The routes are geometrically feasible paths, not time-optimal standard '
+        + 'work, and do not establish staffing, task frequency, synchronized '
+        + 'transfer timing, capacity, traffic safety, or compliance.'
+    );
+    const DEFAULT_MOTION_PLAYBACK_RATE = 1;
+    const DEFAULT_REFUSED_PRESENTATION_SPEED = 1;
     const FLOOR_THICKNESS = 0.02;
     const DEFAULT_GRID_SPACING = 1;
     const DEFAULT_MAJOR_GRID_SPACING = 5;
@@ -268,6 +336,18 @@
         };
     }
 
+    function normalizeLayerVisibility(value, fallback) {
+        const source = value && typeof value === 'object' ? value : {};
+        const base = fallback && typeof fallback === 'object'
+            ? fallback : DEFAULT_LAYER_VISIBILITY;
+        const output = {};
+        Object.keys(DEFAULT_LAYER_VISIBILITY).forEach(function (key) {
+            output[key] = typeof source[key] === 'boolean'
+                ? source[key] : base[key] !== false;
+        });
+        return output;
+    }
+
     function stringValue(value, fallback) {
         return typeof value === 'string' && value ? value : fallback;
     }
@@ -277,6 +357,179 @@
             .filter(function (value) {
                 return typeof value === 'string' && value;
             }))).sort();
+    }
+
+    function detachedJson(value) {
+        return value === undefined
+            ? undefined : JSON.parse(JSON.stringify(value));
+    }
+
+    function facilityMotionError(code, message, details) {
+        const error = new Error(message);
+        error.code = code;
+        error.details = details && typeof details === 'object'
+            ? detachedJson(details) : {};
+        return error;
+    }
+
+    function motionTrajectory(movement) {
+        if (!movement || typeof movement !== 'object') return null;
+        const poses = movement.outcome === 'accepted'
+            ? movement.poses
+            : movement.outcome === 'envelope_refused'
+                ? movement.attemptedPoses : null;
+        const cumulativeDistance = movement.cumulativeDistance;
+        if (!Array.isArray(poses) || !poses.length
+                || !Array.isArray(cumulativeDistance)
+                || poses.length !== cumulativeDistance.length) return null;
+        return { poses: poses, cumulativeDistance: cumulativeDistance };
+    }
+
+    function activityDisplayOffsetPoints(points, requestedOffset) {
+        const offset = finite(requestedOffset, 0);
+        if (!Array.isArray(points) || points.length < 2
+                || Math.abs(offset) <= 1e-9) return points;
+        return points.map(function (point, index) {
+            const previous = points[Math.max(0, index - 1)];
+            const next = points[Math.min(points.length - 1, index + 1)];
+            let dx = finite(next.x, 0) - finite(previous.x, 0);
+            let dz = finite(next.z, 0) - finite(previous.z, 0);
+            if (dx < -1e-9 || (Math.abs(dx) <= 1e-9 && dz < 0)) {
+                dx *= -1;
+                dz *= -1;
+            }
+            const length = Math.hypot(dx, dz);
+            if (length <= 1e-9) return point;
+            return Object.assign({}, point, {
+                x: finite(point.x, 0) - (dz / length) * offset,
+                z: finite(point.z, 0) + (dx / length) * offset,
+            });
+        });
+    }
+
+    function sampleFacilityMotionAtDistance(movement, requestedDistance) {
+        const trajectory = motionTrajectory(movement);
+        if (!trajectory) {
+            throw facilityMotionError(
+                'facility_motion_not_replayable',
+                'This movement has no trajectory to replay.'
+            );
+        }
+        const poses = trajectory.poses;
+        const cumulative = trajectory.cumulativeDistance.map(function (value) {
+            return Math.max(0, finite(value, 0));
+        });
+        const maximum = cumulative[cumulative.length - 1];
+        const target = clamp(requestedDistance, 0, maximum, 0);
+        let lower = 0;
+        let upper = 0;
+        if (target >= maximum) {
+            lower = poses.length - 1;
+            upper = lower;
+        } else if (target > 0) {
+            upper = cumulative.findIndex(function (value) {
+                return value > target;
+            });
+            if (upper < 0) upper = poses.length - 1;
+            lower = Math.max(0, upper - 1);
+        }
+        const span = cumulative[upper] - cumulative[lower];
+        const ratio = upper === lower || span <= 0
+            ? 0 : (target - cumulative[lower]) / span;
+        const start = poses[lower] || {};
+        const end = poses[upper] || start;
+        const startHeading = finite(start.heading, 0);
+        const endHeading = finite(end.heading, startHeading);
+        const headingDelta = Math.atan2(
+            Math.sin(endHeading - startHeading),
+            Math.cos(endHeading - startHeading)
+        );
+        return {
+            x: finite(start.x, 0)
+                + (finite(end.x, 0) - finite(start.x, 0)) * ratio,
+            z: finite(start.z, 0)
+                + (finite(end.z, 0) - finite(start.z, 0)) * ratio,
+            heading: startHeading + headingDelta * ratio,
+            gear: stringValue(start.gear, 'forward'),
+            distanceMeters: target,
+            lowerPoseIndex: lower,
+            upperPoseIndex: upper,
+            interpolationRatio: ratio,
+        };
+    }
+
+    function motionDurationSeconds(movement) {
+        if (!motionTrajectory(movement)) return 0;
+        if (movement.outcome === 'accepted') {
+            return Math.max(
+                0,
+                finite(
+                    movement.presentationDurationSeconds,
+                    finite(movement.plannerDurationEstimateSeconds, 0)
+                )
+            );
+        }
+        const cumulative = movement.cumulativeDistance;
+        return Math.max(
+            0,
+            finite(cumulative[cumulative.length - 1], 0)
+                / DEFAULT_REFUSED_PRESENTATION_SPEED
+        );
+    }
+
+    function normalizedHeading(value) {
+        const heading = finite(value, 0);
+        return Math.atan2(Math.sin(heading), Math.cos(heading));
+    }
+
+    function activityVisualHeadingOffset(forwardAxis) {
+        if (forwardAxis === '+X') return 0;
+        if (forwardAxis === '-X') return Math.PI;
+        if (forwardAxis === '+Z') return Math.PI / 2;
+        if (forwardAxis === '-Z') return -Math.PI / 2;
+        throw facilityMotionError(
+            'facility_activity_visual_alignment_invalid',
+            'The activity actor visual has no supported forward axis.'
+        );
+    }
+
+    function motionDistanceAtTime(movement, elapsedSeconds) {
+        const trajectory = motionTrajectory(movement);
+        if (!trajectory) return 0;
+        const duration = motionDurationSeconds(movement);
+        const distance = finite(
+            trajectory.cumulativeDistance[
+                trajectory.cumulativeDistance.length - 1
+            ],
+            0
+        );
+        if (duration <= 0) return 0;
+        return distance * clamp(elapsedSeconds, 0, duration, 0) / duration;
+    }
+
+    function clearanceSampleAtOrBefore(movement, distanceMeters) {
+        const samples = movement && movement.clearance
+            && movement.clearance.samples;
+        if (!Array.isArray(samples) || !samples.length) return null;
+        const target = Math.max(0, finite(distanceMeters, 0));
+        let selected = samples[0];
+        for (let index = 1; index < samples.length; index += 1) {
+            if (finite(samples[index].distanceMeters, 0) > target) break;
+            selected = samples[index];
+        }
+        return detachedJson(selected);
+    }
+
+    function nearestClearanceSample(movement, distanceMeters) {
+        const samples = movement && movement.clearance
+            && movement.clearance.samples;
+        if (!Array.isArray(samples) || !samples.length) return null;
+        const target = Math.max(0, finite(distanceMeters, 0));
+        return detachedJson(samples.reduce(function (nearest, sample) {
+            return Math.abs(finite(sample.distanceMeters, 0) - target)
+                < Math.abs(finite(nearest.distanceMeters, 0) - target)
+                ? sample : nearest;
+        }, samples[0]));
     }
 
     function copyPoint(value, fallback) {
@@ -1897,6 +2150,14 @@
                 15
             ),
         };
+        const reducedMotionMedia = options.window
+            && typeof options.window.matchMedia === 'function'
+            ? options.window.matchMedia('(prefers-reduced-motion: reduce)')
+            : null;
+        const prefersReducedMotion = typeof options.prefersReducedMotion
+            === 'boolean'
+            ? options.prefersReducedMotion
+            : Boolean(reducedMotionMedia && reducedMotionMedia.matches);
 
         const state = {
             host: null,
@@ -1987,7 +2248,85 @@
             reloadOnResume: false,
             navigationMode: 'orbit',
             gridVisible: options.showGrid !== false,
+            layerVisibility: normalizeLayerVisibility(
+                options.layerVisibility
+            ),
             visualSettings: normalizeVisualSettings(options.visualSettings),
+            motion: {
+                package: null,
+                vehicleProfile: null,
+                root: null,
+                ribbonRoot: null,
+                vehicleRoot: null,
+                createdObjects: [],
+                borrowedObjects: [],
+                playing: false,
+                poseDirty: false,
+                elapsedSeconds: 0,
+                playbackRateMultiplier: DEFAULT_MOTION_PLAYBACK_RATE,
+                lastFrameTime: null,
+                currentPose: null,
+                clearanceSample: null,
+                following: false,
+                status: 'idle',
+                statusReason: null,
+                prefersReducedMotion: prefersReducedMotion,
+                generation: 0,
+                stateHandler: null,
+            },
+            activity: {
+                scenario: null,
+                actorPayloads: null,
+                candidatePresentation: null,
+                root: null,
+                pathRoot: null,
+                tracks: [],
+                hiddenObjects: [],
+                playing: false,
+                poseDirty: false,
+                elapsedSeconds: 0,
+                playbackRateMultiplier: DEFAULT_MOTION_PLAYBACK_RATE,
+                lastFrameTime: null,
+                status: 'idle',
+                statusReason: null,
+                selectedActorId: null,
+                visibleActorTypes: {
+                    vehicle: true,
+                    operator: true,
+                    mobile_equipment: true,
+                },
+                visiblePathTypes: {
+                    vehicle: true,
+                    operator: true,
+                    mobile_equipment: true,
+                },
+                pathsVisible: true,
+                departmentZoneId: null,
+                generation: 0,
+                stateHandler: null,
+            },
+            navigationPreview: {
+                payload: null,
+                root: null,
+                pathRoot: null,
+                actorRoot: null,
+                visual: null,
+                placement: null,
+                hiddenObjects: [],
+                playing: false,
+                poseDirty: false,
+                normalizedTime: 0,
+                playbackRateMultiplier: 1,
+                lastFrameTime: null,
+                durationSeconds: 0,
+                currentPose: null,
+                visualYawRadians: null,
+                pathsVisible: true,
+                status: 'idle',
+                statusReason: null,
+                generation: 0,
+                stateHandler: null,
+            },
             walkthrough: {
                 active: false,
                 locked: false,
@@ -2038,6 +2377,3586 @@
             },
         };
 
+        function motionStateSnapshot() {
+            const movement = state.motion.package
+                && state.motion.package.movement;
+            const duration = movement ? motionDurationSeconds(movement) : 0;
+            const trajectory = movement ? motionTrajectory(movement) : null;
+            const maximumDistance = trajectory
+                ? finite(
+                    trajectory.cumulativeDistance[
+                        trajectory.cumulativeDistance.length - 1
+                    ],
+                    0
+                ) : 0;
+            return {
+                loaded: Boolean(state.motion.package),
+                status: state.motion.status,
+                statusReason: state.motion.statusReason,
+                packageId: state.motion.package
+                    ? state.motion.package.packageId : null,
+                movementId: movement ? movement.movementId : null,
+                outcome: movement ? movement.outcome : null,
+                vehiclePlacementId: movement && movement.vehiclePlacementId
+                    ? movement.vehiclePlacementId : null,
+                vehiclePresentation: movement && movement.vehiclePlacementId
+                    ? 'placed_asset' : movement ? 'profile_proxy' : null,
+                laneBinding: movement && movement.laneBinding
+                    ? detachedJson(movement.laneBinding) : null,
+                following: state.motion.following,
+                playing: state.motion.playing,
+                elapsedSeconds: state.motion.elapsedSeconds,
+                durationSeconds: duration,
+                playbackRateMultiplier:
+                    state.motion.playbackRateMultiplier,
+                distanceMeters: state.motion.currentPose
+                    ? state.motion.currentPose.distanceMeters : 0,
+                totalDistanceMeters: maximumDistance,
+                pose: state.motion.currentPose
+                    ? detachedJson(state.motion.currentPose) : null,
+                clearanceAtValidatedSample: state.motion.clearanceSample
+                    ? detachedJson(state.motion.clearanceSample) : null,
+                sampleSpacingMeters: movement && movement.clearance
+                    ? finite(movement.clearance.sampleSpacingMeters, 0)
+                    : movement && movement.sweptEnvelope
+                        ? finite(
+                            movement.sweptEnvelope.sampleSpacingMeters,
+                            0
+                        ) : null,
+                prefersReducedMotion: state.motion.prefersReducedMotion,
+                qualification: state.motion.package
+                    ? state.motion.package.qualification : null,
+                disclosure: state.motion.package
+                    ? FACILITY_MOTION_DISCLOSURE : null,
+                plannerDurationEstimate: Boolean(
+                    movement && movement.outcome === 'accepted'
+                ),
+                blocking: movement && movement.blocking
+                    ? detachedJson(movement.blocking) : null,
+            };
+        }
+
+        function notifyMotionState() {
+            const snapshot = motionStateSnapshot();
+            if (typeof state.motion.stateHandler === 'function') {
+                state.motion.stateHandler(snapshot, api);
+            }
+            if (typeof options.onMotionStateChange === 'function') {
+                options.onMotionStateChange(snapshot, api);
+            }
+            return snapshot;
+        }
+
+        function setMotionStateHandler(handler) {
+            state.motion.stateHandler = typeof handler === 'function'
+                ? handler : null;
+            if (state.motion.stateHandler) notifyMotionState();
+            return Boolean(state.motion.stateHandler);
+        }
+
+        function motionShape(points) {
+            if (typeof THREE.Shape !== 'function'
+                    || !Array.isArray(points) || points.length < 3) {
+                throw facilityMotionError(
+                    'facility_motion_geometry_unavailable',
+                    'The exact motion footprint cannot be rendered.'
+                );
+            }
+            const shape = new THREE.Shape();
+            points.forEach(function (point, index) {
+                const x = finite(point && point.x, NaN);
+                const z = finite(point && point.z, NaN);
+                if (!Number.isFinite(x) || !Number.isFinite(z)) {
+                    throw facilityMotionError(
+                        'facility_motion_geometry_invalid',
+                        'Motion geometry contains an invalid point.'
+                    );
+                }
+                if (index === 0) shape.moveTo(x, -z);
+                else shape.lineTo(x, -z);
+            });
+            if (typeof shape.closePath === 'function') shape.closePath();
+            return shape;
+        }
+
+        function orientMotionFloorMesh(mesh, elevation) {
+            const halfSqrt = Math.sqrt(0.5);
+            if (mesh.quaternion && typeof mesh.quaternion.set === 'function') {
+                mesh.quaternion.set(-halfSqrt, 0, 0, halfSqrt);
+            }
+            if (mesh.position && typeof mesh.position.set === 'function') {
+                mesh.position.set(0, finite(elevation, 0.04), 0);
+            }
+            mesh.renderOrder = 20;
+            return mesh;
+        }
+
+        function createMotionRibbonRoot(movement) {
+            const swept = movement && movement.sweptEnvelope;
+            const polygons = swept && swept.geometry
+                && swept.geometry.polygons;
+            if (!Array.isArray(polygons) || !polygons.length) return null;
+            if (typeof THREE.ShapeGeometry !== 'function'
+                    || typeof THREE.MeshBasicMaterial !== 'function'
+                    || typeof THREE.Mesh !== 'function') {
+                throw facilityMotionError(
+                    'facility_motion_geometry_unavailable',
+                    'The validated swept envelope cannot be rendered.'
+                );
+            }
+            const rootObject = createContainer();
+            rootObject.name = 'FacilityMotionSweptEnvelope';
+            rootObject.userData = rootObject.userData || {};
+            rootObject.userData.facilityMotionRibbon = true;
+            rootObject.userData.motionOutcome = movement.outcome;
+            polygons.forEach(function (polygon) {
+                const shape = motionShape(polygon.exterior);
+                shape.holes = Array.isArray(shape.holes) ? shape.holes : [];
+                (Array.isArray(polygon.holes) ? polygon.holes : [])
+                    .forEach(function (holePoints) {
+                        shape.holes.push(motionShape(holePoints));
+                    });
+                const geometry = new THREE.ShapeGeometry(shape);
+                const material = new THREE.MeshBasicMaterial({
+                    color: movement.outcome === 'envelope_refused'
+                        ? 0xd14343 : 0x16a085,
+                    transparent: true,
+                    opacity: movement.outcome === 'envelope_refused'
+                        ? 0.28 : 0.20,
+                    depthWrite: false,
+                    side: THREE.DoubleSide,
+                });
+                const mesh = orientMotionFloorMesh(
+                    new THREE.Mesh(geometry, material),
+                    0.035
+                );
+                mesh.userData = mesh.userData || {};
+                mesh.userData.facilityMotionRibbon = true;
+                rootObject.add(mesh);
+            });
+            return rootObject;
+        }
+
+        function createMotionVehicleRoot(profile, movement) {
+            const footprint = profile && profile.footprint;
+            if (!Array.isArray(footprint) || footprint.length < 3
+                    || typeof THREE.ShapeGeometry !== 'function'
+                    || typeof THREE.MeshBasicMaterial !== 'function'
+                    || typeof THREE.Mesh !== 'function') {
+                throw facilityMotionError(
+                    'facility_motion_vehicle_profile_invalid',
+                    'The exact published vehicle footprint is unavailable.'
+                );
+            }
+            const rootObject = createContainer();
+            rootObject.name = 'FacilityMotionVehicle';
+            rootObject.visible = false;
+            rootObject.userData = rootObject.userData || {};
+            rootObject.userData.facilityMotionVehicle = true;
+            rootObject.userData.vehicleProfileId =
+                movement.vehicleProfileRef.vehicleProfileId;
+            rootObject.userData.vehicleProfileRevision =
+                movement.vehicleProfileRef.vehicleProfileRevision;
+            const body = orientMotionFloorMesh(
+                new THREE.Mesh(
+                    new THREE.ShapeGeometry(motionShape(footprint)),
+                    new THREE.MeshBasicMaterial({
+                        color: movement.outcome === 'envelope_refused'
+                            ? 0xe04b4b : 0x00a6d6,
+                        transparent: true,
+                        opacity: 0.94,
+                        depthWrite: true,
+                        side: THREE.DoubleSide,
+                    })
+                ),
+                0.08
+            );
+            body.userData = body.userData || {};
+            body.userData.facilityMotionVehicleFootprint = true;
+            rootObject.add(body);
+            return rootObject;
+        }
+
+        function placementRecord(placementId) {
+            for (const record of state.renderGroups.values()) {
+                if (!record || !record.placementIds.includes(placementId)) {
+                    continue;
+                }
+                if (record.instanced) {
+                    throw facilityMotionError(
+                        'facility_motion_vehicle_instance_not_independent',
+                        'This placement is rendered as a shared instance and '
+                            + 'cannot be reparented without changing its peers.',
+                        { placementId: placementId }
+                    );
+                }
+                let found = null;
+                if (record.container
+                        && typeof record.container.traverse === 'function') {
+                    record.container.traverse(function (object) {
+                        if (!found && object && object.userData
+                                && object.userData.placementId === placementId) {
+                            found = object;
+                        }
+                    });
+                }
+                if (found) return found;
+            }
+            throw facilityMotionError(
+                'facility_motion_vehicle_visual_unavailable',
+                'The requested placement has no independent rendered visual.',
+                { placementId: placementId }
+            );
+        }
+
+        function placementValue(placementId) {
+            return state.placements.find(function (placement) {
+                return placement.placementId === placementId;
+            }) || null;
+        }
+
+        function snapshotBorrowedObject(placementId, vehiclePlacement) {
+            const object = placementRecord(placementId);
+            const placement = placementValue(placementId);
+            if (!placement || !object.parent) {
+                throw facilityMotionError(
+                    'facility_motion_vehicle_visual_unavailable',
+                    'The requested placement transform is unavailable.',
+                    { placementId: placementId }
+                );
+            }
+            const parent = object.parent;
+            const transform = placement.transform || {};
+            const vehicleTransform = vehiclePlacement.transform || {};
+            const position = transform.position || {};
+            const vehiclePosition = vehicleTransform.position || {};
+            return {
+                placementId: placementId,
+                object: object,
+                parent: parent,
+                siblingIndex: Array.isArray(parent.children)
+                    ? parent.children.indexOf(object) : -1,
+                transform: objectTransform(object),
+                visible: object.visible !== false,
+                selected: state.selectedIds.has(placementId),
+                relativePosition: {
+                    x: finite(position.x, 0) - finite(vehiclePosition.x, 0),
+                    y: finite(position.y, 0) - finite(vehiclePosition.y, 0),
+                    z: finite(position.z, 0) - finite(vehiclePosition.z, 0),
+                },
+                originalQuaternion: copyQuaternion(transform.quaternion),
+            };
+        }
+
+        function preflightBorrowedObjects(movement) {
+            if (!movement.vehiclePlacementId) return [];
+            const vehiclePlacement = placementValue(
+                movement.vehiclePlacementId
+            );
+            if (!vehiclePlacement) {
+                throw facilityMotionError(
+                    'facility_motion_vehicle_placement_missing',
+                    'The movement vehicle is not present in this layout revision.'
+                );
+            }
+            return [movement.vehiclePlacementId].concat(
+                Array.isArray(movement.carriedPlacementIds)
+                    ? movement.carriedPlacementIds : []
+            ).map(function (placementId) {
+                return snapshotBorrowedObject(
+                    placementId,
+                    vehiclePlacement
+                );
+            });
+        }
+
+        function restoreBorrowedObjects() {
+            state.motion.borrowedObjects.forEach(function (snapshot) {
+                const object = snapshot.object;
+                const parent = snapshot.parent;
+                if (!object || !parent) return;
+                if (typeof parent.add === 'function') parent.add(object);
+                if (Array.isArray(parent.children)
+                        && snapshot.siblingIndex >= 0) {
+                    const current = parent.children.indexOf(object);
+                    if (current >= 0) parent.children.splice(current, 1);
+                    parent.children.splice(
+                        Math.min(snapshot.siblingIndex, parent.children.length),
+                        0,
+                        object
+                    );
+                    object.parent = parent;
+                }
+                const transform = snapshot.transform || {};
+                if (object.position && typeof object.position.set === 'function') {
+                    object.position.set(
+                        finite(transform.position && transform.position.x, 0),
+                        finite(transform.position && transform.position.y, 0),
+                        finite(transform.position && transform.position.z, 0)
+                    );
+                }
+                if (object.quaternion
+                        && typeof object.quaternion.set === 'function') {
+                    object.quaternion.set(
+                        finite(transform.quaternion && transform.quaternion.x, 0),
+                        finite(transform.quaternion && transform.quaternion.y, 0),
+                        finite(transform.quaternion && transform.quaternion.z, 0),
+                        finite(transform.quaternion && transform.quaternion.w, 1)
+                    );
+                }
+                if (object.scale && typeof object.scale.set === 'function') {
+                    object.scale.set(
+                        finite(transform.scale && transform.scale.x, 1),
+                        finite(transform.scale && transform.scale.y, 1),
+                        finite(transform.scale && transform.scale.z, 1)
+                    );
+                }
+                object.visible = snapshot.visible;
+                if (snapshot.selected) state.selectedIds.add(snapshot.placementId);
+                else state.selectedIds.delete(snapshot.placementId);
+            });
+            state.motion.borrowedObjects = [];
+            if (typeof applySelection === 'function') applySelection();
+        }
+
+        function activateBorrowedObjects() {
+            if (!state.motion.borrowedObjects.length
+                    || state.motion.borrowedObjects.every(function (snapshot) {
+                        return snapshot.object.parent === state.motion.vehicleRoot;
+                    })) return;
+            state.motion.borrowedObjects.forEach(function (snapshot) {
+                state.motion.vehicleRoot.add(snapshot.object);
+                if (snapshot.object.position
+                        && typeof snapshot.object.position.set === 'function') {
+                    snapshot.object.position.set(
+                        snapshot.relativePosition.x,
+                        snapshot.relativePosition.y,
+                        snapshot.relativePosition.z
+                    );
+                }
+                if (snapshot.object.quaternion
+                        && typeof snapshot.object.quaternion.set === 'function') {
+                    const value = snapshot.originalQuaternion;
+                    snapshot.object.quaternion.set(
+                        value.x,
+                        value.y,
+                        value.z,
+                        value.w
+                    );
+                }
+            });
+        }
+
+        function resetMotionState(reason) {
+            state.motion.package = null;
+            state.motion.vehicleProfile = null;
+            state.motion.root = null;
+            state.motion.ribbonRoot = null;
+            state.motion.vehicleRoot = null;
+            state.motion.createdObjects = [];
+            state.motion.borrowedObjects = [];
+            state.motion.playing = false;
+            state.motion.poseDirty = false;
+            state.motion.elapsedSeconds = 0;
+            state.motion.playbackRateMultiplier =
+                DEFAULT_MOTION_PLAYBACK_RATE;
+            state.motion.lastFrameTime = null;
+            state.motion.currentPose = null;
+            state.motion.clearanceSample = null;
+            state.motion.following = false;
+            state.motion.status = 'idle';
+            state.motion.statusReason = reason || null;
+            state.motion.generation += 1;
+        }
+
+        function disposeMotion(reason, silent) {
+            const hadMotion = Boolean(state.motion.package || state.motion.root);
+            restoreBorrowedObjects();
+            const rootObject = state.motion.root;
+            if (rootObject && rootObject.parent
+                    && typeof rootObject.parent.remove === 'function') {
+                rootObject.parent.remove(rootObject);
+            }
+            if (rootObject) disposeObjectGraphs([rootObject]);
+            resetMotionState(reason || 'disposed');
+            if (!silent) notifyMotionState();
+            if (hadMotion) invalidate();
+            return hadMotion;
+        }
+
+        function validateMotionPayload(
+            payload,
+            activeLayoutRevision,
+            activeValidationContextFingerprint
+        ) {
+            const value = payload && typeof payload === 'object' ? payload : {};
+            const packageValue = value.package && typeof value.package === 'object'
+                ? value.package : value;
+            const schemaVersion = packageValue.schemaVersion;
+            if (![FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1,
+                    FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V2,
+                    FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V3].includes(
+                schemaVersion
+            )) {
+                throw facilityMotionError(
+                    'facility_motion_package_schema_unsupported',
+                    'Unsupported Facility Motion Package schema.'
+                );
+            }
+            if (!packageValue.packageId || !packageValue.movement) {
+                throw facilityMotionError(
+                    'facility_motion_package_schema_invalid',
+                    'The Facility Motion Package is incomplete.'
+                );
+            }
+            if (schemaVersion === FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1) {
+                if (typeof activeLayoutRevision !== 'string'
+                        || !activeLayoutRevision
+                        || packageValue.layoutRevision !== activeLayoutRevision) {
+                    throw facilityMotionError(
+                        'facility_motion_package_stale',
+                        'The motion package does not match the active layout revision.',
+                        {
+                            packageRevision: packageValue.layoutRevision || null,
+                            activeLayoutRevision: activeLayoutRevision || null,
+                        }
+                    );
+                }
+            } else {
+                const recomputedFingerprint = activeValidationContextFingerprint
+                    || value.activeValidationContextFingerprint;
+                if (typeof packageValue.generationLayoutRevision !== 'string'
+                        || !packageValue.generationLayoutRevision
+                        || typeof packageValue.validationContextFingerprint
+                            !== 'string'
+                        || !packageValue.validationContextFingerprint) {
+                    throw facilityMotionError(
+                        'facility_motion_package_schema_invalid',
+                        'The v2 Facility Motion Package is incomplete.'
+                    );
+                }
+                if (typeof recomputedFingerprint !== 'string'
+                        || !recomputedFingerprint) {
+                    throw facilityMotionError(
+                        'facility_motion_validation_context_unavailable',
+                        'The v2 validation context was not recomputed before playback.'
+                    );
+                }
+                if (recomputedFingerprint
+                        !== packageValue.validationContextFingerprint) {
+                    throw facilityMotionError(
+                        'facility_motion_package_stale',
+                        'The motion package validation context changed.',
+                        {
+                            packageFingerprint:
+                                packageValue.validationContextFingerprint,
+                            activeValidationContextFingerprint:
+                                recomputedFingerprint,
+                        }
+                    );
+                }
+            }
+            const expectedMotionQualification = schemaVersion
+                    === FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V3
+                ? FACILITY_NAVIGATION_MOTION_QUALIFICATION
+                : FACILITY_MOTION_QUALIFICATION;
+            if (packageValue.qualification !== expectedMotionQualification) {
+                throw facilityMotionError(
+                    'facility_motion_package_qualification_invalid',
+                    'The motion evidence qualification is unavailable or changed.'
+                );
+            }
+            const movement = packageValue.movement;
+            if (!['accepted', 'envelope_refused', 'unroutable'].includes(
+                movement.outcome
+            )) {
+                throw facilityMotionError(
+                    'facility_motion_outcome_invalid',
+                    'Unsupported motion outcome.'
+                );
+            }
+            const navigationJourney = schemaVersion
+                === FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V3;
+            const vehicleProfile = navigationJourney
+                ? value.actorProfile : value.vehicleProfile;
+            if (navigationJourney) {
+                const profileRef = movement.actorProfileRef;
+                if (movement.outcome !== 'accepted'
+                        || !movement.actorPlacementId
+                        || !['pedestrian', 'vehicle'].includes(
+                            movement.actorClass
+                        )
+                        || !profileRef || !vehicleProfile
+                        || vehicleProfile.profileKind !== profileRef.profileKind
+                        || vehicleProfile.profileId !== profileRef.profileId
+                        || vehicleProfile.profileRevision
+                            !== profileRef.profileRevision
+                        || !Array.isArray(vehicleProfile.footprint)
+                        || vehicleProfile.footprint.length < 3
+                        || !motionTrajectory(movement)) {
+                    throw facilityMotionError(
+                        'facility_motion_actor_profile_mismatch',
+                        'The exact navigation actor profile or trajectory is unavailable.'
+                    );
+                }
+            } else if (movement.outcome !== 'unroutable') {
+                if (!vehicleProfile || !movement.vehicleProfileRef
+                        || vehicleProfile.vehicleProfileId
+                            !== movement.vehicleProfileRef.vehicleProfileId
+                        || vehicleProfile.vehicleProfileRevision
+                            !== movement.vehicleProfileRef
+                                .vehicleProfileRevision) {
+                    throw facilityMotionError(
+                        'facility_motion_vehicle_profile_mismatch',
+                        'The exact vehicle profile revision is unavailable.'
+                    );
+                }
+                if (!motionTrajectory(movement)) {
+                    throw facilityMotionError(
+                        'facility_motion_not_replayable',
+                        'This movement has no trajectory to replay.'
+                    );
+                }
+            }
+            return {
+                package: detachedJson(packageValue),
+                vehicleProfile: vehicleProfile
+                    ? detachedJson(vehicleProfile) : null,
+            };
+        }
+
+        function loadMotionPackage(
+            payload,
+            activeLayoutRevision,
+            activeValidationContextFingerprint
+        ) {
+            if (!state.mounted || state.disposed || !state.modelRoot) {
+                throw facilityMotionError(
+                    'facility_motion_view_unavailable',
+                    'Mount the Facility 3D view before loading motion.'
+                );
+            }
+            const validated = validateMotionPayload(
+                payload,
+                activeLayoutRevision,
+                activeValidationContextFingerprint
+            );
+            disposeActivity('motion_loaded', true);
+            disposeNavigationPreview('motion_loaded', true);
+            disposeMotion('replaced', true);
+            const packageValue = validated.package;
+            const movement = packageValue.movement;
+            const borrowedObjects = movement.outcome !== 'unroutable'
+                ? preflightBorrowedObjects(movement) : [];
+            state.motion.package = packageValue;
+            state.motion.vehicleProfile = validated.vehicleProfile;
+            state.motion.status = movement.outcome === 'unroutable'
+                ? 'unroutable' : 'ready';
+            state.motion.statusReason = null;
+            state.motion.playing = false;
+            state.motion.elapsedSeconds = 0;
+            state.motion.lastFrameTime = null;
+            state.motion.currentPose = null;
+            state.motion.clearanceSample = null;
+            state.motion.following = Boolean(movement.vehiclePlacementId);
+            state.motion.poseDirty = movement.outcome !== 'unroutable';
+            if (movement.outcome !== 'unroutable') {
+                try {
+                    const rootObject = createContainer();
+                    rootObject.name = 'FacilityMotionPlayback';
+                    rootObject.userData = rootObject.userData || {};
+                    rootObject.userData.facilityMotionPackageId =
+                        packageValue.packageId;
+                    const ribbon = createMotionRibbonRoot(movement);
+                    if (ribbon) rootObject.add(ribbon);
+                    const vehicleRoot = movement.vehiclePlacementId
+                        ? createContainer()
+                        : createMotionVehicleRoot(
+                            validated.vehicleProfile,
+                            movement
+                        );
+                    vehicleRoot.name = 'FacilityMotionVehicleRoot';
+                    vehicleRoot.visible = false;
+                    rootObject.add(vehicleRoot);
+                    state.motion.borrowedObjects = borrowedObjects;
+                    state.motion.root = rootObject;
+                    state.motion.ribbonRoot = ribbon;
+                    state.motion.vehicleRoot = vehicleRoot;
+                    state.motion.createdObjects = [rootObject];
+                    state.modelRoot.add(rootObject);
+                    invalidate();
+                } catch (error) {
+                    disposeMotion(
+                        error && error.code
+                            ? error.code : 'facility_motion_load_failed',
+                        true
+                    );
+                    throw error;
+                }
+            }
+            notifyMotionState();
+            return motionStateSnapshot();
+        }
+
+        function motionVehicleBounds(pose) {
+            const profile = state.motion.vehicleProfile || {};
+            const dimensions = profile.overallDimensions || {};
+            const length = Math.max(0.5, finite(dimensions.length, 1));
+            const width = Math.max(0.5, finite(dimensions.width, 1));
+            const height = Math.max(0.5, finite(dimensions.height, 1));
+            const heading = finite(pose && pose.heading, 0);
+            const cosine = Math.abs(Math.cos(heading));
+            const sine = Math.abs(Math.sin(heading));
+            const halfX = (cosine * length + sine * width) / 2;
+            const halfZ = (sine * length + cosine * width) / 2;
+            const movement = state.motion.package && state.motion.package.movement;
+            const placement = movement && movement.vehiclePlacementId
+                ? placementValue(movement.vehiclePlacementId) : null;
+            const floorY = placement
+                ? finite(
+                    placement.transform && placement.transform.position
+                        && placement.transform.position.y,
+                    0
+                ) : 0;
+            return {
+                minimum: {
+                    x: finite(pose && pose.x, 0) - halfX,
+                    y: floorY,
+                    z: finite(pose && pose.z, 0) - halfZ,
+                },
+                maximum: {
+                    x: finite(pose && pose.x, 0) + halfX,
+                    y: floorY + height,
+                    z: finite(pose && pose.z, 0) + halfZ,
+                },
+            };
+        }
+
+        function focusMotionVehicle(poseOverride) {
+            const movement = state.motion.package && state.motion.package.movement;
+            const trajectory = motionTrajectory(movement);
+            if (!trajectory || !state.motion.vehicleRoot || state.walkthrough.active
+                    || state.drone.active) return false;
+            let pose = poseOverride || state.motion.currentPose;
+            if (!pose) {
+                pose = sampleFacilityMotionAtDistance(
+                    movement,
+                    motionDistanceAtTime(movement, state.motion.elapsedSeconds)
+                );
+            }
+            const bounds = motionVehicleBounds(pose);
+            return fitBounds(bounds, 'motion_vehicle', {
+                x: finite(pose.x, 0),
+                y: bounds.minimum.y
+                    + (bounds.maximum.y - bounds.minimum.y) * 0.45,
+                z: finite(pose.z, 0),
+            });
+        }
+
+        function setMotionFollow(requested) {
+            const movement = state.motion.package && state.motion.package.movement;
+            const enabled = requested === true;
+            if (!movement || !movement.vehiclePlacementId || state.walkthrough.active
+                    || state.drone.active) {
+                state.motion.following = false;
+                notifyMotionState();
+                return false;
+            }
+            state.motion.following = enabled;
+            if (enabled) focusMotionVehicle();
+            notifyMotionState();
+            return state.motion.following;
+        }
+
+        function translateFollowingCamera(previousPose, nextPose) {
+            if (!state.motion.following || !previousPose || state.walkthrough.active
+                    || state.drone.active || !state.camera) return;
+            const dx = finite(nextPose.x, 0) - finite(previousPose.x, 0);
+            const dz = finite(nextPose.z, 0) - finite(previousPose.z, 0);
+            state.camera.position.x = finite(state.camera.position.x, 0) + dx;
+            state.camera.position.z = finite(state.camera.position.z, 0) + dz;
+            if (state.controls && state.controls.target) {
+                state.controls.target.x = finite(state.controls.target.x, 0) + dx;
+                state.controls.target.z = finite(state.controls.target.z, 0) + dz;
+                if (typeof state.controls.update === 'function') {
+                    state.controls.update();
+                }
+            }
+            if (typeof state.camera.updateMatrixWorld === 'function') {
+                state.camera.updateMatrixWorld(true);
+            }
+        }
+
+        function playMotion() {
+            const movement = state.motion.package
+                && state.motion.package.movement;
+            if (!motionTrajectory(movement)) return false;
+            const duration = motionDurationSeconds(movement);
+            if (state.motion.elapsedSeconds >= duration && duration > 0) {
+                state.motion.elapsedSeconds = 0;
+                state.motion.poseDirty = true;
+            }
+            state.motion.playing = true;
+            state.motion.status = 'playing';
+            state.motion.lastFrameTime = null;
+            notifyMotionState();
+            invalidate();
+            return true;
+        }
+
+        function pauseMotion() {
+            if (!state.motion.package) return false;
+            state.motion.playing = false;
+            state.motion.status = motionTrajectory(
+                state.motion.package.movement
+            ) ? 'paused' : state.motion.status;
+            state.motion.lastFrameTime = null;
+            notifyMotionState();
+            return true;
+        }
+
+        function seekMotion(requestedSeconds) {
+            const movement = state.motion.package
+                && state.motion.package.movement;
+            if (!motionTrajectory(movement)) return false;
+            const duration = motionDurationSeconds(movement);
+            let elapsed = clamp(requestedSeconds, 0, duration, 0);
+            if (!state.motion.playing && movement.outcome === 'accepted') {
+                const requestedDistance = motionDistanceAtTime(
+                    movement,
+                    elapsed
+                );
+                const sample = nearestClearanceSample(
+                    movement,
+                    requestedDistance
+                );
+                const totalDistance = finite(movement.distanceMeters, 0);
+                if (sample && duration > 0 && totalDistance > 0) {
+                    elapsed = duration
+                        * finite(sample.distanceMeters, 0) / totalDistance;
+                }
+            }
+            state.motion.elapsedSeconds = elapsed;
+            state.motion.lastFrameTime = null;
+            state.motion.poseDirty = true;
+            state.motion.status = 'paused';
+            invalidate();
+            return true;
+        }
+
+        function setMotionRate(requestedRate) {
+            if (!state.motion.package) return false;
+            state.motion.playbackRateMultiplier = clamp(
+                requestedRate,
+                0.25,
+                4,
+                DEFAULT_MOTION_PLAYBACK_RATE
+            );
+            notifyMotionState();
+            return state.motion.playbackRateMultiplier;
+        }
+
+        function updateMotion(timestamp) {
+            const movement = state.motion.package
+                && state.motion.package.movement;
+            if (!motionTrajectory(movement) || !state.motion.vehicleRoot) {
+                return false;
+            }
+            const duration = motionDurationSeconds(movement);
+            if (state.motion.playing) {
+                if (state.motion.lastFrameTime === null) {
+                    state.motion.lastFrameTime = finite(timestamp, 0);
+                } else {
+                    const deltaSeconds = Math.max(
+                        0,
+                        (finite(timestamp, state.motion.lastFrameTime)
+                            - state.motion.lastFrameTime) / 1000
+                    );
+                    state.motion.lastFrameTime = finite(
+                        timestamp,
+                        state.motion.lastFrameTime
+                    );
+                    state.motion.elapsedSeconds = Math.min(
+                        duration,
+                        state.motion.elapsedSeconds
+                            + deltaSeconds
+                                * state.motion.playbackRateMultiplier
+                    );
+                    state.motion.poseDirty = true;
+                }
+            }
+            if (!state.motion.poseDirty) return state.motion.playing;
+            try {
+                activateBorrowedObjects();
+                const distance = motionDistanceAtTime(
+                    movement,
+                    state.motion.elapsedSeconds
+                );
+                const pose = sampleFacilityMotionAtDistance(
+                    movement,
+                    distance
+                );
+                const previousPose = state.motion.currentPose;
+                const firstPose = motionTrajectory(movement).poses[0];
+                const heading = movement.vehiclePlacementId
+                    ? -(pose.heading - finite(firstPose.heading, 0))
+                    : -pose.heading;
+                const vehiclePlacement = movement.vehiclePlacementId
+                    ? placementValue(movement.vehiclePlacementId) : null;
+                const vertical = vehiclePlacement
+                    ? finite(
+                        vehiclePlacement.transform
+                            && vehiclePlacement.transform.position
+                            && vehiclePlacement.transform.position.y,
+                        0
+                    ) : 0;
+                if (state.motion.vehicleRoot.position
+                        && typeof state.motion.vehicleRoot.position.set
+                            === 'function') {
+                    state.motion.vehicleRoot.position.set(
+                        pose.x,
+                        vertical,
+                        pose.z
+                    );
+                }
+                if (state.motion.vehicleRoot.quaternion
+                        && typeof state.motion.vehicleRoot.quaternion.set
+                            === 'function') {
+                    state.motion.vehicleRoot.quaternion.set(
+                        0,
+                        Math.sin(heading / 2),
+                        0,
+                        Math.cos(heading / 2)
+                    );
+                }
+                state.motion.vehicleRoot.visible = true;
+                state.motion.currentPose = pose;
+                if (state.motion.following) {
+                    if (previousPose) {
+                        translateFollowingCamera(previousPose, pose);
+                    } else {
+                        focusMotionVehicle(pose);
+                    }
+                }
+                state.motion.clearanceSample = clearanceSampleAtOrBefore(
+                    movement,
+                    pose.distanceMeters
+                );
+                state.motion.poseDirty = false;
+                if (state.motion.playing
+                        && state.motion.elapsedSeconds >= duration) {
+                    state.motion.playing = false;
+                    state.motion.status = 'complete';
+                    state.motion.lastFrameTime = null;
+                }
+                notifyMotionState();
+                return true;
+            } catch (error) {
+                reportError('facility_motion_playback_failed', error);
+                disposeMotion(
+                    error && error.code
+                        ? error.code : 'facility_motion_playback_failed'
+                );
+                return false;
+            }
+        }
+
+        function activityRenderRecord(placementId) {
+            for (const record of state.renderGroups.values()) {
+                if (record && Array.isArray(record.placementIds)
+                        && record.placementIds.includes(placementId)) {
+                    return record;
+                }
+            }
+            throw facilityMotionError(
+                'facility_activity_actor_visual_unavailable',
+                'An activity actor has no rendered catalog visual.',
+                { placementId: placementId }
+            );
+        }
+
+        function activitySuppressedPlacementIds() {
+            const result = new Set();
+            if (!state.activity.scenario) return result;
+            state.activity.tracks.forEach(function (track) {
+                if (track && track.sourcePlacementHidden === true
+                        && track.actor && track.actor.placementId) {
+                    result.add(track.actor.placementId);
+                }
+            });
+            const stationary = state.activity.candidatePresentation
+                && state.activity.candidatePresentation
+                    .suppressedOperatorPlacementIds;
+            if (Array.isArray(stationary)) {
+                stationary.forEach(function (placementId) {
+                    if (placementId) result.add(placementId);
+                });
+            }
+            return result;
+        }
+
+        function activityIndependentObject(record, placementId) {
+            let found = null;
+            if (record && record.container
+                    && typeof record.container.traverse === 'function') {
+                record.container.traverse(function (object) {
+                    if (!found && object && object.userData
+                            && object.userData.placementId === placementId) {
+                        found = object;
+                    }
+                });
+            }
+            return found;
+        }
+
+        function cloneActivityRenderable(prototype) {
+            const clone = cloneRenderable(prototype);
+            if (clone && typeof clone.traverse === 'function') {
+                clone.traverse(function (object) {
+                    if (object && object.isMesh && object.geometry
+                            && typeof object.geometry.clone === 'function') {
+                        object.geometry = object.geometry.clone();
+                    }
+                });
+            }
+            return clone;
+        }
+
+        function hideActivityPlacement(record, placementId) {
+            if (!record.instanced) {
+                const object = activityIndependentObject(record, placementId);
+                if (!object) {
+                    throw facilityMotionError(
+                        'facility_activity_actor_visual_unavailable',
+                        'The activity actor visual cannot be isolated.',
+                        { placementId: placementId }
+                    );
+                }
+                const snapshot = {
+                    kind: 'object',
+                    object: object,
+                    visible: object.visible !== false,
+                };
+                object.visible = false;
+                return [snapshot];
+            }
+            if (typeof THREE.Matrix4 !== 'function') {
+                throw facilityMotionError(
+                    'facility_activity_instance_isolation_unavailable',
+                    'Instanced actor isolation requires Matrix4 support.',
+                    { placementId: placementId }
+                );
+            }
+            const instanceIndex = record.placementIds.indexOf(placementId);
+            if (instanceIndex < 0) return [];
+            return (record.pickObjects || []).map(function (mesh) {
+                if (!mesh || typeof mesh.getMatrixAt !== 'function'
+                        || typeof mesh.setMatrixAt !== 'function') {
+                    throw facilityMotionError(
+                        'facility_activity_instance_isolation_unavailable',
+                        'The rendered actor instance cannot be isolated.',
+                        { placementId: placementId }
+                    );
+                }
+                const matrix = new THREE.Matrix4();
+                mesh.getMatrixAt(instanceIndex, matrix);
+                const hidden = new THREE.Matrix4();
+                if (typeof hidden.makeScale === 'function') {
+                    hidden.makeScale(0, 0, 0);
+                }
+                mesh.setMatrixAt(instanceIndex, hidden);
+                if (mesh.instanceMatrix) mesh.instanceMatrix.needsUpdate = true;
+                return {
+                    kind: 'instance',
+                    mesh: mesh,
+                    instanceIndex: instanceIndex,
+                    matrix: matrix,
+                };
+            });
+        }
+
+        function restoreActivityPlacements() {
+            state.activity.hiddenObjects.slice().reverse().forEach(
+                function (snapshot) {
+                    if (snapshot.kind === 'object' && snapshot.object) {
+                        snapshot.object.visible = snapshot.visible;
+                    } else if (snapshot.kind === 'instance' && snapshot.mesh
+                            && typeof snapshot.mesh.setMatrixAt === 'function') {
+                        snapshot.mesh.setMatrixAt(
+                            snapshot.instanceIndex,
+                            snapshot.matrix
+                        );
+                        if (snapshot.mesh.instanceMatrix) {
+                            snapshot.mesh.instanceMatrix.needsUpdate = true;
+                        }
+                    }
+                }
+            );
+            state.activity.hiddenObjects = [];
+        }
+
+        function activityPlacementStillVisible(placementId) {
+            const record = activityRenderRecord(placementId);
+            if (!record.instanced) {
+                const object = activityIndependentObject(record, placementId);
+                return Boolean(object && object.visible !== false);
+            }
+            if (typeof THREE.Matrix4 !== 'function') return true;
+            return (record.pickObjects || []).some(function (mesh) {
+                if (!mesh || typeof mesh.getMatrixAt !== 'function') return true;
+                const renderedPlacementIds = state.instanceLookup.get(mesh)
+                    || record.placementIds;
+                const instanceIndex = renderedPlacementIds.indexOf(placementId);
+                if (instanceIndex < 0) return false;
+                const matrix = new THREE.Matrix4();
+                mesh.getMatrixAt(instanceIndex, matrix);
+                const elements = matrix.elements || [];
+                return [0, 1, 2, 4, 5, 6, 8, 9, 10].some(function (index) {
+                    return Math.abs(finite(elements[index], 0)) > 1e-9;
+                });
+            });
+        }
+
+        function resetActivityState(reason) {
+            state.activity.scenario = null;
+            state.activity.actorPayloads = null;
+            state.activity.candidatePresentation = null;
+            state.activity.root = null;
+            state.activity.pathRoot = null;
+            state.activity.tracks = [];
+            state.activity.hiddenObjects = [];
+            state.activity.playing = false;
+            state.activity.poseDirty = false;
+            state.activity.elapsedSeconds = 0;
+            state.activity.playbackRateMultiplier =
+                DEFAULT_MOTION_PLAYBACK_RATE;
+            state.activity.lastFrameTime = null;
+            state.activity.status = 'idle';
+            state.activity.statusReason = reason || null;
+            state.activity.selectedActorId = null;
+            state.activity.visibleActorTypes = {
+                vehicle: true,
+                operator: true,
+                mobile_equipment: true,
+            };
+            state.activity.visiblePathTypes = {
+                vehicle: true,
+                operator: true,
+                mobile_equipment: true,
+            };
+            state.activity.pathsVisible = true;
+            state.activity.departmentZoneId = null;
+            state.activity.generation += 1;
+        }
+
+        function activityStateSnapshot() {
+            const scenario = state.activity.scenario;
+            const duration = scenario
+                ? Math.max(0.001, finite(scenario.cycleDurationSeconds, 0.001))
+                : 0;
+            const elapsed = scenario && scenario.repeat
+                ? state.activity.elapsedSeconds % duration
+                : state.activity.elapsedSeconds;
+            return {
+                loaded: Boolean(scenario),
+                scenarioId: scenario ? scenario.scenarioId : null,
+                label: scenario ? scenario.label : null,
+                status: state.activity.status,
+                statusReason: state.activity.statusReason,
+                playing: state.activity.playing,
+                elapsedSeconds: elapsed,
+                durationSeconds: duration,
+                playbackRateMultiplier:
+                    state.activity.playbackRateMultiplier,
+                selectedActorId: state.activity.selectedActorId,
+                visibleActorTypes: Object.assign(
+                    {},
+                    state.activity.visibleActorTypes
+                ),
+                visiblePathTypes: Object.assign(
+                    {},
+                    state.activity.visiblePathTypes
+                ),
+                pathsVisible: state.activity.pathsVisible !== false,
+                borrowedPlacementCount: state.activity.tracks.length,
+                suppressedStationaryOperatorCount:
+                    state.activity.candidatePresentation
+                    && Array.isArray(
+                        state.activity.candidatePresentation
+                            .suppressedOperatorPlacementIds
+                    )
+                        ? state.activity.candidatePresentation
+                            .suppressedOperatorPlacementIds.length
+                        : 0,
+                duplicateVisiblePlacementIds: state.activity.tracks
+                    .map(function (track) {
+                        return track.actor.placementId;
+                    })
+                    .filter(activityPlacementStillVisible)
+                    .sort(),
+                visibleSourcePlacementIds: scenario ? Array.from(new Set(
+                    state.activity.tracks.map(function (track) {
+                        return track.actor.placementId;
+                    }).concat(
+                        state.activity.candidatePresentation
+                        && Array.isArray(
+                            state.activity.candidatePresentation
+                                .suppressedOperatorPlacementIds
+                        )
+                            ? state.activity.candidatePresentation
+                                .suppressedOperatorPlacementIds : []
+                    )
+                )).filter(activityPlacementStillVisible).sort() : [],
+                leanMotionCounts: scenario ? {
+                    operatorPaths: scenario.leanMotion.operatorPaths.length,
+                    pedestrianConnections:
+                        scenario.leanMotion.pedestrianConnections.length,
+                    assistanceGates:
+                        scenario.leanMotion.assistanceGates.length,
+                    materialHandoffs:
+                        scenario.leanMotion.materialHandoffs.length,
+                    fifoPoints: scenario.leanMotion.fifoPoints.length,
+                    renderedObjects: state.activity.pathRoot
+                        && Array.isArray(state.activity.pathRoot.children)
+                        ? state.activity.pathRoot.children.length : 0,
+                } : null,
+                candidatePresentation: state.activity.candidatePresentation
+                    ? {
+                        authority:
+                            state.activity.candidatePresentation.authority,
+                        reviewStatus:
+                            state.activity.candidatePresentation.reviewStatus,
+                        productionEligible:
+                            state.activity.candidatePresentation.productionEligible,
+                        candidateCounts: detachedJson(
+                            state.activity.candidatePresentation.candidateCounts
+                        ),
+                        packagingPathLegend: Array.isArray(
+                            state.activity.candidatePresentation
+                                .packagingPathLegend
+                        ) ? detachedJson(
+                                state.activity.candidatePresentation
+                                    .packagingPathLegend
+                            ) : [],
+                        inspectionPathLegend: Array.isArray(
+                            state.activity.candidatePresentation
+                                .inspectionPathLegend
+                        ) ? detachedJson(
+                                state.activity.candidatePresentation
+                                    .inspectionPathLegend
+                            ) : [],
+                        finishedGoodsPathLegend: Array.isArray(
+                            state.activity.candidatePresentation
+                                .finishedGoodsPathLegend
+                        ) ? detachedJson(
+                                state.activity.candidatePresentation
+                                    .finishedGoodsPathLegend
+                            ) : [],
+                        receivingPathLegend: Array.isArray(
+                            state.activity.candidatePresentation
+                                .receivingPathLegend
+                        ) ? detachedJson(
+                                state.activity.candidatePresentation
+                                    .receivingPathLegend
+                            ) : [],
+                        parkedVehiclePlacementIds: Array.isArray(
+                            state.activity.candidatePresentation
+                                .parkedVehiclePlacementIds
+                        ) ? detachedJson(
+                                state.activity.candidatePresentation
+                                    .parkedVehiclePlacementIds
+                            ) : [],
+                        parkedVehicleVisiblePlacementIds: Array.isArray(
+                            state.activity.candidatePresentation
+                                .parkedVehiclePlacementIds
+                        ) ? state.activity.candidatePresentation
+                                .parkedVehiclePlacementIds.filter(
+                                    activityPlacementStillVisible
+                                ).sort() : [],
+                        qualification:
+                            state.activity.candidatePresentation.qualification,
+                    } : null,
+                departmentZoneId: state.activity.departmentZoneId,
+                actors: state.activity.tracks.map(function (track) {
+                    return {
+                        actorId: track.actor.actorId,
+                        actorType: track.actor.actorType,
+                        label: track.actor.label,
+                        placementId: track.actor.placementId,
+                        routeId: track.actor.routeId,
+                        repeat: track.actor.repeat === true,
+                        loopMode: track.actor.loopMode,
+                        cycleDurationSeconds: motionDurationSeconds(
+                            track.package.movement
+                        ),
+                        cycleClosed: (function () {
+                            const trajectory = motionTrajectory(
+                                track.package.movement
+                            );
+                            const first = trajectory.poses[0];
+                            const last = trajectory.poses[
+                                trajectory.poses.length - 1
+                            ];
+                            return Boolean(first && last
+                                && Math.hypot(
+                                    finite(last.x, 0) - finite(first.x, 0),
+                                    finite(last.z, 0) - finite(first.z, 0)
+                                ) <= 1e-6);
+                        }()),
+                        departmentZoneIds:
+                            track.actor.departmentZoneIds.slice(),
+                        visible: track.root.visible !== false,
+                        pose: track.currentPose
+                            ? detachedJson(track.currentPose) : null,
+                        localElapsedSeconds: track.localElapsedSeconds,
+                        playbackPhase: track.playbackPhase,
+                        travelDirection: track.travelDirection,
+                        currentMotionPackageId:
+                            track.currentMotionPackageId,
+                        exactCatalogVisual: Boolean(track.visual),
+                        sourcePlacementSuppressed:
+                            !activityPlacementStillVisible(
+                                track.actor.placementId
+                            ),
+                        visualForwardAxis:
+                            track.actor.visualAlignment.forwardAxis,
+                        visualYawRadians: track.visualYawRadians,
+                    };
+                }),
+                stationaryEvidence: scenario
+                    ? detachedJson(scenario.stationaryEvidence) : null,
+                unavailableActivity: scenario
+                    ? detachedJson(scenario.unavailableActivity) : [],
+                prototypeMode: Boolean(scenario),
+                qualification: scenario ? scenario.qualification : null,
+                disclosure: scenario ? FACILITY_ACTIVITY_DISCLOSURE : null,
+            };
+        }
+
+        function notifyActivityState() {
+            const snapshot = activityStateSnapshot();
+            if (typeof state.activity.stateHandler === 'function') {
+                state.activity.stateHandler(snapshot, api);
+            }
+            if (typeof options.onActivityStateChange === 'function') {
+                options.onActivityStateChange(snapshot, api);
+            }
+            return snapshot;
+        }
+
+        function setActivityStateHandler(handler) {
+            state.activity.stateHandler = typeof handler === 'function'
+                ? handler : null;
+            if (state.activity.stateHandler) notifyActivityState();
+            return Boolean(state.activity.stateHandler);
+        }
+
+        function disposeActivity(reason, silent) {
+            const hadActivity = Boolean(
+                state.activity.scenario || state.activity.root
+            );
+            restoreActivityPlacements();
+            const rootObject = state.activity.root;
+            if (rootObject && rootObject.parent
+                    && typeof rootObject.parent.remove === 'function') {
+                rootObject.parent.remove(rootObject);
+            }
+            if (rootObject) disposeObjectGraphs([rootObject]);
+            resetActivityState(reason || 'disposed');
+            if (hadActivity) restoreBasePlacementVisibility();
+            if (!silent) notifyActivityState();
+            if (hadActivity) invalidate();
+            return hadActivity;
+        }
+
+        function navigationPreviewRuntime() {
+            const runtime = root
+                && root.InspectorProFacilityNavigationAuthoring;
+            if (!runtime
+                    || typeof runtime.samplePathAtNormalizedTime
+                        !== 'function'
+                    || typeof runtime.pathLength !== 'function') {
+                throw facilityMotionError(
+                    'facility_navigation_preview_runtime_unavailable',
+                    'The deterministic navigation authoring runtime is unavailable.'
+                );
+            }
+            return runtime;
+        }
+
+        function validateNavigationPreviewPayload(value, activeRevision) {
+            const payload = value && typeof value === 'object'
+                ? detachedJson(value) : null;
+            if (!payload || typeof payload.previewId !== 'string'
+                    || !payload.previewId
+                    || typeof payload.actorPlacementId !== 'string'
+                    || !['pedestrian', 'vehicle'].includes(payload.actorClass)
+                    || !Array.isArray(payload.points)
+                    || payload.points.length < 2
+                    || !['+X', '-X', '+Z', '-Z'].includes(
+                        payload.visualForwardAxis
+                    )) {
+                throw facilityMotionError(
+                    'facility_navigation_preview_invalid',
+                    'The manual navigation preview payload is incomplete.'
+                );
+            }
+            if (payload.layoutRevision !== activeRevision) {
+                throw facilityMotionError(
+                    'facility_navigation_preview_stale',
+                    'The manual navigation preview does not match the active base revision.',
+                    {
+                        previewRevision: payload.layoutRevision || null,
+                        activeRevision: activeRevision || null,
+                    }
+                );
+            }
+            payload.points.forEach(function (point, index) {
+                if (!point || !Number.isFinite(Number(point.x))
+                        || !Number.isFinite(Number(point.z))) {
+                    throw facilityMotionError(
+                        'facility_navigation_preview_invalid',
+                        'A manual path waypoint is invalid.',
+                        { pointIndex: index }
+                    );
+                }
+            });
+            const placement = state.placements.find(function (item) {
+                return item.placementId === payload.actorPlacementId;
+            });
+            if (!placement) {
+                throw facilityMotionError(
+                    'facility_navigation_preview_actor_unavailable',
+                    'The selected existing actor is unavailable in the active layout.',
+                    { placementId: payload.actorPlacementId }
+                );
+            }
+            return { payload: payload, placement: placement };
+        }
+
+        function restoreNavigationPreviewPlacement() {
+            state.navigationPreview.hiddenObjects.slice().reverse().forEach(
+                function (snapshot) {
+                    if (snapshot.kind === 'object' && snapshot.object) {
+                        snapshot.object.visible = snapshot.visible;
+                    } else if (snapshot.kind === 'instance' && snapshot.mesh
+                            && typeof snapshot.mesh.setMatrixAt === 'function') {
+                        snapshot.mesh.setMatrixAt(
+                            snapshot.instanceIndex,
+                            snapshot.matrix
+                        );
+                        if (snapshot.mesh.instanceMatrix) {
+                            snapshot.mesh.instanceMatrix.needsUpdate = true;
+                        }
+                    }
+                }
+            );
+            state.navigationPreview.hiddenObjects = [];
+        }
+
+        function resetNavigationPreviewState(reason) {
+            const handler = state.navigationPreview.stateHandler;
+            state.navigationPreview.payload = null;
+            state.navigationPreview.root = null;
+            state.navigationPreview.pathRoot = null;
+            state.navigationPreview.actorRoot = null;
+            state.navigationPreview.visual = null;
+            state.navigationPreview.placement = null;
+            state.navigationPreview.hiddenObjects = [];
+            state.navigationPreview.playing = false;
+            state.navigationPreview.poseDirty = false;
+            state.navigationPreview.normalizedTime = 0;
+            state.navigationPreview.playbackRateMultiplier = 1;
+            state.navigationPreview.lastFrameTime = null;
+            state.navigationPreview.durationSeconds = 0;
+            state.navigationPreview.currentPose = null;
+            state.navigationPreview.visualYawRadians = null;
+            state.navigationPreview.pathsVisible = true;
+            state.navigationPreview.status = 'idle';
+            state.navigationPreview.statusReason = reason || null;
+            state.navigationPreview.generation += 1;
+            state.navigationPreview.stateHandler = handler;
+        }
+
+        function navigationPreviewStateSnapshot() {
+            const preview = state.navigationPreview;
+            const payload = preview.payload;
+            return {
+                loaded: Boolean(payload),
+                previewId: payload ? payload.previewId : null,
+                actorPlacementId: payload
+                    ? payload.actorPlacementId : null,
+                actorClass: payload ? payload.actorClass : null,
+                status: preview.status,
+                statusReason: preview.statusReason,
+                playing: preview.playing,
+                normalizedTime: preview.normalizedTime,
+                durationSeconds: preview.durationSeconds,
+                playbackRateMultiplier: preview.playbackRateMultiplier,
+                pathsVisible: preview.pathsVisible !== false,
+                pose: preview.currentPose
+                    ? detachedJson(preview.currentPose) : null,
+                visualForwardAxis: payload
+                    ? payload.visualForwardAxis : null,
+                visualYawRadians: preview.visualYawRadians,
+                exactCatalogVisual: Boolean(preview.visual),
+                sourcePlacementSuppressed: Boolean(
+                    preview.hiddenObjects.length
+                ),
+                duplicateVisiblePlacementCount:
+                    payload && preview.hiddenObjects.length ? 0 : 1,
+                validationStatus: payload
+                    ? payload.validationStatus || 'pending' : null,
+                qualification: payload ? (
+                    'Manual UI-authored navigation preview. Path geometry is '
+                    + 'not a safety, capacity, timing, or compliance approval.'
+                ) : null,
+            };
+        }
+
+        function notifyNavigationPreviewState() {
+            const snapshot = navigationPreviewStateSnapshot();
+            if (typeof state.navigationPreview.stateHandler === 'function') {
+                state.navigationPreview.stateHandler(snapshot, api);
+            }
+            if (typeof options.onNavigationPreviewStateChange === 'function') {
+                options.onNavigationPreviewStateChange(snapshot, api);
+            }
+            return snapshot;
+        }
+
+        function setNavigationPreviewStateHandler(handler) {
+            state.navigationPreview.stateHandler = typeof handler === 'function'
+                ? handler : null;
+            if (state.navigationPreview.stateHandler) {
+                notifyNavigationPreviewState();
+            }
+            return Boolean(state.navigationPreview.stateHandler);
+        }
+
+        function disposeNavigationPreview(reason, silent) {
+            const hadPreview = Boolean(
+                state.navigationPreview.payload
+                    || state.navigationPreview.root
+            );
+            restoreNavigationPreviewPlacement();
+            const rootObject = state.navigationPreview.root;
+            if (rootObject && rootObject.parent
+                    && typeof rootObject.parent.remove === 'function') {
+                rootObject.parent.remove(rootObject);
+            }
+            if (rootObject) disposeObjectGraphs([rootObject]);
+            resetNavigationPreviewState(reason || 'disposed');
+            if (!silent) notifyNavigationPreviewState();
+            if (hadPreview) invalidate();
+            return hadPreview;
+        }
+
+        function buildNavigationPreviewPath(payload) {
+            const color = payload.validationStatus === 'validated'
+                ? '#0f8f62' : payload.validationStatus === 'invalid'
+                    ? '#c9363e' : '#0878d1';
+            const line = leanMotionLine(
+                payload.points,
+                color,
+                'ManualNavigationPath:' + payload.previewId,
+                'manual_navigation_path',
+                0.98
+            );
+            const pathRoot = createContainer();
+            pathRoot.name = 'FacilityManualNavigationPath';
+            pathRoot.userData = pathRoot.userData || {};
+            pathRoot.userData.facilityNavigationPreviewId = payload.previewId;
+            if (line) pathRoot.add(line);
+            pathRoot.visible = state.navigationPreview.pathsVisible !== false;
+            return pathRoot;
+        }
+
+        async function prepareNavigationPreviewVisual(validated) {
+            const placement = validated.placement;
+            const key = placement.assetId + '|'
+                + placement.assetDefinitionRevision;
+            const group = state.baseGroups.get(key);
+            if (!group) {
+                throw facilityMotionError(
+                    'facility_navigation_preview_visual_unavailable',
+                    'The selected actor has no catalog visual group.',
+                    { placementId: placement.placementId }
+                );
+            }
+            if (!group.resolved) {
+                await resolveBaseGroup(
+                    group,
+                    state.sceneGeneration,
+                    state.abortController ? state.abortController.signal : null
+                );
+            }
+            if (group.deferredVisual) {
+                await loadDeferredGroup(
+                    group,
+                    'navigation_preview_exact_visual'
+                );
+            }
+            const record = activityRenderRecord(placement.placementId);
+            if (!['overview', 'detail'].includes(record.representation)) {
+                throw facilityMotionError(
+                    'facility_navigation_preview_exact_visual_unavailable',
+                    'Manual motion preview requires the exact catalog GLB; footprint and proxy fallbacks are not animated.',
+                    {
+                        placementId: placement.placementId,
+                        representation: record.representation,
+                    }
+                );
+            }
+            return record;
+        }
+
+        async function loadNavigationPreview(payload, activeRevision) {
+            if (!state.mounted || state.disposed || !state.modelRoot) {
+                throw facilityMotionError(
+                    'facility_navigation_preview_view_unavailable',
+                    'Mount the Facility 3D view before previewing a path.'
+                );
+            }
+            let validated = validateNavigationPreviewPayload(
+                payload,
+                activeRevision
+            );
+            const record = await prepareNavigationPreviewVisual(validated);
+            validated = validateNavigationPreviewPayload(
+                payload,
+                activeRevision
+            );
+            disposeMotion('navigation_preview_loaded', true);
+            disposeActivity('navigation_preview_loaded', true);
+            disposeNavigationPreview('replaced', true);
+            try {
+                const rootObject = createContainer();
+                rootObject.name = 'FacilityManualNavigationPreview';
+                rootObject.userData = rootObject.userData || {};
+                rootObject.userData.facilityNavigationPreviewId =
+                    validated.payload.previewId;
+                const visual = cloneActivityRenderable(
+                    record.prototypeObject
+                );
+                if (!visual) {
+                    throw facilityMotionError(
+                        'facility_navigation_preview_visual_unavailable',
+                        'The exact selected actor visual could not be cloned.'
+                    );
+                }
+                applyVisualSettingsToObject(visual);
+                applyPlacementTransform(visual, validated.placement);
+                if (visual.position && typeof visual.position.set === 'function') {
+                    visual.position.set(0, 0, 0);
+                }
+                if (visual.quaternion
+                        && typeof visual.quaternion.set === 'function') {
+                    visual.quaternion.set(0, 0, 0, 1);
+                }
+                const actorRoot = createContainer();
+                actorRoot.name = 'FacilityManualNavigationActor:'
+                    + validated.payload.actorPlacementId;
+                actorRoot.userData = actorRoot.userData || {};
+                actorRoot.userData.facilityNavigationActorPlacementId =
+                    validated.payload.actorPlacementId;
+                actorRoot.add(visual);
+                rootObject.add(actorRoot);
+                const pathRoot = buildNavigationPreviewPath(
+                    validated.payload
+                );
+                rootObject.add(pathRoot);
+                const hidden = hideActivityPlacement(
+                    record,
+                    validated.payload.actorPlacementId
+                );
+                if (!hidden.length) {
+                    throw facilityMotionError(
+                        'facility_navigation_preview_source_not_hidden',
+                        'The stationary actor visual could not be suppressed.'
+                    );
+                }
+                state.navigationPreview.payload = validated.payload;
+                state.navigationPreview.root = rootObject;
+                state.navigationPreview.pathRoot = pathRoot;
+                state.navigationPreview.actorRoot = actorRoot;
+                state.navigationPreview.visual = visual;
+                state.navigationPreview.placement = validated.placement;
+                state.navigationPreview.hiddenObjects = hidden;
+                state.navigationPreview.playing = false;
+                state.navigationPreview.poseDirty = true;
+                state.navigationPreview.normalizedTime = 0;
+                state.navigationPreview.lastFrameTime = null;
+                state.navigationPreview.pathsVisible =
+                    validated.payload.pathsVisible !== false;
+                state.navigationPreview.durationSeconds = Math.max(
+                    1,
+                    navigationPreviewRuntime().pathLength(
+                        validated.payload.points
+                    ) / 1.2
+                );
+                state.navigationPreview.status = 'ready';
+                state.modelRoot.add(rootObject);
+                invalidate();
+            } catch (error) {
+                disposeNavigationPreview(
+                    error && error.code
+                        ? error.code : 'facility_navigation_preview_load_failed',
+                    true
+                );
+                throw error;
+            }
+            notifyNavigationPreviewState();
+            return navigationPreviewStateSnapshot();
+        }
+
+        function updateNavigationPreviewPath(value) {
+            if (!state.navigationPreview.payload) return false;
+            const source = value && typeof value === 'object' ? value : {};
+            const next = Object.assign(
+                {},
+                state.navigationPreview.payload,
+                {
+                    points: detachedJson(source.points
+                        || state.navigationPreview.payload.points),
+                    loopMode: source.loopMode
+                        || state.navigationPreview.payload.loopMode,
+                    direction: source.direction
+                        || state.navigationPreview.payload.direction,
+                    validationStatus: source.validationStatus
+                        || state.navigationPreview.payload.validationStatus,
+                }
+            );
+            validateNavigationPreviewPayload(
+                next,
+                next.layoutRevision
+            );
+            const previous = state.navigationPreview.pathRoot;
+            if (previous && previous.parent
+                    && typeof previous.parent.remove === 'function') {
+                previous.parent.remove(previous);
+            }
+            if (previous) disposeObjectGraphs([previous]);
+            state.navigationPreview.payload = next;
+            state.navigationPreview.durationSeconds = Math.max(
+                1,
+                navigationPreviewRuntime().pathLength(next.points) / 1.2
+            );
+            const pathRoot = buildNavigationPreviewPath(next);
+            pathRoot.visible = state.navigationPreview.pathsVisible !== false;
+            state.navigationPreview.pathRoot = pathRoot;
+            state.navigationPreview.root.add(pathRoot);
+            state.navigationPreview.poseDirty = true;
+            invalidate();
+            return true;
+        }
+
+        function playNavigationPreview() {
+            if (!state.navigationPreview.payload) return false;
+            state.navigationPreview.playing = true;
+            state.navigationPreview.status = 'playing';
+            state.navigationPreview.lastFrameTime = null;
+            notifyNavigationPreviewState();
+            invalidate();
+            return true;
+        }
+
+        function pauseNavigationPreview() {
+            if (!state.navigationPreview.payload) return false;
+            state.navigationPreview.playing = false;
+            state.navigationPreview.status = 'paused';
+            state.navigationPreview.lastFrameTime = null;
+            notifyNavigationPreviewState();
+            return true;
+        }
+
+        function seekNavigationPreview(requestedNormalizedTime) {
+            if (!state.navigationPreview.payload) return false;
+            state.navigationPreview.normalizedTime = clamp(
+                requestedNormalizedTime,
+                0,
+                1,
+                0
+            );
+            state.navigationPreview.lastFrameTime = null;
+            state.navigationPreview.poseDirty = true;
+            state.navigationPreview.status = 'paused';
+            invalidate();
+            return true;
+        }
+
+        function setNavigationPreviewRate(requestedRate) {
+            if (!state.navigationPreview.payload) return false;
+            state.navigationPreview.playbackRateMultiplier = clamp(
+                requestedRate,
+                0.25,
+                4,
+                1
+            );
+            notifyNavigationPreviewState();
+            return state.navigationPreview.playbackRateMultiplier;
+        }
+
+        function setNavigationPreviewPathsVisible(requested) {
+            state.navigationPreview.pathsVisible = requested !== false;
+            if (state.navigationPreview.pathRoot) {
+                state.navigationPreview.pathRoot.visible =
+                    state.navigationPreview.pathsVisible;
+            }
+            invalidate();
+            notifyNavigationPreviewState();
+            return state.navigationPreview.pathsVisible;
+        }
+
+        function navigationPreviewEffectiveTime(payload, normalizedTime) {
+            const value = clamp(normalizedTime, 0, 1, 0);
+            if (payload.loopMode === 'out_and_return') {
+                return value <= 0.5 ? value * 2 : (1 - value) * 2;
+            }
+            if (payload.direction === 'reverse') return 1 - value;
+            return value;
+        }
+
+        function updateNavigationPreview(timestamp) {
+            const preview = state.navigationPreview;
+            const payload = preview.payload;
+            if (!payload || !preview.actorRoot) return false;
+            if (preview.playing) {
+                if (preview.lastFrameTime === null) {
+                    preview.lastFrameTime = finite(timestamp, 0);
+                } else {
+                    const deltaSeconds = Math.max(
+                        0,
+                        (finite(timestamp, preview.lastFrameTime)
+                            - preview.lastFrameTime) / 1000
+                    );
+                    preview.lastFrameTime = finite(
+                        timestamp,
+                        preview.lastFrameTime
+                    );
+                    const delta = deltaSeconds
+                        * preview.playbackRateMultiplier
+                        / Math.max(0.001, preview.durationSeconds);
+                    const next = preview.normalizedTime + delta;
+                    if (payload.loopMode === 'one_way') {
+                        preview.normalizedTime = Math.min(1, next);
+                        if (preview.normalizedTime >= 1) {
+                            preview.playing = false;
+                        }
+                    } else {
+                        preview.normalizedTime = next % 1;
+                    }
+                    preview.poseDirty = true;
+                }
+            }
+            if (!preview.poseDirty) return preview.playing;
+            try {
+                const sampleTime = navigationPreviewEffectiveTime(
+                    payload,
+                    preview.normalizedTime
+                );
+                const pose = navigationPreviewRuntime()
+                    .samplePathAtNormalizedTime(payload.points, sampleTime);
+                if (payload.loopMode === 'out_and_return'
+                        && preview.normalizedTime > 0.5) {
+                    pose.heading = normalizedHeading(pose.heading + Math.PI);
+                }
+                const heading = activityVisualHeadingOffset(
+                    payload.visualForwardAxis
+                ) - pose.heading;
+                const vertical = finite(
+                    preview.placement.transform
+                        && preview.placement.transform.position
+                        && preview.placement.transform.position.y,
+                    0
+                );
+                if (preview.actorRoot.position
+                        && typeof preview.actorRoot.position.set === 'function') {
+                    preview.actorRoot.position.set(pose.x, vertical, pose.z);
+                }
+                if (preview.actorRoot.quaternion
+                        && typeof preview.actorRoot.quaternion.set
+                            === 'function') {
+                    preview.actorRoot.quaternion.set(
+                        0,
+                        Math.sin(heading / 2),
+                        0,
+                        Math.cos(heading / 2)
+                    );
+                }
+                preview.actorRoot.visible = true;
+                preview.currentPose = Object.assign({}, pose, {
+                    normalizedTime: preview.normalizedTime,
+                });
+                preview.visualYawRadians = normalizedHeading(heading);
+                preview.poseDirty = false;
+                preview.status = preview.playing ? 'playing' : 'paused';
+                notifyNavigationPreviewState();
+                return true;
+            } catch (error) {
+                reportError('facility_navigation_preview_failed', error);
+                disposeNavigationPreview(
+                    error && error.code
+                        ? error.code : 'facility_navigation_preview_failed'
+                );
+                return false;
+            }
+        }
+
+        function leanMotionLine(points, color, name, kind, opacity) {
+            if (!Array.isArray(points) || points.length < 2) return null;
+            const positions = [];
+            points.slice(0, -1).forEach(function (point, index) {
+                const next = points[index + 1];
+                positions.push(
+                    finite(point.x, 0), 0.035, finite(point.z, 0),
+                    finite(next.x, 0), 0.035, finite(next.z, 0)
+                );
+            });
+            const line = createGridLineObject(
+                positions,
+                color,
+                opacity,
+                name,
+                'activity-lean-motion',
+                9
+            );
+            if (line) {
+                line.userData = line.userData || {};
+                line.userData.facilityLeanMotionKind = kind;
+            }
+            return line;
+        }
+
+        function leanMotionDashedLine(
+            points,
+            color,
+            name,
+            kind,
+            opacity
+        ) {
+            if (!Array.isArray(points) || points.length < 2) return null;
+            const positions = [];
+            const dashLength = 0.72;
+            const gapLength = 0.42;
+            points.slice(0, -1).forEach(function (point, index) {
+                const next = points[index + 1];
+                const dx = finite(next.x, 0) - finite(point.x, 0);
+                const dz = finite(next.z, 0) - finite(point.z, 0);
+                const length = Math.hypot(dx, dz);
+                if (length <= 0.000001) return;
+                let cursor = 0;
+                while (cursor < length) {
+                    const end = Math.min(length, cursor + dashLength);
+                    positions.push(
+                        finite(point.x, 0) + dx * cursor / length,
+                        0.042,
+                        finite(point.z, 0) + dz * cursor / length,
+                        finite(point.x, 0) + dx * end / length,
+                        0.042,
+                        finite(point.z, 0) + dz * end / length
+                    );
+                    cursor += dashLength + gapLength;
+                }
+            });
+            const line = createGridLineObject(
+                positions,
+                color,
+                opacity,
+                name,
+                'activity-lean-motion',
+                10
+            );
+            if (line) {
+                line.userData = line.userData || {};
+                line.userData.facilityLeanMotionKind = kind;
+            }
+            return line;
+        }
+
+        function leanMotionRibbon(
+            points,
+            color,
+            name,
+            kind,
+            opacity,
+            dashed
+        ) {
+            if (!Array.isArray(points) || points.length < 2) return null;
+            const RootType = THREE.Group || THREE.Object3D;
+            if (typeof RootType !== 'function') return null;
+            const rootObject = new RootType();
+            const addSegment = function (start, end) {
+                const dx = finite(end.x, 0) - finite(start.x, 0);
+                const dz = finite(end.z, 0) - finite(start.z, 0);
+                const length = Math.hypot(dx, dz);
+                if (length <= 0.000001) return;
+                const segment = addFloorPaintRectangle(
+                    rootObject,
+                    { fillColor: color, opacity: opacity },
+                    length,
+                    0.18,
+                    (finite(start.x, 0) + finite(end.x, 0)) / 2,
+                    (finite(start.z, 0) + finite(end.z, 0)) / 2,
+                    { color: color, opacity: opacity }
+                );
+                if (!segment) return;
+                segment.position.y = 0.06;
+                const radians = -Math.atan2(dz, dx);
+                setQuaternion(segment.quaternion, {
+                    x: 0,
+                    y: Math.sin(radians / 2),
+                    z: 0,
+                    w: Math.cos(radians / 2),
+                });
+                segment.renderOrder = 11;
+            };
+            points.slice(0, -1).forEach(function (point, index) {
+                const next = points[index + 1];
+                const dx = finite(next.x, 0) - finite(point.x, 0);
+                const dz = finite(next.z, 0) - finite(point.z, 0);
+                const length = Math.hypot(dx, dz);
+                if (!dashed || length <= 0.000001) {
+                    addSegment(point, next);
+                    return;
+                }
+                const dashLength = 0.72;
+                const gapLength = 0.42;
+                for (let cursor = 0; cursor < length;
+                        cursor += dashLength + gapLength) {
+                    const end = Math.min(length, cursor + dashLength);
+                    addSegment({
+                        x: finite(point.x, 0) + dx * cursor / length,
+                        z: finite(point.z, 0) + dz * cursor / length,
+                    }, {
+                        x: finite(point.x, 0) + dx * end / length,
+                        z: finite(point.z, 0) + dz * end / length,
+                    });
+                }
+            });
+            if (!rootObject.children || !rootObject.children.length) return null;
+            rootObject.name = name;
+            rootObject.userData = rootObject.userData || {};
+            rootObject.userData.facilityLeanMotionKind = kind;
+            rootObject.userData.facilityActivityPathRibbon = true;
+            return rootObject;
+        }
+
+        function buildLeanMotionVisual(leanMotion) {
+            const rootObject = createContainer();
+            rootObject.name = 'FacilityLeanMotionPaths';
+            rootObject.userData = rootObject.userData || {};
+            rootObject.userData.facilityLeanMotion = true;
+            leanMotion.operatorPaths.forEach(function (path) {
+                const line = leanMotionLine(
+                    path.centerline,
+                    '#2563eb',
+                    'OperatorPath:' + path.pathId,
+                    'operator_path',
+                    0.96
+                );
+                if (line) rootObject.add(line);
+            });
+            leanMotion.pedestrianConnections.forEach(function (connection) {
+                const line = leanMotionDashedLine(
+                    connection.centerline,
+                    '#0891b2',
+                    'PedestrianConnection:' + connection.connectionId,
+                    'pedestrian_connection',
+                    0.96
+                );
+                if (line) rootObject.add(line);
+            });
+            leanMotion.assistanceGates.forEach(function (gate) {
+                const center = gate.position;
+                const radius = 0.5;
+                const circle = [];
+                for (let index = 0; index <= 20; index += 1) {
+                    const angle = Math.PI * 2 * index / 20;
+                    circle.push({
+                        x: center.x + Math.cos(angle) * radius,
+                        z: center.z + Math.sin(angle) * radius,
+                    });
+                }
+                const line = leanMotionLine(
+                    circle,
+                    '#06b6d4',
+                    'AssistanceGate:' + gate.gateId,
+                    'assistance_gate',
+                    1
+                );
+                if (line) rootObject.add(line);
+            });
+            leanMotion.materialHandoffs.forEach(function (handoff) {
+                const line = leanMotionLine(
+                    handoff.centerline,
+                    '#059669',
+                    'MaterialHandoff:' + handoff.handoffId,
+                    'material_handoff',
+                    0.94
+                );
+                if (line) rootObject.add(line);
+            });
+            leanMotion.fifoPoints.forEach(function (point) {
+                const center = point.position;
+                const radius = 0.42;
+                const diamond = [
+                    { x: center.x, z: center.z - radius },
+                    { x: center.x + radius, z: center.z },
+                    { x: center.x, z: center.z + radius },
+                    { x: center.x - radius, z: center.z },
+                    { x: center.x, z: center.z - radius },
+                ];
+                const line = leanMotionLine(
+                    diamond,
+                    '#f59e0b',
+                    'FifoPoint:' + point.pointId,
+                    'fifo_point',
+                    1
+                );
+                if (line) rootObject.add(line);
+            });
+            return rootObject;
+        }
+
+        function buildNavigationActivityVisual(validated) {
+            const rootObject = createContainer();
+            rootObject.name = 'FacilityNavigationActivityPaths';
+            rootObject.userData = rootObject.userData || {};
+            rootObject.userData.facilityNavigationActivity = true;
+            const candidatePresentation = validated
+                && validated.candidatePresentation;
+            const finishedGoodsPresentation = Boolean(
+                candidatePresentation
+                && Array.isArray(
+                    candidatePresentation.finishedGoodsPathLegend
+                )
+                && candidatePresentation.finishedGoodsPathLegend.length
+            );
+            const receivingPresentation = Boolean(
+                candidatePresentation
+                && Array.isArray(candidatePresentation.receivingPathLegend)
+                && candidatePresentation.receivingPathLegend.length
+            );
+            const handlingPresentation = finishedGoodsPresentation
+                || receivingPresentation;
+            if (!validated || !validated.scenario
+                    || (
+                        validated.scenario.schemaVersion
+                            !== FACILITY_NAVIGATION_ACTIVITY_SCENARIO_SCHEMA_VERSION
+                        && !candidatePresentation
+                    )) {
+                return rootObject;
+            }
+            const evidenceByPlacement = new Map(
+                candidatePresentation
+                    && Array.isArray(candidatePresentation.programEvidence)
+                    ? candidatePresentation.programEvidence.map(function (item) {
+                        return [item.actorPlacementId, item];
+                    }) : []
+            );
+            validated.actors.forEach(function (entry) {
+                const actorType = entry.actor.actorType;
+                const evidence = evidenceByPlacement.get(
+                    entry.actor.placementId
+                );
+                const pathSegments = evidence
+                    && Array.isArray(evidence.pathSegments)
+                    ? evidence.pathSegments : [];
+                const segmentByPackage = new Map(pathSegments.map(
+                    function (segment) {
+                        return [segment.motionPackageId, segment];
+                    }
+                ));
+                const packages = entry.actor.loopMode === 'closed_path'
+                    && Array.isArray(entry.cyclePackages)
+                    && entry.cyclePackages.length
+                    ? entry.cyclePackages : [entry.package];
+                packages.forEach(function (packageValue) {
+                    const movement = packageValue.movement;
+                    const trajectory = motionTrajectory(movement);
+                    if (!trajectory) return;
+                    const segment = segmentByPackage.get(
+                        packageValue.packageId
+                    );
+                    const phase = segment && segment.phase;
+                    const loadedPhase = [
+                        'carry_out',
+                        'loaded_putaway',
+                        'loaded_dispatch',
+                    ].includes(phase);
+                    const emptyPhase = [
+                        'return_empty',
+                        'empty_to_rack',
+                    ].includes(phase);
+                    const handlingPhase = handlingPresentation && [
+                        'finished_goods_pick',
+                        'receiving_pick',
+                        'loaded_putaway',
+                        'return_empty',
+                        'empty_to_rack',
+                        'loaded_dispatch',
+                    ].includes(phase);
+                    const color = loadedPhase
+                        ? '#d97706' : emptyPhase
+                            ? '#059669' : [
+                                'finished_goods_pick',
+                                'receiving_pick',
+                            ].includes(phase)
+                                ? '#2563eb' : actorType === 'operator'
+                                ? '#2563eb'
+                                : actorType === 'mobile_equipment'
+                                    ? '#0f8f62' : '#d97706';
+                    const lineFactory = emptyPhase
+                        ? leanMotionDashedLine : leanMotionLine;
+                    const displayPoints = activityDisplayOffsetPoints(
+                        trajectory.poses,
+                        segment && segment.displayOffsetMeters
+                    );
+                    const line = (handlingPhase
+                        ? leanMotionRibbon : lineFactory)(
+                            displayPoints,
+                            color,
+                            'NavigationJourney:'
+                                + (movement.journeySolutionId || movement.routeId),
+                            phase ? 'navigation_journey_' + phase
+                                : 'navigation_journey',
+                            0.96,
+                            emptyPhase
+                        );
+                    if (!line) return;
+                    line.userData = line.userData || {};
+                    line.userData.facilityActivityPathActorType = actorType;
+                    line.userData.facilityActivityActorId = entry.actor.actorId;
+                    line.userData.facilityActivityPathPhase = phase || null;
+                    line.userData.facilityActivityDisplayOffsetMeters = finite(
+                        segment && segment.displayOffsetMeters,
+                        0
+                    );
+                    rootObject.add(line);
+                });
+            });
+            const candidateHandoffs = candidatePresentation
+                && Array.isArray(candidatePresentation.handoffs)
+                    ? candidatePresentation.handoffs : [];
+            candidateHandoffs.forEach(function (handoff) {
+                const line = leanMotionLine(
+                    handoff.centerline,
+                    '#059669',
+                    'CandidateHandoff:' + handoff.candidateId,
+                    'candidate_handoff',
+                    0.94
+                );
+                if (line) rootObject.add(line);
+                [
+                    handoff.centerline[0],
+                    handoff.centerline[handoff.centerline.length - 1],
+                ].forEach(function (center, index) {
+                    const radius = 0.42;
+                    const diamond = leanMotionLine([
+                        { x: center.x, z: center.z - radius },
+                        { x: center.x + radius, z: center.z },
+                        { x: center.x, z: center.z + radius },
+                        { x: center.x - radius, z: center.z },
+                        { x: center.x, z: center.z - radius },
+                    ], '#f59e0b',
+                    'CandidateHandoffEndpoint:' + handoff.candidateId + ':' + index,
+                    'candidate_handoff_endpoint', 1);
+                    if (diamond) rootObject.add(diamond);
+                });
+            });
+            const intersections = validated.scenario.navigationPresentation
+                && validated.scenario.navigationPresentation.pathIntersections;
+            (Array.isArray(intersections) ? intersections : []).forEach(
+                function (intersection) {
+                    const center = intersection.position;
+                    const radius = 0.28;
+                    const first = leanMotionLine([
+                        { x: center.x - radius, z: center.z - radius },
+                        { x: center.x + radius, z: center.z + radius },
+                    ], '#dc2626', 'PathIntersection:' + intersection.conflictId,
+                    'navigation_visual_conflict', 0.95);
+                    const second = leanMotionLine([
+                        { x: center.x - radius, z: center.z + radius },
+                        { x: center.x + radius, z: center.z - radius },
+                    ], '#dc2626', 'PathIntersection:' + intersection.conflictId,
+                    'navigation_visual_conflict', 0.95);
+                    if (first) rootObject.add(first);
+                    if (second) rootObject.add(second);
+                }
+            );
+            return rootObject;
+        }
+
+        function applyActivityPathVisibility() {
+            if (!state.activity.pathRoot) return false;
+            const globallyVisible = state.activity.pathsVisible !== false;
+            state.activity.pathRoot.visible = globallyVisible;
+            if (typeof state.activity.pathRoot.traverse === 'function') {
+                state.activity.pathRoot.traverse(function (object) {
+                    const actorType = object && object.userData
+                        && object.userData.facilityActivityPathActorType;
+                    if (!actorType) return;
+                    object.visible = globallyVisible
+                        && state.activity.visiblePathTypes[actorType] !== false;
+                });
+            }
+            return globallyVisible;
+        }
+
+        function validateActivityPayload(payload, activeLayoutRevision) {
+            const value = payload && typeof payload === 'object' ? payload : {};
+            const scenario = value.scenario;
+            const navigationActivity = scenario && scenario.schemaVersion
+                === FACILITY_NAVIGATION_ACTIVITY_SCENARIO_SCHEMA_VERSION;
+            if (!scenario || ![
+                FACILITY_ACTIVITY_SCENARIO_SCHEMA_VERSION,
+                FACILITY_NAVIGATION_ACTIVITY_SCENARIO_SCHEMA_VERSION,
+            ].includes(scenario.schemaVersion)) {
+                throw facilityMotionError(
+                    'facility_activity_scenario_schema_unsupported',
+                    'Unsupported Facility activity scenario schema.'
+                );
+            }
+            if (scenario.layoutRevision !== activeLayoutRevision) {
+                throw facilityMotionError(
+                    'facility_activity_scenario_stale',
+                    'The activity scenario does not match the active layout revision.'
+                );
+            }
+            const expectedActivityQualification = navigationActivity
+                ? FACILITY_NAVIGATION_ACTIVITY_QUALIFICATION
+                : FACILITY_ACTIVITY_SCENARIO_QUALIFICATION;
+            if (scenario.qualification !== expectedActivityQualification) {
+                throw facilityMotionError(
+                    'facility_activity_scenario_qualification_invalid',
+                    'The mandatory activity qualification is unavailable or changed.'
+                );
+            }
+            if (!Array.isArray(scenario.actors) || !scenario.actors.length
+                    || !value.actorPayloads
+                    || typeof value.actorPayloads !== 'object') {
+                throw facilityMotionError(
+                    'facility_activity_scenario_invalid',
+                    'The activity scenario has no replayable actors.'
+                );
+            }
+            const actors = scenario.actors.map(function (actor) {
+                const visualAlignment = actor.visualAlignment;
+                const pairedLanePackageIds = [
+                    actor.returnMotionPackageId,
+                    actor.endTransferMotionPackageId,
+                    actor.startTransferMotionPackageId,
+                ];
+                const cyclePackageIds = Array.isArray(
+                    actor.cycleMotionPackageIds
+                ) ? actor.cycleMotionPackageIds.slice() : null;
+                const pairedLanes = actor.repeat
+                    && actor.loopMode === 'paired_lanes';
+                const pingPong = actor.repeat
+                    && actor.loopMode === 'ping_pong';
+                const closedPath = actor.repeat
+                    && actor.loopMode === 'closed_path';
+                const journeyCycle = actor.repeat
+                    && actor.loopMode === 'journey_cycle';
+                const once = !actor.repeat && actor.loopMode === 'once';
+                const endpointTurnSeconds = Number(actor.endpointTurnSeconds);
+                if (!visualAlignment
+                        || !['+X', '-X', '+Z', '-Z'].includes(
+                            visualAlignment.forwardAxis
+                        )
+                        || visualAlignment.authority
+                            !== 'curated_revision_bound_visual_review'
+                        || typeof visualAlignment.evidenceArtifact !== 'string'
+                        || !visualAlignment.evidenceArtifact
+                        || (!pairedLanes && !pingPong && !closedPath
+                            && !journeyCycle && !once)
+                        || (journeyCycle && !navigationActivity)
+                        || !cyclePackageIds
+                        || !Number.isFinite(endpointTurnSeconds)
+                        || (pingPong && (
+                            endpointTurnSeconds < 0.1
+                            || endpointTurnSeconds > 10
+                        ))
+                        || (!pingPong && !closedPath
+                            && endpointTurnSeconds !== 0)
+                        || (closedPath && (
+                            endpointTurnSeconds < 0.1
+                            || endpointTurnSeconds > 10
+                            || cyclePackageIds.length < 3
+                            || cyclePackageIds[0] !== actor.motionPackageId
+                            || new Set(cyclePackageIds).size
+                                !== cyclePackageIds.length
+                        ))
+                        || (pairedLanes && pairedLanePackageIds.some(
+                            packageId => typeof packageId !== 'string'
+                                || !packageId
+                        ))
+                        || (!pairedLanes && pairedLanePackageIds.some(
+                            packageId => packageId !== null
+                        ))
+                        || (!closedPath && cyclePackageIds.length)) {
+                    throw facilityMotionError(
+                        'facility_activity_visual_alignment_invalid',
+                        'An activity actor has invalid visual alignment or loop timing.',
+                        { actorId: actor.actorId }
+                    );
+                }
+                const placement = placementValue(actor.placementId);
+                if (!placement
+                        || placement.assetId
+                            !== actor.assetDefinitionRef.assetId
+                        || placement.assetDefinitionRevision
+                            !== actor.assetDefinitionRef
+                                .assetDefinitionRevision) {
+                    throw facilityMotionError(
+                        'facility_activity_actor_binding_mismatch',
+                        'An activity actor does not match its exact layout identity.',
+                        { actorId: actor.actorId }
+                    );
+                }
+                function actorPackage(packageId, requireActorRoute) {
+                    const actorPayload = value.actorPayloads[packageId];
+                    const validated = validateMotionPayload(
+                        actorPayload,
+                        activeLayoutRevision
+                    );
+                    const movement = validated.package.movement;
+                    const movementPlacementId = movement.actorPlacementId
+                        || movement.vehiclePlacementId;
+                    const movementRouteId = movement.movementProgramId
+                        || movement.routeId;
+                    if (movementPlacementId !== actor.placementId
+                            || validated.package.packageId !== packageId
+                            || (requireActorRoute !== false
+                                && movementRouteId !== actor.routeId)) {
+                        throw facilityMotionError(
+                            'facility_activity_actor_binding_mismatch',
+                            'An activity package does not match its exact actor.',
+                            { actorId: actor.actorId, packageId: packageId }
+                        );
+                    }
+                    if (!motionTrajectory(movement)) {
+                        throw facilityMotionError(
+                            'facility_activity_actor_not_replayable',
+                            'An activity actor has no replayable trajectory.',
+                            { actorId: actor.actorId, packageId: packageId }
+                        );
+                    }
+                    return validated;
+                }
+                const outbound = actorPackage(actor.motionPackageId);
+                let returnLane = null;
+                let endTransfer = null;
+                let startTransfer = null;
+                let cyclePackages = [];
+                if (pairedLanes) {
+                    returnLane = actorPackage(actor.returnMotionPackageId);
+                    endTransfer = actorPackage(
+                        actor.endTransferMotionPackageId
+                    );
+                    startTransfer = actorPackage(
+                        actor.startTransferMotionPackageId
+                    );
+                    const outboundMovement = outbound.package.movement;
+                    const returnMovement = returnLane.package.movement;
+                    const endMovement = endTransfer.package.movement;
+                    const startMovement = startTransfer.package.movement;
+                    const outboundLane = outboundMovement.laneBinding;
+                    const pairedLane = returnMovement.laneBinding;
+                    const outboundMarkings = outboundLane
+                        && outboundLane.sourceMarkingIds;
+                    const returnMarkings = pairedLane
+                        && pairedLane.sourceMarkingIds;
+                    const markingsOverlap = Array.isArray(outboundMarkings)
+                        && Array.isArray(returnMarkings)
+                        && outboundMarkings.some(id => returnMarkings.includes(id));
+                    function boundaryPose(movement, atEnd) {
+                        const trajectory = motionTrajectory(movement);
+                        return trajectory.poses[
+                            atEnd ? trajectory.poses.length - 1 : 0
+                        ];
+                    }
+                    function continuous(left, right) {
+                        const dx = finite(left.x, 0) - finite(right.x, 0);
+                        const dz = finite(left.z, 0) - finite(right.z, 0);
+                        const dh = normalizedHeading(
+                            finite(left.heading, 0) - finite(right.heading, 0)
+                        );
+                        return Math.hypot(dx, dz) <= 1e-5
+                            && Math.abs(dh) <= 1e-5;
+                    }
+                    const profileRevision = outbound.package.movement
+                        .vehicleProfileRef.vehicleProfileRevision;
+                    if (outboundMovement.outcome !== 'accepted'
+                            || returnMovement.outcome !== 'accepted'
+                            || endMovement.outcome !== 'accepted'
+                            || startMovement.outcome !== 'accepted'
+                            || !outboundLane || !pairedLane
+                            || outboundLane.status !== 'direction_markings'
+                            || pairedLane.status !== 'direction_markings'
+                            || outboundLane.travelDirection
+                                === pairedLane.travelDirection
+                            || !Array.isArray(outboundMarkings)
+                            || !outboundMarkings.length
+                            || !Array.isArray(returnMarkings)
+                            || !returnMarkings.length
+                            || markingsOverlap
+                            || [returnLane, endTransfer, startTransfer].some(
+                                item => item.package.movement.vehicleProfileRef
+                                    .vehicleProfileRevision !== profileRevision
+                            )
+                            || !continuous(
+                                boundaryPose(outboundMovement, true),
+                                boundaryPose(endMovement, false)
+                            )
+                            || !continuous(
+                                boundaryPose(endMovement, true),
+                                boundaryPose(returnMovement, false)
+                            )
+                            || !continuous(
+                                boundaryPose(returnMovement, true),
+                                boundaryPose(startMovement, false)
+                            )
+                            || !continuous(
+                                boundaryPose(startMovement, true),
+                                boundaryPose(outboundMovement, false)
+                            )) {
+                        throw facilityMotionError(
+                            'facility_activity_paired_lane_binding_invalid',
+                            'The paired-lane loop is incomplete or inconsistent.',
+                            { actorId: actor.actorId }
+                        );
+                    }
+                }
+                if (closedPath) {
+                    cyclePackages = cyclePackageIds.map(function (packageId) {
+                        return packageId === actor.motionPackageId
+                            ? outbound : actorPackage(packageId, false);
+                    });
+                    function profileRevision(movement) {
+                        const reference = movement.actorProfileRef
+                            || movement.vehicleProfileRef;
+                        return reference && (
+                            reference.profileRevision
+                            || reference.vehicleProfileRevision
+                        );
+                    }
+                    const outboundProfileRevision = profileRevision(
+                        outbound.package.movement
+                    );
+                    function endpoint(movement, atEnd) {
+                        const trajectory = motionTrajectory(movement);
+                        return trajectory.poses[
+                            atEnd ? trajectory.poses.length - 1 : 0
+                        ];
+                    }
+                    function positionContinuous(left, right) {
+                        return Math.hypot(
+                            finite(left.x, 0) - finite(right.x, 0),
+                            finite(left.z, 0) - finite(right.z, 0)
+                        ) <= 1e-5;
+                    }
+                    const invalidCycle = cyclePackages.some(
+                        item => item.package.movement.outcome !== 'accepted'
+                            || profileRevision(item.package.movement)
+                                !== outboundProfileRevision
+                    ) || cyclePackages.some(function (item, index) {
+                        const next = cyclePackages[
+                            (index + 1) % cyclePackages.length
+                        ];
+                        return !positionContinuous(
+                            endpoint(item.package.movement, true),
+                            endpoint(next.package.movement, false)
+                        );
+                    });
+                    if (invalidCycle) {
+                        throw facilityMotionError(
+                            'facility_activity_closed_path_invalid',
+                            'The local operator path is incomplete or inconsistent.',
+                            { actorId: actor.actorId }
+                        );
+                    }
+                }
+                return {
+                    actor: detachedJson(actor),
+                    package: outbound.package,
+                    returnPackage: returnLane ? returnLane.package : null,
+                    endTransferPackage: endTransfer
+                        ? endTransfer.package : null,
+                    startTransferPackage: startTransfer
+                        ? startTransfer.package : null,
+                    cyclePackages: cyclePackages.map(function (item) {
+                        return item.package;
+                    }),
+                    profile: outbound.vehicleProfile,
+                    placement: placement,
+                    record: activityRenderRecord(actor.placementId),
+                };
+            });
+            const leanMotion = scenario.leanMotion;
+            const validPoint = point => point
+                && Number.isFinite(Number(point.x))
+                && Number.isFinite(Number(point.z));
+            const actorIds = new Set(actors.map(item => item.actor.actorId));
+            const actorById = new Map(actors.map(function (item) {
+                return [item.actor.actorId, item.actor];
+            }));
+            const candidatePresentation = value.candidatePresentation;
+            let validatedCandidatePresentation = null;
+            if (candidatePresentation !== undefined
+                    && candidatePresentation !== null) {
+                const counts = candidatePresentation.candidateCounts;
+                const handoffs = candidatePresentation.handoffs;
+                const suppressedOperatorPlacementIds =
+                    candidatePresentation.suppressedOperatorPlacementIds;
+                const parkedVehiclePlacementIds =
+                    candidatePresentation.parkedVehiclePlacementIds;
+                const actorPlacementIds = new Set(actors.map(function (item) {
+                    return item.actor.placementId;
+                }));
+                const programEvidence = candidatePresentation.programEvidence;
+                const programEvidenceValid = programEvidence === undefined
+                    || (Array.isArray(programEvidence)
+                        && programEvidence.every(function (evidence) {
+                            const entry = actors.find(function (item) {
+                                return item.actor.placementId
+                                    === evidence.actorPlacementId;
+                            });
+                            const segments = evidence.pathSegments;
+                            if (!entry || !Array.isArray(segments)
+                                    || !segments.length) return false;
+                            const packageIds = new Set([
+                                entry.actor.motionPackageId,
+                                ...entry.actor.cycleMotionPackageIds,
+                            ]);
+                            return segments.every(function (segment) {
+                                return segment
+                                    && [
+                                        'carry_in',
+                                        'carry_out',
+                                        'inspection_pick',
+                                        'inspection_place',
+                                        'return_empty',
+                                        'candidate_loop',
+                                        'finished_goods_pick',
+                                        'receiving_pick',
+                                        'loaded_putaway',
+                                        'empty_to_rack',
+                                        'loaded_dispatch',
+                                    ].includes(segment.phase)
+                                    && packageIds.has(segment.motionPackageId)
+                                    && Number.isFinite(
+                                        Number(segment.distanceMeters)
+                                    )
+                                    && Number.isInteger(segment.turnCount);
+                            })
+                                && Number.isFinite(Number(
+                                    evidence.interactionPauseSeconds
+                                ))
+                                && evidence.timingAuthority
+                                    === 'derived_display_only';
+                        }));
+                const pathLegend = candidatePresentation.packagingPathLegend;
+                const pathLegendValid = pathLegend === undefined
+                    || (Array.isArray(pathLegend)
+                        && pathLegend.length === 3
+                        && pathLegend.map(item => item.phase).join('|')
+                            === 'carry_in|carry_out|return_empty'
+                        && pathLegend.every(function (item) {
+                            return item
+                                && typeof item.label === 'string'
+                                && item.label.length > 0
+                                && ['solid', 'dashed'].includes(
+                                    item.lineStyle
+                                );
+                        }));
+                const inspectionPathLegend =
+                    candidatePresentation.inspectionPathLegend;
+                const inspectionPathLegendValid =
+                    inspectionPathLegend === undefined
+                    || (Array.isArray(inspectionPathLegend)
+                        && inspectionPathLegend.length === 3
+                        && inspectionPathLegend.map(item => item.phase).join('|')
+                            === 'inspection_pick|inspection_place|return_empty'
+                        && inspectionPathLegend.every(function (item) {
+                            return item
+                                && typeof item.label === 'string'
+                                && item.label.length > 0
+                                && ['solid', 'dashed'].includes(
+                                    item.lineStyle
+                                );
+                        }));
+                const finishedGoodsPathLegend =
+                    candidatePresentation.finishedGoodsPathLegend;
+                const finishedGoodsPathLegendValid =
+                    finishedGoodsPathLegend === undefined
+                    || (Array.isArray(finishedGoodsPathLegend)
+                        && [2, 3].includes(finishedGoodsPathLegend.length)
+                        && finishedGoodsPathLegend.every(function (item) {
+                            return item
+                                && [
+                                    'finished_goods_pick',
+                                    'loaded_putaway',
+                                    'return_empty',
+                                    'empty_to_rack',
+                                    'loaded_dispatch',
+                                ].includes(item.phase)
+                                && typeof item.label === 'string'
+                                && item.label.length > 0
+                                && ['solid', 'dashed'].includes(
+                                    item.lineStyle
+                                );
+                        }));
+                const receivingPathLegend =
+                    candidatePresentation.receivingPathLegend;
+                const receivingPathLegendValid =
+                    receivingPathLegend === undefined
+                    || (Array.isArray(receivingPathLegend)
+                        && receivingPathLegend.map(item => item.phase).join('|')
+                            === 'receiving_pick|loaded_putaway|return_empty'
+                        && receivingPathLegend.every(function (item) {
+                            return item
+                                && typeof item.label === 'string'
+                                && item.label.length > 0
+                                && ['solid', 'dashed'].includes(
+                                    item.lineStyle
+                                );
+                        }));
+                const parkedVehiclePlacementIdsValid =
+                    parkedVehiclePlacementIds === undefined
+                    || (Array.isArray(parkedVehiclePlacementIds)
+                        && new Set(parkedVehiclePlacementIds).size
+                            === parkedVehiclePlacementIds.length
+                        && parkedVehiclePlacementIds.every(function (
+                            placementId
+                        ) {
+                            return typeof placementId === 'string'
+                                && placementId.length > 0
+                                && !actorPlacementIds.has(placementId)
+                                && Boolean(placementValue(placementId));
+                        }));
+                const candidateValid = candidatePresentation.schemaVersion
+                        === 'facility-reference-movement-candidates-v1'
+                    && typeof candidatePresentation.sourceLayoutId === 'string'
+                    && candidatePresentation.sourceLayoutId.length > 0
+                    && /^[a-f0-9]{64}$/.test(
+                        candidatePresentation.sourceLayoutRevision || ''
+                    )
+                    && candidatePresentation.authority === 'inferred_candidate'
+                    && candidatePresentation.reviewStatus === 'pending'
+                    && candidatePresentation.productionEligible === false
+                    && counts && typeof counts === 'object'
+                    && [
+                        counts.operators,
+                        counts.vehicles,
+                        counts.handoffs,
+                        counts.displayedActors,
+                        counts.displayedHandoffs,
+                        counts.unavailableActors,
+                        counts.partialPrograms,
+                        counts.suppressedStationaryOperators,
+                    ].every(item => Number.isInteger(item) && item >= 0)
+                    && counts.displayedActors === actors.length
+                    && programEvidenceValid
+                    && pathLegendValid
+                    && inspectionPathLegendValid
+                    && finishedGoodsPathLegendValid
+                    && receivingPathLegendValid
+                    && parkedVehiclePlacementIdsValid
+                    && Array.isArray(suppressedOperatorPlacementIds)
+                    && counts.suppressedStationaryOperators
+                        === suppressedOperatorPlacementIds.length
+                    && new Set(suppressedOperatorPlacementIds).size
+                        === suppressedOperatorPlacementIds.length
+                    && suppressedOperatorPlacementIds.every(function (
+                        placementId
+                    ) {
+                        const placement = placementValue(placementId);
+                        return typeof placementId === 'string'
+                            && placementId.length > 0
+                            && !actorPlacementIds.has(placementId)
+                            && placement
+                            && placement.assetId === 'asset-operator';
+                    })
+                    && Array.isArray(handoffs)
+                    && counts.displayedHandoffs === handoffs.length
+                    && handoffs.every(function (handoff) {
+                        return handoff
+                            && typeof handoff.candidateId === 'string'
+                            && handoff.candidateId.length > 0
+                            && actorIds.has(handoff.fromActorId)
+                            && actorIds.has(handoff.toActorId)
+                            && handoff.fromActorId !== handoff.toActorId
+                            && typeof handoff.fromZoneId === 'string'
+                            && handoff.fromZoneId.length > 0
+                            && typeof handoff.toZoneId === 'string'
+                            && handoff.toZoneId.length > 0
+                            && Array.isArray(handoff.centerline)
+                            && handoff.centerline.length >= 2
+                            && handoff.centerline.every(validPoint)
+                            && handoff.evidenceStatus === 'derived'
+                            && handoff.reviewStatus === 'pending'
+                            && handoff.productionEligible === false;
+                    })
+                    && typeof candidatePresentation.qualification === 'string'
+                    && candidatePresentation.qualification.length > 0
+                    && /^[a-f0-9]{64}$/.test(
+                        candidatePresentation.presentationFingerprint || ''
+                    );
+                if (!candidateValid) {
+                    throw facilityMotionError(
+                        'facility_activity_candidate_presentation_invalid',
+                        'The reference movement-candidate presentation is incomplete or over-authoritative.'
+                    );
+                }
+                validatedCandidatePresentation = detachedJson(
+                    candidatePresentation
+                );
+            }
+            const operatorPathById = new Map(
+                (leanMotion && Array.isArray(leanMotion.operatorPaths)
+                    ? leanMotion.operatorPaths : []).map(function (path) {
+                    return [path.pathId, path];
+                })
+            );
+            const fifoPointById = new Map(
+                (leanMotion && Array.isArray(leanMotion.fifoPoints)
+                    ? leanMotion.fifoPoints : []).map(function (point) {
+                    return [point.pointId, point];
+                })
+            );
+            const connectionById = new Map(
+                (leanMotion && Array.isArray(leanMotion.pedestrianConnections)
+                    ? leanMotion.pedestrianConnections : []).map(
+                    function (connection) {
+                        return [connection.connectionId, connection];
+                    }
+                )
+            );
+            const handoffIds = new Set(
+                (leanMotion && Array.isArray(leanMotion.materialHandoffs)
+                    ? leanMotion.materialHandoffs : []).map(function (handoff) {
+                    return handoff.handoffId;
+                })
+            );
+            const leanValid = leanMotion
+                && leanMotion.schemaVersion
+                    === FACILITY_LEAN_MOTION_SCHEMA_VERSION
+                && leanMotion.qualification
+                    === FACILITY_LEAN_MOTION_QUALIFICATION
+                && leanMotion.evidenceStatus === 'derived'
+                && Array.isArray(leanMotion.operatorPaths)
+                && Array.isArray(leanMotion.pedestrianConnections)
+                && Array.isArray(leanMotion.assistanceGates)
+                && Array.isArray(leanMotion.materialHandoffs)
+                && Array.isArray(leanMotion.fifoPoints)
+                && leanMotion.operatorPaths.every(path => path
+                    && actorIds.has(path.actorId)
+                    && path.closed === true
+                    && path.evidenceStatus === 'derived'
+                    && Number.isInteger(path.segmentIndex)
+                    && Number.isInteger(path.segmentCount)
+                    && path.segmentIndex >= 0
+                    && path.segmentCount > path.segmentIndex
+                    && Array.isArray(path.assignedPlacementIds)
+                    && Array.isArray(path.centerline)
+                    && path.centerline.length >= 4
+                    && path.centerline.every(validPoint)
+                    && JSON.stringify(path.centerline[0])
+                        === JSON.stringify(
+                            path.centerline[path.centerline.length - 1]
+                        ))
+                && leanMotion.pedestrianConnections.every(connection => connection
+                    && connection.evidenceStatus === 'derived'
+                    && connection.closed === true
+                    && actorIds.has(connection.actorId)
+                    && operatorPathById.has(connection.pathId)
+                    && operatorPathById.get(connection.pathId).actorId
+                        === connection.actorId
+                    && actorById.get(connection.actorId).actorType === 'operator'
+                    && fifoPointById.has(connection.fifoPointId)
+                    && Array.isArray(connection.handoffIds)
+                    && connection.handoffIds.length >= 1
+                    && connection.handoffIds.every(id => handoffIds.has(id))
+                    && Array.isArray(connection.motionPackageIds)
+                    && connection.motionPackageIds.length === 2
+                    && connection.motionPackageIds.every(id =>
+                        actorById.get(connection.actorId)
+                            .cycleMotionPackageIds.includes(id))
+                    && Array.isArray(connection.centerline)
+                    && connection.centerline.length >= 3
+                    && connection.centerline.every(validPoint)
+                    && JSON.stringify(connection.centerline[0])
+                        === JSON.stringify(connection.centerline[
+                            connection.centerline.length - 1
+                        ])
+                    && connection.centerline.some(point => JSON.stringify(point)
+                        === JSON.stringify(
+                            fifoPointById.get(connection.fifoPointId).position
+                        )))
+                && leanMotion.assistanceGates.every(gate => gate
+                    && gate.evidenceStatus === 'derived'
+                    && Array.isArray(gate.participantPathIds)
+                    && gate.participantPathIds.length === 2
+                    && Array.isArray(gate.participantActorIds)
+                    && gate.participantActorIds.length === 2
+                    && validPoint(gate.position))
+                && leanMotion.materialHandoffs.every(handoff => handoff
+                    && handoff.evidenceStatus === 'derived'
+                    && actorIds.has(handoff.fromActorId)
+                    && actorIds.has(handoff.toActorId)
+                    && handoff.fromActorId !== handoff.toActorId
+                    && operatorPathById.has(handoff.fromPathId)
+                    && operatorPathById.has(handoff.toPathId)
+                    && operatorPathById.get(handoff.fromPathId).actorId
+                        === handoff.fromActorId
+                    && operatorPathById.get(handoff.toPathId).actorId
+                        === handoff.toActorId
+                    && connectionById.has(handoff.fromConnectionId)
+                    && connectionById.has(handoff.toConnectionId)
+                    && connectionById.get(handoff.fromConnectionId).fifoPointId
+                        === handoff.fromPointId
+                    && connectionById.get(handoff.toConnectionId).fifoPointId
+                        === handoff.toPointId
+                    && Array.isArray(handoff.centerline)
+                    && handoff.centerline.length >= 2
+                    && handoff.centerline.every(validPoint)
+                    && fifoPointById.has(handoff.fromPointId)
+                    && fifoPointById.has(handoff.toPointId)
+                    && JSON.stringify(handoff.centerline[0])
+                        === JSON.stringify(
+                            fifoPointById.get(handoff.fromPointId).position
+                        )
+                    && JSON.stringify(handoff.centerline[
+                        handoff.centerline.length - 1
+                    ]) === JSON.stringify(
+                        fifoPointById.get(handoff.toPointId).position
+                    ))
+                && leanMotion.fifoPoints.every(point => point
+                    && point.evidenceStatus === 'derived'
+                    && validPoint(point.position));
+            if (!leanValid) {
+                throw facilityMotionError(
+                    'facility_activity_lean_motion_invalid',
+                    'The derived lean-motion presentation is incomplete.'
+                );
+            }
+            if (navigationActivity) {
+                const presentation = scenario.navigationPresentation;
+                const phaseByActor = new Map(
+                    presentation && Array.isArray(presentation.phaseOffsets)
+                        ? presentation.phaseOffsets.map(item => [item.actorId, item])
+                        : []
+                );
+                const bindingByActor = new Map(
+                    presentation && Array.isArray(presentation.pathBindings)
+                        ? presentation.pathBindings.map(item => [item.actorId, item])
+                        : []
+                );
+                const navigationValid = presentation
+                    && presentation.schemaVersion
+                        === 'facility-navigation-presentation-v1'
+                    && presentation.qualification
+                        === FACILITY_NAVIGATION_PRESENTATION_QUALIFICATION
+                    && presentation.sharedClock === true
+                    && presentation.processTimingClaimed === false
+                    && presentation.generatedCollisionAvoidanceOffsets === false
+                    && phaseByActor.size === actors.length
+                    && bindingByActor.size === actors.length
+                    && actors.every(function (entry) {
+                        const actor = entry.actor;
+                        const phase = phaseByActor.get(actor.actorId);
+                        const binding = bindingByActor.get(actor.actorId);
+                        return phase && binding
+                            && Number(phase.offsetSeconds)
+                                === Number(actor.startOffsetSeconds)
+                            && (phase.authority !== 'none'
+                                || Number(phase.offsetSeconds) === 0)
+                            && binding.motionPackageId
+                                === actor.motionPackageId
+                            && binding.journeySolutionId
+                                === (entry.package.movement.journeySolutionId
+                                    || entry.package.movement.movementId);
+                    });
+                if (!navigationValid) {
+                    throw facilityMotionError(
+                        'facility_activity_navigation_presentation_invalid',
+                        'The navigation presentation is incomplete or rescheduled.'
+                    );
+                }
+            }
+            return {
+                scenario: detachedJson(scenario),
+                actorPayloads: detachedJson(value.actorPayloads),
+                actors: actors,
+                candidatePresentation: validatedCandidatePresentation,
+            };
+        }
+
+        async function prepareActivityActorVisuals(validated) {
+            const groups = new Map();
+            validated.actors.forEach(function (value) {
+                const reference = value.actor.assetDefinitionRef;
+                const key = reference.assetId + '|'
+                    + reference.assetDefinitionRevision;
+                const group = state.baseGroups.get(key);
+                if (!group) {
+                    throw facilityMotionError(
+                        'facility_activity_actor_visual_unavailable',
+                        'The exact catalog visual group is unavailable for an activity actor.',
+                        { actorId: value.actor.actorId }
+                    );
+                }
+                groups.set(key, group);
+            });
+            const keys = Array.from(groups.keys()).sort();
+            let nextKeyIndex = 0;
+            const workerCount = Math.min(4, keys.length);
+            await Promise.all(Array.from(
+                { length: workerCount },
+                async function () {
+                    while (nextKeyIndex < keys.length) {
+                        const keyIndex = nextKeyIndex;
+                        nextKeyIndex += 1;
+                        const group = groups.get(keys[keyIndex]);
+                        if (group.deferredVisual) {
+                            await loadDeferredGroup(
+                                group,
+                                'activity_actor_exact_visual'
+                            );
+                        }
+                    }
+                }
+            ));
+            validated.actors.forEach(function (value) {
+                const record = activityRenderRecord(
+                    value.actor.placementId
+                );
+                if (!['overview', 'detail'].includes(record.representation)) {
+                    throw facilityMotionError(
+                        'facility_activity_actor_exact_visual_unavailable',
+                        'Activity playback requires the exact catalog GLB; footprint and proxy fallbacks are not animated.',
+                        {
+                            actorId: value.actor.actorId,
+                            placementId: value.actor.placementId,
+                            representation: record.representation,
+                        }
+                    );
+                }
+            });
+        }
+
+        async function loadActivityScenario(payload, activeLayoutRevision) {
+            if (!state.mounted || state.disposed || !state.modelRoot) {
+                throw facilityMotionError(
+                    'facility_activity_view_unavailable',
+                    'Mount the Facility 3D view before loading activity.'
+                );
+            }
+            let validated = validateActivityPayload(
+                payload,
+                activeLayoutRevision
+            );
+            await prepareActivityActorVisuals(validated);
+            validated = validateActivityPayload(
+                payload,
+                activeLayoutRevision
+            );
+            disposeMotion('activity_loaded', true);
+            disposeNavigationPreview('activity_loaded', true);
+            disposeActivity('replaced', true);
+            try {
+                const activityRoot = createContainer();
+                activityRoot.name = 'FacilityActivityPlayback';
+                activityRoot.userData = activityRoot.userData || {};
+                activityRoot.userData.facilityActivityScenarioId =
+                    validated.scenario.scenarioId;
+                state.activity.scenario = validated.scenario;
+                state.activity.actorPayloads = validated.actorPayloads;
+                state.activity.candidatePresentation =
+                    validated.candidatePresentation;
+                state.activity.root = activityRoot;
+                state.activity.status = 'ready';
+                state.activity.poseDirty = true;
+                state.activity.elapsedSeconds = 0;
+                state.activity.lastFrameTime = null;
+                const pathRoot = buildLeanMotionVisual(
+                    validated.scenario.leanMotion
+                );
+                if (validated.scenario.schemaVersion
+                        === FACILITY_NAVIGATION_ACTIVITY_SCENARIO_SCHEMA_VERSION
+                        || validated.candidatePresentation) {
+                    const navigationPathRoot = buildNavigationActivityVisual(
+                        validated
+                    );
+                    if (navigationPathRoot) pathRoot.add(navigationPathRoot);
+                }
+                activityRoot.add(pathRoot);
+                state.activity.pathRoot = pathRoot;
+                applyActivityPathVisibility();
+                validated.actors.forEach(function (value) {
+                    const visual = cloneActivityRenderable(
+                        value.record.prototypeObject
+                    );
+                    if (!visual) {
+                        throw facilityMotionError(
+                            'facility_activity_actor_visual_unavailable',
+                            'The exact catalog visual could not be cloned.',
+                            { actorId: value.actor.actorId }
+                        );
+                    }
+                    applyVisualSettingsToObject(visual);
+                    applyPlacementTransform(visual, value.placement);
+                    if (visual.position && typeof visual.position.set
+                            === 'function') {
+                        visual.position.set(0, 0, 0);
+                    }
+                    if (visual.quaternion && typeof visual.quaternion.set
+                            === 'function') {
+                        visual.quaternion.set(0, 0, 0, 1);
+                    }
+                    const actorRoot = createContainer();
+                    actorRoot.name = 'FacilityActivityActor:'
+                        + value.actor.actorId;
+                    actorRoot.visible = false;
+                    actorRoot.userData = actorRoot.userData || {};
+                    actorRoot.userData.facilityActivityActorId =
+                        value.actor.actorId;
+                    actorRoot.userData.facilityActivityActorType =
+                        value.actor.actorType;
+                    actorRoot.userData.facilityActivityPlacementId =
+                        value.actor.placementId;
+                    actorRoot.add(visual);
+                    activityRoot.add(actorRoot);
+                    const hiddenSource = hideActivityPlacement(
+                        value.record,
+                        value.actor.placementId
+                    );
+                    if (!hiddenSource.length) {
+                        throw facilityMotionError(
+                            'facility_activity_actor_source_not_hidden',
+                            'The existing actor visual could not be borrowed for playback.',
+                            { placementId: value.actor.placementId }
+                        );
+                    }
+                    state.activity.hiddenObjects =
+                        state.activity.hiddenObjects.concat(hiddenSource);
+                    state.activity.tracks.push({
+                        actor: value.actor,
+                        package: value.package,
+                        returnPackage: value.returnPackage,
+                        endTransferPackage: value.endTransferPackage,
+                        startTransferPackage: value.startTransferPackage,
+                        cyclePackages: value.cyclePackages,
+                        profile: value.profile,
+                        placement: value.placement,
+                        root: actorRoot,
+                        visual: visual,
+                        currentPose: null,
+                        localElapsedSeconds: 0,
+                        playbackPhase: 'waiting',
+                        travelDirection: 'outbound',
+                        currentMotionPackageId: value.package.packageId,
+                        visualYawRadians: null,
+                        sourcePlacementHidden: true,
+                    });
+                });
+                const suppressedOperatorPlacementIds =
+                    validated.candidatePresentation
+                    && validated.candidatePresentation
+                        .suppressedOperatorPlacementIds;
+                if (Array.isArray(suppressedOperatorPlacementIds)) {
+                    suppressedOperatorPlacementIds.forEach(function (
+                        placementId
+                    ) {
+                        const hiddenSource = hideActivityPlacement(
+                            activityRenderRecord(placementId),
+                            placementId
+                        );
+                        if (!hiddenSource.length) {
+                            throw facilityMotionError(
+                                'facility_activity_stationary_operator_not_hidden',
+                                'A stationary operator visual could not be suppressed for activity playback.',
+                                { placementId: placementId }
+                            );
+                        }
+                        state.activity.hiddenObjects =
+                            state.activity.hiddenObjects.concat(hiddenSource);
+                    });
+                }
+                state.activity.selectedActorId =
+                    state.activity.tracks[0].actor.actorId;
+                state.modelRoot.add(activityRoot);
+                invalidate();
+            } catch (error) {
+                disposeActivity(
+                    error && error.code
+                        ? error.code : 'facility_activity_load_failed',
+                    true
+                );
+                throw error;
+            }
+            notifyActivityState();
+            return activityStateSnapshot();
+        }
+
+        function activityTrackVisible(track, active) {
+            if (!active || state.activity.visibleActorTypes[
+                track.actor.actorType
+            ] === false) return false;
+            const filter = state.activity.departmentZoneId;
+            return !filter || track.actor.departmentZoneIds.includes(filter);
+        }
+
+        function activityTrackTime(track, scenarioSeconds) {
+            const movement = track.package.movement;
+            const duration = motionDurationSeconds(movement);
+            const shifted = scenarioSeconds
+                - finite(track.actor.startOffsetSeconds, 0);
+            if (shifted < 0) {
+                return {
+                    active: false,
+                    elapsed: 0,
+                    duration: duration,
+                    headingOffset: 0,
+                    phase: 'waiting',
+                    direction: 'outbound',
+                    movement: movement,
+                    motionPackageId: track.package.packageId,
+                };
+            }
+            if (track.actor.repeat && track.actor.loopMode === 'closed_path') {
+                const turnDuration = Math.max(
+                    0.1,
+                    finite(track.actor.endpointTurnSeconds, 0.45)
+                );
+                const packages = track.cyclePackages || [];
+                const segments = packages.map(function (packageValue, index) {
+                    return {
+                        package: packageValue,
+                        duration: motionDurationSeconds(packageValue.movement),
+                        index: index,
+                    };
+                });
+                const cycleDuration = segments.reduce(
+                    (total, segment) => total + segment.duration + turnDuration,
+                    0
+                );
+                let phaseTime = shifted % cycleDuration;
+                for (let index = 0; index < segments.length; index += 1) {
+                    const segment = segments[index];
+                    if (phaseTime < segment.duration) {
+                        return {
+                            active: true,
+                            elapsed: phaseTime,
+                            duration: segment.duration,
+                            headingOffset: 0,
+                            phase: 'local_path_' + (index + 1),
+                            direction: 'local_loop',
+                            movement: segment.package.movement,
+                            motionPackageId: segment.package.packageId,
+                        };
+                    }
+                    phaseTime -= segment.duration;
+                    if (phaseTime < turnDuration) {
+                        const next = segments[(index + 1) % segments.length];
+                        const priorTrajectory = motionTrajectory(
+                            segment.package.movement
+                        );
+                        const nextTrajectory = motionTrajectory(
+                            next.package.movement
+                        );
+                        const priorPose = priorTrajectory.poses[
+                            priorTrajectory.poses.length - 1
+                        ];
+                        const nextPose = nextTrajectory.poses[0];
+                        const turnDelta = normalizedHeading(
+                            finite(nextPose.heading, 0)
+                            - finite(priorPose.heading, 0)
+                        );
+                        return {
+                            active: true,
+                            elapsed: segment.duration,
+                            duration: segment.duration,
+                            headingOffset: turnDelta
+                                * (phaseTime / turnDuration),
+                            phase: 'local_turn_' + (index + 1),
+                            direction: 'turning',
+                            movement: segment.package.movement,
+                            motionPackageId: segment.package.packageId,
+                        };
+                    }
+                    phaseTime -= turnDuration;
+                }
+            }
+            if (track.actor.repeat && track.actor.loopMode === 'journey_cycle'
+                    && duration > 0) {
+                return {
+                    active: true,
+                    elapsed: shifted % duration,
+                    duration: duration,
+                    headingOffset: 0,
+                    phase: 'journey_cycle',
+                    direction: 'authored_cycle',
+                    movement: movement,
+                    motionPackageId: track.package.packageId,
+                };
+            }
+            if (track.actor.repeat && track.actor.loopMode === 'paired_lanes') {
+                const segments = [
+                    {
+                        package: track.package,
+                        phase: 'outbound',
+                        direction: 'outbound',
+                    },
+                    {
+                        package: track.endTransferPackage,
+                        phase: 'lane_change_at_end',
+                        direction: 'turning',
+                    },
+                    {
+                        package: track.returnPackage,
+                        phase: 'return',
+                        direction: 'return',
+                    },
+                    {
+                        package: track.startTransferPackage,
+                        phase: 'lane_change_at_start',
+                        direction: 'turning',
+                    },
+                ].map(function (segment) {
+                    return Object.assign({}, segment, {
+                        duration: motionDurationSeconds(
+                            segment.package.movement
+                        ),
+                    });
+                });
+                const cycleDuration = segments.reduce(
+                    (total, segment) => total + segment.duration,
+                    0
+                );
+                let phaseTime = shifted % cycleDuration;
+                for (let index = 0; index < segments.length; index += 1) {
+                    const segment = segments[index];
+                    if (phaseTime < segment.duration
+                            || index === segments.length - 1) {
+                        return {
+                            active: true,
+                            elapsed: Math.min(phaseTime, segment.duration),
+                            duration: segment.duration,
+                            headingOffset: 0,
+                            phase: segment.phase,
+                            direction: segment.direction,
+                            movement: segment.package.movement,
+                            motionPackageId: segment.package.packageId,
+                        };
+                    }
+                    phaseTime -= segment.duration;
+                }
+            }
+            if (track.actor.repeat && track.actor.loopMode === 'ping_pong'
+                    && duration > 0) {
+                const turnDuration = Math.max(
+                    0.1,
+                    finite(track.actor.endpointTurnSeconds, 1)
+                );
+                const cycleDuration = 2 * duration + 2 * turnDuration;
+                const phaseTime = shifted % cycleDuration;
+                if (phaseTime < duration) {
+                    return {
+                        active: true,
+                        elapsed: phaseTime,
+                        duration: duration,
+                        headingOffset: 0,
+                        phase: 'outbound',
+                        direction: 'outbound',
+                        movement: movement,
+                        motionPackageId: track.package.packageId,
+                    };
+                }
+                if (phaseTime < duration + turnDuration) {
+                    const turnRatio = (phaseTime - duration) / turnDuration;
+                    return {
+                        active: true,
+                        elapsed: duration,
+                        duration: duration,
+                        headingOffset: Math.PI * turnRatio,
+                        phase: 'turn_at_end',
+                        direction: 'turning',
+                        movement: movement,
+                        motionPackageId: track.package.packageId,
+                    };
+                }
+                if (phaseTime < 2 * duration + turnDuration) {
+                    const returnElapsed = phaseTime - duration - turnDuration;
+                    return {
+                        active: true,
+                        elapsed: duration - returnElapsed,
+                        duration: duration,
+                        headingOffset: Math.PI,
+                        phase: 'return',
+                        direction: 'return',
+                        movement: movement,
+                        motionPackageId: track.package.packageId,
+                    };
+                }
+                const turnRatio = (
+                    phaseTime - 2 * duration - turnDuration
+                ) / turnDuration;
+                return {
+                    active: true,
+                    elapsed: 0,
+                    duration: duration,
+                    headingOffset: Math.PI * (1 - turnRatio),
+                    phase: 'turn_at_start',
+                    direction: 'turning',
+                    movement: movement,
+                    motionPackageId: track.package.packageId,
+                };
+            }
+            return {
+                active: true,
+                elapsed: Math.min(shifted, duration),
+                duration: duration,
+                headingOffset: 0,
+                phase: shifted >= duration ? 'complete' : 'outbound',
+                direction: 'outbound',
+                movement: movement,
+                motionPackageId: track.package.packageId,
+            };
+        }
+
+        function updateActivity(timestamp) {
+            const scenario = state.activity.scenario;
+            if (!scenario || !state.activity.root) return false;
+            const duration = Math.max(
+                0.001,
+                finite(scenario.cycleDurationSeconds, 0.001)
+            );
+            if (state.activity.playing) {
+                if (state.activity.lastFrameTime === null) {
+                    state.activity.lastFrameTime = finite(timestamp, 0);
+                } else {
+                    const deltaSeconds = Math.max(
+                        0,
+                        (finite(timestamp, state.activity.lastFrameTime)
+                            - state.activity.lastFrameTime) / 1000
+                    );
+                    state.activity.lastFrameTime = finite(
+                        timestamp,
+                        state.activity.lastFrameTime
+                    );
+                    const advanced = state.activity.elapsedSeconds
+                        + deltaSeconds
+                            * state.activity.playbackRateMultiplier;
+                    state.activity.elapsedSeconds = scenario.repeat
+                        ? advanced % duration : Math.min(duration, advanced);
+                    state.activity.poseDirty = true;
+                }
+            }
+            if (!state.activity.poseDirty) return state.activity.playing;
+            try {
+                state.activity.tracks.forEach(function (track) {
+                    const timing = activityTrackTime(
+                        track,
+                        state.activity.elapsedSeconds
+                    );
+                    track.localElapsedSeconds = timing.elapsed;
+                    track.playbackPhase = timing.phase;
+                    track.travelDirection = timing.direction;
+                    track.currentMotionPackageId = timing.motionPackageId;
+                    if (!timing.active) {
+                        track.root.visible = false;
+                        track.currentPose = null;
+                        track.visualYawRadians = null;
+                        return;
+                    }
+                    const movement = timing.movement;
+                    const distance = motionDistanceAtTime(
+                        movement,
+                        timing.elapsed
+                    );
+                    const sampledPose = sampleFacilityMotionAtDistance(
+                        movement,
+                        distance
+                    );
+                    const pose = Object.assign({}, sampledPose, {
+                        heading: normalizedHeading(
+                            sampledPose.heading + timing.headingOffset
+                        ),
+                    });
+                    const heading = activityVisualHeadingOffset(
+                        track.actor.visualAlignment.forwardAxis
+                    ) - pose.heading;
+                    const vertical = finite(
+                        track.placement.transform
+                            && track.placement.transform.position
+                            && track.placement.transform.position.y,
+                        0
+                    );
+                    if (track.root.position
+                            && typeof track.root.position.set === 'function') {
+                        track.root.position.set(pose.x, vertical, pose.z);
+                    }
+                    if (track.root.quaternion
+                            && typeof track.root.quaternion.set === 'function') {
+                        track.root.quaternion.set(
+                            0,
+                            Math.sin(heading / 2),
+                            0,
+                            Math.cos(heading / 2)
+                        );
+                    }
+                    track.root.visible = activityTrackVisible(track, true);
+                    track.currentPose = pose;
+                    track.visualYawRadians = normalizedHeading(heading);
+                });
+                state.activity.poseDirty = false;
+                state.activity.status = state.activity.playing
+                    ? 'playing' : 'paused';
+                notifyActivityState();
+                return true;
+            } catch (error) {
+                reportError('facility_activity_playback_failed', error);
+                disposeActivity(
+                    error && error.code
+                        ? error.code : 'facility_activity_playback_failed'
+                );
+                return false;
+            }
+        }
+
+        function playActivity() {
+            if (!state.activity.scenario) return false;
+            state.activity.playing = true;
+            state.activity.status = 'playing';
+            state.activity.lastFrameTime = null;
+            notifyActivityState();
+            invalidate();
+            return true;
+        }
+
+        function pauseActivity() {
+            if (!state.activity.scenario) return false;
+            state.activity.playing = false;
+            state.activity.status = 'paused';
+            state.activity.lastFrameTime = null;
+            notifyActivityState();
+            return true;
+        }
+
+        function seekActivity(requestedSeconds) {
+            if (!state.activity.scenario) return false;
+            state.activity.elapsedSeconds = clamp(
+                requestedSeconds,
+                0,
+                finite(state.activity.scenario.cycleDurationSeconds, 0),
+                0
+            );
+            state.activity.lastFrameTime = null;
+            state.activity.poseDirty = true;
+            state.activity.status = 'paused';
+            invalidate();
+            return true;
+        }
+
+        function setActivityRate(requestedRate) {
+            if (!state.activity.scenario) return false;
+            state.activity.playbackRateMultiplier = clamp(
+                requestedRate,
+                0.25,
+                4,
+                DEFAULT_MOTION_PLAYBACK_RATE
+            );
+            notifyActivityState();
+            return state.activity.playbackRateMultiplier;
+        }
+
+        function setActivityActorTypeVisible(actorType, requested) {
+            if (!['vehicle', 'operator', 'mobile_equipment'].includes(actorType)) {
+                return false;
+            }
+            state.activity.visibleActorTypes[actorType] = requested !== false;
+            state.activity.poseDirty = true;
+            invalidate();
+            return true;
+        }
+
+        function setActivityPathsVisible(requested) {
+            state.activity.pathsVisible = requested !== false;
+            applyActivityPathVisibility();
+            invalidate();
+            notifyActivityState();
+            return state.activity.pathsVisible;
+        }
+
+        function setActivityPathTypeVisible(actorType, requested) {
+            if (!['vehicle', 'operator', 'mobile_equipment'].includes(actorType)) {
+                return false;
+            }
+            state.activity.visiblePathTypes[actorType] = requested !== false;
+            applyActivityPathVisibility();
+            invalidate();
+            notifyActivityState();
+            return state.activity.visiblePathTypes[actorType];
+        }
+
+        function setActivityDepartmentFilter(zoneId) {
+            state.activity.departmentZoneId = typeof zoneId === 'string'
+                && zoneId ? zoneId : null;
+            state.activity.poseDirty = true;
+            invalidate();
+            return state.activity.departmentZoneId;
+        }
+
+        function selectActivityActor(actorId) {
+            const exists = state.activity.tracks.some(function (track) {
+                return track.actor.actorId === actorId;
+            });
+            if (!exists) return false;
+            state.activity.selectedActorId = actorId;
+            notifyActivityState();
+            return true;
+        }
+
+        function focusActivityActor(actorId) {
+            const selected = actorId || state.activity.selectedActorId;
+            const track = state.activity.tracks.find(function (candidate) {
+                return candidate.actor.actorId === selected;
+            });
+            if (!track || !track.currentPose || state.walkthrough.active
+                    || state.drone.active) return false;
+            const dimensions = track.profile.overallDimensions || {};
+            const pose = track.currentPose;
+            const length = Math.max(0.5, finite(dimensions.length, 1));
+            const width = Math.max(0.5, finite(dimensions.width, 1));
+            const height = Math.max(0.5, finite(dimensions.height, 1));
+            const halfX = Math.max(length, width) / 2;
+            const floorY = finite(
+                track.placement.transform
+                    && track.placement.transform.position
+                    && track.placement.transform.position.y,
+                0
+            );
+            return fitBounds({
+                minimum: {
+                    x: pose.x - halfX,
+                    y: floorY,
+                    z: pose.z - halfX,
+                },
+                maximum: {
+                    x: pose.x + halfX,
+                    y: floorY + height,
+                    z: pose.z + halfX,
+                },
+            }, 'activity_actor', {
+                x: pose.x,
+                y: floorY + height * 0.45,
+                z: pose.z,
+            });
+        }
+
         function notifyStatus(status, reason) {
             state.status = status;
             state.statusReason = reason || null;
@@ -2067,6 +5986,19 @@
         }
 
         function enterDegraded(reason, contextLost) {
+            if (state.motion.package || state.motion.root) {
+                disposeMotion(reason || 'renderer_degraded', true);
+            }
+            if (state.activity.scenario || state.activity.root) {
+                disposeActivity(reason || 'renderer_degraded', true);
+            }
+            if (state.navigationPreview.payload
+                    || state.navigationPreview.root) {
+                disposeNavigationPreview(
+                    reason || 'renderer_degraded',
+                    true
+                );
+            }
             if (state.walkthrough.active) {
                 exitWalkthrough(reason || 'renderer_degraded');
             }
@@ -2242,10 +6174,25 @@
 
         function onAnimationFrame(timestamp, generation) {
             state.frameId = null;
-            if (!state.mounted || state.suspended
-                    || generation !== state.mountGeneration) return;
+            if (generation !== state.mountGeneration) {
+                if (state.motion.package || state.motion.root) {
+                    disposeMotion('stale_generation', false);
+                }
+                if (state.activity.scenario || state.activity.root) {
+                    disposeActivity('stale_generation', false);
+                }
+                if (state.navigationPreview.payload
+                        || state.navigationPreview.root) {
+                    disposeNavigationPreview('stale_generation', false);
+                }
+                return;
+            }
+            if (!state.mounted || state.suspended) return;
             const walking = updateWalkthrough(timestamp);
             const flying = updateDrone(timestamp);
+            const moving = updateMotion(timestamp);
+            const activityMoving = updateActivity(timestamp);
+            const navigationPreviewMoving = updateNavigationPreview(timestamp);
             const rotating = !immersiveActive()
                 && state.visualSettings.autoRotate
                 && state.controls
@@ -2255,11 +6202,17 @@
                 state.controls.update();
                 state.needsRender = true;
             }
-            if (walking || flying) state.needsRender = true;
+            if (walking || flying || moving || activityMoving
+                    || navigationPreviewMoving) {
+                state.needsRender = true;
+            }
             if (!state.needsRender) return;
             state.needsRender = false;
             renderNow();
-            if ((rotating || walking || flying) && requestFrame
+            if ((rotating || walking || flying || state.motion.playing
+                    || state.activity.playing
+                    || state.navigationPreview.playing)
+                    && requestFrame
                     && state.frameId === null) {
                 state.frameId = requestFrame(function (nextTimestamp) {
                     onAnimationFrame(nextTimestamp, generation);
@@ -3417,6 +7370,10 @@
 
         function enterWalkthrough(input) {
             const walkthrough = state.walkthrough;
+            if (state.motion.following) {
+                state.motion.following = false;
+                notifyMotionState();
+            }
             if (state.drone.active) {
                 return switchImmersiveMode('walkthrough');
             }
@@ -3747,13 +7704,20 @@
             }));
         }
 
-        function applyDroneRecordWindow(record, visibleIds, placementsById) {
+        function applyDroneRecordWindow(
+            record,
+            visibleIds,
+            placementsById,
+            suppressedPlacementIds
+        ) {
             if (!record) return;
+            const suppressed = suppressedPlacementIds || new Set();
             const placements = record.placementIds.map(function (id) {
                 return placementsById.get(id);
             }).filter(Boolean);
             const visible = placements.filter(function (placement) {
-                return visibleIds.has(placement.placementId);
+                return visibleIds.has(placement.placementId)
+                    && !suppressed.has(placement.placementId);
             });
             if (record.instanced) {
                 setDroneRecordPlacements(record, visible);
@@ -3763,8 +7727,28 @@
                 if (object) object.visible = Boolean(
                     placements[index]
                     && visibleIds.has(placements[index].placementId)
+                    && !suppressed.has(placements[index].placementId)
                 );
             });
+        }
+
+        function restoreBasePlacementVisibility() {
+            if (state.drone.active && state.camera) {
+                applyDroneRenderWindow(true);
+                return;
+            }
+            const placementsById = dronePlacementMap();
+            const suppressed = activitySuppressedPlacementIds();
+            const allPlacementIds = new Set(placementsById.keys());
+            state.renderGroups.forEach(function (record) {
+                applyDroneRecordWindow(
+                    record,
+                    allPlacementIds,
+                    placementsById,
+                    suppressed
+                );
+            });
+            applySelection(true);
         }
 
         function applyDroneRenderWindow(force) {
@@ -3788,8 +7772,14 @@
             }
             const visibleIds = droneVisiblePlacementIds(current);
             const placementsById = dronePlacementMap();
+            const suppressed = activitySuppressedPlacementIds();
             state.renderGroups.forEach(function (record) {
-                applyDroneRecordWindow(record, visibleIds, placementsById);
+                applyDroneRecordWindow(
+                    record,
+                    visibleIds,
+                    placementsById,
+                    suppressed
+                );
             });
             drone.visiblePlacementCount = visibleIds.size;
             drone.lastVisualViewDistance = viewDistance;
@@ -3806,24 +7796,27 @@
         function applyCurrentDroneRecordWindow(record) {
             if (!state.drone.active || !state.camera || !record) return;
             const visibleIds = droneVisiblePlacementIds(state.camera.position);
-            applyDroneRecordWindow(record, visibleIds, dronePlacementMap());
+            applyDroneRecordWindow(
+                record,
+                visibleIds,
+                dronePlacementMap(),
+                activitySuppressedPlacementIds()
+            );
             state.drone.visiblePlacementCount = visibleIds.size;
             applySelection(true);
         }
 
         function restoreDroneRenderWindow() {
             const placementsById = dronePlacementMap();
+            const suppressed = activitySuppressedPlacementIds();
+            const allPlacementIds = new Set(placementsById.keys());
             state.renderGroups.forEach(function (record) {
-                const placements = record.placementIds.map(function (id) {
-                    return placementsById.get(id);
-                }).filter(Boolean);
-                if (record.instanced) {
-                    setDroneRecordPlacements(record, placements);
-                    return;
-                }
-                record.pickObjects.forEach(function (object) {
-                    if (object) object.visible = true;
-                });
+                applyDroneRecordWindow(
+                    record,
+                    allPlacementIds,
+                    placementsById,
+                    suppressed
+                );
             });
             state.drone.visiblePlacementCount = state.placements.length;
             state.drone.lastVisualCullPosition = null;
@@ -3965,6 +7958,10 @@
 
         function enterDrone(input) {
             const drone = state.drone;
+            if (state.motion.following) {
+                state.motion.following = false;
+                notifyMotionState();
+            }
             if (state.walkthrough.active) {
                 return switchImmersiveMode('drone');
             }
@@ -5356,6 +9353,7 @@
                     markingType: marking.markingType,
                     semanticRole: marking.semanticRole,
                 });
+                object.visible = state.layerVisibility.markings !== false;
                 state.modelRoot.add(object);
                 state.floorMarkingObjects.push(object);
             });
@@ -5441,6 +9439,7 @@
                     aisleKind: aisle.aisleKind,
                     direction: aisle.direction,
                 });
+                object.visible = state.layerVisibility.routes !== false;
                 state.modelRoot.add(object);
                 state.routeObjects.push(object);
             });
@@ -5551,8 +9550,17 @@
                 newPlacementIds: identifiers('newPlacementIds'),
                 movedPlacementIds: identifiers('movedPlacementIds'),
                 removedPlacementIds: identifiers('removedPlacementIds'),
+                preservedPlacementIds: identifiers('preservedPlacementIds'),
+                newRouteIds: identifiers('newRouteIds'),
+                changedRouteIds: identifiers('changedRouteIds'),
+                removedRouteIds: identifiers('removedRouteIds'),
+                preservedRouteIds: identifiers('preservedRouteIds'),
                 beforePlacements: placements('beforePlacements'),
                 proposedPlacements: placements('proposedPlacements'),
+                beforeRoutes: (Array.isArray(value.beforeRoutes)
+                    ? value.beforeRoutes : []).map(detachedJson),
+                proposedRoutes: (Array.isArray(value.proposedRoutes)
+                    ? value.proposedRoutes : []).map(detachedJson),
             };
         }
 
@@ -5578,9 +9586,10 @@
                 removed: 0xdc2626,
                 moved: 0x8b5cf6,
                 new: 0x0ea5e9,
+                preserved: 0x087f5b,
             };
             const opacity = role === 'before' || role === 'removed'
-                ? 0.3 : 0.38;
+                ? 0.3 : role === 'preserved' ? 0.24 : 0.38;
             const visit = function (candidate) {
                 const materials = Array.isArray(candidate && candidate.material)
                     ? candidate.material : [candidate && candidate.material];
@@ -5616,6 +9625,51 @@
             return object;
         }
 
+        function proposalRouteObject(route, role) {
+            const points = routeCenterline(route);
+            if (points.length < 2) return null;
+            const object = createContainer();
+            const colors = {
+                before: '#d97706',
+                removed: '#dc2626',
+                proposed: '#7c3aed',
+                preserved: '#087f5b',
+            };
+            const width = Math.max(0.08, finite(route.corridorWidth, 1));
+            for (let index = 1; index < points.length; index += 1) {
+                const start = points[index - 1];
+                const end = points[index];
+                const dx = end.x - start.x;
+                const dz = end.z - start.z;
+                const length = Math.hypot(dx, dz);
+                if (length <= 0.000001) continue;
+                const segment = addFloorPaintRectangle(
+                    object,
+                    { fillColor: colors[role] || '#7c3aed' },
+                    length,
+                    width,
+                    (start.x + end.x) / 2,
+                    (start.z + end.z) / 2,
+                    { opacity: role === 'preserved' ? 0.26 : 0.42 }
+                );
+                if (!segment) continue;
+                segment.position.y = 0.018 + index * 0.000001;
+                const radians = -Math.atan2(dz, dx);
+                setQuaternion(segment.quaternion, {
+                    x: 0,
+                    y: Math.sin(radians / 2),
+                    z: 0,
+                    w: Math.cos(radians / 2),
+                });
+            }
+            object.name = 'FacilityProposalRoute:'
+                + role + ':' + String(route.routeId || 'route');
+            object.userData = object.userData || {};
+            object.userData.facilityProposalPreview = role;
+            object.userData.facilityProposalRouteId = route.routeId || null;
+            return object;
+        }
+
         function renderProposalObjects() {
             disposeProposalObjects();
             const proposal = state.proposalInput;
@@ -5642,6 +9696,48 @@
                     ? 'new' : 'moved';
                 rootObject.add(proposalObject(placement, role));
             });
+            const currentLayout = state.currentInput
+                && state.currentInput.layout || {};
+            const currentPlacements = new Map(
+                (Array.isArray(currentLayout.placements)
+                    ? currentLayout.placements : []).filter(function (item) {
+                    return item && item.placementId;
+                }).map(function (item) {
+                    return [item.placementId, item];
+                })
+            );
+            proposal.preservedPlacementIds.forEach(function (placementId) {
+                const placement = currentPlacements.get(placementId);
+                if (placement) rootObject.add(
+                    proposalObject(placement, 'preserved')
+                );
+            });
+            const currentRoutes = new Map(
+                (Array.isArray(currentLayout.routes)
+                    ? currentLayout.routes : []).filter(function (item) {
+                    return item && item.routeId;
+                }).map(function (item) {
+                    return [item.routeId, item];
+                })
+            );
+            const removedRoutes = new Set(proposal.removedRouteIds);
+            proposal.beforeRoutes.forEach(function (route) {
+                const object = proposalRouteObject(
+                    route,
+                    removedRoutes.has(route.routeId) ? 'removed' : 'before'
+                );
+                if (object) rootObject.add(object);
+            });
+            proposal.proposedRoutes.forEach(function (route) {
+                const object = proposalRouteObject(route, 'proposed');
+                if (object) rootObject.add(object);
+            });
+            proposal.preservedRouteIds.forEach(function (routeId) {
+                const route = currentRoutes.get(routeId);
+                const object = route
+                    ? proposalRouteObject(route, 'preserved') : null;
+                if (object) rootObject.add(object);
+            });
             state.modelRoot.add(rootObject);
             state.proposalRoot = rootObject;
             invalidate();
@@ -5667,6 +9763,16 @@
         }
 
         function teardownMount(finalDispose) {
+            if (state.motion.package || state.motion.root) {
+                disposeMotion('renderer_teardown', true);
+            }
+            if (state.activity.scenario || state.activity.root) {
+                disposeActivity('renderer_teardown', true);
+            }
+            if (state.navigationPreview.payload
+                    || state.navigationPreview.root) {
+                disposeNavigationPreview('renderer_teardown', true);
+            }
             if (state.walkthrough.active) {
                 exitWalkthrough('renderer_teardown');
             }
@@ -6277,6 +10383,7 @@
                 });
             }
 
+            container.visible = state.layerVisibility.assets !== false;
             state.modelRoot.add(container);
             const record = {
                 baseKey: baseGroupKey(group),
@@ -6290,6 +10397,7 @@
                 instanced: useInstancing,
                 meshCount: useInstancing
                     ? prototypeMeshes.length : pickObjects.length,
+                prototypeMeshCount: prototypeMeshes.length,
                 prototypeMatrices: prototypeMeshes.map(function (mesh) {
                     return mesh.matrix;
                 }),
@@ -6548,50 +10656,56 @@
             }, 0);
         }
 
-        async function loadDeferredGroup(group, reason) {
-            if (!group || !group.deferredVisual || group.deferredLoading
-                    || !state.mounted) return false;
+        function loadDeferredGroup(group, reason) {
+            if (!group || !state.mounted) return Promise.resolve(false);
+            if (group.deferredPromise) return group.deferredPromise;
+            if (!group.deferredVisual) return Promise.resolve(false);
             const generation = state.sceneGeneration;
             const descriptor = group.deferredVisual;
             group.deferredLoading = true;
             state.pendingLoads += 1;
             traceLoad(group, 'overview', 'started', reason);
-            try {
-                const prototype = await normalizeVisualResult(
-                    descriptor,
-                    'overview',
-                    group
-                );
-                if (generation !== state.sceneGeneration || !state.mounted) {
-                    disposeUnadoptedVisual(prototype);
+            const promise = (async function () {
+                try {
+                    const prototype = await normalizeVisualResult(
+                        descriptor,
+                        'overview',
+                        group
+                    );
+                    if (generation !== state.sceneGeneration || !state.mounted) {
+                        disposeUnadoptedVisual(prototype);
+                        return false;
+                    }
+                    if (!prototype) {
+                        traceLoad(group, 'overview', 'skipped', reason);
+                        return false;
+                    }
+                    group.bounds = prototype.bounds || group.bounds;
+                    group.deferredVisual = null;
+                    buildRenderedGroup(group, prototype, 'overview');
+                    traceLoad(group, 'overview', 'resolved', reason);
+                    return true;
+                } catch (error) {
+                    traceLoad(
+                        group,
+                        'overview',
+                        'failed',
+                        error && error.message ? error.message : String(error)
+                    );
+                    warning(
+                        'deferred_asset_stage_failed',
+                        'Deferred asset visual failed; its footprint remains available.',
+                        group.assetId
+                    );
                     return false;
+                } finally {
+                    group.deferredLoading = false;
+                    group.deferredPromise = null;
+                    state.pendingLoads = Math.max(0, state.pendingLoads - 1);
                 }
-                if (!prototype) {
-                    traceLoad(group, 'overview', 'skipped', reason);
-                    return false;
-                }
-                group.bounds = prototype.bounds || group.bounds;
-                group.deferredVisual = null;
-                buildRenderedGroup(group, prototype, 'overview');
-                traceLoad(group, 'overview', 'resolved', reason);
-                return true;
-            } catch (error) {
-                traceLoad(
-                    group,
-                    'overview',
-                    'failed',
-                    error && error.message ? error.message : String(error)
-                );
-                warning(
-                    'deferred_asset_stage_failed',
-                    'Deferred asset visual failed; its footprint remains available.',
-                    group.assetId
-                );
-                return false;
-            } finally {
-                group.deferredLoading = false;
-                state.pendingLoads = Math.max(0, state.pendingLoads - 1);
-            }
+            }());
+            group.deferredPromise = promise;
+            return promise;
         }
 
         function queueDeferredGroup(group, reason) {
@@ -6755,6 +10869,23 @@
             return true;
         }
 
+        function resolveBaseGroup(group, generation, signal) {
+            if (!group || group.resolved) return Promise.resolve(true);
+            if (group.resolvePromise) return group.resolvePromise;
+            const promise = Promise.resolve(
+                resolveGroup(group, generation, signal)
+            ).then(function (resolved) {
+                if (resolved && generation === state.sceneGeneration) {
+                    group.resolved = true;
+                }
+                return resolved;
+            }).finally(function () {
+                group.resolvePromise = null;
+            });
+            group.resolvePromise = promise;
+            return promise;
+        }
+
         function createBaseGroups(layout, catalog) {
             const catalogIndex = buildCatalogIndex(catalog);
             const placements = Array.isArray(layout && layout.placements)
@@ -6789,7 +10920,10 @@
                             || cloneBounds(DEFAULT_BOUNDS),
                         deferredVisual: null,
                         deferredLoading: false,
+                        deferredPromise: null,
                         deferredQueued: false,
+                        resolved: false,
+                        resolvePromise: null,
                     });
                 }
                 groups.get(key).placements.push(placement);
@@ -6799,6 +10933,16 @@
 
         async function setScene(input) {
             const value = input && typeof input === 'object' ? input : {};
+            if (state.motion.package || state.motion.root) {
+                disposeMotion('scene_changed', true);
+            }
+            if (state.activity.scenario || state.activity.root) {
+                disposeActivity('scene_changed', true);
+            }
+            if (state.navigationPreview.payload
+                    || state.navigationPreview.root) {
+                disposeNavigationPreview('scene_changed', true);
+            }
             if (state.walkthrough.active) {
                 exitWalkthrough('scene_changed');
             }
@@ -6859,7 +11003,7 @@
                 if (generation !== state.sceneGeneration || !state.mounted) {
                     break;
                 }
-                await resolveGroup(
+                await resolveBaseGroup(
                     state.baseGroups.get(keys[index]),
                     generation,
                     signal
@@ -7095,6 +11239,9 @@
         function fitBounds(bounds, mode, targetOverride) {
             if (!state.camera || !state.modelRoot || !bounds
                     || state.degraded) return false;
+            // A hidden 3D tab can retain a stale camera aspect. Measure the
+            // now-visible host before calculating fit distance.
+            if (state.mounted && !state.suspended) resize();
             const beforeRoot = objectTransform(state.modelRoot);
             const center = {
                 x: (bounds.minimum.x + bounds.maximum.x) / 2,
@@ -7158,25 +11305,89 @@
                 const horizontalFov = 2 * Math.atan(
                     Math.tan(verticalFov / 2) * aspect
                 );
-                const limitingFov = Math.max(
+                const forward = {
+                    x: -direction.x,
+                    y: -direction.y,
+                    z: -direction.z,
+                };
+                let upReference = { x: 0, y: 1, z: 0 };
+                let right = {
+                    x: forward.y * upReference.z
+                        - forward.z * upReference.y,
+                    y: forward.z * upReference.x
+                        - forward.x * upReference.z,
+                    z: forward.x * upReference.y
+                        - forward.y * upReference.x,
+                };
+                let rightLength = Math.sqrt(
+                    right.x * right.x + right.y * right.y + right.z * right.z
+                );
+                if (rightLength < 0.0001) {
+                    upReference = { x: 0, y: 0, z: 1 };
+                    right = {
+                        x: forward.y * upReference.z
+                            - forward.z * upReference.y,
+                        y: forward.z * upReference.x
+                            - forward.x * upReference.z,
+                        z: forward.x * upReference.y
+                            - forward.y * upReference.x,
+                    };
+                    rightLength = Math.sqrt(
+                        right.x * right.x
+                        + right.y * right.y
+                        + right.z * right.z
+                    );
+                }
+                right = {
+                    x: right.x / rightLength,
+                    y: right.y / rightLength,
+                    z: right.z / rightLength,
+                };
+                const cameraUp = {
+                    x: right.y * forward.z - right.z * forward.y,
+                    y: right.z * forward.x - right.x * forward.z,
+                    z: right.x * forward.y - right.y * forward.x,
+                };
+                const tanVertical = Math.max(0.01, Math.tan(verticalFov / 2));
+                const tanHorizontal = Math.max(
                     0.01,
-                    Math.min(verticalFov, horizontalFov)
+                    Math.tan(horizontalFov / 2)
                 );
-                const radius = Math.max(
-                    0.5,
-                    Math.sqrt(
-                        size.x * size.x
-                        + size.y * size.y
-                        + size.z * size.z
-                    ) / 2
-                );
-                const distance = (
-                    radius / Math.sin(limitingFov / 2)
-                ) * 1.12;
+                let requiredDistance = 0.5;
+                [bounds.minimum.x, bounds.maximum.x].forEach(function (x) {
+                    [bounds.minimum.y, bounds.maximum.y].forEach(function (y) {
+                        [bounds.minimum.z, bounds.maximum.z].forEach(function (z) {
+                            const relative = {
+                                x: x - fitTarget.x,
+                                y: y - fitTarget.y,
+                                z: z - fitTarget.z,
+                            };
+                            const depthOffset = relative.x * direction.x
+                                + relative.y * direction.y
+                                + relative.z * direction.z;
+                            const horizontal = Math.abs(
+                                relative.x * right.x
+                                + relative.y * right.y
+                                + relative.z * right.z
+                            );
+                            const vertical = Math.abs(
+                                relative.x * cameraUp.x
+                                + relative.y * cameraUp.y
+                                + relative.z * cameraUp.z
+                            );
+                            requiredDistance = Math.max(
+                                requiredDistance,
+                                depthOffset + horizontal / tanHorizontal,
+                                depthOffset + vertical / tanVertical
+                            );
+                        });
+                    });
+                });
+                const distance = requiredDistance * 1.12;
                 setVector(state.camera.position, {
-                    x: center.x + direction.x * distance,
-                    y: center.y + direction.y * distance,
-                    z: center.z + direction.z * distance,
+                    x: fitTarget.x + direction.x * distance,
+                    y: fitTarget.y + direction.y * distance,
+                    z: fitTarget.z + direction.z * distance,
                 });
                 state.camera.near = Math.max(0.001, distance / 1000);
                 state.camera.far = Math.max(100, distance + span * 20);
@@ -7199,11 +11410,47 @@
             if (typeof state.camera.updateMatrixWorld === 'function') {
                 state.camera.updateMatrixWorld(true);
             }
+            const projectedCorners = [];
+            if (typeof THREE.Vector3 === 'function'
+                    && typeof state.camera.updateProjectionMatrix === 'function') {
+                [bounds.minimum.x, bounds.maximum.x].forEach(function (x) {
+                    [bounds.minimum.y, bounds.maximum.y].forEach(function (y) {
+                        [bounds.minimum.z, bounds.maximum.z].forEach(function (z) {
+                            const projected = new THREE.Vector3(x, y, z);
+                            if (typeof projected.project !== 'function') return;
+                            projected.project(state.camera);
+                            if (Number.isFinite(projected.x)
+                                    && Number.isFinite(projected.y)) {
+                                projectedCorners.push(projected);
+                            }
+                        });
+                    });
+                });
+            }
+            const viewportOccupancy = projectedCorners.length === 8 ? {
+                widthRatio: Math.min(1, (Math.max.apply(null,
+                    projectedCorners.map(function (point) { return point.x; })
+                ) - Math.min.apply(null,
+                    projectedCorners.map(function (point) { return point.x; })
+                )) / 2),
+                heightRatio: Math.min(1, (Math.max.apply(null,
+                    projectedCorners.map(function (point) { return point.y; })
+                ) - Math.min.apply(null,
+                    projectedCorners.map(function (point) { return point.y; })
+                )) / 2),
+            } : null;
+            if (viewportOccupancy) {
+                viewportOccupancy.maximumRatio = Math.max(
+                    viewportOccupancy.widthRatio,
+                    viewportOccupancy.heightRatio
+                );
+            }
             const afterRoot = objectTransform(state.modelRoot);
             state.lastFit = {
                 mode: mode,
                 center: center,
                 size: size,
+                viewportOccupancy: viewportOccupancy,
                 rootUnchanged: JSON.stringify(beforeRoot)
                     === JSON.stringify(afterRoot),
             };
@@ -7330,6 +11577,34 @@
             return true;
         }
 
+        function setLayerVisibility(visibility) {
+            const next = normalizeLayerVisibility(
+                visibility,
+                state.layerVisibility
+            );
+            state.layerVisibility = next;
+            state.routeObjects.forEach(function (object) {
+                object.visible = next.routes !== false;
+            });
+            state.floorMarkingObjects.forEach(function (object) {
+                object.visible = next.markings !== false;
+            });
+            state.renderGroups.forEach(function (record) {
+                if (record && record.container) {
+                    record.container.visible = next.assets !== false;
+                }
+            });
+            if (state.proposalRoot) {
+                state.proposalRoot.visible = next.assets !== false;
+            }
+            invalidate();
+            return Object.assign({}, state.layerVisibility);
+        }
+
+        function getLayerVisibility() {
+            return Object.assign({}, state.layerVisibility);
+        }
+
         function setEnvironmentSettings(settings) {
             const source = settings && typeof settings === 'object' ? settings : {};
             if (source.worldBounds && typeof source.worldBounds === 'object') {
@@ -7413,12 +11688,23 @@
             return elevationView('right');
         }
 
-        function topView() {
-            const bounds = configuredEnvironmentBounds() || state.worldBounds;
+        function topView(requestedBounds) {
+            const boundedRequest = requestedBounds
+                && requestedBounds.minimum && requestedBounds.maximum
+                && ['x', 'y', 'z'].every(function (axis) {
+                    return Number.isFinite(Number(requestedBounds.minimum[axis]))
+                        && Number.isFinite(Number(
+                            requestedBounds.maximum[axis]
+                        ))
+                        && Number(requestedBounds.maximum[axis])
+                            >= Number(requestedBounds.minimum[axis]);
+                }) ? requestedBounds : null;
+            const bounds = boundedRequest
+                || configuredEnvironmentBounds() || state.worldBounds;
             if (!state.camera || !state.modelRoot || !bounds
                     || state.degraded) return false;
             const beforeRoot = objectTransform(state.modelRoot);
-            const floorY = options.worldBounds
+            const floorY = !boundedRequest && options.worldBounds
                 && Number.isFinite(Number(options.worldBounds.floorY))
                 ? Number(options.worldBounds.floorY)
                 : bounds.minimum.y;
@@ -7899,6 +12185,7 @@
                 placementIds: record.placementIds.slice(),
                 instanced: record.instanced,
                 meshCount: record.meshCount,
+                prototypeMeshCount: record.prototypeMeshCount,
                 instanceMappings: record.mappings.map(function (item) {
                     return item.placementIds
                         ? {
@@ -7911,8 +12198,8 @@
         }
 
         function numbersClose(left, right, tolerance) {
-            return Math.abs(finite(left, 0) - finite(right, 0))
-                <= finite(tolerance, 1e-6);
+            return Number.isFinite(left) && Number.isFinite(right)
+                && Math.abs(left - right) <= finite(tolerance, 1e-6);
         }
 
         function quaternionMatches(actual, expected) {
@@ -7946,15 +12233,51 @@
                     transform.scale, 1e-6);
         }
 
-        function matrixMatches(left, right) {
-            if (!left || !right || !Array.isArray(left.elements)
-                    || !Array.isArray(right.elements)
-                    || left.elements.length !== right.elements.length) {
-                return false;
-            }
-            return left.elements.every(function (value, index) {
-                return numbersClose(value, right.elements[index], 1e-5);
-            });
+        const INSTANCE_MATRIX_AUDIT_TOLERANCE = 1e-5;
+        const MATRIX_AUDIT_SAMPLE_LIMIT = 128;
+
+        function compareInstanceMatrix(actual, expected, object) {
+            const actualValues = actual && actual.elements;
+            const expectedValues = expected && expected.elements;
+            const buffer = object && object.instanceMatrix
+                && object.instanceMatrix.array;
+            const float32 = Object.prototype.toString.call(buffer)
+                === '[object Float32Array]';
+            const validShape = Array.isArray(actualValues)
+                && Array.isArray(expectedValues)
+                && actualValues.length === 16 && expectedValues.length === 16;
+            // Three stores instance matrices in Float32Array. Compare read-back
+            // with that exact encoding, keeping the existing absolute tolerance.
+            // Retain double values and their quantization loss as separate evidence.
+            const storedExpected = validShape ? expectedValues.map(function (value) {
+                return float32 ? Math.fround(value) : value;
+            }) : [];
+            const nonFiniteElements = validShape ? actualValues.map(function (value, index) {
+                return Number.isFinite(value) && Number.isFinite(expectedValues[index])
+                    && Number.isFinite(storedExpected[index]) ? null : index;
+            }).filter(function (value) { return value !== null; }) : [];
+            const valid = validShape && !nonFiniteElements.length;
+            const rawDelta = valid ? actualValues.map(function (value, index) {
+                return value - expectedValues[index];
+            }) : [];
+            const storedDelta = valid ? actualValues.map(function (value, index) {
+                return value - storedExpected[index];
+            }) : [];
+            const maxRawDelta = valid ? Math.max.apply(null, rawDelta.map(Math.abs)) : null;
+            const maxStoredDelta = valid ? Math.max.apply(null, storedDelta.map(Math.abs)) : null;
+            return {
+                matches: valid && maxStoredDelta <= INSTANCE_MATRIX_AUDIT_TOLERANCE,
+                storage: float32 ? 'Float32Array' : 'unquantized',
+                validShape: validShape,
+                nonFiniteElements: nonFiniteElements,
+                actual: validShape ? actualValues : [],
+                expectedDouble: validShape ? expectedValues : [],
+                expectedStored: storedExpected,
+                rawDelta: rawDelta,
+                storedDelta: storedDelta,
+                maxRawDelta: maxRawDelta,
+                maxStoredDelta: maxStoredDelta,
+            };
         }
 
         function getPlacementTransformAudit() {
@@ -7964,32 +12287,76 @@
             const audited = new Set();
             const mismatchIds = new Set();
             const unavailableIds = new Set();
+            const quantizedIds = new Set();
+            const matrixSamples = new Map();
+            let auditedMatrixCount = 0;
+            let rawMatrixMismatchCount = 0;
+            let maxRawMatrixDelta = 0;
+            let maxStoredMatrixDelta = 0;
+            function recordComparison(placementId, record, meshIndex, instanceIndex, comparison) {
+                auditedMatrixCount += 1;
+                maxRawMatrixDelta = Math.max(maxRawMatrixDelta, comparison.maxRawDelta || 0);
+                maxStoredMatrixDelta = Math.max(maxStoredMatrixDelta, comparison.maxStoredDelta || 0);
+                const rawMismatch = comparison.maxRawDelta > INSTANCE_MATRIX_AUDIT_TOLERANCE;
+                if (rawMismatch) rawMatrixMismatchCount += 1;
+                if (rawMismatch && comparison.matches) quantizedIds.add(placementId);
+                if (comparison.matches && !rawMismatch) return;
+                // One representative matrix per placement. A genuine mismatch
+                // takes precedence over a precision-only sample for that placement.
+                const prior = matrixSamples.get(placementId);
+                if (prior && (!prior.matches || comparison.matches)) return;
+                const jsonNumber = function (value) {
+                    return Number.isFinite(value) ? value : String(value);
+                };
+                matrixSamples.set(placementId, {
+                    placementId: placementId, assetId: record.assetId,
+                    meshIndex: meshIndex, instanceIndex: instanceIndex,
+                    matches: comparison.matches, storage: comparison.storage,
+                    validShape: comparison.validShape,
+                    nonFiniteElements: comparison.nonFiniteElements,
+                    expectedDouble: comparison.expectedDouble.map(jsonNumber),
+                    expectedStored: comparison.expectedStored.map(jsonNumber),
+                    actual: comparison.actual.map(jsonNumber),
+                    rawDelta: comparison.rawDelta, storedDelta: comparison.storedDelta,
+                    maxRawDelta: comparison.maxRawDelta,
+                    maxStoredDelta: comparison.maxStoredDelta,
+                });
+            }
             state.renderGroups.forEach(function (record) {
                 if (record.instanced) {
-                    const object = record.pickObjects[0];
-                    const prototypeMatrix = record.prototypeMatrices[0];
-                    const mapping = object
-                        ? state.instanceLookup.get(object) || [] : [];
-                    if (!object || typeof object.getMatrixAt !== 'function'
-                            || typeof THREE.Matrix4 !== 'function') {
-                        record.placementIds.forEach(function (placementId) {
-                            unavailableIds.add(placementId);
-                        });
-                        return;
-                    }
-                    mapping.forEach(function (placementId, instanceIndex) {
-                        const placement = expected.get(placementId);
-                        if (!placement) return;
-                        const actual = new THREE.Matrix4();
-                        object.getMatrixAt(instanceIndex, actual);
-                        const expectedMatrix = multiplyPlacementAndPrototype(
-                            placement,
-                            prototypeMatrix
-                        );
-                        audited.add(placementId);
-                        if (!matrixMatches(actual, expectedMatrix)) {
-                            mismatchIds.add(placementId);
+                    const complete = new Set(record.placementIds);
+                    if (!record.prototypeMatrices.length
+                            || record.pickObjects.length !== record.prototypeMatrices.length) complete.clear();
+                    record.prototypeMatrices.forEach(function (prototypeMatrix, meshIndex) {
+                        const object = record.pickObjects[meshIndex];
+                        const mapping = object
+                            ? state.instanceLookup.get(object) || [] : [];
+                        if (!object || typeof object.getMatrixAt !== 'function'
+                                || !prototypeMatrix || typeof THREE.Matrix4 !== 'function') {
+                            complete.clear();
+                            return;
                         }
+                        const seen = new Set();
+                        mapping.forEach(function (placementId, instanceIndex) {
+                            const placement = expected.get(placementId);
+                            if (!placement) return;
+                            const actual = new THREE.Matrix4();
+                            object.getMatrixAt(instanceIndex, actual);
+                            const expectedMatrix = multiplyPlacementAndPrototype(
+                                placement, prototypeMatrix
+                            );
+                            seen.add(placementId);
+                            const comparison = compareInstanceMatrix(actual, expectedMatrix, object);
+                            recordComparison(placementId, record, meshIndex, instanceIndex, comparison);
+                            if (!comparison.matches) mismatchIds.add(placementId);
+                        });
+                        complete.forEach(function (placementId) {
+                            if (!seen.has(placementId)) complete.delete(placementId);
+                        });
+                    });
+                    record.placementIds.forEach(function (placementId) {
+                        if (complete.has(placementId)) audited.add(placementId);
+                        else unavailableIds.add(placementId);
                     });
                     return;
                 }
@@ -8027,6 +12394,7 @@
                 auditedPlacementCount: audited.size,
                 transformMismatchCount: mismatchIds.size,
                 transformMismatchIds: Array.from(mismatchIds).sort().slice(0, 20),
+                transformMismatchIdsAll: Array.from(mismatchIds).sort(),
                 missingPlacementCount: missingIds.length,
                 missingPlacementIds: missingIds.slice(0, 20),
                 unavailablePlacementCount: unavailableIds.size,
@@ -8037,11 +12405,30 @@
                     visibilityOrPendingIds.slice(0, 20),
                 pendingLoadCount: state.pendingLoads,
                 droneVisibilityWindowActive: state.drone.active,
+                matrixComparison: {
+                    revision: 'instance-storage-matrix-audit-v1',
+                    tolerance: INSTANCE_MATRIX_AUDIT_TOLERANCE,
+                    auditedMatrixCount: auditedMatrixCount,
+                    rawDoubleMismatchMatrixCount: rawMatrixMismatchCount,
+                    quantizationOnlyPlacementIds: Array.from(quantizedIds).filter(function (id) {
+                        return !mismatchIds.has(id);
+                    }).sort(),
+                    maxRawAbsoluteDelta: maxRawMatrixDelta,
+                    maxStoredAbsoluteDelta: maxStoredMatrixDelta,
+                    sampleLimit: MATRIX_AUDIT_SAMPLE_LIMIT,
+                    sampleCount: matrixSamples.size,
+                    samplesTruncated: matrixSamples.size > MATRIX_AUDIT_SAMPLE_LIMIT,
+                    samples: Array.from(matrixSamples.values()).sort(function (left, right) {
+                        if (left.matches !== right.matches) return left.matches ? 1 : -1;
+                        return left.placementId.localeCompare(right.placementId);
+                    }).slice(0, MATRIX_AUDIT_SAMPLE_LIMIT),
+                },
                 evidenceStatus: incomplete ? 'unknown' : 'derived',
                 qualification: (
                     'Compares persisted placement transforms with actual object '
-                    + 'transforms or rendered instance matrices. Prototype mesh '
-                    + 'matrices are included for instanced assets.'
+                    + 'transforms or every rendered instance matrix. Expected matrices '
+                    + 'include prototype transforms and the instance storage encoding; '
+                    + 'double-precision rounding differences remain in matrixComparison.'
                 ),
             };
         }
@@ -8116,6 +12503,9 @@
                     walkthrough: getWalkthroughState(),
                     drone: getDroneState(),
                 },
+                motion: motionStateSnapshot(),
+                activity: activityStateSnapshot(),
+                navigationPreview: navigationPreviewStateSnapshot(),
                 rendering: {
                     displayPixelRatio: state.displayPixelRatio,
                     interactivePixelRatio: state.interactivePixelRatio,
@@ -8142,6 +12532,7 @@
                         ? finite(state.renderer.info.render.triangles, 0) : null,
                 },
                 visualSettings: getVisualSettings(),
+                layerVisibility: getLayerVisibility(),
                 camera: state.camera ? {
                     fov: Number.isFinite(Number(state.camera.fov))
                         ? Number(state.camera.fov) : null,
@@ -8187,6 +12578,9 @@
                     mode: state.lastFit.mode || 'facility',
                     center: Object.assign({}, state.lastFit.center),
                     size: Object.assign({}, state.lastFit.size),
+                    viewportOccupancy: state.lastFit.viewportOccupancy
+                        ? Object.assign({}, state.lastFit.viewportOccupancy)
+                        : null,
                     rootUnchanged: state.lastFit.rootUnchanged,
                 } : null,
             };
@@ -8231,6 +12625,73 @@
             exitDrone: exitDrone,
             getDroneState: getDroneState,
             setDroneStateHandler: setDroneStateHandler,
+            motion: Object.freeze({
+                load: loadMotionPackage,
+                play: playMotion,
+                pause: pauseMotion,
+                seek: seekMotion,
+                setRate: setMotionRate,
+                focus: focusMotionVehicle,
+                setFollow: setMotionFollow,
+                dispose: disposeMotion,
+                getState: motionStateSnapshot,
+                setStateHandler: setMotionStateHandler,
+            }),
+            activity: Object.freeze({
+                load: loadActivityScenario,
+                play: playActivity,
+                pause: pauseActivity,
+                seek: seekActivity,
+                setRate: setActivityRate,
+                setActorTypeVisible: setActivityActorTypeVisible,
+                setPathsVisible: setActivityPathsVisible,
+                setPathTypeVisible: setActivityPathTypeVisible,
+                setDepartmentFilter: setActivityDepartmentFilter,
+                selectActor: selectActivityActor,
+                focusActor: focusActivityActor,
+                dispose: disposeActivity,
+                getState: activityStateSnapshot,
+                setStateHandler: setActivityStateHandler,
+            }),
+            navigationPreview: Object.freeze({
+                load: loadNavigationPreview,
+                updatePath: updateNavigationPreviewPath,
+                play: playNavigationPreview,
+                pause: pauseNavigationPreview,
+                seek: seekNavigationPreview,
+                setRate: setNavigationPreviewRate,
+                setPathsVisible: setNavigationPreviewPathsVisible,
+                dispose: disposeNavigationPreview,
+                getState: navigationPreviewStateSnapshot,
+                setStateHandler: setNavigationPreviewStateHandler,
+            }),
+            loadMotionPackage: loadMotionPackage,
+            playMotion: playMotion,
+            pauseMotion: pauseMotion,
+            seekMotion: seekMotion,
+            setMotionRate: setMotionRate,
+            focusMotionVehicle: focusMotionVehicle,
+            setMotionFollow: setMotionFollow,
+            disposeMotion: disposeMotion,
+            getMotionState: motionStateSnapshot,
+            setMotionStateHandler: setMotionStateHandler,
+            loadActivityScenario: loadActivityScenario,
+            playActivity: playActivity,
+            pauseActivity: pauseActivity,
+            seekActivity: seekActivity,
+            setActivityRate: setActivityRate,
+            disposeActivity: disposeActivity,
+            getActivityState: activityStateSnapshot,
+            setActivityStateHandler: setActivityStateHandler,
+            loadNavigationPreview: loadNavigationPreview,
+            updateNavigationPreviewPath: updateNavigationPreviewPath,
+            playNavigationPreview: playNavigationPreview,
+            pauseNavigationPreview: pauseNavigationPreview,
+            seekNavigationPreview: seekNavigationPreview,
+            disposeNavigationPreview: disposeNavigationPreview,
+            getNavigationPreviewState: navigationPreviewStateSnapshot,
+            setNavigationPreviewStateHandler:
+                setNavigationPreviewStateHandler,
             getWalkthroughContextFocus: getWalkthroughContextFocus,
             setWalkthroughContextHandler: setWalkthroughContextHandler,
             setCameraOrientationHandler: setCameraOrientationHandler,
@@ -8243,6 +12704,8 @@
             applyCameraView: applyCameraView,
             zoomBy: zoomBy,
             setGridVisible: setGridVisible,
+            setLayerVisibility: setLayerVisibility,
+            getLayerVisibility: getLayerVisibility,
             setEnvironmentSettings: setEnvironmentSettings,
             setVisualSettings: setVisualSettings,
             getVisualSettings: getVisualSettings,
@@ -8260,6 +12723,14 @@
         DEFAULT_WALKTHROUGH_SETTINGS: DEFAULT_WALKTHROUGH_SETTINGS,
         DEFAULT_WALKTHROUGH_POSTURES: DEFAULT_WALKTHROUGH_POSTURES,
         DEFAULT_DRONE_SETTINGS: DEFAULT_DRONE_SETTINGS,
+        FACILITY_MOTION_PACKAGE_SCHEMA_VERSION:
+            FACILITY_MOTION_PACKAGE_SCHEMA_VERSION,
+        FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1:
+            FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1,
+        FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V2:
+            FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V2,
+        FACILITY_MOTION_DISCLOSURE: FACILITY_MOTION_DISCLOSURE,
+        sampleFacilityMotionAtDistance: sampleFacilityMotionAtDistance,
         buildDroneSpatialIndex: buildDroneSpatialIndex,
         circleIntersectsPolygon: circleIntersectsPolygon,
         dronePointValid: dronePointValid,

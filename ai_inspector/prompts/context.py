@@ -51,9 +51,18 @@ _CONTEXT_FIELDS = {
         "functional_relationships",
         "affected_functional_interfaces",
     },
+    "assembly.semantic_claims": {
+        "assembly_semantic_claims",
+        "assembly_semantic_sources",
+        "functional_context_diagnostics",
+        "_functional_context_server_resolved",
+        "_semantic_claims_prompt_selected",
+    },
     "motion.groups": {"mode_state", "viewport_context"},
     "viewport.state": {"mode_state", "viewport_context", "selected_parts"},
     "process_map.graph": {"process_map_graph"},
+    "process_map.state": {"process_map_state"},
+    "process_map.evidence": {"process_map_evidence"},
     "facility_layout.digest": {"facility_layout_digest"},
     "facility_layout.state": {"facility_layout_state"},
     "facility_layout.evidence": {"facility_layout_evidence"},
@@ -61,9 +70,12 @@ _CONTEXT_FIELDS = {
 
 _CONTEXT_PROVIDER_ORIGINS = {
     "process_map.graph": "server",
+    "process_map.state": "server",
+    "process_map.evidence": "server",
     "facility_layout.digest": "server",
     "facility_layout.state": "server",
     "facility_layout.evidence": "server",
+    "assembly.semantic_claims": "server",
 }
 
 
@@ -77,6 +89,26 @@ class CompiledContext:
     context: dict[str, Any]
     accounting: dict[str, Any]
     provenance: tuple[dict[str, Any], ...] = ()
+
+
+class ContextBudgetError(ValueError):
+    def __init__(
+        self,
+        context_keys: Iterable[str],
+        *,
+        estimated_tokens: int,
+        maximum_tokens: int,
+    ) -> None:
+        self.code = "required_context_budget_exceeded"
+        self.status_code = 422
+        self.details = {
+            "providers": sorted({str(value) for value in context_keys}),
+            "estimatedTokens": int(estimated_tokens),
+            "maximumTokens": int(maximum_tokens),
+        }
+        super().__init__(
+            "required trusted context exceeds its contract allocation"
+        )
 
 
 def _as_float(value: Any) -> float | None:
@@ -465,6 +497,104 @@ def _prune_mode_and_viewport(
         }
 
 
+def _context_provider_accounting(
+    compiled: Mapping[str, Any],
+    packages: Iterable[Any],
+    *,
+    required: set[str],
+    optional: set[str],
+    removed_optional: Iterable[str],
+) -> list[dict[str, Any]]:
+    removed = {str(value) for value in removed_optional}
+    package_rows = tuple(packages)
+    rows: list[dict[str, Any]] = []
+    for context_key in sorted(required | optional):
+        fields = sorted(_CONTEXT_FIELDS.get(context_key, set()))
+        payload = {
+            field: copy.deepcopy(compiled[field])
+            for field in fields
+            if field in compiled
+        }
+        if context_key == "fai.characteristics":
+            for field in ("fai_table_summary", "context_diagnostics"):
+                if field in compiled:
+                    payload[field] = copy.deepcopy(compiled[field])
+        requested_by = sorted({
+            str(package.manifest.id)
+            for package in package_rows
+            if context_key in {
+                *package.manifest.requires_context,
+                *package.manifest.optional_context,
+            }
+        })
+        included = bool(payload) and context_key not in removed
+        if included:
+            serialized = json.dumps(
+                payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                default=str,
+            )
+            omission_reason = None
+            payload_hash = hashlib.sha256(serialized.encode("ascii")).hexdigest()
+            tokens = math.ceil(len(serialized) / 4)
+        else:
+            payload_hash = None
+            tokens = 0
+            omission_reason = (
+                "optional_context_removed_for_budget"
+                if context_key in removed
+                else (
+                    "required_context_unavailable"
+                    if context_key in required
+                    else "optional_context_unavailable"
+                )
+            )
+        rows.append({
+            "contextKey": context_key,
+            "origin": context_provider_origin(context_key),
+            "requestedBy": requested_by or ["skill-runtime"],
+            "required": context_key in required,
+            "included": included,
+            "estimatedTokens": int(tokens),
+            "payloadSha256": payload_hash,
+            "omissionReason": omission_reason,
+            "fields": sorted(payload) if included else fields,
+        })
+    return rows
+
+
+def split_compiled_context_by_origin(
+    compiled: Mapping[str, Any],
+    packages: Iterable[Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Separate server-resolved context from browser-origin context."""
+
+    package_rows = tuple(packages)
+    required, optional = _manifest_context_keys(package_rows)
+    requested = required | optional
+    if (
+        compiled.get("_functional_context_server_resolved") is True
+        and compiled.get("assembly_semantic_claims")
+    ):
+        requested.add("assembly.semantic_claims")
+    trusted_fields = {
+        field
+        for context_key in requested
+        if context_provider_origin(context_key) == "server"
+        for field in _CONTEXT_FIELDS.get(context_key, set())
+    }
+    trusted: dict[str, Any] = {}
+    untrusted: dict[str, Any] = {}
+    for key, value in compiled.items():
+        if key == "_compiled_prompt":
+            continue
+        target = trusted if key in trusted_fields else untrusted
+        target[key] = copy.deepcopy(value)
+    return trusted, untrusted
+
+
 def compile_skill_context(
     ctx: Mapping[str, Any],
     packages: Iterable[Any],
@@ -486,6 +616,13 @@ def compile_skill_context(
         # are versioned for a broader catalog rollout.
         optional.add("assembly.functional_relationships")
         derived_context.add("assembly.functional_relationships")
+    if (
+        {"trace-assembly-impact", "reason-about-assembly-context"} & selected_skill_ids
+        and ctx.get("_functional_context_server_resolved") is True
+        and ctx.get("assembly_semantic_claims")
+    ):
+        optional.add("assembly.semantic_claims")
+        derived_context.add("assembly.semantic_claims")
     contract_policy = _contract_policy(packages)
     requested = required | optional
     selected_fields = set(_ALWAYS_FIELDS)
@@ -498,6 +635,12 @@ def compile_skill_context(
         if key in selected_fields and value not in (None, "", [], {})
     }
     compiled["_compiled_prompt"] = True
+    if (
+        "assembly.semantic_claims" in requested
+        and compiled.get("_functional_context_server_resolved") is True
+        and compiled.get("assembly_semantic_claims")
+    ):
+        compiled["_semantic_claims_prompt_selected"] = True
     include_motion = bool(
         {"reason-about-motion", "control-cad-viewport"} & selected_skill_ids
         or "motion.groups" in required
@@ -598,14 +741,19 @@ def compile_skill_context(
         priorities=contract_policy["priorities"],
     )
     if budget["budget_exceeded"]:
-        diagnostics["warnings"].append({
-            "type": "required_context_exceeds_budget",
-            "estimated_tokens": budget["estimated_tokens"],
-            "maximum_tokens": budget["maximum_tokens"],
-        })
-        if diagnostics.get("status") == "ok":
-            diagnostics["status"] = "warning"
-        compiled["context_diagnostics"] = diagnostics
+        raise ContextBudgetError(
+            required,
+            estimated_tokens=budget["estimated_tokens"],
+            maximum_tokens=budget["maximum_tokens"],
+        )
+
+    provider_accounting = _context_provider_accounting(
+        compiled,
+        packages,
+        required=required,
+        optional=optional,
+        removed_optional=budget["removed_optional_context"],
+    )
 
     serialized = json.dumps(compiled, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     original = json.dumps(dict(ctx), sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
@@ -639,6 +787,7 @@ def compile_skill_context(
         ).hexdigest(),
         "contract_policy": contract_policy,
         "budget": budget,
+        "providers": provider_accounting,
     }
     return CompiledContext(
         context=compiled,

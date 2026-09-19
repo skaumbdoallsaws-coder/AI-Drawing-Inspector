@@ -15,6 +15,8 @@ import time
 from collections import OrderedDict
 from typing import Any, Iterable, Mapping, Sequence
 
+from .navigation_intent import NAVIGATION_READ_TOOL_NAMES
+
 
 FACILITY_ORCHESTRATION_VERSION = "1.1.0"
 
@@ -29,6 +31,7 @@ _READ_TOOL_NAMES = frozenset({
     "inspect_cell_layout_provenance",
     "analyze_facility_spatial",
     "analyze_facility_fit",
+    *NAVIGATION_READ_TOOL_NAMES,
 })
 
 _INTENT_READ_TOOLS: dict[str, frozenset[str]] = {
@@ -77,8 +80,7 @@ _INTENT_READ_TOOLS: dict[str, frozenset[str]] = {
     }),
     "modify": _READ_TOOL_NAMES,
     "navigate": frozenset({
-        "inspect_facility_entities",
-        "inspect_facility_semantics",
+        *NAVIGATION_READ_TOOL_NAMES,
     }),
     "render": frozenset({
         "inspect_facility_entities",
@@ -139,6 +141,32 @@ _TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
         "mutates": False,
         "requires": ["resolved_asset", "authored_target_zone"],
         "returns": ["validated_candidate_fits", "limiting_constraints"],
+    },
+    "observe_navigation_context": {
+        "mutates": False,
+        "requires": ["active_layout_revision"],
+        "returns": ["bounded_navigation_identities", "missing_semantics"],
+    },
+    "compile_navigation_snapshot": {
+        "mutates": False,
+        "requires": ["movement_program_id", "active_layout_revision"],
+        "returns": ["opaque_navigation_package_id", "bounded_graph_summary"],
+    },
+    "plan_actor_journey": {
+        "mutates": False,
+        "requires": ["navigation_package_id", "movement_program_id"],
+        "returns": ["journey_solution_id", "bounded_journey_summary"],
+    },
+    "validate_actor_journey": {
+        "mutates": False,
+        "requires": ["journey_solution_id", "active_layout_revision"],
+        "returns": ["bounded_validation_findings", "stale_status"],
+    },
+    "compare_journey_alternatives": {
+        "mutates": False,
+        "requires": ["journey_solution_ids"],
+        "returns": ["distance_order", "turn_count_order"],
+        "guarantees": ["no_operational_optimality_claim"],
     },
     "present_chat_table": {
         "mutates": False,
@@ -259,7 +287,7 @@ def _observation_tool(
 ) -> str | None:
     analyses = {str(value) for value in spatial_analyses}
     if operation_intent == "navigate":
-        return "inspect_facility_entities"
+        return "observe_navigation_context"
     if operation_intent == "exact_transform":
         return "analyze_facility_spatial"
     if "pattern_provenance" in analyses:

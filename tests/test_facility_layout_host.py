@@ -172,11 +172,208 @@ def test_g1_generation_api_builds_review_draft_then_saves_explicitly(
         assert run["status"] == "complete"
         assert run["saveEligibility"] == "eligible"
         assert len(run["draftLayout"]["zones"]) == 4
+
+        circulated = client.post(
+            f"/api/facility-layout-generation/{LOCAL_SITE_ID}/"
+            f"{LOCAL_LAYOUT_ID}/runs/{run['runId']}/circulation",
+            headers=headers,
+            json={
+                "prototypeMode": True,
+                "expectedDraftRevision": run["draftLayoutRevision"],
+                "circulation": {
+                    "action": "create",
+                    "route_kind": "material",
+                    "width": 6,
+                    "source_unit": "m",
+                    "source_department": "Receiving",
+                    "target_department": "Inspection",
+                    "via_departments": ["Machining", "Assembly"],
+                    "direction": "two_way",
+                    "label": "Primary material aisle",
+                    "execution_mode": "authorized_draft_run",
+                },
+            },
+        )
+        assert circulated.status_code == 200, circulated.text
+        run = circulated.json()
+        assert run["status"] == "complete"
+        assert run["saveEligibility"] == "eligible"
+        assert len(run["draftLayout"]["routes"]) == 1
+        route = run["draftLayout"]["routes"][0]
+        assert route["corridorWidth"] == 6.0
+        assert route["extensions"]["facilityAisle"]["areaAccounting"] == (
+            "overlay"
+        )
+        obstacle_checked = client.post(
+            f"/api/facility-layout-generation/{LOCAL_SITE_ID}/"
+            f"{LOCAL_LAYOUT_ID}/runs/{run['runId']}/circulation",
+            headers=headers,
+            json={
+                "prototypeMode": True,
+                "expectedDraftRevision": run["draftLayoutRevision"],
+                "circulation": {
+                    "action": "avoid_obstacles",
+                    "obstacle_scope": "static_geometry",
+                    "minimum_clearance": None,
+                    "clearance_unit": None,
+                    "preserve_departments": True,
+                    "preserve_route_identity": True,
+                    "route_id": route["routeId"],
+                    "vehicle_profile_id": None,
+                    "vehicle_profile_revision": None,
+                    "allow_reverse": None,
+                    "execution_mode": "authorized_draft_run",
+                },
+            },
+        )
+        assert obstacle_checked.status_code == 200, obstacle_checked.text
+        run = obstacle_checked.json()
+        assert run["circulation"]["obstacleAvoidance"] == {
+            "status": "clear",
+            "routeId": route["routeId"],
+            "minimumClearanceMeters": 0.0,
+            "clearanceAuthority": "geometric_non_overlap_only",
+            "vehicleTurningValidated": False,
+            "preservedDepartments": True,
+            "preservedRouteIdentity": True,
+        }
+        assert run["draftLayout"]["routes"][0]["routeId"] == route["routeId"]
+        subdivided = client.post(
+            f"/api/facility-layout-generation/{LOCAL_SITE_ID}/"
+            f"{LOCAL_LAYOUT_ID}/runs/{run['runId']}/subdivisions",
+            headers=headers,
+            json={
+                "prototypeMode": True,
+                "expectedDraftRevision": run["draftLayoutRevision"],
+                "subdivision": {
+                    "parent_department": "Assembly",
+                    "count": 4,
+                    "labels": [
+                        "Kitting",
+                        "Mechanical Build",
+                        "Electrical Build",
+                        "Test",
+                    ],
+                    "proportions": None,
+                    "arrangement": "deterministic_grid",
+                    "orientation": "auto",
+                    "rows": None,
+                    "preserve_parent": True,
+                    "execution_mode": "authorized_draft_run",
+                },
+            },
+        )
+        assert subdivided.status_code == 200, subdivided.text
+        run = subdivided.json()
+        assert run["subdivisions"]["parentDepartment"] == "Assembly"
+        assert run["subdivisions"]["parentPreserved"] is True
+        assert len(run["draftLayout"]["zones"]) == 8
+        assert run["draftLayout"]["routes"][0]["routeId"] == route["routeId"]
+        machine = host._catalog["asset-cnc-mill"]
+        assets = client.post(
+            f"/api/facility-layout-generation/{LOCAL_SITE_ID}/"
+            f"{LOCAL_LAYOUT_ID}/runs/{run['runId']}/assets",
+            headers=headers,
+            json={
+                "prototypeMode": True,
+                "expectedDraftRevision": run["draftLayoutRevision"],
+                "assetPlacement": {
+                    "asset_id": machine["assetId"],
+                    "asset_definition_revision": machine[
+                        "assetDefinitionRevision"
+                    ],
+                    "quantity": 2,
+                    "target_area": "Mechanical Build",
+                    "orientation_mode": "long_side_east_west",
+                    "facing_direction": None,
+                    "resource_role": "production",
+                    "access_requirement": "physical_only",
+                    "preserve_hierarchy": True,
+                    "execution_mode": "authorized_draft_run",
+                },
+            },
+        )
+        assert assets.status_code == 200, assets.text
+        run = assets.json()
+        assert run["assetPlacements"]["quantity"] == 2
+        assert run["assetPlacements"]["accessUnverifiedCount"] == 2
+        assert len(run["draftLayout"]["placements"]) == 2
+        assert len(run["draftLayout"]["zones"]) == 8
+        assert run["draftLayout"]["routes"][0]["routeId"] == route["routeId"]
+        cells = client.post(
+            f"/api/facility-layout-generation/{LOCAL_SITE_ID}/"
+            f"{LOCAL_LAYOUT_ID}/runs/{run['runId']}/cells",
+            headers=headers,
+            json={
+                "prototypeMode": True,
+                "expectedDraftRevision": run["draftLayoutRevision"],
+                "cellComposition": {
+                    "target_area": "Mechanical Build",
+                    "candidate_strategies": ["line"],
+                    "selected_strategy": "line",
+                    "objective": "shortest_travel",
+                    "preferred_gap_meters": 1.0,
+                    "invert_u": False,
+                    "process_sequence_placement_ids": [],
+                    "preserve_departments": True,
+                    "preserve_routes": True,
+                    "preserve_markings": True,
+                    "preserve_locked_and_manual": True,
+                    "execution_mode": "authorized_draft_run",
+                },
+            },
+        )
+        assert cells.status_code == 200, cells.text
+        run = cells.json()
+        assert run["cellComposition"]["selectedStrategy"] == "line"
+        assert run["cellComposition"]["memberPlacementCount"] == 2
+        assert run["cellComposition"]["preferredGapAuthority"] == (
+            "user_authored"
+        )
+        assert run["cellComposition"]["saved"] is False
+        assert len(run["draftLayout"]["placements"]) == 2
+        assert len(run["draftLayout"]["zones"]) == 8
+        assert run["draftLayout"]["routes"][0]["routeId"] == route["routeId"]
+        replicated = client.post(
+            f"/api/facility-layout-generation/{LOCAL_SITE_ID}/"
+            f"{LOCAL_LAYOUT_ID}/runs/{run['runId']}/cell-replication",
+            headers=headers,
+            json={
+                "prototypeMode": True,
+                "expectedDraftRevision": run["draftLayoutRevision"],
+                "cellReplication": {
+                    "source_cell": "Mechanical Build",
+                    "target_areas": ["Electrical Build"],
+                    "copy_current_edited_state": False,
+                    "preserve_departments": True,
+                    "preserve_routes": True,
+                    "preserve_markings": True,
+                    "preserve_source_cell": True,
+                    "preserve_manual_and_locked": True,
+                    "execution_mode": "authorized_draft_run",
+                },
+            },
+        )
+        assert replicated.status_code == 200, replicated.text
+        run = replicated.json()
+        assert run["cellReplication"]["replicaCount"] == 1
+        assert run["cellReplication"]["copiedPlacementCount"] == 2
+        assert run["cellReplication"]["sourceCell"] == (
+            "Mechanical Build"
+        )
+        assert run["cellReplication"]["targetAreas"] == [
+            "Electrical Build"
+        ]
+        assert run["cellReplication"]["saved"] is False
+        assert len(run["draftLayout"]["placements"]) == 4
+        assert len(run["draftLayout"]["zones"]) == 8
+        assert run["draftLayout"]["routes"][0]["routeId"] == route["routeId"]
         unchanged = client.get(
             f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
         ).json()
         assert unchanged["revision"] == base["revision"]
         assert unchanged["layout"]["zones"] == []
+        assert unchanged["layout"]["routes"] == []
 
         saved = client.post(
             f"/api/facility-layout-generation/{LOCAL_SITE_ID}/"
@@ -200,7 +397,212 @@ def test_g1_generation_api_builds_review_draft_then_saves_explicitly(
             "Machining",
             "Assembly",
             "Inspection",
+            "Kitting",
+            "Mechanical Build",
+            "Electrical Build",
+            "Test",
         ]
+        assert len(reopened["layout"]["routes"]) == 1
+        assert len(reopened["layout"]["placements"]) == 4
+    finally:
+        client.close()
+        host.close()
+
+
+def test_g1_generation_explicitly_supersedes_owned_unsaved_draft_after_reload(
+    tmp_path,
+    monkeypatch,
+):
+    for name in (
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_PROVIDER",
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_ANTHROPIC_MODEL",
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_OPENAI_MODEL",
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_OPENAI_REASONING_EFFORT",
+        "INSPECTORPRO_SAGE_PROVIDER",
+        "INSPECTORPRO_SAGE_ANTHROPIC_MODEL",
+        "INSPECTORPRO_SAGE_OPENAI_MODEL",
+        "INSPECTORPRO_SAGE_OPENAI_REASONING_EFFORT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    client, host = _client(tmp_path / "facility-generation-supersede")
+    first_headers = {"X-InspectorPro-Session": "host-g1-first-browser"}
+    second_headers = {"X-InspectorPro-Session": "host-g1-reloaded-browser"}
+
+    def request_payload(*, width, depth, labels, supersede=False):
+        return {
+            "prototypeMode": True,
+            "supersedeActiveDraft": supersede,
+            "executionMode": "authorized_draft_run",
+            "facilityEnvelope": {
+                "width": width,
+                "depth": depth,
+                "sourceUnit": "m",
+                "displayName": "Generated Facility",
+            },
+            "departments": {
+                "count": len(labels),
+                "labels": labels,
+                "arrangement": "deterministic_grid",
+            },
+        }
+
+    try:
+        base = client.get("/api/facility-layout-bootstrap").json()["layout"]
+        first = client.post(
+            f"/api/facility-layout-generation/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}/g1",
+            headers=first_headers,
+            json=request_payload(
+                width=100,
+                depth=80,
+                labels=["Receiving", "Machining", "Assembly", "Inspection"],
+            ),
+        )
+        assert first.status_code == 200, first.text
+        first_run = first.json()
+        for _ in range(10):
+            continued = client.post(
+                f"/api/facility-layout-generation/{LOCAL_SITE_ID}/"
+                f"{LOCAL_LAYOUT_ID}/runs/{first_run['runId']}/continue",
+                headers=first_headers,
+                json={},
+            )
+            assert continued.status_code == 200, continued.text
+            first_run = continued.json()
+        assert first_run["status"] == "complete"
+
+        blocked = client.post(
+            f"/api/facility-layout-generation/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}/g1",
+            headers=second_headers,
+            json=request_payload(
+                width=120,
+                depth=90,
+                labels=["Receiving", "Machining", "Assembly"],
+            ),
+        )
+        assert blocked.status_code == 409, blocked.text
+
+        replacement = client.post(
+            f"/api/facility-layout-generation/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}/g1",
+            headers=second_headers,
+            json=request_payload(
+                width=120,
+                depth=90,
+                labels=["Receiving", "Machining", "Assembly"],
+                supersede=True,
+            ),
+        )
+        assert replacement.status_code == 200, replacement.text
+        replacement_run = replacement.json()
+        assert replacement_run["runId"] != first_run["runId"]
+        assert replacement_run["supersededRunId"] == first_run["runId"]
+        assert len(replacement_run["supersededReceiptIds"]) == 10
+
+        prior = client.get(
+            f"/api/facility-layout-generation/{LOCAL_SITE_ID}/"
+            f"{LOCAL_LAYOUT_ID}/runs/{first_run['runId']}",
+            headers=first_headers,
+        )
+        assert prior.status_code == 200, prior.text
+        assert prior.json()["status"] == "cancelled"
+        unchanged = client.get(
+            f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
+        ).json()
+        assert unchanged["revision"] == base["revision"]
+        assert unchanged["layout"] == base["layout"]
+    finally:
+        client.close()
+        host.close()
+
+
+def test_g1_generation_supersedes_owned_draft_after_base_revision_changes(
+    tmp_path,
+    monkeypatch,
+):
+    for name in (
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_PROVIDER",
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_ANTHROPIC_MODEL",
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_OPENAI_MODEL",
+        "INSPECTORPRO_FACILITY_LAYOUT_SAGE_OPENAI_REASONING_EFFORT",
+        "INSPECTORPRO_SAGE_PROVIDER",
+        "INSPECTORPRO_SAGE_ANTHROPIC_MODEL",
+        "INSPECTORPRO_SAGE_OPENAI_MODEL",
+        "INSPECTORPRO_SAGE_OPENAI_REASONING_EFFORT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    client, host = _client(tmp_path / "facility-generation-stale-base")
+    first_headers = {"X-InspectorPro-Session": "host-g1-stale-first"}
+    second_headers = {"X-InspectorPro-Session": "host-g1-stale-second"}
+    endpoint = (
+        f"/api/facility-layout-generation/{LOCAL_SITE_ID}/"
+        f"{LOCAL_LAYOUT_ID}/g1"
+    )
+
+    def payload(width, depth):
+        return {
+            "prototypeMode": True,
+            "supersedeActiveDraft": True,
+            "executionMode": "authorized_draft_run",
+            "facilityEnvelope": {
+                "width": width,
+                "depth": depth,
+                "sourceUnit": "m",
+                "displayName": "Generated Facility",
+            },
+            "departments": {
+                "count": 2,
+                "labels": ["Inbound", "Dispatch"],
+                "arrangement": "deterministic_grid",
+            },
+        }
+
+    try:
+        bootstrap = client.get("/api/facility-layout-bootstrap").json()
+        first = client.post(
+            endpoint,
+            headers=first_headers,
+            json=payload(100, 80),
+        )
+        assert first.status_code == 200, first.text
+        first_run = first.json()
+
+        changed = client.put(
+            f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}",
+            json={
+                "baseRevision": bootstrap["layout"]["revision"],
+                "operations": [
+                    {
+                        "op": "set_plan_settings",
+                        "planSettings": {
+                            "widthMeters": 60,
+                            "depthMeters": 40,
+                            "gridSpacingMeters": 1,
+                            "majorGridSpacingMeters": 5,
+                        },
+                    }
+                ],
+            },
+        )
+        assert changed.status_code == 200, changed.text
+        changed_revision = changed.json()["revision"]
+        assert changed_revision != first_run["baseLayoutRevision"]
+
+        replacement = client.post(
+            endpoint,
+            headers=second_headers,
+            json=payload(150, 100),
+        )
+        assert replacement.status_code == 200, replacement.text
+        replacement_run = replacement.json()
+        assert replacement_run["baseLayoutRevision"] == changed_revision
+        assert replacement_run["supersededRunId"] == first_run["runId"]
+
+        prior = client.get(
+            f"/api/facility-layout-generation/{LOCAL_SITE_ID}/"
+            f"{LOCAL_LAYOUT_ID}/runs/{first_run['runId']}",
+            headers=first_headers,
+        )
+        assert prior.status_code == 200, prior.text
+        assert prior.json()["status"] == "cancelled"
     finally:
         client.close()
         host.close()
@@ -622,6 +1024,8 @@ def test_local_host_rejects_unknown_asset_and_cross_site_scope(tmp_path):
 
 
 def test_local_host_resolves_revision_bound_named_process_maps(tmp_path):
+    from ai_inspector.process_map.repository import load_process_map
+
     process_root = tmp_path / "training"
     product_dir = process_root / "fixture-product"
     product_dir.mkdir(parents=True)
@@ -659,16 +1063,25 @@ def test_local_host_resolves_revision_bound_named_process_maps(tmp_path):
         process_map_root=process_root,
     )
     try:
+        current = load_process_map(process_root, "fixture-product")
+        missing = host._resolve_process_map(
+            host.principal(),
+            LOCAL_SITE_ID,
+            "fixture-product",
+            "default",
+            "0" * 64,
+        )
         resolved = host._resolve_process_map(
             host.principal(),
             LOCAL_SITE_ID,
             "fixture-product",
             "default",
-            "ignored-by-resolver",
+            current["revision"],
         )
     finally:
         host.close()
+    assert missing is None
     assert resolved is not None
-    assert len(resolved["revision"]) == 64
+    assert resolved["revision"] == current["revision"]
     assert resolved["document"]["mapId"] == "default"
     assert resolved["document"]["association"]["productId"] == "fixture-product"

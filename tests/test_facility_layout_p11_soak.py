@@ -2,13 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tools.verify_facility_layout_p11 import run_accelerated_soak
+from tools.verify_facility_layout_p11 import (
+    build_real_soak_evidence,
+    run_accelerated_soak,
+)
 
 
 def test_accelerated_soak_proves_mechanics_but_not_elapsed_time(
     tmp_path: Path,
 ):
-    ledger = run_accelerated_soak(tmp_path / "soak")
+    ledger = run_accelerated_soak(
+        tmp_path / "soak",
+        real_soak_evidence=build_real_soak_evidence(
+            tmp_path / "missing-real-soak-ledger.json"
+        ),
+    )
     accelerated = ledger["acceleratedDeterministicSoak"]
     counts = accelerated["counts"]
 

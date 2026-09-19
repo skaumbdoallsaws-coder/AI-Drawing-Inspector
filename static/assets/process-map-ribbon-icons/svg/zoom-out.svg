@@ -1,0 +1,27 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Zoom Out</title>
+      <defs>
+  <linearGradient id="zoom-out-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#60CCFF"/>
+    <stop offset="1" stop-color="#2F7EEA"/>
+  </linearGradient>
+  <linearGradient id="zoom-out-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="zoom-out-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#zoom-out-shadow)">
+  <circle cx="13.6" cy="13.6" r="8" fill="#F4FBFF" stroke="url(#zoom-out-g)" stroke-width="2.2"/>
+  <path d="M19.4 19.4L27 27" stroke="url(#zoom-out-g)" stroke-width="3"/>
+  <path d="M9.8 13.6H17.4" stroke="#2F7EEA" stroke-width="1.8"/>
+  <path d="M8.6 8.7C10 7.2 11.8 6.5 13.7 6.5" stroke="#BDEBFF" stroke-width="1"/>
+</g>
+
+      </g>
+    </svg>

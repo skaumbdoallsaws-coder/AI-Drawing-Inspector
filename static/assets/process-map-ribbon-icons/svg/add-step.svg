@@ -1,0 +1,30 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Add Step</title>
+      <defs>
+  <linearGradient id="add-step-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#63CFFF"/>
+    <stop offset="1" stop-color="#2B7BE1"/>
+  </linearGradient>
+  <linearGradient id="add-step-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="add-step-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+  <linearGradient id="add-step-plus" x1="20" y1="19" x2="29" y2="29" gradientUnits="userSpaceOnUse"><stop stop-color="#6AE6AD"/><stop offset="1" stop-color="#1FA66E"/></linearGradient>
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#add-step-shadow)">
+  <rect x="4.5" y="5" width="20" height="20" rx="4" fill="url(#add-step-g)" stroke="#1C5F9E" stroke-width="1.1"/>
+  <path d="M8.5 10H20.5M8.5 14H17.5" stroke="#E8F7FF" stroke-width="1.5"/>
+  <circle cx="4.5" cy="15" r="1.6" fill="#DDF4FF" stroke="#1C5F9E" stroke-width="0.8"/>
+  <circle cx="24.5" cy="15" r="1.6" fill="#DDF4FF" stroke="#1C5F9E" stroke-width="0.8"/>
+  <circle cx="24.3" cy="24.3" r="5.1" fill="url(#add-step-plus)" stroke="#147B51" stroke-width="1"/>
+  <path d="M24.3 21.5V27.1M21.5 24.3H27.1" stroke="#fff" stroke-width="1.8"/>
+  <path d="M7 6.8H20" stroke="#BCEBFF" stroke-width="1" opacity="0.7"/>
+</g>
+
+      </g>
+    </svg>

@@ -1,0 +1,38 @@
+schema_version: 1
+id: analyze-facility-layout
+version: 1.4.0
+description: Analyze revision-bound Facility Layout data and present grounded prose, tables, or validated charts without modifying the layout.
+agents:
+  - sage
+workflows:
+  - facility-layout-analysis
+modes:
+  - training
+  - facility_layout
+requires_context:
+  - facility_layout.digest
+optional_context:
+  - facility_layout.evidence
+allowed_tools:
+  - search_industrial_assets
+  - inspect_facility_entities
+  - inspect_facility_region
+  - inspect_facility_findings
+  - inspect_process_bindings
+  - inspect_facility_semantics
+  - inspect_pattern_provenance
+  - inspect_cell_layout_provenance
+  - analyze_facility_spatial
+  - analyze_facility_fit
+  - observe_navigation_context
+  - compile_navigation_snapshot
+  - plan_actor_journey
+  - validate_actor_journey
+  - compare_journey_alternatives
+  - present_chat_visualization
+  - present_chat_table
+side_effects: []
+depends_on: []
+conflicts_with: []
+composable_with: []
+evidence_policy: computed_fields_only

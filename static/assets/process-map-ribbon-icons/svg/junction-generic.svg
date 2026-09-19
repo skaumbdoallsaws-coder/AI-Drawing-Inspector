@@ -1,0 +1,29 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Junction</title>
+      <defs>
+  <linearGradient id="junction-generic-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#B992FF"/>
+    <stop offset="1" stop-color="#7043D6"/>
+  </linearGradient>
+  <linearGradient id="junction-generic-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="junction-generic-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#junction-generic-shadow)">
+  <circle cx="6" cy="9" r="2" fill="#F2EBFF" stroke="#6B45C4" stroke-width="1"/>
+  <circle cx="6" cy="23" r="2" fill="#F2EBFF" stroke="#6B45C4" stroke-width="1"/>
+  <circle cx="26" cy="16" r="2" fill="#F2EBFF" stroke="#6B45C4" stroke-width="1"/>
+  <path d="M8 9H11C14.2 9 14.2 13.8 16 16M8 23H11C14.2 23 14.2 18.2 16 16H24" stroke="url(#junction-generic-g)" stroke-width="2.1"/>
+  <circle cx="16" cy="16" r="4.4" fill="url(#junction-generic-g)" stroke="#4E2E9D" stroke-width="1"/>
+  <circle cx="16" cy="16" r="1.3" fill="#fff"/>
+</g>
+
+      </g>
+    </svg>

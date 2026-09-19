@@ -1,0 +1,30 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Ports</title>
+      <defs>
+  <linearGradient id="ports-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#67E3AD"/>
+    <stop offset="1" stop-color="#22A66F"/>
+  </linearGradient>
+  <linearGradient id="ports-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="ports-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#ports-shadow)">
+  <rect x="7" y="7" width="18" height="18" rx="4" fill="url(#ports-g)" stroke="#176B49" stroke-width="1.1"/>
+  <circle cx="5.5" cy="12" r="2.2" fill="#E9FFF5" stroke="#1A875B" stroke-width="1"/>
+  <circle cx="5.5" cy="20" r="2.2" fill="#E9FFF5" stroke="#1A875B" stroke-width="1"/>
+  <circle cx="26.5" cy="12" r="2.2" fill="#E9FFF5" stroke="#1A875B" stroke-width="1"/>
+  <circle cx="26.5" cy="20" r="2.2" fill="#E9FFF5" stroke="#1A875B" stroke-width="1"/>
+  <path d="M9.8 12H14.7M12.9 9.9L15 12L12.9 14.1M22.2 20H17.3M19.1 17.9L17 20L19.1 22.1" stroke="#fff" stroke-width="1.55"/>
+  <path d="M9.6 8.7H21" stroke="#C7F9E1" stroke-width="1" opacity="0.75"/>
+</g>
+
+      </g>
+    </svg>

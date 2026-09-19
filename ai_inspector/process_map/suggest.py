@@ -16,6 +16,7 @@ _MAX_LIMIT = 100
 _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
 _RULES = {
     "sibling_sequence": "1.0.0",
+    "sibling_sequence_next_card": "1.0.0",
     "inspection_after_operation": "1.0.0",
     "resource_contention": "1.0.0",
 }
@@ -305,6 +306,55 @@ def _annotation_suggestion(
     }
 
 
+def _placement_suggestion(
+    *,
+    from_node_id: str,
+    target_occurrence: Mapping[str, Any],
+    confidence: str,
+    provenance: list[dict[str, Any]],
+) -> dict[str, Any]:
+    rule_id = "sibling_sequence_next_card"
+    target_occurrence_id = _clean_id(target_occurrence.get("occurrenceId"))
+    suggestion_id, evidence_fingerprint = _suggestion_id(
+        rule_id,
+        provenance,
+        from_node_id,
+        target_occurrence_id,
+        "precedence",
+    )
+    edge_id = "pm-e-suggest-" + suggestion_id[4:20]
+    return {
+        "suggestionId": suggestion_id,
+        "ruleId": rule_id,
+        "ruleVersion": _RULES[rule_id],
+        "evidenceFingerprint": evidence_fingerprint,
+        "placement": {
+            "sourceOccurrenceId": target_occurrence_id,
+            "nameSnapshot": str(
+                target_occurrence.get("name")
+                or target_occurrence.get("itemId")
+                or target_occurrence_id
+            ),
+            "itemIdSnapshot": target_occurrence.get("itemId"),
+            "anchorNodeId": from_node_id,
+            "connectionDirection": "outgoing",
+            "edgeKind": "precedence",
+            "edgeId": edge_id,
+        },
+        "confidence": confidence,
+        "provenance": provenance,
+        "explanation": (
+            f"Place '{target_occurrence.get('name') or target_occurrence_id}' next and "
+            "continue the reviewed sibling sequence."
+        ),
+        "validation": {
+            "wouldCreateCycle": False,
+            "duplicateOfExisting": False,
+        },
+        "affectedIds": sorted({from_node_id, target_occurrence_id}),
+    }
+
+
 def suggest_process_map_connections(
     process_map: Mapping[str, Any],
     product_structure: Mapping[str, Any],
@@ -339,12 +389,14 @@ def suggest_process_map_connections(
         if isinstance(item, Mapping) and _clean_id(item.get("occurrenceId"))
     }
     placed_occurrences: dict[str, tuple[Mapping[str, Any], Mapping[str, Any]]] = {}
+    node_id_by_occurrence: dict[str, str] = {}
     for node_id, node in node_by_id.items():
         if node.get("nodeKind") != "product_occurrence":
             continue
         occurrence = occurrences.get(_clean_id(node.get("sourceOccurrenceId")))
         if occurrence is not None:
             placed_occurrences[node_id] = (node, occurrence)
+            node_id_by_occurrence[_clean_id(occurrence.get("occurrenceId"))] = node_id
 
     dismissed = {
         _clean_id(value)
@@ -455,6 +507,76 @@ def suggest_process_map_connections(
             else:
                 candidates.append(candidate)
 
+    all_siblings: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for occurrence in occurrences.values():
+        parent_id = _clean_id(occurrence.get("parentOccurrenceId"))
+        if parent_id and _finite_number(occurrence.get("suggestedBuildOrder")) is not None:
+            all_siblings[parent_id].append(occurrence)
+    for parent_id in sorted(all_siblings):
+        ordered = sorted(
+            all_siblings[parent_id],
+            key=lambda occurrence: (
+                _finite_number(occurrence.get("suggestedBuildOrder")) or 0.0,
+                _clean_id(occurrence.get("occurrenceId")),
+            ),
+        )
+        for left, right in zip(ordered, ordered[1:]):
+            left_occurrence_id = _clean_id(left.get("occurrenceId"))
+            right_occurrence_id = _clean_id(right.get("occurrenceId"))
+            from_node_id = node_id_by_occurrence.get(left_occurrence_id)
+            if not from_node_id or right_occurrence_id in node_id_by_occurrence:
+                continue
+            authored_ids = sorted(set(authored_by_parent.get(parent_id, [])))
+            interface_ids = _pair_functional_evidence(left, right, functional_pairs)
+            if not authored_ids and not interface_ids:
+                continue
+            rule_id = "sibling_sequence_next_card"
+            provenance = [
+                _evidence_row(
+                    "product_containment",
+                    rule_id,
+                    detail=f"Both occurrences belong to parent '{parent_id}'.",
+                    ids=[parent_id, left_occurrence_id, right_occurrence_id],
+                ),
+                _evidence_row(
+                    "suggested_build_order",
+                    rule_id,
+                    detail=(
+                        f"Suggested build order is {left.get('suggestedBuildOrder')} before "
+                        f"{right.get('suggestedBuildOrder')}."
+                    ),
+                    ids=[left_occurrence_id, right_occurrence_id],
+                ),
+            ]
+            if authored_ids:
+                provenance.append(
+                    _evidence_row(
+                        "authored_precedence_pattern",
+                        rule_id,
+                        detail="The saved map already uses ascending sibling build order.",
+                        ids=authored_ids,
+                    )
+                )
+            if interface_ids:
+                provenance.append(
+                    _evidence_row(
+                        "functional_relationship",
+                        rule_id,
+                        detail="Reviewed product evidence relates the two occurrences.",
+                        ids=interface_ids,
+                    )
+                )
+            candidate = _placement_suggestion(
+                from_node_id=from_node_id,
+                target_occurrence=right,
+                confidence="high" if authored_ids and interface_ids else "medium",
+                provenance=provenance,
+            )
+            if candidate["suggestionId"] in dismissed:
+                suppressed_dismissed += 1
+            else:
+                candidates.append(candidate)
+
     steps_by_subject: dict[str, dict[str, list[str]]] = defaultdict(
         lambda: defaultdict(list)
     )
@@ -548,7 +670,7 @@ def suggest_process_map_connections(
         key=lambda item: (
             bool(item.get("validation", {}).get("wouldCreateCycle")),
             _CONFIDENCE_RANK.get(str(item.get("confidence")), 9),
-            0 if "edge" in item else 1,
+            0 if "edge" in item else (1 if "placement" in item else 2),
             item["suggestionId"],
         ),
     )
@@ -560,6 +682,7 @@ def suggest_process_map_connections(
         "summary": {
             "returned": len(returned),
             "edgeSuggestions": sum(1 for item in returned if "edge" in item),
+            "placementSuggestions": sum(1 for item in returned if "placement" in item),
             "annotations": sum(1 for item in returned if "annotation" in item),
             "cycleWarnings": sum(
                 1

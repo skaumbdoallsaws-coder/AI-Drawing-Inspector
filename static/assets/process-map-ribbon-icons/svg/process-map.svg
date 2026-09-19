@@ -1,0 +1,32 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Process Map</title>
+      <defs>
+  <linearGradient id="process-map-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#58C8FF"/>
+    <stop offset="1" stop-color="#2F7EEA"/>
+  </linearGradient>
+  <linearGradient id="process-map-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="process-map-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#process-map-shadow)">
+  <path d="M9.5 10.5C12.4 10.5 13.1 14.1 16 14.1C18.9 14.1 19.6 10.5 22.5 10.5" stroke="url(#process-map-g)" stroke-width="2"/>
+  <path d="M16 14.4V21.2" stroke="url(#process-map-g)" stroke-width="2"/>
+  <rect x="4" y="5" width="9" height="8" rx="2.2" fill="url(#process-map-g)" stroke="#174B78" stroke-width="1"/>
+  <rect x="19" y="5" width="9" height="8" rx="2.2" fill="url(#process-map-g)" stroke="#174B78" stroke-width="1"/>
+  <rect x="11.5" y="20" width="9" height="7" rx="2.2" fill="url(#process-map-g)" stroke="#174B78" stroke-width="1"/>
+  <path d="M6.4 7.2H10.6M21.4 7.2H25.6M13.9 22.2H18.1" stroke="#fff" stroke-width="1.3" opacity="0.95"/>
+  <circle cx="8.5" cy="13" r="1.5" fill="#DDF4FF" stroke="#174B78" stroke-width="0.8"/>
+  <circle cx="23.5" cy="13" r="1.5" fill="#DDF4FF" stroke="#174B78" stroke-width="0.8"/>
+  <circle cx="16" cy="20" r="1.5" fill="#DDF4FF" stroke="#174B78" stroke-width="0.8"/>
+</g>
+
+      </g>
+    </svg>

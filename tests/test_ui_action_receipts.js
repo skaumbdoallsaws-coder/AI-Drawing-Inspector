@@ -25,6 +25,7 @@ function baseState() {
         motion: { playing: false, package_mode: true, motion_id: null, rpm: null, angle_deg: 0 },
         rotation: { assembly: false, part: false },
         process_map_selection: null,
+        process_map_focus: null,
     };
 }
 
@@ -195,6 +196,113 @@ check('process-map scope clear requires an empty transient selection', () => {
     assert.deepStrictEqual(runtime.verifyPostcondition(
         contract,
         { type: 'clear_process_map_part_scope', action_id: 'a1' },
+        before,
+        after,
+        true
+    ), { ok: true });
+});
+
+check('process-map canvas focus is validated and receipt-verifiable', () => {
+    const validation = runtime.validateBundle(contract, {
+        workspace: 'process_map',
+        actions: [{
+            type: 'set_process_map_focus',
+            target_occurrence_id: 'front-wheel',
+            label: 'Front Wheel Assembly',
+            direction: 'upstream',
+            include_routes: true,
+            fit_view: true,
+            dim_others: true,
+        }],
+    });
+    assert.strictEqual(validation.ok, true);
+    const before = baseState();
+    const after = baseState();
+    after.active_tab = 'training';
+    after.process_map_focus = {
+        label: 'Front Wheel Assembly',
+        target_occurrence_id: 'front-wheel',
+        direction: 'upstream',
+        target_node_ids: ['node-front-wheel'],
+        node_ids: ['node-rim', 'stage-mount-tire', 'node-front-wheel'],
+        edge_ids: ['edge-rim-stage', 'edge-stage-wheel'],
+    };
+    assert.deepStrictEqual(runtime.verifyPostcondition(
+        contract,
+        validation.bundle.actions[0],
+        before,
+        after,
+        true
+    ), { ok: true });
+});
+
+check('multi-scope process-map focus requires every requested target', () => {
+    const validation = runtime.validateBundle(contract, {
+        workspace: 'process_map',
+        actions: [{
+            type: 'set_process_map_focus',
+            target_node_ids: ['stage-front', 'stage-rear'],
+            labels: ['Front Wheel', 'Rear Wheel'],
+            direction: 'upstream',
+            include_routes: true,
+        }],
+    });
+    assert.strictEqual(validation.ok, true);
+    const before = baseState();
+    const incomplete = baseState();
+    incomplete.process_map_focus = {
+        target_node_ids: ['stage-front'],
+        target_occurrence_ids: [],
+        node_ids: ['stage-front'],
+        edge_ids: [],
+    };
+    assert.deepStrictEqual(runtime.verifyPostcondition(
+        contract,
+        validation.bundle.actions[0],
+        before,
+        incomplete,
+        true
+    ), { ok: false, error: 'process_map_focus_not_applied' });
+    const complete = baseState();
+    complete.process_map_focus = {
+        target_node_ids: ['stage-front', 'stage-rear'],
+        target_occurrence_ids: [],
+        node_ids: ['part-front', 'stage-front', 'part-rear', 'stage-rear'],
+        edge_ids: ['front-edge', 'rear-edge'],
+    };
+    assert.deepStrictEqual(runtime.verifyPostcondition(
+        contract,
+        validation.bundle.actions[0],
+        before,
+        complete,
+        true
+    ), { ok: true });
+});
+
+check('multi-scope process-map focus is capped at eight targets', () => {
+    const validation = runtime.validateBundle(contract, {
+        workspace: 'process_map',
+        actions: [{
+            type: 'set_process_map_focus',
+            target_node_ids: Array.from({ length: 9 }, (_, index) => `stage-${index}`),
+        }],
+    });
+    assert.strictEqual(validation.ok, false);
+    assert.ok(validation.errors.includes(
+        'action[0]:target_node_ids:too_many_items'
+    ));
+});
+
+check('process-map canvas focus clear requires empty focus state', () => {
+    const before = baseState();
+    before.process_map_focus = {
+        target_occurrence_id: 'front-wheel',
+        node_ids: ['node-rim', 'node-front-wheel'],
+    };
+    const after = baseState();
+    assert.deepStrictEqual(runtime.verifyPostcondition(
+        contract,
+        { type: 'clear_process_map_focus', action_id: 'a1' },
         before,
         after,
         true

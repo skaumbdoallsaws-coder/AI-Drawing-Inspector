@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "commands": {
+    "linear-pattern": {
+      "type": "object",
+      "properties": {
+        "seedIds": {"type": "array", "minItems": 1, "maxItems": 240, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "pattern": "\\S"}, "description": "For a complete cell, use the cell zone ID returned in cells[].cellId by Create Cell, not its member placement IDs. The cell ID includes its envelope and contained assets. Wait for the Create Cell receipt before this call; never use placeholder IDs or revisions."},
+        "count": {"type": "integer", "minimum": 2, "maximum": 50},
+        "direction": {"type": "string", "enum": ["horizontal", "vertical", "east", "west", "north", "south"], "description": "Matches UI: horizontal = +X; vertical = -Z. North = +Z; south = -Z."},
+        "spacing": {"type": "number", "exclusiveMinimum": 0, "description": "Pitch between corresponding seed anchors, not edge clearance."},
+        "sourceUnit": {"type": "string", "enum": ["m", "mm", "ft", "in"]}
+      },
+      "required": ["seedIds", "count", "direction", "spacing", "sourceUnit"],
+      "additionalProperties": false
+    },
+    "cell-layout": {
+      "type": "object",
+      "properties": {
+        "selectionIds": {"type": "array", "minItems": 2, "maxItems": 240, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "pattern": "\\S"}},
+        "strategyId": {"type": "string", "enum": ["line", "l", "u", "grid", "parallel", "serpentine", "loop", "spine", "herringbone", "cluster"]},
+        "targetBounds": {"type": "object", "properties": {"width": {"type": "number", "exclusiveMinimum": 0}, "depth": {"type": "number", "exclusiveMinimum": 0}}, "required": ["width", "depth"], "additionalProperties": false, "description": "Dimensions only; center is derived from the selected equipment."},
+        "sourceUnit": {"type": "string", "enum": ["m", "mm", "ft", "in"]},
+        "gap": {"type": "number", "minimum": 0, "description": "Preferred spacing input to the existing envelope-filling layout strategy, not a guarantee of exact edge clearance. Actual separation depends on envelope dimensions and strategy; do not claim exact spacing from this value."},
+        "rows": {"type": "integer", "minimum": 1, "maximum": 240},
+        "orientation": {"type": "string", "enum": ["preserve", "follow-path", "face-center", "face-outward"]},
+        "angleDegrees": {"type": "number", "description": "Existing builder yaw: 0 is +X; positive 90 points toward -Z."},
+        "invertU": {"type": "boolean"}
+      },
+      "required": ["selectionIds", "strategyId", "targetBounds", "sourceUnit", "gap", "rows", "orientation", "angleDegrees", "invertU"],
+      "additionalProperties": false
+    },
+    "create-cell-group": {
+      "type": "object",
+      "properties": {
+        "selectionIds": {"type": "array", "minItems": 1, "maxItems": 240, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "pattern": "\\S"}},
+        "label": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S", "description": "Cell series base name; existing numbering begins at 01."},
+        "envelopePadding": {"type": "number", "minimum": 0, "default": 0},
+        "sourceUnit": {"type": "string", "enum": ["m", "mm", "ft", "in"], "default": "m"}
+      },
+      "required": ["selectionIds", "label"],
+      "additionalProperties": false
+    },
+    "surface-stack": {
+      "type": "object",
+      "properties": {
+        "supportId": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "childIds": {"type": "array", "minItems": 1, "maxItems": 239, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "pattern": "\\S"}},
+        "surfaceId": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "side": {"type": "string", "enum": ["top", "bottom"], "default": "top"},
+        "gap": {"type": "number", "minimum": 0, "default": 0},
+        "sourceUnit": {"type": "string", "enum": ["m", "mm", "ft", "in"], "default": "m"},
+        "itemGap": {"type": "number", "minimum": 0},
+        "inset": {"type": "number", "minimum": 0}
+      },
+      "required": ["supportId", "childIds", "surfaceId", "itemGap", "inset"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,11 @@
+'use strict';
+const divider = document.getElementById('splitter');
+let fraction = 0.5, hostWidth = 1440, start = null;
+const resize = value => window.research.command({ action: 'resize', value: Math.max(0.2, Math.min(0.8, value)) }).catch(() => {});
+window.research.subscribe(state => { fraction = state.splitFraction || 0.5; hostWidth = state.hostWidth || 1440; divider.setAttribute('aria-valuenow', String(Math.round(fraction * 100))); });
+divider.addEventListener('pointerdown', event => { if (!event.isTrusted) return; start = { x: event.screenX, fraction }; divider.setPointerCapture(event.pointerId); });
+divider.addEventListener('pointermove', event => { if (start) void resize(start.fraction - (event.screenX - start.x) / hostWidth); });
+divider.addEventListener('pointerup', () => { start = null; });
+divider.addEventListener('lostpointercapture', () => { start = null; });
+divider.addEventListener('dblclick', () => resize(0.5));
+divider.addEventListener('keydown', event => { if (['ArrowLeft','ArrowRight','Home'].includes(event.key)) { event.preventDefault(); void resize(event.key === 'Home' ? 0.5 : fraction + (event.key === 'ArrowLeft' ? 0.02 : -0.02)); } });

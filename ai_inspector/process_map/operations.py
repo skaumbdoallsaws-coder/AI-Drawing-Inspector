@@ -15,29 +15,46 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 from .repository import canonical_process_map_bytes, process_map_revision
 from .schema_v3 import (
+    EDGE_ROUTE_MODES,
     GROUP_COLOR_KEYS,
+    JUNCTION_TYPES,
+    LAYOUT_FLOW_DIRECTIONS,
+    LAYOUT_POLICY_NUMERIC_FIELDS,
+    LAYOUT_POLICY_ROUTE_MODES,
     MAX_GROUP_DESCRIPTION_LENGTH,
     MAX_GROUP_LABEL_LENGTH,
     MAX_NODE_LABEL_LENGTH,
     MAX_NODE_NOTE_LENGTH,
+    MAX_ROUTE_POINTS,
     MAX_REFERENCE_CATALOG_ITEMS,
     MAX_REFERENCE_CLAUSE_LENGTH,
     MAX_REFERENCE_DETAILS_LENGTH,
     MAX_REFERENCE_IDENTIFIER_LENGTH,
     MAX_REFERENCE_NAME_LENGTH,
+    MAX_REFERENCE_POPULATED_AT_LENGTH,
+    MAX_REFERENCE_POPULATED_BY_LENGTH,
     MAX_REFERENCE_REVISION_LENGTH,
+    MAX_REFERENCE_SOURCE_HASH_LENGTH,
+    MAX_REFERENCE_SOURCE_ID_LENGTH,
     MAX_REFERENCES_PER_TARGET,
+    MAX_PROCESS_PLAN_DISCLAIMER_LENGTH,
+    MAX_PROCESS_PLAN_IMPORTS,
     MIN_GROUP_HEIGHT,
     MIN_GROUP_WIDTH,
     PORT_ORDERS,
     PORT_ORIENTATIONS,
+    POSITION_MODES,
     PROCESS_STEP_TYPES,
+    PROCESS_STEP_PROPERTY_LIMITS,
+    REFERENCE_KNOWLEDGE_STATUSES,
     REFERENCE_KINDS,
+    node_position_mode,
     validate_placement_map,
 )
 
 
 MAX_OPERATION_BATCH = 100
+MAX_INTERNAL_OPERATION_BATCH = 500
 MAX_DOMAIN_ID_LENGTH = 128
 PROCESS_MAP_OPERATION_SCHEMA_VERSION = 1
 
@@ -273,7 +290,12 @@ def _collapse_redundant_junctions(process_map: Dict[str, Any]) -> None:
         edges = _edges(process_map)
         collapsed = False
         for node in list(nodes):
-            if not isinstance(node, dict) or node.get("nodeKind") != "junction" or _junction_has_metadata(node):
+            if (
+                not isinstance(node, dict)
+                or node.get("nodeKind") != "junction"
+                or node.get("junctionType") != "wire_branch"
+                or _junction_has_metadata(node)
+            ):
                 continue
             node_id = node.get("nodeId")
             incident = [
@@ -348,6 +370,36 @@ def _normalized_reference(
         cleaned = _clean_text(value.get(key), maximum, f"reference.{key}", required=False)
         if cleaned:
             result[key] = cleaned
+    knowledge_status = value.get("knowledgeStatus")
+    if knowledge_status is not None:
+        knowledge_status = _clean_text(
+            knowledge_status, 40, "reference.knowledgeStatus"
+        )
+        if knowledge_status not in REFERENCE_KNOWLEDGE_STATUSES:
+            _fail(
+                "invalid_operation_field",
+                f"Unsupported reference knowledgeStatus '{knowledge_status}'.",
+            )
+        result["knowledgeStatus"] = knowledge_status
+    demo_data = value.get("demoData")
+    if demo_data is not None:
+        if not isinstance(demo_data, bool):
+            _fail("invalid_operation_field", "reference.demoData must be a boolean.")
+        result["demoData"] = demo_data
+    for key, maximum in (
+        ("sourcePlanId", MAX_REFERENCE_SOURCE_ID_LENGTH),
+        ("sourceRevision", MAX_REFERENCE_REVISION_LENGTH),
+        ("sourcePlanHash", MAX_REFERENCE_SOURCE_HASH_LENGTH),
+        ("sourceRequirementId", MAX_REFERENCE_SOURCE_ID_LENGTH),
+        ("sourceResourceId", MAX_REFERENCE_SOURCE_ID_LENGTH),
+        ("populatedBy", MAX_REFERENCE_POPULATED_BY_LENGTH),
+        ("populatedAt", MAX_REFERENCE_POPULATED_AT_LENGTH),
+    ):
+        cleaned = _clean_text(
+            value.get(key), maximum, f"reference.{key}", required=False
+        )
+        if cleaned:
+            result[key] = cleaned
     if kind == "standard" and not result.get("identifier"):
         _fail("invalid_operation_field", "A standard reference requires an identifier.")
     requested = value.get("referenceId")
@@ -390,6 +442,7 @@ def _op_place_occurrence(
         "nodeKind": "product_occurrence",
         "sourceOccurrenceId": occurrence_id,
         "position": _position(operation.get("position")),
+        "positionMode": operation.get("positionMode", "manual"),
         "portOrientation": operation.get("portOrientation", "horizontal"),
         "portOrder": operation.get("portOrder", "input_first"),
     }
@@ -397,8 +450,31 @@ def _op_place_occurrence(
         node["labelOverride"] = _clean_text(operation.get("label"), MAX_NODE_LABEL_LENGTH, "label")
     if operation.get("note") is not None:
         node["note"] = _clean_text(operation.get("note"), MAX_NODE_NOTE_LENGTH, "note")
+    if node["positionMode"] not in POSITION_MODES:
+        _fail("invalid_operation_field", "positionMode must be auto, manual, or locked.")
+    if node["positionMode"] == "locked":
+        node["locked"] = True
+    if operation.get("semantic") is not None:
+        node["semantic"] = deepcopy(operation["semantic"])
     _nodes(process_map).append(node)
     return {"nodeId": node_id, "occurrenceId": occurrence_id}
+
+
+def _process_step_properties(value: Any) -> Dict[str, str]:
+    if not isinstance(value, Mapping):
+        _fail("invalid_operation_field", "properties must be an object.")
+    unknown = sorted(set(value) - set(PROCESS_STEP_PROPERTY_LIMITS))
+    if unknown:
+        _fail(
+            "invalid_operation_field",
+            "Unsupported process-step properties: " + ", ".join(unknown) + ".",
+        )
+    result: Dict[str, str] = {}
+    for field, maximum in PROCESS_STEP_PROPERTY_LIMITS.items():
+        cleaned = _clean_text(value.get(field), maximum, field, required=False)
+        if cleaned:
+            result[field] = cleaned
+    return result
 
 
 def _op_add_process_step(
@@ -417,12 +493,23 @@ def _op_add_process_step(
         "processType": process_type,
         "name": _clean_text(operation.get("name"), MAX_NODE_LABEL_LENGTH, "name"),
         "position": _position(operation.get("position")),
+        "positionMode": operation.get("positionMode", "manual"),
         "portOrientation": operation.get("portOrientation", "horizontal"),
         "portOrder": operation.get("portOrder", "input_first"),
     }
     note = _clean_text(operation.get("note"), MAX_NODE_NOTE_LENGTH, "note", required=False)
     if note:
         node["note"] = note
+    if operation.get("properties") is not None:
+        properties = _process_step_properties(operation.get("properties"))
+        if properties:
+            node["properties"] = properties
+    if node["positionMode"] not in POSITION_MODES:
+        _fail("invalid_operation_field", "positionMode must be auto, manual, or locked.")
+    if node["positionMode"] == "locked":
+        node["locked"] = True
+    if operation.get("semantic") is not None:
+        node["semantic"] = deepcopy(operation["semantic"])
     _nodes(process_map).append(node)
     return {"nodeId": node_id}
 
@@ -434,12 +521,28 @@ def _op_add_junction(
     index: int,
 ) -> Dict[str, Any]:
     node_id = _requested_or_generated_id(process_map, operation, index, "nodeId", "pmj")
-    _nodes(process_map).append({
+    junction_type = _clean_text(
+        operation.get("junctionType", "wire_branch"),
+        32,
+        "junctionType",
+    )
+    if junction_type not in JUNCTION_TYPES:
+        _fail("invalid_operation_field", f"Unsupported junction type '{junction_type}'.")
+    position_mode = operation.get("positionMode", "manual")
+    if position_mode not in POSITION_MODES:
+        _fail("invalid_operation_field", "positionMode must be auto, manual, or locked.")
+    node = {
         "nodeId": node_id,
         "nodeKind": "junction",
-        "junctionType": "wire_branch",
+        "junctionType": junction_type,
         "position": _position(operation.get("position")),
-    })
+        "positionMode": position_mode,
+    }
+    if position_mode == "locked":
+        node["locked"] = True
+    if operation.get("semantic") is not None:
+        node["semantic"] = deepcopy(operation["semantic"])
+    _nodes(process_map).append(node)
     return {"nodeId": node_id}
 
 
@@ -451,8 +554,194 @@ def _op_move_node(
 ) -> Dict[str, Any]:
     node_id = _clean_id(operation.get("nodeId"), "nodeId")
     node = _find(_nodes(process_map), "nodeId", node_id, "Node")
+    if node_position_mode(node) == "locked":
+        _fail("locked_node_movement", f"Node '{node_id}' is position-locked.")
     node["position"] = _position(operation.get("position"))
+    requested_mode = operation.get("positionMode")
+    if requested_mode is not None:
+        if requested_mode not in POSITION_MODES:
+            _fail("invalid_operation_field", "positionMode must be auto, manual, or locked.")
+        node["positionMode"] = requested_mode
+        if requested_mode == "locked":
+            node["locked"] = True
+        else:
+            node.pop("locked", None)
     return {"nodeId": node_id}
+
+
+def _op_set_node_locked(
+    process_map: Dict[str, Any],
+    _structure: Mapping[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+) -> Dict[str, Any]:
+    node_id = _clean_id(operation.get("nodeId"), "nodeId")
+    node = _find(_nodes(process_map), "nodeId", node_id, "Node")
+    locked = operation.get("locked")
+    if not isinstance(locked, bool):
+        _fail("invalid_operation_field", "locked must be a boolean.")
+    if locked:
+        node["locked"] = True
+        node["positionMode"] = "locked"
+    else:
+        node.pop("locked", None)
+        node["positionMode"] = "manual"
+    return {"nodeId": node_id, "locked": locked}
+
+
+def _op_set_node_position_mode(
+    process_map: Dict[str, Any],
+    _structure: Mapping[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+) -> Dict[str, Any]:
+    node_id = _clean_id(operation.get("nodeId"), "nodeId")
+    node = _find(_nodes(process_map), "nodeId", node_id, "Node")
+    mode = _clean_text(operation.get("positionMode"), 16, "positionMode")
+    if mode not in POSITION_MODES:
+        _fail("invalid_operation_field", "positionMode must be auto, manual, or locked.")
+    node["positionMode"] = mode
+    if mode == "locked":
+        node["locked"] = True
+    else:
+        node.pop("locked", None)
+    return {"nodeId": node_id, "positionMode": mode}
+
+
+def _op_set_layout_policy(
+    process_map: Dict[str, Any],
+    _structure: Mapping[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+) -> Dict[str, Any]:
+    requested = operation.get("policy")
+    if not isinstance(requested, Mapping) or not requested:
+        _fail("invalid_operation_field", "set_layout_policy requires a non-empty policy object.")
+    allowed = {
+        "flowDirection",
+        "gridSize",
+        "nodeClearance",
+        "edgeClearance",
+        "portLeadLength",
+        "routeMode",
+    }
+    unknown = sorted(set(requested) - allowed)
+    if unknown:
+        _fail(
+            "invalid_operation_field",
+            "Unsupported layout policy fields: " + ", ".join(unknown) + ".",
+        )
+    policy = deepcopy(
+        process_map.get("layoutPolicy")
+        if isinstance(process_map.get("layoutPolicy"), Mapping)
+        else {}
+    )
+    if "flowDirection" in requested:
+        value = _clean_text(requested.get("flowDirection"), 40, "policy.flowDirection")
+        if value not in LAYOUT_FLOW_DIRECTIONS:
+            _fail("invalid_operation_field", f"Unsupported flow direction '{value}'.")
+        policy["flowDirection"] = value
+    if "routeMode" in requested:
+        value = _clean_text(requested.get("routeMode"), 40, "policy.routeMode")
+        if value not in LAYOUT_POLICY_ROUTE_MODES:
+            _fail("invalid_operation_field", f"Unsupported route mode '{value}'.")
+        policy["routeMode"] = value
+    for field, (minimum, maximum) in LAYOUT_POLICY_NUMERIC_FIELDS.items():
+        if field not in requested:
+            continue
+        value = requested.get(field)
+        if (
+            not _finite_number(value)
+            or float(value) < minimum
+            or float(value) > maximum
+        ):
+            _fail(
+                "invalid_operation_field",
+                f"policy.{field} must be between {minimum:g} and {maximum:g}.",
+            )
+        policy[field] = float(value)
+    process_map["layoutPolicy"] = policy
+    return {"policyFields": sorted(requested)}
+
+
+def _normalized_edge_routing(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        _fail("invalid_operation_field", "routing must be an object.")
+    allowed = {"mode", "routerVersion", "waypoints", "obstacleFingerprint"}
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        _fail(
+            "invalid_operation_field",
+            "Unsupported routing fields: " + ", ".join(unknown) + ".",
+        )
+    mode = _clean_text(value.get("mode"), 40, "routing.mode")
+    if mode not in EDGE_ROUTE_MODES:
+        _fail("invalid_operation_field", f"Unsupported route mode '{mode}'.")
+    if mode == "bezier_legacy":
+        return {"mode": mode}
+    router_version = value.get("routerVersion")
+    if (
+        not isinstance(router_version, int)
+        or isinstance(router_version, bool)
+        or router_version < 1
+    ):
+        _fail("invalid_operation_field", "routing.routerVersion must be a positive integer.")
+    waypoints = value.get("waypoints")
+    if not isinstance(waypoints, list) or len(waypoints) > MAX_ROUTE_POINTS:
+        _fail(
+            "invalid_operation_field",
+            f"routing.waypoints must contain at most {MAX_ROUTE_POINTS} points.",
+        )
+    normalized_waypoints = [
+        _position(point, f"routing.waypoints[{index}]")
+        for index, point in enumerate(waypoints)
+    ]
+    if mode == "polyline_manual":
+        return {
+            "mode": mode,
+            "routerVersion": router_version,
+            "waypoints": normalized_waypoints,
+        }
+    fingerprint = _clean_text(
+        value.get("obstacleFingerprint"),
+        128,
+        "routing.obstacleFingerprint",
+    )
+    return {
+        "mode": mode,
+        "routerVersion": router_version,
+        "waypoints": normalized_waypoints,
+        "obstacleFingerprint": fingerprint,
+    }
+
+
+def _op_set_edge_routing(
+    process_map: Dict[str, Any],
+    _structure: Mapping[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+) -> Dict[str, Any]:
+    edge_id = _clean_id(operation.get("edgeId"), "edgeId")
+    edge = _find(_edges(process_map), "edgeId", edge_id, "Edge")
+    edge["routing"] = _normalized_edge_routing(operation.get("routing"))
+    if edge["routing"].get("mode") != "bezier_legacy":
+        process_map["layoutVersion"] = max(
+            3,
+            int(process_map.get("layoutVersion") or 1),
+        )
+    return {"edgeId": edge_id, "routeMode": edge["routing"]["mode"]}
+
+
+def _op_clear_edge_routing(
+    process_map: Dict[str, Any],
+    _structure: Mapping[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+) -> Dict[str, Any]:
+    edge_id = _clean_id(operation.get("edgeId"), "edgeId")
+    edge = _find(_edges(process_map), "edgeId", edge_id, "Edge")
+    edge.pop("routing", None)
+    return {"edgeId": edge_id}
 
 
 def _op_retype_step(
@@ -520,6 +809,29 @@ def _op_set_label(
     return {"nodeId": node_id}
 
 
+def _op_set_edge_label(
+    process_map: Dict[str, Any],
+    _structure: Mapping[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+) -> Dict[str, Any]:
+    edge_id = _clean_id(operation.get("edgeId"), "edgeId")
+    edge = _find(_edges(process_map), "edgeId", edge_id, "Edge")
+    label = _clean_text(
+        operation.get("label"), MAX_NODE_LABEL_LENGTH, "label", required=False
+    )
+    records = _logical_edge_records(process_map, edge)
+    for record in records:
+        if label:
+            record["label"] = label
+        else:
+            record.pop("label", None)
+    return {
+        "edgeId": edge_id,
+        "logicalConnectionId": edge.get("logicalConnectionId") or edge_id,
+    }
+
+
 def _op_set_note(
     process_map: Dict[str, Any],
     _structure: Mapping[str, Any],
@@ -536,6 +848,24 @@ def _op_set_note(
     else:
         node.pop("note", None)
     return {"nodeId": node_id}
+
+
+def _op_set_process_properties(
+    process_map: Dict[str, Any],
+    _structure: Mapping[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+) -> Dict[str, Any]:
+    node_id = _clean_id(operation.get("nodeId"), "nodeId")
+    node = _find(_nodes(process_map), "nodeId", node_id, "Node")
+    if node.get("nodeKind") != "process_step":
+        _fail("operation_target_kind_mismatch", "Only process steps have manufacturing properties.")
+    properties = _process_step_properties(operation.get("properties"))
+    if properties:
+        node["properties"] = properties
+    else:
+        node.pop("properties", None)
+    return {"nodeId": node_id, "properties": properties}
 
 
 def _op_connect(
@@ -564,6 +894,8 @@ def _op_connect(
     label = _clean_text(operation.get("label"), MAX_NODE_LABEL_LENGTH, "label", required=False)
     if label:
         edge["label"] = label
+    if operation.get("semantic") is not None:
+        edge["semantic"] = deepcopy(operation["semantic"])
     _edges(process_map).append(edge)
     return {"edgeId": edge_id, "logicalConnectionId": logical_id}
 
@@ -834,16 +1166,86 @@ def _op_detach_reference(
     return {"targetType": target_type, "targetId": target_id, "referenceId": reference_id}
 
 
+def _op_record_process_plan_import(
+    process_map: Dict[str, Any],
+    _structure: Mapping[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+) -> Dict[str, Any]:
+    record = {
+        "sourcePlanId": _clean_text(
+            operation.get("sourcePlanId"),
+            MAX_REFERENCE_SOURCE_ID_LENGTH,
+            "sourcePlanId",
+        ),
+        "sourceRevision": _clean_text(
+            operation.get("sourceRevision"),
+            MAX_REFERENCE_REVISION_LENGTH,
+            "sourceRevision",
+        ),
+        "sourcePlanHash": _clean_text(
+            operation.get("sourcePlanHash"),
+            MAX_REFERENCE_SOURCE_HASH_LENGTH,
+            "sourcePlanHash",
+        ),
+        "populatedBy": _clean_text(
+            operation.get("populatedBy"),
+            MAX_REFERENCE_POPULATED_BY_LENGTH,
+            "populatedBy",
+        ),
+        "populatedAt": _clean_text(
+            operation.get("populatedAt"),
+            MAX_REFERENCE_POPULATED_AT_LENGTH,
+            "populatedAt",
+        ),
+        "disclaimer": _clean_text(
+            operation.get("disclaimer"),
+            MAX_PROCESS_PLAN_DISCLAIMER_LENGTH,
+            "disclaimer",
+        ),
+    }
+    demo_data = operation.get("demoData")
+    if not isinstance(demo_data, bool):
+        _fail("invalid_operation_field", "demoData must be a boolean.")
+    record["demoData"] = demo_data
+    imports = process_map.get("processPlanImports")
+    if imports is None:
+        imports = []
+        process_map["processPlanImports"] = imports
+    if not isinstance(imports, list):
+        _fail("invalid_map_shape", "processPlanImports must be an array.")
+    identity = tuple(
+        record[field] for field in ("sourcePlanId", "sourceRevision", "sourcePlanHash")
+    )
+    if any(
+        isinstance(item, dict)
+        and tuple(item.get(field) for field in ("sourcePlanId", "sourceRevision", "sourcePlanHash")) == identity
+        for item in imports
+    ):
+        return {"sourcePlanId": record["sourcePlanId"], "alreadyRecorded": True}
+    if len(imports) >= MAX_PROCESS_PLAN_IMPORTS:
+        _fail("process_plan_import_limit", "The process-plan import history is full.")
+    imports.append(record)
+    return {"sourcePlanId": record["sourcePlanId"], "alreadyRecorded": False}
+
+
 _HANDLERS: Dict[str, Callable[[Dict[str, Any], Mapping[str, Any], Mapping[str, Any], int], Dict[str, Any]]] = {
     "place_occurrence": _op_place_occurrence,
     "add_process_step": _op_add_process_step,
     "add_junction": _op_add_junction,
     "move_node": _op_move_node,
+    "set_node_locked": _op_set_node_locked,
+    "set_node_position_mode": _op_set_node_position_mode,
+    "set_layout_policy": _op_set_layout_policy,
     "retype_step": _op_retype_step,
     "set_port_layout": _op_set_port_layout,
     "set_label": _op_set_label,
+    "set_edge_label": _op_set_edge_label,
     "set_note": _op_set_note,
+    "set_process_properties": _op_set_process_properties,
     "connect": _op_connect,
+    "set_edge_routing": _op_set_edge_routing,
+    "clear_edge_routing": _op_clear_edge_routing,
     "split_edge_with_junction": _op_split_edge_with_junction,
     "delete_node": _op_delete_node,
     "delete_edge": _op_delete_edge,
@@ -853,6 +1255,7 @@ _HANDLERS: Dict[str, Callable[[Dict[str, Any], Mapping[str, Any], Mapping[str, A
     "delete_group": _op_delete_group,
     "attach_reference": _op_attach_reference,
     "detach_reference": _op_detach_reference,
+    "record_process_plan_import": _op_record_process_plan_import,
 }
 
 
@@ -888,7 +1291,8 @@ def build_process_map_diff(before: Mapping[str, Any], after: Mapping[str, Any]) 
             ),
         }
     metadata_keys = (
-        "displayName", "association", "status", "viewport", "dismissedSuggestions"
+        "displayName", "association", "status", "viewport", "dismissedSuggestions",
+        "layoutPolicy", "processPlanImports",
     )
     result["metadata"] = [key for key in metadata_keys if before.get(key) != after.get(key)]
     return result
@@ -916,16 +1320,19 @@ def apply_process_map_operations(
     process_map: Mapping[str, Any],
     product_structure: Mapping[str, Any],
     operations: Sequence[Mapping[str, Any]],
+    *,
+    maximum_operations: int = MAX_OPERATION_BATCH,
 ) -> Dict[str, Any]:
     """Apply an operation batch in memory and return validation plus a diff."""
     if not isinstance(operations, Sequence) or isinstance(operations, (str, bytes)):
         raise ProcessMapOperationError("operations_not_array", "operations must be an array.")
     if not operations:
         raise ProcessMapOperationError("operations_empty", "At least one operation is required.")
-    if len(operations) > MAX_OPERATION_BATCH:
+    limit = max(1, min(MAX_INTERNAL_OPERATION_BATCH, int(maximum_operations)))
+    if len(operations) > limit:
         raise ProcessMapOperationError(
             "operations_too_large",
-            f"An operation batch can contain at most {MAX_OPERATION_BATCH} operations.",
+            f"An operation batch can contain at most {limit} operations.",
         )
     before = deepcopy(dict(process_map))
     after = deepcopy(before)

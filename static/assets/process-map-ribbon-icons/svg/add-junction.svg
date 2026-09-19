@@ -1,0 +1,31 @@
+    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+      <title>Add Junction</title>
+      <defs>
+  <linearGradient id="add-junction-g" x1="5" y1="4" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#B992FF"/>
+    <stop offset="1" stop-color="#7043D6"/>
+  </linearGradient>
+  <linearGradient id="add-junction-shine" x1="8" y1="5" x2="22" y2="20" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFFFFF" stop-opacity="0.78"/>
+    <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+  </linearGradient>
+  <filter id="add-junction-shadow" x="-35%" y="-35%" width="170%" height="180%" color-interpolation-filters="sRGB">
+    <feDropShadow dx="0" dy="1.1" stdDeviation="1.0" flood-color="#0A2B49" flood-opacity="0.24"/>
+  </filter>
+  <linearGradient id="add-junction-plus" x1="20" y1="19" x2="29" y2="29" gradientUnits="userSpaceOnUse"><stop stop-color="#6AE6AD"/><stop offset="1" stop-color="#1FA66E"/></linearGradient>
+</defs>
+
+      <g stroke-linecap="round" stroke-linejoin="round">
+        <g filter="url(#add-junction-shadow)">
+  <path d="M15.2 4.8C15.6 4.4 16.4 4.4 16.8 4.8L26.2 14.2C26.6 14.6 26.6 15.4 26.2 15.8L16.8 25.2C16.4 25.6 15.6 25.6 15.2 25.2L5.8 15.8C5.4 15.4 5.4 14.6 5.8 14.2L15.2 4.8Z" fill="url(#add-junction-g)" stroke="#4E2E9D" stroke-width="1.1"/>
+  <circle cx="10.2" cy="12.1" r="1.45" fill="#F3EBFF"/>
+  <circle cx="10.2" cy="18.1" r="1.45" fill="#F3EBFF"/>
+  <circle cx="21.8" cy="15.1" r="1.45" fill="#F3EBFF"/>
+  <path d="M11.7 12.1H14.2C15.7 12.1 16.2 13.2 16.2 15.1M11.7 18.1H14.2C15.7 18.1 16.2 17 16.2 15.1H20.3" stroke="#fff" stroke-width="1.55"/>
+  <path d="M9 7.7L12.2 6.1" stroke="#E8D7FF" stroke-width="1" opacity="0.8"/>
+  <circle cx="24.2" cy="24.2" r="5.1" fill="url(#add-junction-plus)" stroke="#147B51" stroke-width="1"/>
+  <path d="M24.2 21.4V27M21.4 24.2H27" stroke="#fff" stroke-width="1.8"/>
+</g>
+
+      </g>
+    </svg>

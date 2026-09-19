@@ -77,6 +77,9 @@ check('V2 authoring does not depend on the legacy semantic fixture', () => {
     assert.ok(index.includes(
         'const runtimesReady = _trainFacilityAuthoringRuntimesReady();'
     ));
+    assert.ok(index.includes(
+        "Object.defineProperty(window, '_trainFacilityLayoutAuthoringApp'"
+    ));
 
     const renderStart = index.indexOf(
         'function _trainRenderFacilityLayoutViewer()'
@@ -119,6 +122,49 @@ check('V2 authoring does not depend on the legacy semantic fixture', () => {
     assert.ok(index.slice(legacyStart, legacyStart + 600).includes(
         '_trainEnsureFacilityLayoutLoaded()'
     ));
+});
+
+check('Facility motion playback is a read-only identity-only browser tool', () => {
+    const index = source('static/index.html');
+    const server = source('server.py');
+    [
+        'start_facility_motion_playback',
+        'function _trainStartFacilityMotionPlayback',
+        'workspace.startMotionPlayback(request)',
+        'readOnlyPresentation: true',
+        'layoutChanged: false',
+        'saved: false',
+    ].forEach(token => assert.ok(index.includes(token), token));
+    assert.ok(server.includes('facility_motion_intent_fast_path'));
+    assert.ok(server.includes('"requestKind": "motion_playback"'));
+    assert.ok(server.includes('"readOnly": True'));
+    const functionStart = index.indexOf(
+        'async function _trainStartFacilityMotionPlayback'
+    );
+    const functionEnd = index.indexOf(
+        'window.__facilityLayoutAgentV1',
+        functionStart
+    );
+    const body = index.slice(functionStart, functionEnd);
+    ['x:', 'z:', 'poses:', 'speed:', 'duration:'].forEach(token => {
+        assert.ok(!body.includes(token), token);
+    });
+});
+
+check('Facility activity playback accepts the shared 24-actor contract', () => {
+    const index = source('static/index.html');
+    const functionStart = index.indexOf(
+        'async function _trainStartFacilityActivityPlayback'
+    );
+    const functionEnd = index.indexOf(
+        'window.__facilityLayoutAgentV1',
+        functionStart
+    );
+    assert.ok(functionStart >= 0 && functionEnd > functionStart);
+    const body = index.slice(functionStart, functionEnd);
+    assert.ok(body.includes('maximumActors > 24'));
+    assert.ok(!body.includes('maximumActors > 12'));
+    assert.ok(body.includes('workspace.startActivityPlayback'));
 });
 
 check('integrated Facility Layout editing commands live in the main ribbon', () => {
@@ -184,4 +230,4 @@ check('pilot runbook carries the mandatory safety disclaimer', () => {
     assert.ok(runbook.replace(/\r?\n/g, ' ').includes(disclaimer));
 });
 
-console.log(`${passed}/6 facility layout P11 contract checks passed`);
+console.log(`${passed}/${passed} facility layout P11 contract checks passed`);

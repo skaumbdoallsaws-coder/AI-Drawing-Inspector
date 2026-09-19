@@ -16975,6 +16975,54 @@
             border-color: rgba(21, 101, 192, 0.46);
             box-shadow: 0 0 0 3px rgba(42, 135, 223, 0.16);
         }
+        /* First-focus edge sweep: a multi-colour line travels once around the
+           composer border, then fades. @property is what makes the conic angle
+           animatable -- without it the gradient would jump rather than rotate. */
+        @property --agent-edge-angle {
+            syntax: '<angle>';
+            initial-value: 0deg;
+            inherits: false;
+        }
+        .agent-composer-shell::before {
+            content: '';
+            position: absolute;
+            inset: -1px;
+            /* One more than the shell's 22px so the ring hugs the outer edge. */
+            border-radius: 23px;
+            padding: 1.5px;
+            background: conic-gradient(from var(--agent-edge-angle),
+                transparent 0deg,
+                rgba(79, 195, 247, 0.30) 26deg,
+                #4fc3f7 52deg,
+                #1565c0 78deg,
+                #6c4bd8 104deg,
+                #d9645f 128deg,
+                rgba(217, 100, 95, 0.28) 150deg,
+                transparent 178deg);
+            /* Punch the centre out so only the border ring paints. */
+            -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            -webkit-mask-composite: xor;
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask-composite: exclude;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .agent-composer-shell.agent-edge-sweep::before {
+            animation: agent-edge-spin 1.15s linear 2, agent-edge-fade 2.3s ease-out 1;
+        }
+        @keyframes agent-edge-spin {
+            to { --agent-edge-angle: 360deg; }
+        }
+        @keyframes agent-edge-fade {
+            0%   { opacity: 0; }
+            12%  { opacity: 1; }
+            68%  { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .agent-composer-shell.agent-edge-sweep::before { animation: none; }
+        }
         .agent-panel-input textarea {
             flex: 1;
             min-height: 86px;
@@ -20653,7 +20701,10 @@
                     <div class="agent-icons-strip" id="agentIconsStrip"></div>
                     <div class="agent-panel-input">
                         <div class="agent-composer-shell">
-                            <textarea id="agentInput" placeholder="Message Iris..." autocomplete="off" rows="1"></textarea>
+                            <!-- Pre-hydration text only. _syncAgentInputPlaceholder() replaces this
+                                 with the selected agent's name; no agent is named here so the markup
+                                 cannot go stale if the default agent or a display name changes. -->
+                            <textarea id="agentInput" placeholder="Message your agent..." autocomplete="off" rows="1"></textarea>
                             <div class="agent-composer-footer">
                                 <button class="agent-camera-btn" id="agentCameraBtn" type="button" title="Attachment options coming soon">+</button>
                                 <div class="agent-composer-actions">
@@ -20852,6 +20903,15 @@
            ============================================================ */
 
         const PM_CARD_TOOLBAR = true;
+
+        // The agent a new or unattributed conversation starts on. Sage is the primary
+        // engineering agent; the server agrees (`agent: str = "sage"` and the Sage skill
+        // core prompt), so the UI default is kept here rather than repeated as a literal
+        // at each conversation-creation and restore site.
+        // This is the internal session key, which stays 'deviation-analyst' so that
+        // conversations saved before this change still restore. The display name comes
+        // from AGENTS[...].name, never from a hardcoded string.
+        const DEFAULT_AGENT_KEY = 'deviation-analyst';
 
         // State
         const state = {
@@ -75642,8 +75702,8 @@
                                 title: title,
                                 createdAt: snapshot.savedAt,
                                 updatedAt: snapshot.savedAt,
-                                meta: { part_number: pn || null, part_name: snapshot.recovery?.part?.part_name || null, lastAgent: snapshot.currentAgent || 'inspector' },
-                                state: { currentAgent: snapshot.currentAgent || 'inspector', sessions: snapshot.sessions },
+                                meta: { part_number: pn || null, part_name: snapshot.recovery?.part?.part_name || null, lastAgent: snapshot.currentAgent || DEFAULT_AGENT_KEY },
+                                state: { currentAgent: snapshot.currentAgent || DEFAULT_AGENT_KEY, sessions: snapshot.sessions },
                             },
                         },
                         workspaceRecovery: snapshot.recovery || {},
@@ -75685,9 +75745,9 @@
                     title: 'New Chat',
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
-                    meta: meta || { part_number: null, part_name: null, lastAgent: 'inspector' },
+                    meta: meta || { part_number: null, part_name: null, lastAgent: DEFAULT_AGENT_KEY },
                     state: {
-                        currentAgent: 'inspector',
+                        currentAgent: DEFAULT_AGENT_KEY,
                         sessions: {
                             'inspector': serializeSessionForPersistence(createAgentSession('inspector')),
                             'deviation-analyst': serializeSessionForPersistence(createAgentSession('deviation-analyst')),
@@ -75706,7 +75766,7 @@
 
             function buildEmptyConversationState() {
                 return {
-                    currentAgent: 'inspector',
+                    currentAgent: DEFAULT_AGENT_KEY,
                     sessions: {
                         'inspector': serializeSessionForPersistence(createAgentSession('inspector')),
                         'deviation-analyst': serializeSessionForPersistence(createAgentSession('deviation-analyst')),
@@ -75746,7 +75806,7 @@
                 const stateValue = buildEmptyConversationState();
                 const previousAgent = existing && existing.state
                     && AGENTS[existing.state.currentAgent]
-                    ? existing.state.currentAgent : 'inspector';
+                    ? existing.state.currentAgent : DEFAULT_AGENT_KEY;
                 stateValue.currentAgent = previousAgent;
                 const sessionIds = _serverAgentSessionIds(payload);
 
@@ -75813,7 +75873,7 @@
                 );
                 const record = {
                     ...summary,
-                    meta: { lastAgent: 'inspector' },
+                    meta: { lastAgent: DEFAULT_AGENT_KEY },
                     agentSessionIds: _serverAgentSessionIds(payload),
                     state: buildEmptyConversationState(),
                 };
@@ -75841,7 +75901,7 @@
                     chatUiEpoch++;
                     _currentConversationId = record.id;
                     restoreConversationSnapshot(record);
-                    currentAgent = record.state.currentAgent || 'inspector';
+                    currentAgent = record.state.currentAgent || DEFAULT_AGENT_KEY;
                     _clearChatTransientState();
                     _syncChatUI({ suppressInspectionCard: true });
                 }
@@ -75897,7 +75957,7 @@
                             ...existing,
                             ...summary,
                             state: existing.state || buildEmptyConversationState(),
-                            meta: existing.meta || { lastAgent: 'inspector' },
+                            meta: existing.meta || { lastAgent: DEFAULT_AGENT_KEY },
                         };
                     });
 
@@ -76056,7 +76116,7 @@
                 chatUiEpoch++;
                 _currentConversationId = convId;
                 restoreConversationSnapshot(conv);
-                currentAgent = conv.state.currentAgent || 'inspector';
+                currentAgent = conv.state.currentAgent || DEFAULT_AGENT_KEY;
                 _syncChatUI();
                 scheduleChatRegistrySave();
             }
@@ -76080,13 +76140,13 @@
                     return;
                 }
                 chatUiEpoch++;
-                const meta = { part_number: state.partNumber || null, part_name: state.partName || null, lastAgent: 'inspector' };
+                const meta = { part_number: state.partNumber || null, part_name: state.partName || null, lastAgent: DEFAULT_AGENT_KEY };
                 const conv = createEmptyConversation(meta);
                 _chatRegistry.conversations[conv.id] = conv;
                 _currentConversationId = conv.id;
                 resetAllSessions();
                 _clearChatTransientState();
-                currentAgent = 'inspector';
+                currentAgent = DEFAULT_AGENT_KEY;
                 _syncChatUI({ suppressSuggestions: true, suppressInspectionCard: true });
                 saveChatRegistryNow();
             }
@@ -76135,12 +76195,12 @@
                 // Registry-first: overwrite the conversation record authoritatively
                 conv.title = 'New Chat';
                 conv.updatedAt = Date.now();
-                conv.meta = { ...(conv.meta || {}), lastAgent: 'inspector' };
+                conv.meta = { ...(conv.meta || {}), lastAgent: DEFAULT_AGENT_KEY };
                 conv.state = buildEmptyConversationState();
 
                 // Restore from the cleared snapshot into live session objects
                 restoreConversationSnapshot(conv);
-                currentAgent = conv.state.currentAgent || 'inspector';
+                currentAgent = conv.state.currentAgent || DEFAULT_AGENT_KEY;
 
                 // Clear transient DOM/runtime state, then sync UI
                 _clearChatTransientState();
@@ -77393,8 +77453,12 @@
             const _partsFinderAvatar = `<img src="/static/avatar_scout_realistic.png" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" alt="Scout">`;
 
             const AGENTS = {
+                // Keys are internal session identifiers and are persisted in the chat
+                // registry, so they are not renamed to match display names. Sage is the
+                // primary agent (see DEFAULT_AGENT_KEY); its role matches the server's
+                // Sage skill prompt, "senior manufacturing and quality engineer".
                 'inspector': { name: 'Iris', role: 'Drawing Analysis', color: '#4fc3f7', avatar: _inspectorAvatar },
-                'deviation-analyst': { name: 'Sage', role: 'Deviation Impact', color: '#FFB300', avatar: _deviationAvatar },
+                'deviation-analyst': { name: 'Sage', role: 'Manufacturing & Quality', color: '#FFB300', avatar: _deviationAvatar },
                 'parts-finder': { name: 'Scout', role: 'Part Sourcing', color: '#00E676', avatar: _partsFinderAvatar },
             };
 
@@ -88816,7 +88880,7 @@
             };
 
             // ---- Agent Selector (inline icon strip) ----
-            let currentAgent = 'inspector';
+            let currentAgent = DEFAULT_AGENT_KEY;
             const agentIconsStrip = $('agentIconsStrip');
 
             function buildAgentIconStrip() {
@@ -89349,6 +89413,16 @@
                 // Switching to typing abandons a held spacebar PTT. Drop the hold so silence
                 // detection (and the 20s cap) can release the mic instead of recording forever.
                 state._pttHeld = false;
+                // Run the edge sweep on the first focus only. The flag lives on the element
+                // rather than in `state` so it is never persisted or restored with a session.
+                const composerShell = agentInput.closest('.agent-composer-shell');
+                if (composerShell && !composerShell.dataset.edgeSwept) {
+                    composerShell.dataset.edgeSwept = '1';
+                    composerShell.classList.add('agent-edge-sweep');
+                    // Matches the longer of the two animations; the class is dropped so it
+                    // cannot interfere with the ordinary :focus-within styling afterwards.
+                    setTimeout(() => composerShell.classList.remove('agent-edge-sweep'), 2400);
+                }
             });
 
             // Hide voice controls bar if browser doesn't support audio recording
@@ -89368,7 +89442,7 @@
                     const conv = reg.conversations[_currentConversationId];
                     if (conv) {
                         restoreConversationSnapshot(conv);
-                        currentAgent = conv.state.currentAgent || 'inspector';
+                        currentAgent = conv.state.currentAgent || DEFAULT_AGENT_KEY;
                     }
                     handleInterruptedRecovery(reg.workspaceRecovery);
                     const activeSession = getCurrentAgentSession();
@@ -89379,13 +89453,17 @@
                     }
                     agentInput.value = activeSession.pendingInput || '';
                     syncAgentInputHeight();
+                    // The restored conversation may belong to Sage or Scout rather than the
+                    // default agent, so the placeholder has to follow currentAgent here. Without
+                    // this the field keeps the markup's pre-hydration text and names the wrong agent.
+                    _syncAgentInputPlaceholder();
                     console.log('[ChatRegistry] Restored — conv:', _currentConversationId,
                         'agent:', currentAgent, 'messages:', activeSession.messages.length);
                 }
 
                 // Initialize registry if none exists
                 if (!_chatRegistry) {
-                    const conv = createEmptyConversation({ part_number: null, part_name: null, lastAgent: 'inspector' });
+                    const conv = createEmptyConversation({ part_number: null, part_name: null, lastAgent: DEFAULT_AGENT_KEY });
                     _chatRegistry = {
                         version: 1,
                         currentConversationId: conv.id,

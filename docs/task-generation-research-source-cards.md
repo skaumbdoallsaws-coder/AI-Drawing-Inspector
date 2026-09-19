@@ -33,22 +33,27 @@ generation workflow never emits the block that feeds it.
 4. **Block schema and normalizer.** `ai_inspector/chat_content.py` already
    defines the `sources` block and `_normalize_source`.
 5. **Reference implementation.** The Documentation workflow already does this.
-   See `static/index.html:37326`, which builds anchor badges from
-   `sourceCitations`. Copy that pattern rather than inventing one.
+   Grep `static/index.html` for `badge.href = String(citation.url)` (line 37386
+   as of 2026-09-19), which builds anchor badges from `sourceCitations`. Copy
+   that pattern rather than inventing one.
 6. **Response assembly.** `server.py` already attaches rich blocks and already
    handles the generation turn in the same place:
-   - `server.py:40798` calls `extract_chat_presentation_blocks()` to build
+   - `server.py:40802` calls `extract_chat_presentation_blocks()` to build
      `_rich_content_blocks` from presentation tool calls.
-   - `server.py:41244` does `result["content_blocks"] = _rich_content_blocks`,
-     guarded by `if _rich_content_blocks:`.
-   - `server.py:41251` is the `if ctx.get("_facility_generation_binding"):`
-     branch, seven lines later. It reads
+   - `server.py:41244-41245` is `if _rich_content_blocks:` followed by
+     `result["content_blocks"] = _rich_content_blocks`.
+   - `server.py:41250` is the `if ctx.get("_facility_generation_binding"):`
+     branch, five lines later. It reads
      `ctx["_facility_generation_outcome"]` (the `generation_turn_outcome()`
      result) and sets `result["facility_generation_planning"]`. It clears
      `result["tool_calls"]` but does **not** clear `content_blocks`, so a block
      attached above survives.
    - `normalize_chat_response_payload()` runs at `server.py:43258`, `43582`
      and `44375`.
+
+   Line numbers are accurate as of commit `a442754` plus the UI commit that
+   follows it. `static/index.html` in particular shifts often -- prefer the
+   quoted code strings over the numbers when they disagree.
 
 ## The two contracts
 
@@ -171,6 +176,41 @@ block from the receipt, not from model output.
    is the right place for the mapping tests.
 7. Report what was verified live versus locally. Do not claim a live
    research-to-card pass from a mocked researcher.
+
+## UI changes landed 2026-09-19 -- read before editing the chat composer
+
+Three changes went into `static/index.html` after the `a442754` checkpoint. None
+of them touch the generation pipeline, but two of them establish rules this task
+must not break.
+
+1. **Sage is now the default agent.** A new `DEFAULT_AGENT_KEY` constant (near
+   the top of the main script block, beside `PM_CARD_TOOLBAR`) holds
+   `'deviation-analyst'`, and the 17 conversation-creation and restore sites
+   that previously hardcoded `'inspector'` now read from it. The registry role
+   also changed from `Deviation Impact` to `Manufacturing & Quality` to match
+   the server's Sage skill prompt.
+
+   **Internal agent keys were deliberately NOT renamed.** `deviation-analyst`,
+   `inspector` and `parts-finder` are persisted in the chat registry as
+   `agentType` and key `agentSessionId`, so renaming them breaks restore of
+   saved conversations. `server.py`'s `_SKILL_PUBLIC_TO_INTERNAL_AGENT` still
+   maps the public names onto these keys. Do not "tidy" this.
+
+2. **Agent display names come from the `AGENTS` registry only.** The composer
+   placeholder previously hardcoded `Message Iris...` in the markup, which went
+   stale whenever a Sage or Scout conversation was restored -- the boot restore
+   path set `currentAgent` but never re-synced the placeholder. That path now
+   calls `_syncAgentInputPlaceholder()`, and the markup names no agent. If this
+   task adds any user-visible agent name, resolve it through
+   `AGENTS[currentAgent].name`; never write a name into markup or a literal.
+
+3. **The composer has a first-focus edge animation.** `.agent-composer-shell`
+   gained a `::before` conic-gradient ring driven by an `@property`-registered
+   `--agent-edge-angle`, shown once per page load via an `agent-edge-sweep`
+   class added on first focus and removed after 2400 ms. It is cosmetic and
+   independent of this task; just be aware that `.agent-composer-shell` now has
+   a `::before` and a `z-index: 1` on it, so any new overlay in the composer
+   needs to account for that stacking.
 
 ## Relationship to the open gates
 

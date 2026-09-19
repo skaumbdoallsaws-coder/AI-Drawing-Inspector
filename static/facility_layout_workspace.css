@@ -3838,6 +3838,13 @@ html[data-theme="dark"] .ip-flw-motion-outcome[data-motion-outcome="unroutable"]
     font-size: 10px;
 }
 
+/* The notice is only shown while placement alternatives are on offer. Stated
+   explicitly because the rule above would otherwise keep the warning strip
+   visible the moment anyone gives this element a display value. */
+.ip-flw-validation-notice[hidden] {
+    display: none;
+}
+
 .ip-flw-candidate-controls {
     align-items: center;
     flex-wrap: wrap;

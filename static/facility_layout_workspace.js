@@ -10244,13 +10244,15 @@
         } else {
             this.viewportStack.appendChild(motionPanel);
         }
+        // Hidden until there are placement alternatives to act on. This strip previously
+        // carried a permanent advisory line, which kept the warning styling lit over the
+        // viewport at all times even when nothing needed attention. Save still performs
+        // authoritative server-side validation; only the standing notice is gone.
         this.validationNotice = element(this.document, 'div', {
             className: 'ip-flw-validation-notice',
             role: 'note',
+            hidden: true,
         });
-        this.validationNotice.appendChild(element(this.document, 'span', {
-            className: 'ip-flw-advisory-authority',
-        }, 'Browser overlap feedback is advisory. Save performs authoritative server validation.'));
         this.candidateControls = element(this.document, 'div', {
             className: 'ip-flw-view-tabs ip-flw-candidate-controls',
             role: 'group',
@@ -12576,6 +12578,7 @@
                 layoutProposal.selectedIndex
             ];
             this.candidateControls.hidden = false;
+            this.validationNotice.hidden = false;
             this.candidateControls.removeAttribute('data-safety-status');
             this.candidateControls.setAttribute(
                 'data-preview-kind',
@@ -12648,6 +12651,7 @@
         if (!proposal || !Array.isArray(proposal.candidates)
                 || !proposal.candidates.length) {
             this.candidateControls.hidden = true;
+            this.validationNotice.hidden = true;
             this.candidateControls.removeAttribute('data-safety-status');
             this.candidateControls.removeAttribute('data-preview-kind');
             this.candidateSummary.textContent = '';
@@ -12685,6 +12689,7 @@
         const candidate = proposal.candidates[proposal.selectedIndex];
         const assessment = candidateAssessment(candidate);
         this.candidateControls.hidden = false;
+        this.validationNotice.hidden = false;
         this.candidateControls.setAttribute(
             'data-safety-status',
             assessment.status

@@ -89453,10 +89453,6 @@
                     }
                     agentInput.value = activeSession.pendingInput || '';
                     syncAgentInputHeight();
-                    // The restored conversation may belong to Sage or Scout rather than the
-                    // default agent, so the placeholder has to follow currentAgent here. Without
-                    // this the field keeps the markup's pre-hydration text and names the wrong agent.
-                    _syncAgentInputPlaceholder();
                     console.log('[ChatRegistry] Restored — conv:', _currentConversationId,
                         'agent:', currentAgent, 'messages:', activeSession.messages.length);
                 }
@@ -89473,6 +89469,11 @@
                     _currentConversationId = conv.id;
                 }
 
+                // Runs for both branches above: a restored conversation may belong to any
+                // agent, and a freshly created one starts on DEFAULT_AGENT_KEY. Neither path
+                // goes through _syncChatUI() or selectAgent(), so without this the composer
+                // keeps the markup's pre-hydration placeholder and never names the agent.
+                _syncAgentInputPlaceholder();
                 updateChatBar();
                 _serverMemoryReady = _initializeServerMemory();
             }

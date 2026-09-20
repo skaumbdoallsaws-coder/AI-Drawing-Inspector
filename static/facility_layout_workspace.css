@@ -1666,14 +1666,16 @@
     display: flex;
     align-items: end;
     gap: 2px;
-    padding: 4px 8px 0;
+    /* Trimmed with the ribbon density pass: this strip sits directly under a
+       58px ribbon, so it no longer needs to hold its own against an 88px one. */
+    padding: 3px 8px 0;
     border-bottom: 1px solid var(--ip-flw-border);
     background: var(--ip-flw-panel);
 }
 
 .ip-flw-view-tab {
     min-width: 62px;
-    height: 29px;
+    height: 24px;
     padding: 4px 12px;
     border: 1px solid transparent;
     border-bottom: 0;

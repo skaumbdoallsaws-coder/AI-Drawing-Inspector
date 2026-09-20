@@ -5088,10 +5088,12 @@
         .facility-ribbon-commandbar .ribbon-group {
             min-width: 0;
             gap: 6px;
-            padding: 6px 6px 18px;
+            /* The old 18px bottom padding reserved space for the absolutely
+               positioned group label, which this workflow no longer shows. */
+            padding: 5px 7px;
         }
         .facility-ribbon-commandbar .ribbon-sep {
-            height: 82px;
+            height: var(--fl-btn-h);
         }
         .facility-ribbon-commandbar .documentation-ribbon-command.is-large {
             width: 68px;
@@ -5111,9 +5113,68 @@
         .facility-ribbon-commandbar .documentation-ribbon-stack {
             min-width: 92px;
             width: 92px;
+            /* The base stack is a hardcoded 78px, sized for the old large
+               button. Left alone it overflows the shorter ribbon. */
+            height: var(--fl-btn-h);
         }
         .facility-ribbon-commandbar .documentation-ribbon-menu {
             min-width: 240px;
+        }
+
+        /* ---- Facility Layout ribbon density ---------------------------------
+           Scoped to this workflow; Process Map and Documentation keep the
+           88px ribbon until their own pass. Every rule below reads the four
+           tokens, so density is tuned in one place rather than per rule.
+           Baseline this replaces: .ribbon 88px, group padding-bottom 18px
+           reserving a group label, is-large 78px tall, separators 82px.
+           The command mix is unchanged -- select/pan large, create medium,
+           edit already a compact stack -- only the sizes move.             */
+        .ribbon.facility-layout-ribbon {
+            /* 48 = three 15px compact rows plus the stack's two 1px gaps, so a
+               stacked column and a single button end up exactly the same
+               height. Ribbon = --fl-btn-h + the group's 5px/5px padding. */
+            --fl-btn-h: 48px;
+            --fl-compact-h: 15px;
+            --fl-icon-lg: 22px;
+            --fl-icon-md: 19px;
+            --fl-icon-sm: 13px;
+            height: 58px;
+            min-height: 58px;
+        }
+        /* Separators already convey grouping, which is how SOLIDWORKS does it;
+           the label band cost more vertical space than it returned. */
+        .facility-ribbon-commandbar .ribbon-group-label {
+            display: none;
+        }
+        .facility-ribbon-commandbar .documentation-ribbon-command.is-large,
+        .facility-ribbon-commandbar .documentation-ribbon-command.is-medium {
+            height: var(--fl-btn-h);
+            gap: 2px;
+            padding: 3px 4px;
+        }
+        .facility-ribbon-commandbar .documentation-ribbon-command.is-large
+        .documentation-command-icon {
+            width: var(--fl-icon-lg);
+            height: var(--fl-icon-lg);
+        }
+        .facility-ribbon-commandbar .documentation-ribbon-command.is-medium
+        .documentation-command-icon {
+            width: var(--fl-icon-md);
+            height: var(--fl-icon-md);
+        }
+        .facility-ribbon-commandbar .documentation-ribbon-command.is-compact {
+            height: var(--fl-compact-h);
+            gap: 5px;
+            padding: 0 4px;
+        }
+        .facility-ribbon-commandbar .documentation-ribbon-command.is-compact
+        .documentation-command-icon {
+            width: var(--fl-icon-sm);
+            height: var(--fl-icon-sm);
+        }
+        .facility-ribbon-commandbar .documentation-command-label {
+            font-size: 8.5px;
+            line-height: 1.05;
         }
         .facility-ribbon-commandbar .documentation-menu-item {
             min-height: 32px;

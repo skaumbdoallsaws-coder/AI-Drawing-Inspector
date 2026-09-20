@@ -49,8 +49,9 @@ assert.ok(index.includes('appInstance.workspace.openAssetBrowser()'));
     'data-facility-ribbon-command',
 ].forEach(token => assert.ok(index.includes(token), token));
 
+// 'selection' is deliberately absent: Select and Pan are reached from the plan
+// viewport's heads-up toolbar rather than duplicated in the ribbon.
 [
-    ['selection', 'Selection'],
     ['create', 'Create'],
     ['edit', 'Edit'],
     ['position', 'Position'],

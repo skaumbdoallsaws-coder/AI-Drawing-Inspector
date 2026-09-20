@@ -44805,10 +44805,9 @@
                 return group;
             };
 
-            appendGroup('selection', 'Selection', [
-                _trainFacilityRibbonButton('select', { size: 'large' }),
-                _trainFacilityRibbonButton('pan', { size: 'large' }),
-            ]);
+            // Select and Pan live in the plan viewport's heads-up toolbar, which
+            // is always on screen and reaches the same executeCommand path. A
+            // second copy in the ribbon only spent width on the duplicate.
             appendGroup('create', 'Create', [
                 _trainFacilityRibbonMenu(
                     'rectangle-zone', 'Zones', 'Create facility zones',

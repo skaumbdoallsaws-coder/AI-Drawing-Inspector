@@ -2010,26 +2010,48 @@
     color: var(--ip-flw-text);
 }
 
+/* Heads-up toolbar, as in the SOLIDWORKS drawing viewport: it floats at the
+   top of the plan, clear of the ruler, and carries no panel of its own so the
+   layout stays readable underneath. Hover is what gives each button a surface;
+   at rest only the icons show. */
 .ip-flw-plan-navigation {
-    bottom: 18px;
+    top: calc(var(--ip-flw-ruler-size) + 10px);
     left: 50%;
     display: flex;
     align-items: center;
-    gap: 2px;
-    height: 38px;
-    padding: 3px;
-    border: 1px solid color-mix(in srgb, var(--ip-flw-border-strong) 78%, transparent);
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--ip-flw-panel) 94%, transparent);
-    box-shadow: 0 2px 7px rgb(0 0 0 / 16%);
+    gap: 1px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
     transform: translateX(-50%);
+}
+
+.ip-flw-plan-nav-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 19px;
+    height: 19px;
+    pointer-events: none;
+}
+
+.ip-flw-plan-nav-icon img {
+    width: 100%;
+    height: 100%;
+    /* Without a panel behind them the icons sit straight on the drawing, so a
+       soft halo keeps them legible over dark zones and placed assets. */
+    filter: drop-shadow(0 0 2px var(--ip-flw-panel))
+            drop-shadow(0 1px 1px rgb(255 255 255 / 55%));
 }
 
 .ip-flw-plan-nav-button {
     display: grid;
     place-items: center;
-    width: 30px;
-    height: 30px;
+    width: 26px;
+    height: 26px;
     padding: 0;
     border: 1px solid transparent;
     border-radius: 3px;
@@ -2037,6 +2059,12 @@
     background: transparent;
     font: 700 10px/1 "Segoe UI", Arial, sans-serif;
     cursor: pointer;
+}
+
+/* The metre/feet control keeps a text face, so it needs the same legibility
+   help the icons get from their drop-shadow. */
+.ip-flw-plan-nav-button[data-icon-source="text"] {
+    text-shadow: 0 0 3px var(--ip-flw-panel), 0 0 2px var(--ip-flw-panel);
 }
 
 .ip-flw-plan-nav-button:hover:not(:disabled) {

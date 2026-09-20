@@ -3404,15 +3404,38 @@
     Workspace.prototype._planNavigationButton = function (
         command,
         label,
-        glyph
+        glyph,
+        icon
     ) {
-        return element(this.document, 'button', {
+        // The shortcut letter moves into the tooltip rather than being the
+        // button face, which is where SOLIDWORKS puts it too. aria-label keeps
+        // the spoken name, so the icon costs a screen reader nothing.
+        const button = element(this.document, 'button', {
             type: 'button',
             className: 'ip-flw-plan-nav-button',
             'data-plan-command': command,
             'aria-label': label,
-            title: label,
-        }, glyph);
+            title: glyph ? label + ' (' + glyph + ')' : label,
+        });
+        if (!icon) {
+            // Value toggles (the metre/feet switch) read better as their value.
+            button.setAttribute('data-icon-source', 'text');
+            button.textContent = glyph;
+            return button;
+        }
+        const iconHost = element(this.document, 'span', {
+            className: 'ip-flw-plan-nav-icon',
+            'aria-hidden': 'true',
+        });
+        iconHost.appendChild(element(this.document, 'img', {
+            src: VIEWPORT_ICON_ROOT + icon + '.svg',
+            alt: '',
+            draggable: 'false',
+            'aria-hidden': 'true',
+        }));
+        button.setAttribute('data-icon-source', 'viewport-icon');
+        button.appendChild(iconHost);
+        return button;
     };
 
     Workspace.prototype._threeNavigationButton = function (
@@ -10001,20 +10024,26 @@
             'data-plan-overlay': 'navigation',
         });
         [
-            ['select', 'Select and move assets', 'V'],
-            ['pan', 'Pan the Plan view', 'H'],
-            ['zoom-out', 'Zoom out', '-'],
-            ['zoom-in', 'Zoom in', '+'],
-            ['fit-facility', 'Fit facility', 'F'],
-            ['fit-layout', 'Fit placed assets', 'L'],
-            ['reset-view', 'Reset Plan view', 'R'],
-            ['grid', 'Show grid', 'G'],
-            ['snap', 'Snap to grid', '#'],
-            ['layers', 'Layer visibility', 'L'],
-            ['unit', 'Display distances in feet', 'm'],
+            // [command, label, shortcut, icon]. Icons come from the viewport
+            // set the 3D toolbar already uses, so both viewports read alike.
+            // A null icon keeps the glyph as the face: the unit control shows
+            // its current value rather than an action.
+            ['select', 'Select and move assets', 'V', 'cursor-click'],
+            ['pan', 'Pan the Plan view', 'H', 'hand'],
+            ['zoom-out', 'Zoom out', '-', 'magnifying-glass-minus'],
+            ['zoom-in', 'Zoom in', '+', 'magnifying-glass-plus'],
+            ['fit-facility', 'Fit facility', 'F', 'corners-out'],
+            ['fit-layout', 'Fit placed assets', 'L', 'bounding-box'],
+            ['reset-view', 'Reset Plan view', 'R', 'arrow-clockwise'],
+            ['grid', 'Show grid', 'G', 'grid-four'],
+            ['snap', 'Snap to grid', '#', 'cell-layout'],
+            // 'stack' is one of the few icons with baked-in colour, which
+            // reads as a highlight next to the currentColor line icons.
+            ['layers', 'Layer visibility', 'L', 'copy'],
+            ['unit', 'Display distances in feet', 'm', null],
         ].forEach(function (item) {
             this.planNavigation.appendChild(this._planNavigationButton(
-                item[0], item[1], item[2]
+                item[0], item[1], item[2], item[3]
             ));
         }, this);
         append(

@@ -2866,8 +2866,15 @@ async function main() {
                 ).length,
                 3
             );
-            assert.ok(data.root.querySelector('.ip-flw-advisory-authority')
-                .textContent.includes('Save performs authoritative'));
+            // The standing advisory line was removed: it kept the warning strip
+            // lit over the viewport at all times. The strip itself stays in the
+            // tree because the placement-alternative controls live in it, and is
+            // shown only while those controls are on offer.
+            assert.strictEqual(
+                data.root.querySelector('.ip-flw-advisory-authority'),
+                null
+            );
+            assert.strictEqual(data.workspace.validationNotice.hidden, true);
             assert.strictEqual(
                 data.workspace.advisoryLiveRegion.getAttribute('aria-live'),
                 'polite'

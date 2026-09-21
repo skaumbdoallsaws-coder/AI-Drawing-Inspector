@@ -2348,7 +2348,9 @@
     left: 50%;
     display: flex;
     align-items: center;
-    gap: 8px;
+    /* Matches the plan toolbar. The group-start margin below does the
+       separating, so the base gap does not need to as well. */
+    gap: 1px;
     min-height: 28px;
     padding: 0;
     transform: translateX(-50%);
@@ -2382,7 +2384,9 @@
 }
 
 .ip-flw-three-nav-button[data-group-start="true"] {
-    margin-left: 5px;
+    /* Raised from 5px as the base gap dropped to 1px, so group boundaries stay
+       legible now that they are the only spacing in the row. */
+    margin-left: 9px;
 }
 
 .ip-flw-three-nav-icon {

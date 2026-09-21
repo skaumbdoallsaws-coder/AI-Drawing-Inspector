@@ -3405,7 +3405,8 @@
         command,
         label,
         glyph,
-        icon
+        icon,
+        fallback
     ) {
         // The shortcut letter moves into the tooltip rather than being the
         // button face, which is where SOLIDWORKS puts it too. aria-label keeps
@@ -3427,13 +3428,30 @@
             className: 'ip-flw-plan-nav-icon',
             'aria-hidden': 'true',
         });
-        iconHost.appendChild(element(this.document, 'img', {
-            src: VIEWPORT_ICON_ROOT + icon + '.svg',
-            alt: '',
-            draggable: 'false',
-            'aria-hidden': 'true',
-        }));
-        button.setAttribute('data-icon-source', 'viewport-icon');
+        // Same source the 3D toolbar draws from, so both viewports share one
+        // icon family rather than the flat outline set this used to load.
+        const iconFactory = this.options.viewerToolbarIconMarkup
+            || (root && root.InspectorProViewerToolbarIconMarkup);
+        let markup = '';
+        if (typeof iconFactory === 'function') {
+            try {
+                markup = iconFactory(icon) || '';
+            } catch (error) {
+                markup = '';
+            }
+        }
+        if (markup) {
+            iconHost.innerHTML = markup;
+            button.setAttribute('data-icon-source', 'cad-viewer');
+        } else {
+            iconHost.appendChild(element(this.document, 'img', {
+                src: VIEWPORT_ICON_ROOT + (fallback || icon) + '.svg',
+                alt: '',
+                draggable: 'false',
+                'aria-hidden': 'true',
+            }));
+            button.setAttribute('data-icon-source', 'fallback');
+        }
         button.appendChild(iconHost);
         return button;
     };
@@ -10024,26 +10042,27 @@
             'data-plan-overlay': 'navigation',
         });
         [
-            // [command, label, shortcut, icon]. Icons come from the viewport
-            // set the 3D toolbar already uses, so both viewports read alike.
-            // A null icon keeps the glyph as the face: the unit control shows
+            // [command, label, shortcut, viewerIconKind, flatFallbackFile].
+            // The kinds are the same rich CAD icons the 3D toolbar renders;
+            // the fallback file is only used if that factory is unavailable.
+            // A null kind keeps the glyph as the face: the unit control shows
             // its current value rather than an action.
-            ['select', 'Select and move assets', 'V', 'cursor-click'],
-            ['pan', 'Pan the Plan view', 'H', 'hand'],
-            ['zoom-out', 'Zoom out', '-', 'magnifying-glass-minus'],
-            ['zoom-in', 'Zoom in', '+', 'magnifying-glass-plus'],
-            ['fit-facility', 'Fit facility', 'F', 'corners-out'],
-            ['fit-layout', 'Fit placed assets', 'L', 'bounding-box'],
-            ['reset-view', 'Reset Plan view', 'R', 'arrow-clockwise'],
-            ['grid', 'Show grid', 'G', 'grid-four'],
-            ['snap', 'Snap to grid', '#', 'cell-layout'],
-            // 'stack' is one of the few icons with baked-in colour, which
-            // reads as a highlight next to the currentColor line icons.
-            ['layers', 'Layer visibility', 'L', 'copy'],
-            ['unit', 'Display distances in feet', 'm', null],
+            ['select', 'Select and move assets', 'V', 'pointer', 'cursor-click'],
+            ['pan', 'Pan the Plan view', 'H', 'pan', 'hand'],
+            ['zoom-out', 'Zoom out', '-', 'zoom-out', 'magnifying-glass-minus'],
+            ['zoom-in', 'Zoom in', '+', 'zoom-in', 'magnifying-glass-plus'],
+            ['fit-facility', 'Fit facility', 'F', 'zoomfit', 'corners-out'],
+            ['fit-layout', 'Fit placed assets', 'L', 'zoom-window', 'bounding-box'],
+            ['reset-view', 'Reset Plan view', 'R', 'reset', 'arrow-clockwise'],
+            ['grid', 'Show grid', 'G', 'grid-lines', 'grid-four'],
+            ['snap', 'Snap to grid', '#', 'snap-grid', 'cell-layout'],
+            // The viewer set's 'grid' kind draws stacked sheets, which is the
+            // layers metaphor; its name is a legacy of the 3D toolbar.
+            ['layers', 'Layer visibility', 'L', 'grid', 'copy'],
+            ['unit', 'Display distances in feet', 'm', null, null],
         ].forEach(function (item) {
             this.planNavigation.appendChild(this._planNavigationButton(
-                item[0], item[1], item[2], item[3]
+                item[0], item[1], item[2], item[3], item[4]
             ));
         }, this);
         append(

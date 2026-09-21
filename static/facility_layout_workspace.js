@@ -9999,6 +9999,21 @@
             'aria-hidden': 'true',
             'data-plan-overlay': 'left-ruler',
         });
+        // Cursor position markers, one per ruler, as a CAD drawing view shows.
+        // They repeat what the coordinate readout already states, in the place
+        // the eye is already looking while pointing at something.
+        this.planTopRulerCursor = element(this.document, 'div', {
+            className: 'ip-flw-plan-ruler-cursor',
+            'data-ruler-axis': 'x',
+            'aria-hidden': 'true',
+            hidden: true,
+        });
+        this.planLeftRulerCursor = element(this.document, 'div', {
+            className: 'ip-flw-plan-ruler-cursor',
+            'data-ruler-axis': 'z',
+            'aria-hidden': 'true',
+            hidden: true,
+        });
         this.planScaleBar = element(this.document, 'div', {
             className: 'ip-flw-plan-scale',
             'aria-label': 'Plan scale',
@@ -11197,6 +11212,9 @@
         this._listen(this.planView, 'pointermove', this._handlePlanPointerMove.bind(this));
         this._listen(this.planView, 'pointerup', this._handlePlanPointerUp.bind(this));
         this._listen(this.planView, 'pointercancel', this._cancelPointerGesture.bind(this));
+        this._listen(this.planView, 'pointerleave', function () {
+            this._setRulerCursor(null);
+        }.bind(this));
         this._listen(
             this.planView,
             'lostpointercapture',
@@ -13687,6 +13705,12 @@
 
         clearElement(this.planTopRuler);
         clearElement(this.planLeftRuler);
+        // The markers are children of the rulers, so they have to be put back
+        // after each clear, and the projection is retained so pointer moves can
+        // place them without asking the adapter for viewport state again.
+        this.planTopRuler.appendChild(this.planTopRulerCursor);
+        this.planLeftRuler.appendChild(this.planLeftRulerCursor);
+        this.planProjection = projection;
         const width = Math.max(1, finite(projection.width, 1));
         const height = Math.max(1, finite(projection.height, 1));
         const topLeft = planWorldAtScreen(projection, 0, 0);
@@ -15188,6 +15212,48 @@
             + ' ' + unit + '  Z '
             + formattedDistance(displayDistance(this.lastPointerWorld.z, unit))
             + ' ' + unit;
+        this._setRulerCursor(this.lastPointerWorld);
+    };
+
+    // Places the ruler markers at the pointer. Passing null hides them, which is
+    // what leaving the plan should do: a marker left behind would report a
+    // position the pointer no longer has.
+    Workspace.prototype._setRulerCursor = function (world) {
+        if (!this.planTopRulerCursor || !this.planLeftRulerCursor) return;
+        const projection = this.planProjection;
+        const usable = Boolean(
+            world && projection && finite(projection.scale, 0) > 0
+        );
+        if (!usable) {
+            this.planTopRulerCursor.hidden = true;
+            this.planLeftRulerCursor.hidden = true;
+            return;
+        }
+        const screen = planScreenForWorld(
+            projection,
+            finite(world.x, 0),
+            finite(world.z, 0)
+        );
+        const width = Math.max(1, finite(projection.width, 1));
+        const height = Math.max(1, finite(projection.height, 1));
+        const x = finite(screen.x, -1);
+        const y = finite(screen.y, -1);
+        // Clamp to the ruler rather than letting a marker ride off the end,
+        // where it would point at a coordinate that is not on screen.
+        this.planTopRulerCursor.hidden = !(x >= 0 && x <= width);
+        this.planLeftRulerCursor.hidden = !(y >= 0 && y <= height);
+        if (!this.planTopRulerCursor.hidden) {
+            this.planTopRulerCursor.setAttribute(
+                'style',
+                'left:' + Number(x.toFixed(2)) + 'px'
+            );
+        }
+        if (!this.planLeftRulerCursor.hidden) {
+            this.planLeftRulerCursor.setAttribute(
+                'style',
+                'top:' + Number(y.toFixed(2)) + 'px'
+            );
+        }
     };
 
     Workspace.prototype._handleToolbarClick = function (event) {

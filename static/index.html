@@ -7630,7 +7630,10 @@
         /* ---- Part Explorer Panel (3D Assembly) ---- */
         .part-explorer-panel {
             position: absolute;
-            top: 28px;
+            /* Clears the toolbar, which runs from top 8px to 36px. At 28px this
+               panel overlapped it and, being the higher z-index, covered the
+               left-hand buttons. The panel stays draggable from here. */
+            top: 44px;
             left: 12px;
             z-index: 12;
             background: var(--overlay-bg);
@@ -9091,7 +9094,9 @@
             z-index: 10;
             display: flex;
             align-items: center;
-            gap: 8px;
+            /* Matches the Plan and 3D facility toolbars. This row has no group
+               separators, so the gap is uniform across every button. */
+            gap: 1px;
             padding: 0;
             background: transparent;
             border: 0;

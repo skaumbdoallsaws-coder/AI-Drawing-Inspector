@@ -35,17 +35,34 @@ does not require generation, routing, or motion.
 
 Verified in the working tree on 2026-09-22.
 
-**A two-column shell.** `.ip-flw-shell` is already
-`grid-template-columns: minmax(360px, 1fr) minmax(210px, 270px)`, and
-`.ip-flw-properties` already occupies the second column. The integrated
-workflow collapses it to one column deliberately, with the comment "the central
-editor is the primary authoring surface. The asset catalog is a transient
-browser, not a permanent rail." A rail is anticipated by the layout; this plan
-adds a second consumer of it, not the concept.
+**A vacated left slot, which is where the tree belongs.** `.left-panel` is a
+240px column that the app **deliberately collapses on entering this workflow**:
+
+```js
+trainingState.type = 'facility_layout';
+...
+window._toggleLeftPanel();
+_desktopAutoCollapsedPartPanel = true;   // restored when leaving
+```
+
+So the slot exists, has a known width, already has a toggle and a restore path,
+and is empty precisely while Facility Layout is open. The tree docks here.
+
+**The right edge is Sage's.** The agent panel is a flex sibling of the viewport
+on the right. Putting a structure tree there would make the tree and the
+assistant compete for one edge, and would break the convention every CAD tool
+shares - SOLIDWORKS, Fusion and Inventor all place the feature tree on the left.
+The reference screenshot for this request has it on the left too.
+
+**A two-column shell, for the properties rail.** `.ip-flw-shell` is
+`grid-template-columns: minmax(360px, 1fr) minmax(210px, 270px)`, with
+`.ip-flw-properties` in the second column; the integrated workflow collapses it
+to one and floats the properties pane at `top: 44px; right: 14px`. That rail
+stays as it is. The tree is a left-side peer of it, not a second tenant.
 
 **A properties pane with collapse states.** `.ip-flw-properties` supports
-`[hidden]` and `[data-collapsed="true"]`, and in the integrated workflow floats
-at `top: 44px; right: 14px`.
+`[hidden]` and `[data-collapsed="true"]` - the pattern the tree pane should
+reuse for its own collapse.
 
 **A single state choke point.** `this.session.subscribe(this._handleSessionState)`
 receives every layout change: zone creation, placement, deletion, undo, and
@@ -201,13 +218,19 @@ placements. No DOM, no workspace changes.
 
 ### FT2 - Pane Shell And Read-Only Tree
 
-Render the tree into the existing properties rail. Lazy expansion: a branch
-computes and renders its children the first time it opens. Grouping of
-identical assets within a zone (`Wire Mesh Guard Panel x41`) rather than one row
-each. Empty state and unzoned branch per section 4.3.
+Dock the pane in the left slot described in section 2, reusing the existing
+`_toggleLeftPanel` collapse rather than adding a second mechanism. The workflow
+currently auto-collapses that slot on entry; this phase changes that to host the
+tree instead, and must leave `_desktopAutoCollapsedPartPanel` restoring the
+drawing panel correctly when the user leaves Facility Layout.
 
-Exit: the tree renders the reference layout, expands and collapses, and shows
-the unzoned branch on a fixture that has one. No selection yet.
+Lazy expansion: a branch computes and renders its children the first time it
+opens. Grouping of identical assets within a zone (`Wire Mesh Guard Panel x38`)
+rather than one row each. Empty state and unzoned branch per section 4.3.
+
+Exit: the tree renders the reference layout, expands and collapses, shows the
+unzoned branch on a fixture that has one, and leaving the workflow restores the
+drawing panel exactly as it does today. No selection yet.
 
 ### FT3 - Selection Binding
 

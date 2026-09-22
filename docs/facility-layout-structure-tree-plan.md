@@ -64,6 +64,37 @@ stays as it is. The tree is a left-side peer of it, not a second tenant.
 `[hidden]` and `[data-collapsed="true"]` - the pattern the tree pane should
 reuse for its own collapse.
 
+**An activity rail that already extends and retracts a left pane.** The tree's
+entry point is a third icon in `#activityBar`, below Drawing and 3D Model. The
+pattern is fixed by the two that exist:
+
+```html
+<div class="activity-bar-icon" data-panel="structure" title="Structure">
+  <span class="shell-rail-icon" aria-hidden="true">
+    <img class="shell-rail-icon-image shell-rail-icon-dark"  src="/static/assets/shell-icons/dark/structure.svg"  alt="">
+    <img class="shell-rail-icon-image shell-rail-icon-light" src="/static/assets/shell-icons/light/structure.svg" alt="">
+  </span>
+  <span class="activity-tooltip">Structure</span>
+</div>
+```
+
+and the routing is a `switch (panel)` where `explorer` is already a true
+extend/retract toggle:
+
+```js
+case 'explorer':
+    if (window._toggleLeftPanel) window._toggleLeftPanel();
+    break;
+```
+
+`syncActiveState()` then reflects pane visibility back onto the icon's `active`
+class, driven by a `MutationObserver` on `.left-panel`. A `structure` case joins
+that switch and that sync. Nothing new is invented for show/hide.
+
+Two icon assets must be authored, dark and light, to match the existing set
+(`drawing.svg`, `model_3d.svg`, ...). That is the only new artwork this plan
+requires.
+
 **A single state choke point.** `this.session.subscribe(this._handleSessionState)`
 receives every layout change: zone creation, placement, deletion, undo, and
 Sage-driven edits. Nothing needs per-command wiring.
@@ -216,21 +247,31 @@ Exit: unit tests for nested zones, an asset in no zone, an asset on a boundary,
 overlapping equal-area zones, an empty layout, and a layout with zones but no
 placements. No DOM, no workspace changes.
 
-### FT2 - Pane Shell And Read-Only Tree
+### FT2 - Pane Shell, Rail Icon, And Read-Only Tree
 
-Dock the pane in the left slot described in section 2, reusing the existing
-`_toggleLeftPanel` collapse rather than adding a second mechanism. The workflow
-currently auto-collapses that slot on entry; this phase changes that to host the
-tree instead, and must leave `_desktopAutoCollapsedPartPanel` restoring the
-drawing panel correctly when the user leaves Facility Layout.
+Dock the pane in the left slot described in section 2 and add the `structure`
+rail icon beneath 3D Model, with its two artwork variants, its `switch` case and
+its `syncActiveState` branch. Extend and retract reuse `_toggleLeftPanel`; no
+second show/hide mechanism is introduced.
+
+The Drawing panel and the structure tree share that one slot and are mutually
+exclusive, as the activity rail implies: selecting one replaces the other rather
+than splitting the width. In Facility Layout the workflow already auto-collapses
+the Drawing panel on entry, so Structure is simply what that slot holds here.
+
+This phase must leave `_desktopAutoCollapsedPartPanel` restoring the Drawing
+panel correctly when the user leaves Facility Layout, including when they left
+with Structure showing.
 
 Lazy expansion: a branch computes and renders its children the first time it
 opens. Grouping of identical assets within a zone (`Wire Mesh Guard Panel x38`)
 rather than one row each. Empty state and unzoned branch per section 4.3.
 
-Exit: the tree renders the reference layout, expands and collapses, shows the
-unzoned branch on a fixture that has one, and leaving the workflow restores the
-drawing panel exactly as it does today. No selection yet.
+Exit: the rail icon extends and retracts the pane and reflects its state; the
+tree renders the reference layout, expands and collapses, shows the unzoned
+branch on a fixture that has one; and leaving the workflow restores the Drawing
+panel exactly as it does today, including from the Structure state. No selection
+yet.
 
 ### FT3 - Selection Binding
 

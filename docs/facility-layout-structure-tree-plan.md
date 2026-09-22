@@ -31,6 +31,37 @@ This work is orthogonal to the generation gates in
 `sage-research-layout-implementation-report.md`. It requires only a layout; it
 does not require generation, routing, or motion.
 
+## 1a. Mockup
+
+![Structure tree docked left, toggled from the activity rail](mockups/facility-structure-tree-left-rail.png)
+
+`docs/mockups/facility-structure-tree-left-rail.png`
+
+Every label and count in that image is derived from
+`fl-reference-manual-20260812` by running the real containment rule, not drawn
+by hand. `Automation + Robot cells` genuinely holds 492 assets across 12 child
+zones, and Cell A01 genuinely holds 38 guard panels, one robot and one lift
+table. The one invented element is the `Unzoned` branch: the reference layout
+has no unzoned placements, so it is shown as it would appear while authoring
+from empty, which is the case section 3.3 describes.
+
+The image demonstrates, in order: the four-level hierarchy of section 3.1;
+grouping by asset rather than one row per placement; lazy expansion, shown as
+`7 more zones`; both zone shapes, since `Receiving + Raw Material` has no child
+zones and lists its assets directly; the unzoned branch in amber, not red,
+because it is a normal authoring state and not an error; two-way selection, with
+Cell A01 lit in both the tree and the plan; and the geometric-membership rule
+stated in the footer per section 4.2.
+
+A right-docked variant was mocked first and rejected for the reasons in section
+2; it is retained as `mockups/facility-structure-tree-right-rejected.png` so the
+reviewer can weigh the choice rather than take it on trust.
+
+Both images regenerate from `tools/mockups/facility_structure_tree_model.py`,
+which derives the hierarchy from the layout, and
+`tools/mockups/facility_structure_tree_mockup.py`, which renders it. Re-running
+them against a changed layout is how this mockup stays honest.
+
 ## 2. What Already Exists
 
 Verified in the working tree on 2026-09-22.

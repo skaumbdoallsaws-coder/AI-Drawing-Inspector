@@ -16541,6 +16541,31 @@
         };
     };
 
+    /**
+     * Read-only view of what the structure tree needs, deliberately without
+     * clone(): this is read on every structure notification, and cloning the
+     * whole layout each time would make an observer more expensive than the
+     * viewport it observes. Callers must not mutate what they get back.
+     *
+     * getState() nests the session under `.session`; this exposes the few
+     * fields directly so a caller cannot reach for a top-level `layout` that
+     * does not exist there.
+     */
+    Workspace.prototype.structureSource = function () {
+        const state = this.state;
+        if (!state) return null;
+        // The session carries no top-level layoutId: it lives on the layout.
+        // Reading the wrong one silently yields '', which would let two
+        // different layouts share an invalidation key and an expansion
+        // namespace.
+        return {
+            layout: state.layout || null,
+            layoutId: (state.layout && state.layout.layoutId) || '',
+            revision: state.draftRevision || state.baseRevision || '',
+            selection: Array.isArray(state.selection) ? state.selection : [],
+        };
+    };
+
     Workspace.prototype._notifyStructure = function () {
         if (this.destroyed) return;
         for (let index = 0; index < this.structureListeners.length; index += 1) {

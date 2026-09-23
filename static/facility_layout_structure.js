@@ -388,10 +388,51 @@
         };
     }
 
+    /**
+     * Next selection for a toggle gesture over `memberIds`, given the current
+     * selection. Pure set arithmetic, kept here so it can be tested without a
+     * DOM and so both the tree and any later caller agree on the rule.
+     *
+     * The group toggles as a unit: if any member is unselected the gesture
+     * selects all of them, and only when every member is already selected does
+     * it deselect them. Entities outside the group are never touched, and the
+     * result is the whole next selection - the caller issues one selectMany,
+     * not one call per member.
+     *
+     * @param {string[]} currentIds
+     * @param {string[]} memberIds
+     * @returns {string[]}
+     */
+    function toggleSelection(currentIds, memberIds) {
+        const current = Array.isArray(currentIds) ? currentIds : [];
+        const members = Array.isArray(memberIds) ? memberIds : [];
+        if (!members.length) return current.slice();
+        const selected = Object.create(null);
+        current.forEach(function (id) { selected[id] = true; });
+
+        const everyMemberSelected = members.every(function (id) {
+            return Boolean(selected[id]);
+        });
+        if (everyMemberSelected) {
+            const drop = Object.create(null);
+            members.forEach(function (id) { drop[id] = true; });
+            return current.filter(function (id) { return !drop[id]; });
+        }
+        const next = current.slice();
+        members.forEach(function (id) {
+            if (!selected[id]) {
+                next.push(id);
+                selected[id] = true;   // a repeated member must not be added twice
+            }
+        });
+        return next;
+    }
+
     return {
         API_VERSION: API_VERSION,
         UNZONED_SCOPE: UNZONED_SCOPE,
         deriveStructure: deriveStructure,
         groupKey: groupKey,
+        toggleSelection: toggleSelection,
     };
 }));

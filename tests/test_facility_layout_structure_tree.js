@@ -1,10 +1,11 @@
 'use strict';
 
 /**
- * FT2 acceptance for the structure tree renderer.
+ * FT2/FT3 acceptance for the structure tree renderer.
  * Covers lazy expansion, grouping, the unzoned branch, the empty state, the
- * read-only preview rule, and the two-key expansion contract from section 6 -
- * including the four-step sequence the third review asked for.
+ * read-only preview rule, the two-key expansion contract from section 6 -
+ * including the four-step sequence the third review asked for - and FT3
+ * selection binding in both directions.
  */
 
 const assert = require('assert');
@@ -251,7 +252,7 @@ check('the caret expands and the label does not', function () {
     const selected = [];
     const tree = treeModule.createStructureTree({
         document: doc, host: element,
-        onSelect: function (kind, rowId) { selected.push([kind, rowId]); },
+        onSelect: function (kind, payload) { selected.push([kind, payload.rowId]); },
     });
     tree.render({
         model: structure.deriveStructure(LAYOUT),
@@ -275,7 +276,7 @@ check('no row selects while a preview is represented', function () {
     const selected = [];
     const tree = treeModule.createStructureTree({
         document: doc, host: element,
-        onSelect: function (kind, rowId) { selected.push([kind, rowId]); },
+        onSelect: function (kind, payload) { selected.push([kind, payload.rowId]); },
     });
     tree.render({
         model: structure.deriveStructure(LAYOUT),
@@ -391,6 +392,262 @@ check('destroy clears the host and detaches listeners', function () {
     assert.strictEqual(element.childNodes.length, 0);
     assert.strictEqual((element.listeners.click || []).length, 0);
     assert.strictEqual((element.listeners.keydown || []).length, 0);
+});
+
+// ------------------------------------------------- FT3 selection binding --
+// The model is shared by these checks; row IDs are read from it rather than
+// spelled out, because a group's ID is scoped by its parent zone.
+const MODEL = structure.deriveStructure(LAYOUT);
+const CELL_A_GUARDS = MODEL.zones.cellA.groups.filter(function (group) {
+    return group.assetId === 'asset-guard';
+})[0];
+const CELL_B_GUARDS = MODEL.zones.cellB.groups.filter(function (group) {
+    return group.assetId === 'asset-guard';
+})[0];
+
+function selectingTree(doc, element) {
+    const events = [];
+    const tree = treeModule.createStructureTree({
+        document: doc, host: element,
+        onSelect: function (kind, payload, event) {
+            events.push({ kind: kind, payload: payload, event: event });
+        },
+    });
+    return { tree: tree, events: events };
+}
+
+function show(tree, selection, openRowIds) {
+    const frame = {
+        model: MODEL,
+        view: { kind: 'draft', layoutId: 'L1', revision: 'rev-1' },
+        readOnly: false,
+        selection: selection || [],
+    };
+    // Render before expanding: expansion is namespaced by the current view, so
+    // it is only meaningful once one exists. This is the real order too - the
+    // user opens a branch that is already on screen.
+    tree.render(frame);
+    if (openRowIds && openRowIds.length) {
+        openRowIds.forEach(function (rowId) { tree.setExpandedForTest(rowId, true); });
+        tree.render(frame);
+    }
+}
+
+function selectionOf(element, rowId) {
+    const row = element.querySelector('[data-row-id="' + rowId + '"]');
+    return row ? row.getAttribute('data-selection') : null;
+}
+
+check('a zone row reports its own ID, and Ctrl marks the gesture additive', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = selectingTree(doc, element);
+    show(harness.tree, []);
+
+    const label = element.querySelector('[data-row-id="auto"]').childNodes[2];
+    element.dispatch('click', { target: label });
+    assert.strictEqual(harness.events[0].kind, 'zone');
+    assert.deepStrictEqual(harness.events[0].payload.ids, ['auto']);
+    assert.strictEqual(harness.events[0].payload.additive, false);
+
+    element.dispatch('click', { target: label, ctrlKey: true });
+    assert.strictEqual(harness.events[1].payload.additive, true);
+    element.dispatch('click', { target: label, metaKey: true });
+    assert.strictEqual(harness.events[2].payload.additive, true, 'meta counts on macOS');
+});
+
+check('a group row carries every member, so it acts as a unit', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = selectingTree(doc, element);
+    show(harness.tree, [], ['auto', 'cellA']);
+
+    const row = element.querySelector('[data-row-id="' + CELL_A_GUARDS.rowId + '"]');
+    element.dispatch('click', { target: row.childNodes[2] });
+    assert.strictEqual(harness.events[0].kind, 'group');
+    assert.deepStrictEqual(harness.events[0].payload.ids.slice().sort(), ['g1', 'g2']);
+});
+
+check('a placement row reports the placement, not its group', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = selectingTree(doc, element);
+    show(harness.tree, [], ['auto', 'cellA', CELL_A_GUARDS.rowId]);
+
+    const row = element.querySelector('[data-row-id="g2"]');
+    element.dispatch('click', { target: row.childNodes[2] });
+    assert.strictEqual(harness.events[0].kind, 'placement');
+    assert.deepStrictEqual(harness.events[0].payload.ids, ['g2']);
+});
+
+check('the Unzoned header selects nothing: it is a scope, not an entity', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = selectingTree(doc, element);
+    show(harness.tree, []);
+
+    const row = element.querySelector('[data-row-id="unzoned"]');
+    element.dispatch('click', { target: row.childNodes[2] });
+    assert.deepStrictEqual(harness.events, []);
+});
+
+check('Enter selects the focused row; the caret is not the only way in', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = selectingTree(doc, element);
+    show(harness.tree, []);
+
+    const row = element.querySelector('[data-row-id="auto"]');
+    element.dispatch('keydown', { target: row, key: 'Enter' });
+    assert.deepStrictEqual(harness.events[0].payload.ids, ['auto']);
+    element.dispatch('keydown', { target: row, key: ' ', ctrlKey: true });
+    assert.strictEqual(harness.events[1].payload.additive, true);
+});
+
+check('no row reaches onSelect by keyboard while a preview is represented', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = selectingTree(doc, element);
+    harness.tree.render({
+        model: MODEL,
+        view: { kind: 'candidate', proposalId: 'p1', layoutId: 'L1', revision: 'r' },
+        readOnly: true,
+        selection: [],
+    });
+    const row = element.querySelector('[data-row-id="auto"]');
+    element.dispatch('keydown', { target: row, key: 'Enter' });
+    element.dispatch('click', { target: row.childNodes[2] });
+    assert.deepStrictEqual(harness.events, []);
+});
+
+// --------------------------------------------------- canvas -> tree state --
+check('a selected zone is marked selected', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = selectingTree(doc, element);
+    show(harness.tree, ['auto']);
+    assert.strictEqual(selectionOf(element, 'auto'), 'all');
+    const row = element.querySelector('[data-row-id="auto"]');
+    assert.strictEqual(row.getAttribute('aria-selected'), 'true');
+    assert.strictEqual(selectionOf(element, 'unzoned'), 'none');
+});
+
+check('a group is full when every member is selected and partial when some are', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = selectingTree(doc, element);
+
+    show(harness.tree, ['g1', 'g2'], ['auto', 'cellA']);
+    assert.strictEqual(selectionOf(element, CELL_A_GUARDS.rowId), 'all');
+
+    show(harness.tree, ['g1'], ['auto', 'cellA']);
+    assert.strictEqual(
+        selectionOf(element, CELL_A_GUARDS.rowId), 'partial',
+        'partial is displayed when members are selected individually'
+    );
+    const placementRow = element.querySelector('[data-row-id="g1"]');
+    assert.ok(placementRow, 'a partial group is opened so the member is reachable');
+    assert.strictEqual(placementRow.getAttribute('data-selection'), 'all');
+    assert.strictEqual(selectionOf(element, 'g2'), 'none');
+});
+
+check('a canvas selection reveals its ancestors in a collapsed tree', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = selectingTree(doc, element);
+
+    show(harness.tree, []);
+    assert.deepStrictEqual(
+        rows(element).map(function (r) { return r.id; }), ['auto', 'unzoned'],
+        'starts collapsed'
+    );
+
+    // Selection arrives from the canvas: a guard panel deep inside Cell B.
+    show(harness.tree, ['g3']);
+    const ids = rows(element).map(function (r) { return r.id; });
+    assert.ok(ids.indexOf('cellB') >= 0, 'the parent zone is opened');
+    // A one-member group has no separate placement row: the group row is the
+    // placement's representation, and it carries the selection.
+    assert.ok(ids.indexOf(CELL_B_GUARDS.rowId) >= 0, 'the selected item is visible');
+    assert.strictEqual(selectionOf(element, CELL_B_GUARDS.rowId), 'all');
+    assert.strictEqual(selectionOf(element, CELL_A_GUARDS.rowId), null,
+        'only the branch holding the selection is opened');
+});
+
+check('revealing does not fight a user who collapses a branch', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = selectingTree(doc, element);
+    show(harness.tree, ['g3']);
+    assert.ok(rows(element).some(function (r) { return r.id === CELL_B_GUARDS.rowId; }));
+
+    // The user collapses the root while the selection is unchanged.
+    const caret = element.querySelector('[data-row-id="auto"]').childNodes[0];
+    element.dispatch('click', { target: caret });
+    assert.deepStrictEqual(
+        rows(element).map(function (r) { return r.id; }), ['auto', 'unzoned']
+    );
+
+    // An unrelated redraw (a camera move, say) must not re-open it.
+    show(harness.tree, ['g3']);
+    assert.deepStrictEqual(
+        rows(element).map(function (r) { return r.id; }), ['auto', 'unzoned'],
+        'the same selection is revealed once, not on every draw'
+    );
+
+    // A new selection reveals again.
+    show(harness.tree, ['r1']);
+    const robot = MODEL.zones.cellA.groups.filter(function (group) {
+        return group.assetId === 'asset-robot';
+    })[0];
+    assert.ok(rows(element).some(function (r) { return r.id === robot.rowId; }));
+});
+
+check('an empty selection clears every mark', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = selectingTree(doc, element);
+    show(harness.tree, ['g1'], ['auto', 'cellA']);
+    assert.strictEqual(selectionOf(element, CELL_A_GUARDS.rowId), 'partial');
+    show(harness.tree, []);
+    assert.strictEqual(selectionOf(element, 'auto'), 'none');
+});
+
+// ------------------------------------------------- group toggle contract --
+check('a group toggle selects every member when any is unselected', function () {
+    assert.deepStrictEqual(
+        structure.toggleSelection([], ['g1', 'g2']).sort(), ['g1', 'g2']
+    );
+    assert.deepStrictEqual(
+        structure.toggleSelection(['g1'], ['g1', 'g2']).sort(), ['g1', 'g2'],
+        'partial toggles up to full, it does not deselect'
+    );
+});
+
+check('a group toggle deselects only when every member is selected', function () {
+    assert.deepStrictEqual(structure.toggleSelection(['g1', 'g2'], ['g1', 'g2']), []);
+});
+
+check('a group toggle leaves entities outside the group untouched', function () {
+    const next = structure.toggleSelection(['r1', 'cellB', 'g1', 'g2'], ['g1', 'g2']);
+    assert.deepStrictEqual(next, ['r1', 'cellB'], 'the robot and the zone survive');
+
+    const back = structure.toggleSelection(next, ['g1', 'g2']);
+    assert.deepStrictEqual(back, ['r1', 'cellB', 'g1', 'g2']);
+});
+
+check('a second toggle deselects exactly what the first selected', function () {
+    const first = structure.toggleSelection(['r1'], ['g1', 'g2']);
+    assert.deepStrictEqual(first, ['r1', 'g1', 'g2']);
+    assert.deepStrictEqual(
+        structure.toggleSelection(first, ['g1', 'g2']), ['r1'],
+        'round trip returns to the starting selection'
+    );
+});
+
+check('a toggle never duplicates an already selected member', function () {
+    assert.deepStrictEqual(structure.toggleSelection(['g1'], ['g2', 'g2']), ['g1', 'g2']);
+    assert.deepStrictEqual(structure.toggleSelection([], []), []);
 });
 
 console.log('\n' + passed + '/' + passed + ' facility layout structure tree checks passed');

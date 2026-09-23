@@ -2,7 +2,8 @@
 
 Date: 2026-09-22 (revision 5 - fourth review pass)
 
-Status: proposed, not started. No code has been written for this plan.
+Status: FT0-FT3 implemented as of 2026-09-23. FT4 and FT5 remain.
+See section 7a for what landed and what the app verification found.
 
 Revision 2 answered a first independent review: five contracts tightened, and
 three claims from revision 1 corrected in place - the represented layout
@@ -674,6 +675,84 @@ survives selection and rebuilds** - a rebuild triggered by a layout change must
 not drop focus out of the tree or reset it to the first row.
 
 Exit: promotion decision recorded with evidence, or the gap that blocks it.
+
+## 7a. Implementation Status
+
+Updated 2026-09-23, after FT3.
+
+| Phase | State | Lands in |
+| --- | --- | --- |
+| FT0 | done | fixtures, baseline counts |
+| FT1 | done | `static/facility_layout_structure.js`, 21 checks |
+| FT2 | done | `static/facility_layout_structure_tree.js`, pane, rail icon |
+| FT3 | done | selection binding both ways, 30 checks |
+| FT4 | not started | - |
+| FT5 | not started | - |
+
+### What FT3 added
+
+- `render()` takes a `selection` array. The tree stores no selection of its
+  own, so the session stays the single source of truth in both directions.
+- `onSelect(kind, payload, event)` where `payload` is `{rowId, ids, additive}`.
+  `ids` carries every entity the row stands for, so a group acts as a unit.
+  Enter and Space select; the caret and the arrow keys expand.
+- `toggleSelection(currentIds, memberIds)` in the derivation module: pure set
+  arithmetic for the group toggle, testable without a DOM. It lives there
+  rather than inline in `index.html` so the rule has one home.
+- Ancestors are revealed when the **selection changes**, not on every draw, so
+  revealing never fights a user who has collapsed a branch.
+- `Workspace.prototype.structureSource()`: a clone-free read of
+  `{layout, layoutId, revision, selection}`.
+
+### Two defects this phase found in FT2's wiring
+
+Both would have made the pane silently wrong in the app while every FT2 unit
+test still passed, because those tests feed the renderer a model directly and
+never touch the workspace.
+
+1. `_structureRepresentedLayout` read `state.layout` from `workspace.getState()`,
+   which nests the session under `.session`. The tree would have derived from
+   `undefined`. This is why `structureSource()` exists.
+2. The session carries no top-level `layoutId` - it is on the layout. The
+   accessor returned `''`, which would have let two different layouts share one
+   invalidation key *and* one expansion namespace.
+
+### Verified in the app against the reference layout
+
+`fl-reference-manual-20260812`, 45 zones and 827 placements, revision
+`a40b2541e31c` unchanged and unsaved throughout.
+
+- Six root zones whose counts total exactly 827, so no placement is lost or
+  double-counted, and the layout needs no Unzoned branch.
+- Canvas to tree: selecting one placement in a collapsed tree opened the path to
+  it, took the tree from 6 rows to 60, marked the placement, and put its
+  38-member group into `partial`.
+- Tree to canvas, all three row kinds: a zone row selects the zone and
+  Ctrl-clicking it deselects; a placement row selects it, Ctrl adds a second and
+  Ctrl removes exactly that one; a group row replaces the selection with all 38
+  members, and a second Ctrl-click removes those 38 while leaving an unrelated
+  placement selected.
+- Preview read-only is covered by unit tests for both the click and the
+  keyboard path; the app case needs a live generation proposal.
+
+### One finding that is not FT3's
+
+A selection change costs about **3 seconds** on this layout, and the cost is
+not the tree's:
+
+| Measurement | Time |
+| --- | --- |
+| `deriveStructure` over all 45 zones / 827 placements | 13 ms |
+| tree redraw from a cached model | 12 ms |
+| select **one** entity, end to end | 3174 ms |
+| select 38 entities, tree **detached** | 3256 ms |
+| select 38 entities, tree attached | 2714 ms |
+
+The cost is flat in the number of entities and is unchanged when the tree is
+removed from the listener list, so it belongs to the existing session broadcast
+and viewport sync, not to this work. FT3 does make it easier to trigger, since
+one click can now select 38 entities. Worth a separate look; it is not a reason
+to hold FT3.
 
 ## 8. Milestones
 

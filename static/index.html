@@ -6683,6 +6683,19 @@
         .ip-fst-row:focus-visible {
             box-shadow: inset 0 0 0 1px var(--accent-primary, #4fc3f7);
         }
+        .ip-fst-row[data-selection="all"] {
+            background: var(--accent-soft, rgba(79, 195, 247, 0.16));
+        }
+        .ip-fst-row[data-selection="all"] .ip-fst-label {
+            color: var(--accent-primary, #4fc3f7);
+        }
+        /* Partial: some members of a group are selected. A left edge marker
+           rather than a fill, so it never reads as a full selection. */
+        .ip-fst-row[data-selection="partial"] {
+            background: var(--accent-soft, rgba(79, 195, 247, 0.16));
+            background: color-mix(in srgb, var(--accent-primary, #4fc3f7) 8%, transparent);
+            box-shadow: inset 2px 0 0 var(--accent-primary, #4fc3f7);
+        }
         .ip-fst-row[data-tone="notice"] .ip-fst-label { color: #e0b357; }
         .ip-fst-row[data-geometry="invalid"] .ip-fst-label {
             color: #d98b6a;
@@ -54519,10 +54532,12 @@
         // previews call directly without notifying the session.
         let _structureTreeView = null;
         let _structureTreeWorkspace = null;
+        let _structureTreeModel = null;
+        let _structureTreeSelection = null;
 
         function _structureRepresentedLayout(workspace) {
-            if (!workspace) return null;
-            const state = workspace.getState ? workspace.getState() : null;
+            if (!workspace || typeof workspace.structureSource !== 'function') return null;
+            const state = workspace.structureSource();
             if (!state) return null;
             const preview = workspace.generationPlanningView
                 && typeof workspace.generationPlanningView.activeLayout === 'function'
@@ -54535,6 +54550,9 @@
                     layoutId: String(state.layoutId || ''),
                     revision: String(preview.revision || preview.baseRevision || ''),
                     readOnly: true,
+                    // A preview's IDs are not in the draft layout, so the
+                    // session's selection does not apply to it.
+                    selection: [],
                 };
             }
             return {
@@ -54542,8 +54560,9 @@
                 kind: 'draft',
                 proposalId: '',
                 layoutId: String(state.layoutId || ''),
-                revision: String(state.draftRevision || state.baseRevision || ''),
+                revision: String(state.revision || ''),
                 readOnly: false,
+                selection: state.selection.slice(),
             };
         }
 
@@ -54554,19 +54573,87 @@
             if (!structureApi) return;
             const view = _structureRepresentedLayout(_structureTreeWorkspace);
             if (!view) return;
-            // Rebuild only when the represented geometry moved. Camera and
-            // selection notifications reach the same subscriber and must not
-            // rebuild rows.
+            // Rebuild rows only when the represented geometry moved. Camera
+            // notifications reach the same subscriber and must not rebuild.
+            // A selection change redraws from the cached model instead: it
+            // changes how rows look, never which rows exist.
             const invalidation = [view.kind, view.proposalId, view.layoutId, view.revision].join('\u0000');
-            if (invalidation === _structureTreeView) return;
-            _structureTreeView = invalidation;
-            const scope = document.getElementById('structurePanelScope');
-            if (scope) scope.textContent = view.kind === 'candidate' ? 'Preview (read only)' : '';
+            const selectionKey = view.selection.join('\u0000');
+            if (invalidation === _structureTreeView
+                    && selectionKey === _structureTreeSelection) return;
+            if (invalidation !== _structureTreeView) {
+                _structureTreeView = invalidation;
+                _structureTreeModel = structureApi.deriveStructure(view.layout || {});
+                const scope = document.getElementById('structurePanelScope');
+                if (scope) scope.textContent = view.kind === 'candidate' ? 'Preview (read only)' : '';
+            }
+            _structureTreeSelection = selectionKey;
             tree.render({
-                model: structureApi.deriveStructure(view.layout || {}),
+                model: _structureTreeModel,
                 view: view,
                 readOnly: view.readOnly,
+                selection: view.selection,
             });
+        }
+
+        /**
+         * Tree row -> session selection.
+         *
+         * A plain click replaces the selection; Ctrl/Meta toggles. A group row
+         * carries every member, and toggles as a unit: if any member is
+         * unselected the gesture selects them all, and only when all are
+         * selected does it deselect them.
+         *
+         * The toggle is computed from the current selection and lands as one
+         * selectMany, for two reasons. session.selectMany only unions when
+         * additive - it has no toggle - so removing members needs the resulting
+         * set. And N calls would broadcast N intermediate selections, each one
+         * redrawing the viewport.
+         */
+        function _structureApplySelection(kind, payload) {
+            const workspace = _structureTreeWorkspace;
+            const session = workspace && workspace.session;
+            if (!session || !payload || !payload.ids.length) return;
+            // Second gate on the preview rule. The renderer already refuses to
+            // emit while read-only; this keeps the seam honest if that changes.
+            const view = _structureRepresentedLayout(workspace);
+            if (!view || view.readOnly) return;
+            const ids = payload.ids;
+
+            try {
+                _structureSelect(session, workspace, payload, ids);
+            } catch (error) {
+                // Selection can be refused (a locked or non-desktop session).
+                // A row click must not take the workspace down with it.
+                console.warn('structure tree selection refused', error);
+            }
+        }
+
+        function _structureSelect(session, workspace, payload, ids) {
+            if (!payload.additive) {
+                // Replace. One entity or a whole group, same call.
+                if (ids.length === 1 && typeof session.select === 'function') {
+                    session.select(ids[0]);
+                } else if (typeof session.selectMany === 'function') {
+                    session.selectMany(ids);
+                }
+                return;
+            }
+
+            if (ids.length === 1 && typeof session.select === 'function') {
+                session.select(ids[0], { toggle: true });
+                return;
+            }
+            const structureApi = window.InspectorProFacilityStructure;
+            if (typeof session.selectMany !== 'function' || !structureApi) return;
+
+            const source = workspace.structureSource();
+            // One call carrying the resulting set: selectMany only unions when
+            // additive, and N calls would broadcast N intermediate selections.
+            session.selectMany(structureApi.toggleSelection(
+                source ? source.selection : [],
+                ids
+            ));
         }
 
         window._structureTreeRefresh = _structureRenderNow;
@@ -54574,6 +54661,7 @@
         window._mountStructureTree = function () {
             if (window._structureTreeInstance) {
                 _structureTreeView = null;   // force a redraw when re-shown
+                _structureTreeSelection = null;
                 _structureRenderNow();
                 return window._structureTreeInstance;
             }
@@ -54583,6 +54671,7 @@
             window._structureTreeInstance = api.createStructureTree({
                 document: document,
                 host: host,
+                onSelect: _structureApplySelection,
                 displayName: function (assetId) {
                     return String(assetId || '').replace(/^asset-/, '')
                         .replace(/[-_]+/g, ' ')
@@ -54596,6 +54685,8 @@
         function _trainBindStructureTree(appInstance) {
             _structureTreeWorkspace = appInstance && appInstance.workspace;
             _structureTreeView = null;
+            _structureTreeSelection = null;
+            _structureTreeModel = null;
             if (!_structureTreeWorkspace) return;
             if (typeof _structureTreeWorkspace.subscribeStructure === 'function') {
                 _structureTreeWorkspace.subscribeStructure(_structureRenderNow);

@@ -11,7 +11,9 @@
  * so an ordinary edit rebuilds rows without collapsing what the user opened,
  * while a preview keeps its own expanded set.
  *
- * FT2 scope: read-only. Selection arrives in FT3 through onSelect.
+ * Selection (FT3) is reported through onSelect and displayed from the
+ * selection array handed to render(); the tree stores no selection of its own,
+ * so the session stays the single source of truth in both directions.
  */
 (function (root, factory) {
     'use strict';
@@ -57,7 +59,10 @@
      * @param {object} options
      * @param {Document} options.document
      * @param {Element}  options.host        where rows are drawn
-     * @param {function} [options.onSelect]  FT3; (rowKind, payload, event)
+     * @param {function} [options.onSelect]  (rowKind, payload, event) where
+     *        payload is { rowId, ids, additive }. `ids` carries every entity
+     *        the row stands for - one for a zone or placement, all members for
+     *        a group - so a group acts as a unit.
      * @param {function} [options.displayName] (assetId, revision) -> label
      */
     function createStructureTree(options) {
@@ -71,8 +76,15 @@
 
         // expansion[namespace] = { rowId: true }
         const expansion = Object.create(null);
-        let current = null;      // { model, view, readOnly }
+        let current = null;      // { model, view, readOnly, selection }
         let destroyed = false;
+        // Rebuilt by every draw(): the row's own selectable entity IDs, so a
+        // click resolves to IDs without re-deriving the model.
+        let rowTargets = Object.create(null);
+        let drawSelection = Object.create(null);
+        // Ancestors are opened when the selection changes, not on every draw:
+        // re-revealing would fight a user who collapsed a branch.
+        let revealedKey = null;
 
         function expandedSet() {
             const key = namespaceOf(current && current.view);
@@ -90,6 +102,70 @@
             else delete set[rowId];
         }
 
+        function selectionSet() {
+            const ids = (current && current.selection) || [];
+            const set = Object.create(null);
+            for (let index = 0; index < ids.length; index += 1) set[ids[index]] = true;
+            return set;
+        }
+
+        /**
+         * Selection state for a group row: every member, some, or none.
+         * Partial is displayed, never produced by a group gesture.
+         */
+        function groupSelectionState(group, selected) {
+            let hit = 0;
+            for (let index = 0; index < group.placementIds.length; index += 1) {
+                if (selected[group.placementIds[index]]) hit += 1;
+            }
+            if (hit === 0) return 'none';
+            return hit === group.placementIds.length ? 'all' : 'partial';
+        }
+
+        /**
+         * Open the path down to anything selected, so a canvas selection is
+         * visible in the tree rather than hidden inside a collapsed branch.
+         */
+        function revealSelection() {
+            const model = current && current.model;
+            const selected = selectionSet();
+            if (!model || !Object.keys(selected).length) return;
+            const open = [];
+            model.zoneOrder.forEach(function (zoneId) {
+                const node = model.zones[zoneId];
+                let wanted = Boolean(selected[zoneId]);
+                if (!wanted) {
+                    for (let index = 0; index < node.groups.length; index += 1) {
+                        const group = node.groups[index];
+                        if (groupSelectionState(group, selected) !== 'none') {
+                            // Open the group too when only some members are hit,
+                            // so the selected occurrence is actually reachable.
+                            if (groupSelectionState(group, selected) === 'partial') {
+                                open.push(group.rowId);
+                            }
+                            wanted = true;
+                        }
+                    }
+                }
+                if (!wanted) return;
+                // Ancestors, not the row itself: a selected zone need not open.
+                let cursor = selected[zoneId] ? node.parentZoneId : zoneId;
+                while (cursor) {
+                    open.push(cursor);
+                    cursor = model.zones[cursor].parentZoneId;
+                }
+            });
+            const unzoned = model.unzoned;
+            if (unzoned) {
+                unzoned.groups.forEach(function (group) {
+                    if (groupSelectionState(group, selected) !== 'none') {
+                        open.push(unzoned.rowId);
+                    }
+                });
+            }
+            open.forEach(function (rowId) { setExpanded(rowId, true); });
+        }
+
         function rowNode(spec) {
             const row = element(doc, 'div', {
                 className: 'ip-fst-row',
@@ -101,6 +177,8 @@
                 'aria-expanded': spec.expandable
                     ? (spec.expanded ? 'true' : 'false')
                     : null,
+                'aria-selected': spec.selection === 'all' ? 'true' : 'false',
+                'data-selection': spec.selection || 'none',
                 style: '--ip-fst-depth:' + spec.depth,
             });
 
@@ -145,7 +223,9 @@
                 icon: node.geometryValid ? 'zone' : 'zone-invalid',
                 expandable: hasChildren,
                 expanded: expanded,
+                selection: drawSelection[zoneId] ? 'all' : 'none',
             });
+            rowTargets[node.rowId] = [zoneId];
             if (!node.geometryValid) {
                 // Rule 5: the failure is reported in place, not swallowed.
                 row.setAttribute('data-geometry', 'invalid');
@@ -169,6 +249,8 @@
         function appendGroup(group, depth) {
             const count = group.placementIds.length;
             const expanded = count > 1 && isExpanded(group.rowId);
+            const state = groupSelectionState(group, drawSelection);
+            rowTargets[group.rowId] = group.placementIds.slice();
             host.appendChild(rowNode({
                 rowId: group.rowId,
                 kind: 'group',
@@ -178,9 +260,14 @@
                 icon: 'asset',
                 expandable: count > 1,
                 expanded: expanded,
+                // 'partial' is displayed, never produced by a group gesture:
+                // it appears when members are selected one at a time or on
+                // the canvas.
+                selection: state === 'all' ? 'all' : (state === 'partial' ? 'partial' : 'none'),
             }));
             if (!expanded) return;
             group.placementIds.forEach(function (placementId, index) {
+                rowTargets[placementId] = [placementId];
                 host.appendChild(rowNode({
                     rowId: placementId,
                     kind: 'placement',
@@ -191,6 +278,7 @@
                     icon: 'placement',
                     expandable: false,
                     expanded: false,
+                    selection: drawSelection[placementId] ? 'all' : 'none',
                 }));
             });
         }
@@ -227,6 +315,14 @@
             }());
 
             clear(host);
+            rowTargets = Object.create(null);
+            drawSelection = selectionSet();
+            const key = namespaceOf(current.view) + ''
+                + Object.keys(drawSelection).sort().join('');
+            if (key !== revealedKey) {
+                revealSelection();
+                revealedKey = key;
+            }
             const model = current.model;
             if (!model || model.counts.zones === 0 && model.counts.placements === 0) {
                 host.appendChild(element(doc, 'div', {
@@ -277,7 +373,17 @@
                 return;
             }
             if (current && current.readOnly) return;
-            if (onSelect) onSelect(kind, rowId, event);
+            if (!onSelect) return;
+            const ids = rowTargets[rowId];
+            // 'unzoned' is a scope header, not an entity: nothing to select.
+            if (!ids || !ids.length) return;
+            onSelect(kind, {
+                rowId: rowId,
+                ids: ids.slice(),
+                // Ctrl/Meta toggles. Shift is left to the canvas; the tree has
+                // no range gesture yet.
+                additive: Boolean(event.ctrlKey || event.metaKey),
+            }, event);
         }
 
         function handleKeydown(event) {
@@ -302,7 +408,16 @@
                 setExpanded(rowId, false);
                 draw();
             } else if (event.key === 'Enter' || event.key === ' ') {
-                if (expandable) {
+                const ids = rowTargets[rowId];
+                if (ids && ids.length && onSelect && !(current && current.readOnly)) {
+                    onSelect(row.getAttribute('data-row-kind'), {
+                        rowId: rowId,
+                        ids: ids.slice(),
+                        additive: Boolean(event.ctrlKey || event.metaKey),
+                    }, event);
+                } else if (expandable) {
+                    // Nothing to select (the Unzoned header): fall back to
+                    // opening the branch so the key is never inert.
                     setExpanded(rowId, !expanded);
                     draw();
                 }
@@ -320,7 +435,8 @@
         return {
             API_VERSION: API_VERSION,
 
-            /** @param {object} next { model, view, readOnly } */
+            /** @param {object} next { model, view, readOnly, selection }
+             *  `selection` is the session's selected entity IDs. */
             render: function (next) {
                 if (destroyed) return;
                 current = next || null;

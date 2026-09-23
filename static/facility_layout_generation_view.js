@@ -94,6 +94,22 @@
             }
             return preview.candidate.candidateLayout;
         }
+        /**
+         * Identity of the preview activeLayout() would return, or null.
+         * Read-only and additive: activeLayout() hands back a layout document
+         * with no candidate identity on it, and a caller that has to tell one
+         * candidate from another - such as the structure tree, which keys both
+         * its rebuilds and its expansion state on it - cannot recover that
+         * from the layout alone.
+         */
+        function activePreviewRef() {
+            if (!preview || !activeLayout()) return null;
+            return {
+                candidateRevision: preview.candidate.candidateRevision,
+                previewRevision: preview.candidate.previewRevision,
+                baseRevision: preview.candidate.baseRevision,
+            };
+        }
         function render() {
             workspace.root.setAttribute('data-generation-planning', opened ? 'true' : 'false');
             if (!opened) { if (body) body.hidden = true; return false; }
@@ -155,7 +171,8 @@
             body.appendChild(exit);
             return true;
         }
-        return {open, close, select, reference, begin, show, activeLayout, render};
+        return {open, close, select, reference, begin, show, activeLayout,
+                activePreviewRef, render};
     }
     return Object.freeze({create: create});
 }));

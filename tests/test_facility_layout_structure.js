@@ -364,4 +364,106 @@ if (fs.existsSync(REFERENCE)) {
     console.log('SKIP reference layout cases (fixture not present)');
 }
 
+// ------------------------------------------------------ FT4: reparenting --
+// Deleting a zone is not modelled here - the derivation only sees the layout
+// that remains. These checks pin the consequence the plan calls out, because
+// an earlier draft got it backwards and said contents fall to Unzoned.
+
+const NESTED = {
+    zones: [
+        { zoneId: 'outer', label: 'Automation', boundary: rect(0, 0, 100, 100) },
+        { zoneId: 'mid', label: 'Cell A01', boundary: rect(10, 10, 60, 60) },
+        { zoneId: 'inner', label: 'Station 1', boundary: rect(20, 20, 40, 40) },
+    ],
+    placements: [place('p1', 'asset-robot', 30, 30)],
+};
+
+function withoutZone(layout, zoneId) {
+    return {
+        zones: layout.zones.filter(function (zone) { return zone.zoneId !== zoneId; }),
+        placements: layout.placements,
+    };
+}
+
+function parentOf(model, placementId) {
+    let found = null;
+    model.zoneOrder.forEach(function (zoneId) {
+        model.zones[zoneId].groups.forEach(function (group) {
+            if (group.placementIds.indexOf(placementId) >= 0) found = zoneId;
+        });
+    });
+    if (found) return found;
+    const unzoned = model.unzoned;
+    if (unzoned) {
+        for (let index = 0; index < unzoned.groups.length; index += 1) {
+            if (unzoned.groups[index].placementIds.indexOf(placementId) >= 0) {
+                return UNZONED_SCOPE;
+            }
+        }
+    }
+    return null;
+}
+
+check('deleting a nested zone reparents to the next containing zone', function () {
+    assert.strictEqual(parentOf(deriveStructure(NESTED), 'p1'), 'inner');
+
+    // Delete the innermost zone: the robot is still inside Cell A01.
+    const afterInner = deriveStructure(withoutZone(NESTED, 'inner'));
+    assert.strictEqual(parentOf(afterInner, 'p1'), 'mid', 'falls to the next parent');
+
+    // Delete that too: still inside Automation, still not unzoned.
+    const afterMid = deriveStructure(
+        withoutZone(withoutZone(NESTED, 'inner'), 'mid')
+    );
+    assert.strictEqual(parentOf(afterMid, 'p1'), 'outer');
+    assert.strictEqual(afterMid.unzoned.directCount, 0, 'nothing fell to Unzoned');
+});
+
+check('only a placement with no containing zone left becomes unzoned', function () {
+    const bare = deriveStructure({ zones: [], placements: NESTED.placements });
+    assert.strictEqual(parentOf(bare, 'p1'), UNZONED_SCOPE);
+    assert.strictEqual(bare.unzoned.directCount, 1);
+});
+
+check('deleting a middle zone reparents its child zone, not just its assets', function () {
+    const afterMid = deriveStructure(withoutZone(NESTED, 'mid'));
+    assert.deepStrictEqual(afterMid.roots, ['outer']);
+    assert.deepStrictEqual(afterMid.zones.outer.childZoneIds, ['inner'],
+        'the grandchild becomes a direct child of the surviving ancestor');
+    assert.strictEqual(parentOf(afterMid, 'p1'), 'inner');
+});
+
+check('deleting a top-level zone drops its whole subtree to unzoned', function () {
+    const afterOuter = deriveStructure({
+        zones: [],
+        placements: NESTED.placements,
+    });
+    assert.deepStrictEqual(afterOuter.roots, []);
+    assert.strictEqual(afterOuter.unzoned.directCount, 1);
+});
+
+check('moving a placement across a boundary moves it between zones', function () {
+    const moved = {
+        zones: NESTED.zones,
+        placements: [place('p1', 'asset-robot', 70, 70)],   // outside mid, inside outer
+    };
+    assert.strictEqual(parentOf(deriveStructure(moved), 'p1'), 'outer');
+
+    const outside = {
+        zones: NESTED.zones,
+        placements: [place('p1', 'asset-robot', 500, 500)],
+    };
+    assert.strictEqual(parentOf(deriveStructure(outside), 'p1'), UNZONED_SCOPE);
+});
+
+check('counts roll up through the surviving chain after a deletion', function () {
+    const before = deriveStructure(NESTED);
+    assert.strictEqual(before.zones.outer.totalCount, 1);
+    assert.strictEqual(before.zones.outer.directCount, 0, 'held by the innermost zone');
+
+    const after = deriveStructure(withoutZone(NESTED, 'inner'));
+    assert.strictEqual(after.zones.outer.totalCount, 1);
+    assert.strictEqual(after.zones.mid.directCount, 1);
+});
+
 console.log('\n' + passed + '/' + passed + ' facility layout structure checks passed');

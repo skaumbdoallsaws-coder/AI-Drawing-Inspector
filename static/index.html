@@ -54534,21 +54534,34 @@
         let _structureTreeWorkspace = null;
         let _structureTreeModel = null;
         let _structureTreeSelection = null;
+        // Counters, so "a camera pan rebuilds nothing" is observable rather
+        // than asserted. notifications >> redraws >> rebuilds is the shape
+        // this design is for.
+        const _structureTreeStats = { notifications: 0, rebuilds: 0, redraws: 0 };
+        window._structureTreeStats = _structureTreeStats;
 
         function _structureRepresentedLayout(workspace) {
             if (!workspace || typeof workspace.structureSource !== 'function') return null;
             const state = workspace.structureSource();
             if (!state) return null;
-            const preview = workspace.generationPlanningView
-                && typeof workspace.generationPlanningView.activeLayout === 'function'
-                ? workspace.generationPlanningView.activeLayout() : null;
-            if (preview && preview.layout) {
+            // activeLayout() returns the candidate layout document itself,
+            // not a wrapper, and carries no candidate identity - that comes
+            // from activePreviewRef(). Testing it for a `.layout` field, as an
+            // earlier draft did, meant the preview branch could never fire.
+            const view = workspace.generationPlanningView;
+            const previewLayout = view && typeof view.activeLayout === 'function'
+                ? view.activeLayout() : null;
+            if (previewLayout) {
+                const ref = (view && typeof view.activePreviewRef === 'function'
+                    ? view.activePreviewRef() : null) || {};
                 return {
-                    layout: preview.layout,
+                    layout: previewLayout,
                     kind: 'candidate',
-                    proposalId: String(preview.proposalId || preview.id || 'preview'),
-                    layoutId: String(state.layoutId || ''),
-                    revision: String(preview.revision || preview.baseRevision || ''),
+                    // One candidate is one namespace; its revision is what
+                    // rebuilds rows inside that namespace.
+                    proposalId: String(ref.candidateRevision || 'preview'),
+                    layoutId: String(previewLayout.layoutId || state.layoutId || ''),
+                    revision: String(ref.previewRevision || ref.candidateRevision || ''),
                     readOnly: true,
                     // A preview's IDs are not in the draft layout, so the
                     // session's selection does not apply to it.
@@ -54567,6 +54580,7 @@
         }
 
         function _structureRenderNow() {
+            _structureTreeStats.notifications += 1;
             const tree = window._structureTreeInstance;
             if (!tree || !_structureTreeWorkspace) return;
             const structureApi = window.InspectorProFacilityStructure;
@@ -54583,11 +54597,13 @@
                     && selectionKey === _structureTreeSelection) return;
             if (invalidation !== _structureTreeView) {
                 _structureTreeView = invalidation;
+                _structureTreeStats.rebuilds += 1;
                 _structureTreeModel = structureApi.deriveStructure(view.layout || {});
                 const scope = document.getElementById('structurePanelScope');
                 if (scope) scope.textContent = view.kind === 'candidate' ? 'Preview (read only)' : '';
             }
             _structureTreeSelection = selectionKey;
+            _structureTreeStats.redraws += 1;
             tree.render({
                 model: _structureTreeModel,
                 view: view,

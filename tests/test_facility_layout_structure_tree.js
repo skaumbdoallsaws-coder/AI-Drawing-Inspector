@@ -650,4 +650,138 @@ check('a toggle never duplicates an already selected member', function () {
     assert.deepStrictEqual(structure.toggleSelection([], []), []);
 });
 
+// -------------------------------------------------- FT4 dynamic behaviour --
+check('a zone that disappears takes its rows with it and leaves the rest open', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const view = { kind: 'draft', layoutId: 'L1', revision: 'rev-1' };
+    const tree = treeModule.createStructureTree({ document: doc, host: element });
+
+    tree.render({ model: structure.deriveStructure(LAYOUT), view: view });
+    tree.setExpandedForTest('auto', true);
+    tree.setExpandedForTest('cellB', true);
+    tree.render({ model: structure.deriveStructure(LAYOUT), view: view });
+    assert.ok(rows(element).some(function (r) { return r.id === 'cellB'; }));
+
+    // Cell B is deleted. Its guard panel is still inside Automation, so it
+    // reparents rather than vanishing - the derivation's rule, drawn.
+    const without = {
+        zones: LAYOUT.zones.filter(function (z) { return z.zoneId !== 'cellB'; }),
+        placements: LAYOUT.placements,
+    };
+    tree.render({
+        model: structure.deriveStructure(without),
+        view: { kind: 'draft', layoutId: 'L1', revision: 'rev-2' },
+    });
+    const after = rows(element);
+    assert.ok(!after.some(function (r) { return r.id === 'cellB'; }), 'the zone row is gone');
+    assert.ok(after.some(function (r) { return r.id === 'cellA'; }), 'Automation stayed open');
+    assert.ok(
+        after.some(function (r) { return r.kind === 'group' && /guard/i.test(r.label); }),
+        'the orphaned guard panel reparented into Automation'
+    );
+});
+
+check('undoing a deletion brings the branch back still expanded', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const view = { kind: 'draft', layoutId: 'L1', revision: 'rev-1' };
+    const tree = treeModule.createStructureTree({ document: doc, host: element });
+    const without = {
+        zones: LAYOUT.zones.filter(function (z) { return z.zoneId !== 'cellB'; }),
+        placements: LAYOUT.placements,
+    };
+
+    tree.render({ model: structure.deriveStructure(LAYOUT), view: view });
+    tree.setExpandedForTest('auto', true);
+    tree.setExpandedForTest('cellB', true);
+    tree.render({ model: structure.deriveStructure(LAYOUT), view: view });
+    const openBefore = rows(element).filter(function (r) { return r.id === 'cellB'; })[0];
+    assert.strictEqual(openBefore.expanded, 'true');
+
+    // Delete, then undo. Expansion is keyed by row ID inside a namespace that
+    // revision does not touch, so the branch comes back as the user left it.
+    tree.render({
+        model: structure.deriveStructure(without),
+        view: { kind: 'draft', layoutId: 'L1', revision: 'rev-2' },
+    });
+    tree.render({
+        model: structure.deriveStructure(LAYOUT),
+        view: { kind: 'draft', layoutId: 'L1', revision: 'rev-3' },
+    });
+    const openAfter = rows(element).filter(function (r) { return r.id === 'cellB'; })[0];
+    assert.ok(openAfter, 'the zone row is back');
+    assert.strictEqual(openAfter.expanded, 'true', 'and still expanded');
+});
+
+check('a selection change inside an open branch does not change which rows exist', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const view = { kind: 'draft', layoutId: 'L1', revision: 'rev-1' };
+    const model = structure.deriveStructure(LAYOUT);
+    const guards = model.zones.cellA.groups.filter(function (g) {
+        return g.assetId === 'asset-guard';
+    })[0];
+    const tree = treeModule.createStructureTree({ document: doc, host: element });
+
+    tree.render({ model: model, view: view, selection: [] });
+    ['auto', 'cellA', guards.rowId].forEach(function (id) {
+        tree.setExpandedForTest(id, true);
+    });
+    tree.render({ model: model, view: view, selection: [] });
+    const before = rows(element).map(function (r) { return r.id; });
+
+    tree.render({ model: model, view: view, selection: ['g1'] });
+    assert.deepStrictEqual(
+        rows(element).map(function (r) { return r.id; }), before,
+        'the row set is identical; only marks changed'
+    );
+    assert.strictEqual(
+        element.querySelector('[data-row-id="g1"]').getAttribute('data-selection'), 'all'
+    );
+});
+
+check('a moved placement lands under its new zone on the next render', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const view = { kind: 'draft', layoutId: 'L1', revision: 'rev-1' };
+    const tree = treeModule.createStructureTree({ document: doc, host: element });
+
+    tree.render({ model: structure.deriveStructure(LAYOUT), view: view });
+    ['auto', 'cellA', 'cellB'].forEach(function (id) {
+        tree.setExpandedForTest(id, true);
+    });
+    tree.render({ model: structure.deriveStructure(LAYOUT), view: view });
+
+    const countIn = function (zoneId, model) {
+        return model.zones[zoneId].directCount;
+    };
+    const first = structure.deriveStructure(LAYOUT);
+    assert.strictEqual(countIn('cellA', first), 3);
+    assert.strictEqual(countIn('cellB', first), 1);
+
+    // Drag r1 out of Cell A and into Cell B.
+    const moved = {
+        zones: LAYOUT.zones,
+        placements: LAYOUT.placements.map(function (p) {
+            return p.placementId === 'r1' ? place('r1', 'asset-robot', 60, 20) : p;
+        }),
+    };
+    const second = structure.deriveStructure(moved);
+    assert.strictEqual(countIn('cellA', second), 2);
+    assert.strictEqual(countIn('cellB', second), 2);
+
+    tree.render({
+        model: second,
+        view: { kind: 'draft', layoutId: 'L1', revision: 'rev-2' },
+    });
+    const drawn = rows(element);
+    const cellB = drawn.filter(function (r) { return r.id === 'cellB'; })[0];
+    assert.strictEqual(cellB.expanded, 'true', 'the branch the user opened stayed open');
+    const robotUnderB = drawn.some(function (r) {
+        return r.kind === 'group' && /robot/i.test(r.label);
+    });
+    assert.ok(robotUnderB, 'the robot now draws under Cell B');
+});
+
 console.log('\n' + passed + '/' + passed + ' facility layout structure tree checks passed');

@@ -1,7 +1,7 @@
 # Agent handoff
 
 Routing document for an agent picking up work in this repo. Last updated
-2026-09-19. Details live in `docs/`; this file only points at them and lists the
+2026-09-23. Details live in `docs/`; this file only points at them and lists the
 constraints that are expensive to discover by accident.
 
 ## Active task
@@ -12,6 +12,32 @@ one wiring gap; the click path (chat link -> in-app browser -> PDF download) is
 already built end to end. That document carries the exact contracts, the
 confirmed seam in `server.py`, the field mapping and the non-goals. Read it
 before touching anything in the generation path.
+
+## Recently landed
+
+**Facility Layout structure tree** (`docs/facility-layout-structure-tree-plan.md`,
+section 7a). A SolidWorks-style pane in the left slot showing zones and their
+equipment, derived geometrically - zone membership is never written into the
+layout. FT0-FT4 are complete and FT5 is complete in the browser; the Electron
+half is an open gap recorded in the plan.
+
+Three things an agent touching this should know:
+
+- `tests/verify_facility_layout_structure_tree_app.py` drives a real browser
+  against a local server and is the **only** place the workspace wiring is
+  exercised. Three defects reached the app while every unit test passed,
+  because unit tests feed the renderer a model directly. Run it after changing
+  `_structureRepresentedLayout`, `Workspace.structureSource`, or the generation
+  view's `activeLayout` / `activePreviewRef`.
+- `generationPlanningView.activeLayout()` returns the candidate **layout
+  document**, not a wrapper, and carries no identity. `activePreviewRef()` was
+  added beside it for callers that must tell one candidate from another. It is
+  additive and read-only; do not fold it into `activeLayout()`.
+- Two authoritative server rules constrain any layout-authoring test: a
+  placement whose footprint leaves the shell floor is rejected
+  (`placement_outside_floor`), and **once any zone exists every placement must
+  be inside a zone** (`zone_containment_violation`). Unzoned is therefore
+  authorable only before the first zone or after the last one.
 
 ## Where the larger work stopped
 

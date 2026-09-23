@@ -2,8 +2,9 @@
 
 Date: 2026-09-22 (revision 5 - fourth review pass)
 
-Status: FT0-FT3 implemented as of 2026-09-23. FT4 and FT5 remain.
-See section 7a for what landed and what the app verification found.
+Status: implemented as of 2026-09-23. FT0-FT4 complete; FT5 complete in the
+browser, with the Electron half recorded as an open gap. Section 7a carries
+what landed, what the app verification found, and what blocks promotion.
 
 Revision 2 answered a first independent review: five contracts tightened, and
 three claims from revision 1 corrected in place - the represented layout
@@ -678,16 +679,21 @@ Exit: promotion decision recorded with evidence, or the gap that blocks it.
 
 ## 7a. Implementation Status
 
-Updated 2026-09-23, after FT3.
+Updated 2026-09-23, after FT5.
 
 | Phase | State | Lands in |
 | --- | --- | --- |
 | FT0 | done | fixtures, baseline counts |
-| FT1 | done | `static/facility_layout_structure.js`, 21 checks |
+| FT1 | done | `static/facility_layout_structure.js` |
 | FT2 | done | `static/facility_layout_structure_tree.js`, pane, rail icon |
-| FT3 | done | selection binding both ways, 30 checks |
-| FT4 | not started | - |
-| FT5 | not started | - |
+| FT3 | done | selection binding both ways |
+| FT4 | done | invalidation, expansion, reparenting, build-from-empty |
+| FT5 | done in the browser; Electron not run (see the gap below) | evidence in `docs/evidence/facility-layout-structure-tree/` |
+
+Tests: 27 derivation, 34 renderer, 88 workspace, 41 app. The app checks live in
+`tests/verify_facility_layout_structure_tree_app.py`, which drives a real
+browser against a local server and is the only place the workspace wiring is
+exercised.
 
 ### What FT3 added
 
@@ -697,62 +703,123 @@ Updated 2026-09-23, after FT3.
   `ids` carries every entity the row stands for, so a group acts as a unit.
   Enter and Space select; the caret and the arrow keys expand.
 - `toggleSelection(currentIds, memberIds)` in the derivation module: pure set
-  arithmetic for the group toggle, testable without a DOM. It lives there
-  rather than inline in `index.html` so the rule has one home.
+  arithmetic for the group toggle, testable without a DOM.
 - Ancestors are revealed when the **selection changes**, not on every draw, so
   revealing never fights a user who has collapsed a branch.
-- `Workspace.prototype.structureSource()`: a clone-free read of
-  `{layout, layoutId, revision, selection}`.
 
-### Two defects this phase found in FT2's wiring
+### What FT4 added
 
-Both would have made the pane silently wrong in the app while every FT2 unit
-test still passed, because those tests feed the renderer a model directly and
-never touch the workspace.
+- Rebuild and redraw counters on the host, so "a camera pan rebuilds nothing"
+  is measured rather than asserted. Five camera moves produce notifications and
+  zero rebuilds and zero redraws; a selection change redraws without
+  rebuilding; an edit rebuilds.
+- Derivation tests for the reparenting rule this plan calls out, because an
+  earlier draft had it backwards: deleting a nested zone sends its contents to
+  the next containing zone, and only a placement with no containing zone left
+  becomes Unzoned. Deleting a middle zone also reparents its **child zones** to
+  the surviving ancestor, not just its assets.
+- Renderer tests for rows that disappear and return: a deleted branch takes its
+  rows with it and leaves its siblings open, and undoing the deletion brings it
+  back still expanded, because expansion is keyed by row ID inside a namespace
+  that revision does not touch.
+
+### Three defects this work found in FT2's wiring
+
+All three would have made the pane silently wrong in the app while every unit
+test passed, because those tests feed the renderer a model directly and never
+touch the workspace. They are the argument for the app-level script existing.
 
 1. `_structureRepresentedLayout` read `state.layout` from `workspace.getState()`,
    which nests the session under `.session`. The tree would have derived from
-   `undefined`. This is why `structureSource()` exists.
+   `undefined`. Hence `Workspace.structureSource()`, a clone-free read of just
+   the four fields the tree needs.
 2. The session carries no top-level `layoutId` - it is on the layout. The
    accessor returned `''`, which would have let two different layouts share one
    invalidation key *and* one expansion namespace.
+3. `generationPlanningView.activeLayout()` returns the candidate **layout
+   document itself**, not a `{layout, ...}` wrapper, and carries no candidate
+   identity. The preview branch tested for `.layout` and so could never fire:
+   a candidate would have been drawn as if it were the draft, editable. Fixed,
+   with a small additive `activePreviewRef()` on the generation view supplying
+   the candidate identity the two keys need.
 
-### Verified in the app against the reference layout
+### Verified in the app
 
-`fl-reference-manual-20260812`, 45 zones and 827 placements, revision
-`a40b2541e31c` unchanged and unsaved throughout.
+Against `fl-reference-manual-20260812` (45 zones, 827 placements) and the blank
+`fl-main`, with nothing ever saved - the stored base revision is asserted
+unmoved at the end of the run.
 
-- Six root zones whose counts total exactly 827, so no placement is lost or
-  double-counted, and the layout needs no Unzoned branch.
-- Canvas to tree: selecting one placement in a collapsed tree opened the path to
-  it, took the tree from 6 rows to 60, marked the placement, and put its
-  38-member group into `partial`.
-- Tree to canvas, all three row kinds: a zone row selects the zone and
-  Ctrl-clicking it deselects; a placement row selects it, Ctrl adds a second and
-  Ctrl removes exactly that one; a group row replaces the selection with all 38
-  members, and a second Ctrl-click removes those 38 while leaving an unrelated
-  placement selected.
-- Preview read-only is covered by unit tests for both the click and the
-  keyboard path; the app case needs a live generation proposal.
+**Build from empty.** Place equipment on an empty layout (it lands in Unzoned),
+draw a zone around it, nest a second zone, move a placement across a boundary,
+delete the nested zone and watch its contents reparent to the surviving parent
+rather than fall to Unzoned, undo, remove the last zone and watch everything
+fall to Unzoned, undo again.
 
-### One finding that is not FT3's
+**The four-step sequence.** Expand a draft branch; move equipment and the branch
+stays expanded; open a candidate sharing the draft's zone IDs and its expansion
+is independent; dismiss it and the draft's expansion returns. Steps 3 and 4 use
+a stub at `activeLayout()` / `activePreviewRef()`, because a real candidate
+needs a live generation run (AGENTS.md gate 1). What is stubbed is the seam this
+work owns, not the tree's behaviour.
 
-A selection change costs about **3 seconds** on this layout, and the cost is
-not the tree's:
+**Accessibility.** `tree` / `treeitem` roles with `aria-level`, arrow-key
+navigation, and focus that survives a rebuild on the same row.
+
+**Layout competition.** The pane holds real width, collapsing returns it to the
+viewport, and the tree stays usable with Sage open beside it.
+
+### Two authoritative server rules, discovered by running the build
+
+Neither is documented elsewhere in this plan, and both shape what the Unzoned
+branch can mean.
+
+1. The blank layout's shell is a small room. A placement whose footprint leaves
+   the floor is rejected as `placement_outside_floor`. The usable floor for a
+   pallet is about x in [5, 35], z in [5, 25].
+2. **Once any zone exists, every placement must be inside a zone.** A commit
+   that would strand one is rejected as `zone_containment_violation` with
+   reason `footprint_or_setback`, one finding per stranded placement. So
+   Unzoned is an authorable state only before the first zone is drawn or after
+   the last one is removed. The branch is still correct and still reachable -
+   but it cannot be produced by drawing a zone that misses something, which is
+   how section 4.3 implies a user would meet it.
+
+### The gap that blocks a full FT5 promotion
+
+FT5 asks for a run in **both** the Electron application and the browser, each
+with Sage and the research pane open. The browser half is done. The Electron
+half was not run, for two reasons rather than one:
+
+- `desktop/README.md` requires an isolated source snapshot outside the checkout
+  and a restricted backend fixture; the rendering backend refuses to run from
+  the live checkout. That fixture uses an empty library and confines stores to
+  its own data root, so the reference layout is not present in it - the
+  evidence FT5 wants could not be captured there without further setup.
+- The research pane is Electron-only by design, so it cannot be opened in the
+  browser at all. Both Electron-specific FT5 items land in this same gap.
+
+Nothing observed so far suggests the tree behaves differently under Electron:
+it is the same `static/index.html`, and the pane is ordinary DOM in the existing
+left slot. But that is an expectation, not evidence, and the promotion decision
+should say so.
+
+### One finding that is not this work's
+
+A selection change costs about **3 seconds** on the reference layout, and the
+cost is not the tree's:
 
 | Measurement | Time |
 | --- | --- |
-| `deriveStructure` over all 45 zones / 827 placements | 13 ms |
+| `deriveStructure` over 45 zones / 827 placements | 13 ms |
 | tree redraw from a cached model | 12 ms |
 | select **one** entity, end to end | 3174 ms |
 | select 38 entities, tree **detached** | 3256 ms |
 | select 38 entities, tree attached | 2714 ms |
 
-The cost is flat in the number of entities and is unchanged when the tree is
-removed from the listener list, so it belongs to the existing session broadcast
-and viewport sync, not to this work. FT3 does make it easier to trigger, since
-one click can now select 38 entities. Worth a separate look; it is not a reason
-to hold FT3.
+Flat in the number of entities and unchanged when the tree is removed from the
+listener list, so it belongs to the existing session broadcast and viewport
+sync. FT3 makes it easier to trigger, since one click can now select 38
+entities. Worth a separate look; it is not a reason to hold this work.
 
 ## 8. Milestones
 

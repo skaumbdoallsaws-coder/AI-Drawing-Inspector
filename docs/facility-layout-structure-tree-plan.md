@@ -1,6 +1,6 @@
 # Facility Layout Structure Tree Plan
 
-Date: 2026-09-22 (revision 3 - second review pass)
+Date: 2026-09-22 (revision 4 - third review pass)
 
 Status: proposed, not started. No code has been written for this plan.
 
@@ -18,7 +18,16 @@ diagram and refresh path now cover previews, which do not notify the session
 (sections 3a, FT3); FT2 no longer repeats the auto-collapse mistake and carries
 the full entry/exit matrix; and the benchmark is split across the phases that
 can measure each part (section 5, FT1, FT2, FT5). Containment rule 3 now states
-smallest area first, then `zoneId`. The architecture is still unchanged.
+smallest area first, then `zoneId`.
+
+Revision 4 answers a third pass, which found a bug introduced by revision 3:
+expansion state was scoped by a key containing `revision`, so an ordinary edit
+would have collapsed every open branch. Rebuilding and remembering are separate
+questions and now use separate keys (section 6), FT4 no longer carries the older
+wording, and an acceptance sequence covers expansion surviving an edit while
+staying independent across a preview. Group toggling gained two requirements:
+it preserves unrelated selections and lands as one `selectMany`. The
+architecture is unchanged throughout.
 
 Working name: FT0-FT5
 
@@ -344,6 +353,15 @@ of them; if all are selected, it deselects all. Partial state is displayed, not
 produced, by group gestures - it arises when members are selected individually
 or from the canvas.
 
+Two requirements on that gesture:
+
+- **Entities outside the group are untouched.** Ctrl/Meta-toggling a group must
+  leave every other selected entity selected. It computes the next selection
+  from the current one, and never replaces the selection wholesale.
+- **It lands as a single `selectMany`.** One call carrying the resulting set,
+  not N calls per member: each would `notify()`, producing N broadcasts and N
+  highlight passes for one gesture.
+
 Requirements:
 
 - **Groups retain their member placement IDs.** A group row carries the exact
@@ -467,11 +485,26 @@ revision. `_syncController` already computes this to build its preview
 descriptor; the tree consumes the same result rather than inferring it
 separately. Two independent answers to "what is on screen" would drift.
 
-**The view key includes kind and proposal identity.** Expansion state is scoped
-by `{ kind, proposalId, layoutId, revision }`, not by layout ID and zone ID
-alone: a candidate may legitimately carry the same layout ID and the same zone
-IDs as the draft it was derived from, so those two fields cannot isolate one
-view's expansion from the other's.
+**Two keys, not one.** Revision 3 of this plan scoped expansion by
+`{ kind, proposalId, layoutId, revision }`. That is wrong: an ordinary edit
+changes the revision, so every branch the user had opened would collapse each
+time they moved a piece of equipment. Rebuilding and remembering are different
+questions and need different keys.
+
+| Key | Fields | Answers |
+| --- | --- | --- |
+| derivation invalidation | `{ kind, proposalId, layoutId, revision }` | has the represented geometry changed, so must the hierarchy be rebuilt |
+| expansion namespace | `{ kind, proposalId, layoutId }` | which view's expanded set is this, so it survives edits within that view |
+
+`revision` belongs in the first and must not appear in the second. `kind` and
+`proposalId` must appear in both, because a candidate may legitimately carry the
+same `layoutId` **and the same zone IDs** as the draft it was derived from;
+without them, opening a preview would inherit the draft's expanded set and
+dismissing it would hand back the candidate's.
+
+Inside a namespace, expansion is recorded against **stable row IDs** - zone IDs,
+and for group rows the asset identity and revision from section 3a - never row
+indices, which move as the layout changes.
 
 `deriveStructure` takes a layout and returns a plain object. It touches no DOM,
 holds no state, and is the only place containment is decided. It is testable
@@ -567,9 +600,11 @@ Invalidate on the represented layout's revision, per section 5 - not on every
 all arrive there. Selection highlighting updates on its own path without
 rebuilding rows.
 
-Preserve expansion state across rebuilds keyed by **layout identity and zone
-ID**, not zone ID alone: the same zone ID in a different layout is a different
-zone, and expansion must not leak across a layout switch or a preview.
+Preserve expansion state across rebuilds using the **expansion namespace** from
+section 6 - `{ kind, proposalId, layoutId }`, with stable row IDs inside it.
+Deliberately **not** the invalidation key: including `revision` there would
+collapse every open branch on each edit, which is the failure this phase exists
+to avoid.
 
 Verify the cases from section 3. **Deleting a nested zone moves its placements
 to the next containing parent, not to Unzoned** - an earlier draft of this plan
@@ -582,6 +617,15 @@ them, move one across a boundary, delete a nested zone and confirm reparenting
 to the surviving parent, delete a top-level zone and confirm the fall to
 Unzoned, undo each step. Confirm a camera pan and a selection change rebuild
 nothing.
+
+And this sequence, which is what the two keys exist for:
+
+1. Expand a draft branch.
+2. Move a piece of equipment. **The branch stays expanded** - the revision moved,
+   so the hierarchy rebuilt, but the expansion namespace did not change.
+3. Open a candidate that contains the same zone IDs. **Its expansion is
+   independent** - it starts from its own namespace, not the draft's.
+4. Dismiss the candidate. **The draft's original expansion returns.**
 
 ### FT5 - Evaluation And Promotion
 

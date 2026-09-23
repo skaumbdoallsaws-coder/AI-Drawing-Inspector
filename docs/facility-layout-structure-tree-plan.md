@@ -1,16 +1,24 @@
 # Facility Layout Structure Tree Plan
 
-Date: 2026-09-22 (revision 2 - independent review amendments)
+Date: 2026-09-22 (revision 3 - second review pass)
 
 Status: proposed, not started. No code has been written for this plan.
 
-Revision 2 answers an independent read-only review. Five contracts were
-tightened and three claims in revision 1 were wrong and are corrected in
-place, each marked where it appears: the layout the tree represents during a
-preview (section 2a), what a grouped row selects (section 3a), the left-panel
-lifecycle (section 2), the notification frequency and what the benchmark
-proves (section 5), and the containment rule (section 3.2a). The architecture
-is unchanged.
+Revision 2 answered a first independent review: five contracts tightened, and
+three claims from revision 1 corrected in place - the represented layout
+(section 2a), grouped-row selection (section 3a), the left-panel lifecycle
+(section 2), notification frequency and what the benchmark proves (section 5),
+and the containment rule (section 3.2a).
+
+Revision 3 answers a second pass, which found that four of those amendments had
+not been carried through the rest of the document. Policy stated in one section
+was contradicted by a phase description in another. Fixed: the architecture
+diagram and refresh path now cover previews, which do not notify the session
+(section 6); the row-kind table and FT3 now agree on one selection behaviour
+(sections 3a, FT3); FT2 no longer repeats the auto-collapse mistake and carries
+the full entry/exit matrix; and the benchmark is split across the phases that
+can measure each part (section 5, FT1, FT2, FT5). Containment rule 3 now states
+smallest area first, then `zoneId`. The architecture is still unchanged.
 
 Working name: FT0-FT5
 
@@ -280,12 +288,15 @@ The rule for this plan:
 2. **Placement containment is by placement origin**, and the boundary is
    **inclusive**, matching `covers`. A placement exactly on a shared edge
    belongs to the zone, not to Unzoned.
-3. **Ties are deterministic and independent of input order.** Where two
-   containing zones have equal area, resolve by `zoneId` ascending. Reordering
-   the `zones` array must not change any row.
+3. **Resolution is smallest area first, then `zoneId` ascending.** Among all
+   containing zones, the smallest area wins; only where areas are equal does
+   `zoneId` decide. Both steps are required: area alone is not deterministic
+   when two zones tie, and `zoneId` alone would ignore nesting. Reordering the
+   `zones` array must not change any row.
 4. **Overlapping, non-nesting zones** (neither covers the other) are both valid
-   parents of a point in the overlap; rule 3 picks one, and the placement
-   appears once, under that one.
+   parents of a point in the overlap. Rule 3 applies unchanged - smallest area,
+   then `zoneId` - and the placement appears once, under that one zone. It is
+   never listed twice.
 5. **Invalid geometry does not fail the tree.** A zone whose polygon cannot be
    evaluated reports the failure on its own row and contributes no containment;
    its would-be contents fall to the next containing parent, or to Unzoned.
@@ -313,11 +324,25 @@ mockup and not in the implementation.
 
 The tree has three row kinds, and they behave differently:
 
-| Row kind | Represents | Click | Ctrl-click |
+Expansion and selection are separate gestures: **the caret expands, the label
+selects.** A zone row is not inert - clicking its label selects the zone, the
+same as clicking the zone on the canvas.
+
+| Row kind | Represents | Label click | Ctrl / Meta click |
 | --- | --- | --- | --- |
-| zone | one zone | selects nothing; expands | - |
-| group | N placements of one asset identity | `selectMany` over its member IDs | adds its members to the selection |
-| placement | one placement | `select` | additive `select` |
+| zone | one zone | `select(zoneId)` | toggles that zone |
+| group | N placements of one asset identity | `selectMany(memberIds)`, replacing | toggles the whole group as a unit |
+| placement | one placement | `select(id)` | toggles that placement |
+
+Ctrl-click **toggles**; it is not merely additive. That matches the canvas,
+where `handleViewSelection` passes `{ additive, toggle }` with both set from the
+same modifier, and `session.select` takes the `toggle` branch when it is present.
+A tree that only added would diverge from the canvas on the second click.
+
+A group toggles as a unit: if any member is unselected, the gesture selects all
+of them; if all are selected, it deselects all. Partial state is displayed, not
+produced, by group gestures - it arises when members are selected individually
+or from the canvas.
 
 Requirements:
 
@@ -391,9 +416,11 @@ The plan therefore specifies:
   Selection changes arrive far more often than geometry ones.
 - **Ignore camera notifications entirely** for tree purposes.
 
-FT1 must ship a reproducible JavaScript benchmark that reports **hierarchy,
-grouping and rendering separately**, so the browser cost is known rather than
-inferred from the derivation figure above.
+The benchmark is reproducible JavaScript reporting **hierarchy, grouping and
+rendering separately**, and it is split across the phases that can actually
+measure each part: hierarchy and grouping in FT1, which has no DOM; DOM
+rendering in FT2, where the renderer exists; integrated Electron and browser
+responsiveness in FT5. No phase is asked to measure something it has not built.
 
 Rendering, not derivation, is the cost that matters. Of 827 placements, 456 are
 the same wire-mesh guard panel, and the busiest leaves hold 114 and 41. A raw
@@ -402,16 +429,49 @@ expand produces a wall of identical rows.
 ## 6. Architecture
 
 ```text
-state.layout  ->  deriveStructure(layout)        pure, no DOM, unit testable
-                    |
-                    +-> { roots, byZone, unzoned, counts }
-                    |
-                  renderTree(model, expanded)    lazy: children built on expand
-                    |
-                  row click  ->  session.select(...)
-                    |
-                  session broadcast -> _handleSessionState -> derive again
+representedLayout()            one resolver, shared with the viewport
+  |  { layout, kind: 'draft' | 'candidate', proposalId, revision }
+  |
+  +-> deriveStructure(layout)        pure, no DOM, unit testable
+        |
+        +-> { roots, byZone, unzoned, counts }
+        |
+      renderTree(model, viewKey)     lazy: children built on expand
+        |
+      row click -> session.select / selectMany   (draft only; see 2a)
+
+refresh triggers
+  session broadcast  -> _handleSessionState  -> re-resolve, rebuild if revision moved
+  preview open/replace/close -> _syncController -> re-resolve, rebuild
 ```
+
+**The tree cannot rely on the session broadcast alone.** Generation previews
+refresh through the workspace directly:
+
+```js
+function refresh() {
+    if (workspace.destroyed) return;
+    workspace._renderDesignPanel();
+    workspace._syncController();     // no session notify
+}
+```
+
+`close()` calls the same `refresh()`. So opening, replacing and dismissing a
+preview all move what the viewport shows without any subscriber hearing about
+it. The tree must therefore be refreshed from the same place the viewport is -
+`_syncController` - and not only from `_handleSessionState`.
+
+**One resolver, two consumers.** `representedLayout()` returns the layout the
+viewport is currently showing together with its kind, proposal identity and
+revision. `_syncController` already computes this to build its preview
+descriptor; the tree consumes the same result rather than inferring it
+separately. Two independent answers to "what is on screen" would drift.
+
+**The view key includes kind and proposal identity.** Expansion state is scoped
+by `{ kind, proposalId, layoutId, revision }`, not by layout ID and zone ID
+alone: a candidate may legitimately carry the same layout ID and the same zone
+IDs as the draft it was derived from, so those two fields cannot isolate one
+view's expansion from the other's.
 
 `deriveStructure` takes a layout and returns a plain object. It touches no DOM,
 holds no state, and is the only place containment is decided. It is testable
@@ -438,9 +498,10 @@ Exit: unit tests for every rule in section 3.2a - nested zones, an asset in no
 zone, an asset exactly on a boundary, overlapping equal-area zones, a concave
 polygon that defeats the bounding-box prefilter, a reordered `zones` array
 producing identical output, invalid zone geometry, an empty layout, and a layout
-with zones but no placements. Plus the separated benchmark required by section
-5, reporting hierarchy, grouping and rendering costs independently. No DOM, no
-workspace changes.
+with zones but no placements. Plus the **hierarchy and grouping** halves of the
+benchmark required by section 5; rendering cost belongs to FT2, which is where
+the renderer arrives, and integrated responsiveness to FT5. No DOM, no workspace
+changes.
 
 ### FT2 - Pane Shell, Rail Icon, And Read-Only Tree
 
@@ -451,31 +512,53 @@ second show/hide mechanism is introduced.
 
 The Drawing panel and the structure tree share that one slot and are mutually
 exclusive, as the activity rail implies: selecting one replaces the other rather
-than splitting the width. In Facility Layout the workflow already auto-collapses
-the Drawing panel on entry, so Structure is simply what that slot holds here.
+than splitting the width.
 
-This phase must leave `_desktopAutoCollapsedPartPanel` restoring the Drawing
-panel correctly when the user leaves Facility Layout, including when they left
-with Structure showing.
+Implement the two-field contract from section 2 - `leftPanelVisible` and
+`leftPanelContent` - rather than assuming an auto-collapse. The existing
+collapse fires only under native initialisation with a `facilityLayoutId`
+parameter, so it cannot be relied on as the entry behaviour.
+
+Every path must be defined, not just the native one:
+
+| Path | Required behaviour |
+| --- | --- |
+| native entry with `facilityLayoutId` | content becomes `structure`; the existing collapse must not fight it |
+| in-app switch into Facility Layout | content becomes `structure`; visibility unchanged from the user's last choice |
+| switch to another workflow **inside Workflows** | content returns to `drawing`; Structure does not persist into a workflow that has no layout |
+| leaving the Workflows tab | prior Drawing state restored, including a panel the user had collapsed themselves |
+| Ctrl+B | toggles visibility only; never changes content |
+| browser entry, no URL parameter | no collapse occurs; content still resolves correctly |
 
 Lazy expansion: a branch computes and renders its children the first time it
 opens. Grouping of identical assets within a zone (`Wire Mesh Guard Panel x38`)
 rather than one row each. Empty state and unzoned branch per section 4.3.
 
 Exit: the rail icon extends and retracts the pane and reflects its state; the
-tree renders the reference layout, expands and collapses, shows the unzoned
-branch on a fixture that has one; and leaving the workflow restores the Drawing
-panel exactly as it does today, including from the Structure state. No selection
-yet.
+tree renders the reference layout, expands and collapses, and shows the unzoned
+branch on a fixture that has one. **Every row in the path table above passes**,
+including switching to another workflow without leaving the Workflows tab. The
+**rendering** half of the section 5 benchmark is measured here, against the
+827-placement reference layout with a branch expanded. Preview opening,
+replacement, dismissal, Apply and Undo each move the tree, per section 2a. No
+selection yet.
 
 ### FT3 - Selection Binding
 
-Row click calls `session.select`; ctrl-click is additive, matching
-`handleViewSelection`. Selection arriving from the canvas highlights the
-corresponding row and reveals its ancestors. One selection model, two views.
+Implement the row-kind contract in section 3a exactly: caret expands, label
+selects, Ctrl/Meta **toggles** rather than merely adding, and a group row acts
+on its retained member IDs as a unit. Selection arriving from the canvas
+highlights the corresponding row, reveals its ancestors, and drives the
+partial state on any group whose members are only partly selected. One selection
+model, two views.
 
-Exit: canvas-to-tree and tree-to-canvas selection agree in both directions,
-including multi-select, verified against the reference layout.
+Selection is disabled entirely while a preview is represented, per section 2a.
+
+Exit: canvas-to-tree and tree-to-canvas selection agree in both directions for
+all three row kinds, including multi-select and including a second Ctrl-click
+deselecting what the first selected; partial group state appears when members
+are selected from the canvas; and no row click reaches `session.select` while a
+preview is active. Verified against the reference layout.
 
 ### FT4 - Dynamic Behaviour
 
@@ -578,8 +661,14 @@ shared ownership, history, Apply/Undo recovery". That work lands on selection
 and history, which FT3 and FT4 also touch, and section 2a now binds this plan to
 preview and candidate behaviour that gate 4 also governs. Mitigation: FT3 only
 *calls* the existing selection API and adds no new selection state, and during a
-preview the tree is read-only and selects nothing at all. If gate 4 begins first,
-FT3 and FT4 should wait; FT0 through FT2 are unaffected either way.
+preview the tree is read-only and selects nothing at all.
+
+**FT2 is no longer clear of gate 4.** Its acceptance now includes preview
+opening, replacement, dismissal, Apply and Undo (section 2a), and Apply/Undo
+recovery is exactly what gate 4 governs. If gate 4 begins first, FT2's preview
+acceptance should be written against whatever it lands, and FT3 and FT4 should
+wait. **FT0 and FT1 remain unaffected** - they touch no workspace file and no
+preview behaviour - so they stay the safe starting point.
 
 **Against the reference layout.** Nothing in this plan writes to a layout, so
 the manual reference stays untouched by construction, not by discipline.

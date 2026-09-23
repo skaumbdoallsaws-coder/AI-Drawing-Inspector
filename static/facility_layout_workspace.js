@@ -2621,6 +2621,11 @@
         this.lastThreeFitFingerprint = null;
         this.commandStates = {};
         this.unsubscribe = null;
+        // Listeners for anything that changes what the viewport represents.
+        // Fired from both refresh paths: the session broadcast, and
+        // _syncController, which generation previews call directly without
+        // notifying the session.
+        this.structureListeners = [];
         this.marqueeCleanup = null;
         this.createdTopAdapter = false;
         this.createdThreeAdapter = false;
@@ -16521,6 +16526,32 @@
         this.root.setAttribute('aria-busy', this.state.busy ? 'true' : 'false');
     };
 
+    /**
+     * Subscribe to changes in what the viewport represents. Returns an
+     * unsubscribe function. Used by the structure tree, which cannot rely on
+     * the session broadcast alone because previews bypass it.
+     */
+    Workspace.prototype.subscribeStructure = function (listener) {
+        if (typeof listener !== 'function') return function () {};
+        this.structureListeners.push(listener);
+        const self = this;
+        return function () {
+            const index = self.structureListeners.indexOf(listener);
+            if (index >= 0) self.structureListeners.splice(index, 1);
+        };
+    };
+
+    Workspace.prototype._notifyStructure = function () {
+        if (this.destroyed) return;
+        for (let index = 0; index < this.structureListeners.length; index += 1) {
+            try {
+                this.structureListeners[index]();
+            } catch (error) {
+                // A tree that throws must not break the viewport it observes.
+            }
+        }
+    };
+
     Workspace.prototype._syncController = function () {
         if (!this.state.layout || !this.controller) return;
         const layoutAlternative = activeLayoutAlternative(this.state);
@@ -16580,6 +16611,7 @@
                 return placementIds.has(id);
             }));
         }
+        this._notifyStructure();
     };
 
     Workspace.prototype._syncPlanSettingsFromLayout = function () {
@@ -17074,6 +17106,7 @@
         }
         if (this.unsubscribe) this.unsubscribe();
         this.unsubscribe = null;
+        this.structureListeners = [];
         if (this.selectionToolbarManager) {
             this.selectionToolbarManager.destroy();
         }

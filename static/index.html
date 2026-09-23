@@ -6619,6 +6619,115 @@
             scroll-behavior: smooth;
         }
 
+        /* ---- Facility Layout structure tree -------------------------------
+           The tree and the Drawing sections share the left slot and are
+           mutually exclusive; leftPanelContent decides which is shown. */
+        .left-panel[data-content="structure"] > .panel-section,
+        .left-panel[data-content="structure"] > .feature-tree {
+            display: none;
+        }
+        .structure-panel {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            flex: 1;
+        }
+        .structure-panel[hidden] { display: none; }
+        .structure-panel-head {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            padding: 10px 12px 8px;
+            border-bottom: 1px solid var(--border-structure);
+        }
+        .structure-panel-title {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+        }
+        /* Names the represented layout when it is not the editable draft, so a
+           read-only preview is never mistaken for the draft. */
+        .structure-panel-scope {
+            margin-left: auto;
+            font-size: 10px;
+            color: var(--accent-primary, #4fc3f7);
+        }
+        .structure-panel-body {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            padding: 4px 0;
+        }
+        .structure-panel-foot {
+            padding: 8px 12px;
+            border-top: 1px solid var(--border-structure);
+            font-size: 10px;
+            line-height: 1.45;
+            color: var(--text-secondary);
+        }
+        .ip-fst-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            height: 23px;
+            padding-right: 9px;
+            padding-left: calc(6px + (var(--ip-fst-depth, 0) * 15px));
+            font-size: 11.5px;
+            white-space: nowrap;
+            cursor: default;
+            outline: none;
+        }
+        .ip-fst-row:hover { background: var(--bg-hover); }
+        .ip-fst-row:focus-visible {
+            box-shadow: inset 0 0 0 1px var(--accent-primary, #4fc3f7);
+        }
+        .ip-fst-row[data-tone="notice"] .ip-fst-label { color: #e0b357; }
+        .ip-fst-row[data-geometry="invalid"] .ip-fst-label {
+            color: #d98b6a;
+            text-decoration: underline dotted;
+        }
+        .ip-fst-caret {
+            width: 9px;
+            flex: 0 0 9px;
+            font-size: 9px;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+        .ip-fst-icon {
+            width: 12px;
+            height: 12px;
+            flex: 0 0 12px;
+            border-radius: 2px;
+            border: 1px solid currentColor;
+            opacity: 0.55;
+        }
+        .ip-fst-icon[data-icon="asset"] { border-radius: 50%; }
+        .ip-fst-icon[data-icon="placement"] { opacity: 0.3; }
+        .ip-fst-icon[data-icon="unzoned"] {
+            border-style: dashed;
+            color: #e0b357;
+            opacity: 0.9;
+        }
+        .ip-fst-icon[data-icon="zone-invalid"] { border-style: dotted; }
+        .ip-fst-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ip-fst-meta {
+            margin-left: auto;
+            font-size: 10px;
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+        }
+        .ip-fst-empty {
+            padding: 16px 14px;
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--text-secondary);
+        }
+
         .left-restore-strip {
             display: none;
             width: 6px;
@@ -20412,6 +20521,13 @@
                     </span>
                     <span class="activity-tooltip">3D Model</span>
                 </div>
+                <div class="activity-bar-icon" data-panel="structure" title="Structure">
+                    <span class="shell-rail-icon" aria-hidden="true">
+                        <img class="shell-rail-icon-image shell-rail-icon-dark" src="/static/assets/shell-icons/dark/structure.svg" alt="" draggable="false">
+                        <img class="shell-rail-icon-image shell-rail-icon-light" src="/static/assets/shell-icons/light/structure.svg" alt="" draggable="false">
+                    </span>
+                    <span class="activity-tooltip">Structure</span>
+                </div>
                 <div class="activity-bar-spacer"></div>
             </div>
 
@@ -20476,6 +20592,21 @@
                     </div>
                 </div>
                 <div class="feature-tree" id="featureTree"></div>
+
+                <!-- Facility Layout structure tree. Shares this slot with the
+                     Drawing sections above: leftPanelContent decides which is
+                     shown, and the CSS hides the other. -->
+                <section class="structure-panel" id="structurePanel" hidden>
+                    <div class="structure-panel-head">
+                        <span class="structure-panel-title">Structure</span>
+                        <span class="structure-panel-scope" id="structurePanelScope"></span>
+                    </div>
+                    <div class="structure-panel-body" id="structureTreeHost"></div>
+                    <div class="structure-panel-foot">
+                        Membership is geometric: each asset is listed under the
+                        smallest zone whose boundary contains it.
+                    </div>
+                </section>
             </div>
 
             <!-- Center Viewport -->
@@ -20973,6 +21104,8 @@
     <script src="/static/facility_layout_editor.js?v=20260905-receiving-cycle-v2"></script>
     <script src="/static/facility_layout_three_adapter.js?v=20260905-receiving-cycle-v2"></script>
     <script src="/static/facility_layout_recorder.js?v=20260807-viewport-recording"></script>
+    <script src="/static/facility_layout_structure.js?v=20260923-structure-tree"></script>
+    <script src="/static/facility_layout_structure_tree.js?v=20260923-structure-tree"></script>
     <script src="/static/facility_layout_patterns.js?v=20260912-construction-contract"></script>
     <script src="/static/facility_layout_command_adapter.js?v=20260912-contract-v1-retry-fix"></script>
     <script src="/static/facility_layout_session.js?v=20260912-sage-construction"></script>
@@ -54377,6 +54510,98 @@
         }
 
         let _trainFacilityLayoutAuthoringApp = null;
+
+        // ---- Facility Layout structure tree -----------------------------
+        // The tree derives from whatever layout the viewport represents, which
+        // is not always state.layout: a generation or construction preview can
+        // be on screen while the draft is untouched. It is therefore refreshed
+        // from two places - the session broadcast, and _syncController, which
+        // previews call directly without notifying the session.
+        let _structureTreeView = null;
+        let _structureTreeWorkspace = null;
+
+        function _structureRepresentedLayout(workspace) {
+            if (!workspace) return null;
+            const state = workspace.getState ? workspace.getState() : null;
+            if (!state) return null;
+            const preview = workspace.generationPlanningView
+                && typeof workspace.generationPlanningView.activeLayout === 'function'
+                ? workspace.generationPlanningView.activeLayout() : null;
+            if (preview && preview.layout) {
+                return {
+                    layout: preview.layout,
+                    kind: 'candidate',
+                    proposalId: String(preview.proposalId || preview.id || 'preview'),
+                    layoutId: String(state.layoutId || ''),
+                    revision: String(preview.revision || preview.baseRevision || ''),
+                    readOnly: true,
+                };
+            }
+            return {
+                layout: state.layout || null,
+                kind: 'draft',
+                proposalId: '',
+                layoutId: String(state.layoutId || ''),
+                revision: String(state.draftRevision || state.baseRevision || ''),
+                readOnly: false,
+            };
+        }
+
+        function _structureRenderNow() {
+            const tree = window._structureTreeInstance;
+            if (!tree || !_structureTreeWorkspace) return;
+            const structureApi = window.InspectorProFacilityStructure;
+            if (!structureApi) return;
+            const view = _structureRepresentedLayout(_structureTreeWorkspace);
+            if (!view) return;
+            // Rebuild only when the represented geometry moved. Camera and
+            // selection notifications reach the same subscriber and must not
+            // rebuild rows.
+            const invalidation = [view.kind, view.proposalId, view.layoutId, view.revision].join('\u0000');
+            if (invalidation === _structureTreeView) return;
+            _structureTreeView = invalidation;
+            const scope = document.getElementById('structurePanelScope');
+            if (scope) scope.textContent = view.kind === 'candidate' ? 'Preview (read only)' : '';
+            tree.render({
+                model: structureApi.deriveStructure(view.layout || {}),
+                view: view,
+                readOnly: view.readOnly,
+            });
+        }
+
+        window._structureTreeRefresh = _structureRenderNow;
+
+        window._mountStructureTree = function () {
+            if (window._structureTreeInstance) {
+                _structureTreeView = null;   // force a redraw when re-shown
+                _structureRenderNow();
+                return window._structureTreeInstance;
+            }
+            const api = window.InspectorProFacilityStructureTree;
+            const host = document.getElementById('structureTreeHost');
+            if (!api || !host) return null;
+            window._structureTreeInstance = api.createStructureTree({
+                document: document,
+                host: host,
+                displayName: function (assetId) {
+                    return String(assetId || '').replace(/^asset-/, '')
+                        .replace(/[-_]+/g, ' ')
+                        .replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+                },
+            });
+            _structureRenderNow();
+            return window._structureTreeInstance;
+        };
+
+        function _trainBindStructureTree(appInstance) {
+            _structureTreeWorkspace = appInstance && appInstance.workspace;
+            _structureTreeView = null;
+            if (!_structureTreeWorkspace) return;
+            if (typeof _structureTreeWorkspace.subscribeStructure === 'function') {
+                _structureTreeWorkspace.subscribeStructure(_structureRenderNow);
+            }
+            if (window._structureTreeInstance) _structureRenderNow();
+        }
         let _trainFacilityLayoutMountPromise = null;
         let _trainDesktopFacilityDocument = null;
         let _trainFacilityLayoutMountGeneration = 0;
@@ -54670,6 +54895,7 @@
                     .createFacilityLayoutApp(preparedFacilityOptions);
                 _trainFacilityLayoutAuthoringApp = appInstance;
                 await appInstance.ready;
+                _trainBindStructureTree(appInstance);
                 if (mountGeneration !== _trainFacilityLayoutMountGeneration
                         || !_trainIsFacilityLayoutMode()) {
                     appInstance.destroy();
@@ -89971,8 +90197,13 @@
 
                 icons.forEach(icon => {
                     const panel = icon.dataset.panel;
+                    const leftShown = Boolean(leftPanel && leftPanel.style.display !== 'none');
+                    const content = window._getLeftPanelContent
+                        ? window._getLeftPanelContent() : 'drawing';
                     if (panel === 'explorer') {
-                        icon.classList.toggle('active', leftPanel && leftPanel.style.display !== 'none');
+                        icon.classList.toggle('active', leftShown && content === 'drawing');
+                    } else if (panel === 'structure') {
+                        icon.classList.toggle('active', leftShown && content === 'structure');
                     } else if (panel === 'agent') {
                         icon.classList.toggle('active', rightPanel && rightPanel.style.display !== 'none' && rightPanel.style.width !== '0px');
                     } else {
@@ -89988,8 +90219,26 @@
 
                     switch (panel) {
                         case 'explorer':
-                            // True toggle — hide if visible, show if hidden
+                            // True toggle — hide if visible, show if hidden.
+                            // Also claims the slot back for the Drawing content.
+                            if (window._setLeftPanelContent
+                                && window._getLeftPanelContent
+                                && window._getLeftPanelContent() !== 'drawing') {
+                                window._setLeftPanelContent('drawing', { reveal: true });
+                                break;
+                            }
                             if (window._toggleLeftPanel) window._toggleLeftPanel();
+                            break;
+                        case 'structure':
+                            // Selecting Structure when it is already showing
+                            // retracts the pane, matching the explorer toggle.
+                            if (!window._setLeftPanelContent) break;
+                            if (window._getLeftPanelContent
+                                && window._getLeftPanelContent() === 'structure') {
+                                if (window._toggleLeftPanel) window._toggleLeftPanel();
+                            } else {
+                                window._setLeftPanelContent('structure', { reveal: true });
+                            }
                             break;
                         case 'model':
                             document.querySelector('.tab[data-tab="3dmodel"]')?.click();
@@ -90076,10 +90325,34 @@
                 });
             }
 
-            // Expose for Ctrl+B shortcut
+            // Expose for Ctrl+B shortcut. Visibility only: it deliberately does
+            // not touch which content the slot holds.
             window._toggleLeftPanel = function() {
                 if (leftCollapsed) expandLeft();
                 else collapseLeft();
+            };
+
+            // Which content the left slot holds - 'drawing' or 'structure'.
+            // Separate from visibility, per the plan: Ctrl+B and the rail toggle
+            // whether the slot is shown; this decides what is in it.
+            let leftPanelContent = 'drawing';
+            const structurePanel = document.getElementById('structurePanel');
+
+            window._getLeftPanelContent = function() { return leftPanelContent; };
+
+            window._setLeftPanelContent = function(kind, options) {
+                const next = kind === 'structure' ? 'structure' : 'drawing';
+                const opts = options || {};
+                leftPanelContent = next;
+                if (leftPanel) leftPanel.setAttribute('data-content', next);
+                if (structurePanel) structurePanel.hidden = next !== 'structure';
+                if (next === 'structure' && typeof window._mountStructureTree === 'function') {
+                    window._mountStructureTree();
+                }
+                // Showing content is a separate act from choosing it, so a
+                // caller has to ask for it.
+                if (opts.reveal && leftCollapsed) expandLeft();
+                return leftPanelContent;
             };
         })();
 

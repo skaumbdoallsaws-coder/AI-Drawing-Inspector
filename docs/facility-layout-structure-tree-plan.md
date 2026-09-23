@@ -1,6 +1,6 @@
 # Facility Layout Structure Tree Plan
 
-Date: 2026-09-22 (revision 4 - third review pass)
+Date: 2026-09-22 (revision 5 - fourth review pass)
 
 Status: proposed, not started. No code has been written for this plan.
 
@@ -26,8 +26,15 @@ would have collapsed every open branch. Rebuilding and remembering are separate
 questions and now use separate keys (section 6), FT4 no longer carries the older
 wording, and an acceptance sequence covers expansion surviving an edit while
 staying independent across a preview. Group toggling gained two requirements:
-it preserves unrelated selections and lands as one `selectMany`. The
-architecture is unchanged throughout.
+it preserves unrelated selections and lands as one `selectMany`.
+
+Revision 5 answers a fourth pass, which closed the last identity gap: a group
+row scoped only by asset identity collides across zones. Row IDs are now scoped
+by parent (section 6), grouping is stated as per-zone (section 3a), and FT2
+gains an isolation test. Measurement backing it: 18 of the reference layout's 37
+distinct assets occur in more than one zone, `asset-operator` in seventeen. The
+architecture is unchanged throughout, and this revision is the baseline the
+reviewer accepted for implementation.
 
 Working name: FT0-FT5
 
@@ -369,6 +376,10 @@ Requirements:
 - **Group by asset identity and revision**, `assetId` + `assetDefinitionRevision`,
   not by display name. Two revisions of one asset are two groups even where the
   catalog name is identical, because they are different entities.
+- **Grouping is scoped to one zone.** A group never spans zones: the same asset
+  in two cells is two groups, addressed by the row ID in section 6. This is what
+  the counts in the mockup already show, and 18 of the reference layout's 37
+  assets occur in more than one zone.
 - **Partial selection is shown.** When some but not all of a group's members are
   selected, the row renders a distinct partial state rather than reading as
   fully selected or fully unselected.
@@ -502,9 +513,25 @@ same `layoutId` **and the same zone IDs** as the draft it was derived from;
 without them, opening a preview would inherit the draft's expanded set and
 dismissing it would hand back the candidate's.
 
-Inside a namespace, expansion is recorded against **stable row IDs** - zone IDs,
-and for group rows the asset identity and revision from section 3a - never row
-indices, which move as the layout changes.
+Inside a namespace, expansion is recorded against **stable row IDs**, never row
+indices, which move as the layout changes. A row ID is scoped by where the row
+sits, not only by what it holds:
+
+| Row kind | Row ID |
+| --- | --- |
+| zone | `zoneId` |
+| group | parent scope (`zoneId`, or a distinct `unzoned` scope) + `assetId` + `assetDefinitionRevision` |
+| placement | `placementId` |
+
+**The parent scope is required, not decorative.** The same asset appears in many
+zones, so asset identity alone collides. Measured on the reference layout:
+**18 of its 37 distinct assets appear in more than one zone**, and
+`asset-operator` appears in **17**. Without the parent scope, expanding the
+guard-panel group in one cell would expand the identical group in every other
+cell, and `asset-operator` would share one key across seventeen rows.
+
+Unzoned needs its own scope rather than a null zone ID, so its groups are
+addressable and cannot collide with a zone that happens to be missing an ID.
 
 `deriveStructure` takes a layout and returns a plain object. It touches no DOM,
 holds no state, and is the only place containment is decided. It is testable
@@ -573,8 +600,12 @@ branch on a fixture that has one. **Every row in the path table above passes**,
 including switching to another workflow without leaving the Workflows tab. The
 **rendering** half of the section 5 benchmark is measured here, against the
 827-placement reference layout with a branch expanded. Preview opening,
-replacement, dismissal, Apply and Undo each move the tree, per section 2a. No
-selection yet.
+replacement, dismissal, Apply and Undo each move the tree, per section 2a.
+
+**Group rows are isolated per zone.** Expanding the guard-panel group in
+`Manufacturing Cell A01` must leave the identical group in `Cell A02` collapsed,
+and the reference layout gives a harder case in `asset-operator`, which occurs in
+seventeen zones. No selection yet.
 
 ### FT3 - Selection Binding
 

@@ -13,6 +13,7 @@
     const DEFAULT_DUPLICATE_OFFSET = Object.freeze({ x: 1, y: 0, z: 1 });
     const DEFAULT_QUATERNION = Object.freeze({ x: 0, y: 0, z: 0, w: 1 });
     const ORDINARY_OPERATION_TYPES = Object.freeze([
+        'rename_layout',
         'place_asset',
         'move_placement',
         'rotate_placement',
@@ -4660,6 +4661,26 @@
             }], [id]);
         }
 
+        /**
+         * Rename the layout itself. rename_layout is an operation the server
+         * already implements; this is the gesture that emits it.
+         */
+        async function renameLayout(displayName) {
+            requireLoaded();
+            const next = nonEmptyString(displayName, 'layout display name').trim();
+            if (!next) throw new TypeError('layout display name must not be blank');
+            if (next.length > 120) {
+                throw new RangeError('layout display name must be 120 characters or fewer');
+            }
+            if (draftLayout.displayName === next) return getState();
+            // 'preserve', not 'created': a rename creates nothing, and the
+            // user's selection has no reason to change because of it.
+            return commitGesture('Rename layout', [{
+                op: 'rename_layout',
+                displayName: next,
+            }], 'preserve');
+        }
+
         async function editZoneLabel(zoneId, label) {
             requireLoaded();
             const id = nonEmptyString(zoneId, 'zoneId');
@@ -5022,6 +5043,7 @@
             editZoneGeometry: editZoneGeometry,
             editZoneDimensions: editZoneDimensions,
             editZoneLabel: editZoneLabel,
+            renameLayout: renameLayout,
             editZoneType: editZoneType,
             createFloorMarking: createFloorMarking,
             editFloorMarking: editFloorMarking,

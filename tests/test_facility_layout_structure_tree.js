@@ -47,6 +47,16 @@ function makeDocument() {
                 child.parentNode = null;
                 return child;
             },
+            replaceChild: function (next, previous) {
+                const index = this.childNodes.indexOf(previous);
+                if (index < 0) throw new Error('replaceChild: not a child');
+                this.childNodes[index] = next;
+                next.parentNode = this;
+                previous.parentNode = null;
+                return previous;
+            },
+            value: '',
+            select: function () {},
             setAttribute: function (key, value) { this.attributes[key] = String(value); },
             getAttribute: function (key) {
                 return Object.prototype.hasOwnProperty.call(this.attributes, key)
@@ -90,6 +100,10 @@ function makeDocument() {
                 if (match) {
                     const want = match[1].replace(/\\(["\\])/g, '$1');
                     return all.filter(function (n) { return n.getAttribute('data-row-id') === want; });
+                }
+                if (selector.charAt(0) === '.') {
+                    const wanted = selector.slice(1);
+                    return all.filter(function (n) { return n.className === wanted; });
                 }
                 return [];
             },
@@ -141,6 +155,15 @@ const LAYOUT = {
     ],
 };
 
+const LAYOUT_ROW = treeModule.LAYOUT_ROW_ID;
+
+// Every tree now has one root: the layout document. These helpers keep the
+// checks about the structure under it.
+function idsBelowRoot(element) {
+    return rows(element).map(function (r) { return r.id; })
+        .filter(function (id) { return id !== LAYOUT_ROW; });
+}
+
 function rows(element) {
     return element.querySelectorAll('.ip-fst-row').map(function (row) {
         return {
@@ -168,8 +191,11 @@ check('collapsed roots render without their descendants', function () {
     const element = host(doc);
     build(doc, element);
     const drawn = rows(element);
-    assert.deepStrictEqual(drawn.map(function (r) { return r.id; }), ['auto', 'unzoned']);
-    assert.strictEqual(drawn[0].expanded, 'false', 'lazy: children not built yet');
+    assert.strictEqual(drawn[0].id, LAYOUT_ROW, 'the layout is the single root');
+    assert.strictEqual(drawn[0].kind, 'layout');
+    assert.strictEqual(drawn[0].expanded, 'true', 'the root opens by default');
+    assert.deepStrictEqual(idsBelowRoot(element), ['auto', 'unzoned']);
+    assert.strictEqual(drawn[1].expanded, 'false', 'lazy: children not built yet');
 });
 
 check('expanding a zone builds its children on demand', function () {
@@ -224,10 +250,17 @@ check('an empty layout renders an explicit empty state, not a blank pane', funct
     const doc = makeDocument();
     const element = host(doc);
     const tree = treeModule.createStructureTree({ document: doc, host: element });
-    tree.render({ model: structure.deriveStructure({}), view: { kind: 'draft' } });
-    assert.strictEqual(rows(element).length, 0);
-    assert.strictEqual(element.childNodes.length, 1);
-    assert.ok(/No zones or equipment yet/.test(element.childNodes[0].textContent));
+    tree.render({
+        model: structure.deriveStructure({}),
+        view: { kind: 'draft', displayName: 'Main Facility' },
+    });
+    // The layout row is still drawn: its name must be visible and renameable
+    // on an empty layout, which is exactly when a user would set it.
+    assert.deepStrictEqual(idsBelowRoot(element), []);
+    assert.strictEqual(rows(element).length, 1);
+    assert.strictEqual(rows(element)[0].label, 'Main Facility');
+    assert.strictEqual(element.childNodes.length, 2);
+    assert.ok(/No zones or equipment yet/.test(element.childNodes[1].textContent));
 });
 
 check('invalid zone geometry is reported on its own row', function () {
@@ -557,10 +590,7 @@ check('a canvas selection reveals its ancestors in a collapsed tree', function (
     const harness = selectingTree(doc, element);
 
     show(harness.tree, []);
-    assert.deepStrictEqual(
-        rows(element).map(function (r) { return r.id; }), ['auto', 'unzoned'],
-        'starts collapsed'
-    );
+    assert.deepStrictEqual(idsBelowRoot(element), ['auto', 'unzoned'], 'starts collapsed');
 
     // Selection arrives from the canvas: a guard panel deep inside Cell B.
     show(harness.tree, ['g3']);
@@ -584,14 +614,12 @@ check('revealing does not fight a user who collapses a branch', function () {
     // The user collapses the root while the selection is unchanged.
     const caret = element.querySelector('[data-row-id="auto"]').childNodes[0];
     element.dispatch('click', { target: caret });
-    assert.deepStrictEqual(
-        rows(element).map(function (r) { return r.id; }), ['auto', 'unzoned']
-    );
+    assert.deepStrictEqual(idsBelowRoot(element), ['auto', 'unzoned']);
 
     // An unrelated redraw (a camera move, say) must not re-open it.
     show(harness.tree, ['g3']);
     assert.deepStrictEqual(
-        rows(element).map(function (r) { return r.id; }), ['auto', 'unzoned'],
+        idsBelowRoot(element), ['auto', 'unzoned'],
         'the same selection is revealed once, not on every draw'
     );
 
@@ -782,6 +810,196 @@ check('a moved placement lands under its new zone on the next render', function 
         return r.kind === 'group' && /robot/i.test(r.label);
     });
     assert.ok(robotUnderB, 'the robot now draws under Cell B');
+});
+
+// ------------------------------------------------------ the layout root --
+function renamingTree(doc, element, view) {
+    const renames = [];
+    const tree = treeModule.createStructureTree({
+        document: doc, host: element,
+        onRename: function (name) { renames.push(name); },
+    });
+    tree.render({
+        model: structure.deriveStructure(LAYOUT),
+        view: view || { kind: 'draft', layoutId: 'L1', revision: 'r',
+                        displayName: 'Main Facility' },
+        readOnly: view ? Boolean(view.readOnly) : false,
+    });
+    return { tree: tree, renames: renames };
+}
+
+function labelOf(element, rowId) {
+    const row = element.querySelector('[data-row-id="' + rowId + '"]');
+    return row ? row.childNodes[2].textContent : null;
+}
+
+check('the layout is the only root, and every zone hangs under it', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    renamingTree(doc, element);
+    const drawn = rows(element);
+    assert.strictEqual(drawn[0].id, LAYOUT_ROW);
+    assert.strictEqual(drawn[0].kind, 'layout');
+    assert.strictEqual(labelOf(element, LAYOUT_ROW), 'Main Facility');
+
+    const depths = element.querySelectorAll('.ip-fst-row').map(function (row) {
+        return row.getAttribute('style');
+    });
+    assert.strictEqual(depths[0], '--ip-fst-depth:0', 'the layout sits at depth 0');
+    assert.ok(
+        depths.slice(1).every(function (style) { return style !== '--ip-fst-depth:0'; }),
+        'nothing else sits at depth 0'
+    );
+});
+
+check('the layout row carries the total placement count', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    renamingTree(doc, element);
+    const row = element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]');
+    assert.strictEqual(row.childNodes[3].textContent, String(LAYOUT.placements.length));
+});
+
+check('a layout with no name falls back rather than showing an empty row', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const tree = treeModule.createStructureTree({ document: doc, host: element });
+    tree.render({
+        model: structure.deriveStructure(LAYOUT),
+        view: { kind: 'draft', layoutId: 'L1', revision: 'r' },
+    });
+    assert.strictEqual(labelOf(element, LAYOUT_ROW), 'Facility layout');
+});
+
+check('the root opens by default and can be collapsed shut', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = renamingTree(doc, element);
+    assert.ok(idsBelowRoot(element).length > 0, 'open on arrival');
+
+    const caret = element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]').childNodes[0];
+    element.dispatch('click', { target: caret });
+    assert.deepStrictEqual(idsBelowRoot(element), [], 'collapsing hides the whole tree');
+
+    // A collapse is remembered, not forgotten back to the default.
+    harness.tree.render({
+        model: structure.deriveStructure(LAYOUT),
+        view: { kind: 'draft', layoutId: 'L1', revision: 'r2',
+                displayName: 'Main Facility' },
+    });
+    assert.deepStrictEqual(idsBelowRoot(element), [], 'still closed after an edit');
+
+    element.dispatch('click', {
+        target: element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]').childNodes[0],
+    });
+    assert.ok(idsBelowRoot(element).length > 0, 'and it opens again');
+});
+
+check('double-clicking the layout row opens an editor seeded with the name', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    renamingTree(doc, element);
+    const row = element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]');
+    element.dispatch('dblclick', { target: row.childNodes[2] });
+
+    const input = element.querySelector('.ip-fst-rename');
+    assert.ok(input, 'an input replaced the label');
+    assert.strictEqual(input.value, 'Main Facility');
+    assert.strictEqual(doc.activeElement, input, 'and it is focused');
+});
+
+check('Enter commits the new name and Escape abandons it', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = renamingTree(doc, element);
+    const rowOf = function () {
+        return element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]');
+    };
+
+    element.dispatch('dblclick', { target: rowOf().childNodes[2] });
+    let input = element.querySelector('.ip-fst-rename');
+    input.value = 'North Plant';
+    input.dispatch('keydown', { target: input, key: 'Enter' });
+    assert.deepStrictEqual(harness.renames, ['North Plant']);
+
+    // The tree does not apply the name itself - it asks the host and waits.
+    // The host renders again when the session comes back with the new name.
+    harness.tree.render({
+        model: structure.deriveStructure(LAYOUT),
+        view: { kind: 'draft', layoutId: 'L1', revision: 'r2',
+                displayName: 'North Plant' },
+    });
+    assert.strictEqual(labelOf(element, LAYOUT_ROW), 'North Plant');
+    assert.ok(!element.querySelector('.ip-fst-rename'), 'the editor is gone');
+
+    element.dispatch('dblclick', { target: rowOf().childNodes[2] });
+    input = element.querySelector('.ip-fst-rename');
+    input.value = 'Discarded';
+    input.dispatch('keydown', { target: input, key: 'Escape' });
+    assert.deepStrictEqual(harness.renames, ['North Plant'], 'Escape commits nothing');
+    assert.ok(!element.querySelector('.ip-fst-rename'), 'and the editor closes');
+    assert.strictEqual(labelOf(element, LAYOUT_ROW), 'North Plant');
+});
+
+check('an unchanged or blank name is not sent as a rename', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = renamingTree(doc, element);
+    const rowOf = function () {
+        return element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]');
+    };
+
+    element.dispatch('dblclick', { target: rowOf().childNodes[2] });
+    let input = element.querySelector('.ip-fst-rename');
+    input.dispatch('keydown', { target: input, key: 'Enter' });   // untouched
+    assert.deepStrictEqual(harness.renames, []);
+
+    element.dispatch('dblclick', { target: rowOf().childNodes[2] });
+    input = element.querySelector('.ip-fst-rename');
+    input.value = '   ';
+    input.dispatch('keydown', { target: input, key: 'Enter' });
+    assert.deepStrictEqual(harness.renames, [], 'a blank name is refused');
+});
+
+check('F2 renames from the keyboard', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    renamingTree(doc, element);
+    const row = element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]');
+    element.dispatch('keydown', { target: row, key: 'F2' });
+    assert.ok(element.querySelector('.ip-fst-rename'), 'F2 opens the editor');
+});
+
+check('a preview cannot be renamed', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const harness = renamingTree(doc, element, {
+        kind: 'candidate', proposalId: 'p1', layoutId: 'L1', revision: 'r',
+        displayName: 'Candidate Facility', readOnly: true,
+    });
+    const row = element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]');
+    assert.strictEqual(row.getAttribute('data-editable'), null);
+    element.dispatch('dblclick', { target: row.childNodes[2] });
+    element.dispatch('keydown', { target: row, key: 'F2' });
+    assert.ok(!element.querySelector('.ip-fst-rename'), 'no editor opens');
+    assert.deepStrictEqual(harness.renames, []);
+});
+
+check('the layout row selects nothing: it is the document, not an entity', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const selected = [];
+    const tree = treeModule.createStructureTree({
+        document: doc, host: element,
+        onSelect: function (kind, payload) { selected.push([kind, payload.rowId]); },
+    });
+    tree.render({
+        model: structure.deriveStructure(LAYOUT),
+        view: { kind: 'draft', layoutId: 'L1', revision: 'r', displayName: 'Main' },
+    });
+    const row = element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]');
+    element.dispatch('click', { target: row.childNodes[2] });
+    assert.deepStrictEqual(selected, []);
 });
 
 console.log('\n' + passed + '/' + passed + ' facility layout structure tree checks passed');

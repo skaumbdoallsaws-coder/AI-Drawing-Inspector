@@ -6696,6 +6696,25 @@
             background: color-mix(in srgb, var(--accent-primary, #4fc3f7) 8%, transparent);
             box-shadow: inset 2px 0 0 var(--accent-primary, #4fc3f7);
         }
+        /* The layout root is the document, so it carries more weight than
+           the zones beneath it. */
+        .ip-fst-row[data-row-kind="layout"] .ip-fst-label {
+            font-weight: 600;
+            letter-spacing: 0.01em;
+        }
+        .ip-fst-row[data-editable="true"] .ip-fst-label { cursor: text; }
+        .ip-fst-rename {
+            flex: 1 1 auto;
+            min-width: 0;
+            font: inherit;
+            color: var(--text-primary);
+            background: var(--bg-input, rgba(0, 0, 0, 0.25));
+            border: 1px solid var(--accent-primary, #4fc3f7);
+            border-radius: 2px;
+            padding: 0 3px;
+            height: 17px;
+            outline: none;
+        }
         .ip-fst-row[data-tone="notice"] .ip-fst-label { color: #e0b357; }
         .ip-fst-row[data-geometry="invalid"] .ip-fst-label {
             color: #d98b6a;
@@ -54561,6 +54580,7 @@
                     // rebuilds rows inside that namespace.
                     proposalId: String(ref.candidateRevision || 'preview'),
                     layoutId: String(previewLayout.layoutId || state.layoutId || ''),
+                    displayName: String(previewLayout.displayName || ''),
                     revision: String(ref.previewRevision || ref.candidateRevision || ''),
                     readOnly: true,
                     // A preview's IDs are not in the draft layout, so the
@@ -54573,6 +54593,7 @@
                 kind: 'draft',
                 proposalId: '',
                 layoutId: String(state.layoutId || ''),
+                displayName: String(state.displayName || ''),
                 revision: String(state.revision || ''),
                 readOnly: false,
                 selection: state.selection.slice(),
@@ -54672,6 +54693,28 @@
             ));
         }
 
+        /**
+         * Layout row -> session rename. The tree reports the new name and
+         * waits; the redraw arrives with the session broadcast, so the name on
+         * screen is always the one the session accepted.
+         */
+        function _structureRenameLayout(displayName) {
+            const workspace = _structureTreeWorkspace;
+            const session = workspace && workspace.session;
+            if (!session || typeof session.renameLayout !== 'function') return;
+            const view = _structureRepresentedLayout(workspace);
+            if (!view || view.readOnly) return;
+            Promise.resolve()
+                .then(function () { return session.renameLayout(displayName); })
+                .catch(function (error) {
+                    // A refused rename must leave the tree showing the name the
+                    // session still holds, not the one the user typed.
+                    console.warn('facility layout rename refused', error);
+                    _structureTreeView = null;
+                    _structureRenderNow();
+                });
+        }
+
         window._structureTreeRefresh = _structureRenderNow;
 
         window._mountStructureTree = function () {
@@ -54688,6 +54731,7 @@
                 document: document,
                 host: host,
                 onSelect: _structureApplySelection,
+                onRename: _structureRenameLayout,
                 displayName: function (assetId) {
                     return String(assetId || '').replace(/^asset-/, '')
                         .replace(/[-_]+/g, ' ')

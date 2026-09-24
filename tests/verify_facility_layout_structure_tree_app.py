@@ -516,6 +516,102 @@ def run(base, headed, shots_dir):
             (total, ref["placements"]),
         )
 
+        # ------------------------------------ the layout root and its rename
+        root = page.evaluate(
+            """() => {
+              const rows = [...document.querySelectorAll('#structureTreeHost .ip-fst-row')];
+              const first = rows[0];
+              const depths = rows.map(r => r.getAttribute('style'));
+              return {
+                kind: first.getAttribute('data-row-kind'),
+                label: first.childNodes[2].textContent,
+                meta: first.childNodes[3] ? first.childNodes[3].textContent : '',
+                expanded: first.getAttribute('aria-expanded'),
+                editable: first.getAttribute('data-editable'),
+                otherRootRows: depths.slice(1)
+                  .filter(s => s === '--ip-fst-depth:0').length,
+                storedName: window.__fst.src().displayName,
+              };
+            }"""
+        )
+        check("the layout is the tree's single root", root["kind"] == "layout"
+              and root["otherRootRows"] == 0, root)
+        check(
+            "it shows the layout's own name and total",
+            root["label"] == root["storedName"] and root["meta"] == str(ref["placements"]),
+            root,
+        )
+        check("it is open on arrival and marked editable", root["expanded"] == "true"
+              and root["editable"] == "true", root)
+
+        # Rename it the way a user would: double-click, type, Enter.
+        original = root["storedName"]
+        page.evaluate(
+            """(name) => {
+              const row = document.querySelector('#structureTreeHost .ip-fst-row');
+              row.childNodes[2].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+              const input = document.querySelector('.ip-fst-rename');
+              input.value = name;
+              input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+            }""",
+            "Main Facility",
+        )
+        page.wait_for_function(
+            "() => window._trainFacilityLayoutAuthoringApp.workspace"
+            ".structureSource().displayName === 'Main Facility'",
+            timeout=30000,
+        )
+        renamed = page.evaluate(
+            """() => ({
+              stored: window.__fst.src().displayName,
+              rowLabel: document.querySelector('#structureTreeHost .ip-fst-row')
+                .childNodes[2].textContent,
+              editorGone: !document.querySelector('.ip-fst-rename'),
+            })"""
+        )
+        check(
+            "renaming the root renames the layout, and the row follows the session",
+            renamed["stored"] == "Main Facility"
+            and renamed["rowLabel"] == "Main Facility"
+            and renamed["editorGone"],
+            renamed,
+        )
+
+        # Collapsing the root hides the whole tree; reopening restores it.
+        page.evaluate(
+            """() => {
+              const row = document.querySelector('#structureTreeHost .ip-fst-row');
+              row.childNodes[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            }"""
+        )
+        check(
+            "collapsing the root hides every zone",
+            page.evaluate(
+                "() => document.querySelectorAll('#structureTreeHost .ip-fst-row').length"
+            ) == 1,
+        )
+        page.evaluate(
+            """() => {
+              const row = document.querySelector('#structureTreeHost .ip-fst-row');
+              row.childNodes[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            }"""
+        )
+        check(
+            "and reopening restores them",
+            page.evaluate(
+                "() => document.querySelectorAll('#structureTreeHost .ip-fst-row').length"
+            ) > 1,
+        )
+
+        # Put the name back, so a rerun starts where this one did.
+        page.evaluate("(name) => window.__fst.session().renameLayout(name)", original)
+        page.wait_for_function(
+            "(name) => window._trainFacilityLayoutAuthoringApp.workspace"
+            ".structureSource().displayName === name",
+            arg=original, timeout=30000,
+        )
+        check("the original name is restored for the next run", True)
+
         check(
             "the tree exposes tree/treeitem roles and levels",
             page.evaluate(

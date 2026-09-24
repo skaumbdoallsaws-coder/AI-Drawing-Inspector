@@ -16561,6 +16561,7 @@
         return {
             layout: state.layout || null,
             layoutId: (state.layout && state.layout.layoutId) || '',
+            displayName: (state.layout && state.layout.displayName) || '',
             revision: state.draftRevision || state.baseRevision || '',
             selection: Array.isArray(state.selection) ? state.selection : [],
         };

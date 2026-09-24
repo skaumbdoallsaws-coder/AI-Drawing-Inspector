@@ -25,6 +25,9 @@
     'use strict';
 
     const API_VERSION = 1;
+    // The layout row stands for the document, which has no entity ID of
+    // its own. A reserved constant keeps it out of any real ID's way.
+    const LAYOUT_ROW_ID = '\u0000layout';
 
     function namespaceOf(view) {
         const source = view || {};
@@ -73,6 +76,7 @@
         const displayName = typeof settings.displayName === 'function'
             ? settings.displayName
             : function (assetId) { return assetId; };
+        const onRename = typeof settings.onRename === 'function' ? settings.onRename : null;
 
         // expansion[namespace] = { rowId: true }
         const expansion = Object.create(null);
@@ -92,14 +96,22 @@
             return expansion[key];
         }
 
-        function isExpanded(rowId) {
-            return Boolean(expandedSet()[rowId]);
+        /**
+         * @param {string} rowId
+         * @param {boolean} [fallback] value when the user has never touched it
+         */
+        function isExpanded(rowId, fallback) {
+            const set = expandedSet();
+            if (Object.prototype.hasOwnProperty.call(set, rowId)) {
+                return Boolean(set[rowId]);
+            }
+            return Boolean(fallback);
         }
 
+        // A collapse is stored as false rather than deleted, so a row with a
+        // default of open can tell "never touched" from "closed on purpose".
         function setExpanded(rowId, value) {
-            const set = expandedSet();
-            if (value) set[rowId] = true;
-            else delete set[rowId];
+            expandedSet()[rowId] = Boolean(value);
         }
 
         function selectionSet() {
@@ -283,14 +295,14 @@
             });
         }
 
-        function appendUnzoned() {
+        function appendUnzoned(depth) {
             const unzoned = current.model.unzoned;
             if (!unzoned || unzoned.directCount === 0) return;
             const expanded = isExpanded(unzoned.rowId);
             const row = rowNode({
                 rowId: unzoned.rowId,
                 kind: 'unzoned',
-                depth: 0,
+                depth: depth,
                 label: 'Unzoned',
                 meta: String(unzoned.directCount),
                 icon: 'unzoned',
@@ -302,8 +314,81 @@
             host.appendChild(row);
             if (!expanded) return;
             unzoned.groups.forEach(function (group) {
-                appendGroup(group, 1);
+                appendGroup(group, depth + 1);
             });
+        }
+
+        /**
+         * The layout document itself, as the single root every zone hangs
+         * under. It is not a derived fact - the derivation only knows geometry
+         * - so it is drawn from the view descriptor.
+         *
+         * Open unless the user has closed it: a tree whose only visible row is
+         * the layout name would be useless on arrival.
+         */
+        function appendLayout() {
+            const model = current.model;
+            const label = (current.view && current.view.displayName) || 'Facility layout';
+            const total = model.counts ? model.counts.placements : 0;
+            const expanded = isExpanded(LAYOUT_ROW_ID, true);
+            const row = rowNode({
+                rowId: LAYOUT_ROW_ID,
+                kind: 'layout',
+                depth: 0,
+                label: label,
+                meta: total ? String(total) : '',
+                icon: 'layout',
+                expandable: true,
+                expanded: expanded,
+            });
+            if (onRename && !(current && current.readOnly)) {
+                row.setAttribute('data-editable', 'true');
+                row.setAttribute('title', label + ' - double-click to rename');
+            }
+            host.appendChild(row);
+            if (!expanded) return;
+            model.roots.forEach(function (zoneId) { appendZone(zoneId, 1); });
+            appendUnzoned(1);
+        }
+
+        /**
+         * Inline rename of the layout row. Enter commits, Escape cancels, and
+         * losing focus commits, which is what a text field in a tree is
+         * expected to do. The tree does not apply the new name itself: it asks
+         * the host, and redraws when the session comes back round.
+         */
+        function beginRename(row) {
+            if (!onRename || (current && current.readOnly)) return;
+            if (row.querySelector('.ip-fst-rename')) return;
+            const labelNode = row.querySelector('.ip-fst-label');
+            if (!labelNode) return;
+            const original = labelNode.textContent;
+            const input = element(doc, 'input', {
+                className: 'ip-fst-rename',
+                type: 'text',
+                'aria-label': 'Facility layout name',
+            });
+            input.value = original;
+            row.replaceChild(input, labelNode);
+            input.focus();
+            if (typeof input.select === 'function') input.select();
+
+            let settled = false;
+            const finish = function (commit) {
+                if (settled) return;
+                settled = true;
+                const next = String(input.value || '').trim();
+                if (commit && next && next !== original) onRename(next);
+                else draw();
+            };
+            input.addEventListener('keydown', function (event) {
+                if (event.key === 'Enter') { finish(true); }
+                else if (event.key === 'Escape') { finish(false); }
+                else { return; }
+                if (typeof event.stopPropagation === 'function') event.stopPropagation();
+                if (typeof event.preventDefault === 'function') event.preventDefault();
+            });
+            input.addEventListener('blur', function () { finish(true); });
         }
 
         function draw() {
@@ -324,14 +409,15 @@
                 revealedKey = key;
             }
             const model = current.model;
-            if (!model || model.counts.zones === 0 && model.counts.placements === 0) {
+            if (!model) return;
+            // The layout row is drawn even when the layout is empty, so its
+            // name is always present and always renameable.
+            appendLayout();
+            if (model.counts.zones === 0 && model.counts.placements === 0) {
                 host.appendChild(element(doc, 'div', {
                     className: 'ip-fst-empty',
                 }, 'No zones or equipment yet. Draw a zone or place equipment to see it here.'));
-                return;
             }
-            model.roots.forEach(function (zoneId) { appendZone(zoneId, 0); });
-            appendUnzoned();
 
             // Focus survives a rebuild when its row still exists (FT5 requirement).
             if (focusedRowId) {
@@ -386,6 +472,12 @@
             }, event);
         }
 
+        function handleDoubleClick(event) {
+            const row = rowFromEvent(event);
+            if (!row || row.getAttribute('data-row-kind') !== 'layout') return;
+            beginRename(row);
+        }
+
         function handleKeydown(event) {
             const row = rowFromEvent(event);
             if (!row) return;
@@ -407,6 +499,10 @@
             } else if (event.key === 'ArrowLeft' && expandable && expanded) {
                 setExpanded(rowId, false);
                 draw();
+            } else if (event.key === 'F2' && row.getAttribute('data-row-kind') === 'layout') {
+                beginRename(row);
+            } else if (event.key === 'Enter' && row.getAttribute('data-row-kind') === 'layout') {
+                beginRename(row);
             } else if (event.key === 'Enter' || event.key === ' ') {
                 const ids = rowTargets[rowId];
                 if (ids && ids.length && onSelect && !(current && current.readOnly)) {
@@ -430,6 +526,7 @@
         host.setAttribute('role', 'tree');
         host.setAttribute('aria-label', 'Facility layout structure');
         host.addEventListener('click', handleClick);
+        host.addEventListener('dblclick', handleDoubleClick);
         host.addEventListener('keydown', handleKeydown);
 
         return {
@@ -445,7 +542,10 @@
 
             /** Expansion for the current view; exposed for tests. */
             expandedRowIds: function () {
-                return Object.keys(expandedSet()).sort();
+                const set = expandedSet();
+                return Object.keys(set).filter(function (rowId) {
+                    return set[rowId] === true;
+                }).sort();
             },
 
             /** Test-only. Requires a prior render: expansion is namespaced by
@@ -470,6 +570,7 @@
                 if (destroyed) return;
                 destroyed = true;
                 host.removeEventListener('click', handleClick);
+                host.removeEventListener('dblclick', handleDoubleClick);
                 host.removeEventListener('keydown', handleKeydown);
                 clear(host);
             },
@@ -478,6 +579,7 @@
 
     return {
         API_VERSION: API_VERSION,
+        LAYOUT_ROW_ID: LAYOUT_ROW_ID,
         createStructureTree: createStructureTree,
         namespaceOf: namespaceOf,
     };

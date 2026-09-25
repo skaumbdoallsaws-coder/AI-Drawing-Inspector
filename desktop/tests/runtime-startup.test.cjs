@@ -209,7 +209,7 @@ test('actual init waits for deferred profiles and assembly selection before mana
 
 function mountFixture(options = {}) {
   const f = fixture({ search: options.search === undefined ? '' : options.search, recoveryRequired: options.recoveryRequired });
-  let legacy = 0, created = 0, fit = 0, supplied;
+  let legacy = 0, created = 0, fit = 0, supplied, boundStructure;
   const requests = [], createdNodes = [];
   function element() {
     const value = { style: {}, isConnected: true, children: [], appendChild(child) { this.children.push(child); return child; } };
@@ -228,6 +228,9 @@ function mountFixture(options = {}) {
     _trainIsFacilityLayoutMode: () => true,
     _trainDisposeFacilityLayoutAuthoring() { f.context._trainFacilityLayoutMountGeneration++; f.context._trainFacilityLayoutAuthoringApp = null; },
     _trainDisposeLiveAssemblyViewer: () => {},
+    // The structure pane observes the mounted workspace. Binding it is part of
+    // mounting, so the stub records what it was handed.
+    _trainBindStructureTree: instance => { boundStructure = instance; },
     _trainMountLegacyFacilityLayoutViewer: () => { legacy++; return true; },
     _trainLoadFacilityThreeRuntime: async () => ({}),
     InspectorProFacilityLayout: { placementFootprint() {} }, InspectorProFacilityThree: {},
@@ -247,7 +250,8 @@ function mountFixture(options = {}) {
   vm.runInContext(indexFunction('_trainMountFacilityLayoutViewer') + '\n' + indexFunction('_trainMountFacilityLayoutViewerImpl'), f.context);
   return { ...f, requests, createdNodes,
     mount: () => f.context._trainMountFacilityLayoutViewer(),
-    get legacy() { return legacy; }, get created() { return created; }, get fit() { return fit; }, get supplied() { return supplied; } };
+    get legacy() { return legacy; }, get created() { return created; }, get fit() { return fit; },
+    get supplied() { return supplied; }, get boundStructure() { return boundStructure; } };
 }
 
 test('actual mount uses the authorized document without a query and attaches before fitting', async () => {
@@ -258,6 +262,9 @@ test('actual mount uses the authorized document without a query and attaches bef
   assert.equal(f.supplied.sessionId, f.value.owner.sessionId);
   assert.equal(f.created, 1); assert.equal(f.fit, 1); assert.equal(f.legacy, 0);
   assert.equal(f.rpc('snapshot').startupRecoveryPending, false);
+  // The structure pane is bound to the app that was actually mounted, not to
+  // a stale one: without this the tree observes nothing and renders empty.
+  assert.equal(f.boundStructure, f.app);
 });
 
 test('actual mount defers post-mount view changes when retained recovery remains unresolved', async () => {

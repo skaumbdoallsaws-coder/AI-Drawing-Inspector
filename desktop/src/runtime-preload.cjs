@@ -6,10 +6,21 @@ const { contextBridge, ipcRenderer } = require('electron');
 if (process.isMainFrame && process.argv.includes('--inspectorpro-desktop-managed')) {
   const MAX_JSON_CHARACTERS = 16 * 1024 * 1024;
   const ROOT_ID = 'trainFacilityLayoutAuthoring';
+  // Facility-layout surfaces that sit outside the canvas root. Each must
+  // match at most one node, and each is captured at attachment so a replaced
+  // node cannot inherit the grant. Workflow selectors, global toolbars and
+  // Sage stay out of this set.
+  //
+  // The structure pane belongs here for the same reason the assets panel
+  // does: it exists only for the facility layout, and every gesture in it
+  // drives the attached facility session and nothing else. Its rail icon is
+  // listed as the single icon rather than the activity bar, because without
+  // it the pane cannot be opened at all and would render inert.
   const FACILITY_SURFACES = [
     '.facility-layout-ribbon .facility-ribbon-commandbar',
     '#trainFacilityLayoutAssets', '#trainRightRailPlayback',
     '#trainFacilityMotionPlaybackHost', '#themeToggleBtn',
+    '#structurePanel', '.activity-bar-icon[data-panel="structure"]',
   ];
   const METHODS = new Set(['snapshot', 'freeze', 'unfreeze', 'restoreRecovery',
     'acceptReconciliation', 'setStartupRecoveryGate', 'inspectOtherWorkflows']);

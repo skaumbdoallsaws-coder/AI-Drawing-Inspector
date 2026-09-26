@@ -25,6 +25,18 @@
     'use strict';
 
     const API_VERSION = 1;
+    // Row-kind artwork. Files are the shipped facility icon package; see
+    // static/assets/facility-tree-icons/README.md. A kind with no file here
+    // keeps the drawn marker below it, which is how Unzoned stays visibly
+    // unlike a zone rather than borrowing a zone's icon.
+    const ICON_BASE = '/static/assets/facility-tree-icons/';
+    const ICON_FILES = Object.freeze({
+        layout: 'facility-layout.svg',
+        zone: 'zone.svg',
+        cell: 'manufacturing-cell.svg',
+        asset: 'asset.svg',
+    });
+
     // The layout row stands for the document, which has no entity ID of
     // its own. A reserved constant keeps it out of any real ID's way.
     const LAYOUT_ROW_ID = '\u0000layout';
@@ -77,6 +89,7 @@
             ? settings.displayName
             : function (assetId) { return assetId; };
         const onRename = typeof settings.onRename === 'function' ? settings.onRename : null;
+        const iconBase = typeof settings.iconBase === 'string' ? settings.iconBase : ICON_BASE;
 
         // expansion[namespace] = { rowId: true }
         const expansion = Object.create(null);
@@ -178,6 +191,31 @@
             open.forEach(function (rowId) { setExpanded(rowId, true); });
         }
 
+        /**
+         * The type marker for a row. Colour carries meaning in this artwork,
+         * so these are real images rather than masked silhouettes.
+         */
+        function iconNode(kind) {
+            const file = ICON_FILES[kind];
+            if (!file) {
+                return element(doc, 'span', {
+                    className: 'ip-fst-icon',
+                    'data-icon': kind,
+                    'aria-hidden': 'true',
+                });
+            }
+            return element(doc, 'img', {
+                className: 'ip-fst-icon',
+                'data-icon': kind,
+                src: iconBase + file,
+                width: '20',
+                height: '20',
+                alt: '',
+                draggable: 'false',
+                'aria-hidden': 'true',
+            });
+        }
+
         function rowNode(spec) {
             const row = element(doc, 'div', {
                 className: 'ip-fst-row',
@@ -201,11 +239,7 @@
             }, spec.expandable ? (spec.expanded ? '\u25be' : '\u25b8') : '');
             row.appendChild(caret);
 
-            row.appendChild(element(doc, 'span', {
-                className: 'ip-fst-icon',
-                'data-icon': spec.icon,
-                'aria-hidden': 'true',
-            }));
+            row.appendChild(iconNode(spec.icon));
 
             row.appendChild(element(doc, 'span', {
                 className: 'ip-fst-label',
@@ -232,7 +266,7 @@
                 depth: depth,
                 label: node.label,
                 meta: node.totalCount ? String(node.totalCount) : '',
-                icon: node.geometryValid ? 'zone' : 'zone-invalid',
+                icon: node.parentZoneId ? 'cell' : 'zone',
                 expandable: hasChildren,
                 expanded: expanded,
                 selection: drawSelection[zoneId] ? 'all' : 'none',
@@ -287,7 +321,7 @@
                     label: displayName(group.assetId, group.assetDefinitionRevision)
                         + ' ' + (index + 1),
                     meta: '',
-                    icon: 'placement',
+                    icon: 'asset',
                     expandable: false,
                     expanded: false,
                     selection: drawSelection[placementId] ? 'all' : 'none',

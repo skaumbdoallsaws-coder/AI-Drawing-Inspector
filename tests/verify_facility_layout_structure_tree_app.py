@@ -654,14 +654,29 @@ def run(base, headed, shots_dir):
         check("ArrowDown moves focus to the next row", focused_before not in (None, first_row),
               focused_before)
 
-        # Force a rebuild and confirm focus is still on the same row.
-        page.evaluate(
+        # Force a real rebuild and confirm focus is still on the same row.
+        # Assigning window._structureTreeView does nothing: the host's state is
+        # a top-level `let`, which is not a window property, so that would
+        # leave the refresh a no-op and the check meaningless. Re-rendering the
+        # instance with a new revision rebuilds every row for real.
+        rebuilt = page.evaluate(
             """() => {
-              const ws = window.__fst.ws();
-              window._structureTreeView = null;     // force a rebuild
-              window._structureTreeRefresh();
+              const before = document.querySelectorAll('#structureTreeHost .ip-fst-row')[0];
+              const model = window.InspectorProFacilityStructure
+                .deriveStructure(window.__fst.src().layout);
+              window._structureTreeInstance.render({
+                model: model,
+                view: { kind: 'draft', layoutId: window.__fst.src().layoutId,
+                        revision: 'forced-rebuild',
+                        displayName: window.__fst.src().displayName },
+                readOnly: false,
+                selection: window.__fst.src().selection,
+              });
+              const after = document.querySelectorAll('#structureTreeHost .ip-fst-row')[0];
+              return before !== after;
             }"""
         )
+        check("the rebuild really replaced the rows", rebuilt, rebuilt)
         focused_after = page.evaluate(
             "() => document.activeElement && document.activeElement.getAttribute('data-row-id')"
         )

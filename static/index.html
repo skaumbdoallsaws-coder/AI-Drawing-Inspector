@@ -6671,10 +6671,10 @@
             display: flex;
             align-items: center;
             gap: 6px;
-            height: 23px;
+            height: 28px;
             padding-right: 9px;
-            padding-left: calc(6px + (var(--ip-fst-depth, 0) * 15px));
-            font-size: 11.5px;
+            padding-left: calc(6px + (var(--ip-fst-depth, 0) * 18px));
+            font-size: 12px;
             white-space: nowrap;
             cursor: default;
             outline: none;
@@ -6712,7 +6712,7 @@
             border: 1px solid var(--accent-primary, #4fc3f7);
             border-radius: 2px;
             padding: 0 3px;
-            height: 17px;
+            height: 21px;
             outline: none;
         }
         .ip-fst-row[data-tone="notice"] .ip-fst-label { color: #e0b357; }
@@ -6721,35 +6721,43 @@
             text-decoration: underline dotted;
         }
         .ip-fst-caret {
-            width: 9px;
-            flex: 0 0 9px;
-            font-size: 9px;
+            width: 11px;
+            flex: 0 0 11px;
+            font-size: 10px;
+            text-align: center;
             color: var(--text-secondary);
             cursor: pointer;
         }
-        .ip-fst-icon {
+        /* Type artwork. Colour is the signal, so these are images rather
+           than masked silhouettes, and they never shrink with the label. */
+        img.ip-fst-icon {
+            display: block;
+            width: 20px;
+            height: 20px;
+            flex: 0 0 20px;
+            object-fit: contain;
+            user-select: none;
+            -webkit-user-drag: none;
+        }
+        /* Unzoned has no artwork in the package: it is a scope, not a zone,
+           and borrowing a zone's icon would say the wrong thing. */
+        span.ip-fst-icon {
             width: 12px;
             height: 12px;
             flex: 0 0 12px;
             border-radius: 2px;
-            border: 1px solid currentColor;
-            opacity: 0.55;
-        }
-        .ip-fst-icon[data-icon="asset"] { border-radius: 50%; }
-        .ip-fst-icon[data-icon="placement"] { opacity: 0.3; }
-        .ip-fst-icon[data-icon="unzoned"] {
-            border-style: dashed;
-            color: #e0b357;
+            border: 1px dashed #e0b357;
             opacity: 0.9;
+            margin: 0 4px;
         }
-        .ip-fst-icon[data-icon="zone-invalid"] { border-style: dotted; }
         .ip-fst-label {
             overflow: hidden;
             text-overflow: ellipsis;
         }
         .ip-fst-meta {
             margin-left: auto;
-            font-size: 10px;
+            padding-left: 8px;
+            font-size: 10.5px;
             color: var(--text-secondary);
             font-variant-numeric: tabular-nums;
         }

@@ -1002,4 +1002,90 @@ check('the layout row selects nothing: it is the document, not an entity', funct
     assert.deepStrictEqual(selected, []);
 });
 
+// ------------------------------------------------------ type icons --
+check('each row kind carries its own artwork, chosen by kind not by name', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const model = structure.deriveStructure(LAYOUT);
+    const guards = model.zones.cellA.groups.filter(function (g) {
+        return g.assetId === 'asset-guard';
+    })[0];
+    const view = { kind: 'draft', layoutId: 'L1', revision: 'r', displayName: 'Main' };
+    const tree = treeModule.createStructureTree({ document: doc, host: element });
+    tree.render({ model: model, view: view });
+    ['auto', 'cellA', guards.rowId].forEach(function (id) {
+        tree.setExpandedForTest(id, true);
+    });
+    tree.render({ model: model, view: view });
+
+    function iconOf(rowId) {
+        const row = element.querySelector('[data-row-id="' + rowId + '"]');
+        return row && { tag: row.childNodes[1].tagName, src: row.childNodes[1].getAttribute('src') };
+    }
+
+    assert.strictEqual(iconOf(LAYOUT_ROW).src,
+        '/static/assets/facility-tree-icons/facility-layout.svg');
+    // A top-level zone is a department; a zone inside one is a cell. zoneType
+    // cannot make this call - the reference layout marks its departments
+    // 'workcell' too.
+    assert.strictEqual(iconOf('auto').src,
+        '/static/assets/facility-tree-icons/zone.svg');
+    assert.strictEqual(iconOf('cellA').src,
+        '/static/assets/facility-tree-icons/manufacturing-cell.svg');
+    // One unified icon for every asset, group row and individual placement
+    // alike.
+    assert.strictEqual(iconOf(guards.rowId).src,
+        '/static/assets/facility-tree-icons/asset.svg');
+    assert.strictEqual(iconOf('g1').src,
+        '/static/assets/facility-tree-icons/asset.svg');
+
+    assert.strictEqual(iconOf('auto').tag, 'IMG', 'colour is preserved, not masked');
+});
+
+check('Unzoned keeps a drawn marker rather than borrowing a zone icon', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const tree = treeModule.createStructureTree({ document: doc, host: element });
+    tree.render({
+        model: structure.deriveStructure(LAYOUT),
+        view: { kind: 'draft', layoutId: 'L1', revision: 'r' },
+    });
+    const row = element.querySelector('[data-row-id="unzoned"]');
+    assert.strictEqual(row.childNodes[1].tagName, 'SPAN');
+    assert.strictEqual(row.childNodes[1].getAttribute('data-icon'), 'unzoned');
+    assert.strictEqual(row.childNodes[1].getAttribute('src'), null);
+});
+
+check('icons are sized and made inert for assistive tech and dragging', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const tree = treeModule.createStructureTree({ document: doc, host: element });
+    tree.render({
+        model: structure.deriveStructure(LAYOUT),
+        view: { kind: 'draft', displayName: 'Main' },
+    });
+    const icon = element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]').childNodes[1];
+    assert.strictEqual(icon.getAttribute('width'), '20');
+    assert.strictEqual(icon.getAttribute('height'), '20');
+    assert.strictEqual(icon.getAttribute('alt'), '');
+    assert.strictEqual(icon.getAttribute('aria-hidden'), 'true');
+    assert.strictEqual(icon.getAttribute('draggable'), 'false');
+});
+
+check('a host may relocate the artwork without touching the renderer', function () {
+    const doc = makeDocument();
+    const element = host(doc);
+    const tree = treeModule.createStructureTree({
+        document: doc, host: element, iconBase: '/elsewhere/',
+    });
+    tree.render({
+        model: structure.deriveStructure(LAYOUT),
+        view: { kind: 'draft', displayName: 'Main' },
+    });
+    assert.strictEqual(
+        element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]').childNodes[1].getAttribute('src'),
+        '/elsewhere/facility-layout.svg'
+    );
+});
+
 console.log('\n' + passed + '/' + passed + ' facility layout structure tree checks passed');

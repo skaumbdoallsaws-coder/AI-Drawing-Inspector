@@ -81534,8 +81534,9 @@
                 if (exactEdit) {
                     if (exactEdit.ok === false) return 'The edit could not be confirmed ('
                         + String(exactEdit.error || 'edit_failed') + '). Check the layout before retrying.';
+                    // Stays true after the user approves or dismisses the review.
                     return exactEdit.saved === true ? 'Applied. Undo is available in the layout toolbar.'
-                        : 'Ready for review. Nothing has been saved.';
+                        : 'Staged for your review. Nothing is saved until you approve it.';
                 }
                 const designUndo = toolResults.find(item =>
                     item && item.name === 'undo_facility_design_proposal'
@@ -89030,7 +89031,13 @@
                                     facilitySemanticStatus
                                     && typeof response === 'string'
                                 ) {
-                                    response = facilitySemanticStatus;
+                                    // Keep Sage's own account of what it staged and what it
+                                    // could not verify; the app's authoritative status follows
+                                    // it. Replacing the reply left only the one-line status.
+                                    const facilityReply = response.trim();
+                                    response = !facilityReply ? facilitySemanticStatus
+                                        : facilityReply.includes(facilitySemanticStatus) ? facilityReply
+                                        : facilityReply + '\n\n**Status:** ' + facilitySemanticStatus;
                                 } else if (semanticStatus && typeof response === 'string') {
                                     response = semanticStatus;
                                 } else if (metadataStatus && typeof response === 'string') {

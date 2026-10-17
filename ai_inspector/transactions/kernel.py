@@ -395,6 +395,7 @@ class TransactionKernel:
             request_fingerprint=fingerprint,
             created_at=now,
             expires_at=expires_at,
+            authorization_mode=request.authorization_mode,
         )
         self._state.put_approval(approval, now=now)
         return approval

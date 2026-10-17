@@ -39,6 +39,7 @@ from .errors import (
 
 FACILITY_LAYOUT_REGISTRY_VERSION = 1
 FACILITY_LAYOUT_SCHEMA_VERSION = 1
+_VALIDATED_CURRENT_CACHE_SIZE = 64
 
 _STABLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _LAYOUT_ID_RE = re.compile(r"^fl-[A-Za-z0-9][A-Za-z0-9._:-]{0,124}$")
@@ -342,6 +343,7 @@ class FacilityLayoutRepository:
         self.root = Path(root).resolve()
         self._validator = validator
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self._validated_current_revisions: dict[str, None] = {}
         try:
             os.makedirs(_native_fs_path(self.root), exist_ok=True)
         except OSError as exc:
@@ -681,7 +683,8 @@ class FacilityLayoutRepository:
                 "layout_scope_mismatch",
                 "Facility Layout scope does not match its registry.",
             )
-        if document.get("schemaVersion") == FACILITY_LAYOUT_SCHEMA_VERSION:
+        if (document.get("schemaVersion") == FACILITY_LAYOUT_SCHEMA_VERSION
+                and revision not in self._validated_current_revisions):
             try:
                 canonical_payload = canonical_layout_bytes(document)
             except FacilityLayoutError as exc:
@@ -694,6 +697,11 @@ class FacilityLayoutRepository:
                     "layout_asset_not_canonical",
                     "Facility Layout bytes are not canonical.",
                 )
+            # Memoize only pure validation of these exact bytes. Every access
+            # still rereads bytes and checks authority, registry, identity and scope.
+            self._validated_current_revisions[revision] = None
+            if len(self._validated_current_revisions) > _VALIDATED_CURRENT_CACHE_SIZE:
+                self._validated_current_revisions.pop(next(iter(self._validated_current_revisions)))
         return document, payload, revision, summary
 
     def _record(

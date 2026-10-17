@@ -210,6 +210,9 @@ def create_facility_layout_router(
     """Build an isolated router; the host app decides when to mount it."""
 
     router = APIRouter()
+    from .decal_images import create_decal_image_router
+    router.include_router(create_decal_image_router(
+        service=service, principal_resolver=principal_resolver, feature_gate=feature_gate))
 
     @router.get("/api/facility-layouts/{site_id}")
     async def list_layouts(
@@ -395,6 +398,23 @@ def create_facility_layout_router(
             )
         )
 
+    @router.post("/api/facility-layouts/{site_id}/{layout_id}/operation-undo-preview")
+    async def preview_approved_operation_undo(site_id: str, layout_id: str, request: Request, body: Any = Body(...)):
+        blocked = _feature_block(feature_gate, "agent_preview")
+        if blocked is not None:
+            return blocked
+        try:
+            payload = _body_mapping(body)
+            if (not {"baseRevision", "receiptId"}.issubset(payload)
+                    or set(payload) - {"baseRevision", "receiptId", "editMode"}
+                    or not all(isinstance(payload[key], str) and 1 <= len(payload[key]) <= 128 for key in payload)):
+                raise FacilityValidationError("invalid_request_body", "An exact saved revision and receipt ID are required.")
+        except FacilityLayoutError as exc:
+            return _error_response(exc)
+        from .operation_proposals import create
+        return await _thread_result(lambda: create(service, principal_resolver(request), site_id, layout_id,
+            payload["baseRevision"], undo_receipt_id=payload["receiptId"], edit_mode=payload.get("editMode", "preview")))
+
     @router.get(
         "/api/facility-layouts/{site_id}/{layout_id}"
         "/proposals/{proposal_id}/preview"
@@ -476,6 +496,8 @@ def create_facility_layout_router(
                 explicit_approval=(
                     payload.get("explicitApproval") is True
                 ),
+                authorization_mode=payload.get("authorizationMode", "explicit"),
+                direct_consent=payload.get("directConsent") is True,
             )
         )
 

@@ -44,7 +44,40 @@ Close the native window normally to let the shell handle pending state and shut
 down its owned backend. The separate **InspectorPro - Manual Layout** shortcut
 is the browser launcher and is not the native application.
 
+## Sage Gateway - October 1, 2026
+
+The normal profile now enables the model gateway. Facility Layout planning uses
+`gpt-6-astra`; routing uses Haiku and web research uses Claude. Close and reopen
+the native app, then use a new Sage planning conversation. Existing generation
+sessions retain their old binding and are not automatically migrated.
+
+The profile's `modelGateway` field points to `config/sage-gateway.json` and the
+private `.runtime/model-gateway/dependencies` installation. No global Python
+upgrade or API key in the profile is required. Model selection and rollback are
+documented in [the gateway report](sage-model-gateway-implementation.md).
+Planning reliability and latency limitations remain open; this default change
+does not certify unrestricted generation or demo readiness.
+
 ## Recreate the Shortcut
+
+### Authoring Tools Promotion - October 13, 2026
+
+The normal shortcut now uses the project-owned Electron 44.3.0 runtime at
+`desktop/node_modules/electron/dist/electron.exe`. It still uses the existing
+`--application` profile and opens `fl-private-gym-20261007`. The previous shortcut
+was backed up with a `.runtime-target-<timestamp>.bak` suffix. This is the
+development desktop runtime, not a new packaged installer.
+
+Decals, Wall Lettering, Component Materials, Interior Walls, Floor Surfaces, and
+Replace Asset passed native ribbon/dialog checks on an isolated Gym copy. See
+[manual authoring tools](facility-manual-authoring-tools.md) for evidence and
+verification limits. Surfaces commands are under **More** when ribbon space is
+limited; component finishes are under **Appearance**.
+
+The shortcut installer accepts any valid application startup layout ID.
+`-RepairRuntimeTarget` explicitly updates the runtime of an existing normal
+shortcut only when its application/profile/Python arguments match exactly;
+it backs up the shortcut before changing it.
 
 Run `scripts/install_inspectorpro_native_shortcut.ps1` with absolute `-Electron`
 and `-ProfileFile` arguments, plus `-Python` if required. The installer refuses

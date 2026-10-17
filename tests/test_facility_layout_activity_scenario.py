@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 
 import pytest
 
 from ai_inspector.facility_layout.activity_scenario import (
+    FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_CANONICAL_BYTES,
+    FACILITY_NAVIGATION_PRESENTATION_QUALIFICATION,
+    FACILITY_NAVIGATION_PRESENTATION_SCHEMA,
     FACILITY_ACTIVITY_SCENARIO_QUALIFICATION,
     FACILITY_ACTIVITY_SCENARIO_SCHEMA_VERSION,
     FacilityActivityScenarioError,
     FacilityActivityScenarioStore,
     build_facility_activity_scenario,
+    build_navigation_activity_scenario,
     facility_activity_scenario_summary,
     validate_facility_activity_scenario,
 )
@@ -114,6 +119,62 @@ def test_activity_scenario_supports_23_actor_reference_playback_but_caps_at_24()
             },
         )
     assert caught.value.code == "facility_activity_scenario_actor_limit"
+
+
+def _large_navigation_scenario(count):
+    """Synthetic package-contract fixture, not a physical route qualification."""
+    actors = [_actor(i, "operator") for i in range(count)]
+    for actor in actors:
+        actor.update(loopMode="journey_cycle", startOffsetSeconds=0, endpointTurnSeconds=0)
+    return build_navigation_activity_scenario(
+        layout_revision="a" * 64, label="All saved movement", actors=actors,
+        cycle_duration_seconds=20,
+        stationary_evidence={"placementCount": 0, "assetTypeCount": 0,
+                             "reason": "Synthetic fixture", "evidenceStatus": "unknown"},
+        navigation_presentation={
+            "schemaVersion": FACILITY_NAVIGATION_PRESENTATION_SCHEMA,
+            "qualification": FACILITY_NAVIGATION_PRESENTATION_QUALIFICATION,
+            "sharedClock": True, "processTimingClaimed": False,
+            "generatedCollisionAvoidanceOffsets": False,
+            "phaseOffsets": [{"actorId": a["actorId"], "offsetSeconds": 0, "authority": "none"} for a in actors],
+            "pathBindings": [{"pathBindingId": "npb-" + a["actorId"], "actorId": a["actorId"],
+                              "actorClass": "pedestrian", "journeySolutionId": "njs-" + a["actorId"],
+                              "motionPackageId": a["motionPackageId"], "closed": True} for a in actors],
+            "pathIntersections": [], "handoffResultIds": [],
+            "sampledProximity": {"sampleCount": 101,
+                "qualification": "Center-distance samples on the shared display clock; not a collision or safety assessment.",
+                "pairMinimums": [{"actorIds": [left["actorId"], right["actorId"]],
+                                  "centerDistanceMeters": 10, "normalizedTime": 0}
+                                 for i, left in enumerate(actors) for right in actors[i + 1:]]},
+        },
+    )
+
+
+@pytest.mark.parametrize("count", [40, 64])
+def test_navigation_scenario_retains_every_actor_and_pair_at_larger_limits(count):
+    scenario = _large_navigation_scenario(count)
+    assert len(scenario["actors"]) == count
+    assert len(scenario["navigationPresentation"]["sampledProximity"]["pairMinimums"]) == count * (count - 1) // 2
+    assert 65_536 < len(json.dumps(scenario).encode()) < FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_CANONICAL_BYTES
+    assert validate_facility_activity_scenario(scenario) == scenario
+
+
+def test_navigation_scenario_still_refuses_more_than_64_actors():
+    with pytest.raises(FacilityActivityScenarioError) as caught:
+        _large_navigation_scenario(65)
+    assert caught.value.code == "facility_activity_scenario_actor_limit"
+
+
+def test_navigation_scenario_byte_budget_remains_bounded():
+    scenario = _large_navigation_scenario(40)
+    scenario["label"] = "x" * FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_CANONICAL_BYTES
+    # Rebuild seals the modified package before enforcing the byte budget.
+    with pytest.raises(FacilityActivityScenarioError) as caught:
+        build_navigation_activity_scenario(layout_revision=scenario["layoutRevision"],
+            label=scenario["label"], actors=scenario["actors"], cycle_duration_seconds=20,
+            navigation_presentation=scenario["navigationPresentation"],
+            stationary_evidence=scenario["stationaryEvidence"])
+    assert caught.value.code == "facility_activity_scenario_too_large"
 
 
 def test_activity_scenario_binds_a_closed_operator_loop_to_one_actor():

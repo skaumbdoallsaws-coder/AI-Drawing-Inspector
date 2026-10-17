@@ -209,7 +209,7 @@ test('actual init waits for deferred profiles and assembly selection before mana
 
 function mountFixture(options = {}) {
   const f = fixture({ search: options.search === undefined ? '' : options.search, recoveryRequired: options.recoveryRequired });
-  let legacy = 0, created = 0, fit = 0, supplied, boundStructure;
+  let legacy = 0, created = 0, fit = 0, supplied, boundStructure, sheetSetup, sheetRenders = 0;
   const requests = [], createdNodes = [];
   function element() {
     const value = { style: {}, isConnected: true, children: [], appendChild(child) { this.children.push(child); return child; } };
@@ -231,6 +231,8 @@ function mountFixture(options = {}) {
     // The structure pane observes the mounted workspace. Binding it is part of
     // mounting, so the stub records what it was handed.
     _trainBindStructureTree: instance => { boundStructure = instance; },
+    _trainSetupFacilitySheets: (instance, options) => { sheetSetup = { instance, options }; },
+    _trainRenderFacilitySheets: () => { sheetRenders++; },
     _trainMountLegacyFacilityLayoutViewer: () => { legacy++; return true; },
     _trainLoadFacilityThreeRuntime: async () => ({}),
     InspectorProFacilityLayout: { placementFootprint() {} }, InspectorProFacilityThree: {},
@@ -251,7 +253,8 @@ function mountFixture(options = {}) {
   return { ...f, requests, createdNodes,
     mount: () => f.context._trainMountFacilityLayoutViewer(),
     get legacy() { return legacy; }, get created() { return created; }, get fit() { return fit; },
-    get supplied() { return supplied; }, get boundStructure() { return boundStructure; } };
+    get supplied() { return supplied; }, get boundStructure() { return boundStructure; },
+    get sheetSetup() { return sheetSetup; }, get sheetRenders() { return sheetRenders; } };
 }
 
 test('actual mount uses the authorized document without a query and attaches before fitting', async () => {
@@ -265,12 +268,16 @@ test('actual mount uses the authorized document without a query and attaches bef
   // The structure pane is bound to the app that was actually mounted, not to
   // a stale one: without this the tree observes nothing and renders empty.
   assert.equal(f.boundStructure, f.app);
+  assert.equal(f.sheetSetup.instance, f.app);
+  assert.equal(f.sheetSetup.options.layoutId, f.supplied.layoutId);
+  assert.equal(f.sheetSetup.options.root, f.supplied.root);
 });
 
 test('actual mount defers post-mount view changes when retained recovery remains unresolved', async () => {
   const f = mountFixture({ recoveryRequired: true }); assert.equal(await f.mount(), true);
   assert.equal(f.created, 1); assert.equal(f.fit, 0); assert.equal(f.legacy, 0);
   assert.equal(f.rpc('snapshot').startupRecoveryPending, true);
+  assert.equal(f.sheetSetup, undefined);
 });
 
 test('managed missing runtime, unavailable viewer, wrong bootstrap site and failed bootstrap never fall back to legacy', async t => {
@@ -313,6 +320,7 @@ test('returning to Facility restores the retained root and docked playback witho
     assert.equal(f.context._trainFacilityLayoutAuthoringApp.session, session);
     assert.equal(resumed, suspended ? 1 : 0); assert.equal(visibility, 1);
     assert.equal(f.created, 0); assert.deepEqual(f.requests, []);
+    assert.equal(f.sheetRenders, 1);
   });
 });
 

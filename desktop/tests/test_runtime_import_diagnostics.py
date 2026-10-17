@@ -1,4 +1,6 @@
 import importlib.util
+import asyncio
+import builtins
 from contextlib import ExitStack
 import io
 import json
@@ -7,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from types import SimpleNamespace
@@ -15,7 +18,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from desktop.runtime.startup_diagnostics import StartupImportDiagnostics
+from desktop.runtime.startup_diagnostics import CooperativeTracebackHandler, StartupImportDiagnostics
 from desktop.runtime import managed_backend
 
 
@@ -31,6 +34,101 @@ class FakeHandler:
 
 
 class ImportDiagnosticsTests(unittest.TestCase):
+    def test_normal_startup_diagnostic_failure_preserves_application_import_error(self):
+        primary = ImportError('controlled application import failure')
+        original_import = builtins.__import__
+        def import_module(name, *args, **kwargs):
+            if name == 'server':
+                raise primary
+            if name == 'uvicorn':
+                return SimpleNamespace()
+            return original_import(name, *args, **kwargs)
+        for operation in ('construct', 'dump_traceback_later', 'cancel_dump_traceback_later'):
+            with self.subTest(operation=operation), ExitStack() as patches:
+                handler = Mock()
+                factory = patches.enter_context(patch(
+                    'desktop.runtime.startup_diagnostics.CooperativeTracebackHandler', return_value=handler))
+                target = factory if operation == 'construct' else getattr(handler, operation)
+                target.side_effect = OSError('PRIVATE_ERROR_MUST_NOT_APPEAR')
+                patches.enter_context(patch.object(builtins, '__import__', side_effect=import_module))
+                patches.enter_context(patch.object(managed_backend, 'checkpoint'))
+                output = patches.enter_context(patch.object(managed_backend, 'emit'))
+                with self.assertRaises(ImportError) as caught:
+                    asyncio.run(managed_backend.serve(None, {'instanceId': 'controlled'}, None, application=True))
+                self.assertIs(caught.exception, primary)
+                self.assertNotIn('PRIVATE_ERROR', repr(output.call_args_list))
+                self.assertEqual(output.call_args[0][0], 'DIAGNOSTIC_ERROR')
+                self.assertEqual(output.call_args[0][1]['errorType'], 'OSError')
+                if operation != 'construct':
+                    handler.cancel_dump_traceback_later.assert_called_once()
+
+    def test_default_sampler_does_not_call_the_c_watchdog(self):
+        output = io.StringIO()
+        with patch('faulthandler.dump_traceback_later', side_effect=AssertionError('C watchdog must not run')):
+            diagnostic = StartupImportDiagnostics(.01, stderr=output)
+            self.assertIsInstance(diagnostic.handler, CooperativeTracebackHandler)
+            diagnostic.start()
+            deadline = time.monotonic() + 2
+            while 'cooperative Python stack sample' not in output.getvalue() and time.monotonic() < deadline:
+                time.sleep(.01)
+            diagnostic.stop()
+        self.assertIn('cooperative Python stack sample', output.getvalue())
+
+    def test_sampler_bounds_repetition_and_excludes_locals_and_source(self):
+        private_value = 'PRIVATE_LOCAL_MUST_NOT_APPEAR'
+        output = io.StringIO()
+        handler = CooperativeTracebackHandler(max_dumps=2)
+        handler.dump_traceback_later(.01, repeat=True, file=output)
+        handler._thread.join(timeout=2)
+        self.assertFalse(handler._thread.is_alive())
+        handler.cancel_dump_traceback_later()
+        content = output.getvalue()
+        self.assertEqual(content.count('Timeout ('), 2)
+        self.assertIn('test_sampler_bounds_repetition', content)
+        self.assertNotIn(private_value, content)
+        self.assertNotIn('private_value =', content)
+        time.sleep(.02)
+        self.assertEqual(content, output.getvalue())
+
+    def test_sampler_cancel_prevents_late_write_and_supports_binary_stream(self):
+        output = io.BytesIO()
+        handler = CooperativeTracebackHandler()
+        handler.dump_traceback(file=output, all_threads=False)
+        handler.dump_traceback_later(.1, repeat=True, file=output)
+        handler.cancel_dump_traceback_later()
+        content = output.getvalue()
+        output.close()
+        time.sleep(.12)
+        self.assertIn(b'Thread', content)
+        self.assertNotIn(b'Timeout', content)
+
+    def test_sampler_rejects_invalid_interval_exit_and_unbounded_dumps(self):
+        for value in (0, -1, True, float('nan'), float('inf')):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                CooperativeTracebackHandler().dump_traceback_later(value, file=io.StringIO())
+        with self.assertRaises(ValueError):
+            CooperativeTracebackHandler().dump_traceback_later(1, file=io.StringIO(), exit=True)
+        for count in (0, 1025, True):
+            with self.assertRaises(ValueError): CooperativeTracebackHandler(max_dumps=count)
+
+    def test_blocked_writer_retains_descriptor_until_it_can_stop(self):
+        entered, release = threading.Event(), threading.Event()
+        class BlockedOutput(io.StringIO):
+            def write(self, value):
+                entered.set()
+                release.wait(3)
+                return super().write(value)
+        output = BlockedOutput()
+        handler = CooperativeTracebackHandler()
+        handler.dump_traceback_later(.001, file=output)
+        self.assertTrue(entered.wait(1))
+        try:
+            with self.assertRaises(RuntimeError): handler.cancel_dump_traceback_later()
+            self.assertFalse(output.closed)
+        finally:
+            release.set()
+            handler.cancel_dump_traceback_later()
+
     def test_opt_in_files_identity_and_cancel_before_close(self):
         with tempfile.TemporaryDirectory() as temp:
             handler = FakeHandler(); output = io.StringIO(); key = str(uuid.uuid4())

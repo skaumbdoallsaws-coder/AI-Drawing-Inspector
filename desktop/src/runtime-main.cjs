@@ -262,7 +262,7 @@ async function start() {
 }
 async function bootstrap() {
   options = parseRuntimeOptions(process.argv.slice(2));
-  if (options.workflowAcceptanceOutput || options.browserAcceptanceOutput) throw fail('desktop_workflow_check_requires_application');
+  if (options.workflowAcceptanceOutput || options.browserAcceptanceOutput || options.generationAcceptanceOutput) throw fail('desktop_workflow_check_requires_application');
   profile = await loadRuntimeProfile(options.profileFile); await localPath(options.python);
   if (options.acceptanceOutput && !profile.acceptanceLayoutId) throw fail('desktop_acceptance_profile_required');
   await fs.mkdir(profile.stateRoot, { recursive: true });

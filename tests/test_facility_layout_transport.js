@@ -1393,7 +1393,7 @@ test('receiving vehicle-cycle preset remains closed and coordinate free', async 
     );
 });
 
-test('navigation activity rejects coordinate fields and more than 24 actors', async () => {
+test('navigation activity rejects coordinate fields and more than 64 actors', async () => {
     const transport = Transport.createHttpTransport({
         siteId: 'site-a',
         layoutId: 'layout-one',
@@ -1415,14 +1415,27 @@ test('navigation activity rejects coordinate fields and more than 24 actors', as
             baseRevision: 'a'.repeat(64),
             request: {
                 journeySolutionIds: Array.from(
-                    { length: 21 },
+                    { length: 65 },
                     (_, index) => 'njs-' + index
                 ),
                 prototypeMode: true,
             },
         }),
-        /between 1 and 20/
+        /between 1 and 64/
     );
+});
+
+test('navigation activity accepts all 40 actors and the 64 actor boundary without truncation', async () => {
+    const calls = [];
+    const transport = Transport.createHttpTransport({siteId:'site-a', layoutId:'layout-one',
+        fetch: async (_url, init) => { calls.push(JSON.parse(init.body)); return response(200, {}); }});
+    assert.strictEqual(Transport.NAVIGATION_ACTIVITY_MAXIMUM_ACTORS, 64);
+    for (const count of [40, 64]) {
+        const ids = Array.from({length:count}, (_,i) => 'njs-' + i);
+        await transport.buildNavigationActivityScenario({baseRevision:'a'.repeat(64),
+            request:{journeySolutionIds:ids,prototypeMode:true}});
+        assert.deepStrictEqual(calls.at(-1).request.journeySolutionIds, ids);
+    }
 });
 
 test('construction transport binds approval to the editor session and never saves', async () => {
@@ -1460,6 +1473,24 @@ test('generation source and exact candidate requests are read-only and scoped', 
     assert.ok(calls.every(call => !/apply|save/.test(call.url)));
     await assert.rejects(async () => transport.inspectGenerationPlanningPreview({workspaceId: 'x', previewId: 'bad', previewRevision: 'x'}, editor));
     assert.strictEqual(calls.length, 2);
+});
+
+test('generation selection and destination retain exact references without implicit Apply or Save', async () => {
+    const calls = [];
+    const transport = Transport.createHttpTransport({siteId: 'site-a', layoutId: 'empty', sessionId: 'session-pilot',
+        fetch: async (url, init) => { calls.push({url, init}); return response(200, {}); }});
+    const editor = {baseRevision: 'a'.repeat(64), draftRevision: 'a'.repeat(64), dirty: false};
+    const preview = {workspaceId: 'planning-session', previewId: 'b'.repeat(64), previewRevision: 'c'.repeat(64)};
+    await transport.selectGenerationPlanningPreview(preview, editor);
+    assert.ok(calls[0].url.endsWith('/select'));
+    assert.deepStrictEqual(JSON.parse(calls[0].init.body), {workspaceId: preview.workspaceId,
+        request: {previewId: preview.previewId, previewRevision: preview.previewRevision}, editorContext: editor});
+    const request = {requestKey: 'destination-one', expectedBaseRevision: editor.baseRevision,
+        displayName: 'Concept', widthMeters: 50, depthMeters: 40, confirmConceptualFloor: true};
+    await transport.createGenerationDestination(request, editor);
+    assert.ok(calls[1].url.endsWith('/destination'));
+    assert.deepStrictEqual(JSON.parse(calls[1].init.body).request, request);
+    assert.ok(calls.every(call => !/\/apply|\/save/.test(call.url)));
 });
 
 (async () => {

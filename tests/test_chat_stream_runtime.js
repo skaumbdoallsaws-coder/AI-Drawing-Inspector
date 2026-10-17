@@ -19,10 +19,34 @@ function event(seq, type, id = 'r1', extra = {}) {
     return { v: 1, event: type, response_id: id, seq, ts: 1, ...extra };
 }
 
+test('facility identity survives memory-off requests and does not mutate the payload', () => {
+    const original = { session_id: 'local-chat', inspection_context: { attachments: { facility_layout: { layoutId: 'gym' } } } };
+    const first = runtime.ensureFacilityTurnIdentity(original, 'conversation-a', () => 'turn-1');
+    const second = runtime.ensureFacilityTurnIdentity(original, 'conversation-a', () => 'turn-2');
+    assert.strictEqual(first.conversation_id, second.conversation_id);
+    assert.notStrictEqual(first.client_turn_id, second.client_turn_id);
+    assert.strictEqual(original.client_turn_id, undefined);
+    assert.strictEqual(runtime.ensureFacilityTurnIdentity(original, null, () => 'turn-3').conversation_id, 'local-chat');
+});
+
+test('facility identity preserves retries and authoritative memory identifiers', () => {
+    const original = { conversation_id: 'server-conversation', agent_session_id: 'server-session', client_turn_id: 'retry-turn',
+        inspection_context: { attachments: { facility_layout: {} } } };
+    assert.deepStrictEqual(runtime.ensureFacilityTurnIdentity(original, 'different-local-id', () => { throw Error('must not regenerate'); }), original);
+});
+
+test('non-facility chat payloads retain their existing identity behavior', () => {
+    const original = { message: 'hello' };
+    assert.strictEqual(runtime.ensureFacilityTurnIdentity(original, 'conversation', () => { throw Error('not used'); }), original);
+});
+
 test('planning status labels name actual phases without displaying arbitrary provider text', () => {
     assert.strictEqual(runtime.statusLabel('generation_search'), 'Researching public sources');
     assert.strictEqual(runtime.statusLabel('generation_geometry'), 'Generating and validating geometry');
     assert.strictEqual(runtime.statusLabel('generation_repair'), 'Reviewing a planning issue');
+    assert.strictEqual(runtime.statusLabel('codex_connecting'), 'Connecting the inspection runtime');
+    assert.strictEqual(runtime.statusLabel('codex_inspecting'), 'Inspecting the saved layout');
+    assert.strictEqual(runtime.statusLabel('codex_researching'), 'Researching public technical sources');
     assert.strictEqual(runtime.statusLabel('<img src=x onerror=alert(1)>'), 'Preparing the response');
     assert.strictEqual(runtime.statusLabel('__proto__'), 'Preparing the response');
 });

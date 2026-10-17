@@ -47,7 +47,7 @@ except ImportError:  # pragma: no cover - deterministic refusal is tested.
     LineString = Point = Polygon = STRtree = nearest_points = unary_union = None
 
 
-FACILITY_NAVIGATION_COMPILER_VERSION = "facility-navigation-compiler-v1"
+FACILITY_NAVIGATION_COMPILER_VERSION = "facility-navigation-compiler-v1.1"
 FACILITY_NAVIGATION_PACKAGE_SCHEMA = "facility-navigation-package-v1"
 FACILITY_NAVIGATION_PACKAGE_MAXIMUM_CANONICAL_BYTES = 16 * 1024 * 1024
 FACILITY_NAVIGATION_MAXIMUM_INTERSECTION_COMPARISONS = 5_000_000
@@ -922,7 +922,13 @@ def _placement_access_candidates(
             continue
         if "any" not in permitted and direction not in permitted:
             continue
-        point = Point(float(x), float(z))
+        # Check the serialized point, snapped away from the equipment rather
+        # than into its canonical buffered boundary. This preserves clearance.
+        x = (math.floor(x * 1_000_000) / 1_000_000 if "west" in direction else
+             math.ceil(x * 1_000_000) / 1_000_000 if "east" in direction else round(x, 6))
+        z = (math.floor(z * 1_000_000) / 1_000_000 if "south" in direction else
+             math.ceil(z * 1_000_000) / 1_000_000 if "north" in direction else round(z, 6))
+        point = Point(x, z)
         if free_space.covers(point):
             candidates.append({
                 "x": round(float(x), 6),

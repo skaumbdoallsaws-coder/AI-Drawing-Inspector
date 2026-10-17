@@ -14,6 +14,22 @@
     const DEFAULT_QUATERNION = Object.freeze({ x: 0, y: 0, z: 0, w: 1 });
     const ORDINARY_OPERATION_TYPES = Object.freeze([
         'rename_layout',
+        'set_plan_settings',
+        'set_perimeter_walls',
+        'set_decals',
+        'set_component_materials',
+        'set_interior_walls',
+        'set_floor_surfaces',
+        'upsert_floor_surface',
+        'delete_floor_surface',
+        'upsert_interior_wall',
+        'delete_interior_wall',
+        'upsert_decal',
+        'delete_decal',
+        'edit_perimeter_walls',
+        'upsert_wall_artwork',
+        'delete_wall_artwork',
+        'replace_asset',
         'place_asset',
         'move_placement',
         'rotate_placement',
@@ -27,6 +43,7 @@
         'add_floor_marking',
         'edit_floor_marking',
         'delete_floor_marking',
+        'add_route',
         'add_aisle',
         'edit_aisle',
         'edit_route',
@@ -771,6 +788,8 @@
                 routeProposals: clone(ghost.routeProposals || []),
             },
             metrics: clone(metrics),
+            editMode: source.editMode === 'direct' ? 'direct' : 'preview',
+            directApplyPolicy: clone(source.directApplyPolicy || { eligible: false }),
             transactionBinding: normalizeTransactionBinding(
                 source.transactionBinding,
                 expectedRevision
@@ -879,12 +898,12 @@
             ...rawAlternative,
             proposalId: proposalId,
             transactionBinding: rawAlternative.transactionBinding
-                || source.transactionBinding,
+                || source.transactionBinding || source.binding,
             createdAt: rawAlternative.createdAt || source.createdAt,
             expiresAt: rawAlternative.expiresAt || source.expiresAt,
         }, 0, expectedRevision);
         const topBinding = normalizeTransactionBinding(
-            source.transactionBinding,
+            source.transactionBinding || source.binding,
             expectedRevision
         );
         if (alternative.alternativeId !== expectedAlternative.alternativeId
@@ -1326,6 +1345,7 @@
         let designAuthorityState = 'ready';
         let editorGenerationId = nextEditorGenerationId();
         let recentReceiptIds = [];
+        let lastApprovedOperationCommit = null;
         let busy = false;
         let conflict = null;
         let lastError = null;
@@ -1720,6 +1740,7 @@
 
         function restoreDesignEditorFrame(frame) {
             const value = object(frame, 'Facility design editor frame');
+            lastApprovedOperationCommit = null;
             baseLayout = frozenClone(value.baseLayout);
             baseRevision = nonEmptyString(
                 value.baseRevision,
@@ -1896,11 +1917,13 @@
             if (recentReceiptIds.length > 6) {
                 recentReceiptIds = recentReceiptIds.slice(-6);
             }
+            return receiptId;
         }
 
         function installReceipt(receipt, requireRevision) {
             const layout = frozenClone(layoutFromReceipt(receipt, 'layout receipt'));
             const revision = revisionFromReceipt(receipt, requireRevision);
+            lastApprovedOperationCommit = null;
             baseLayout = layout;
             baseRevision = revision || baseRevision;
             draftLayout = layout;
@@ -2098,7 +2121,8 @@
                     };
                 }),
                 historyCursor: cursor,
-                canUndo: (cursor > 0 || hasGeneratedDraft || hasDesignProposal)
+                canUndo: (cursor > 0 || hasGeneratedDraft || hasDesignProposal
+                    || canPreviewOperationUndo())
                     && !busy && (!desktopRecovery || (designAuthorityState === 'ready' && !desktopFreezeOwner && !desktopPending && !desktopRecoveryOwned && !desktopStartupRecoveryPending)),
                 canRedo: !hasGeneratedDraft && !hasDesignProposal
                     && cursor < batches.length && !busy
@@ -2131,6 +2155,7 @@
                 placementAlternatives: clone(placementAlternatives),
                 layoutProposal: clone(layoutProposal),
                 recentReceiptIds: recentReceiptIds.slice(),
+                lastApprovedOperationCommit: clone(lastApprovedOperationCommit),
                 lastError: lastError,
             };
         }
@@ -2162,6 +2187,24 @@
                 setBusy(false);
             }
             return getState();
+        }
+
+        function beginSheetDeletion(expectedDraftRevision) {
+            requireLoaded();
+            assertIdle();
+            if (draftRevision !== expectedDraftRevision) {
+                throw new Error('The layout changed. Review it before deleting the sheet.');
+            }
+            if (generatedDraft || designProposalDraft || designAuthorityState !== 'ready') {
+                throw new Error('Save or undo the pending proposal before deleting this sheet.');
+            }
+            setBusy(true);
+            let released = false;
+            return function () {
+                if (released) return;
+                released = true;
+                setBusy(false);
+            };
         }
 
         function subscribe(listener) {
@@ -2597,6 +2640,201 @@
             return getState();
         }
 
+        function operationProposalReference(value) {
+            const source = object(value, 'operation proposal reference');
+            const fields = ['siteId', 'layoutId', 'revision', 'proposalId'];
+            if (Object.keys(source).some(function (key) { return !fields.includes(key); })) {
+                throw new TypeError('Operation previews accept only a server proposal reference');
+            }
+            const reference = {};
+            fields.forEach(function (key) {
+                reference[key] = nonEmptyString(source[key], 'operation proposal ' + key);
+            });
+            return reference;
+        }
+
+        function assertOperationProposalCurrent(reference, generation, isCurrent) {
+            requireLoaded();
+            assertDesktopMutable();
+            const siteId = baseLayout.association && baseLayout.association.siteId;
+            if (reference.siteId !== siteId || reference.layoutId !== baseLayout.layoutId
+                    || (config.siteId && config.siteId !== reference.siteId)
+                    || (config.layoutId && config.layoutId !== reference.layoutId)
+                    || reference.revision !== baseRevision || draftRevision !== baseRevision
+                    || (generation && generation !== editorGenerationId)
+                    || (typeof config.isOperationProposalContextCurrent === 'function'
+                        && !config.isOperationProposalContextCurrent())
+                    || (isCurrent && !isCurrent())) {
+                throw layoutProposalStale('The operation preview no longer matches the active editor');
+            }
+            if (cursor > 0 || generatedDraft || designProposalDraft
+                    || designAuthorityState !== 'ready' || conflict) {
+                const error = new Error('Save or discard changes and resolve conflicts before previewing operations');
+                error.code = 'layout_proposal_dirty';
+                throw error;
+            }
+        }
+
+        function validateOperationProposal(proposal, reference, strategy) {
+            proposal.alternatives.forEach(function (alternative) {
+                const binding = alternative.transactionBinding;
+                const layout = alternative.ghostPreview.layout;
+                if (!['exact-operations-v1', 'exact-undo-v1'].includes(alternative.strategy)
+                        || (strategy && alternative.strategy !== strategy)
+                        || binding.target.domain !== 'facility-layout'
+                        || binding.target.resourceId !== reference.layoutId
+                        || layout.layoutId !== reference.layoutId
+                        || !layout.association || layout.association.siteId !== reference.siteId) {
+                    throw layoutProposalStale('The operation preview belongs to another document or proposal type');
+                }
+            });
+            return proposal;
+        }
+
+        async function fetchOperationProposal(reference, fetchPreview, normalize, options) {
+            assertIdle();
+            const settings = options || {};
+            const generation = editorGenerationId;
+            assertOperationProposalCurrent(reference, generation, settings.isCurrent);
+            setBusy(true);
+            try {
+                assertOperationProposalCurrent(reference, generation, settings.isCurrent);
+                const receipt = await fetchPreview(settings.signal ? { signal: settings.signal } : undefined);
+                assertOperationProposalCurrent(reference, generation, settings.isCurrent);
+                const proposal = normalize(receipt);
+                proposal.operationReference = clone(reference);
+                proposal.operationEditorGenerationId = generation;
+                const selected = proposal.alternatives[proposal.selectedIndex];
+                if (settings.applyDirectly === true && selected.editMode === 'direct'
+                        && selected.directApplyPolicy.eligible === true) {
+                    await applyDirectOperationProposal(proposal, reference, generation, settings);
+                    return getState();
+                }
+                layoutProposal = deepFreeze(proposal);
+                placementAlternatives = null;
+                ghost = null;
+                lastError = null;
+            } catch (error) {
+                // Keep an existing preview visible through busy/error status updates.
+                lastError = error;
+                throw error;
+            } finally {
+                setBusy(false);
+            }
+            return getState();
+        }
+
+        async function applyDirectOperationProposal(proposal, reference, generation, settings) {
+            const selected = proposal.alternatives[proposal.selectedIndex];
+            const check = function () {
+                assertOperationProposalCurrent(reference, generation, settings.isCurrent);
+                if (settings.signal && settings.signal.aborted) throw new Error('Operation cancelled');
+            };
+            check();
+            const key = 'direct-' + createIdempotencyKey(config);
+            const transportOptions = settings.signal ? { signal: settings.signal } : undefined;
+            const approval = await config.approveLayoutProposal({
+                proposalId: selected.proposalId, binding: clone(selected.transactionBinding),
+                idempotencyKey: key, explicitApproval: false,
+                authorizationMode: 'direct', directConsent: true,
+            }, transportOptions);
+            check();
+            const payload = { approvalToken: nonEmptyString(approval.approvalToken, 'approvalToken'),
+                binding: clone(selected.transactionBinding), idempotencyKey: key };
+            let applied;
+            try {
+                applied = await config.applyLayoutProposal(payload, transportOptions);
+            } catch (error) {
+                // Retry only a lost transport response, using the SAME approved transaction.
+                if (error.status || error.code || (settings.signal && settings.signal.aborted)) throw error;
+                applied = await config.applyLayoutProposal(payload, transportOptions);
+            }
+            const receiptId = rememberReceipt(applied);
+            const savedSelection = selectedIds.slice();
+            installReceipt(applied, true);
+            if (receiptId && selected.strategy === 'exact-operations-v1') {
+                lastApprovedOperationCommit = { receiptId, revision: baseRevision,
+                    siteId: baseLayout.association && baseLayout.association.siteId,
+                    layoutId: baseLayout.layoutId, editorGenerationId, directApply: true };
+            }
+            selectedIds = selectedIdsInLayout(draftLayout, savedSelection);
+            lastError = null;
+        }
+
+        async function fetchAndInstallOperationProposal(value, options) {
+            const reference = operationProposalReference(value);
+            if (typeof config.getLayoutProposalPreview !== 'function') {
+                throw new Error('getLayoutProposalPreview transport is not configured');
+            }
+            return fetchOperationProposal(reference, function (transportOptions) {
+                return config.getLayoutProposalPreview({ proposalId: reference.proposalId }, transportOptions);
+            }, function (receipt) {
+                const source = object(receipt, 'operation proposal preview');
+                const alternative = object(source.alternative, 'operation proposal alternative');
+                if (source.proposalId !== reference.proposalId
+                        || (alternative.proposalId && alternative.proposalId !== reference.proposalId)) {
+                    throw layoutProposalStale('The server returned a different operation proposal');
+                }
+                const proposal = normalizeLayoutProposals({
+                    previewPure: source.previewPure,
+                    layoutRevision: reference.revision,
+                    selectedProposalId: source.proposalId,
+                    alternatives: [{
+                        ...alternative,
+                        proposalId: source.proposalId,
+                        transactionBinding: alternative.transactionBinding
+                            || source.transactionBinding || source.binding,
+                        createdAt: alternative.createdAt || source.createdAt,
+                        expiresAt: alternative.expiresAt || source.expiresAt,
+                    }],
+                }, reference.revision, reference);
+                normalizeLayoutProposalPreview(source, proposal.alternatives[0], reference.revision);
+                return validateOperationProposal(proposal, reference);
+            }, options);
+        }
+
+        function canPreviewOperationUndo() {
+            const commit = lastApprovedOperationCommit;
+            return Boolean(commit && typeof config.createOperationUndoPreview === 'function'
+                && !busy && !conflict && !layoutProposal && cursor === 0
+                && !generatedDraft && !designProposalDraft && designAuthorityState === 'ready'
+                && baseLayout && baseLayout.layoutId === commit.layoutId
+                && baseLayout.association && baseLayout.association.siteId === commit.siteId
+                && baseRevision === commit.revision && draftRevision === commit.revision
+                && editorGenerationId === commit.editorGenerationId
+                && (typeof config.isOperationProposalContextCurrent !== 'function'
+                    || config.isOperationProposalContextCurrent()));
+        }
+
+        async function requestOperationUndoPreview(options) {
+            requireLoaded();
+            assertIdle();
+            if (!canPreviewOperationUndo()) {
+                throw layoutProposalStale('Undo requires the unchanged result of the last approved operation commit');
+            }
+            const commit = clone(lastApprovedOperationCommit);
+            const reference = { siteId: commit.siteId, layoutId: commit.layoutId, revision: commit.revision };
+            return fetchOperationProposal(reference, function (transportOptions) {
+                return config.createOperationUndoPreview({
+                    baseRevision: commit.revision,
+                    receiptId: commit.receiptId,
+                    ...(options && options.applyDirectly ? { editMode: 'direct' } : {}),
+                }, transportOptions);
+            }, function (receipt) {
+                const proposal = validateOperationProposal(
+                    normalizeLayoutProposals(receipt, commit.revision, { receiptId: commit.receiptId }),
+                    reference, 'exact-undo-v1'
+                );
+                if (proposal.alternatives.length !== 1
+                        || proposal.alternatives[0].operations.length !== 1
+                        || proposal.alternatives[0].operations[0].op !== 'restore_approved_revision'
+                        || proposal.alternatives[0].operations[0].receiptId !== commit.receiptId) {
+                    throw layoutProposalStale('The undo preview does not match the approved receipt');
+                }
+                return proposal;
+            }, options);
+        }
+
         function installGenerationDraft(receipt) {
             requireLoaded();
             assertIdle();
@@ -2741,10 +2979,20 @@
                     prepared.candidateLayout,
                     'Facility design candidate layout'
                 ));
-                const candidateOperations = ordinaryOperations(
-                    prepared.candidateOperations,
-                    'Facility design candidate operations'
-                );
+                const candidateBatches = prepared.candidateOperationBatches === undefined
+                    ? [{ label: 'Apply Facility design proposal', operations: ordinaryOperations(
+                        prepared.candidateOperations, 'Facility design candidate operations') }]
+                    : prepared.candidateOperationBatches;
+                if (!Array.isArray(candidateBatches) || !candidateBatches.length || candidateBatches.length > 100) {
+                    throw new TypeError('Facility design candidate batches are invalid');
+                }
+                const journalBatches = candidateBatches.map(function (batch) {
+                    const operations = ordinaryOperations(batch.operations, 'Facility design candidate batch');
+                    if (prepared.candidateOperationBatches !== undefined && operations.length > 500) {
+                        throw new TypeError('Facility design candidate batch exceeds 500 operations');
+                    }
+                    return { label: nonEmptyString(batch.label, 'Facility design batch label'), operations: operations };
+                });
                 const resultDraftRevision = nonEmptyString(
                     preparedBody.proposalBinding.resultLayoutRevision,
                     'Facility design result layout revision'
@@ -2797,10 +3045,7 @@
                     0,
                     Number(rootFrame.cursor) || 0
                 );
-                batches = frozenClone(rootBatches.concat([{
-                    label: 'Apply Facility design proposal',
-                    operations: clone(candidateOperations),
-                }]));
+                batches = frozenClone(rootBatches.concat(journalBatches));
                 cursor = batches.length;
                 draftLayout = candidateLayout;
                 draftRevision = resultDraftRevision;
@@ -3064,6 +3309,9 @@
             const proposal = layoutProposal;
             const selectedIndex = proposal.selectedIndex;
             const selected = proposal.alternatives[selectedIndex];
+            if (proposal.operationReference) {
+                assertOperationProposalCurrent(proposal.operationReference, proposal.operationEditorGenerationId);
+            }
             const requestOptions = options || {};
             const transportOptions = requestOptions.signal
                 ? { signal: requestOptions.signal }
@@ -3082,6 +3330,9 @@
                     selected,
                     baseRevision
                 );
+                if (proposal.operationReference) {
+                    assertOperationProposalCurrent(proposal.operationReference, proposal.operationEditorGenerationId);
+                }
                 if (layoutProposal !== proposal
                         || layoutProposal.selectedIndex !== selectedIndex) {
                     throw layoutProposalStale(
@@ -3107,9 +3358,18 @@
                     binding: clone(selected.transactionBinding),
                     idempotencyKey: idempotencyKey,
                 }, transportOptions);
-                rememberReceipt(appliedReceipt);
+                const receiptId = rememberReceipt(appliedReceipt);
                 const savedSelection = selectedIds.slice();
                 installReceipt(appliedReceipt, true);
+                if (receiptId && selected.strategy === 'exact-operations-v1') {
+                    lastApprovedOperationCommit = {
+                        receiptId: receiptId,
+                        revision: baseRevision,
+                        siteId: baseLayout.association && baseLayout.association.siteId,
+                        layoutId: baseLayout.layoutId,
+                        editorGenerationId: editorGenerationId,
+                    };
+                }
                 selectedIds = selectedIdsInLayout(
                     draftLayout,
                     savedSelection
@@ -4351,6 +4611,27 @@
             );
         }
 
+        async function setPerimeterWalls(settings) {
+            requireLoaded();
+            return commitGesture('Set perimeter walls', [{
+                op: 'set_perimeter_walls', wallSettings: clone(settings),
+            }], 'preserve');
+        }
+
+        async function setDecals(decals) {
+            return commitGesture('Edit wall decals', [{op: 'set_decals', decals: clone(decals)}], 'preserve');
+        }
+
+        async function importDecalImage(file, requestOptions) {
+            requireLoaded();
+            assertIdle();
+            if (generatedDraft || designProposalDraft || layoutProposal || placementAlternatives) {
+                throw new Error('Finish the active preview before importing a decal.');
+            }
+            if (typeof options.importDecalImage !== 'function') throw new Error('Decal image import is unavailable.');
+            return options.importDecalImage(file, requestOptions);
+        }
+
         async function setPlanSettings(settings) {
             requireLoaded();
             const value = object(settings, 'plan settings');
@@ -4404,6 +4685,42 @@
                 };
             }));
             return commitGesture('Delete selection', operations, []);
+        }
+
+        async function setComponentMaterials(placementId, materials) {
+            return commitGesture('Edit component materials', [{op:'set_component_materials',placementId,materials:clone(materials)}], 'preserve');
+        }
+        async function setInteriorWalls(walls) {
+            return commitGesture('Edit interior walls', [{op:'set_interior_walls',walls:clone(walls)}], 'preserve');
+        }
+        async function setFloorSurfaces(surfaces) {
+            return commitGesture('Edit floor surfaces', [{op:'set_floor_surfaces',surfaces:clone(surfaces)}], 'preserve');
+        }
+        function replacementOperation(placementId, asset) {
+            return {op:'replace_asset',placementId,assetId:asset.assetId,assetDefinitionRevision:asset.assetDefinitionRevision,keepAppearance:asset.keepAppearance!==false};
+        }
+        async function previewAssetReplacement(placementId, asset) {
+            requireLoaded();assertIdle();
+            if(generatedDraft||designProposalDraft||layoutProposal||placementAlternatives)throw new Error('Finish the active preview first.');
+            const revision=draftRevision,generation=editorGenerationId;
+            const result=await preview(currentOperations().concat([replacementOperation(placementId,asset)]));
+            if(revision!==draftRevision||generation!==editorGenerationId)throw new Error('Layout changed during the replacement check.');
+            return clone(result.layout);
+        }
+        async function replaceAsset(placementId, asset) {
+            return commitGesture('Replace asset', [replacementOperation(placementId,asset)], 'preserve');
+        }
+
+        async function setSelectedAppearance(color) {
+            if (color !== null && (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color))) {
+                throw new TypeError('Color must be a six-digit hex color or null');
+            }
+            const ids = selectedPlacements().filter(function (placement) {
+                return (placement.appearance && placement.appearance.color || null)
+                    !== (color && color.toLowerCase());
+            }).map(function (placement) { return placement.placementId; });
+            return commitGesture(color === null ? 'Reset appearance' : 'Change appearance',
+                ids.length ? [{ op: 'set_appearance', placementIds: ids, color: color }] : [], 'preserve');
         }
 
         async function setSelectedLocked(locked) {
@@ -4662,8 +4979,8 @@
         }
 
         /**
-         * Rename the layout itself. rename_layout is an operation the server
-         * already implements; this is the gesture that emits it.
+         * Rename the layout itself. rename_layout is already an ordinary
+         * operation the transport accepts; this is the gesture that emits it.
          */
         async function renameLayout(displayName) {
             requireLoaded();
@@ -4825,6 +5142,9 @@
                     setBusy(false);
                 }
                 return getState();
+            }
+            if (cursor === 0 && canPreviewOperationUndo()) {
+                return requestOperationUndoPreview(lastApprovedOperationCommit.directApply ? { applyDirectly: true } : undefined);
             }
             return recompute(cursor - 1);
         }
@@ -4998,6 +5318,7 @@
             captureDesignEditorFrame: captureDesignEditorFrame,
             installDesktopRecovery: installDesktopRecovery,
             subscribe: subscribe,
+            beginSheetDeletion: beginSheetDeletion,
             setCameraState: setCameraState,
             select: select,
             selectMany: selectMany,
@@ -5013,6 +5334,8 @@
             acceptPlacementAlternative: acceptPlacementAlternative,
             requestLayoutProposal: requestLayoutProposal,
             installLayoutProposal: installLayoutProposal,
+            fetchAndInstallOperationProposal: fetchAndInstallOperationProposal,
+            requestOperationUndoPreview: requestOperationUndoPreview,
             installGenerationDraft: installGenerationDraft,
             applyDesignProposal: applyDesignProposal,
             installConstructionApproval: installConstructionApproval,
@@ -5031,9 +5354,18 @@
             duplicateSelected: duplicateSelected,
             applyPattern: applyPattern,
             setPlanSettings: setPlanSettings,
+            setPerimeterWalls: setPerimeterWalls,
+            setDecals: setDecals,
+            importDecalImage: importDecalImage,
             clearLayout: clearLayout,
             deleteSelected: deleteSelected,
             lockSelected: function () { return setSelectedLocked(true); },
+            setSelectedAppearance: setSelectedAppearance,
+            setComponentMaterials: setComponentMaterials,
+            setInteriorWalls: setInteriorWalls,
+            setFloorSurfaces: setFloorSurfaces,
+            previewAssetReplacement: previewAssetReplacement,
+            replaceAsset: replaceAsset,
             unlockSelected: function () { return setSelectedLocked(false); },
             createRectangleZone: createRectangleZone,
             createZones: createZones,

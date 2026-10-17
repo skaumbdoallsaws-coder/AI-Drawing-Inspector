@@ -5237,10 +5237,13 @@
             border-top: 1px solid #e1e6ea;
         }
         @container facility-ribbon (max-width: 1450px) {
+            [data-facility-ribbon-group="surfaces"],
+            [data-facility-separator-for="surfaces"],
             [data-facility-ribbon-group="build"],
             [data-facility-separator-for="build"] {
                 display: none !important;
             }
+            .facility-overflow-section[data-overflow-group="surfaces"],
             .facility-overflow-section[data-overflow-group="build"] {
                 display: block;
             }
@@ -9389,6 +9392,8 @@
             text-transform: uppercase;
         }
         .train-plant-walkthrough-hud {
+            width: max-content;
+            flex-wrap: wrap;
             position: absolute;
             left: 50%;
             bottom: 18px;
@@ -9450,6 +9455,7 @@
             font-weight: 700;
         }
         .train-plant-walkthrough-keys {
+            flex-wrap: wrap;
             display: flex;
             align-items: center;
             gap: 8px;
@@ -9493,6 +9499,20 @@
             .train-plant-walkthrough-status {
                 min-width: 188px;
             }
+        }
+        #assy-3d-container { container-type: inline-size; }
+        .three-toolbar.train-plant-operator-toolbar {
+            width: max-content; max-width: calc(100% - 16px);
+            flex-wrap: wrap; justify-content: center;
+        }
+        .three-toolbar.train-plant-operator-toolbar > button { flex-shrink: 0; }
+        @container (max-width: 680px) {
+            .train-plant-walkthrough-hud {
+                left: 8px; right: 8px; bottom: 8px; transform: none;
+                width: auto; max-width: none; gap: 6px;
+            }
+            .train-plant-walkthrough-status { min-width: 0; flex: 1; }
+            .train-plant-walkthrough-keys { display: none; }
         }
         .three-toolbar-popup .three-toolbar-menu-item {
             justify-content: flex-start;
@@ -17304,6 +17324,8 @@
         .agent-model-select {
             position: relative;
         }
+        #agentFacilityEditMode { max-width: 140px; min-width: 0; letter-spacing: 0; }
+        #agentFacilityEditMode[hidden] { display: none; }
         .agent-model-btn {
             display: flex;
             align-items: center;
@@ -20257,7 +20279,9 @@
         }
     };
     </script>
-    <link rel="stylesheet" href="/static/facility_layout_workspace.css?v=20260917-generation-planning">
+    <link rel="stylesheet" href="/static/facility_layout_workspace.css?v=20261013-authoring-1">
+    <link rel="stylesheet" href="/static/walkthrough_camera_settings.css?v=20260927-1">
+    <link rel="stylesheet" href="/static/facility_layout_sheets.css?v=20260929-open-layout-1">
     <script type="importmap">
     {
         "imports": {
@@ -20386,6 +20410,7 @@
                         <span class="app-menu-label">File</span>
                         <div class="app-menu-dropdown">
                             <button data-action="open-drawing">Open Drawing...</button>
+                            <button data-action="open-layout" disabled>Open Layout...</button>
                             <button data-action="export-results">Export Results</button>
                             <button data-action="print-fai">Print FAI Report</button>
                             <div class="menu-separator"></div>
@@ -20963,6 +20988,11 @@
                             <textarea id="agentInput" placeholder="Message your agent..." autocomplete="off" rows="1"></textarea>
                             <div class="agent-composer-footer">
                                 <button class="agent-camera-btn" id="agentCameraBtn" type="button" title="Attachment options coming soon">+</button>
+                                <select id="agentFacilityEditMode" class="agent-model-btn" aria-label="Layout edit mode"
+                                    title="Apply routine reversible edits directly, or preview every edit first">
+                                    <option value="direct">Apply directly</option>
+                                    <option value="preview">Preview first</option>
+                                </select>
                                 <div class="agent-composer-actions">
                                     <div class="agent-model-select">
                                         <button id="agentModelBtn" class="agent-model-btn" type="button" title="Reasoning level placeholder - does not change backend behavior" aria-label="Reasoning level">
@@ -21141,18 +21171,31 @@
     <script src="/static/assembly_knowledge_review.js"></script>
     <script src="/static/process_map_editor.js"></script>
     <script src="/static/facility_layout_navigation_authoring.js?v=20260901-auto-route"></script>
-    <script src="/static/facility_layout_editor.js?v=20260905-receiving-cycle-v2"></script>
-    <script src="/static/facility_layout_three_adapter.js?v=20260905-receiving-cycle-v2"></script>
+    <script src="/static/facility_layout_ground.js?v=20261002-ground-1"></script>
+    <script src="/static/facility_layout_walls.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_lettering.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_authoring_dialog.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_component_materials.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_interior_walls.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_floor_surfaces.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_replace_asset.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_decals.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_editor.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_avatar.js?v=20260928-motion-operators-1"></script>
+    <script src="/static/process_operator.js?v=20260927-1"></script>
+    <script src="/static/walkthrough_camera_settings.js?v=20260927-1"></script>
+    <script src="/static/facility_layout_three_adapter.js?v=20261013-authoring-1"></script>
     <script src="/static/facility_layout_recorder.js?v=20260807-viewport-recording"></script>
     <script src="/static/facility_layout_structure.js?v=20260923-structure-tree"></script>
-    <script src="/static/facility_layout_structure_tree.js?v=20260923-structure-tree"></script>
+    <script src="/static/facility_layout_structure_tree.js?v=9c9992a02daa"></script>
+    <script src="/static/facility_layout_sheets.js?v=20260929-open-layout-1"></script>
     <script src="/static/facility_layout_patterns.js?v=20260912-construction-contract"></script>
     <script src="/static/facility_layout_command_adapter.js?v=20260912-contract-v1-retry-fix"></script>
-    <script src="/static/facility_layout_session.js?v=20260912-sage-construction"></script>
-    <script src="/static/facility_layout_transport.js?v=20260917-generation-planning"></script>
+    <script src="/static/facility_layout_session.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_transport.js?v=20261013-decals-1"></script>
     <script src="/static/facility_layout_generation_view.js?v=20260917-generation-research"></script>
-    <script src="/static/facility_layout_workspace.js?v=20260917-generation-planning"></script>
-    <script src="/static/facility_layout_app.js?v=20260912-sage-construction"></script>
+    <script src="/static/facility_layout_workspace.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_app.js?v=20261013-decals-1"></script>
     <script src="/static/desktop_workflow_observation.js?v=20260915-workflow-coverage"></script>
     <script src="/static/desktop_runtime_bridge.js?v=20260915-workflow-coverage"></script>
     <script>
@@ -21855,7 +21898,7 @@
         function _desktopObserveApplication() {
             const rows = _desktopInspectOtherWorkflows();
             const facility = _trainFacilityLayoutAuthoringApp?.session?.getState();
-            rows.facility = {
+            rows.facility = _trainFacilitySheets ? _trainFacilitySheets.observation() : {
                 dirty: !!facility?.dirty,
                 busy: !!facility?.busy,
                 pending: !!facility && facility.designAuthorityState !== 'ready',
@@ -23019,6 +23062,10 @@
         // ---- Viewport Rendering ----
         function switchTab(tab) {
             const previousTab = state.activeTab;
+            if (previousTab === 'training' && tab !== 'training' && _trainIsPlantProcessMode()) {
+                _trainExitPlantSpatialWalkthrough('tab_changed');
+                _stopPlantWalkthrough();
+            }
             const enteringDocumentationWorkflow = tab === 'training'
                 && trainingState.type === 'documentation';
             if (!enteringDocumentationWorkflow && document.getElementById('documentationWorkspace')) {
@@ -27403,6 +27450,8 @@
             facilityDuplicate: _facilityLayoutIcon('copy'),
             facilityDelete: _facilityLayoutIcon('trash'),
             facilityLock: _facilityLayoutIcon('lock-simple'),
+            facilityAppearance: _facilityLayoutIcon('sphere'),
+            facilityDecals: _facilityLayoutIcon('camera'),
             facilityAlign: _facilityLayoutIcon('bounding-box'),
             facilityDistribute: _facilityLayoutIcon('grid-four'),
             facilityRelative: _facilityLayoutIcon('sphere'),
@@ -32350,6 +32399,24 @@
             return result;
         }
 
+        function _viewerRenderGeometryOverride(renderer, scene, camera, rigidMaterial, skinnedMaterial) {
+            const originalOverride = scene.overrideMaterial, originals = [];
+            try {
+                // r128 caches a material's first program without distinguishing rigid/skinned objects.
+                // Separate materials keep animated limbs out of the rigid bind-pose shader.
+                scene.traverse(object => {
+                    if (!object.isMesh) return;
+                    originals.push([object,object.material]);
+                    object.material = object.isSkinnedMesh ? skinnedMaterial : rigidMaterial;
+                });
+                scene.overrideMaterial = null;
+                renderer.render(scene,camera);
+            } finally {
+                originals.forEach(([object,material]) => {object.material=material;});
+                scene.overrideMaterial=originalOverride;
+            }
+        }
+
         function _partsManualCreateHiddenLinesRemovedPass(meshes, width, height, options = {}) {
             const preparationStartedAt = performance.now();
             const topologyEdges = options.viewerFeatureEdges
@@ -32380,11 +32447,18 @@
                 depthTest: true,
                 depthWrite: true,
                 blending: THREE.NoBlending,
+                skinning: false,
                 vertexShader: `
+                    #include <skinning_pars_vertex>
                     varying vec3 vManualViewNormal;
                     void main() {
-                        vManualViewNormal = normalize(normalMatrix * normal);
-                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                        #include <skinbase_vertex>
+                        #include <beginnormal_vertex>
+                        #include <skinnormal_vertex>
+                        #include <begin_vertex>
+                        #include <skinning_vertex>
+                        vManualViewNormal = normalize(normalMatrix * objectNormal);
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
                     }
                 `,
                 fragmentShader: `
@@ -32395,6 +32469,8 @@
                     }
                 `,
             });
+            const skinnedNormalDepthMaterial = normalDepthMaterial.clone();
+            skinnedNormalDepthMaterial.skinning = true;
             const featureMaterial = topologyEdges.enabled
                 ? new THREE.LineBasicMaterial({
                     color: 0x000000,
@@ -32537,8 +32613,7 @@
                         renderer.setClearColor(0x000000, 0);
                         renderer.clear(true, true, true);
                         scene.background = null;
-                        scene.overrideMaterial = normalDepthMaterial;
-                        renderer.render(scene, camera);
+                        _viewerRenderGeometryOverride(renderer,scene,camera,normalDepthMaterial,skinnedNormalDepthMaterial);
                         scene.overrideMaterial = originalOverrideMaterial;
                         scene.background = originalBackground;
                         if (featureLines.length) {
@@ -32573,6 +32648,7 @@
                     featureScene.clear();
                     featureMaterial?.dispose?.();
                     normalDepthMaterial.dispose();
+                    skinnedNormalDepthMaterial.dispose();
                     postQuad.geometry.dispose();
                     postMaterial.dispose();
                     renderTarget.dispose();
@@ -32646,6 +32722,8 @@
                 depthWrite: true,
                 side: THREE.DoubleSide,
             });
+            const skinnedDepthOnlyMaterial = depthOnlyMaterial.clone();
+            skinnedDepthOnlyMaterial.skinning = true;
 
             meshes.forEach(mesh => {
                 if (!mesh?.isMesh || !mesh.geometry) return;
@@ -32696,8 +32774,7 @@
                         renderer.setRenderTarget(originalTarget);
                         renderer.autoClear = false;
                         scene.background = null;
-                        scene.overrideMaterial = depthOnlyMaterial;
-                        renderer.render(scene, camera);
+                        _viewerRenderGeometryOverride(renderer,scene,camera,depthOnlyMaterial,skinnedDepthOnlyMaterial);
                         scene.overrideMaterial = originalOverrideMaterial;
                         hiddenLines.forEach(line => {
                             const sourceMesh = line.userData.sourceMesh;
@@ -32719,6 +32796,7 @@
                     hiddenScene.clear();
                     hiddenMaterial.dispose();
                     depthOnlyMaterial.dispose();
+                    skinnedDepthOnlyMaterial.dispose();
                     visiblePass.dispose();
                 },
                 diagnostics: {
@@ -43168,8 +43246,9 @@
                 'aisle', 'floor-marking', 'motion-path',
             ] },
             { label: 'Arrange', commands: [
-                'rotate', 'duplicate', 'delete', 'clear-all', 'lock',
+                'rotate', 'duplicate', 'delete', 'clear-all', 'lock', 'appearance', 'component-materials', 'replace-asset',
             ] },
+            { label: 'Surfaces', commands: ['decals', 'lettering', 'interior-walls', 'floor-surfaces'] },
             { label: 'Position', commands: [
                 'align', 'distribute', 'relative', 'distance', 'offset',
             ] },
@@ -43218,6 +43297,10 @@
                 shortcut: 'Shift+P',
                 title: 'Author a motion path for one selected existing actor',
             },
+            'saved-movement': {
+                icon: 'facilityMotionPath', label: 'Saved Movement',
+                title: 'Prepare playback from saved movement programs',
+            },
             rotate: {
                 icon: 'facilityRotate', label: 'Rotate 90', shortcut: 'R',
                 title: 'Rotate the selected equipment 90 degrees',
@@ -43238,6 +43321,34 @@
             lock: {
                 icon: 'facilityLock', label: 'Lock', shortcut: 'L',
                 title: 'Lock the selected equipment in place',
+            },
+            appearance: {
+                icon: 'facilityAppearance', label: 'Appearance',
+                title: 'Change selected object colors',
+            },
+            decals: {
+                icon: 'facilityDecals', label: 'Decals',
+                title: 'Import and place artwork on wall faces',
+            },
+            lettering: {
+                icon: 'facilityDecals', label: 'Wall Lettering',
+                title: 'Create and edit text on a wall face',
+            },
+            'component-materials': {
+                icon: 'facilityAppearance', label: 'Component Materials',
+                title: 'Edit individual mesh finishes on the selected asset',
+            },
+            'interior-walls': {
+                icon: 'facilityRectangleZone', label: 'Interior Walls',
+                title: 'Create and edit interior partitions and door openings',
+            },
+            'floor-surfaces': {
+                icon: 'facilityRectangleZone', label: 'Floor Surfaces',
+                title: 'Apply floor finishes without changing ground levels',
+            },
+            'replace-asset': {
+                icon: 'facilitySwap', label: 'Replace Asset',
+                title: 'Replace a selected model while retaining its placement',
             },
             align: {
                 icon: 'facilityAlign', label: 'Align',
@@ -44848,7 +44959,7 @@
             menu.setAttribute('data-ribbon-dropdown', 'true');
             const content = document.createElement('div');
             content.className = 'documentation-menu-items';
-            ['selection', 'create', 'edit', 'position', 'build', 'history']
+            ['selection', 'create', 'edit', 'surfaces', 'position', 'build', 'history']
                 .forEach(key => {
                     const entry = groups.get(key);
                     if (entry) content.appendChild(
@@ -44856,7 +44967,7 @@
                     );
                 });
             content.appendChild(
-                _trainFacilityOverflowSection('utilities', 'Utilities', null, ['clear-all'])
+                _trainFacilityOverflowSection('utilities', 'Utilities', null, ['saved-movement', 'clear-all'])
             );
             menu.appendChild(content);
             trigger.addEventListener('click', event => {
@@ -45003,6 +45114,15 @@
                     _trainFacilityRibbonButton('delete', { compact: true, size: 'compact' }),
                 ]),
                 _trainFacilityRibbonButton('lock', { size: 'medium' }),
+                _trainFacilityRibbonMenu('appearance', 'Appearance', 'Edit object and component finishes',
+                    ['appearance', 'component-materials'], { size: 'medium' }),
+                _trainFacilityRibbonButton('replace-asset', { size: 'medium' }),
+            ]);
+            appendGroup('surfaces', 'Surfaces', [
+                _trainFacilityRibbonMenu('decals', 'Wall Art', 'Add artwork and lettering',
+                    ['decals', 'lettering'], { size: 'medium' }),
+                _trainFacilityRibbonMenu('interior-walls', 'Walls / Floors', 'Edit partitions and floor finishes',
+                    ['interior-walls', 'floor-surfaces'], { size: 'medium' }),
             ]);
             appendGroup('position', 'Position', [
                 _trainFacilityRibbonMenu(
@@ -48697,6 +48817,7 @@
 
         function _plantWalkthroughHighlightGroups(groupIds, durationMs) {
             _plantWalkSetSelection(groupIds, false);
+            if (_plantWalk.active) _trainStartPlantOperatorGuide({groups:groupIds,source:'narration'});
             // durationMs is optional; segments normally clear via the next segment.
             if (durationMs && durationMs > 0) {
                 const my = _plantWalk.sessionId;
@@ -48919,6 +49040,7 @@
         }
 
         function _stopPlantWalkthrough() {
+            _trainCancelPlantOperatorGuide();
             _plantWalk.sessionId++;
             _plantWalk.active = false;
             _plantWalkStopVoice();
@@ -53368,6 +53490,20 @@
         }
 
         const _trainPlantSpatialWalk = {
+            position: null,
+            avatar: null,
+            avatarHeading: 0,
+            cameraMode: 'third-person',
+            cameraSettings: InspectorProWalkthroughCamera.load(),
+            cameraControl: null,
+            avatarButton: null,
+            guideButton: null,
+            guide: null,
+            guideSource: null,
+            cueKey: null,
+            pendingCue: null,
+            pointing: false,
+            frameTravel: 0,
             active: false,
             locked: false,
             lockRequested: false,
@@ -53565,7 +53701,7 @@
             const modelScale = Math.max(0.5, Math.min(2, maximumSpan / 12.81));
             const helper = window.InspectorProFacilityThree;
             const postureProfiles = helper && typeof helper.walkthroughPostureProfiles === 'function'
-                ? helper.walkthroughPostureProfiles(modelScale)
+                ? { ...helper.walkthroughPostureProfiles(modelScale) }
                 : {
                     standing: {
                         eyeHeight: 1.7 * modelScale,
@@ -53590,6 +53726,10 @@
                     },
                 };
             const standingProfile = postureProfiles.standing;
+            postureProfiles.kneeling = { ...postureProfiles.crouching,
+                eyeHeight: 1.2 * modelScale, bodyHeight: 1.5 * modelScale,
+                walkSpeed: 0, fastSpeed: 0 };
+            postureProfiles.crawling = { ...postureProfiles.crawling, radius: .30 * modelScale };
             const eyeHeight = standingProfile.eyeHeight;
             const radius = standingProfile.radius;
             const groundCandidates = [];
@@ -53776,7 +53916,7 @@
         function _trainPlantWalkDirection() {
             const camera = state.assyCamera;
             if (!camera || !window.THREE) return null;
-            return camera.getWorldDirection(new THREE.Vector3()).normalize();
+            return new THREE.Vector3(-Math.sin(_trainPlantSpatialWalk.yaw), 0, -Math.cos(_trainPlantSpatialWalk.yaw));
         }
 
         function _trainApplyPlantWalkOrientation() {
@@ -53793,6 +53933,187 @@
             const direction = _trainPlantWalkDirection();
             if (direction) controls.target.copy(camera.position).addScaledVector(direction, 2);
             controls._needsUpdate = false;
+            if (_trainPlantSpatialWalk.active) _trainUpdatePlantOperatorCamera();
+        }
+
+        function _trainCancelPlantOperatorGuide() {
+            const r = _trainPlantSpatialWalk;
+            if (r.guide) r.guide.cancel();
+            r.guide = null; r.guideSource = null; r.pointing = false; r.pendingCue = null;
+        }
+
+        function _trainSetPlantCameraSettings(value) {
+            const r = _trainPlantSpatialWalk;
+            r.cameraSettings = InspectorProWalkthroughCamera.save(value);
+            if (r.cameraControl) r.cameraControl.sync(r.cameraSettings);
+            if (r.active) _trainUpdatePlantOperatorCamera();
+        }
+
+        function _trainTogglePlantOperatorCamera() {
+            const r = _trainPlantSpatialWalk;
+            r.cameraMode = r.cameraMode === 'third-person' ? 'first-person' : 'third-person';
+            if (r.active) _trainSyncPlantOperator(0, 0);
+            _trainSyncPlantSpatialWalkthroughUi();
+        }
+
+        function _trainUpdatePlantOperatorCamera() {
+            const r = _trainPlantSpatialWalk, camera = state.assyCamera;
+            if (!r.active || !r.position || !camera) return;
+            const scale = r.geometry.modelScale;
+            if (r.cameraMode === 'first-person') {
+                camera.position.set(r.position.x, r.footY + r.currentEyeHeight, r.position.z);
+                camera.quaternion.setFromEuler(new THREE.Euler(r.pitch, r.yaw, 0, 'YXZ'));
+                state.assyControls.target.copy(camera.position).addScaledVector(_trainPlantWalkDirection(), 2);
+                if (r.avatar) r.avatar.root.visible = false;
+                return;
+            }
+            const anchor = new THREE.Vector3(r.position.x, r.footY + r.currentEyeHeight * .65, r.position.z);
+            const direction = new THREE.Vector3(0,0,-1).applyEuler(new THREE.Euler(r.pitch, r.yaw, 0, 'YXZ'));
+            const desired = anchor.clone().addScaledVector(direction, -r.cameraSettings.distance * scale);
+            desired.y += r.cameraSettings.height * scale;
+            desired.y = Math.max(r.geometry.floorY + .2 * scale, desired.y);
+            const boom = desired.clone().sub(anchor), length = boom.length();
+            // Reuse the validated sparse collision volumes instead of raycasting every CAD triangle per frame.
+            const g = r.geometry;
+            if (!g.cameraCollisionBoxes) g.cameraCollisionBoxes = g.obstacleVolumes.map(volume => {
+                const xs = volume.polygon.map(p => p.x), zs = volume.polygon.map(p => p.z);
+                return new THREE.Box3(new THREE.Vector3(Math.min(...xs),volume.minimumY,Math.min(...zs)),
+                    new THREE.Vector3(Math.max(...xs),volume.maximumY,Math.max(...zs)));
+            });
+            const ray = new THREE.Ray(anchor, boom.normalize()), hit = new THREE.Vector3();
+            let distance = length;
+            for (const box of g.cameraCollisionBoxes) {
+                if (ray.intersectBox(box,hit)) distance = Math.min(distance,Math.max(.08*scale,anchor.distanceTo(hit)-.18*scale));
+            }
+            const profile = _trainPlantActivePostureProfile();
+            const halfFov = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+            const framingDistance = Math.max(r.currentEyeHeight*.65,profile.bodyHeight-r.currentEyeHeight*.65,
+                (r.posture === 'crawling' ? .8 : .35)*scale/Math.max(.1,camera.aspect)) / halfFov;
+            if (distance < framingDistance) {
+                // A retracted boom must not fill the viewport with the operator's torso.
+                camera.position.set(r.position.x,r.footY+r.currentEyeHeight,r.position.z);
+                camera.quaternion.setFromEuler(new THREE.Euler(r.pitch,r.yaw,0,'YXZ'));
+                state.assyControls.target.copy(camera.position).addScaledVector(direction,2);
+                if (r.avatar) r.avatar.root.visible = false;
+                return;
+            }
+            camera.position.copy(anchor).addScaledVector(boom, distance);
+            camera.lookAt(anchor); state.assyControls.target.copy(anchor);
+            if (r.avatar) r.avatar.root.visible = true;
+        }
+
+        function _trainSyncPlantOperator(seconds, distance) {
+            const r = _trainPlantSpatialWalk;
+            if (!r.active || !r.position || !state.assyScene) return;
+            if (!r.avatar) {
+                r.avatar = InspectorProFacilityAvatar.createAvatar(THREE);
+                r.avatar.root.userData._isFacilityOverlay = true;
+                r.avatar.root.scale.setScalar(r.geometry.modelScale);
+                state.assyScene.add(r.avatar.root);
+            }
+            const g = r.geometry, scale = g.modelScale, heading = r.avatarHeading;
+            r.avatar.update({ position: r.position, heading, deltaSeconds: seconds,
+                distance: distance / scale, posture: r.posture, grounding: true, pointing: r.pointing,
+                supportHeight: (x,z) => {
+                    const p = {x:r.position.x+(x*Math.cos(heading)+z*Math.sin(heading))*scale,
+                        z:r.position.z+(-x*Math.sin(heading)+z*Math.cos(heading))*scale};
+                    const surface = InspectorProFacilityThree.walkthroughSurfaceAtPoint({ point:p,
+                        currentElevation:r.footY, maximumStepUp:g.maximumStepUp,
+                        maximumStepDown:g.maximumStepDown, surfaces:g.walkSurfaces });
+                    return surface ? (surface.elevation-r.footY)/scale : 0;
+                },
+            });
+            _trainUpdatePlantOperatorCamera();
+        }
+
+        function _trainMovePlantOperator(delta) {
+            const r = _trainPlantSpatialWalk, api = InspectorProProcessOperator, helper = InspectorProFacilityThree;
+            const g = r.geometry, before = {...r.position};
+            const heading = Math.hypot(delta.x,delta.z) > 1e-8 ? Math.atan2(-delta.x,-delta.z) : r.avatarHeading;
+            if (!api.transitionFits(helper,g,before,r.posture,r.posture,r.avatarHeading,heading).ok) return 0;
+            // Check the full bent body, not only the first-person collision cylinder.
+            const result = helper.resolveMultiLevelWalkthroughMovement(api.movementInput(g,before,delta,r.posture));
+            const next = {x:result.position.x,y:result.elevation,z:result.position.z};
+            if (!api.poseFits(helper,g,next,r.posture,heading).ok) return 0;
+            r.position = next; r.footY = next.y; r.avatarHeading = heading;
+            r.surfaceId = result.surfaceId || r.surfaceId; r.surfaceKind = result.surfaceKind || r.surfaceKind;
+            const distance = Math.hypot(next.x-before.x,next.z-before.z);
+            r.frameTravel += distance;
+            return distance;
+        }
+
+        function _trainStartPlantOperatorGuide(cue) {
+            const r = _trainPlantSpatialWalk, api = InspectorProProcessOperator, helper = InspectorProFacilityThree;
+            _trainCancelPlantOperatorGuide();
+            if (state.activeTab !== 'training' || !_trainIsPlantProcessMode()) return false;
+            if (!r.active && !_trainEnterPlantSpatialWalkthrough({guided:true})) return false;
+            r.cameraMode = 'third-person'; r.keys.clear();
+            r.hasLocked = false; r.locked = false; r.lockRequested = false;
+            if (document.pointerLockElement === r.canvas && document.exitPointerLock) document.exitPointerLock();
+            const g = r.geometry, start = {...r.position};
+            let actions = [], result;
+            if (cue && cue.groups) {
+                const box = _trainPlantBoundsForGroups(cue.groups);
+                const posture = cue.posture || 'standing';
+                result = api.approach(helper,g,start,box,posture);
+                if (result.ok) actions = [{kind:'move',points:result.points},
+                    {kind:'pose',posture,heading:result.heading,seconds:cue.seconds||6,pointing:posture==='standing'}];
+            } else {
+                const box = _trainPlantBoundsForGroups(['existing_cooling_tower_filter_vessel']);
+                result = api.approach(helper,g,start,box,'kneeling');
+                if (result.ok) {
+                    const climb = api.stairRoute(helper,g,result.end);
+                    if (!climb.ok) result = climb;
+                    else actions = [{kind:'move',points:result.points},
+                        {kind:'pose',posture:'kneeling',heading:result.heading,seconds:4},
+                        {kind:'pose',posture:'standing',seconds:1},
+                        {kind:'move',points:climb.points},
+                        {kind:'pose',posture:'standing',seconds:5,pointing:true},
+                        {kind:'move',points:climb.descent}];
+                }
+            }
+            if (!result || !result.ok) {
+                r.postureMessage = 'Operator: ' + (result && result.reason || 'unsupported_target').replaceAll('_',' ');
+                _trainUpdatePlantWalkHud(0,true);
+                return false;
+            }
+            r.guide = api.createTimeline(actions); r.guideSource = cue && cue.source || 'tour';
+            r.postureMessage = null;
+            _trainSyncPlantSpatialWalkthroughUi();
+            return true;
+        }
+
+        function _trainTogglePlantOperatorGuide() {
+            const r = _trainPlantSpatialWalk;
+            if (r.guide && r.guide.snapshot().status === 'playing') r.guide.pause();
+            else if (r.guide && r.guide.snapshot().status === 'paused') r.guide.resume();
+            else _trainStartPlantOperatorGuide();
+            _trainSyncPlantSpatialWalkthroughUi();
+        }
+
+        function _trainCuePlantOperator(step) {
+            const r = _trainPlantSpatialWalk;
+            r.pendingCue = null;
+            const zone = step && (step.processZone || step.process_zone);
+            const key = String(trainingState.currentStepIndex) + ':' + zone;
+            if (r.cueProcedure === trainingState.procedure && r.cueKey === key && r.guide && r.guideSource === 'training') {
+                if (trainingState.isPlaying) r.guide.resume();
+                return;
+            }
+            _trainCancelPlantOperatorGuide(); r.cueKey = key;
+            r.cueProcedure = trainingState.procedure;
+            const groups = {warm_return:_plantWalkGroupsForCategory('hot'),
+                heat_rejection:['cooling_tower_cell','cooling_tower_cell_2'],
+                fan_airflow:['cooling_tower_cell','cooling_tower_cell_2'],
+                cooled_supply:_plantWalkGroupsForCategory('cold'),
+                controls_safety:['existing_cooling_tower_filter_vessel']}[zone];
+            const cue = groups && groups.length ? {groups,source:'training',
+                posture:zone==='controls_safety'?'kneeling':'standing'} : null;
+            if (!cue && zone !== 'operator_walkdown') return;
+            if (!state.assyLiveScene || !r.geometry) { r.pendingCue = {step}; return; }
+            _trainStartPlantOperatorGuide(cue);
+            r.guideSource = 'training';
+            if (r.guide && !trainingState.isPlaying) r.guide.pause();
         }
 
         function _trainPlantPostureLabel(posture) {
@@ -53800,6 +54121,7 @@
                 standing: 'Standing',
                 crouching: 'Crouching',
                 crawling: 'Crawling',
+                kneeling: 'Kneeling',
             }[posture] || 'Standing';
         }
 
@@ -53828,8 +54150,8 @@
             }
             const clearance = helper.walkthroughVerticalClearance({
                 point: {
-                    x: state.assyCamera.position.x,
-                    z: state.assyCamera.position.z,
+                    x: runtime.position.x,
+                    z: runtime.position.z,
                 },
                 elevation: Number.isFinite(runtime.footY)
                     ? runtime.footY : runtime.geometry.floorY,
@@ -53855,8 +54177,8 @@
                 posture: key,
                 postures: runtime.geometry.postureProfiles,
                 point: {
-                    x: state.assyCamera.position.x,
-                    z: state.assyCamera.position.z,
+                    x: runtime.position.x,
+                    z: runtime.position.z,
                 },
                 elevation: Number.isFinite(runtime.footY)
                     ? runtime.footY : runtime.geometry.floorY,
@@ -53868,6 +54190,11 @@
             });
             runtime.availableClearance = result.availableHeight;
             runtime.clearanceObstacleId = result.obstacleId || null;
+            if (result.ok) {
+                const fit = InspectorProProcessOperator.transitionFits(InspectorProFacilityThree,
+                    runtime.geometry, runtime.position, runtime.posture, key, runtime.avatarHeading, runtime.avatarHeading);
+                if (!fit.ok) Object.assign(result, fit, {ok:false});
+            }
             if (!result.ok) {
                 const required = Number.isFinite(result.requiredHeight)
                     ? `${_trainPlantDisplayMeters(result.requiredHeight).toFixed(2)} m` : 'more space';
@@ -53913,6 +54240,14 @@
 
         function _trainSyncPlantSpatialWalkthroughUi() {
             const runtime = _trainPlantSpatialWalk;
+            if (runtime.avatarButton) runtime.avatarButton.setAttribute('aria-pressed',
+                runtime.cameraMode === 'third-person' ? 'true' : 'false');
+            if (runtime.guideButton) {
+                const playing = runtime.guide && runtime.guide.snapshot().status === 'playing';
+                runtime.guideButton.setAttribute('aria-pressed', playing ? 'true' : 'false');
+                runtime.guideButton.title = playing ? 'Pause operator walkdown' : 'Play operator walkdown';
+                runtime.guideButton.setAttribute('aria-label',runtime.guideButton.title);
+            }
             if (runtime.walkButton) {
                 runtime.walkButton.classList.toggle('active', runtime.active);
                 runtime.walkButton.setAttribute('aria-pressed', runtime.active ? 'true' : 'false');
@@ -53923,9 +54258,10 @@
             }
             if (runtime.hud) runtime.hud.hidden = !runtime.active;
             if (runtime.hudTitle) {
-                runtime.hudTitle.textContent = runtime.locked
-                    ? 'Cooling tower walk'
-                    : (runtime.active ? 'Click the viewport to resume' : 'Cooling tower walk');
+                const guideStatus = runtime.guide && runtime.guide.snapshot().status;
+                runtime.hudTitle.textContent = guideStatus
+                    ? 'Operator walkdown: ' + guideStatus
+                    : 'Cooling tower walk';
             }
             if (runtime.hudPosture) {
                 runtime.hudPosture.textContent = _trainPlantPostureLabel(runtime.posture);
@@ -53937,8 +54273,9 @@
             if (!runtime.active || !runtime.hudPosition || !state.assyCamera) return;
             if (!force && timeMs && timeMs - runtime.lastHudTime < 100) return;
             runtime.lastHudTime = timeMs || 0;
+            _trainSyncPlantSpatialWalkthroughUi();
             _trainRefreshPlantWalkClearance();
-            const p = state.assyCamera.position;
+            const p = runtime.position;
             const floorY = runtime.geometry ? runtime.geometry.floorY : 0;
             const footY = Number.isFinite(runtime.footY) ? runtime.footY : floorY;
             const level = Math.max(0, footY - floorY);
@@ -53978,6 +54315,7 @@
                     <kbd>Shift</kbd><span>Faster</span>
                     <kbd>C</kbd><span>Crouch</span>
                     <kbd>Z</kbd><span>Crawl</span>
+                    <kbd>K</kbd><span>Kneel</span><kbd>V</kbd><span>Camera</span>
                     <kbd>Space</kbd><span>Stand</span>
                     <kbd>Esc</kbd><span>Exit</span>
                 </div>
@@ -54028,18 +54366,31 @@
             };
             runtime.onKeyDown = event => {
                 if (!runtime.active) return;
+                const target = event.target;
+                if (target && target.closest && target.closest('input,textarea,select,[contenteditable="true"],[role="textbox"]')) return;
+                if (!runtime.locked && ['Space','Enter'].includes(event.code)
+                        && target && target.closest && target.closest('button,[role="button"]')) return;
+                if (event.code === 'Escape') {
+                    _trainExitPlantSpatialWalkthrough('keyboard_exit'); event.preventDefault(); return;
+                }
                 if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight'].includes(event.code)) {
+                    _trainCancelPlantOperatorGuide();
+                    if (!runtime.locked) runtime.onCanvasClick();
                     runtime.keys.add(event.code);
                     event.preventDefault();
                     return;
                 }
-                if (event.repeat || !['KeyC', 'KeyZ', 'Space'].includes(event.code)) return;
+                if (event.repeat || !['KeyC', 'KeyZ', 'KeyK', 'KeyV', 'Space'].includes(event.code)) return;
+                if (event.code === 'KeyV') { _trainTogglePlantOperatorCamera(); event.preventDefault(); return; }
+                _trainCancelPlantOperatorGuide();
                 if (event.code === 'KeyC') {
                     _trainRequestPlantWalkPosture(runtime.posture === 'crawling'
                         ? 'crouching' : (runtime.posture === 'crouching' ? 'standing' : 'crouching'));
                 } else if (event.code === 'KeyZ') {
                     _trainRequestPlantWalkPosture(runtime.posture === 'crawling'
                         ? 'crouching' : 'crawling');
+                } else if (event.code === 'KeyK') {
+                    _trainRequestPlantWalkPosture(runtime.posture === 'kneeling' ? 'standing' : 'kneeling');
                 } else {
                     _trainRequestPlantWalkPosture('standing');
                 }
@@ -54048,9 +54399,10 @@
             runtime.onKeyUp = event => {
                 runtime.keys.delete(event.code);
             };
-            runtime.onBlur = () => runtime.keys.clear();
+            runtime.onBlur = () => { runtime.keys.clear(); if(runtime.guide)runtime.guide.pause(); };
             runtime.onCanvasClick = () => {
                 if (!runtime.active || runtime.locked || runtime.lockRequested) return;
+                _trainCancelPlantOperatorGuide();
                 runtime.lockRequested = true;
                 const request = runtime.canvas.requestPointerLock && runtime.canvas.requestPointerLock();
                 if (request && typeof request.catch === 'function') {
@@ -54063,6 +54415,12 @@
             document.addEventListener('keydown', runtime.onKeyDown);
             document.addEventListener('keyup', runtime.onKeyUp);
             window.addEventListener('blur', runtime.onBlur);
+            runtime.onWheel = event => {
+                if (!runtime.active || runtime.cameraMode !== 'third-person' || event.ctrlKey) return;
+                event.preventDefault();
+                _trainSetPlantCameraSettings(InspectorProWalkthroughCamera.zoom(runtime.cameraSettings, event));
+            };
+            canvas.addEventListener('wheel', runtime.onWheel, {passive:false});
             canvas.addEventListener('click', runtime.onCanvasClick);
             runtime.listenersAttached = true;
             return true;
@@ -54071,7 +54429,7 @@
         function _trainPreparePlantSpatialWalkthrough() {
             if (!_trainIsPlantProcessMode() || !state.assyLiveScene || !state.assyRenderer) return false;
             const runtime = _trainPlantSpatialWalk;
-            runtime.geometry = _trainBuildPlantWalkGeometry();
+            if (!runtime.active || !runtime.geometry) runtime.geometry = _trainBuildPlantWalkGeometry();
             const container = document.getElementById('assy-3d-container');
             if (container) {
                 _trainEnsurePlantWalkthroughHud(container);
@@ -54083,12 +54441,19 @@
 
         function _trainSchedulePlantSpatialWalkthroughRefresh() {
             requestAnimationFrame(() => {
-                if (_trainIsPlantProcessMode()) _trainPreparePlantSpatialWalkthrough();
+                if (_trainIsPlantProcessMode()) {
+                    _trainPreparePlantSpatialWalkthrough();
+                    const pending = _trainPlantSpatialWalk.pendingCue;
+                    _trainPlantSpatialWalk.pendingCue = null;
+                    if (pending) _trainCuePlantOperator(pending.step);
+                }
             });
         }
 
-        function _trainEnterPlantSpatialWalkthrough() {
+        function _trainEnterPlantSpatialWalkthrough(options) {
             const runtime = _trainPlantSpatialWalk;
+            runtime.cameraSettings = InspectorProWalkthroughCamera.load();
+            if (runtime.cameraControl) { runtime.cameraControl.sync(runtime.cameraSettings); runtime.cameraControl.close(false); }
             if (runtime.active) return true;
             if (!_trainPreparePlantSpatialWalkthrough() || !runtime.geometry
                     || !state.assyCamera || !state.assyControls || !runtime.canvas) {
@@ -54146,7 +54511,7 @@
             runtime.postureMessage = null;
             runtime.active = true;
             runtime.locked = false;
-            runtime.lockRequested = true;
+            runtime.lockRequested = !(options && options.guided);
             runtime.hasLocked = false;
             runtime.keys.clear();
             runtime.lastTime = 0;
@@ -54156,16 +54521,19 @@
             controls._needsUpdate = false;
             state._assyAutoRotate = false;
             camera.position.set(spawn.x, runtime.footY + runtime.currentEyeHeight, spawn.z);
+            runtime.position = {x:spawn.x, y:runtime.footY, z:spawn.z};
             const lookTarget = preferredStairEntry && preferredStairEntry.target
                 ? preferredStairEntry.target : geometry.center;
             camera.lookAt(lookTarget.x, runtime.footY + runtime.currentEyeHeight, lookTarget.z);
             const rotation = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
             runtime.pitch = rotation.x;
             runtime.yaw = rotation.y;
+            runtime.avatarHeading = rotation.y;
             _trainApplyPlantWalkOrientation();
+            _trainSyncPlantOperator(.25,0);
             _trainUpdatePlantWalkHud(0);
             _trainSyncPlantSpatialWalkthroughUi();
-            const request = runtime.canvas.requestPointerLock && runtime.canvas.requestPointerLock();
+            const request = !(options && options.guided) && runtime.canvas.requestPointerLock && runtime.canvas.requestPointerLock();
             if (request && typeof request.catch === 'function') {
                 request.catch(() => runtime.onPointerLockError());
             }
@@ -54175,6 +54543,8 @@
         function _trainExitPlantSpatialWalkthrough(reason, options) {
             const runtime = _trainPlantSpatialWalk;
             const value = options || {};
+            _trainCancelPlantOperatorGuide();
+            if (runtime.avatar) { runtime.avatar.dispose(); runtime.avatar = null; }
             if (!runtime.active && !runtime.previousCamera) return false;
             runtime.active = false;
             runtime.locked = false;
@@ -54204,6 +54574,7 @@
             runtime.previousCamera = null;
             runtime.lastTime = 0;
             runtime.footY = null;
+            runtime.position = null;
             runtime.surfaceId = null;
             runtime.surfaceKind = null;
             runtime.posture = 'standing';
@@ -54221,73 +54592,59 @@
 
         function _trainTickPlantSpatialWalkthrough(timeMs) {
             const runtime = _trainPlantSpatialWalk;
-            if (!runtime.active || !runtime.geometry || !state.assyCamera || !state.assyControls) return;
+            if (!runtime.active || !runtime.geometry || !runtime.position || !state.assyCamera || !state.assyControls) return;
+            if (!_trainIsPlantProcessMode()) { _trainExitPlantSpatialWalkthrough('workflow_changed'); return; }
             const previous = runtime.lastTime || timeMs;
             runtime.lastTime = timeMs;
-            const seconds = Math.max(0, Math.min(0.05, (timeMs - previous) / 1000));
+            // Collision resolution already subdivides movement; allow low-FPS viewers to maintain walking speed.
+            const seconds = Math.max(0, Math.min(.25,(timeMs-previous)/1000));
+            runtime.frameTravel = 0;
+            if (runtime.guide && runtime.guide.snapshot().status === 'paused') {
+                _trainUpdatePlantOperatorCamera(); _trainUpdatePlantWalkHud(timeMs); return;
+            }
             _trainUpdatePlantWalkEyeHeight(seconds);
+            if (runtime.guide) {
+                const timeline = runtime.guide;
+                if (runtime.guideSource === 'training' && !trainingState.isPlaying) timeline.pause();
+                timeline.tick(seconds, {
+                    position:()=>runtime.position, scale:runtime.geometry.modelScale,
+                    speed:runtime.geometry.walkSpeed,
+                    posture:p=>runtime.posture===p || _trainRequestPlantWalkPosture(p,{silent:true}),
+                    move:delta=>runtime.avatar && runtime.avatar.snapshot().postureBlend < .995 ? 0 : _trainMovePlantOperator(delta),
+                    face:heading=>{
+                        if (!InspectorProProcessOperator.transitionFits(InspectorProFacilityThree,runtime.geometry,
+                                runtime.position,runtime.posture,runtime.posture,runtime.avatarHeading,heading).ok) return false;
+                        runtime.avatarHeading=heading;runtime.yaw=heading;return true;
+                    },
+                    point:value=>{runtime.pointing=value;},
+                });
+                const status = timeline.snapshot();
+                if(status.status==='blocked') runtime.postureMessage = status.reason.replaceAll('_',' ');
+                if(status.status==='paused') { _trainUpdatePlantOperatorCamera(); _trainUpdatePlantWalkHud(timeMs); return; }
+            } else if (runtime.locked && seconds > 0) {
+                const forward = _trainPlantWalkDirection();
+                const right = new THREE.Vector3().crossVectors(forward,state.assyCamera.up).normalize();
+                const delta = new THREE.Vector3();
+                if (runtime.keys.has('KeyW')) delta.add(forward);
+                if (runtime.keys.has('KeyS')) delta.sub(forward);
+                if (runtime.keys.has('KeyD')) delta.add(right);
+                if (runtime.keys.has('KeyA')) delta.sub(right);
+                if(delta.lengthSq()>0 && (!runtime.avatar || runtime.avatar.snapshot().postureBlend >= .995)) {
+                    const p = _trainPlantActivePostureProfile();
+                    const fast = runtime.keys.has('ShiftLeft') || runtime.keys.has('ShiftRight');
+                    delta.normalize().multiplyScalar((fast?p.fastSpeed:p.walkSpeed)*seconds);
+                    _trainMovePlantOperator(delta);
+                }
+            }
             _trainApplyPlantWalkOrientation();
-            if (!runtime.locked || seconds <= 0) {
-                _trainUpdatePlantWalkHud(timeMs);
-                return;
-            }
-            const forward = _trainPlantWalkDirection();
-            if (!forward) return;
-            forward.y = 0;
-            if (forward.lengthSq() < 0.000001) forward.set(0, 0, -1);
-            forward.normalize();
-            const right = new THREE.Vector3().crossVectors(forward, state.assyCamera.up).normalize();
-            const delta = new THREE.Vector3();
-            if (runtime.keys.has('KeyW')) delta.add(forward);
-            if (runtime.keys.has('KeyS')) delta.sub(forward);
-            if (runtime.keys.has('KeyD')) delta.add(right);
-            if (runtime.keys.has('KeyA')) delta.sub(right);
-            if (delta.lengthSq() > 0) {
-                const profile = _trainPlantActivePostureProfile();
-                if (!profile) return;
-                const fast = runtime.keys.has('ShiftLeft') || runtime.keys.has('ShiftRight');
-                delta.normalize().multiplyScalar((fast ? profile.fastSpeed : profile.walkSpeed) * seconds);
-                const helper = window.InspectorProFacilityThree;
-                const result = helper && typeof helper.resolveMultiLevelWalkthroughMovement === 'function'
-                    ? helper.resolveMultiLevelWalkthroughMovement({
-                        start: {
-                            x: state.assyCamera.position.x,
-                            z: state.assyCamera.position.z,
-                            elevation: Number.isFinite(runtime.footY)
-                                ? runtime.footY : runtime.geometry.floorY,
-                        },
-                        delta: { x: delta.x, z: delta.z },
-                        radius: profile.radius,
-                        bodyHeight: profile.bodyHeight,
-                        maximumStepUp: runtime.geometry.maximumStepUp,
-                        maximumStepDown: runtime.geometry.maximumStepDown,
-                        supportClearance: runtime.geometry.supportClearance,
-                        bounds: runtime.geometry.bounds,
-                        surfaces: runtime.geometry.walkSurfaces,
-                        obstacleVolumes: runtime.geometry.obstacleVolumes,
-                    })
-                    : { position: {
-                        x: state.assyCamera.position.x + delta.x,
-                        z: state.assyCamera.position.z + delta.z,
-                    }, elevation: runtime.geometry.floorY, surfaceId: 'cooling-tower-ground', surfaceKind: 'ground' };
-                runtime.footY = Number.isFinite(result.elevation)
-                    ? result.elevation : runtime.geometry.floorY;
-                runtime.surfaceId = result.surfaceId || runtime.surfaceId;
-                runtime.surfaceKind = result.surfaceKind || runtime.surfaceKind;
-                runtime.postureMessage = null;
-                state.assyCamera.position.set(
-                    result.position.x,
-                    runtime.footY + runtime.currentEyeHeight,
-                    result.position.z
-                );
-                _trainApplyPlantWalkOrientation();
-            }
+            _trainSyncPlantOperator(seconds,runtime.frameTravel);
             _trainUpdatePlantWalkHud(timeMs);
         }
 
         function _trainDisposePlantSpatialWalkthrough() {
             const runtime = _trainPlantSpatialWalk;
             _trainExitPlantSpatialWalkthrough('viewer_disposed', { restore: false });
+            runtime.pendingCue = null; runtime.cueKey = null; runtime.cueProcedure = null;
             if (runtime.listenersAttached) {
                 document.removeEventListener('pointerlockchange', runtime.onPointerLockChange);
                 document.removeEventListener('pointerlockerror', runtime.onPointerLockError);
@@ -54295,7 +54652,10 @@
                 document.removeEventListener('keydown', runtime.onKeyDown);
                 document.removeEventListener('keyup', runtime.onKeyUp);
                 window.removeEventListener('blur', runtime.onBlur);
-                if (runtime.canvas) runtime.canvas.removeEventListener('click', runtime.onCanvasClick);
+                if (runtime.canvas) {
+                    runtime.canvas.removeEventListener('click', runtime.onCanvasClick);
+                    runtime.canvas.removeEventListener('wheel', runtime.onWheel);
+                }
             }
             if (runtime.hud && runtime.hud.isConnected) runtime.hud.remove();
             if (runtime.viewpointOutsideHandler) {
@@ -54306,6 +54666,10 @@
             runtime.container = null;
             runtime.geometry = null;
             runtime.walkButton = null;
+            runtime.avatarButton = null;
+            runtime.guideButton = null;
+            if (runtime.cameraControl) runtime.cameraControl.dispose();
+            runtime.cameraControl = null;
             runtime.hud = null;
             runtime.hudTitle = null;
             runtime.hudPosture = null;
@@ -54423,6 +54787,7 @@
 
         function _trainEnhancePlantProcessToolbar(container, toolbar) {
             if (!toolbar || !_trainIsPlantProcessMode()) return;
+            toolbar.classList.add('train-plant-operator-toolbar');
             toolbar.appendChild(_threeToolbarSeparator());
             const walkButton = _createThreeToolbarButton({
                 title: 'Explore the cooling tower at human height',
@@ -54437,8 +54802,33 @@
             walkButton.dataset.plantProcessCommand = 'walkthrough';
             walkButton.setAttribute('aria-pressed', 'false');
             toolbar.appendChild(walkButton);
+            const avatarButton = _createThreeToolbarButton({title:'Switch operator camera (V)',
+                ariaLabel:'Switch operator camera (V)',icon:'avatar-view',iconOnly:true,
+                onClick:_trainTogglePlantOperatorCamera});
+            avatarButton.dataset.plantProcessCommand = 'avatar-view';
+            toolbar.appendChild(avatarButton);
+            const cameraButton = _createThreeToolbarButton({title:'Walkthrough camera settings',
+                ariaLabel:'Walkthrough camera settings',icon:'settings',iconOnly:true});
+            cameraButton.dataset.plantProcessCommand = 'camera-settings';
+            toolbar.appendChild(cameraButton);
+            if (_trainPlantSpatialWalk.cameraControl) _trainPlantSpatialWalk.cameraControl.dispose();
+            _trainPlantSpatialWalk.cameraControl = InspectorProWalkthroughCamera.createControl({
+                document, button:cameraButton,
+                onOpen:() => _trainSetPlantCameraSettings(InspectorProWalkthroughCamera.load()),
+                onChange:value => {
+                    _trainPlantSpatialWalk.cameraMode = 'third-person';
+                    _trainSetPlantCameraSettings(value); _trainSyncPlantSpatialWalkthroughUi();
+                },
+            });
+            const guideButton = _createThreeToolbarButton({title:'Play operator walkdown',
+                ariaLabel:'Play operator walkdown',icon:'walk-to-selected',iconOnly:true,
+                onClick:_trainTogglePlantOperatorGuide});
+            guideButton.dataset.plantProcessCommand = 'operator-guide';
+            toolbar.appendChild(guideButton);
+            _trainPlantSpatialWalk.avatarButton = avatarButton;
+            _trainPlantSpatialWalk.guideButton = guideButton;
             toolbar.appendChild(_trainCreatePlantOperatorViewMenu());
-            toolbar.dataset.toolCount = String(Number(toolbar.dataset.toolCount || 14) + 2);
+            toolbar.dataset.toolCount = String(Number(toolbar.dataset.toolCount || 14) + 5);
             _trainPlantSpatialWalk.walkButton = walkButton;
             _trainEnsurePlantWalkthroughHud(container);
             _trainSyncPlantSpatialWalkthroughUi();
@@ -54500,6 +54890,8 @@
                         _trainSchedulePlantSpatialWalkthroughRefresh();
                     },
                 });
+                // The shared initializer defaults to relative positioning; this host owns its scene's size.
+                inner.style.position = 'absolute';
                 _trainUpdatePlantViewerCaption();
                 return true;
             } catch (e) {
@@ -54550,6 +54942,168 @@
         }
 
         let _trainFacilityLayoutAuthoringApp = null;
+        let _trainFacilitySheets = null;
+        let _trainFacilitySheetOptions = null;
+        let _trainFacilitySheetError = '';
+
+        function _trainFacilitySheetAction(action) {
+            _trainFacilitySheetError = '';
+            Promise.resolve().then(action).catch(error => {
+                _trainFacilitySheetError = error.message;
+            }).finally(_trainRenderFacilitySheets);
+        }
+
+        function _trainRenderFacilitySheets() {
+            if (!_trainFacilitySheets) return;
+            const app = _trainFacilityLayoutAuthoringApp;
+            const root = app?.workspace?.root;
+            const host = document.getElementById('trainViewportHost');
+            if (root && host && root.parentNode === host) {
+                root.style.bottom = '34px';
+                root.style.height = 'calc(100% - 34px)';
+                let strip = host.querySelector('.ip-layout-sheets');
+                if (!strip) { strip = document.createElement('div'); strip.className = 'ip-layout-sheets'; host.appendChild(strip); }
+                window.InspectorProFacilitySheets.renderStrip(strip, _trainFacilitySheets.state(), {
+                    canCreate: !!app.workspace.capabilities.manualAuthoring,
+                    activate: id => _trainFacilitySheetAction(() => _trainFacilitySheets.activate(id)),
+                    add: () => _trainFacilitySheetAction(() => _trainFacilitySheets.addBlank()),
+                    rename: (id, name, revision) => _trainFacilitySheetAction(() => _trainFacilitySheets.rename(id, name, revision)),
+                    remove: (id, revision) => _trainFacilitySheetAction(() => _trainFacilitySheets.remove(id, revision)),
+                });
+                host.querySelector('.ip-layout-sheet-error')?.remove();
+                if (_trainFacilitySheetError) {
+                    const error = document.createElement('div');
+                    error.className = 'ip-layout-sheet-error'; error.setAttribute('role', 'alert');
+                    error.textContent = _trainFacilitySheetError; host.appendChild(error);
+                }
+            }
+            _structureTreeSelection = null;
+            _structureRenderNow();
+        }
+
+        function _trainAssertSheetSwitchable({ deletingSession } = {}) {
+            const app = _trainFacilityLayoutAuthoringApp;
+            const state = app?.session.getState();
+            const agent = window.__agentChatStreamV1?.getDesktopLifecycleObservation?.();
+            if (!app || (state.busy && deletingSession !== app.session) || state.designAuthorityState !== 'ready'
+                    || app.workspace.designState?.busy || app.workspace.motionRequestPending
+                    || app.workspace.activityRequestPending || agent?.busy || agent?.pending) {
+                throw new Error('Finish the current operation or recovery before switching layouts.');
+            }
+            if (Array.from(document.querySelectorAll('dialog[open], [aria-modal="true"]'))
+                    .some(element => element.getClientRects().length && !element.hidden)) {
+                throw new Error('Close the current dialog before switching layouts.');
+            }
+        }
+
+        function _trainCanOpenFacilitySheet() {
+            return state.activeTab === 'training' && _trainIsFacilityLayoutMode()
+                && !!_trainFacilitySheets && !_trainFacilitySheets.state().busy;
+        }
+
+        async function _trainChooseSavedFacilitySheet() {
+            if (!_trainCanOpenFacilitySheet()) throw new Error('Open the Facility Layout workspace first.');
+            _trainAssertSheetSwitchable();
+            const sheets = _trainFacilitySheets, app = _trainFacilityLayoutAuthoringApp;
+            await sheets.refresh();
+            if (!_trainCanOpenFacilitySheet() || sheets !== _trainFacilitySheets || app !== _trainFacilityLayoutAuthoringApp) {
+                throw new Error('The workspace changed. Reopen the layout chooser.');
+            }
+            _trainAssertSheetSwitchable();
+            const host = document.querySelector('#trainViewportHost .ip-layout-sheets');
+            if (!host) throw new Error('The layout sheets are not ready.');
+            window.InspectorProFacilitySheets.openLayoutDialog(host, sheets.state().availableLayouts,
+                id => _trainFacilitySheetAction(() => {
+                    if (!_trainCanOpenFacilitySheet() || sheets !== _trainFacilitySheets || app !== _trainFacilityLayoutAuthoringApp) {
+                        throw new Error('The workspace changed. Reopen the layout chooser.');
+                    }
+                    return sheets.activate(id);
+                }));
+        }
+
+        async function _trainActivateFacilitySheet({ previous, retained, receipt, layoutId, deletingSession }) {
+            _trainAssertSheetSwitchable({ deletingSession });
+            const host = document.getElementById('trainViewportHost');
+            if (!host || !_trainIsFacilityLayoutMode()) throw new Error('Open the Facility Layout workspace first.');
+            let next = retained;
+            const oldRoot = previous.workspace.root;
+            previous.suspend();
+            previous.workspace.clearMotionPlayback('layout_sheet_changed');
+            previous.workspace.clearActivityPlayback('layout_sheet_changed');
+            previous.workspace.threeAdapter?.park?.();
+            previous.workspace.motionPanel?.remove();
+            oldRoot.remove();
+            try {
+                if (next) {
+                    host.prepend(next.workspace.root);
+                    next.resume(next.workspace.root);
+                } else {
+                    const root = document.createElement('div');
+                    root.id = 'trainFacilityLayoutAuthoring';
+                    root.style.cssText = 'position:absolute;inset:0 0 34px;min-width:0;min-height:0;height:calc(100% - 34px);';
+                    host.prepend(root);
+                    next = window.InspectorProFacilityApp.createFacilityLayoutApp({
+                        ..._trainFacilitySheetOptions, root, layoutId, initialReceipt: receipt,
+                    });
+                    try { await next.ready; } catch (error) { root.remove(); throw error; }
+                }
+                if (!host.isConnected || !_trainIsFacilityLayoutMode()) {
+                    throw new Error('Layout switching was interrupted by a workspace change.');
+                }
+                _trainFacilityLayoutAuthoringApp = next;
+                const motionHost = document.getElementById('trainFacilityMotionPlaybackHost');
+                if (motionHost && next.workspace.motionPanel?.getAttribute('data-motion-docked') === 'true') {
+                    motionHost.appendChild(next.workspace.motionPanel);
+                    next.workspace.options.onMotionPanelVisibilityChange?.(!next.workspace.motionPanel.hidden);
+                }
+                _trainBindStructureTree(next);
+                const url = new URL(location.href);
+                url.searchParams.set('facilityLayoutId', layoutId);
+                history.replaceState(history.state, '', url);
+                return next;
+            } catch (error) {
+                if (next && retained) {
+                    next.suspend();
+                    next.workspace.threeAdapter?.park?.();
+                    next.workspace.motionPanel?.remove();
+                    next.workspace.root.remove();
+                } else if (next) next.destroy();
+                host.prepend(oldRoot); previous.resume(oldRoot);
+                _trainFacilityLayoutAuthoringApp = previous;
+                _trainBindStructureTree(previous);
+                throw error;
+            }
+        }
+
+        function _trainSetupFacilitySheets(app, options) {
+            // Restricted acceptance shells authorize one exact document only.
+            if (_trainDesktopFacilityDocument || !window.InspectorProFacilitySheets) return;
+            _trainFacilitySheetOptions = options;
+            if (!_trainFacilitySheets) _trainFacilitySheets = window.InspectorProFacilitySheets.createSheets({
+                transport: app.transport,
+                canCreate: () => !!_trainFacilityLayoutAuthoringApp?.workspace.capabilities.manualAuthoring,
+                newId: () => 'fl-' + crypto.randomUUID(),
+                assertSwitchable: _trainAssertSheetSwitchable,
+                assertEditable: target => {
+                    const view = _structureRepresentedLayout(target.workspace);
+                    if (view?.readOnly || target.workspace.designState?.busy
+                            || target.workspace.motionRequestPending || target.workspace.activityRequestPending) {
+                        throw new Error('Close the preview and finish pending operations before editing this sheet.');
+                    }
+                },
+                activate: _trainActivateFacilitySheet,
+                onChange: _trainRenderFacilitySheets,
+            });
+            _trainFacilitySheets.register(app);
+            _trainFacilitySheetAction(() => _trainFacilitySheets.refresh());
+        }
+
+        window.addEventListener('beforeunload', event => {
+            const state = _trainFacilitySheets?.observation();
+            if (!window.InspectorProNativeApplication && state && (state.dirty || state.busy || state.pending)) {
+                event.preventDefault(); event.returnValue = '';
+            }
+        });
 
         // ---- Facility Layout structure tree -----------------------------
         // The tree derives from whatever layout the viewport represents, which
@@ -54638,6 +55192,7 @@
                 view: view,
                 readOnly: view.readOnly,
                 selection: view.selection,
+                layouts: _trainFacilitySheets?.state().layouts || [],
             });
         }
 
@@ -54740,6 +55295,7 @@
                 host: host,
                 onSelect: _structureApplySelection,
                 onRename: _structureRenameLayout,
+                onActivateLayout: id => _trainFacilitySheetAction(() => _trainFacilitySheets.activate(id)),
                 displayName: function (assetId) {
                     return String(assetId || '').replace(/^asset-/, '')
                         .replace(/[-_]+/g, ' ')
@@ -54751,17 +55307,19 @@
         };
 
         function _trainBindStructureTree(appInstance) {
+            if (_trainStructureUnsubscribe) _trainStructureUnsubscribe();
             _structureTreeWorkspace = appInstance && appInstance.workspace;
             _structureTreeView = null;
             _structureTreeSelection = null;
             _structureTreeModel = null;
             if (!_structureTreeWorkspace) return;
             if (typeof _structureTreeWorkspace.subscribeStructure === 'function') {
-                _structureTreeWorkspace.subscribeStructure(_structureRenderNow);
+                _trainStructureUnsubscribe = _structureTreeWorkspace.subscribeStructure(_structureRenderNow);
             }
             if (window._structureTreeInstance) _structureRenderNow();
         }
         let _trainFacilityLayoutMountPromise = null;
+        let _trainStructureUnsubscribe = null;
         let _trainDesktopFacilityDocument = null;
         let _trainFacilityLayoutMountGeneration = 0;
         let _trainFacilityThreeRuntimePromise = null;
@@ -54790,16 +55348,19 @@
                 import('three/addons/controls/OrbitControls.js'),
                 import('three/addons/controls/PointerLockControls.js'),
                 import('three/addons/loaders/GLTFLoader.js'),
+                import('three/addons/utils/BufferGeometryUtils.js'),
             ]).then(([
                 THREE,
                 controlsModule,
                 pointerLockModule,
                 loaderModule,
+                geometryModule,
             ]) => ({
                 THREE,
                 OrbitControls: controlsModule.OrbitControls,
                 PointerLockControls: pointerLockModule.PointerLockControls,
                 GLTFLoader: loaderModule.GLTFLoader,
+                mergeGeometries: geometryModule.mergeGeometries,
             })).catch(error => {
                 _trainFacilityThreeRuntimePromise = null;
                 throw error;
@@ -54816,6 +55377,10 @@
                     return;
                 }
                 try { app.destroy(); } catch (_) {}
+            }
+            if (_trainFacilitySheets) {
+                _trainFacilitySheets.apps().forEach(app => app.destroy());
+                _trainFacilitySheets = null;
             }
             _trainFacilityLayoutAuthoringApp = null;
         }
@@ -54881,6 +55446,7 @@
                                 === 'function') {
                         _trainFacilityLayoutAuthoringApp.resume(retainedRoot);
                     }
+                    _trainRenderFacilitySheets();
                     return true;
                 }
             }
@@ -54993,6 +55559,7 @@
                             PointerLockControls:
                                 facilityThree.PointerLockControls,
                             GLTFLoader: facilityThree.GLTFLoader,
+                            mergeGeometries: facilityThree.mergeGeometries,
                             placementFootprint:
                                 window.InspectorProFacilityLayout
                                     .placementFootprint,
@@ -55068,6 +55635,7 @@
                     if (desktopAttachment.recoveryRequired) return true;
                 }
                 if (appInstance.workspace) {
+                    _trainSetupFacilitySheets(appInstance, facilityAppOptions);
                     await appInstance.workspace.executeCommand('fit');
                     if (facilityQuery.get('facilityAssets') === '1'
                             && typeof appInstance.workspace.openAssetBrowser
@@ -56487,6 +57055,7 @@
         }
 
         function _trainDisposeLiveAssemblyViewer() {
+            _trainDisposePlantSpatialWalkthrough();
             try { _trainDisposeFlowVisualization(); } catch (_) {}
             try { _trainDisposeFacilityLayoutGrid(); } catch (_) {}
             try { _trainDisposeFacilityZoneOverlays(); } catch (_) {}
@@ -58163,7 +58732,6 @@
             if (_trainIsPlantProcessProcedure(proc)) {
                 trainingState.viewportMode = 'plant_process';
                 const currentStep = proc.steps[trainingState.currentStepIndex || 0];
-                _trainDisposeLiveAssemblyViewer();
                 _trainRenderPlantProcessDiagram(_trainPlantProcessZoneIdFromStep(currentStep));
             } else {
                 _trainEnsureLiveAssemblyViewer();
@@ -58426,6 +58994,7 @@
             if (_trainIsPlantProcessProcedure(trainingState.procedure)) {
                 trainingState.viewportMode = 'plant_process';
                 _trainRenderPlantProcessDiagram(_trainPlantProcessZoneIdFromStep(stepLike));
+                _trainCuePlantOperator(stepLike);
                 return;
             }
             const highlightParts = stepLike.highlightParts || stepLike.highlight_parts || [];
@@ -58628,6 +59197,9 @@
         window._trainingOnPlaybackEnd = function() {
             if (state._narrationKind !== 'training' && state._narrationKind !== null) return;
             trainingState.isPlaying = false;
+            if (_trainPlantSpatialWalk.guide && _trainPlantSpatialWalk.guideSource === 'training') {
+                _trainPlantSpatialWalk.guide.pause();
+            }
             // Stop any in-flight typewriter and make sure the panel shows the
             // FULL current instruction (not a half-typed line) once playback
             // ends or is stopped.
@@ -71714,6 +72286,9 @@
         }
 
         function _viewerToolbarIconMarkup(kind) {
+            if (kind === 'avatar-view') {
+                return '<img class="view-toolbar-icon" src="/static/assets/facility-layout-ribbon-icons/svg/camera.svg" alt="" draggable="false">';
+            }
             if (kind && kind.startsWith('view-')) {
                 const viewName = kind.slice(5);
                 return `<img class="view-toolbar-icon" src="${_viewToolbarIconSrc(viewName)}" alt="" draggable="false">`;
@@ -75190,6 +75765,21 @@
             const agentToggleBtn = $('agentToggleBtn');
             const agentPanel = $('agentPanel');
             const agentInput = $('agentInput');
+            const facilityEditModeSelect = $('agentFacilityEditMode');
+            try {
+                facilityEditModeSelect.value = localStorage.getItem('inspectorpro.sage.facilityEditMode') === 'preview'
+                    ? 'preview' : 'direct';
+            } catch (_) { /* The visible default also works without local storage. */ }
+            facilityEditModeSelect.addEventListener('change', () => {
+                try { localStorage.setItem('inspectorpro.sage.facilityEditMode', facilityEditModeSelect.value); } catch (_) {}
+                const active = getAgentSession('deviation-analyst').activeStream;
+                if (facilityEditModeSelect.value === 'preview' && active && active.kind === 'facility-direct-edit') {
+                    active.controller.abort();
+                }
+            });
+            function _sageFacilityEditMode() {
+                return facilityEditModeSelect.value === 'direct' ? 'direct' : 'preview';
+            }
             const agentSendBtn = $('agentSendBtn');
             const _agentSendDefaultMarkup = agentSendBtn ? agentSendBtn.innerHTML : '';
             const agentMessages = $('agentMessages');
@@ -75883,6 +76473,10 @@
 
             function _setServerMemoryState(value, message) {
                 _serverMemoryState = String(value || 'unavailable');
+                agentInput.disabled = getCurrentAgentSession().waiting
+                    || _currentConversationIsLegacyArchive()
+                    || ['initializing', 'unavailable'].includes(_serverMemoryState);
+                updateSendButtonState();
                 const indicator = document.getElementById('agentMemoryStatus');
                 if (!indicator) return;
                 const labels = {
@@ -76390,6 +76984,7 @@
             }
 
             async function _loadServerConversation(conversationId, activate) {
+                if (activate !== false) _setServerMemoryState('initializing', 'Loading conversation');
                 const payload = await _serverMemoryJson(
                     '/api/agent/conversations/' + encodeURIComponent(conversationId),
                     { cache: 'no-store' }
@@ -76528,6 +77123,7 @@
             // Full UI sync after conversation/agent swap — mirrors selectAgent() restore steps
             function _syncAgentInputPlaceholder() {
                 if (!agentInput) return;
+                facilityEditModeSelect.hidden = currentAgent !== 'deviation-analyst' || !_trainIsFacilityLayoutMode();
                 const archived = _currentConversationIsLegacyArchive();
                 const memoryUnavailable = _serverMemoryState === 'unavailable';
                 agentInput.placeholder = archived
@@ -76556,12 +77152,12 @@
                 const w = activeSession.waiting;
                 const archived = _currentConversationIsLegacyArchive();
                 const memoryUnavailable = _serverMemoryState === 'unavailable';
-                const blocked = archived || memoryUnavailable;
+                const blocked = archived || memoryUnavailable || _serverMemoryState === 'initializing';
                 agentSendBtn.disabled = w || blocked || !agentInput.value.trim();
                 agentInput.disabled = w || blocked;
                 _syncAgentInputPlaceholder();
-                if (archived) _setServerMemoryState('archive');
-                else if (_serverMemoryEnabled() && !memoryUnavailable) {
+                if (archived && _serverMemoryState !== 'initializing') _setServerMemoryState('archive');
+                else if (_serverMemoryEnabled() && !memoryUnavailable && _serverMemoryState !== 'initializing') {
                     _setServerMemoryState('ready');
                 }
                 updateSendButtonState();
@@ -76596,6 +77192,7 @@
             }
 
             async function switchConversation(convId) {
+                if (_serverMemoryState === 'initializing') return;
                 if (convId === _currentConversationId) return;
                 if (isAnySessionWaiting()) {
                     if (window._toast) window._toast('Wait for the current response to finish before switching chats.', 'warning');
@@ -76623,6 +77220,7 @@
             }
 
             async function createNewConversation() {
+                if (_serverMemoryState === 'initializing') return;
                 if (isAnySessionWaiting()) {
                     if (window._toast) window._toast('Wait for the current response to finish before starting a new chat.', 'warning');
                     return;
@@ -76653,6 +77251,7 @@
             }
 
             async function clearCurrentConversation() {
+                if (_serverMemoryState === 'initializing') return;
                 if (isAnySessionWaiting()) {
                     if (window._toast) window._toast('Wait for the current response to finish.', 'warning');
                     return;
@@ -77544,6 +78143,7 @@
                                 && typeof app.workspace.getDesignReference === 'function'
                             ) ? app.workspace.getDesignReference() : null,
                             state: {
+                                editMode: _sageFacilityEditMode(),
                                 dirty: !!facilityState.dirty,
                                 conflict: !!facilityState.conflict,
                                 editable: !facilityState.busy,
@@ -78633,7 +79233,7 @@
                 const _w = getCurrentAgentSession().waiting;
                 const _streaming = !!getCurrentAgentSession().activeStream;
                 const _memoryBlocked = _currentConversationIsLegacyArchive()
-                    || _serverMemoryState === 'unavailable';
+                    || ['initializing', 'unavailable'].includes(_serverMemoryState);
                 agentSendBtn.disabled = _streaming
                     ? false : (_memoryBlocked || _w || (!hasText && !hasImage));
                 if (_streaming) {
@@ -80930,6 +81530,13 @@
 
             function _facilityLayoutSemanticToolStatusLine(toolResults) {
                 if (!Array.isArray(toolResults)) return null;
+                const exactEdit = toolResults.find(item => item && item.name === 'present_codex_facility_preview');
+                if (exactEdit) {
+                    if (exactEdit.ok === false) return 'The edit could not be confirmed ('
+                        + String(exactEdit.error || 'edit_failed') + '). Check the layout before retrying.';
+                    return exactEdit.saved === true ? 'Applied. Undo is available in the layout toolbar.'
+                        : 'Ready for review. Nothing has been saved.';
+                }
                 const designUndo = toolResults.find(item =>
                     item && item.name === 'undo_facility_design_proposal'
                 );
@@ -81632,6 +82239,75 @@
                         ? String(agentSession.chatSessionId)
                         : 'facility-layout-agent',
                 };
+            }
+
+            async function _trainPresentCodexFacilityPreview(args, originAgent, execution = {}) {
+                let originSession = null;
+                let activeEdit = null;
+                try {
+                    if (originAgent !== 'deviation-analyst') {
+                        return { ok: false, error: 'agent_not_allowed' };
+                    }
+                    const fields = ['siteId', 'layoutId', 'revision', 'proposalId'];
+                    if (!args || typeof args !== 'object' || Array.isArray(args)
+                            || Object.keys(args).some(key => !fields.includes(key) && key !== 'editMode')
+                            || (args.editMode !== undefined && !['direct', 'preview'].includes(args.editMode))
+                            || fields.some(key => typeof args[key] !== 'string' || !args[key].trim())) {
+                        return { ok: false, error: 'operation_proposal_reference_required' };
+                    }
+                    const input = { siteId: args.siteId, layoutId: args.layoutId,
+                        revision: args.revision, proposalId: args.proposalId };
+                    const reference = _trainFacilityAgentReference(originAgent);
+                    originSession = getAgentSession(originAgent);
+                    const requestId = originSession.requestId;
+                    const chatSessionId = originSession.chatSessionId;
+                    if (execution.controller) {
+                        activeEdit = { controller: execution.controller, kind: 'facility-direct-edit' };
+                        originSession.activeStream = activeEdit;
+                        if (typeof setWaiting === 'function') setWaiting(true, originAgent);
+                    }
+                    const isCurrent = () => {
+                        try {
+                            const active = _trainFacilityAgentReference(originAgent);
+                            const session = getAgentSession(originAgent);
+                            return session.requestId === requestId && session.chatSessionId === chatSessionId
+                                && !(execution.controller && execution.controller.signal.aborted)
+                                && active.app === reference.app
+                                && active.attachment.siteId === input.siteId
+                                && active.attachment.layoutId === input.layoutId
+                                && active.attachment.revision === input.revision;
+                        } catch (_) { return false; }
+                    };
+                    if (!isCurrent()) return { ok: false, error: 'layout_proposal_stale' };
+                    const state = reference.app.session.getState();
+                    if (!state.loaded || state.dirty || state.busy || state.conflict
+                            || state.baseRevision !== input.revision
+                            || state.draftRevision !== input.revision) {
+                        return { ok: false, error: 'layout_proposal_dirty' };
+                    }
+                    const applyDirectly = args.editMode === 'direct' && _sageFacilityEditMode() === 'direct';
+                    await reference.app.session.fetchAndInstallOperationProposal(input, {
+                        isCurrent: () => isCurrent() && (!applyDirectly || _sageFacilityEditMode() === 'direct'),
+                        applyDirectly,
+                        signal: execution.controller && execution.controller.signal,
+                    });
+                    const after = reference.app.session.getState();
+                    if (after.baseRevision !== input.revision) {
+                        return { ok: true, proposalId: input.proposalId, saved: true,
+                            layoutChanged: true, approvalRequired: false, undoAvailable: after.canUndo,
+                            message: 'Applied. Undo is available in the layout toolbar.' };
+                    }
+                    return { ok: true, proposalId: input.proposalId, previewPure: true,
+                        approvalRequired: true, layoutChanged: false, saved: false };
+                } catch (error) {
+                    return { ok: false, error: String(error && error.code || 'operation_proposal_preview_failed'),
+                        message: String(error && error.message || error), layoutChanged: null, saved: null };
+                } finally {
+                    if (originSession && activeEdit && originSession.activeStream === activeEdit) {
+                        originSession.activeStream = null;
+                        if (typeof setWaiting === 'function') setWaiting(true, originAgent);
+                    }
+                }
             }
 
             async function _trainFacilityAgentRequest(
@@ -85354,6 +86030,12 @@
                         );
                     }
                 },
+                present_codex_facility_preview: {
+                    agents: ['deviation-analyst'],
+                    async execute(args, execution = {}) {
+                        return await _trainPresentCodexFacilityPreview(args, execution.originAgent, execution);
+                    }
+                },
                 build_facility_layout_preview: {
                     agents: ['deviation-analyst', 'inspector'],
                     async execute(args, execution = {}) {
@@ -85735,6 +86417,7 @@
                 run_facility_design_preview: 120000,
                 apply_facility_design_proposal_draft: 120000,
                 preview_facility_move: 30000,
+                present_codex_facility_preview: 120000,
                 build_facility_layout_preview: 300000,
                 generate_facility_departments_draft: 300000,
                 generate_full_factory_draft: 300000,
@@ -85803,10 +86486,15 @@
                 const t0 = performance.now();
                 const toolCallId = (typeof toolCall.tool_call_id === 'string' && toolCall.tool_call_id)
                     ? toolCall.tool_call_id : _newExecutionId('tool');
+                const controller = toolCall.name === 'present_codex_facility_preview' ? new AbortController() : null;
+                let timer = null;
                 try {
                     const result = await Promise.race([
-                        Promise.resolve(tool.execute(toolCall.args || {}, { toolCallId, originAgent })),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeout)),
+                        Promise.resolve(tool.execute(toolCall.args || {}, { toolCallId, originAgent, controller })),
+                        new Promise((_, reject) => { timer = setTimeout(() => {
+                            if (controller) controller.abort();
+                            reject(new Error('timeout'));
+                        }, timeout); }),
                     ]);
                     const dur = Math.round(performance.now() - t0);
                     console.log('[ToolDispatch]', toolCall.name, result, dur + 'ms');
@@ -85815,6 +86503,8 @@
                     const dur = Math.round(performance.now() - t0);
                     console.error('[ToolDispatch]', toolCall.name, err.message, dur + 'ms');
                     return { ok: false, name: toolCall.name, tool_call_id: toolCallId, error: err.message, duration_ms: dur };
+                } finally {
+                    if (timer !== null) clearTimeout(timer);
                 }
             }
 
@@ -87399,6 +88089,8 @@
             }
 
             async function _getChatStreamingStatus() {
+                // Runtime profiles are startup configuration. Reload this page after
+                // restarting the backend with a different profile to refresh its marker.
                 if (!_chatStreamingStatusPromise) {
                     _chatStreamingStatusPromise = fetch('/api/agent/chat/streaming-status', {
                         cache: 'no-store',
@@ -87463,6 +88155,24 @@
             function _agentServiceFailureText(agentKey, error) {
                 const agentName = (AGENTS[agentKey] && AGENTS[agentKey].name) || 'The agent';
                 const code = String(error && error.agentErrorCode || '').toLowerCase();
+                if (code === 'codex_stream_required') {
+                    return `${agentName}'s inspection runtime requires a live streaming connection. No engineering changes were made. Reload the app and send a new request.`;
+                }
+                if (code === 'codex_time_budget_exhausted') {
+                    return `${agentName} reached the execution time limit before finishing. No engineering changes were saved. Send a new request to retry; this attempt will not continue automatically.`;
+                }
+                if (code === 'codex_tool_budget_exhausted') {
+                    return `${agentName} reached the tool-call limit before finishing. No engineering changes were saved. Send a new request with a smaller scope.`;
+                }
+                if (code === 'codex_protocol_timeout') {
+                    return `${agentName}'s inspection runtime timed out. No engineering changes were made. Send a new request when the system is less busy.`;
+                }
+                if (code === 'codex_runtime_stopped') {
+                    return `${agentName}'s inspection runtime stopped unexpectedly. No engineering changes were made. Send a new request to reconnect.`;
+                }
+                if (code === 'codex_runtime_failed') {
+                    return `${agentName}'s inspection runtime could not complete this request. No engineering changes were made. Send a new request to try again.`;
+                }
                 if (code === 'provider_credit_unavailable') {
                     return `${agentName} could not respond because the configured Anthropic API account does not have enough credit. Add API credit or update the API configuration, then retry.`;
                 }
@@ -87475,21 +88185,37 @@
                 return `${agentName} could not generate a response. Retry the request.`;
             }
 
+            function _agentPartialFailureText(agentKey, error) {
+                if (error && error.streamCancelled) return 'Response stopped. Send a new request to continue.';
+                if (error && error.agentServiceFailure) return _agentServiceFailureText(agentKey, error);
+                return 'Response interrupted. Retry the request to continue.';
+            }
+
             async function _requestAgentChatStream(payload, originAgent, originSession, turnId, preResponseWorkingState) {
                 const status = await _getChatStreamingStatus();
-                const allowed = status && status.enabled
-                    && Array.isArray(status.agents)
-                    && status.agents.includes(_agentStreamingName(originAgent));
-                if (!allowed) return null;
-
                 const activeMode = payload.inspection_context
                     && payload.inspection_context.attachments
                     && payload.inspection_context.attachments.session
                     && payload.inspection_context.attachments.session.active_mode;
+                const codexFacility = status?.facilityRuntime === 'codex'
+                    && originAgent === 'deviation-analyst' && activeMode === 'facility_layout';
+                const streamRequiredFailure = (error = new Error('Codex requires a cancellable stream')) =>
+                    Object.assign(error, {
+                        agentServiceFailure: true,
+                        agentErrorCode: 'codex_stream_required',
+                        streamRetryable: false,
+                        workingState: preResponseWorkingState,
+                    });
+                const allowed = codexFacility || status && status.enabled
+                    && Array.isArray(status.agents)
+                    && status.agents.includes(_agentStreamingName(originAgent));
+                if (!allowed) {
+                    return null;
+                }
                 if ((activeMode === 'report' || activeMode === 'report_fai') && !status.high_risk_modes) {
                     return null;
                 }
-                if (/walk\s*(me\s+)?through|narrat|guided\s+tour|sales\s+coach|sales\s+walkthrough/i.test(payload.message || '')) {
+                if (!codexFacility && /walk\s*(me\s+)?through|narrat|guided\s+tour|sales\s+coach|sales\s+walkthrough/i.test(payload.message || '')) {
                     return null;
                 }
 
@@ -87506,6 +88232,22 @@
                 originSession.activeStream = active;
                 setWaiting(true, originAgent);
 
+                const boundApp = _trainFacilityLayoutAuthoringApp;
+                const boundSessionId = originSession.chatSessionId;
+                const contextGuard = codexFacility
+                    ? window.InspectorProChatStreamRuntime.guardSavedFacilityContext({
+                        reference: payload.inspection_context.attachments.facility_layout,
+                        subscribe: listener => boundApp?.session?.subscribe(listener),
+                        readCurrent: () => ({
+                            active: state.activeTab === 'training' && _trainIsFacilityLayoutMode()
+                                && _trainFacilityLayoutAuthoringApp === boundApp,
+                            requestCurrent: originSession.requestId === turnId
+                                && originSession.chatSessionId === boundSessionId,
+                            state: boundApp?.session?.getState(),
+                        }),
+                        onInvalidate: () => controller.abort(),
+                    }) : null;
+                try {
                 let response;
                 try {
                     response = await fetch('/api/agent/chat/v2/stream', {
@@ -87521,12 +88263,16 @@
                         error.streamCancelled = true;
                         throw error;
                     }
+                    if (codexFacility) throw streamRequiredFailure(error);
                     return null;
                 }
                 if (!response.ok) {
                     originSession.activeStream = null;
                     setWaiting(true, originAgent);
-                    if (response.status === 404 || response.status === 409) return null;
+                    if (response.status === 404 || response.status === 409) {
+                        if (codexFacility) throw streamRequiredFailure();
+                        return null;
+                    }
                     const body = await response.json().catch(() => ({}));
                     const parsed = _chatMemoryRuntime.memoryError(
                         response.status,
@@ -87581,6 +88327,11 @@
                         const lines = buffer.split(/\r?\n/);
                         buffer = lines.pop() || '';
                         for (const line of lines) {
+                            if (contextGuard && !contextGuard.check()) {
+                                const changed = new Error('The active layout changed during inspection');
+                                changed.streamCancelled = true;
+                                throw changed;
+                            }
                             const event = _parseAgentStreamEventLine(line);
                             if (!event) continue;
                             if (eventGate) {
@@ -87675,6 +88426,7 @@
                             error.workingState = workingState;
                             throw error;
                         }
+                        if (codexFacility) throw streamRequiredFailure(error);
                         return null;
                     }
                     if (streamMessage) error.streamingMessage = streamMessage;
@@ -87684,6 +88436,19 @@
                     originSession.activeStream = null;
                     setWaiting(true, originAgent);
                     try { reader.releaseLock(); } catch (_) {}
+                }
+                } catch (error) {
+                    if (codexFacility && !error.streamCancelled && error.name !== 'AbortError'
+                            && !error.agentServiceFailure && !error.memoryCode) {
+                        throw streamRequiredFailure(error);
+                    }
+                    throw error;
+                } finally {
+                    if (contextGuard) contextGuard.dispose();
+                    if (originSession.activeStream === active) {
+                        originSession.activeStream = null;
+                        setWaiting(true, originAgent);
+                    }
                 }
             }
 
@@ -87719,6 +88484,7 @@
             };
 
             async function handleAgentSend(retryOptions) {
+                if (_serverMemoryState === 'initializing') return;
                 const retry = retryOptions
                     && retryOptions.frozenRequest
                     && typeof retryOptions.frozenRequest === 'object'
@@ -87727,6 +88493,7 @@
                     _serverMemoryReady = _recoverServerMemoryConnection();
                 }
                 await _serverMemoryReady;
+                if (_serverMemoryState === 'initializing') return;
                 if (_serverMemoryState === 'unavailable') {
                     if (!retry) {
                         addMessage(
@@ -87813,6 +88580,7 @@
 
                 const displayText = text || (hasImage ? '\uD83D\uDCF7 [Screenshot attached]' : '');
                 if (!retry) {
+                    originSession.pendingInput = '';
                     addMessage(displayText, 'user', originAgent);
                     maybeAutotitleFromMessage(text);
                 }
@@ -87950,6 +88718,9 @@
                             actionParameters: {},
                         });
                     }
+                    payload = window.InspectorProChatStreamRuntime.ensureFacilityTurnIdentity(
+                        payload, _currentConversationId, _newClientTurnId
+                    );
                     if (inspCtx.attachments && inspCtx.attachments.facility_layout
                             && inspCtx.attachments.facility_layout.generationPlanning) {
                         if (!payload.client_turn_id) payload = {...payload, client_turn_id: _newClientTurnId()};
@@ -87994,6 +88765,11 @@
                             const requestError = new Error(parsed.message);
                             requestError.memoryCode = parsed.code;
                             requestError.status = parsed.status;
+                            if (parsed.code === 'codex_stream_required') {
+                                requestError.agentServiceFailure = true;
+                                requestError.agentErrorCode = parsed.code;
+                                requestError.streamRetryable = false;
+                            }
                             throw requestError;
                         }
                         data = await res.json();
@@ -88332,7 +89108,7 @@
                     }
                     if (err && err.streamingMessage) {
                         if (err.streamPartial && typeof err.streamingMessage.fail === 'function') {
-                            err.streamingMessage.fail('Response interrupted. Retry the request to continue.');
+                            err.streamingMessage.fail(_agentPartialFailureText(originAgent, err));
                         } else {
                             err.streamingMessage.discard();
                         }
@@ -88345,7 +89121,7 @@
                         streamTurnCancelled = true;
                         response = '';
                     } else if (err && err.streamPartial) {
-                        _showAgentStreamRetry(
+                        if (err.streamRetryable !== false) _showAgentStreamRetry(
                             originAgent,
                             messageText,
                             err.streamingMessage,
@@ -88362,7 +89138,7 @@
                             'assistant',
                             originAgent
                         );
-                        _showAgentStreamRetry(
+                        if (err.streamRetryable !== false) _showAgentStreamRetry(
                             originAgent,
                             messageText,
                             { message: failureMessage },
@@ -88817,6 +89593,7 @@
 
                 const displayText = text || (hasImage ? '\ud83d\udcf7 [Screenshot attached]' : '');
                 if (!retry) {
+                    originSession.pendingInput = '';
                     addMessage(displayText, 'user', originAgent);
                     maybeAutotitleFromMessage(text);
                 }
@@ -89692,6 +90469,7 @@
 
             function refreshAgentContextBar() {
                 if (!agentContextShell) return;
+                facilityEditModeSelect.hidden = currentAgent !== 'deviation-analyst' || !_trainIsFacilityLayoutMode();
                 const mode = _agentContextModeLabel();
                 const partLabel = _agentContextPartLabel();
                 const viewport = _agentContextViewportText();
@@ -90682,6 +91460,8 @@
 
                 label.addEventListener('click', (e) => {
                     e.stopPropagation();
+                    const openLayout = item.querySelector('[data-action="open-layout"]');
+                    if (openLayout) openLayout.disabled = !_trainCanOpenFacilitySheet();
                     if (openMenu === item) {
                         item.classList.remove('open');
                         openMenu = null;
@@ -90694,6 +91474,8 @@
 
                 // Hover-to-switch when a menu is already open
                 label.addEventListener('mouseenter', () => {
+                    const openLayout = item.querySelector('[data-action="open-layout"]');
+                    if (openLayout) openLayout.disabled = !_trainCanOpenFacilitySheet();
                     if (openMenu && openMenu !== item) {
                         openMenu.classList.remove('open');
                         item.classList.add('open');
@@ -90720,6 +91502,9 @@
                     switch (action) {
                         case 'open-drawing':
                             document.getElementById('fileInput')?.click();
+                            break;
+                        case 'open-layout':
+                            _trainFacilitySheetAction(_trainChooseSavedFacilitySheet);
                             break;
                         case 'export-results':
                             document.getElementById('exportBtn')?.click();

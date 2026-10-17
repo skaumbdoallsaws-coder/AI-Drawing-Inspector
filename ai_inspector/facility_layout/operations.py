@@ -23,6 +23,7 @@ from .navigation_contract import (
     validate_navigation_writer_authority,
 )
 from .plan_settings import PLAN_SETTINGS_EXTENSION_KEY, normalize_plan_settings
+from .perimeter_walls import KEY as WALLS_KEY, compile_perimeter_walls
 from .routing import persisted_route_fingerprint
 from .validate import validate_layout
 
@@ -385,12 +386,25 @@ def _requested_or_generated_id(
 
 
 def _reference_matches(value: Any, key: str, identifier: str) -> bool:
-    if isinstance(value, Mapping):
-        if value.get(key) == identifier:
-            return True
-        return any(_reference_matches(item, key, identifier) for item in value.values())
-    if isinstance(value, list):
-        return any(_reference_matches(item, key, identifier) for item in value)
+    # Layouts are JSON trees. Avoid generic Mapping dispatch on every scalar,
+    # while retaining support for mapping/list subclasses at the API boundary.
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        kind = type(current)
+        if kind is dict:
+            if current.get(key) == identifier:
+                return True
+            pending.extend(current.values())
+        elif kind is list:
+            pending.extend(current)
+        elif kind not in (str, int, float, bool, type(None)):
+            if isinstance(current, Mapping):
+                if current.get(key) == identifier:
+                    return True
+                pending.extend(current.values())
+            elif isinstance(current, list):
+                pending.extend(current)
     return False
 
 
@@ -601,6 +615,15 @@ def _op_add_floor_marking(
     )
     _floor_markings(document).append(marking)
     return [marking_id], [marking_id]
+
+
+def _op_add_floor_path(document, operation, index, base_revision):
+    from .floor_paths import compile_floor_path
+    created = []
+    for marking in compile_floor_path(operation.get("path")):
+        ids, _ = _op_add_floor_marking(document, {"op": "add_floor_marking", "floorMarking": marking}, index, base_revision)
+        created.extend(ids)
+    return created, created
 
 
 def _op_edit_floor_marking(
@@ -890,7 +913,163 @@ def _op_delete_placement(
         for placement in _collection(document, "placements")
         if placement.get("placementId") != placement_id
     ]
+    from .decals import remove_bound_decals
+    remove_bound_decals(document, lambda target: target.get("placementId") == placement_id)
     return [], [placement_id]
+
+
+def _op_set_appearance(document, operation, _index, _base_revision):
+    ids = operation.get("placementIds")
+    if not isinstance(ids, list) or not 1 <= len(ids) <= 5000:
+        _fail("invalid_operation_field", "placementIds must contain 1 to 5000 IDs.")
+    ids = [_clean_id(value, "placementId", "pl") for value in ids]
+    if len(set(ids)) != len(ids):
+        _fail("invalid_operation_field", "placementIds must be unique.")
+    if "color" not in operation:
+        _fail("invalid_operation_field", "color is required; use null to reset appearance.")
+    color = operation["color"]
+    if color is not None and (not isinstance(color, str)
+                             or re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None):
+        _fail("invalid_operation_field", "color must be a six-digit hex color or null.")
+    placements = [_find(document, "placements", "placementId", value, "Placement") for value in ids]
+    for placement in placements:
+        if color is None:
+            placement.pop("appearance", None)
+        else:
+            placement["appearance"] = {"color": color.lower()}
+    return [], ids
+
+
+def _op_replace_asset(document, operation, _index, _base_revision):
+    identifier = _clean_id(operation.get("placementId"), "placementId", "pl")
+    placement = _find(document, "placements", "placementId", identifier, "Placement")
+    asset_id = _clean_id(operation.get("assetId"), "assetId", "asset")
+    revision = operation.get("assetDefinitionRevision")
+    if not isinstance(revision, str) or not re.fullmatch(r"[a-f0-9]{64}", revision):
+        _fail("invalid_operation_field", "Choose an exact asset definition revision.")
+    keep = operation.get("keepAppearance", True)
+    if type(keep) is not bool:
+        _fail("invalid_operation_field", "keepAppearance must be boolean.")
+    if placement["assetId"] == asset_id and placement["assetDefinitionRevision"] == revision:
+        return [], []
+    references = _placement_references(document, identifier)
+    if placement.get("snapRelationship"):
+        references.append("placement attachment")
+    ext = document.get("extensions", {})
+    art = list(ext.get("facilityDecals", {}).get("artworks", []))
+    art += ext.get("facilityPerimeterWalls", {}).get("settings", {}).get("exteriorFinish", {}).get("fittedArtworks", [])
+    if any(a.get("target", {}).get("placementId") == identifier for a in art):
+        references.append("wall artwork")
+    if _reference_matches(ext.get("facilityNavigation", {}), "placementId", identifier):
+        references.append("movement program")
+    if references:
+        _fail("replacement_has_dependencies", "Detach linked equipment, routes, process bindings, movement, or wall artwork before replacing this asset.", details={"targetId":identifier,"references":sorted(set(references))})
+    placement["assetId"] = asset_id
+    placement["assetDefinitionRevision"] = revision
+    placement.pop("componentMaterials", None)
+    if not keep: placement.pop("appearance", None)
+    _set_or_stale_layout_provenance(placement, operation, container="metadata")
+    return [], [identifier]
+
+
+def _op_set_floor_surfaces(document, operation, _index, _base_revision):
+    from .floor_surfaces import normalize_floor_surfaces, KEY
+    try:
+        value = normalize_floor_surfaces(operation.get("surfaces"), document)
+    except ValueError as exc:
+        _fail("invalid_floor_surfaces", str(exc))
+    previous = {s["surfaceId"] for s in document.get("extensions", {}).get(KEY, {}).get("surfaces", [])}
+    current = {s["surfaceId"] for s in value["surfaces"]}
+    document.setdefault("extensions", {})[KEY] = value
+    return sorted(current-previous), sorted(current | previous)
+
+
+def _op_set_interior_walls(document, operation, _index, _base_revision):
+    from .interior_walls import compile_interior_walls, KEY
+    from .decals import remove_bound_decals
+    try:
+        value = compile_interior_walls(operation.get("walls"), document)
+    except ValueError as exc:
+        _fail("invalid_interior_walls", str(exc))
+    previous = {w["wallId"] for w in document.get("extensions", {}).get(KEY, {}).get("walls", [])}
+    current = {w["wallId"] for w in value["walls"]}
+    document.setdefault("extensions", {})[KEY] = value
+    remove_bound_decals(document, lambda target: target.get("wallId") in previous-current)
+    return sorted(current-previous), sorted(current | previous)
+
+
+def _edit_collection_row(
+    value, collection, operation, *, row_field, identity_field, delete=False,
+    derived_fields=(), extra_fields=(),
+):
+    field = identity_field if delete else row_field
+    if set(operation) != {"op", field, *extra_fields}:
+        _fail("invalid_operation_field", f"Expected {field} for {operation['op']}.")
+    row = None if delete else _mapping(operation[field], field)
+    identifier = operation[field] if delete else row.get(identity_field)
+    if not isinstance(identifier, str) or not identifier:
+        _fail("invalid_operation_field", f"{identity_field} must be a nonempty string.")
+    rows = _collection(value, collection)
+    target = next((i for i, item in enumerate(rows) if item.get(identity_field) == identifier), None)
+    if delete and target is None:
+        _fail(
+            "operation_target_not_found", f"{identity_field} '{identifier}' was not found.",
+            details={"targetId": identifier},
+        )
+    # Saved geometry is derived; only authored fields may re-enter the setters.
+    rows = [{key: item for key, item in record.items() if key not in derived_fields} for record in rows]
+    if delete:
+        del rows[target]
+    elif target is None:
+        rows.append(row)
+    else:
+        rows[target] = row
+    value[collection] = rows
+    return ([identifier] if target is None else []), [identifier]
+
+
+def _op_edit_floor_surface_row(document, operation, index, base_revision):
+    from .floor_surfaces import KEY
+    value = _mapping(document.get("extensions", {}).get(KEY, {"version": 1, "surfaces": []}), KEY)
+    result = _edit_collection_row(
+        value, "surfaces", operation, row_field="surface", identity_field="surfaceId",
+        delete=operation["op"] == "delete_floor_surface",
+    )
+    _op_set_floor_surfaces(document, {"op": "set_floor_surfaces", "surfaces": value}, index, base_revision)
+    return result
+
+
+def _op_edit_interior_wall_row(document, operation, index, base_revision):
+    from .interior_walls import KEY
+    from .decals import KEY as DECALS_KEY
+    value = _mapping(document.get("extensions", {}).get(KEY, {"version": 1, "walls": []}), KEY)
+    created, affected = _edit_collection_row(
+        value, "walls", operation, row_field="wall", identity_field="wallId",
+        delete=operation["op"] == "delete_interior_wall", derived_fields=("panels",),
+    )
+    if operation["op"] == "delete_interior_wall":
+        affected.extend(
+            row["artworkId"] for row in document.get("extensions", {}).get(DECALS_KEY, {}).get("artworks", [])
+            if row["target"].get("wallId") == operation["wallId"]
+        )
+    _op_set_interior_walls(document, {"op": "set_interior_walls", "walls": value}, index, base_revision)
+    return created, affected
+
+
+def _op_set_component_materials(document, operation, _index, _base_revision):
+    from .component_materials import normalize_component_materials
+    identifier = _clean_id(operation.get("placementId"), "placementId", "pl")
+    placement = _find(document, "placements", "placementId", identifier, "Placement")
+    if "materials" not in operation:
+        _fail("invalid_operation_field", "materials is required; use null to restore originals.")
+    if operation["materials"] is None:
+        placement.pop("componentMaterials", None)
+    else:
+        try:
+            placement["componentMaterials"] = normalize_component_materials(operation["materials"])
+        except ValueError as exc:
+            _fail("invalid_component_materials", str(exc))
+    return [], [identifier]
 
 
 def _op_set_position_mode(
@@ -1833,8 +2012,130 @@ def _op_set_plan_settings(
     extensions = document.setdefault("extensions", {})
     if not isinstance(extensions, dict):
         _fail("invalid_layout_shape", "extensions must be an object.")
+    if "facilityGround" in extensions and settings != extensions.get(PLAN_SETTINGS_EXTENSION_KEY):
+        previous = extensions.get(PLAN_SETTINGS_EXTENSION_KEY) or {}
+        if any(settings[key] != previous.get(key) for key in ("widthMeters", "depthMeters")):
+            _fail("explicit_ground_boundary", "This layout has explicit ground levels. Edit their boundaries with set_ground; plan dimensions cannot silently replace them.")
     extensions[PLAN_SETTINGS_EXTENSION_KEY] = settings
+    if WALLS_KEY in extensions:
+        try:
+            extensions[WALLS_KEY] = compile_perimeter_walls(extensions[WALLS_KEY]["settings"], document)
+        except ValueError as exc:
+            _fail("invalid_perimeter_walls", str(exc))
     return [], []
+
+
+def _op_set_ground(document, operation, _index, _base_revision):
+    from .ground import KEY, normalize_ground
+    if set(operation) != {"op", "ground"}:
+        _fail("invalid_ground", "Expected ground (or null to restore the plan floor)")
+    extensions = document.setdefault("extensions", {})
+    if operation["ground"] is None:
+        extensions.pop(KEY, None)
+    else:
+        try:
+            extensions[KEY] = normalize_ground(operation["ground"])
+        except ValueError as exc:
+            _fail("invalid_ground", str(exc))
+    return [], []
+
+
+def _op_set_perimeter_walls(document, operation, _index, _base_revision):
+    if "wallSettings" not in operation or set(operation) - {"op", "wallSettings"}:
+        _fail("invalid_perimeter_walls", "Expected wallSettings (or null to remove walls)")
+    extensions = document.setdefault("extensions", {})
+    settings = operation.get("wallSettings")
+    if settings is None:
+        extensions.pop(WALLS_KEY, None)
+        from .decals import remove_bound_decals
+        remove_bound_decals(document, lambda target: "edge" in target)
+    else:
+        try:
+            extensions[WALLS_KEY] = compile_perimeter_walls(settings, document)
+        except ValueError as exc:
+            _fail("invalid_perimeter_walls", str(exc))
+    return [], []
+
+
+def _op_set_decals(document, operation, _index, _base_revision):
+    from .decals import KEY, normalize_decals
+    if set(operation) != {"op", "decals"}:
+        _fail("invalid_decals", "Expected decals")
+    try:
+        value = normalize_decals(operation["decals"], document)
+    except ValueError as exc:
+        _fail("invalid_decals", str(exc))
+    document.setdefault("extensions", {})[KEY] = value
+    return [], []
+
+
+def _op_edit_decal_row(document, operation, index, base_revision):
+    from .decals import KEY
+    value = _mapping(document.get("extensions", {}).get(KEY, {"version": 1, "artworks": []}), KEY)
+    result = _edit_collection_row(
+        value, "artworks", operation, row_field="decal", identity_field="artworkId",
+        delete=operation["op"] == "delete_decal",
+    )
+    _op_set_decals(document, {"op": "set_decals", "decals": value}, index, base_revision)
+    return result
+
+
+def _perimeter_settings_for_edit(document):
+    value = document.get("extensions", {}).get(WALLS_KEY)
+    if value is None:
+        _fail("operation_target_not_found", "Perimeter walls were not found.", details={"targetId": WALLS_KEY})
+    return _mapping(value.get("settings"), "wallSettings")
+
+
+def _perimeter_artwork_index(settings):
+    finish = settings.get("exteriorFinish", {})
+    return {
+        row["artworkId"]: (collection, row)
+        for collection in ("artworks", "fittedArtworks")
+        for row in finish.get(collection, [])
+    }
+
+
+def _op_edit_perimeter_walls(document, operation, index, base_revision):
+    if set(operation) != {"op", "patch"}:
+        _fail("invalid_operation_field", "Expected patch for edit_perimeter_walls.")
+    patch = _mapping(operation["patch"], "patch")
+    allowed = {"boundarySource", "boundary", "heightMeters", "thicknessMeters", "openings", "interiorColor", "exteriorFinish"}
+    if set(patch) - allowed:
+        _fail("invalid_operation_field", "Unsupported perimeter wall patch fields.")
+    settings = _perimeter_settings_for_edit(document)
+    previous_artworks = _perimeter_artwork_index(settings)
+    if "exteriorFinish" in patch:
+        finish = _mapping(settings.get("exteriorFinish", {}), "exteriorFinish")
+        finish.update(_mapping(patch["exteriorFinish"], "exteriorFinish"))
+        patch["exteriorFinish"] = finish
+    if patch.get("boundarySource") == "plan" and "boundary" not in patch:
+        settings.pop("boundary", None)
+    settings.update(patch)
+    _op_set_perimeter_walls(document, {"op": "set_perimeter_walls", "wallSettings": settings}, index, base_revision)
+    current_artworks = _perimeter_artwork_index(document["extensions"][WALLS_KEY]["settings"])
+    affected = {
+        identifier for identifier in previous_artworks.keys() | current_artworks.keys()
+        if previous_artworks.get(identifier) != current_artworks.get(identifier)
+    }
+    return sorted(current_artworks.keys() - previous_artworks.keys()), sorted(affected | {str(document["layoutId"])})
+
+
+def _op_edit_wall_artwork_row(document, operation, index, base_revision):
+    collection = operation.get("collection")
+    if collection not in ("artworks", "fittedArtworks"):
+        _fail("invalid_operation_field", "collection must be artworks or fittedArtworks.")
+    settings = _perimeter_settings_for_edit(document)
+    if "exteriorFinish" not in settings:
+        _fail("operation_target_not_found", "Perimeter exterior finish was not found.", details={"targetId": "exteriorFinish"})
+    finish = settings["exteriorFinish"]
+    finish.setdefault(collection, [])
+    result = _edit_collection_row(
+        finish, collection, operation, row_field="artwork", identity_field="artworkId",
+        delete=operation["op"] == "delete_wall_artwork", extra_fields=("collection",),
+    )
+    _op_set_perimeter_walls(document, {"op": "set_perimeter_walls", "wallSettings": settings}, index, base_revision)
+    return result
 
 
 def _navigation_record_ids(value: Any) -> set[str]:
@@ -2071,6 +2372,8 @@ def _op_clear_layout_contents(
             if isinstance(value, Mapping) and value.get(identifier_field)
         )
         document[collection_name] = []
+    from .decals import remove_bound_decals
+    remove_bound_decals(document, lambda target: "placementId" in target)
     return [], affected
 
 
@@ -2086,6 +2389,7 @@ _HANDLERS: Dict[str, _Handler] = {
     "edit_zone": _op_edit_zone,
     "delete_zone": _op_delete_zone,
     "add_floor_marking": _op_add_floor_marking,
+    "add_floor_path": _op_add_floor_path,
     "edit_floor_marking": _op_edit_floor_marking,
     "delete_floor_marking": _op_delete_floor_marking,
     "place_asset": _op_place_asset,
@@ -2094,6 +2398,15 @@ _HANDLERS: Dict[str, _Handler] = {
     "duplicate_placement": _op_duplicate_placement,
     "delete_placement": _op_delete_placement,
     "set_position_mode": _op_set_position_mode,
+    "set_appearance": _op_set_appearance,
+    "set_component_materials": _op_set_component_materials,
+    "set_interior_walls": _op_set_interior_walls,
+    "set_floor_surfaces": _op_set_floor_surfaces,
+    "upsert_interior_wall": _op_edit_interior_wall_row,
+    "delete_interior_wall": _op_edit_interior_wall_row,
+    "upsert_floor_surface": _op_edit_floor_surface_row,
+    "delete_floor_surface": _op_edit_floor_surface_row,
+    "replace_asset": _op_replace_asset,
     "set_snap_relationship": _op_set_snap_relationship,
     "add_route": _op_add_route,
     "add_aisle": _op_add_aisle,
@@ -2113,6 +2426,14 @@ _HANDLERS: Dict[str, _Handler] = {
     "edit_process_binding": _op_edit_process_binding,
     "detach_process_binding": _op_detach_process_binding,
     "set_plan_settings": _op_set_plan_settings,
+    "set_perimeter_walls": _op_set_perimeter_walls,
+    "set_decals": _op_set_decals,
+    "edit_perimeter_walls": _op_edit_perimeter_walls,
+    "upsert_wall_artwork": _op_edit_wall_artwork_row,
+    "delete_wall_artwork": _op_edit_wall_artwork_row,
+    "upsert_decal": _op_edit_decal_row,
+    "delete_decal": _op_edit_decal_row,
+    "set_ground": _op_set_ground,
     "set_facility_navigation": _op_set_facility_navigation,
     "clear_layout_contents": _op_clear_layout_contents,
 }

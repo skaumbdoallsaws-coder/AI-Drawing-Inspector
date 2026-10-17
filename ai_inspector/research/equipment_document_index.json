@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "equipment-document-index-v1",
+  "summaryPath": "docs/facility-equipment-documented-capability-answers-2026-09-09.md",
+  "summarySha256": "eb2049f922cbb62b185b355941b994adb139ab7a0f7c3bfbfc827b80a66e0652",
+  "verificationPath": "output/pdf/equipment-documents-2026-09-09/verification.json",
+  "verificationSha256": "e78e151e49d1dcbf633a708453a6812112de5879ed4bc37d9208b7fa4d0b5a7f",
+  "bindings": [
+    {
+      "assetId": "asset-haas-st30-lathe",
+      "assetDefinitionRevision": "2e7123e38487539fd30733a69e25e760298d0c686624f2cf410219bcf38cdf67",
+      "model": "Haas ST-30",
+      "summaryHeading": "1. Haas ST-30",
+      "hazardIds": [],
+      "applicability": "ST-30 only, not ST-25/ST-35. The 2018 brochure and 2025 NGC family manual are separate editions; installed options and workholding remain unknown.",
+      "documents": ["Haas-ST-series-brochure-20180207.pdf", "Haas-lathe-NGC-operators-manual-2025.pdf"]
+    },
+    {
+      "assetId": "asset-doosan-dbc130-ii",
+      "assetDefinitionRevision": "ffc9d7a2204a0381c0a85265050a311d7e0f8b1f258a084accbd38c80f0e88a0",
+      "model": "Doosan DBC 130 II",
+      "summaryHeading": "2. Doosan DBC 130 II",
+      "hazardIds": ["DBC-UNIT-01", "DBC-CONFIG-01"],
+      "applicability": "Archived EN 160919 DBC 130 II, not DBC 130L II or current web ratings. Table size, APC and splash guard change limits; installed configuration is unknown.",
+      "documents": ["Doosan-DBC-series-brochure-archived.pdf"]
+    },
+    {
+      "assetId": "asset-lathe-acer-1760g",
+      "assetDefinitionRevision": "5d6429fc49b8a4261775d316c96d53593dc23342f4b7d6753066483633875673",
+      "model": "ACER Dynamic 1760G",
+      "summaryHeading": "3. ACER Dynamic 1760G",
+      "hazardIds": ["ACER-UNITS-01"],
+      "applicability": "Scanned family brochure: page 2 row labels continue onto page 3; 1760G is the middle of 1740G/1760G/1780G. Text search cannot establish absence on scanned pages. Floor dimension unit pairs conflict.",
+      "documents": ["ACER-Dynamic-and-eLathe-series-brochure.pdf"]
+    },
+    {
+      "assetId": "asset-nordson-3-axis-robot",
+      "assetDefinitionRevision": "120e71602a15626fae16742e30e0b55ab9d99d3e1be6b52f702979bd180d479f",
+      "model": "Nordson EFD E6",
+      "summaryHeading": "4. Nordson EFD E6",
+      "hazardIds": ["EFD-EDITION-01", "EFD-RANGE-01"],
+      "applicability": "Legacy E6 specifications come from its own 2019 data-sheet column. The manual page 12 E2/E3/E5 specification table cannot supply E6 ratings. Command limits and required dispensing equipment remain distinct from robot ratings.",
+      "documents": ["Nordson-EFD-E-series-data-sheet-2019.pdf", "Nordson-EFD-E-series-operating-manual.pdf"]
+    },
+    {
+      "assetId": "asset-abb-irb6650-robot",
+      "assetDefinitionRevision": "886e29b92be913ed483751e827c510fe6521c4459545fb056f02091cdf73c2b9",
+      "model": "ABB IRB 6650",
+      "summaryHeading": "5. ABB IRB 6650",
+      "hazardIds": [],
+      "applicability": "Revision 1 family specification. Installed 125/3.2 versus 200/2.75 variant is unconfirmed; a CAD filename is not installation evidence. Full versus limited axis-5 motion has different inertia limits. Nominal payload does not pass a load diagram.",
+      "documents": ["ABB-IRB-6600-6650-product-specification-rev1.pdf"]
+    },
+    {
+      "assetId": "asset-mobile-lift-mmle-50d",
+      "assetDefinitionRevision": "e95f2e9aa1d42e4b46e5121e2dff0a2d9aa4f9df088af91a47a12612616ba397",
+      "model": "MMLE-50D",
+      "summaryHeading": "6. MMLE-50D",
+      "hazardIds": ["MMLE-MODEL-01", "MMLE-SUPPORT-01"],
+      "applicability": "MMLE-50D, not the MXE-150 on brochure page 6. Its numerical load-center rating remains unknown. Fork/platform terminology and actual load support must be resolved separately.",
+      "documents": ["Lift-Products-Maxx-Mobile-brochure.pdf", "Lift-Products-MMLE-50D-service-manual.pdf"]
+    }
+  ]
+}

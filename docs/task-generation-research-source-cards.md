@@ -4,6 +4,13 @@ Written 2026-09-19 for the next Codex session. Scope is one wiring gap, not a
 new subsystem. Everything this task depends on already exists and works; do not
 rebuild any of it.
 
+**September 23 checkpoint:** response wiring is implemented in
+`generation_presentation.py` and `server.py`. Source identity inference is disabled
+for these receipt-derived cards. Python/JavaScript regressions and a live v2 SSE
+payload comparison pass. The normal Electron card-click, PDF preview and download
+checks below remain pending; this task is not fully accepted. See
+[current evidence and limitations](sage-research-layout-implementation-report.md).
+
 ## Goal
 
 When Sage runs `search_generation_sources` or `read_generation_source` in the

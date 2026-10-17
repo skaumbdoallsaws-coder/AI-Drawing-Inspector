@@ -2412,6 +2412,16 @@ def _mounting_checks(
                 details={"requestedSurfaceKind": requested_kind},
             )
         ]
+    ground = shell.get("extensions", {}).get("facilityGround")
+    if requested_kind == "floor" and ground is not None:
+        from .ground import supports_footprint
+        anchor_y = float((coordinate.get("floorAnchor") or {}).get("y", 0))
+        y = float(placement["transform"]["position"]["y"]) + anchor_y
+        if supports_footprint(ground, _placement_polygon(records), y, reference["featureId"]):
+            return []
+        return [_finding("unsupported_mounting_surface", "error",
+            "Placement requires one continuous, level ground surface at its support elevation.",
+            subject_refs=(placement_id,), details={"placementSupportY": y})]
     surfaces = (
         tuple(prepared_surfaces)
         if prepared_surfaces is not None
@@ -3346,11 +3356,53 @@ def _aisle_segment_polygon(
     )
 
 
+def _aisle_wall_boundary_contact(
+    corridor: Sequence[Point2],
+    wall: Sequence[Point2],
+) -> bool:
+    """Prove an intersecting aisle/wall pair has only contact within epsilon.
+
+    A separating edge-normal projection also works for concave walls. If no
+    such axis exists, conservatively retain the inclusive obstruction finding.
+    """
+    origin_x, origin_z = corridor[0]
+    for polygon in (corridor, wall):
+        for index, start in enumerate(polygon):
+            end = polygon[(index + 1) % len(polygon)]
+            dx, dz = end[0] - start[0], end[1] - start[1]
+            length = math.hypot(dx, dz)
+            if length <= GEOMETRY_EPSILON:
+                continue
+            # Unit normals keep the tolerance in meters, independent of edge length.
+            normal_x, normal_z = -dz / length, dx / length
+            corridor_projection = [
+                (x - origin_x) * normal_x + (z - origin_z) * normal_z
+                for x, z in corridor
+            ]
+            wall_projection = [
+                (x - origin_x) * normal_x + (z - origin_z) * normal_z
+                for x, z in wall
+            ]
+            if (
+                max(corridor_projection) - min(wall_projection) <= GEOMETRY_EPSILON
+                or max(wall_projection) - min(corridor_projection) <= GEOMETRY_EPSILON
+            ):
+                return True
+    return False
+
+
 def _aisle_checks(
     layout: Mapping[str, Any],
     records_by_placement: Mapping[str, Sequence[SpatialRecord]],
+    shell: Mapping[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], int, int, int]:
     findings: list[dict[str, Any]] = []
+    shell_index = UniformGridSpatialIndex(shell_obstacle_records(shell))
+    wall_ids = {
+        str(feature.get("featureId") or "")
+        for feature in (shell.get("features", []) if isinstance(shell, Mapping) else [])
+        if isinstance(feature, Mapping) and feature.get("featureKind") == "wall"
+    }
     aisle_count = 0
     obstructed_routes: set[str] = set()
     unverified_count = 0
@@ -3423,6 +3475,25 @@ def _aisle_checks(
             )
             if polygon is not None
         )
+        shell_hits: dict[str, list[int]] = {}
+        for segment_index, corridor in enumerate(segment_polygons):
+            for record_id in shell_index.query(polygon_bounds(corridor)):
+                obstacle = shell_index.record(record_id)
+                if polygons_intersect(corridor, obstacle.polygon):
+                    if obstacle.owner_id in wall_ids and _aisle_wall_boundary_contact(
+                        corridor, obstacle.polygon,
+                    ):
+                        continue
+                    shell_hits.setdefault(obstacle.owner_id, []).append(segment_index)
+        for feature_id, blocked in sorted(shell_hits.items()):
+            obstructed_routes.add(route_id)
+            findings.append(_finding(
+                "aisle_shell_obstructed", "warning",
+                f"Shell obstacle '{feature_id}' intersects aisle '{label}'.",
+                subject_refs=(route_id, feature_id),
+                details={"shellFeatureId": feature_id, "segmentIndexes": blocked,
+                         "corridorWidth": corridor_width},
+            ))
         for placement_id in sorted(records_by_placement):
             physical_records = tuple(
                 record
@@ -3487,6 +3558,13 @@ def diagnose_layout(
         _surface_attachment_checks(placements, records_by_placement, catalog)
     )
     findings.extend(attachment_findings)
+    from .wall_attachments import check_wall_attachments
+    wall_findings, wall_contacts, wall_mounted = check_wall_attachments(
+        placements, records_by_placement, catalog,
+    )
+    findings.extend(wall_findings)
+    attachment_contact_pairs |= wall_contacts
+    attached_placements |= wall_mounted
     collision_findings, collision_count = _placement_collisions(
         records_by_placement,
         allowed_contact_pairs=(
@@ -3579,7 +3657,7 @@ def diagnose_layout(
         )
     )
     aisle_findings, aisle_count, obstructed_aisle_count, aisle_unverified_count = (
-        _aisle_checks(layout, records_by_placement)
+        _aisle_checks(layout, records_by_placement, shell)
     )
     findings.extend(aisle_findings)
     ordered = sort_findings(findings)

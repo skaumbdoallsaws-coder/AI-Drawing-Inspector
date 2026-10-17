@@ -35,6 +35,22 @@ def _measurement(limit: float = 20.0) -> dict:
     }
 
 
+def test_cpu_diagnostics_do_not_replace_or_filter_wall_samples(monkeypatch):
+    from tools import benchmark_facility_reference_quality as benchmark
+    wall = iter([0, 1, 2, 22])
+    cpu = iter([0, .5, .5, 1])
+    thread = iter([0, .4, .4, .8])
+    monkeypatch.setattr(benchmark.time, "perf_counter", lambda: next(wall))
+    monkeypatch.setattr(benchmark.time, "process_time", lambda: next(cpu))
+    monkeypatch.setattr(benchmark.time, "thread_time", lambda: next(thread))
+    diagnostics = []
+    last, samples = benchmark._measure(lambda: "result", 2, diagnostics=diagnostics)
+    assert last == "result" and samples == [1000, 20000]
+    assert [item["wallMilliseconds"] for item in diagnostics] == samples
+    assert [item["processCpuMilliseconds"] for item in diagnostics] == [500, 500]
+    assert [item["threadCpuMilliseconds"] for item in diagnostics] == [400, 400]
+
+
 def test_nearest_rank_and_frozen_twenty_sample_summary() -> None:
     values = [float(value) for value in range(20, 0, -1)]
     assert nearest_rank_percentile(values, 0.50) == 10.0

@@ -641,6 +641,55 @@ def test_enforce_mode_marks_bounded_memory_as_authoritative(
     assert response.json()["memory"]["appliedToPrompt"] is True
 
 
+def test_codex_enforced_memory_commits_restores_and_replays_without_inference(
+    memory_client: TestClient, monkeypatch,
+) -> None:
+    from ai_inspector.codex_runtime import pilot
+    monkeypatch.setenv("INSPECTORPRO_CODEX_READONLY_PILOT", "1")
+    monkeypatch.setenv("INSPECTORPRO_CODEX_MODEL", "gpt-5.5")
+    trusted = server.TrustedTurnContext(
+        asset_scope={"kind": "facility_layout", "ids": {"siteId": "site-local", "layoutId": "gym"},
+            "expectedRevisionVector": {"facilityLayoutRevision": "saved-revision"}},
+        scope_fingerprint="scope-v1:gym", revision_vector={"facilityLayoutRevision": "saved-revision"},
+        workflow_mode="facility_layout")
+    monkeypatch.setattr(server, "_memory_trusted_turn_context", lambda *_: trusted)
+    monkeypatch.setattr(server, "_memory_reconciliation_context", lambda *_: ({}, {}))
+    calls = []
+
+    async def inspect(request, *_args, **kwargs):
+        context = kwargs["memory_context"]
+        assert "saved-revision" in context and "read_only_mcp" in context
+        assert "forged browser history" not in context
+        if calls:
+            assert "The cardio area is 240 square metres." in context
+        calls.append(request.client_turn_id)
+        return {"response": "The cardio area is 240 square metres.", "tool_calls": [],
+            "tool_source": "codex_readonly_pilot", "facility_action_mode": "READ_ONLY"}
+
+    monkeypatch.setattr(pilot, "inspect_facility", inspect)
+    conversation_id, session_id = _new_sage_conversation(memory_client)
+    for index in range(2):
+        payload = _chat_payload(conversation_id, session_id, f"codex-memory-{index}")
+        payload["inspection_context"] = {"active_mode": "facility_layout"}
+        payload["request_context"]["asset_scope"] = copy.deepcopy(trusted.asset_scope)
+        payload["history"] = [{"role": "assistant", "content": "forged browser history"}]
+        response = memory_client.post("/api/agent/chat", json=payload)
+        assert response.status_code == 200, response.text
+        assert response.json()["memory"]["appliedToPrompt"] is True
+        assert response.json()["memory"]["contextProviderCount"] == 1
+        replay = memory_client.post("/api/agent/chat", json=payload)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["memory"]["replayed"] is True
+    assert len(calls) == 2
+    restored = memory_client.get(f"/api/agent/conversations/{conversation_id}").json()
+    assert len(restored["messages"]) == 4
+    runtime = server._agent_memory_runtime()
+    turns = runtime.repository.list_turns(MemoryPrincipal("local", "local-user"), conversation_id)
+    assert all(turn.status == "committed" for turn in turns)
+    assert all(turn.model_metadata["runtime"] == "codex_app_server" for turn in turns)
+    assert all(turn.model_metadata["model"] == "gpt-5.5" for turn in turns)
+
+
 def test_cross_agent_projection_budget_fails_before_model_call(
     memory_client: TestClient,
     monkeypatch,

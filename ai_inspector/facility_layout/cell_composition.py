@@ -955,13 +955,19 @@ def compile_cell_composition_program(
     for placement_id in normalized["memberPlacementIds"]:
         target = proposed[placement_id]
         position = deepcopy(target["position"])
+        # The complete membership/sequence lives on the cell zone. Repeating it
+        # on every member makes provenance quadratic in cell size.
+        member_provenance = deepcopy(provenance)
+        member_provenance["seedEntityIds"] = [placement_id]
+        member_provenance["parameters"].pop("processSequencePlacementIds", None)
+        member_provenance["parameters"]["cellProvenanceZoneId"] = normalized["targetZoneId"]
         operations.append(
             {
                 "op": "move_placement",
                 "placementId": placement_id,
                 "position": position,
                 "movementKind": "automatic",
-                "layoutProvenance": deepcopy(provenance),
+                "layoutProvenance": member_provenance,
             }
         )
     if defer_post_validation:

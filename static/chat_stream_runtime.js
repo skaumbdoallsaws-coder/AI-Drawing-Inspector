@@ -5,12 +5,56 @@
 })(typeof window !== 'undefined' ? window : globalThis, function () {
     'use strict';
 
+    function ensureFacilityTurnIdentity(payload, conversationId, newTurnId) {
+        if (!payload?.inspection_context?.attachments?.facility_layout) return payload;
+        // Runtime identity is required even when server conversation memory is off.
+        return { ...payload,
+            conversation_id: payload.conversation_id || conversationId || payload.session_id,
+            client_turn_id: payload.client_turn_id || newTurnId(),
+        };
+    }
+
+    function guardSavedFacilityContext(options) {
+        const reference = options.reference;
+        let invalid = false, disposed = false;
+        function check() {
+            if (disposed || invalid) return !invalid;
+            try {
+                const current = options.readCurrent();
+                const state = current.state;
+                if (!current.active || !current.requestCurrent || !state?.loaded
+                        || state.dirty || state.conflict
+                        || state.baseRevision !== reference.revision
+                        || state.draftRevision !== reference.revision
+                        || state.layout?.layoutId !== reference.layoutId
+                        || state.layout?.association?.siteId !== reference.siteId) {
+                    invalid = true;
+                }
+            } catch (_) { invalid = true; }
+            if (invalid) options.onInvalidate();
+            return !invalid;
+        }
+        const unsubscribe = options.subscribe(check);
+        const clear = options.clearInterval || clearInterval;
+        const timer = (options.setInterval || setInterval)(check, 100);
+        check();
+        return { check, dispose() {
+            if (disposed) return;
+            disposed = true;
+            clear(timer);
+            if (typeof unsubscribe === 'function') unsubscribe();
+        } };
+    }
+
     function statusLabel(phase) {
         const labels = {
             routing: 'Routing', context: 'Inspecting assembly context',
             generating: 'Preparing the response', executing: 'Preparing visual aids',
             finalizing: 'Finalizing response',
             generation_context: 'Checking the brief and previous proposal',
+            codex_connecting: 'Connecting the inspection runtime',
+            codex_inspecting: 'Inspecting the saved layout',
+            codex_researching: 'Researching public technical sources',
             generation_catalog: 'Inspecting available equipment',
             generation_search: 'Researching public sources',
             generation_read: 'Reading source evidence',
@@ -202,6 +246,8 @@
     }
 
     return {
+        ensureFacilityTurnIdentity,
+        guardSavedFacilityContext,
         statusLabel,
         parseEventLine,
         createEventGate,

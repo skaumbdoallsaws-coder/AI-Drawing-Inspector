@@ -43,6 +43,8 @@ from .generation_admission import FacilityGenerationAdmissionService
 from .generation_agent import FacilityGenerationAgentService
 from .generation_requirement_repository import GenerationRequirementRepository
 from .generation_requirements import GenerationRequirementError
+from .generation_draft import GenerationDraftAdapter
+from .generation_destination import create_generation_destination
 from .program_execution import FacilityProgramExecutionError
 from .errors import FacilityLayoutError, FacilityNotFoundError
 from .design_base import (
@@ -117,6 +119,7 @@ PRIVATE_ASSET_MANIFEST = Path(
 )
 
 _DESIGN_ERRORS = (
+    GenerationRequirementError,
     FacilityDesignBaseError,
     FacilityDesignBriefError,
     FacilityDesignCandidateError,
@@ -464,6 +467,29 @@ def _private_manifest_specs(root: Path) -> tuple[dict[str, Any], ...]:
             raise ValueError(
                 f"Private asset manifest tags are invalid: {asset_id}"
             )
+        footprint_polygons = None
+        if "footprintPolygons" in raw:
+            from .spatial import _convex_hull, _polygon, _polygon_is_convex, polygon_area
+
+            polygons = raw["footprintPolygons"]
+            if not isinstance(polygons, list) or not 1 <= len(polygons) <= 64:
+                raise ValueError(f"Private asset footprint polygons are invalid: {asset_id}")
+            footprint_polygons = []
+            for polygon in polygons:
+                if (
+                    not isinstance(polygon, list) or not 3 <= len(polygon) <= 32
+                    or any(not isinstance(p, dict) or set(p) != {"x", "z"} for p in polygon)
+                ):
+                    raise ValueError(f"Private asset footprint polygon is invalid: {asset_id}")
+                points = _polygon(polygon, "private asset footprint")
+                if (
+                    len(set(points)) != len(points)
+                    or not _polygon_is_convex(points)
+                    or abs(abs(polygon_area(points)) - abs(polygon_area(_convex_hull(points)))) > 1e-8
+                    or any(abs(x) > measured[0] / 2 + 1e-8 or abs(z) > measured[1] / 2 + 1e-8 for x, z in points)
+                ):
+                    raise ValueError(f"Private asset footprint must be convex and inside its bounds: {asset_id}")
+                footprint_polygons.append([{"x": x, "z": z} for x, z in points])
         raw_surfaces = raw.get("supportSurfaces", [])
         if not isinstance(raw_surfaces, list):
             raise ValueError(
@@ -588,6 +614,7 @@ def _private_manifest_specs(root: Path) -> tuple[dict[str, Any], ...]:
             "source_to_canonical": tuple(float(value) for value in matrix),
             "tags": tuple(value.strip() for value in tags),
             "support_surfaces": tuple(support_surfaces),
+            "footprint_polygons": footprint_polygons,
         })
     return tuple(specs)
 
@@ -634,6 +661,8 @@ def build_private_local_asset_catalog(
             deepcopy(surface)
             for surface in spec.get("support_surfaces", ())
         ]
+        if spec.get("footprint_polygons") is not None:
+            entry["definition"]["geometry"]["footprintPolygons"] = deepcopy(spec["footprint_polygons"])
         if support_surfaces:
             entry["supportSurfaces"] = support_surfaces
             entry["definition"]["supportSurfaces"] = support_surfaces
@@ -844,6 +873,8 @@ class LocalFacilityLayoutHost:
             if private_assets is None
             else bool(private_assets)
         )
+        self._component_visual_root = (Path(private_asset_root).resolve()
+            if private_asset_root is not None else Path(__file__).resolve().parents[2])
         catalog_source = (
             build_private_local_asset_catalog(private_asset_root)
             if use_private_assets
@@ -874,6 +905,7 @@ class LocalFacilityLayoutHost:
             current_asset_definition_resolver=(
                 self._resolve_current_asset_definition
             ),
+            component_inventory_resolver=self._resolve_component_inventory,
             process_map_resolver=(
                 self._resolve_process_map
                 if self.process_map_root is not None
@@ -908,11 +940,17 @@ class LocalFacilityLayoutHost:
         )
         self._lock = threading.RLock()
         self.generation_agent_service = FacilityGenerationAgentService(self.generation_admission_service)
+        self.generation_draft_adapter = GenerationDraftAdapter(self.generation_admission_service, self.design_repository)
         self._bootstrapped = False
 
     @staticmethod
     def principal() -> FacilityPrincipal:
         return local_facility_principal(site_id=LOCAL_SITE_ID)
+
+    def _resolve_component_inventory(self, principal, reference, placement_id, representation):
+        from ai_inspector.codex_runtime.component_inventory import resolve_component_inventory
+        return resolve_component_inventory(self.agent_runtime, principal, reference,
+            placement_id, representation, project_root=self._component_visual_root)
 
     def _load_facility_planning_package(
         self,
@@ -1509,6 +1547,13 @@ class LocalFacilityLayoutHost:
                 "Facility design transaction is outside the requested layout scope.",
             )
         return envelope
+
+    def _validate_generation_transaction(self, principal, site_id, layout_id, transaction_id):
+        envelope = self._require_design_transaction_scope(principal, site_id, layout_id, transaction_id)
+        ref = envelope["transaction"]["selectedProposalRef"]
+        proposal = self.design_repository.get_artifact(principal.tenant_id, site_id,
+            ref["artifactKind"], ref["artifactId"], ref["artifactRevision"])["artifact"]
+        self.generation_draft_adapter.validate(principal, site_id, layout_id, proposal, adopted=True)
 
     def _agent_capabilities(
         self,
@@ -2113,7 +2158,7 @@ class LocalFacilityLayoutHost:
         @router.post("/api/facility-layout-planning/{site_id}/{layout_id}/{action}")
         def isolated_generation_planning(request: Request, site_id: str, layout_id: str,
                                          action: str, body: dict[str, Any]):
-            if action not in {"admit", "preview", "inspect"}:
+            if action not in {"admit", "preview", "inspect", "select", "destination"}:
                 raise HTTPException(status_code=404, detail="Planning action not found.")
             self._require_feature("generation_planning_preview")
             if set(body) != {"workspaceId", "request", "editorContext"}:
@@ -2122,6 +2167,12 @@ class LocalFacilityLayoutHost:
             options = dict(site_id=site_id, layout_id=layout_id, workspace_id=body["workspaceId"],
                            editor_context=body["editorContext"])
             try:
+                if action == "destination":
+                    with self._lock:
+                        return create_generation_destination(self, principal, site_id, layout_id,
+                            body["request"], _shell_document(), _timestamp())
+                if action == "select":
+                    return self.generation_draft_adapter.publish(principal, **options, request=body["request"])
                 if action == "inspect":
                     reference = body["request"]
                     if not isinstance(reference, Mapping) or set(reference) != {"previewId", "previewRevision"}:
@@ -2499,6 +2550,7 @@ class LocalFacilityLayoutHost:
                         "facility_design_scope_mismatch",
                         "Facility design proposal is outside the requested layout scope.",
                     )
+                self.generation_draft_adapter.validate(principal, site_id, layout_id, inspected["proposal"])
                 result = self.design_loop_service.prepare_proposal_apply(
                     tenant_id=principal.tenant_id,
                     site_id=site_id,
@@ -2572,6 +2624,7 @@ class LocalFacilityLayoutHost:
                 self._require_design_transaction_scope(
                     principal, site_id, layout_id, transaction_id
                 )
+                self._validate_generation_transaction(principal, site_id, layout_id, transaction_id)
                 result = self.design_loop_service.commit_proposal_apply(
                     tenant_id=principal.tenant_id,
                     site_id=site_id,
@@ -2670,6 +2723,7 @@ class LocalFacilityLayoutHost:
                 self._require_design_transaction_scope(
                     principal, site_id, layout_id, transaction_id
                 )
+                self._validate_generation_transaction(principal, site_id, layout_id, transaction_id)
                 return self.design_loop_service.save_proposal(
                     tenant_id=principal.tenant_id,
                     site_id=site_id,

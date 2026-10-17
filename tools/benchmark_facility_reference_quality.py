@@ -170,13 +170,20 @@ def _chromium() -> dict[str, Any]:
     }
 
 
-def _measure(function: Callable[[], Any], samples: int) -> tuple[Any, list[float]]:
+def _measure(function: Callable[[], Any], samples: int, *, diagnostics=None) -> tuple[Any, list[float]]:
     last = None
     values = []
     for _index in range(samples):
+        cpu_started = time.process_time()
+        thread_started = time.thread_time()
         started = time.perf_counter()
         last = function()
         values.append((time.perf_counter() - started) * 1000.0)
+        if diagnostics is not None:
+            diagnostics.append({"sample": _index + 1, "wallMilliseconds": values[-1],
+                "processCpuMilliseconds": (time.process_time() - cpu_started) * 1000.0,
+                "threadCpuMilliseconds": (time.thread_time() - thread_started) * 1000.0})
+            print(json.dumps(diagnostics[-1]), flush=True)
     return last, values
 
 
@@ -329,8 +336,9 @@ def main() -> int:
     ):
         raise RuntimeError("The warmup local amendment is not exactly undoable.")
 
+    macro_diagnostics, full_diagnostics, amendment_diagnostics = [], [], []
     _last_macro, macro_samples = _measure(
-        lambda: _macro_preview(base, program), args.runs
+        lambda: _macro_preview(base, program), args.runs, diagnostics=macro_diagnostics
     )
 
     def full_cycle() -> dict[str, Any]:
@@ -342,7 +350,7 @@ def main() -> int:
             raise RuntimeError("A measured full-reference Undo changed the base.")
         return {"plan": plan, "result": result}
 
-    last_full, full_samples = _measure(full_cycle, args.runs)
+    last_full, full_samples = _measure(full_cycle, args.runs, diagnostics=full_diagnostics)
 
     def amendment_cycle() -> dict[str, Any]:
         result = amend_facility_program_resource_batch(
@@ -358,23 +366,26 @@ def main() -> int:
             raise RuntimeError("A measured local amendment is not exactly undoable.")
         return result
 
-    last_amendment, amendment_samples = _measure(amendment_cycle, args.runs)
+    last_amendment, amendment_samples = _measure(amendment_cycle, args.runs, diagnostics=amendment_diagnostics)
 
     measurements = {
         "firstMacroPreview": {
             "scope": "frozen FacilityProgram envelope and macro-stage compiler",
+            "diagnostics": macro_diagnostics,
             **summarize_timing_samples(
                 macro_samples, limit_milliseconds=10_000
             ),
         },
         "fullReferenceGeneration": {
             "scope": "operation-plan compilation plus complete deterministic execution",
+            "diagnostics": full_diagnostics,
             **summarize_timing_samples(
                 full_samples, limit_milliseconds=90_000
             ),
         },
         "localResourceAmendment": {
             "scope": "dependency-independent target-area batch replacement plus deterministic validation",
+            "diagnostics": amendment_diagnostics,
             "batchId": amendment_batch["batch_id"],
             "patch": amendment_patch,
             **summarize_timing_samples(

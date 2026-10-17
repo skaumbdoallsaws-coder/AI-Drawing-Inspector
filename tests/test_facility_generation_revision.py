@@ -5,7 +5,7 @@ import jsonschema
 import pytest
 
 from ai_inspector.facility_layout.generation_agent import (
-    CONTEXT_TOOL, REQUIREMENTS_TOOL, REVISE_TOOL, generation_tool_specs, generation_turn_outcome,
+    CONTEXT_TOOL, REQUIREMENTS_TOOL, REVISE_TOOL, PREVIEW_TOOL, generation_tool_specs, generation_turn_outcome,
 )
 from ai_inspector.facility_layout.generation_requirements import (
     build_generation_ledger, evaluate_generation_requirements, validate_generation_amendment,
@@ -15,7 +15,7 @@ from tests.test_facility_generation_agent import chat, execute, generate
 from tests.test_facility_generation_requirements import body, amended, assert_error
 
 
-def correction(chat):
+def correction(chat, additional=()):
     preview, _ = generate(chat)
     prior = execute(chat, CONTEXT_TOOL, {"section": "requirements"})["items"]
     old = next(item for item in prior if item["predicate"]["kind"] == "resource_quantity")
@@ -27,7 +27,7 @@ def correction(chat):
         {**common, "requirementId": "preservation", "supersedes": [],
          "predicate": {"kind": "preserve_prior_requirements", "subjectId": chat["binding"]["ledgerId"],
                        "parameters": {"exceptRequirementIds": [old["requirementId"]]}}},
-    ]})
+    ] + [{**deepcopy(item), "sourceText": chat["message"]} for item in additional]})
     return preview, {"requestKey": "revised-count", "expectedLedgerRevision": receipt["ledgerRevision"],
         "previewId": preview["previewId"], "previewRevision": preview["previewRevision"],
         "changes": [{"collection": "equipmentRequirements", "entityId": old["predicate"]["subjectId"], "values": {"quantity": 3}}]}
@@ -59,7 +59,7 @@ def test_semantic_revision_preserves_every_other_field_and_durable_retry(chat, m
     (lambda a: a["changes"].append(deepcopy(a["changes"][0])), "generation_revision_changes_invalid"),
     (lambda a: a.update(changes=[]), "generation_revision_changes_invalid"),
     (lambda a: a["changes"][0]["values"].update(quantity=2), "generation_requirements_not_satisfied"),
-    (lambda a: a["changes"][0]["values"].update(quantity=True), "generation_requirements_not_satisfied"),
+    (lambda a: a["changes"][0]["values"].update(quantity=True), "facility_planning_equipment_quantity_invalid"),
 ])
 def test_invalid_revision_cannot_replace_prior_candidate(chat, mutation, code):
     initial, args = correction(chat)
@@ -72,7 +72,59 @@ def test_revision_cannot_weaken_an_unmodified_spacing_constraint(chat):
     _, args = correction(chat)
     args["changes"][0]["values"]["authoredSpacing"] = {
         **chat["request"]["proposal"]["equipmentRequirements"][0]["authoredSpacing"], "value": 0.1}
-    assert_code("generation_requirements_not_satisfied", lambda: execute(chat, REVISE_TOOL, args))
+    assert_code("generation_unrequested_package_change", lambda: execute(chat, REVISE_TOOL, args))
+
+
+@pytest.mark.parametrize("field,value", [("displayName", "Unrequested renamed program"),
+                                       ("presentationIntent", {"fit_to_occupied_content": False, "semantic_zoom": False})])
+def test_full_package_correction_cannot_change_unbound_design_choices(chat, field, value):
+    initial, args = correction(chat)
+    proposal = deepcopy(chat["request"]["proposal"])
+    proposal["equipmentRequirements"][0]["quantity"] = 3
+    proposal[field] = value
+    assert_code("generation_unrequested_package_change", lambda: execute(chat, PREVIEW_TOOL, {
+        "requestKey": "full-replacement", "expectedLedgerRevision": args["expectedLedgerRevision"], "proposal": proposal}))
+    assert chat["service"].prior_package(chat["principal"], chat["binding"])["previewId"] == initial["previewId"]
+
+
+def test_preserved_correction_accepts_exact_full_package_equivalent(chat):
+    _, args = correction(chat)
+    proposal = deepcopy(chat["request"]["proposal"])
+    proposal["equipmentRequirements"][0]["quantity"] = 3
+    result = execute(chat, PREVIEW_TOOL, {"requestKey": "equivalent-replacement",
+        "expectedLedgerRevision": args["expectedLedgerRevision"], "proposal": proposal})
+    assert result["counts"]["placements"] == 3
+
+
+def test_sparse_correction_cannot_smuggle_unrequested_department_change(chat):
+    initial, args = correction(chat)
+    department = chat["request"]["proposal"]["departments"][0]
+    args["changes"].append({"collection": "departments", "entityId": department["departmentId"],
+                            "values": {"areaShare": 0.8}})
+    assert_code("generation_unrequested_package_change", lambda: execute(chat, REVISE_TOOL, args))
+    assert chat["service"].prior_package(chat["principal"], chat["binding"])["previewId"] == initial["previewId"]
+
+
+def test_new_assumption_cannot_authorize_changing_a_preserved_department(chat):
+    department = chat["request"]["proposal"]["departments"][0]
+    original_text, message = chat["message"], ""
+    for item in chat["record"]["requirements"]:
+        text = original_text[item["start"]:item["end"]]
+        if item["predicate"]["kind"] == "department_allocation" and item["predicate"]["subjectId"] == department["departmentId"]:
+            text = f"Include {department['label']}."
+            item["predicate"].update(kind="department_presence", parameters={"label": department["label"]})
+        item.update(start=len(message), end=len(message) + len(text))
+        message += text + " "
+    chat["message"] = message
+    initial, args = correction(chat, additional=[{
+        "requirementId": "new-area-assumption", "kind": "assumption", "disposition": "represented",
+        "reason": "A new spatial preference, not a user instruction.", "supersedes": [],
+        "predicate": {"kind": "department_allocation", "subjectId": department["departmentId"],
+            "parameters": {**{key: department[key] for key in ("label", "zoneType", "row")}, "areaShare": 0.8}},
+    }])
+    args["changes"].append({"collection": "departments", "entityId": department["departmentId"], "values": {"areaShare": 0.8}})
+    assert_code("generation_unrequested_package_change", lambda: execute(chat, REVISE_TOOL, args))
+    assert chat["service"].prior_package(chat["principal"], chat["binding"])["previewId"] == initial["previewId"]
 
 
 def test_revision_still_requires_current_user_turn(chat):

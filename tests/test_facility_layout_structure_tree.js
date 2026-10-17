@@ -10,6 +10,8 @@
 
 const assert = require('assert');
 const path = require('path');
+const fs = require('fs');
+const { createHash } = require('crypto');
 
 const ROOT = path.resolve(__dirname, '..');
 const structure = require(path.join(ROOT, 'static', 'facility_layout_structure.js'));
@@ -1003,6 +1005,44 @@ check('the layout row selects nothing: it is the document, not an entity', funct
 });
 
 // ------------------------------------------------------ type icons --
+check('other layout sheets are separate roots and activate by click or keyboard', function () {
+    const doc = makeDocument(), element = host(doc), activated = [], selected = [];
+    const tree = treeModule.createStructureTree({ document: doc, host: element,
+        onActivateLayout: id => activated.push(id), onSelect: (...args) => selected.push(args) });
+    tree.render({ model: structure.deriveStructure(LAYOUT),
+        view: { kind: 'draft', layoutId: 'L1', displayName: 'First', revision: 'r' },
+        layouts: [{ layoutId: 'L1', displayName: 'First' }, { layoutId: 'L2', displayName: 'Second', dirty: true }] });
+    const sheet = element.querySelectorAll('.ip-fst-row').find(row => row.getAttribute('data-row-kind') === 'layout-sheet');
+    assert.ok(sheet);
+    assert.strictEqual(sheet.childNodes[2].textContent, 'Second *');
+    element.dispatch('click', { target: sheet.childNodes[2] });
+    element.dispatch('keydown', { target: sheet, key: 'Enter' });
+    assert.deepStrictEqual(activated, ['L2', 'L2']);
+    assert.deepStrictEqual(selected, []);
+});
+
+check('a candidate with a new layout identity remains visible beside saved sheets', function () {
+    const doc = makeDocument(), element = host(doc);
+    const tree = treeModule.createStructureTree({ document: doc, host: element });
+    tree.render({ model: structure.deriveStructure(LAYOUT), readOnly: true,
+        view: { kind: 'candidate', proposalId: 'P1', layoutId: 'new-candidate', displayName: 'Proposal', revision: 'r' },
+        layouts: [{ layoutId: 'L1', displayName: 'First' }, { layoutId: 'L2', displayName: 'Second' }] });
+    assert.ok(element.querySelector('[data-row-id="' + LAYOUT_ROW + '"]'));
+    assert.strictEqual(element.querySelectorAll('.ip-fst-row')
+        .filter(row => row.getAttribute('data-row-kind') === 'layout-sheet').length, 2);
+});
+
+check('the app cache key matches the shipped tree renderer', function () {
+    const html = fs.readFileSync(path.join(ROOT, 'static', 'index.html'), 'utf8');
+    const script = fs.readFileSync(path.join(ROOT, 'static', 'facility_layout_structure_tree.js'), 'utf8');
+    const version = createHash('sha256').update(script.replace(/\r\n/g, '\n')).digest('hex').slice(0, 12);
+    assert.ok(html.includes('/static/facility_layout_structure_tree.js?v=' + version + '"'),
+        'Update the script cache key when changing the tree renderer; Electron persists the previous script.');
+    for (const file of ['facility-layout.svg', 'zone.svg', 'manufacturing-cell.svg', 'asset.svg']) {
+        assert.ok(fs.readFileSync(path.join(ROOT, 'static', 'assets', 'facility-tree-icons', file), 'utf8').includes('<svg'));
+    }
+});
+
 check('each row kind carries its own artwork, chosen by kind not by name', function () {
     const doc = makeDocument();
     const element = host(doc);

@@ -53,6 +53,7 @@ def classify_shadow_route(
     failure: dict[str, Any] | None = None,
     runtime_mode: str = "shadow",
     telemetry_workflow: str = "skill_route_shadow",
+    cache_namespace: str = "",
 ) -> dict[str, Any] | None:
     """Return a validated route; side effects remain independently gated.
 
@@ -74,6 +75,8 @@ def classify_shadow_route(
         recent_turns=recent_turns,
         context_fingerprint=catalog.context_fingerprint,
     )
+    if cache_namespace:
+        key = (key[0], key[1], cache_namespace + ":" + key[2])
     cached = cache.get(key)
     if cached is not None:
         requested = cached["requested_side_effects"]

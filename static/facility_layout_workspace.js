@@ -8,6 +8,21 @@
     'use strict';
 
     const API_VERSION = 1;
+    const wallsRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_walls.js') : root.InspectorProFacilityWalls;
+    const decalsRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_decals.js') : root.InspectorProFacilityDecals;
+    const componentMaterialsRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_component_materials.js') : root.InspectorProFacilityComponentMaterials;
+    const authoringDialogs = typeof module === 'object' && module.exports
+        ? require('./facility_layout_authoring_dialog.js') : root.InspectorProFacilityAuthoringDialog;
+    const interiorWallsRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_interior_walls.js') : root.InspectorProFacilityInteriorWalls;
+    const floorSurfacesRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_floor_surfaces.js') : root.InspectorProFacilityFloorSurfaces;
+    const replaceAssetRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_replace_asset.js') : root.InspectorProFacilityReplaceAsset;
+    const NAVIGATION_ACTIVITY_MAXIMUM_ACTORS = 64;
     const generationView = typeof module === 'object' && module.exports
         ? require('./facility_layout_generation_view.js') : root.InspectorProGenerationPlanningView;
     const ASSET_MIME = 'application/x-inspectorpro-facility-asset';
@@ -56,6 +71,7 @@
         routes: true,
         markings: true,
         assets: true,
+        walls: true,
     });
     const TOOL_MODES = Object.freeze([
         'select',
@@ -3489,7 +3505,12 @@
                 markup = '';
             }
         }
-        if (icon === 'record') {
+        if (icon === 'settings') {
+            iconHost.appendChild(element(this.document, 'img', {
+                src: '/static/assets/global-toolbar-icons/gear.png',
+                alt: '', draggable: 'false', 'aria-hidden': 'true',
+            }));
+        } else if (icon === 'record') {
             iconHost.appendChild(element(this.document, 'span', {
                 className: 'ip-flw-record-symbol',
             }));
@@ -3505,6 +3526,7 @@
                 pan: 'hand',
                 orbit: 'sphere',
                 walkthrough: 'person-simple-walk',
+                'avatar-view': 'camera',
                 drone: 'drone',
                 'switch-immersive': 'swap',
                 'walk-to-selected': 'navigation-arrow',
@@ -3738,6 +3760,7 @@
             ['routes', 'Routes'],
             ['markings', 'Floor markings'],
             ['assets', 'Assets'],
+            ['walls', 'Walls'],
         ].forEach(function (spec) {
             const id = 'ip-flw-layer-' + spec[0];
             const row = element(this.document, 'div', {
@@ -3760,6 +3783,10 @@
             className: 'ip-flw-layer-show-all',
             'data-layer-action': 'show-all',
         }, 'Show all'));
+        panel.appendChild(element(this.document, 'button', {
+            type: 'button', className: 'ip-flw-layer-show-all',
+            'data-layer-action': 'perimeter-walls',
+        }, 'Perimeter walls...'));
         this.layerPanel = panel;
         return panel;
     };
@@ -4749,6 +4776,223 @@
         }
     };
 
+    Workspace.prototype.savedMovementChoices = function () {
+        const layout = this.state.layout || {};
+        const value = layout.extensions && layout.extensions.facilityNavigation
+            && layout.extensions.facilityNavigation.movementPrograms || [];
+        const programs = Array.isArray(value) ? value.filter(p => p && typeof p === 'object') : [];
+        const byId = new Map(programs.map(p => [p.movementProgramId, p]));
+        const placements = new Map((layout.placements || []).map(p => [p.placementId, p]));
+        const choices = [];
+        const add = (label, ids) => {
+            if (!Array.isArray(ids) || !ids.length || ids.length > NAVIGATION_ACTIVITY_MAXIMUM_ACTORS
+                    || new Set(ids).size !== ids.length
+                    || ids.some(id => !byId.has(id) || !placements.has(byId.get(id).actorPlacementId))
+                    || new Set(ids.map(id => byId.get(id).actorPlacementId)).size !== ids.length) return;
+            choices.push({ label: String(label), movementProgramIds: ids.slice() });
+        };
+        add('All saved movement (' + programs.length + ' actors)', programs.map(p => p.movementProgramId));
+        const selected = new Set(this.state.selection || []);
+        add('Selected actors', programs.filter(p => selected.has(p.actorPlacementId)).map(p => p.movementProgramId));
+        const presentation = layout.extensions && layout.extensions.facilityProcessPresentation;
+        if (presentation && presentation.schemaVersion === 1 && Array.isArray(presentation.groups)) {
+            presentation.groups.forEach(g => {
+                if (g && typeof g === 'object') add(g.label, g.movementProgramIds);
+            });
+        }
+        programs.forEach(p => {
+            const actor = placements.get(p.actorPlacementId);
+            add(actor && actor.metadata && actor.metadata.instanceLabel || p.actorPlacementId, [p.movementProgramId]);
+        });
+        return choices;
+    };
+
+    Workspace.prototype._canEditAppearance = function () {
+        return !this.destroyed && !this.suspended && this.state.loaded && !this.state.busy
+            && this.capabilities.manualAuthoring && !this.state.conflict
+            && !this.state.generatedDraft && !this.state.designProposalDraft
+            && !this.state.layoutProposal && !this.state.placementAlternatives
+            && !this.constructionPreview && !this.activityRequestPending
+            && !(this.generationPlanningView && this.generationPlanningView.activeLayout())
+            && typeof this.session.setSelectedAppearance === 'function'
+            && this._selectedPlacementRecords().length > 0;
+    };
+
+    Workspace.prototype.closeAppearanceDialog = function () {
+        if (this.appearanceDialog) this.appearanceDialog.remove();
+        this.appearanceDialog = null;
+        this.refreshAppearanceDialog = null;
+    };
+
+    Workspace.prototype.openAppearanceDialog = function () {
+        if (!this._canEditAppearance()) return false;
+        this.closeAppearanceDialog();
+        const selected = this._selectedPlacementRecords();
+        const openingRevision = this.state.draftRevision;
+        const openingSelection = JSON.stringify(this.state.selection);
+        const openingLayout = this.state.layout.layoutId;
+        const colors = new Set(selected.map(p => p.appearance && p.appearance.color || null));
+        let chosen = colors.size === 1 ? Array.from(colors)[0] : undefined;
+        const focusReturn = this.document.activeElement;
+        const dialog = element(this.document, 'section', {
+            className: 'ip-flw-precision-dialog ip-flw-appearance-dialog', role: 'dialog',
+            'aria-modal': 'false', 'aria-label': 'Object appearance',
+        });
+        const header = element(this.document, 'header', { className: 'ip-flw-precision-header' });
+        const close = element(this.document, 'button', { type: 'button',
+            className: 'ip-flw-precision-close', title: 'Close', 'aria-label': 'Close appearance' }, 'X');
+        const dismiss = () => {
+            this.closeAppearanceDialog();
+            if (focusReturn && typeof focusReturn.focus === 'function') focusReturn.focus();
+        };
+        close.addEventListener('click', dismiss);
+        dialog.addEventListener('keydown', event => {
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismiss(); }
+        });
+        append(header, element(this.document, 'h2', {}, 'Appearance'), close);
+        const body = element(this.document, 'div', { className: 'ip-flw-precision-body' });
+        body.appendChild(element(this.document, 'div', { className: 'ip-flw-appearance-summary' },
+            selected.length === 1 ? (selected[0].metadata && selected[0].metadata.instanceLabel
+                || selected[0].assetId) : selected.length + ' objects'));
+        const swatches = element(this.document, 'div', { className: 'ip-flw-appearance-swatches',
+            role: 'group', 'aria-label': 'Preset colors' });
+        const picker = element(this.document, 'input', { type: 'color', value: chosen || '#9aa2a9',
+            'aria-label': 'Custom object color', 'data-appearance-color': 'true' });
+        const value = element(this.document, 'span', { className: 'ip-flw-appearance-value' });
+        const status = element(this.document, 'div', { className: 'ip-flw-precision-status', role: 'status' });
+        const apply = element(this.document, 'button', { type: 'button',
+            className: 'ip-flw-primary-action', 'data-appearance-apply': 'true' }, 'Apply');
+        const refresh = () => {
+            const stale = this.state.draftRevision !== openingRevision
+                || this.state.layout.layoutId !== openingLayout
+                || JSON.stringify(this.state.selection) !== openingSelection;
+            apply.disabled = !this._canEditAppearance() || stale || chosen === undefined;
+            value.textContent = chosen === undefined ? 'Mixed colors' : chosen === null ? 'Default' : chosen.toUpperCase();
+            if (stale) status.textContent = 'Selection or layout changed. Reopen Appearance.';
+            Array.from(swatches.children).forEach(button => button.setAttribute('aria-pressed',
+                button.getAttribute('data-appearance-swatch') === chosen ? 'true' : 'false'));
+        };
+        [['#e8ecef', 'White'], ['#9aa2a9', 'Gray'], ['#303940', 'Charcoal'],
+            ['#2478bc', 'Blue'], ['#28866b', 'Green'], ['#e4b329', 'Yellow'],
+            ['#d97929', 'Orange'], ['#bb4040', 'Red']].forEach(([color, name]) => {
+            const button = element(this.document, 'button', { type: 'button',
+                className: 'ip-flw-appearance-swatch', title: name, 'aria-label': name,
+                'data-appearance-swatch': color, style: 'background-color:' + color });
+            button.addEventListener('click', () => { chosen = color; picker.value = color; refresh(); });
+            swatches.appendChild(button);
+        });
+        picker.addEventListener('input', () => { chosen = picker.value; refresh(); });
+        picker.addEventListener('change', () => { chosen = picker.value; refresh(); });
+        const reset = element(this.document, 'button', { type: 'button',
+            className: 'ip-flw-appearance-reset', title: 'Reset to default finish',
+            'aria-label': 'Reset to default finish', 'data-appearance-reset': 'true' });
+        reset.appendChild(element(this.document, 'img', {
+            src: VIEWPORT_ICON_ROOT + 'arrow-u-up-left.svg', alt: '', 'aria-hidden': 'true' }));
+        reset.addEventListener('click', () => { chosen = null; refresh(); });
+        const custom = element(this.document, 'div', { className: 'ip-flw-appearance-custom' });
+        append(custom, picker, value, reset);
+        append(body, swatches, custom);
+        apply.addEventListener('click', async () => {
+            refresh();
+            if (apply.disabled) return;
+            apply.disabled = true;
+            try {
+                await this.session.setSelectedAppearance(chosen);
+                dismiss();
+            } catch (error) {
+                status.textContent = String(error.message || error);
+                refresh();
+            }
+        });
+        const footer = element(this.document, 'footer', { className: 'ip-flw-precision-footer' });
+        append(footer, status, apply);
+        append(dialog, header, body, footer);
+        this.root.appendChild(dialog);
+        this.appearanceDialog = dialog;
+        this.refreshAppearanceDialog = refresh;
+        refresh();
+        picker.focus();
+        return true;
+    };
+
+    Workspace.prototype.openSavedMovementDialog = function () {
+        if (this.destroyed || this.state.busy || this.state.conflict || this.activityRequestPending
+                || !this.capabilities.navigationMultiActor
+                || activeLayoutAlternative(this.state) || this.constructionPreview
+                || (this.generationPlanningView && this.generationPlanningView.activeLayout())) return false;
+        const choices = this.savedMovementChoices();
+        if (!choices.length) return false;
+        if (this.savedMovementDialog) this.savedMovementDialog.remove();
+        const openingLayout = JSON.stringify(this.state.layout);
+        const focusReturn = this.document.activeElement;
+        const abort = new AbortController();
+        const dialog = element(this.document, 'section', {
+            className: 'ip-flw-precision-dialog ip-flw-saved-movement-dialog',
+            role: 'dialog', 'aria-modal': 'false', 'aria-label': 'Saved movement',
+        });
+        const header = element(this.document, 'header', { className: 'ip-flw-precision-header' });
+        const close = element(this.document, 'button', {
+            type: 'button', className: 'ip-flw-precision-close', title: 'Close', 'aria-label': 'Close saved movement',
+        }, 'X');
+        const dismiss = () => {
+            abort.abort();
+            dialog.remove();
+            if (this.savedMovementDialog === dialog) this.savedMovementDialog = null;
+            if (focusReturn && typeof focusReturn.focus === 'function') focusReturn.focus();
+        };
+        close.addEventListener('click', dismiss);
+        dialog.addEventListener('keydown', event => {
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismiss(); }
+        });
+        append(header, element(this.document, 'h2', {}, 'Saved movement'), close);
+        const body = element(this.document, 'div', { className: 'ip-flw-precision-body' });
+        const select = element(this.document, 'select', { 'aria-label': 'Movement scope', 'data-saved-movement-group': 'true' });
+        select.style.maxWidth = '100%';
+        choices.forEach((choice, i) => select.appendChild(element(this.document, 'option', { value: String(i) }, choice.label)));
+        select.value = '0';
+        body.appendChild(select);
+        const status = element(this.document, 'div', { className: 'ip-flw-precision-status', role: 'status', 'aria-live': 'polite' });
+        const prepare = element(this.document, 'button', {
+            type: 'button', className: 'ip-flw-primary-action', 'data-saved-movement-prepare': 'true',
+        }, 'Play movement');
+        prepare.addEventListener('click', async () => {
+            if (JSON.stringify(this.state.layout) !== openingLayout) {
+                status.textContent = 'The layout changed. Reopen Saved movement.';
+                return;
+            }
+            const choice = choices[Number(select.value)];
+            if (!choice || prepare.disabled) return;
+            prepare.disabled = true;
+            select.disabled = true;
+            status.textContent = 'Validating movement paths...';
+            try {
+                await this.startNavigationActivityPlayback({
+                    movementProgramIds: choice.movementProgramIds, scenarioLabel: choice.label,
+                    prototypeMode: true, signal: abort.signal,
+                    onProgress: progress => {
+                        if (!abort.signal.aborted) status.textContent = progress;
+                    },
+                });
+                if (!abort.signal.aborted) {
+                    this.threeAdapter.activity.play();
+                    dismiss();
+                }
+            } catch (error) {
+                if (!abort.signal.aborted) status.textContent = String(error.message || error);
+            } finally {
+                prepare.disabled = false;
+                select.disabled = false;
+            }
+        });
+        const footer = element(this.document, 'footer', { className: 'ip-flw-precision-footer' });
+        append(footer, status, prepare);
+        append(dialog, header, body, footer);
+        this.root.appendChild(dialog);
+        this.savedMovementDialog = dialog;
+        select.focus();
+        return true;
+    };
+
     Workspace.prototype.startNavigationActivityPlayback = async function (request) {
         if (this.destroyed || this.activityRequestPending) {
             throw new Error('Facility navigation activity playback is unavailable.');
@@ -4782,10 +5026,10 @@
         const suppliedJourneyIds = Array.isArray(input.journeySolutionIds)
             ? Array.from(new Set(input.journeySolutionIds.map(String))) : [];
         if ((!programIds.length && !suppliedJourneyIds.length)
-                || programIds.length + suppliedJourneyIds.length > 20
+                || programIds.length + suppliedJourneyIds.length > NAVIGATION_ACTIVITY_MAXIMUM_ACTORS
                 || input.prototypeMode !== true) {
             const error = new Error(
-                'Navigation playback requires 1-20 existing program or journey IDs in prototype mode.'
+                'Navigation playback requires 1-' + NAVIGATION_ACTIVITY_MAXIMUM_ACTORS + ' existing program or journey IDs in prototype mode.'
             );
             error.code = 'facility_navigation_activity_request_invalid';
             throw error;
@@ -4800,8 +5044,31 @@
         };
         this.activityRequestPending = true;
         try {
+            this._renderToolbarState();
             const plannedJourneyIds = [];
+            const ensureCurrent = () => {
+                const current = this.session.getState();
+                if (this.destroyed || (input.signal && input.signal.aborted)) {
+                    const error = new Error('Movement preparation cancelled.');
+                    error.code = 'facility_navigation_activity_cancelled';
+                    throw error;
+                }
+                if (current.baseRevision !== beforeState.baseRevision
+                        || activeLayoutAlternative(current) || this.constructionPreview
+                        || (this.generationPlanningView && this.generationPlanningView.activeLayout())
+                        || JSON.stringify(current.layout || {}) !== beforeFingerprint
+                        || JSON.stringify(current.operations || []) !== beforeOperations) {
+                    const error = new Error('The Facility Layout changed while navigation activity was prepared.');
+                    error.code = 'facility_navigation_activity_stale';
+                    throw error;
+                }
+            };
             for (const movementProgramId of programIds) {
+                ensureCurrent();
+                if (typeof input.onProgress === 'function') {
+                    input.onProgress('Validating path ' + (plannedJourneyIds.length + 1)
+                        + ' of ' + programIds.length + '...');
+                }
                 const compiled = await transport.compileNavigationSnapshot({
                     ...basePayload,
                     request: {
@@ -4809,6 +5076,7 @@
                         prototypeMode: true,
                     },
                 });
+                ensureCurrent();
                 const navigationPackageId = String(
                     compiled && compiled.summary
                     && compiled.summary.navigationPackageId || ''
@@ -4826,6 +5094,7 @@
                         prototypeMode: true,
                     },
                 });
+                ensureCurrent();
                 const summary = planned && planned.summary || {};
                 const journeySolutionId = String(summary.journeySolutionId || '');
                 if (!journeySolutionId || summary.outcome !== 'accepted') {
@@ -4842,6 +5111,7 @@
             const journeySolutionIds = Array.from(new Set(
                 suppliedJourneyIds.concat(plannedJourneyIds)
             ));
+            ensureCurrent();
             const created = await transport.buildNavigationActivityScenario({
                 ...basePayload,
                 request: {
@@ -4855,6 +5125,7 @@
                     prototypeMode: true,
                 },
             });
+            ensureCurrent();
             const scenarioId = String(created && created.scenarioId || '');
             const activeRevision = String(created && created.layoutRevision || '');
             if (!scenarioId || !activeRevision) {
@@ -4867,6 +5138,7 @@
                 activeRevision: activeRevision,
             });
             const currentState = this.session.getState();
+            ensureCurrent();
             if (JSON.stringify(currentState.layout || {}) !== beforeFingerprint
                     || currentState.baseRevision !== beforeState.baseRevision
                     || JSON.stringify(currentState.operations || [])
@@ -4880,6 +5152,7 @@
             if (this.controller && typeof this.controller.ready === 'function') {
                 await this.controller.ready();
             }
+            ensureCurrent();
             if (this.motionState.loaded) this.clearMotionPlayback('activity_loaded');
             if (this.topAdapter
                     && typeof this.topAdapter.setActivityPresentation === 'function') {
@@ -4887,6 +5160,10 @@
             }
             try {
                 await this.threeAdapter.activity.load(payload, activeRevision);
+                try { ensureCurrent(); } catch (error) {
+                    this.clearActivityPlayback('preparation_cancelled');
+                    throw error;
+                }
             } catch (error) {
                 if (this.topAdapter
                         && typeof this.topAdapter.clearActivityPresentation === 'function') {
@@ -4904,10 +5181,12 @@
                 readOnlyPresentation: true,
             });
         } catch (error) {
-            if (typeof this.options.onError === 'function') this.options.onError(error);
+            if (error.code !== 'facility_navigation_activity_cancelled'
+                    && typeof this.options.onError === 'function') this.options.onError(error);
             throw error;
         } finally {
             this.activityRequestPending = false;
+            if (!this.destroyed) this._renderToolbarState();
         }
     };
 
@@ -4981,6 +5260,8 @@
 
     Workspace.prototype._renderLayerVisibility = function () {
         if (!this.layerPanel) return;
+        const wallButton = this.layerPanel.querySelector('[data-layer-action="perimeter-walls"]');
+        if (wallButton) wallButton.disabled = !wallsRuntime.canEdit(this);
         Object.keys(DEFAULT_LAYER_VISIBILITY).forEach(function (key) {
             const input = this.layerPanel.querySelector(
                 '[data-facility-layer="' + key + '"]'
@@ -5054,6 +5335,11 @@
             'data-layer-action',
             this.layerPanel
         );
+        if (action === 'perimeter-walls') {
+            event.preventDefault();
+            try { wallsRuntime.openDialog(this); } catch (error) { this._setError(error); }
+            return;
+        }
         if (action !== 'show-all') return;
         if (typeof event.preventDefault === 'function') event.preventDefault();
         this.layerVisibility = normalizeLayerVisibility(
@@ -9922,6 +10208,13 @@
             ['duplicate', 'Duplicate', 'Ctrl+D or Ctrl+drag'],
             ['delete', 'Delete', 'Delete'],
             ['lock', 'Lock', 'L'],
+            ['appearance', 'Appearance', ''],
+            ['decals', 'Decals', ''],
+            ['lettering', 'Wall Lettering', ''],
+            ['component-materials', 'Component Materials', ''],
+            ['interior-walls', 'Interior Walls', ''],
+            ['floor-surfaces', 'Floor Surfaces', ''],
+            ['replace-asset', 'Replace Asset', ''],
             ['align', 'Align', ''],
             ['distribute', 'Distribute', ''],
             ['relative', 'Relative', ''],
@@ -9943,6 +10236,7 @@
             ['fit-layout', 'Fit Layout', 'Shift+F'],
             ['top-view', 'Top View', 'T'],
             ['auto-arrange', 'Auto Arrange', ''],
+            ['saved-movement', 'Saved movement', ''],
             ['clear-all', 'Clear All', ''],
             ['save', 'Save', 'Ctrl+S'],
         ].forEach(function (spec) {
@@ -10147,6 +10441,7 @@
         );
         [
             ['display-settings', 'Display settings', 'display', false],
+            ['appearance', 'Object appearance', 'display', false],
             ['layers', 'Layer visibility', 'stack', false],
             ['orbit', 'Orbit view', 'orbit', true],
             [
@@ -10155,6 +10450,7 @@
                 'walkthrough',
                 false,
             ],
+            ['avatar-view', 'Show avatar in Walkthrough (C)', 'avatar-view', false],
             [
                 'drone',
                 'Fly through facility in assisted Drone mode',
@@ -10178,6 +10474,23 @@
                 item[0], item[1], item[2], item[3]
             ));
         }, this);
+        if (root.InspectorProWalkthroughCamera && this.document.defaultView) {
+            const button = this._threeNavigationButton('camera-settings',
+                'Walkthrough camera settings', 'settings', false);
+            this.threeNavigation.appendChild(button);
+            this.walkCameraControl = root.InspectorProWalkthroughCamera.createControl({
+                document: this.document, button,
+                onOpen: () => {
+                    if (this.threeAdapter && this.threeAdapter.setWalkthroughCameraSettings)
+                        this.threeAdapter.setWalkthroughCameraSettings(root.InspectorProWalkthroughCamera.load());
+                },
+                onChange: value => {
+                    if (!this.threeAdapter || !this.threeAdapter.setWalkthroughCameraSettings) return;
+                    this.threeAdapter.setWalkthroughCameraSettings(value);
+                    this.threeAdapter.setWalkthroughCameraMode('third-person');
+                },
+            });
+        }
         this.threeNavigation.appendChild(this._threeViewpointsControl());
         [
             ['record', 'Record facility view', 'record', true],
@@ -14006,6 +14319,8 @@
     };
 
     Workspace.prototype._renderThreeNavigationState = function () {
+        const appearance = this.threeNavigation.querySelector('[data-three-command="appearance"]');
+        if (appearance) appearance.disabled = !this._canEditAppearance();
         if (!this.threeNavigation) return;
         ['orbit', 'pan'].forEach(function (command) {
             const button = this.threeNavigation.querySelector(
@@ -14030,6 +14345,18 @@
                 : 'Walk through facility at human height';
             walkthrough.setAttribute('aria-label', label);
             walkthrough.setAttribute('title', label);
+        }
+        if (this.walkCameraControl && this.threeWalkthrough.cameraSettings)
+            this.walkCameraControl.sync(this.threeWalkthrough.cameraSettings);
+        const avatarView = this.threeNavigation.querySelector('[data-three-command="avatar-view"]');
+        if (avatarView) {
+            const thirdPerson = this.threeWalkthrough.cameraMode === 'third-person';
+            avatarView.disabled = this.threeWalkthrough.supported === false
+                || this.threeWalkthrough.avatarSupported === false;
+            avatarView.setAttribute('aria-pressed', thirdPerson ? 'true' : 'false');
+            const label = thirdPerson ? 'Use first-person Walkthrough (C)' : 'Show avatar in Walkthrough (C)';
+            avatarView.setAttribute('aria-label', label);
+            avatarView.setAttribute('title', label);
         }
         const drone = this.threeNavigation.querySelector(
             '[data-three-command="drone"]'
@@ -15142,6 +15469,11 @@
                         ? selected[0].placementId : undefined,
                 });
             }
+        } else if (command === 'avatar-view') {
+            if (typeof this.threeAdapter.setWalkthroughCameraMode === 'function') {
+                this.threeAdapter.setWalkthroughCameraMode(
+                    this.threeWalkthrough.cameraMode === 'third-person' ? 'first-person' : 'third-person');
+            }
         } else if (command === 'drone') {
             if (this.threeDrone.active
                     && typeof this.threeAdapter.exitDrone === 'function') {
@@ -15189,6 +15521,8 @@
             } else if (typeof this.threeAdapter.fit === 'function') {
                 this.threeAdapter.fit();
             }
+        } else if (command === 'appearance') {
+            this.openAppearanceDialog();
         } else if (command === 'display-settings') {
             this._setLayerPanelOpen(false);
             this.threeSettingsOpen = !this.threeSettingsOpen;
@@ -15332,6 +15666,13 @@
     };
 
     Workspace.prototype.executeCommand = function (command) {
+        if (command === 'decals') return Promise.resolve(decalsRuntime.openDialog(this));
+        if (command === 'lettering') return Promise.resolve(decalsRuntime.openDialog(this, 'lettering'));
+        if (command === 'component-materials') return componentMaterialsRuntime.open(this);
+        if (command === 'interior-walls') return Promise.resolve(interiorWallsRuntime.open(this));
+        if (command === 'floor-surfaces') return Promise.resolve(floorSurfacesRuntime.open(this));
+        if (command === 'replace-asset') return Promise.resolve(replaceAssetRuntime.open(this));
+        if (command === 'appearance') return Promise.resolve(this.openAppearanceDialog());
         if (this.generationPlanningView && this.generationPlanningView.activeLayout()
                 && !['pan', 'fit', 'fit-layout', 'top-view'].includes(command)) {
             return Promise.reject(new Error('Exit the isolated generation preview before editing'));
@@ -15363,6 +15704,10 @@
             } else {
                 this.openNavigationDialog();
             }
+            return Promise.resolve(this.getState());
+        }
+        if (command === 'saved-movement') {
+            this.openSavedMovementDialog();
             return Promise.resolve(this.getState());
         }
         if (PRECISION_MODES.includes(command)) {
@@ -15543,6 +15888,7 @@
 
     Workspace.prototype._setViewMode = function (mode) {
         if (!VIEW_MODES.includes(mode)) throw new TypeError('invalid view mode');
+        if (this.walkCameraControl) this.walkCameraControl.close(false);
         if (mode === '3d' && !this.threeAdapter) mode = 'plan';
         if (mode !== '3d') {
             this._cancelRecordingCountdown();
@@ -16350,6 +16696,11 @@
                 || !this.navigationRuntime
                 || typeof this.session.setFacilityNavigation !== 'function'
                 || !this._navigationSelectedActor(),
+            'saved-movement': !this.capabilities.navigationMultiActor
+                || this.activityRequestPending || Boolean(this.state.conflict)
+                || Boolean(activeLayoutAlternative(this.state)) || Boolean(this.constructionPreview)
+                || Boolean(this.generationPlanningView && this.generationPlanningView.activeLayout())
+                || !this.savedMovementChoices().length,
             'auto-arrange': !this.capabilities.fullLayoutProposals
                 || typeof this.session.requestLayoutProposal
                     !== 'function'
@@ -16360,6 +16711,13 @@
             duplicate: manualEditingBlocked || !hasMovable,
             delete: manualEditingBlocked || !hasSelection,
             lock: manualEditingBlocked || !hasMovable,
+            appearance: !this._canEditAppearance(),
+            decals: !decalsRuntime || !wallsRuntime.canEdit(this),
+            lettering: !decalsRuntime || !wallsRuntime.canEdit(this),
+            'component-materials': !componentMaterialsRuntime || !wallsRuntime.canEdit(this) || this._selectedPlacementRecords().length !== 1,
+            'interior-walls': !interiorWallsRuntime || !wallsRuntime.canEdit(this),
+            'floor-surfaces': !floorSurfacesRuntime || !wallsRuntime.canEdit(this),
+            'replace-asset': !replaceAssetRuntime || !wallsRuntime.canEdit(this) || this._selectedPlacementRecords().length !== 1,
             align: manualEditingBlocked
                 || selectedPlacements.length < 2,
             distribute: manualEditingBlocked
@@ -16727,6 +17085,7 @@
             this._hideGhost();
         }
         this._renderProperties();
+        if (this.refreshAppearanceDialog) this.refreshAppearanceDialog();
         this._renderAssetBrowser();
         if (this.precisionState.open) this._renderPrecisionDialog();
         if (this.patternState.open) this._renderPatternDialog();
@@ -16941,6 +17300,7 @@
     };
 
     Workspace.prototype.suspend = function () {
+        this.closeAppearanceDialog();
         if (this.destroyed || this.suspended) return false;
         if (this.motionState.playing && this.threeAdapter
                 && this.threeAdapter.motion) {
@@ -17089,8 +17449,13 @@
     };
 
     Workspace.prototype.destroy = function () {
+        if (decalsRuntime) decalsRuntime.closeDialog(this);
+        if (authoringDialogs) authoringDialogs.close(this);
+        this.closeAppearanceDialog();
         if (this.destroyed) return false;
         this.destroyed = true;
+        if (this.walkCameraControl) this.walkCameraControl.dispose();
+        this.walkCameraControl = null;
         this.clearMotionPlayback('workspace_destroyed');
         this.clearActivityPlayback('workspace_destroyed');
         this._finishMovableDialogDrag(null, true);

@@ -10,8 +10,16 @@ const failure = (code, message = code) => Object.assign(new Error(message), { co
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 function childEnvironment(profile, python, source = process.env) {
   if (profile.mode === 'application') {
-    const result = { ...source, PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' };
+    const result = { ...require('./codex-config.cjs').isolateCodexEnvironment(source), PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' };
     for (const key of Object.keys(result)) if (/^(ELECTRON_|NODE_OPTIONS$|PYTHON_DOTENV_DISABLED$)/i.test(key)) delete result[key];
+    if (profile.modelGateway) {
+      // The selected native profile, not inherited shell settings, owns this binding.
+      const inheritedPath = Object.keys(result).find(key => key.toUpperCase() === 'PYTHONPATH');
+      const searchPath = inheritedPath ? result[inheritedPath] : '';
+      for (const key of Object.keys(result)) if (/^(INSPECTORPRO_LLM_GATEWAY_CONFIG|PYTHONPATH)$/i.test(key)) delete result[key];
+      result.INSPECTORPRO_LLM_GATEWAY_CONFIG = profile.modelGateway.configPath;
+      result.PYTHONPATH = [profile.modelGateway.dependencyRoot, searchPath].filter(Boolean).join(path.delimiter);
+    }
     return result;
   }
   const result = {};

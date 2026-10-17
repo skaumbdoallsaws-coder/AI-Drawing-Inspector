@@ -1,0 +1,20 @@
+.ip-walk-camera-panel {
+    position: fixed; z-index: 10020; width: 268px; max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px); overflow: auto; padding: 12px; box-sizing: border-box;
+    border: 1px solid var(--border-color, #b9c5cf); border-radius: 6px;
+    background: var(--bg-panel, #fff); color: var(--text-primary, #172331);
+    box-shadow: 0 6px 20px #0003; font: 12px/1.4 "Segoe UI", Arial, sans-serif;
+    letter-spacing: 0;
+}
+.ip-walk-camera-panel[hidden] { display: none; }
+.ip-walk-camera-panel header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.ip-walk-camera-panel button { border: 1px solid var(--border-color, #b9c5cf); background: color-mix(in srgb, var(--bg-panel, #fff) 88%, var(--text-primary, #172331) 12%); color: inherit; cursor: pointer; height: 28px; border-radius: 3px; }
+.ip-walk-camera-panel header button { width: 28px; padding: 4px; }
+.ip-walk-camera-panel header img { width: 18px; height: 18px; }
+:root[data-theme="dark"] .ip-walk-camera-panel header img { filter: brightness(0) invert(1); }
+.ip-walk-camera-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.ip-walk-camera-presets button[aria-pressed="true"] { background: var(--accent-primary, #0878d1); border-color: var(--accent-primary, #0878d1); color: white; }
+.ip-walk-camera-panel label { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-top: 12px; }
+.ip-walk-camera-panel input { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--accent-primary, #0878d1); }
+.ip-walk-camera-panel output { font-variant-numeric: tabular-nums; }
+.ip-walk-camera-panel :focus-visible { outline: 2px solid var(--accent-primary, #0878d1); outline-offset: 2px; }

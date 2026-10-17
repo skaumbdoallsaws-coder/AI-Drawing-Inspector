@@ -1073,6 +1073,32 @@ def test_nav7_bounds_dense_intersections_per_actor_pair(monkeypatch):
     assert len(presentation["pathIntersections"]) == 2
 
 
+def test_shared_clock_samples_each_actor_once_per_instant(monkeypatch):
+    import math
+    records = [{"actorId": f"actor-{i:02d}", "index": i} for i in range(40)]
+    calls = []
+
+    def pose(record, time):
+        calls.append((record["actorId"], time))
+        return {"x": math.sin(record["index"] + time), "z": math.cos(record["index"] * .3 - time)}
+
+    monkeypatch.setattr(navigation_activity, "_sample_pose", pose)
+    actual = navigation_activity._sampled_pair_minimums(records, cycle_duration_seconds=7, sample_count=11)
+    assert len(calls) == 40 * 11
+    expected = []
+    for i, left in enumerate(records):
+        for right in records[i + 1:]:
+            values = []
+            for tick in range(11):
+                normalized = tick / 10
+                a, b = pose(left, 7 * normalized), pose(right, 7 * normalized)
+                values.append((math.hypot(a["x"] - b["x"], a["z"] - b["z"]), normalized))
+            distance, normalized = min(values)
+            expected.append({"actorIds": [left["actorId"], right["actorId"]],
+                             "centerDistanceMeters": round(distance, 6), "normalizedTime": round(normalized, 6)})
+    assert actual == expected
+
+
 def test_nav7_rejects_unauthorised_phase_offset():
     layout = _layout()
     journey = plan_pedestrian_journey(layout, _compile(layout), "nmp-cycle")

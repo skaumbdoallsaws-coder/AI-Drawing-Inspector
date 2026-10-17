@@ -100,6 +100,12 @@ rendering backend refuses to run from the live checkout.
 
 ## Tests
 
+**No flashing terminals on Windows.** The user is working in other apps.
+Prefer in-process file reads. Launch commands directly through pythonw.exe
+and tools/run_hidden.pyw (CREATE_NO_WINDOW), without an intermediate
+PowerShell/cmd window. Use redirected output and windowsHide on the parent
+spawn as well. Background helpers must never open visible console windows.
+
 `desktop/` uses `npm test` (`node --test tests/*.test.cjs`). Python tests are
 pytest-style with bare module-level asserts. Confirm the runner in use before
 reporting counts, and report what actually ran rather than an expected total.

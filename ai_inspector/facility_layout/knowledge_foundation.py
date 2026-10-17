@@ -2593,7 +2593,7 @@ def validate_generation_run(value: Mapping[str, Any]) -> dict[str, Any]:
         "saveEligibility",
         "terminalReason",
     }
-    unknown = sorted(set(value) - required)
+    unknown = sorted(set(value) - required - {"gatewayRevision"})
     missing = sorted(required - set(value))
     if missing or unknown:
         raise FacilityKnowledgeContractError(
@@ -2787,6 +2787,8 @@ def validate_generation_run(value: Mapping[str, Any]) -> dict[str, Any]:
         )
     for field in ("effectiveProvider", "effectiveModel"):
         _identifier(value[field], field)
+    if "gatewayRevision" in value:
+        _sha256(value["gatewayRevision"], "gatewayRevision")
     if value["reasoningEffort"] is not None:
         _identifier(value["reasoningEffort"], "reasoningEffort")
     for field in ("createdAt", "updatedAt", "lastActivityAt", "expiresAt"):

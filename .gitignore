@@ -39,6 +39,7 @@ venv/
 !ai_inspector/prompts/modules.json
 !ai_inspector/product_intelligence/catalogs/*.json
 !ai_inspector/facility_layout/catalogs/activity-visual-alignments-v1.json
+!ai_inspector/research/equipment_document_index.json
 !ai_inspector/product_intelligence/disposition_policies/*.json
 !ai_inspector/product_intelligence/schemas/*.json
 !tests/fixtures/prompt_compilation_cases.json

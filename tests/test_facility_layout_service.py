@@ -1317,6 +1317,220 @@ def test_routing_differential_keeps_distinct_subjects():
     ]
 
 
+def _ordinary_route_layout(service, principal, shell, policy, *, stale=False):
+    layout = apply_facility_layout_operations(
+        _layout(shell, policy),
+        _material_route_operations("e" * 64, _layout(shell, policy))[:2],
+    )["document"]
+    for index, z in enumerate((0.75, 3.25)):
+        points = [{"x": 0.5, "y": 0, "z": z}, {"x": 4.5, "y": 0, "z": z}]
+        route = {
+            "routeId": f"rt-ordinary-{index}",
+            "routeKind": "material",
+            "sourceEndpoint": {"kind": "world_point", "position": points[0]},
+            "targetEndpoint": {"kind": "world_point", "position": points[1]},
+            "routingMode": "polyline",
+            "centerline": points,
+            "corridorWidth": 0.5,
+            "sourceRevisions": {
+                "layout": "0" * 64 if stale else routing_layout_fingerprint(layout),
+                "shell": shell.revision,
+                "policy": policy.revision,
+            },
+            "requirements": [],
+            "evidence": [],
+        }
+        route["routeFingerprint"] = persisted_route_fingerprint(route)
+        layout["routes"].append(route)
+    # Model a persisted historical layout without weakening service validation.
+    return service.layout_repository.create_layout(principal, "site-a", layout)
+
+
+def _ordinary_route_edit(layout, edit):
+    if edit == "move":
+        return {"op": "move_placement", "placementId": "pl-route-machine",
+                "position": {"x": 3.75, "y": 0, "z": 2}}
+    placement = deepcopy(layout["placements"][0])
+    placement.update(placementId="pl-added-forklift", assetId="asset-forklift")
+    placement["transform"]["position"] = {"x": 1.5, "y": 0, "z": 2}
+    return {"op": "place_asset", "placement": placement}
+
+
+@pytest.mark.parametrize("edit", ["move", "add"])
+@pytest.mark.parametrize("stale", [False, True])
+def test_ordinary_routes_revalidate_on_placement_edits(tmp_path, edit, stale):
+    from ai_inspector.facility_layout.diff import build_exact_layout_diff, facility_layout_diff_hash
+
+    service, principal, shell, policy, _ = _service(tmp_path)
+    before = _ordinary_route_layout(service, principal, shell, policy, stale=stale)
+    original = deepcopy(before)
+    operations = [_ordinary_route_edit(before["layout"], edit)]
+    snapshot = _file_snapshot(tmp_path / "layouts")
+    preview = service.preview_operations(principal, "site-a", before["layout"]["layoutId"],
+        before["revision"], operations)
+    assert preview["routingDiagnostics"]["valid"] is True
+    assert _file_snapshot(tmp_path / "layouts") == snapshot
+    assert before == original
+    for old, route in zip(before["layout"]["routes"], preview["document"]["routes"]):
+        expected = deepcopy(old)
+        expected["sourceRevisions"]["layout"] = routing_layout_fingerprint(preview["document"])
+        expected["routeFingerprint"] = persisted_route_fingerprint(expected)
+        assert route == expected
+        assert route["routeId"] in preview["affectedIds"]
+    diff = build_exact_layout_diff(before["layout"], preview["document"])
+    assert preview["canonicalDiff"] == diff
+    assert preview["diffHash"] == facility_layout_diff_hash(
+        layout_id=before["layout"]["layoutId"], base_revision=before["revision"],
+        operations=operations, after=preview["document"], canonical_diff=diff)
+    assert preview == service.preview_operations(principal, "site-a", before["layout"]["layoutId"],
+        before["revision"], operations)
+    saved = service.apply_operations(principal, "site-a", before["layout"]["layoutId"],
+        before["revision"], operations)
+    assert saved["layout"] == preview["document"]
+    assert saved["operationResult"]["diffHash"] == preview["diffHash"]
+    assert saved["routingDiagnostics"]["valid"] is True
+
+
+@pytest.mark.parametrize("source", ["layout", "shell", "policy", "vehicle"])
+@pytest.mark.parametrize("edit", ["add_route", "edit_route"])
+def test_ordinary_route_revalidation_does_not_refresh_submitted_stale_routes(tmp_path, source, edit):
+    service, principal, shell, policy, vehicle = _service(tmp_path)
+    before = _ordinary_route_layout(service, principal, shell, policy)
+    route = deepcopy(before["layout"]["routes"][0])
+    route["sourceRevisions"][source] = "9" * 64
+    if source == "vehicle":
+        route["vehicleProfileRef"] = {
+            "vehicleProfileId": vehicle.document["vehicleProfileId"],
+            "vehicleProfileRevision": vehicle.revision,
+        }
+    if edit == "add_route":
+        route["routeId"] = "rt-submitted-stale"
+    route["routeFingerprint"] = persisted_route_fingerprint(route)
+    operation = ({"op": edit, "route": route} if edit == "add_route" else
+        {"op": edit, "routeId": route["routeId"],
+         "patch": {key: value for key, value in route.items() if key != "routeId"}})
+    snapshot = _file_snapshot(tmp_path / "layouts")
+    with pytest.raises(FacilityValidationError) as caught:
+        service.apply_operations(principal, "site-a", before["layout"]["layoutId"], before["revision"],
+            [_ordinary_route_edit(before["layout"], "move"), operation])
+    assert caught.value.code == "routing_validation_failed"
+    assert any(item["code"] == "stale_route_source_revision" and source in item["subjects"]
+        for item in caught.value.details["findings"])
+    assert _file_snapshot(tmp_path / "layouts") == snapshot
+
+
+def test_ordinary_route_revalidation_still_rejects_moved_connector(tmp_path):
+    service, principal, shell, policy, _ = _service(tmp_path,
+        asset_resolver=lambda _p, _s, asset, revision: _routing_asset(asset, revision))
+    before = service.create_layout(principal, "site-a", _layout(shell, policy))
+    before = service.apply_operations(principal, "site-a", before["layout"]["layoutId"], before["revision"],
+        _material_route_operations("e" * 64, before["layout"]))
+    snapshot = _file_snapshot(tmp_path / "layouts")
+    with pytest.raises(FacilityValidationError) as caught:
+        service.apply_operations(principal, "site-a", before["layout"]["layoutId"], before["revision"],
+            [_ordinary_route_edit(before["layout"], "move")])
+    assert any(item["code"] == "route_endpoint_geometry_mismatch"
+        for item in caught.value.details["findings"])
+    assert _file_snapshot(tmp_path / "layouts") == snapshot
+
+
+@pytest.mark.parametrize("defect", ["shell", "policy", "vehicle", "geometry", "missing_layout"])
+def test_ordinary_route_revalidation_preserves_other_inherited_failures(tmp_path, defect):
+    service, principal, shell, policy, vehicle = _service(tmp_path)
+    before = _ordinary_route_layout(service, principal, shell, policy, stale=True)
+    document = deepcopy(before["layout"])
+    route = document["routes"][0]
+    if defect in {"shell", "policy", "vehicle"}:
+        route["sourceRevisions"][defect] = "9" * 64
+        if defect == "vehicle":
+            route["vehicleProfileRef"] = {
+                "vehicleProfileId": vehicle.document["vehicleProfileId"],
+                "vehicleProfileRevision": vehicle.revision,
+            }
+        route["routeFingerprint"] = persisted_route_fingerprint(route)
+    elif defect == "geometry":
+        route["routeFingerprint"] = "9" * 64
+    else:
+        del route["sourceRevisions"]["layout"]
+        route["routeFingerprint"] = persisted_route_fingerprint(route)
+    before = service.layout_repository.save_layout(principal, "site-a", document["layoutId"],
+        document, before["revision"])
+    preview = service.preview_operations(principal, "site-a", document["layoutId"], before["revision"],
+        [_ordinary_route_edit(document, "move")])
+    assert preview["document"]["routes"][0] == route
+    assert preview["routingDiagnostics"]["valid"] is False
+    assert any(finding["code"] == ("stale_route_geometry" if defect == "geometry"
+        else "stale_route_source_revision") for finding in preview["routingDiagnostics"]["findings"])
+
+
+def test_ordinary_route_revalidation_cannot_hide_stale_asset_authority(tmp_path):
+    service, principal, shell, policy, _ = _service(tmp_path)
+    before = _ordinary_route_layout(service, principal, shell, policy, stale=True)
+    service.asset_definition_resolver = lambda _p, _s, asset, _revision: _resolved_asset(asset, "9" * 64)
+    snapshot = _file_snapshot(tmp_path / "layouts")
+    with pytest.raises(FacilityLayoutError) as caught:
+        service.apply_operations(principal, "site-a", before["layout"]["layoutId"], before["revision"],
+            [_ordinary_route_edit(before["layout"], "move")])
+    assert caught.value.code == "stale_asset_definition_revision"
+    assert _file_snapshot(tmp_path / "layouts") == snapshot
+
+
+def test_ordinary_route_revalidation_leaves_noops_and_aisle_sources_unchanged(tmp_path):
+    service, principal, shell, policy, _ = _service(tmp_path)
+    before = _ordinary_route_layout(service, principal, shell, policy, stale=True)
+    noop = service.preview_operations(principal, "site-a", before["layout"]["layoutId"], before["revision"], [])
+    assert noop["document"] == before["layout"]
+    assert noop["changed"] is False
+    before = service.apply_operations(principal, "site-a", before["layout"]["layoutId"], before["revision"],
+        [{"op": "add_aisle", "aisle": {"routeId": "rt-test-aisle", "label": "Test aisle",
+          "aisleKind": "material", "corridorWidth": 0.5, "centerline": [
+              {"x": 0.5, "y": 0, "z": 3.5}, {"x": 4.5, "y": 0, "z": 3.5}]}}])
+    aisle = next(route for route in before["layout"]["routes"] if "facilityAisle" in route.get("extensions", {}))
+    preview = service.preview_operations(principal, "site-a", before["layout"]["layoutId"], before["revision"],
+        [_ordinary_route_edit(before["layout"], "move")])
+    assert next(route for route in preview["document"]["routes"] if route["routeId"] == aisle["routeId"]) == aisle
+    assert "layoutBaseRevision" in aisle["sourceRevisions"]
+    assert preview["routingDiagnostics"]["valid"] is True
+
+
+@pytest.mark.parametrize("blocking", [False, True])
+def test_ordinary_route_revalidation_checks_forklift_swept_volume(tmp_path, blocking):
+    service, principal, shell, policy, vehicle = _service(tmp_path)
+    before = _ordinary_route_layout(service, principal, shell, policy)
+    document = deepcopy(before["layout"])
+    document["zones"][0].update(zoneType="aisle", anchors=[], boundary=[
+        {"x": 0, "z": 4.5}, {"x": 20, "z": 4.5}, {"x": 20, "z": 7.5}, {"x": 0, "z": 7.5}])
+    route = document["routes"][0]
+    route.update(routeKind="forklift", routingMode="vehicle", corridorWidth=3,
+        vehicleProfileRef={"vehicleProfileId": vehicle.document["vehicleProfileId"],
+            "vehicleProfileRevision": vehicle.revision})
+    route["centerline"] = [{"x": 3, "y": 0, "z": 6}, {"x": 12, "y": 0, "z": 6}]
+    route["sourceEndpoint"]["position"] = route["centerline"][0]
+    route["targetEndpoint"]["position"] = route["centerline"][-1]
+    document["routes"] = [route]
+    route["sourceRevisions"].update(layout=routing_layout_fingerprint(document), vehicle=vehicle.revision)
+    route["routeFingerprint"] = persisted_route_fingerprint(route)
+    before = service.save_layout(principal, "site-a", document["layoutId"], document, before["revision"])
+    assert before["routingDiagnostics"]["valid"] is True
+    operation = _ordinary_route_edit(document, "add")
+    operation["placement"]["transform"]["position"] = {"x": 8, "y": 0, "z": 6 if blocking else 2}
+    snapshot = _file_snapshot(tmp_path / "layouts")
+    if blocking:
+        # Isolate routing: public placement application also rejects aisle occupancy.
+        candidate = apply_facility_layout_operations(before["layout"], [operation])["document"]
+        candidate, diagnostics, rebound = service._revalidate_route_layout_sources(
+            principal, "site-a", candidate, inherited_routes=before["layout"]["routes"])
+        assert not rebound
+        assert candidate["routes"] == before["layout"]["routes"]
+        assert diagnostics["valid"] is False
+        assert any(item["code"] == "route_swept_volume_collision" for item in diagnostics["findings"])
+    else:
+        preview = service.preview_operations(principal, "site-a", document["layoutId"], before["revision"], [operation])
+        assert preview["routingDiagnostics"]["valid"] is True
+        assert preview["document"]["routes"][0]["sourceRevisions"]["layout"] == routing_layout_fingerprint(preview["document"])
+    assert _file_snapshot(tmp_path / "layouts") == snapshot
+
+
 def test_process_map_dependency_requires_reported_revision(tmp_path):
     service, principal, shell, policy, _ = _service(
         tmp_path,
@@ -1532,6 +1746,8 @@ def test_service_compiles_bounded_navigation_snapshot_and_isolates_package(
         "manualPathConstraints": [],
         "handoffPrograms": [],
     }
+    next(p for p in layout["placements"] if p["placementId"] == "pl-nav-operator").setdefault(
+        "metadata", {})["instanceLabel"] = "Inspection operator Q1"
     created = service.create_layout(principal, "site-a", layout)
 
     result = service.compile_navigation_snapshot(
@@ -1613,6 +1829,7 @@ def test_service_compiles_bounded_navigation_snapshot_and_isolates_package(
     assert full_activity["scenario"]["schemaVersion"] == (
         "facility-activity-scenario-v7"
     )
+    assert full_activity["scenario"]["actors"][0]["label"] == "Inspection operator Q1"
     motion_payload = next(iter(full_activity["actorPayloads"].values()))
     assert motion_payload["package"]["schemaVersion"] == (
         "facility-motion-package-v3"

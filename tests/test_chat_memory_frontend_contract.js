@@ -128,4 +128,24 @@ test('memory failures are visible and block local action fallback', () => {
     assert(memoryBranch >= 0 && legacyFallback > memoryBranch);
 });
 
+test('conversation transitions block send and cannot be marked ready by UI sync', () => {
+    for (const name of ['handleAgentSend', 'createNewConversation', 'switchConversation', 'clearCurrentConversation']) {
+        assert(body(name).includes("if (_serverMemoryState === 'initializing') return;"), name);
+    }
+    assert(body('updateSendButtonState').includes("['initializing', 'unavailable'].includes(_serverMemoryState)"));
+    assert(body('_setServerMemoryState').includes('updateSendButtonState()'));
+    assert(body('_syncChatUI').includes("&& _serverMemoryState !== 'initializing'"));
+    assert(body('_syncChatUI').includes("if (archived && _serverMemoryState !== 'initializing')"));
+    const load = body('_loadServerConversation');
+    assert(load.indexOf("_setServerMemoryState('initializing'") < load.indexOf('await _serverMemoryJson('));
+});
+
+test('sending consumes the persisted draft before message persistence for Sage and Scout', () => {
+    for (const name of ['handleAgentSend', 'handleScoutSearchSend']) {
+        const send = body(name);
+        const clear = send.indexOf("originSession.pendingInput = '';");
+        assert(clear >= 0 && clear < send.indexOf("addMessage(displayText, 'user', originAgent)"), name);
+    }
+});
+
 if (!process.exitCode) console.log(`${passed}/${passed} passed`);

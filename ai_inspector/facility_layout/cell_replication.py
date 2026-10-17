@@ -18,6 +18,7 @@ from .knowledge_foundation import (
     canonical_facility_knowledge_bytes,
 )
 from .operations import (
+    MAX_OPERATION_BATCH,
     apply_facility_layout_operations,
     apply_prevalidated_facility_layout_operations,
 )
@@ -1058,6 +1059,9 @@ def compile_cell_replication_program(
                     relationship["supportPlacementId"] = id_map[support_id]
                 copy["snapRelationship"] = relationship
             metadata = deepcopy(dict(copy.get("metadata") or {}))
+            member_provenance = deepcopy(provenance)
+            member_provenance["seedEntityIds"] = [source_id]
+            member_provenance["parameters"]["cellProvenanceZoneId"] = target_zone_id
             metadata.update(
                 {
                     "generatedBy": "facility_cell_replication_g6",
@@ -1071,7 +1075,7 @@ def compile_cell_replication_program(
                     "moduleId": module_id,
                     "moduleRevision": module_revision,
                     "moduleInstanceIndex": target_index,
-                    "layoutProvenance": deepcopy(provenance),
+                    "layoutProvenance": member_provenance,
                 }
             )
             copy["metadata"] = metadata
@@ -1102,11 +1106,15 @@ def compile_cell_replication_program(
             }
         )
     if defer_post_validation:
-        result = apply_prevalidated_facility_layout_operations(
-            base,
-            operations,
-            base_revision=trusted_canonical_layout_revision(base),
-        )
+        # Program compilation is isolated; preserve the kernel's per-batch limit.
+        result = {"document": base}
+        for offset in range(0, len(operations), MAX_OPERATION_BATCH):
+            working = result["document"]
+            result = apply_prevalidated_facility_layout_operations(
+                working,
+                operations[offset : offset + MAX_OPERATION_BATCH],
+                base_revision=trusted_canonical_layout_revision(working),
+            )
     else:
         result = apply_facility_layout_operations(
             base, operations, base_revision=layout_revision(base)

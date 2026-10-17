@@ -12,6 +12,7 @@ from shapely.ops import unary_union
 
 from .authorization import require_facility_action
 from .canonical import layout_revision
+from .circulation import FacilityCirculationError
 from .design_brief import canonical_design_bytes, design_revision
 from .design_repository import FacilityDesignRepositoryNotFoundError
 from .design_source import _process_map_document
@@ -20,17 +21,27 @@ from .facility_planning import (
     _canonical_evidence_register, _canonical_process_steps,
     canonicalize_facility_planning_package, compile_facility_planning_package,
 )
+from .facility_program import FacilityProgramError
+from .floor_communication import FacilityFloorCommunicationError
+from .industrial_patterns import FacilityIndustrialPatternError
+from .knowledge_foundation import FacilityKnowledgeContractError
 from .generation_requirements import (
     evaluate_generation_requirements, guard_empty_generation_base,
-    guard_generation_operations, identifier, revision,
+    guard_generation_operations, identifier, revision, require_generation_planning_coverage,
 )
-from .program_execution import compile_facility_program_operation_plan, execute_facility_program_operation_plan
+from .generation_flow import require_process_coverage, FLOW_SCOPE
+from .generation_composition import (MAX_GENERATION_PLACEMENTS, COMPOSITION_FIELDS,
+    composition_inventory, require_composition_coverage, validate_composed_inventory)
+from .program_execution import (
+    FacilityProgramExecutionError, compile_facility_program_operation_plan,
+    execute_facility_program_operation_plan,
+)
 
 
 MAX_REQUEST_BYTES = 262_144
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 MAX_RESPONSE_BYTES = 16_384
-MAX_PREVIEW_PLACEMENTS = 120
+MAX_PREVIEW_PLACEMENTS = MAX_GENERATION_PLACEMENTS
 SOURCE_KIND = "generation-source-context"
 PROVISIONAL_SOURCE_KIND = "generation-provisional-context"
 ADMISSION_KIND = "generation-package-admission"
@@ -58,6 +69,13 @@ def _closed(value, fields, name):
 def _bounded(value, maximum, name):
     if len(canonical_design_bytes(value)) > maximum:
         _fail("generation_admission_budget_exceeded", f"{name} exceeds its byte limit.")
+
+
+def matching_equipment_mappings(context, identity, process_step_refs):
+    return [mapping for mapping in context["equipmentMappings"]
+            if identity.get("assetId") == mapping["assetId"]
+            and identity.get("assetDefinitionRevision") == mapping["assetDefinitionRevision"]
+            and set(process_step_refs) == set(mapping["processStepRefs"])]
 
 
 def _reject_model_authority(value):
@@ -90,6 +108,8 @@ class FacilityGenerationAdmissionService:
         self.leases = lease_repository
         self.resolve_process_map = process_map_resolver
         self.catalog_provider = catalog_provider
+        from ai_inspector.research.equipment_documents import EquipmentDocumentLibrary
+        self.equipment_documents = EquipmentDocumentLibrary()
 
     def _authorize(self, principal, site_id, action="proposal.create"):
         self.require_capability("generation_planning_preview")
@@ -174,7 +194,10 @@ class FacilityGenerationAdmissionService:
                 _fail("generation_source_mapping_invalid", "Equipment mapping needs evidence present in the source context.")
             binding = (key, tuple(sorted(refs)))
             if binding in seen:
-                _fail("generation_source_mapping_invalid", "Duplicate equipment mapping.")
+                _fail("generation_source_mapping_invalid",
+                      "Duplicate asset/revision/process assignment. Include this mapping once; equipment quantity belongs "
+                      "in the resource batch, not repeated mappings. The same asset may have different process assignments.",
+                      assetId=key[0], assetDefinitionRevision=key[1], processStepRefs=sorted(refs))
             seen.add(binding)
         return catalog, resolved
 
@@ -222,6 +245,9 @@ class FacilityGenerationAdmissionService:
         if not self.repository.artifact_pin_count(principal.tenant_id, site_id, source_ref["artifactRevision"]):
             _fail("generation_source_unpublished", "Source context publication is incomplete.")
         catalog, resolved_map = self._ground_context(principal, site_id, record["context"])
+        if record.get("localDocumentRefs"):
+            from .generation_exploration import GenerationExploration
+            GenerationExploration(self).planning_documents(principal, record, record["localDocumentRefs"])
         return record, catalog, resolved_map
 
     @staticmethod
@@ -233,11 +259,15 @@ class FacilityGenerationAdmissionService:
                          "sourceRevision": context["processMapRef"]["processMapRevision"]})
         return refs
 
-    def _bundle(self, principal, site_id, layout_id, ledger, editor_context):
+    def _bundle(self, principal, site_id, layout_id, ledger, editor_context, *, allowed_design_owner=None):
         self.repository.require_current_ledger(principal.tenant_id, site_id, ledger["ledgerId"], ledger["ledgerRevision"])
         if ledger["layoutId"] != layout_id or ledger["tenantId"] != principal.tenant_id or ledger["siteId"] != site_id:
             _fail("generation_ledger_scope_mismatch", "Ledger belongs to a different layout or principal scope.")
-        if self.leases.inspect(principal.tenant_id, site_id, layout_id)["active"]:
+        ownership = self.leases.inspect(principal.tenant_id, site_id, layout_id)
+        lease = ownership["lease"] or {}
+        owned = (allowed_design_owner is not None and lease.get("ownerKind") == "design_run"
+                 and lease.get("ownerRunId") == allowed_design_owner)
+        if ownership["active"] and not owned:
             raise FacilityConflictError("generation_active_writer", "An active draft owner blocks new-empty-layout planning.")
         bundle = self.agent_runtime.resolve_context(principal, site_id=site_id, layout_id=layout_id,
                                                     expected_revision=ledger["baseRevision"])
@@ -302,15 +332,65 @@ class FacilityGenerationAdmissionService:
                                 "policy": bundle.policy_document, "catalog": catalog, "processMap": resolved_map,
                                 "source": source_record, "compilerRevision": generation_compiler_revision()})
 
-    def _current(self, principal, site_id, layout_id, workspace_id, record, editor_context):
+    def _current(self, principal, site_id, layout_id, workspace_id, record, editor_context, *, allowed_design_owner=None):
         ledger = self.repository.require_current_ledger(principal.tenant_id, site_id, record["ledgerId"], record["ledgerRevision"])["ledger"]
         if ledger["workspaceId"] != workspace_id:
             _fail("generation_ledger_scope_mismatch", "Ledger belongs to another workspace.")
-        bundle = self._bundle(principal, site_id, layout_id, ledger, editor_context)
+        bundle = self._bundle(principal, site_id, layout_id, ledger, editor_context, allowed_design_owner=allowed_design_owner)
         source, catalog, resolved = self._source(principal, site_id, record["sourceContextRef"])
         if self._fingerprint(bundle, catalog, resolved, source) != record["sourceFingerprint"]:
             raise FacilityConflictError("generation_sources_changed", "Base, source, policy, catalog or compiler changed; request a new admission.")
         return ledger, bundle, catalog
+
+    def _guard_preserved_proposal(self, principal, site_id, layout_id, workspace_id, ledger, proposal):
+        turn = ledger["turns"][-1]["turnId"]
+        current = [item for item in ledger["requirements"] if item["source"]["turnId"] == turn
+                   and item["disposition"] == "represented" and item["kind"] == "hard_constraint"]
+        if not any(item["predicate"]["kind"] == "preserve_prior_requirements" for item in current):
+            return
+        prior = self.prior_package(principal, {"siteId": site_id, "layoutId": layout_id,
+            "workspaceId": workspace_id, "ledgerId": ledger["ledgerId"], "baseRevision": ledger["baseRevision"]})
+        if prior is None:
+            _fail("generation_preservation_base_missing", "Preservation requires an existing evaluated proposal.")
+        # Permission to change a requirement does not authorize rebuilding all
+        # unbound design choices. Preserve those too, except explicit new fields.
+        bindings = {
+            "resource_quantity": ("equipmentRequirements", "requirementId", {"quantity"}),
+            "resource_spacing": ("equipmentRequirements", "requirementId", {"authoredSpacing"}),
+            "resource_pattern": ("equipmentRequirements", "requirementId", {"placementPattern", "semanticOrientation"}),
+            "resource_mapping": ("equipmentRequirements", "requirementId", {"selectedCatalogIdentity", "processStepRefs", "targetArea"}),
+            "department_allocation": ("departments", "departmentId", {"label", "zoneType", "areaShare", "row"}),
+            **COMPOSITION_FIELDS,
+        }
+        allowed = set()
+        for item in current:
+            predicate = item["predicate"]
+            if predicate["kind"] == "envelope_dimensions":
+                allowed.update(("facilityEnvelope", key) for key in ("width", "depth", "sourceUnit"))
+            elif predicate["kind"] in bindings:
+                collection, identity, fields = bindings[predicate["kind"]]
+                for index, entity in enumerate(prior["package"][collection]):
+                    if entity[identity] == predicate["subjectId"]:
+                        allowed.update((collection, index, key) for key in fields)
+
+        changed = []
+        def compare(before, after, path=()):
+            if path in allowed or before == after:
+                return
+            if isinstance(before, dict) and isinstance(after, dict) and before.keys() == after.keys():
+                for key in before:
+                    compare(before[key], after[key], (*path, key))
+            elif isinstance(before, list) and isinstance(after, list) and len(before) == len(after):
+                for index, (left, right) in enumerate(zip(before, after)):
+                    compare(left, right, (*path, index))
+            else:
+                changed.append(".".join(map(str, path)))
+        compare(prior["package"], proposal)
+        if changed:
+            _fail("generation_unrequested_package_change",
+                  "This correction must preserve unrequested package fields. Patch the exact prior proposal; do not rebuild it.",
+                  changedFields=changed[:16], nextTool="revise_generation_package",
+                  previewId=prior["previewId"], previewRevision=prior["previewRevision"])
 
     def admit(self, principal, *, site_id, layout_id, workspace_id, request, editor_context):
         self._authorize(principal, site_id)
@@ -323,6 +403,7 @@ class FacilityGenerationAdmissionService:
         proposal = request["proposal"]
         _reject_model_authority(proposal)
         _closed(proposal, _MODEL_FIELDS, "model package proposal")
+        self._guard_preserved_proposal(principal, site_id, layout_id, workspace_id, ledger, proposal)
         source, catalog, resolved_map = self._source(principal, site_id, request["sourceContextRef"])
         context = source["context"]
         if source.get("reviewScope") == "unreviewed_process_proposal" and any(source.get(key) != value for key, value in
@@ -344,34 +425,46 @@ class FacilityGenerationAdmissionService:
         })
         if len(package["departments"]) > 8 or len(package["equipmentRequirements"]) > 24:
             _fail("generation_admission_budget_exceeded", "First-slice planning supports at most eight departments and 24 resource batches.")
-        if package["cellRecipes"] or package["moduleFamilies"]:
-            _fail("generation_recipe_scope_unsupported", "Cell/module recipes require the later candidate-composition gate.")
-        if sum(item["quantity"] or 0 for item in package["equipmentRequirements"]) > MAX_PREVIEW_PLACEMENTS:
-            _fail("generation_admission_budget_exceeded", "First-slice preview supports at most 120 placements.")
+        inventory = composition_inventory(package)
+        require_composition_coverage(ledger, package, inventory)
         for item in package["equipmentRequirements"]:
+            spacing = item.get("authoredSpacing")
+            if spacing and any(entry["evidenceId"] == spacing["evidenceRef"] and entry["sourceType"] in {"public_research_result", "local_equipment_document"}
+                               for entry in context["evidenceRegister"]):
+                _fail("generation_spacing_evidence_not_applicable",
+                      "A document-read receipt is not an applicable dimensional fact. Do not attribute a numeric gap to background research. "
+                      "Use brief-interpretation only for an authorized, disclosed prototype assumption; if a documented limit is required, retain that requirement as unresolved.",
+                      requirementId=item["requirementId"], evidenceRef=spacing["evidenceRef"])
             identity = item["selectedCatalogIdentity"] or {}
-            if not any(identity.get("assetId") == mapping["assetId"]
-                       and identity.get("assetDefinitionRevision") == mapping["assetDefinitionRevision"]
-                       and set(item["processStepRefs"]) == set(mapping["processStepRefs"])
-                       and set(mapping["evidenceRefs"]) <= set(item["evidenceRefs"])
-                       for mapping in context["equipmentMappings"]):
+            if not any(set(mapping["evidenceRefs"]) <= set(item["evidenceRefs"])
+                       for mapping in matching_equipment_mappings(context, identity, item["processStepRefs"])):
                 candidates = [mapping for mapping in context["equipmentMappings"] if mapping["assetId"] == identity.get("assetId")]
                 _fail("generation_equipment_mapping_unapproved",
                       f"Resource {item['requirementId']} does not match a bound equipment/process assignment and its evidence refs.",
                       requirementId=item["requirementId"], expectedMappings=candidates[:8])
         notes, consulted = self._planning_notes(principal, source, ledger)
+        require_process_coverage(ledger, context)
+        from .generation_research_policy import GenerationResearchPolicy
+        policy = GenerationResearchPolicy(self.repository).overview(principal.tenant_id,
+            {"siteId": site_id, "ledgerId": ledger["ledgerId"]})
+        if policy["mode"] == "clarify":
+            _fail("generation_research_requirement_mismatch", "Clarify the research restriction before previewing.")
         checks = evaluate_generation_requirements(ledger, package, execution_context={
             "catalogIdentities": [{key: item[key] for key in ("assetId", "assetDefinitionRevision")}
                                   for item in catalog if item.get("previewPlanningEligible") is True],
-            "consultedSources": consulted, "assumptionsDisclosed": True})
+            "consultedSources": consulted, "consultedLocalDocuments": notes["localDocuments"], "assumptionsDisclosed": True,
+            "publicWebAllowed": policy["mode"] == "allow" if policy["policyRevision"] else None,
+            "compositionInventory": inventory})
         if not checks["requirementsSatisfied"]:
-            _fail("generation_requirements_not_satisfied", "Package does not satisfy all active requirements.", checks=checks["checks"])
-        covered = {(item["predicate"]["kind"], item["predicate"]["subjectId"])
-                   for item in ledger["requirements"] if item["disposition"] == "represented"}
-        required = {("envelope_dimensions", layout_id), ("unsaved_preview", layout_id)}
-        required.update(("resource_quantity", item["requirementId"]) for item in package["equipmentRequirements"])
-        if not required <= covered:
-            _fail("generation_requirements_incomplete", "Envelope, quantities and preview intent need explicit ledger requirements.")
+            failed_ids = {item["requirementId"] for item in checks["checks"] if not item["passed"]}
+            turn_text = {item["turnId"]: item["text"] for item in ledger["turns"]}
+            violations = [{"requirementId": item["requirementId"], "kind": item["kind"],
+                "predicate": deepcopy(item["predicate"]), "sourceText": turn_text[item["source"]["turnId"]][
+                    item["source"]["start"]:item["source"]["end"]][:1024]}
+                for item in ledger["requirements"] if item["requirementId"] in failed_ids]
+            _fail("generation_requirements_not_satisfied", "Package does not satisfy all active requirements.",
+                  checks=checks["checks"], violations=violations[:8], violationsTruncated=len(violations) > 8)
+        require_generation_planning_coverage(ledger, (item["requirementId"] for item in package["equipmentRequirements"]))
         compiled = compile_facility_planning_package(package, catalog)
         if compiled["blockingFindingCount"]:
             _fail("generation_program_not_ready", "Planning package has unresolved compilation requirements.", findings=compiled.get("findings", []))
@@ -381,7 +474,9 @@ class FacilityGenerationAdmissionService:
                   "baseRevision": ledger["baseRevision"], "sourceContextRef": deepcopy(request["sourceContextRef"]),
                   "sourceFingerprint": self._fingerprint(bundle, catalog, resolved_map, source),
                   "package": package, "modelProposal": deepcopy(proposal), "packageRevision": design_revision(package), "compiled": compiled,
-                  "requirements": checks, "saved": False, "editorChanged": False,
+                  "requirements": checks, "compositionInventory": inventory, "saved": False, "editorChanged": False,
+                  "processValidation": {"scope": FLOW_SCOPE,
+                      "checks": [item for item in checks["checks"] if "processFlow" in item]},
                   "planningNotes": notes,
                   "eligibility": "isolated_prototype_preview_only", "productionEligible": False}
         record["contentRevision"] = design_revision(record)
@@ -397,26 +492,53 @@ class FacilityGenerationAdmissionService:
 
     def _planning_notes(self, principal, source, ledger):
         context = source["context"]
-        assumptions = list(context.get("assumptions", []))
-        assumptions += [item["reason"] for item in ledger["requirements"]
-                        if item["kind"] == "assumption" and item["disposition"] == "represented"]
+        context_current = source.get("userTurn", {}).get("turnId") == ledger["turns"][-1]["turnId"]
+        context_assumptions = list(context.get("assumptions", []))
+        assumptions = context_assumptions if context_current else []
+        # Free-text reasons are retained as provenance; the current values come
+        # from the executable predicate, not an earlier narrative about it.
+        for item in ledger["requirements"]:
+            if item["kind"] != "assumption" or item["disposition"] != "represented":
+                continue
+            predicate = item["predicate"]
+            parameters, kind = predicate["parameters"], predicate["kind"]
+            if kind == "resource_spacing":
+                detail = f"{parameters['value']:g} {parameters['unit']} geometric gap, not approved operating clearance"
+            elif kind == "resource_quantity":
+                detail = f"{parameters['quantity']} resources (provisional quantity)"
+            elif kind == "resource_mapping":
+                detail = f"{parameters['assetId']} in {parameters['targetArea']} (provisional process assignment)"
+            else:
+                values = [f"{key}: {', '.join(map(str, value)) if isinstance(value, list) else value}"
+                          for key, value in parameters.items() if key not in {"assetDefinitionRevision", "evidenceRef"}]
+                detail = kind.replace("_", " ") + "; " + "; ".join(values)
+            assumptions.append(predicate["subjectId"] + ": " + detail)
         assumptions = list(dict.fromkeys(assumptions))
         consulted = []
         if source.get("researchRefs"):
             from .generation_exploration import GenerationExploration
             reader = GenerationExploration(self)
             for index, ref in enumerate(source["researchRefs"]):
-                result = reader.load_research(principal, source, ref)
+                result = reader.planning_research(principal, source, [ref])[0]
                 consulted.extend({"evidenceRef": "research-" + str(index), "url": entry["url"], "title": entry["title"]}
-                                 for entry in result["sources"])
+                                 for entry in result["sources"] if entry.get("retrieval") == "fetched_document"
+                                 and entry["url"] == result["requestedUrl"])
         sources = []
         for entry in consulted:
             if len(entry["url"]) <= 1000 and not any(prior["url"] == entry["url"] for prior in sources):
                 sources.append({**entry, "title": entry["title"][:160]})
+        local_documents = []
+        if source.get("localDocumentRefs"):
+            from .generation_exploration import GenerationExploration, local_document_consultations
+            local_documents = local_document_consultations(
+                GenerationExploration(self).planning_documents(principal, source, source["localDocumentRefs"]))
         notes = {"provisional": context["schemaVersion"] == PROVISIONAL_SOURCE_SCHEMA,
                  "assumptions": assumptions, "unknowns": context.get("unknowns", []),
+                 "historicalAssumptions": [] if context_current else context_assumptions,
+                 "contextNotesStatus": "current_turn" if context_current else "historical_not_revalidated",
                  "sources": sources[:4], "sourcesTruncated": len(sources) > 4 or any(len(entry["url"]) > 1000 for entry in consulted),
-                 "sourceQualification": "Consulted public evidence; applicability and engineering limits are not approved."}
+                 "localDocuments": local_documents,
+                 "sourceQualification": "Bounded document reads; applicability and engineering limits are not approved."}
         _bounded(notes, MAX_RESPONSE_BYTES - 2500, "visible planning notes")
         return notes, consulted
 
@@ -459,20 +581,31 @@ class FacilityGenerationAdmissionService:
             return self._summary(artifact_id, prior)
         self._check_floor(bundle, admission["package"])
         program = admission["compiled"]["facilityProgram"]
-        plan = compile_facility_program_operation_plan(program, bundle.layout_document, catalog)
-        operations = []
+        try:
+            plan = compile_facility_program_operation_plan(program, bundle.layout_document, catalog)
+        except (FacilityCirculationError, FacilityKnowledgeContractError, FacilityProgramError,
+                FacilityIndustrialPatternError, FacilityFloorCommunicationError,
+                FacilityProgramExecutionError) as exc:
+            # Known compiler refusals are actionable findings, not unexpected read failures.
+            raise FacilityValidationError(exc.code, str(exc), details=exc.details) from exc
+        operation_batches = []
         for stage in plan["stages"]:
             for batch in stage["batches"]:
                 if batch["operations"]:
                     guard_generation_operations(batch["operations"])
-                    operations.extend(batch["operations"])
-        # The existing service's authoritative cumulative preview has a 500-op limit.
-        guard_generation_operations(operations)
-        executed = execute_facility_program_operation_plan(bundle.layout_document, plan)
-        validated = self.service.preview_operations(principal, site_id, layout_id, ledger["baseRevision"], operations)
+                    operation_batches.append(batch["operations"])
+        if (sum(map(len, operation_batches)) <= 500
+                and not any(admission["package"][k] for k in ("areaGroups", "cellRecipes", "moduleFamilies"))):
+            operations = [op for batch in operation_batches for op in batch]
+            executed = execute_facility_program_operation_plan(bundle.layout_document, plan)
+            validated = self.service.preview_operations(principal, site_id, layout_id, ledger["baseRevision"], operations)
+        else:
+            validated = self.service.preview_program(principal, site_id, layout_id, ledger["baseRevision"], plan)
+            executed = validated["execution"]
         candidate = validated["document"]
         if layout_revision(candidate) != executed["draftLayoutRevision"]:
             _fail("generation_preview_execution_drift", "Authoritative replay differs from the compiled candidate.")
+        validate_composed_inventory(candidate, admission["compositionInventory"])
         for name in ("spatialDiagnostics", "routingDiagnostics"):
             diagnostic = validated.get(name)
             if (not isinstance(diagnostic, Mapping) or diagnostic.get("valid") is not True
@@ -485,12 +618,13 @@ class FacilityGenerationAdmissionService:
                     for collection, key in (("zones", "zoneId"), ("placements", "placementId"),
                                              ("routes", "routeId"), ("floorMarkings", "markingId"))}
         record = {key: deepcopy(admission[key]) for key in ("principalId", "siteId", "layoutId", "workspaceId",
-                  "ledgerId", "ledgerRevision", "baseRevision", "sourceContextRef", "sourceFingerprint", "planningNotes")}
+                  "ledgerId", "ledgerRevision", "baseRevision", "sourceContextRef", "sourceFingerprint", "planningNotes", "processValidation")}
         record.update({"requestHash": design_revision(request), "admissionRef": self._record_ref(ADMISSION_KIND, request["admissionId"]),
                        "admissionRevision": admission["contentRevision"], "candidateLayout": candidate,
                        "candidateRevision": layout_revision(candidate), "operationPlan": plan,
                        "receiptChain": executed["receiptChain"], "cumulativeDiff": executed["cumulativeDiff"],
-                       "manifest": manifest, "validation": {key: deepcopy(validated[key]) for key in
+                       "manifest": manifest, "compositionInventory": deepcopy(admission["compositionInventory"]),
+                       "validation": {key: deepcopy(validated[key]) for key in
                            ("findings", "spatialDiagnostics", "routingDiagnostics") if key in validated},
                        "optimizationAvailable": False, "productionEligible": False, "saved": False, "editorChanged": False})
         record["contentRevision"] = design_revision(record)
@@ -513,8 +647,17 @@ class FacilityGenerationAdmissionService:
                    "baseRevision": record["baseRevision"],
                    "candidateRevision": record["candidateRevision"], "ledgerRevision": record["ledgerRevision"],
                    "counts": {key: len(value) for key, value in record["manifest"].items()},
+                   "compositionInventory": deepcopy(record.get("compositionInventory", {})),
+                   "execution": {"stages": len(record["operationPlan"]["stages"]),
+                       "batches": len(record["receiptChain"]),
+                       "operations": sum(r["operationCount"] for r in record["receiptChain"])},
+                   "zoneKinds": {"operational": sum(zone.get("zoneType") != "aisle" for zone in record["candidateLayout"]["zones"]),
+                                 "circulation": sum(zone.get("zoneType") == "aisle" for zone in record["candidateLayout"]["zones"])},
                    "saved": False, "editorChanged": False, "optimizationAvailable": False, "productionEligible": False,
                    "validationStatus": "prototype_geometry_valid",
+                   "processValidation": {"scope": record["processValidation"]["scope"],
+                       "checkedSequenceCount": len(record["processValidation"]["checks"]),
+                       "stationTransfersValidated": False},
                    "warningCount": sum(item.get("severity") == "warning" for item in findings),
                    "unverifiedFindingCount": sum(item.get("severity") == "unverified" for item in findings),
                    "qualification": "Isolated prototype geometry; process bindings, production and safety qualification are not provided."}

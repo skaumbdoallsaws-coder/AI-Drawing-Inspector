@@ -175,6 +175,7 @@ def _normalize_source(raw: Mapping[str, Any], index: int) -> Optional[Dict[str, 
             160,
         ),
         "sourceType": source_type,
+        "inferIdentity": raw.get("inferIdentity") is not False,
         "retrievedAt": _text(raw.get("retrievedAt"), 64),
         "description": _text(raw.get("description"), 500),
         "partNumber": _text(

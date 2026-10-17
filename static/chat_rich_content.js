@@ -337,7 +337,9 @@
         }
         const sourceType = SOURCE_TYPES.has(raw.sourceType) ? raw.sourceType : 'web';
         const domain = cleanText(raw.domain || sourceDomain(url), 160);
-        const identity = sourceIdentity(domain, url, raw.iconUrl || raw.favicon || '');
+        const inferIdentity = raw.inferIdentity !== false;
+        const identity = inferIdentity ? sourceIdentity(domain, url, raw.iconUrl || raw.favicon || '')
+            : { publisher: '', iconUrl: safeUrl(raw.iconUrl || raw.favicon), accent: '' };
         return {
             id: cleanText(raw.id || ('source_' + (index + 1)), 120),
             title: cleanText(raw.title || raw.name || url, 240),
@@ -348,6 +350,7 @@
                 160
             ),
             sourceType,
+            inferIdentity,
             retrievedAt: cleanText(raw.retrievedAt || '', 64),
             description: cleanText(raw.description || '', 500),
             partNumber: cleanText(raw.partNumber || raw.part_number || raw.sku || '', 120),

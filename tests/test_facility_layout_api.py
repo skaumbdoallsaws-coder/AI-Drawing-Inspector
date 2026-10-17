@@ -14,6 +14,7 @@ from ai_inspector.facility_layout.authority_repository import (
 )
 from ai_inspector.facility_layout.authorization import FacilityPrincipal
 from ai_inspector.facility_layout.operations import create_layout_document
+from ai_inspector.facility_layout.canonical import layout_revision
 from ai_inspector.facility_layout.repository import FacilityLayoutRepository
 from ai_inspector.facility_layout.service import (
     FacilityLayoutService,
@@ -371,10 +372,11 @@ def test_http_operation_preview_is_read_only_and_matches_put(tmp_path):
 
     assert applied.status_code == 200
     applied_body = applied.json()
+    assert preview["revision"] == layout_revision(preview["document"])
     assert applied_body["operationResult"] == {
         key: value
         for key, value in preview.items()
-        if key not in {"baseRevision", "dependencies"}
+        if key not in {"baseRevision", "dependencies", "revision"}
     }
     assert applied_body["dependencies"] == preview["dependencies"]
 

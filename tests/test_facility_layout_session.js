@@ -204,6 +204,13 @@ function applyFakeOperations(base, operations) {
                 item => item.placementId !== operation.placementId
             );
             break;
+        case 'set_appearance':
+            operation.placementIds.forEach(id => {
+                const p = findPlacement(document, id);
+                if (operation.color === null) delete p.appearance;
+                else p.appearance = {color: operation.color.toLowerCase()};
+            });
+            break;
         case 'set_position_mode':
             findPlacement(document, operation.placementId).positionMode =
                 operation.positionMode;
@@ -657,6 +664,46 @@ function fullLayoutRequest() {
 }
 
 async function main() {
+    await check('appearance is one multi-selection gesture with undo redo reset and no Save', async () => {
+        const authority = fakeAuthority(layout());
+        const session = authority.makeSession();
+        session.load(authority.initialReceipt());
+        const original = session.getState().layout;
+        session.selectMany(['pl-a', 'pl-locked']);
+        await session.setSelectedAppearance('#2478BC');
+        const colored = session.getState();
+        assert.equal(colored.history.length, 1);
+        assert.equal(colored.dirty, true);
+        assert.deepEqual(colored.selection, ['pl-a', 'pl-locked']);
+        assert.equal(colored.layout.placements[0].appearance.color, '#2478bc');
+        assert.equal(colored.layout.placements[2].appearance.color, '#2478bc');
+        assert.deepEqual(colored.layout.placements[1], original.placements[1]);
+        await session.undo();
+        assert.deepEqual(session.getState().layout, original);
+        await session.redo();
+        assert.deepEqual(session.getState().layout, colored.layout);
+        await session.setSelectedAppearance('#2478bc');
+        assert.equal(session.getState().history.length, 1);
+        await session.setSelectedAppearance(null);
+        assert.deepEqual(session.getState().layout, original);
+        await assert.rejects(session.setSelectedAppearance('red'), /six-digit/);
+    });
+    await check('sheet deletion locks mutation until resolved and preserves the prior draft', async () => {
+        const authority = fakeAuthority(layout()), session = authority.makeSession();
+        session.load(authority.initialReceipt());
+        session.select('pl-a');
+        await session.moveSelected({ x: 1, y: 0, z: 0 });
+        const before = session.getState();
+        assert.throws(() => session.beginSheetDeletion('stale'), /changed/);
+        const release = session.beginSheetDeletion(before.draftRevision);
+        assert.strictEqual(session.getState().busy, true);
+        await assert.rejects(session.renameLayout('Blocked'), /busy/);
+        await assert.rejects(session.save(), /busy/);
+        await assert.rejects(session.undo(), /busy/);
+        assert.throws(() => session.discard(), /busy/);
+        release(); release();
+        assert.deepStrictEqual(session.getState(), before);
+    });
     await check('exports UMD and CommonJS API', async () => {
         assert.strictEqual(facilitySession.apiVersion, 1);
         assert.strictEqual(typeof facilitySession.createSession, 'function');
@@ -3164,7 +3211,8 @@ async function main() {
             assert.strictEqual(saved.receipt.receiptId, 'receipt-design-save');
         });
 
-    await check('design replacement failure restores A and exact Undo restores O history',
+    for (const staged of [false, true]) {
+    await check('design replacement failure restores A and exact Undo restores O history' + (staged ? ' with program batches' : ''),
         async () => {
             const preparedCalls = [];
             const commitCalls = [];
@@ -3204,12 +3252,17 @@ async function main() {
                         },
                         transactionBindingRevision,
                         candidateLayout,
-                        candidateOperations: [{
+                        ...(staged ? { candidateOperationBatches: [
+                            { label: 'seed-stage', operations: [{ op: 'move_placement', placementId: 'pl-b',
+                                position: { x: 8, y: 0, z: 2 }, movementKind: 'automatic' }] },
+                            { label: 'cell-stage', operations: [{ op: 'move_placement', placementId: 'pl-b',
+                                position: { x: targetX, y: 0, z: 2 }, movementKind: 'automatic' }] },
+                        ] } : { candidateOperations: [{
                             op: 'move_placement',
                             placementId: 'pl-b',
                             position: { x: targetX, y: 0, z: 2 },
                             movementKind: 'automatic',
-                        }],
+                        }] }),
                         expectedInstallationFingerprint,
                         adoption: {
                             adoptionToken: 'adoption-' + request.proposalId,
@@ -3277,7 +3330,12 @@ async function main() {
             });
             assert.strictEqual(byId(stateA.layout, 'pl-a').transform.position.x, 2);
             assert.strictEqual(byId(stateA.layout, 'pl-b').transform.position.x, 11);
-            assert.strictEqual(stateA.operations.length, 3);
+            assert.strictEqual(stateA.operations.length, staged ? 4 : 3);
+            if (staged) {
+                const appliedFrame = session.captureDesignEditorFrame();
+                assert.strictEqual(appliedFrame.cursor, 4);
+                assert.deepStrictEqual(appliedFrame.batches.slice(2).map(b => b.label), ['seed-stage', 'cell-stage']);
+            }
             assert.strictEqual(
                 stateA.designProposalDraft.transactionRevision,
                 'active-proposal-a'
@@ -3293,7 +3351,7 @@ async function main() {
             );
             const restoredA = session.getState();
             assert.strictEqual(byId(restoredA.layout, 'pl-b').transform.position.x, 11);
-            assert.strictEqual(restoredA.operations.length, 3);
+            assert.strictEqual(restoredA.operations.length, staged ? 4 : 3);
             assert.strictEqual(restoredA.designProposalDraft.proposalId, 'proposal-a');
             assert.strictEqual(recoveryCalls.length, 1);
             assert.strictEqual(preparedCalls[1].transactionId, 'transaction-design-one');
@@ -3311,6 +3369,7 @@ async function main() {
             assert.strictEqual(byId(oneMoreUndo.layout, 'pl-b').transform.position.x, 4);
             assert.strictEqual(oneMoreUndo.operations.length, 1);
         });
+    }
 
     await check('lost design Undo acknowledgment retains a retryable recovery handle',
         async () => {

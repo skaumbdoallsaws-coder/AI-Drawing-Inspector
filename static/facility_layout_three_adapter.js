@@ -7,6 +7,24 @@
 }(typeof globalThis !== 'undefined' ? globalThis : this, function (root) {
     'use strict';
 
+    const avatarRuntime = root.InspectorProFacilityAvatar
+        || (typeof require === 'function' ? require('./facility_layout_avatar.js') : null);
+    const wallsRuntime = root.InspectorProFacilityWalls
+        || (typeof require === 'function' ? require('./facility_layout_walls.js') : null);
+    const groundRuntime = root.InspectorProFacilityGround
+        || (typeof require === 'function' ? require('./facility_layout_ground.js') : null);
+    const componentRuntime = root.InspectorProFacilityComponentMaterials
+        || (typeof require === 'function' ? require('./facility_layout_component_materials.js') : null);
+    const floorSurfacesRuntime = root.InspectorProFacilityFloorSurfaces
+        || (typeof require === 'function' ? require('./facility_layout_floor_surfaces.js') : null);
+
+    const cameraPreferences = root.InspectorProWalkthroughCamera
+        || (typeof require === 'function' ? require('./walkthrough_camera_settings.js') : null);
+
+    // Explicit visual substitution only; catalog geometry and route authority stay unchanged.
+    const ANIMATED_OPERATOR_REVISION =
+        '773d3761fb0796587de7a21ccb8b368f4334c71f73c06682b84472d69d4b5757';
+
     const RESOLUTION_STAGES = Object.freeze([
         'manifest',
         'footprint',
@@ -41,6 +59,7 @@
         routes: true,
         markings: true,
         assets: true,
+        walls: true,
     });
     const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1 =
         'facility-motion-package-v1';
@@ -124,6 +143,7 @@
         ceilingPadding: 10,
         maximumCeiling: 500,
         fieldOfView: 60,
+        distanceCulling: false,
         viewDistance: 60,
         altitudeViewMultiplier: 4,
         maximumViewDistance: 500,
@@ -745,6 +765,35 @@
         );
     }
 
+    // The camera boom uses the same conservative footprint obstacles as walking.
+    // It retracts along a straight segment, never slides through an obstacle.
+    function resolveWalkthroughCamera(input) {
+        const anchor = input.anchor;
+        const desired = input.desired;
+        const radius = 0.15;
+        const distance = Math.hypot(desired.x - anchor.x,
+            desired.y - anchor.y, desired.z - anchor.z);
+        const steps = Math.max(1, Math.ceil(distance / 0.075));
+        let position = Object.assign({}, anchor);
+        let obstructed = false;
+        for (let index = 0; index <= steps; index += 1) {
+            const fraction = index / steps;
+            const point = {
+                x: anchor.x + (desired.x - anchor.x) * fraction,
+                y: anchor.y + (desired.y - anchor.y) * fraction,
+                z: anchor.z + (desired.z - anchor.z) * fraction,
+            };
+            if (point.y < input.floorY + radius
+                    || !walkthroughPointValid(point, radius, input.bounds, input.obstacles || [])) {
+                obstructed = true;
+                break;
+            }
+            position = point;
+        }
+        return { position, obstructed, distance: Math.hypot(position.x - anchor.x,
+            position.y - anchor.y, position.z - anchor.z) };
+    }
+
     function resolveWalkthroughMovement(input) {
         const value = input && typeof input === 'object' ? input : {};
         const start = {
@@ -803,6 +852,22 @@
             collided: collided,
             stepCount: stepCount,
         };
+    }
+
+    function walkthroughSweptObstacles(index, start, delta, radius) {
+        const minimumX = Math.min(start.x, start.x + delta.x) - radius;
+        const maximumX = Math.max(start.x, start.x + delta.x) + radius;
+        const minimumZ = Math.min(start.z, start.z + delta.z) - radius;
+        const maximumZ = Math.max(start.z, start.z + delta.z) + radius;
+        const center = { x: (minimumX + maximumX) / 2, z: (minimumZ + maximumZ) / 2 };
+        // The whole swept rectangle includes the solver's axis-slide paths.
+        return droneCandidateVolumes(index, center,
+            Math.max(maximumX - minimumX, maximumZ - minimumZ) / 2
+        ).filter(function (record) {
+            const b = record.planarBounds;
+            return b.minimumX <= maximumX && b.maximumX >= minimumX
+                && b.minimumZ <= maximumZ && b.maximumZ >= minimumZ;
+        }).map(function (record) { return record.polygon; });
     }
 
     function normalizedDroneVolume(value, index) {
@@ -1685,9 +1750,8 @@
             100,
             Math.floor(finite(value.maximumNodes, 20000))
         );
-        if (columnCount * rowCount > maximumNodes) {
-            return { ok: false, reason: 'grid_too_large', points: [] };
-        }
+        // Cells and search records are allocated lazily. Bound explored nodes,
+        // not the area of the site: a short walk can occur in a large factory.
         const cellCache = new Map();
         const keyFor = function (column, row) {
             return column + ':' + row;
@@ -1817,7 +1881,12 @@
             });
         }
         if (!closed.has(goalKey)) {
-            return { ok: false, reason: 'no_path', points: [] };
+            return {
+                ok: false,
+                reason: open.length ? 'search_budget_exhausted' : 'no_path',
+                points: [],
+                visitedNodeCount: visitedNodeCount,
+            };
         }
         const gridPoints = [];
         let cursor = goalKey;
@@ -2112,6 +2181,7 @@
                 85,
                 DEFAULT_DRONE_SETTINGS.fieldOfView
             ),
+            distanceCulling: options.droneDistanceCulling === true,
             viewDistance: clamp(
                 options.droneViewDistance,
                 30,
@@ -2161,6 +2231,7 @@
 
         const state = {
             host: null,
+            parkedView: null,
             mounted: false,
             suspended: false,
             disposed: false,
@@ -2183,6 +2254,10 @@
             themeCleanup: null,
             modelRoot: null,
             floorMarkingObjects: [],
+            wallObjects: [],
+            floorSurfaceObjects: [],
+            wallFinishObjects: [],
+            wallArtworkLoads: [],
             routeObjects: [],
             camera: null,
             controls: null,
@@ -2328,6 +2403,19 @@
                 stateHandler: null,
             },
             walkthrough: {
+                position: null,
+                cameraMode: 'first-person',
+                cameraSettings: cameraPreferences.load(),
+                lookQuaternion: null,
+                avatar: null,
+                avatarSettling: false,
+                heading: 0,
+                cameraDistance: 0,
+                cameraObstructed: false,
+                obstacleIndex: null,
+                performance: { movementFrames: 0, simulatedSeconds: 0,
+                    droppedSeconds: 0, collisionCandidates: 0, contextQueries: 0 },
+                lastContextTime: null,
                 active: false,
                 locked: false,
                 exiting: false,
@@ -3261,6 +3349,40 @@
             }
         }
 
+        function usesOperatorAvatar(record) {
+            return record && record.assetId === 'asset-operator'
+                && record.assetDefinitionRevision === ANIMATED_OPERATOR_REVISION
+                && record.representation === 'operator-avatar';
+        }
+
+        function createActivityVisual(record) {
+            if (!usesOperatorAvatar(record)) return cloneActivityRenderable(record.prototypeObject);
+            const avatar = avatarRuntime.createAvatar(THREE);
+            avatar.root.name = 'facility-animated-operator';
+            avatar.root.userData.navigationOnly = false;
+            avatar.root.facilityOperatorAvatar = avatar;
+            return avatar.root;
+        }
+
+        function operatorVisualEvidence(visual) {
+            const avatar = visual && visual.facilityOperatorAvatar;
+            return {
+                exactCatalogVisual: Boolean(visual) && !avatar,
+                visualSource: !visual ? null : avatar ? 'animated-operator-avatar' : 'catalog-glb',
+                avatar: avatar ? avatar.snapshot() : null,
+            };
+        }
+
+        function sampleOperatorGait(visual, distance, pathLength, walking) {
+            const avatar = visual && visual.facilityOperatorAvatar;
+            if (!avatar) return;
+            const scale = Math.max(0.001, finite(visual.scale.x, 1));
+            avatar.update({ position: { x: 0, y: 0, z: 0 }, heading: 0, snap: true,
+                gaitDistanceMeters: Math.max(0, distance) / scale, walking: walking,
+                gaitWeight: Math.max(0, Math.min(1, distance / .2, (pathLength - distance) / .2)),
+            });
+        }
+
         function activityRenderRecord(placementId) {
             for (const record of state.renderGroups.values()) {
                 if (record && Array.isArray(record.placementIds)
@@ -3613,13 +3735,14 @@
                         travelDirection: track.travelDirection,
                         currentMotionPackageId:
                             track.currentMotionPackageId,
-                        exactCatalogVisual: Boolean(track.visual),
+                        ...operatorVisualEvidence(track.visual),
                         sourcePlacementSuppressed:
                             !activityPlacementStillVisible(
                                 track.actor.placementId
                             ),
-                        visualForwardAxis:
-                            track.actor.visualAlignment.forwardAxis,
+                        visualForwardAxis: track.visual.facilityOperatorAvatar
+                            ? '-Z' : track.actor.visualAlignment.forwardAxis,
+                        catalogVisualForwardAxis: track.actor.visualAlignment.forwardAxis,
                         visualYawRadians: track.visualYawRadians,
                     };
                 }),
@@ -3796,10 +3919,11 @@
                 pathsVisible: preview.pathsVisible !== false,
                 pose: preview.currentPose
                     ? detachedJson(preview.currentPose) : null,
-                visualForwardAxis: payload
-                    ? payload.visualForwardAxis : null,
+                visualForwardAxis: preview.visual && preview.visual.facilityOperatorAvatar
+                    ? '-Z' : payload ? payload.visualForwardAxis : null,
+                catalogVisualForwardAxis: payload ? payload.visualForwardAxis : null,
                 visualYawRadians: preview.visualYawRadians,
-                exactCatalogVisual: Boolean(preview.visual),
+                ...operatorVisualEvidence(preview.visual),
                 sourcePlacementSuppressed: Boolean(
                     preview.hiddenObjects.length
                 ),
@@ -3898,10 +4022,11 @@
                 );
             }
             const record = activityRenderRecord(placement.placementId);
-            if (!['overview', 'detail'].includes(record.representation)) {
+            if (!usesOperatorAvatar(record)
+                    && !['overview', 'detail'].includes(record.representation)) {
                 throw facilityMotionError(
                     'facility_navigation_preview_exact_visual_unavailable',
-                    'Manual motion preview requires the exact catalog GLB; footprint and proxy fallbacks are not animated.',
+                    'Manual motion preview requires the catalog GLB or the registered operator avatar; footprint and proxy fallbacks are not animated.',
                     {
                         placementId: placement.placementId,
                         representation: record.representation,
@@ -3936,9 +4061,7 @@
                 rootObject.userData = rootObject.userData || {};
                 rootObject.userData.facilityNavigationPreviewId =
                     validated.payload.previewId;
-                const visual = cloneActivityRenderable(
-                    record.prototypeObject
-                );
+                const visual = createActivityVisual(record);
                 if (!visual) {
                     throw facilityMotionError(
                         'facility_navigation_preview_visual_unavailable',
@@ -3962,6 +4085,8 @@
                     validated.payload.actorPlacementId;
                 actorRoot.add(visual);
                 rootObject.add(actorRoot);
+                // Own resources before any subsequent validation can fail.
+                state.navigationPreview.root = rootObject;
                 const pathRoot = buildNavigationPreviewPath(
                     validated.payload
                 );
@@ -4162,8 +4287,13 @@
                     pose.heading = normalizedHeading(pose.heading + Math.PI);
                 }
                 const heading = activityVisualHeadingOffset(
-                    payload.visualForwardAxis
+                    preview.visual.facilityOperatorAvatar ? '-Z' : payload.visualForwardAxis
                 ) - pose.heading;
+                const pathLength = navigationPreviewRuntime().pathLength(payload.points);
+                const travel = pathLength * sampleTime;
+                const returning = payload.loopMode === 'out_and_return' && preview.normalizedTime > .5;
+                sampleOperatorGait(preview.visual, returning ? pathLength - travel : travel,
+                    pathLength, !(payload.loopMode === 'one_way' && preview.normalizedTime >= 1));
                 const vertical = finite(
                     preview.placement.transform
                         && preview.placement.transform.position
@@ -4634,6 +4764,7 @@
                 );
             }
             if (!Array.isArray(scenario.actors) || !scenario.actors.length
+                    || scenario.actors.length > (navigationActivity ? 64 : 24)
                     || !value.actorPayloads
                     || typeof value.actorPayloads !== 'object') {
                 throw facilityMotionError(
@@ -5333,10 +5464,11 @@
                 const record = activityRenderRecord(
                     value.actor.placementId
                 );
-                if (!['overview', 'detail'].includes(record.representation)) {
+                if (!usesOperatorAvatar(record)
+                        && !['overview', 'detail'].includes(record.representation)) {
                     throw facilityMotionError(
                         'facility_activity_actor_exact_visual_unavailable',
-                        'Activity playback requires the exact catalog GLB; footprint and proxy fallbacks are not animated.',
+                        'Activity playback requires the catalog GLB or the registered operator avatar; footprint and proxy fallbacks are not animated.',
                         {
                             actorId: value.actor.actorId,
                             placementId: value.actor.placementId,
@@ -5396,9 +5528,7 @@
                 state.activity.pathRoot = pathRoot;
                 applyActivityPathVisibility();
                 validated.actors.forEach(function (value) {
-                    const visual = cloneActivityRenderable(
-                        value.record.prototypeObject
-                    );
+                    const visual = createActivityVisual(value.record);
                     if (!visual) {
                         throw facilityMotionError(
                             'facility_activity_actor_visual_unavailable',
@@ -5787,8 +5917,12 @@
                         ),
                     });
                     const heading = activityVisualHeadingOffset(
-                        track.actor.visualAlignment.forwardAxis
+                        track.visual.facilityOperatorAvatar ? '-Z' : track.actor.visualAlignment.forwardAxis
                     ) - pose.heading;
+                    const pathLength = motionDistanceAtTime(movement, motionDurationSeconds(movement));
+                    const returning = timing.direction === 'return' && timing.movement === track.package.movement;
+                    sampleOperatorGait(track.visual, returning ? pathLength - distance : distance,
+                        pathLength, timing.direction !== 'turning' && timing.phase !== 'complete');
                     const vertical = finite(
                         track.placement.transform
                             && track.placement.transform.position
@@ -6114,13 +6248,13 @@
             return true;
         }
 
-        function renderNow() {
+        function renderNow(timestamp) {
             if (!state.mounted || state.suspended || state.degraded
                 || !state.renderer || !state.scene || !state.camera) {
                 return false;
             }
             try {
-                updateWalkthroughContextFocus();
+                updateWalkthroughContextFocus(timestamp);
                 notifyCameraOrientation(false);
                 state.renderer.render(state.scene, state.camera);
                 state.renderedFrames += 1;
@@ -6208,7 +6342,7 @@
             }
             if (!state.needsRender) return;
             state.needsRender = false;
-            renderNow();
+            renderNow(timestamp);
             if ((rotating || walking || flying || state.motion.playing
                     || state.activity.playing
                     || state.navigationPreview.playing)
@@ -6283,12 +6417,22 @@
                     ));
                     return;
                 }
+                if (state.walkthrough.active && walkthroughHasActivity()) {
+                    state.navigationInteracting = true;
+                    setRendererPixelRatio(state.interactivePixelRatio);
+                    return;
+                }
                 state.navigationInteracting = false;
                 setRendererPixelRatio(state.displayPixelRatio);
                 invalidate();
                 loadDeferredVisibleGroups();
             };
             const timerHost = options.window || root;
+            if (state.navigationRestoreTimer !== null && timerHost
+                    && typeof timerHost.clearTimeout === 'function') {
+                timerHost.clearTimeout(state.navigationRestoreTimer);
+                state.navigationRestoreTimer = null;
+            }
             if (navigationSettings.restoreDelayMs > 0
                     && timerHost
                     && typeof timerHost.setTimeout === 'function') {
@@ -6438,6 +6582,12 @@
                 );
                 state.walkthroughControls.enabled = false;
                 state.walkthroughChangeHandler = function () {
+                    if (state.walkthrough.active) {
+                        state.walkthrough.lookQuaternion = copyQuaternion(state.camera.quaternion);
+                        syncWalkthroughCamera();
+                        beginNavigationInteraction();
+                        endNavigationInteraction();
+                    }
                     if (state.drone.active) {
                         beginDroneInteraction();
                         endNavigationInteraction();
@@ -6510,6 +6660,20 @@
                     'error',
                     state.walkthroughErrorHandler
                 );
+                // Pointer-lock aim is independent of the raised render camera.
+                state.walkthroughAimHandler = function () {
+                    const walk = state.walkthrough;
+                    if (walk.active && walk.locked && walk.lookQuaternion)
+                        setQuaternion(state.camera.quaternion, walk.lookQuaternion);
+                };
+                state.walkthroughWheelHandler = function (event) {
+                    const walk = state.walkthrough;
+                    if (!walk.active || walk.cameraMode !== 'third-person' || event.ctrlKey) return;
+                    event.preventDefault();
+                    setWalkthroughCameraSettings(cameraPreferences.zoom(walk.cameraSettings, event));
+                };
+                addListener(documentObject, 'mousemove', state.walkthroughAimHandler, true);
+                addListener(state.canvas, 'wheel', state.walkthroughWheelHandler, { passive: false });
                 state.walkthroughKeyDownHandler = function (event) {
                     if (state.drone.active) handleDroneKey(event, true);
                     else handleWalkthroughKey(event, true);
@@ -6531,6 +6695,8 @@
                     if (state.walkthrough.active) {
                         state.walkthrough.keys.clear();
                         state.walkthrough.lastFrameTime = null;
+                        cancelWalkthroughNavigation('window_blurred');
+                        endNavigationInteraction();
                     } else if (state.drone.active) {
                         state.drone.keys.clear();
                         state.drone.lastFrameTime = null;
@@ -6594,6 +6760,16 @@
 
         function disposeObjectGraphs(objects) {
             const seenObjects = new Set();
+            const avatars = new Set();
+            (objects || []).filter(Boolean).forEach(function (object) {
+                if (object.traverse) object.traverse(function (child) {
+                    if (child.facilityOperatorAvatar) avatars.add(child.facilityOperatorAvatar);
+                });
+            });
+            avatars.forEach(function (avatar) {
+                avatar.root.traverse(function (child) { seenObjects.add(child); });
+                avatar.dispose();
+            });
             const seenGeometries = new Set();
             const seenMaterials = new Set();
             const seenTextures = new Set();
@@ -6619,6 +6795,16 @@
                     visit(rootObject);
                 }
             });
+        }
+
+        function isArtworkMaterial(material) {
+            return Boolean(material && material.map
+                && material.userData && material.userData.facilityArtwork === true);
+        }
+
+        function isAuthoredSurfaceMaterial(material) {
+            return isArtworkMaterial(material) || Boolean(material
+                && material.userData && material.userData.facilityAuthoredFinish === true);
         }
 
         function createNeutralAssetMaterial(sourceMaterial) {
@@ -6678,6 +6864,12 @@
             const originals = new Set();
             const replacementFor = function (material) {
                 if (!material) return material;
+                if (isAuthoredSurfaceMaterial(material)) {
+                    material.polygonOffset = true;
+                    material.polygonOffsetFactor = -1;
+                    material.polygonOffsetUnits = -1;
+                    return material;
+                }
                 if (!replacements.has(material)) {
                     replacements.set(
                         material,
@@ -6700,6 +6892,18 @@
 
             const seenMaterials = new Set();
             const seenTextures = new Set();
+            // A printed surface can share a texture with a neutralized material.
+            const retainTextures = function (candidate) {
+                const materials = Array.isArray(candidate && candidate.material)
+                    ? candidate.material : [candidate && candidate.material];
+                materials.filter(Boolean).forEach(function (material) {
+                    Object.values(material).forEach(function (value) {
+                        if (value && value.isTexture) seenTextures.add(value);
+                    });
+                });
+            };
+            if (typeof object.traverse === 'function') object.traverse(retainTextures);
+            else retainTextures(object);
             originals.forEach(function (material) {
                 if (replacements.get(material) !== material) {
                     disposeMaterial(material, seenMaterials, seenTextures);
@@ -6717,6 +6921,10 @@
                 const materials = Array.isArray(candidate.material)
                     ? candidate.material : [candidate.material];
                 materials.filter(Boolean).forEach(function (material) {
+                    if (material.userData && (material.userData.facilityAuthoredFinish === true || material.userData.facilityComponentOverride === true)) {
+                        material.wireframe = state.visualSettings.wireframe;
+                        return;
+                    }
                     if ('metalness' in material) {
                         material.metalness = state.visualSettings.metalness;
                     }
@@ -6844,6 +7052,8 @@
         }
 
         function configuredEnvironmentBounds() {
+            const groundBounds = groundRuntime && groundRuntime.bounds(groundRuntime.surfaces(state.currentInput && state.currentInput.layout));
+            if (groundBounds) return groundBounds;
             const configured = options.worldBounds;
             if (configured
                     && Number.isFinite(Number(configured.minX))
@@ -6887,6 +7097,13 @@
             return {
                 supported: typeof PointerLockControls === 'function',
                 active: walkthrough.active,
+                cameraMode: walkthrough.cameraMode,
+                cameraSettings: Object.assign({}, walkthrough.cameraSettings),
+                avatarSupported: Boolean(avatarRuntime && typeof THREE.SphereGeometry === 'function'),
+                position: walkthrough.position ? Object.assign({}, walkthrough.position) : null,
+                avatar: walkthrough.avatar ? walkthrough.avatar.snapshot() : null,
+                cameraDistance: walkthrough.cameraDistance,
+                cameraObstructed: walkthrough.cameraObstructed,
                 locked: walkthrough.locked,
                 eyeHeight: walkthroughSettings.eyeHeight,
                 radius: walkthroughSettings.radius,
@@ -6895,6 +7112,7 @@
                 navigationSpeed: walkthroughSettings.navigationSpeed,
                 obstacleCount: walkthrough.obstaclePolygons.length,
                 collisionCount: walkthrough.collisionCount,
+                performance: Object.assign({}, walkthrough.performance),
                 movementKeys: Array.from(walkthrough.keys).sort(),
                 targetPlacementId: walkthrough.targetPlacementId,
                 spawn: walkthrough.spawn
@@ -6952,6 +7170,7 @@
                 cruiseSpeed: droneSettings.cruiseSpeed,
                 boostSpeed: droneSettings.boostSpeed,
                 fieldOfView: droneSettings.fieldOfView,
+                distanceCulling: droneSettings.distanceCulling,
                 viewDistance: droneSettings.viewDistance,
                 effectiveViewDistance: droneEffectiveViewDistance(
                     state.camera && state.camera.position
@@ -7030,13 +7249,197 @@
             return fallbackPlacementPolygon(placement);
         }
 
+        function wallVolumes() {
+            const layout = state.currentInput && state.currentInput.layout;
+            const floorY = finite(options.worldBounds && options.worldBounds.floorY, 0);
+            return wallsRuntime.volumes(layout, floorY);
+        }
+
+        function renderPerimeterWalls() {
+            if (!state.modelRoot) return;
+            wallVolumes().forEach(function (volume) {
+                const shape = new THREE.Shape();
+                volume.polygon.forEach(function (point, index) {
+                    if (index === 0) shape.moveTo(point.x, -point.z);
+                    else shape.lineTo(point.x, -point.z);
+                });
+                shape.closePath();
+                const geometry = new THREE.ExtrudeGeometry(shape, {
+                    depth: volume.maximumY - volume.minimumY, bevelEnabled: false, steps: 1,
+                });
+                geometry.rotateX(-Math.PI / 2);
+                const material = new THREE.MeshStandardMaterial({ color: volume.color, roughness: 0.88 });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.y = volume.minimumY;
+                mesh.name = volume.id;
+                mesh.visible = state.layerVisibility.walls !== false;
+                state.modelRoot.add(mesh); state.wallObjects.push(mesh);
+            });
+            renderExteriorFinishes();
+        }
+
+        function renderExteriorFinishes() {
+            const layout = state.currentInput.layout;
+            const wall = wallsRuntime.data(layout);
+            const finish = wall && wall.settings.exteriorFinish;
+            if (typeof wallsRuntime.exteriorSurfaces !== 'function') return;
+            const floorY = finite(options.worldBounds && options.worldBounds.floorY, 0);
+            const generation = state.sceneGeneration;
+            const batches = new Map();
+            function adopt(mesh) {
+                mesh.visible = state.layerVisibility.walls !== false;
+                state.modelRoot.add(mesh); state.wallFinishObjects.push(mesh);
+            }
+            wallsRuntime.exteriorSurfaces(layout).forEach(function (surface) {
+                if (!surface.artwork) {
+                    const vertices = batches.get(surface.color) || [];
+                    const corners = [[-.5,-.5],[.5,-.5],[.5,.5],[-.5,.5]].map(function (p) {
+                        return [surface.x+p[0]*surface.width*surface.nz,
+                            floorY+surface.y+p[1]*surface.height,
+                            surface.z-p[0]*surface.width*surface.nx];
+                    });
+                    [0,1,2,0,2,3].forEach(i=>vertices.push(...corners[i]));
+                    batches.set(surface.color,vertices); return;
+                }
+                const art = surface.artwork;
+                const record = {artworkId:art.artworkId,imagePath:art.imagePath,status:'loading'};
+                state.wallArtworkLoads.push(record);
+                const material = new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,alphaTest:.01,depthWrite:false,toneMapped:false});
+                const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1,1),material);
+                mesh.userData.exteriorArtwork=record;
+                mesh.name = 'exterior-artwork-'+art.artworkId;
+                mesh.position.set(surface.x,floorY+surface.y,surface.z);
+                mesh.rotation.y = Math.atan2(surface.nx,surface.nz);
+                adopt(mesh); mesh.visible=false;
+                state.pendingLoads += 1;
+                function done(status) {
+                    if (generation !== state.sceneGeneration) return;
+                    record.status=status;state.pendingLoads=Math.max(0,state.pendingLoads-1);invalidate();
+                }
+                const texture = new THREE.TextureLoader().load(art.imagePath,function (loaded) {
+                    if (generation !== state.sceneGeneration || !state.mounted) {loaded.dispose();return;}
+                    const uv=art.uv||[0,0,1,1];
+                    loaded.colorSpace=THREE.SRGBColorSpace;
+                    loaded.offset.set(uv[0],uv[1]);loaded.repeat.set(uv[2]-uv[0],uv[3]-uv[1]);
+                    const ratio=loaded.image.width*(uv[2]-uv[0])/(loaded.image.height*(uv[3]-uv[1]));
+                    const width=Math.min(surface.width-.2,(surface.height-.2)*ratio);
+                    mesh.scale.set(width,width/ratio,1);
+                    material.needsUpdate=true;mesh.visible=state.layerVisibility.walls!==false;done('ready');
+                },undefined,function () {
+                    if (generation !== state.sceneGeneration) return;
+                    warning('exterior_artwork_failed','Exterior artwork could not be loaded.',art.artworkId);done('failed');
+                });
+                material.map=texture;
+            });
+            batches.forEach(function (vertices,color) {
+                const geometry=new THREE.BufferGeometry();
+                geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));geometry.computeVertexNormals();
+                adopt(new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color,roughness:.82,metalness:.08})));
+            });
+            const catalog=buildCatalogIndex(state.currentInput.assetCatalog);
+            ((finish && finish.wallFaces)||[]).forEach(function (face) {
+                const placement=state.placements.find(p=>p.placementId===face.placementId&&p.assetDefinitionRevision===face.assetDefinitionRevision);
+                const entry=placement&&catalog.exact.get(placement.assetId+'|'+placement.assetDefinitionRevision);
+                if(!placement||!wallsRuntime.isWallAsset(entry)) {
+                    warning('exterior_wall_face_unavailable','Exterior finish needs its exact wall asset.',face.placementId);return;
+                }
+                const bounds=boundsForPlacement(placement),min=bounds.minimum,max=bounds.maximum;
+                const mesh=new THREE.Mesh(new THREE.PlaneGeometry(max.x-min.x,max.y-min.y),
+                    new THREE.MeshStandardMaterial({color:face.color,roughness:.82,metalness:.08,
+                        polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}));
+                mesh.position.set((min.x+max.x)/2,(min.y+max.y)/2,face.face==='positive_z'?max.z+.003:min.z-.003);
+                if(face.face==='negative_z')mesh.rotation.y=Math.PI;
+                const group=new THREE.Group();group.add(mesh);applyPlacementTransform(group,placement);adopt(group);
+            });
+            renderFittedWallArt(layout, floorY, generation, adopt, catalog);
+        }
+
+        function renderFittedWallArt(layout, floorY, generation, adopt, catalog) {
+            if (typeof wallsRuntime.fittedArtworkSurfaces !== 'function') return;
+            const surfaces=wallsRuntime.fittedArtworkSurfaces(layout,function (id) {
+                const placement=state.placements.find(p=>p.placementId===id);
+                const entry=placement&&catalog.exact.get(placement.assetId+'|'+placement.assetDefinitionRevision);
+                return placement&&entry?{placement,entry,bounds:boundsForPlacement(placement)}:null;
+            });
+            const resolvedIds=new Set(surfaces.map(s=>s.artwork.artworkId));
+            wallsRuntime.fittedArtworks(layout).forEach(art=>{
+                if(!resolvedIds.has(art.artworkId))warning('fitted_artwork_target_unavailable',
+                    'Wall artwork needs a valid wall face without a door opening.',art.artworkId);
+            });
+            surfaces.forEach(function (surface) {
+                const art=surface.artwork;
+                const record={artworkId:art.artworkId,imagePath:art.imagePath,status:'loading',kind:'fitted',
+                    planeWidth:surface.width,planeHeight:surface.height,target:art.target};
+                state.wallArtworkLoads.push(record);
+                // Keep artwork ahead of the paint decal even at grazing camera angles.
+                const material=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,
+                    alphaTest:.01,depthWrite:false,toneMapped:false,
+                    polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+                const mesh=new THREE.Mesh(new THREE.PlaneGeometry(surface.width,surface.height),material);
+                mesh.name='fitted-artwork-'+art.artworkId;
+                mesh.userData.exteriorArtwork=record;
+                mesh.position.set(surface.x,surface.y+(surface.placement?0:floorY),surface.z);
+                mesh.rotation.y=Math.atan2(surface.nx,surface.nz);
+                let visibilityRoot=mesh;
+                if (surface.placement) {
+                    const group=new THREE.Group();group.add(mesh);
+                    group.userData.exteriorArtwork=record;
+                    applyPlacementTransform(group,surface.placement);adopt(group);
+                    visibilityRoot=group;
+                } else adopt(mesh);
+                visibilityRoot.visible=false;mesh.visible=false;state.pendingLoads+=1;
+                function done(status) {
+                    if(generation!==state.sceneGeneration)return;
+                    record.status=status;
+                    // Layer refreshes can hide the parent while the image is loading.
+                    visibilityRoot.visible=status==='ready'&&state.layerVisibility.walls!==false;
+                    state.pendingLoads=Math.max(0,state.pendingLoads-1);invalidate();
+                }
+                const texture=new THREE.TextureLoader().load(art.imagePath,function(loaded) {
+                    if(generation!==state.sceneGeneration||!state.mounted){loaded.dispose();return;}
+                    const frame=wallsRuntime.fittedArtworkFrame(surface.width,surface.height,
+                        loaded.image.width,loaded.image.height,art.uv);
+                    record.imageFrame=frame;
+                    loaded.colorSpace=THREE.SRGBColorSpace;
+                    // Keep a full-wall transparent plane; sample only the trimmed, proportionally fitted graphic.
+                    material.onBeforeCompile=function(shader) {
+                        shader.uniforms.artworkFrame={value:new THREE.Vector4(frame.x,frame.y,frame.width,frame.height)};
+                        shader.uniforms.artworkCrop={value:new THREE.Vector4(...art.uv)};
+                        shader.fragmentShader='uniform vec4 artworkFrame;\nuniform vec4 artworkCrop;\n'+shader.fragmentShader;
+                        shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`
+                            #ifdef USE_MAP
+                                vec2 artUv=(vMapUv-artworkFrame.xy)/artworkFrame.zw;
+                                if(any(lessThan(artUv,vec2(0.0)))||any(greaterThan(artUv,vec2(1.0))))discard;
+                                diffuseColor*=texture2D(map,mix(artworkCrop.xy,artworkCrop.zw,artUv));
+                            #endif
+                        `);
+                    };
+                    material.customProgramCacheKey=()=> 'fitted-wall-art-v1';
+                    material.needsUpdate=true;
+                    mesh.visible=true;
+                    mesh.updateWorldMatrix(true,false);
+                    const position=mesh.getWorldPosition(new THREE.Vector3());
+                    const scale=mesh.getWorldScale(new THREE.Vector3());
+                    record.worldPosition={x:position.x,y:position.y,z:position.z};
+                    record.worldWidth=surface.width*scale.x;record.worldHeight=surface.height*scale.y;
+                    done('ready');
+                },undefined,function() {
+                    if(generation!==state.sceneGeneration)return;
+                    warning('fitted_artwork_failed','Wall artwork could not be loaded.',art.artworkId);done('failed');
+                });
+                material.map=texture;
+            });
+        }
+
         function buildWalkthroughObstacles() {
             return state.placements.map(function (placement) {
                 return {
                     placementId: placement.placementId,
                     polygon: footprintForPlacement(placement),
                 };
-            }).filter(function (record) {
+            }).concat(wallVolumes().map(function (volume) {
+                return { placementId: volume.id, polygon: volume.polygon };
+            })).filter(function (record) {
                 return record.polygon.length >= 3;
             }).sort(function (left, right) {
                 return left.placementId.localeCompare(right.placementId);
@@ -7056,7 +7459,7 @@
                     minimumY: bounds.minimum.y,
                     maximumY: bounds.maximum.y,
                 }, 0);
-            }).filter(Boolean).sort(function (left, right) {
+            }).concat(wallVolumes()).filter(Boolean).sort(function (left, right) {
                 return left.placementId.localeCompare(right.placementId);
             });
         }
@@ -7300,6 +7703,95 @@
                 state.camera.updateMatrixWorld(true);
             }
             invalidate();
+            loadDeferredVisibleGroups();
+            return true;
+        }
+
+        function disposeWalkthroughAvatar() {
+            const walk = state.walkthrough;
+            if (walk.avatar) walk.avatar.dispose();
+            walk.avatar = null;
+            walk.avatarSettling = false;
+            walk.position = null;
+            walk.obstacleIndex = null;
+            walk.cameraDistance = 0;
+            walk.cameraObstructed = false;
+        }
+
+        function syncWalkthroughCamera() {
+            const walk = state.walkthrough;
+            if (!walk.active || !walk.position || !state.camera) return;
+            const body = walk.position;
+            if (walk.lookQuaternion) setQuaternion(state.camera.quaternion, walk.lookQuaternion);
+            if (walk.cameraMode === 'first-person') {
+                setVector(state.camera.position, { x: body.x,
+                    y: body.y + walkthroughSettings.eyeHeight, z: body.z });
+                walk.cameraDistance = 0;
+                walk.cameraObstructed = false;
+                if (walk.avatar) walk.avatar.root.visible = false;
+            } else {
+                const direction = new THREE.Vector3();
+                state.walkthroughControls.getDirection(direction);
+                const anchor = { x: body.x, y: body.y + 1.05, z: body.z };
+                const distance = walk.cameraSettings.distance;
+                const desired = { x: anchor.x - direction.x * distance,
+                    y: anchor.y - direction.y * distance + walk.cameraSettings.height,
+                    z: anchor.z - direction.z * distance };
+                const nearby = walkthroughSweptObstacles(walk.obstacleIndex, anchor,
+                    { x: desired.x - anchor.x, z: desired.z - anchor.z }, 0.15);
+                const resolved = resolveWalkthroughCamera({ anchor,
+                    desired: desired,
+                    bounds: walk.bounds, floorY: walk.floorY, obstacles: nearby });
+                setVector(state.camera.position, resolved.position);
+                walk.cameraDistance = resolved.distance;
+                walk.cameraObstructed = resolved.obstructed;
+                if (!walk.avatar) {
+                    walk.avatar = avatarRuntime.createAvatar(THREE);
+                    state.scene.add(walk.avatar.root);
+                    walk.avatar.update({ position: body, heading: walk.heading, snap: true });
+                }
+                const minimumFrame = Math.max(1.05, 0.4 / Math.max(0.1, state.camera.aspect || 1))
+                    / Math.tan((state.camera.fov || 45) * Math.PI / 360);
+                walk.avatar.root.visible = resolved.distance >= minimumFrame;
+                if (walk.avatar.root.visible && typeof state.camera.lookAt === 'function') {
+                    state.camera.lookAt(anchor.x, anchor.y, anchor.z);
+                } else if (!walk.avatar.root.visible) {
+                    setVector(state.camera.position, { x: body.x, y: body.y + walkthroughSettings.eyeHeight, z: body.z });
+                }
+            }
+            if (typeof state.camera.updateMatrixWorld === 'function') state.camera.updateMatrixWorld(true);
+        }
+
+        function setWalkthroughCameraSettings(value) {
+            state.walkthrough.cameraSettings = cameraPreferences.save(value);
+            syncWalkthroughCamera();
+            notifyWalkthroughState();
+            invalidate();
+            return Object.assign({}, state.walkthrough.cameraSettings);
+        }
+
+        function setWalkthroughCameraMode(mode) {
+            if (!['first-person', 'third-person'].includes(mode)) return false;
+            if (mode === 'third-person'
+                    && !(avatarRuntime && typeof THREE.SphereGeometry === 'function')) return false;
+            state.walkthrough.cameraMode = mode;
+            syncWalkthroughCamera();
+            notifyWalkthroughState();
+            invalidate();
+            return true;
+        }
+
+        function lookWalkthroughAt(target) {
+            const walk = state.walkthrough;
+            if (!walk.active || !walk.position || !state.camera || !target
+                    || !['x', 'y', 'z'].every(axis => Number.isFinite(target[axis]))) return false;
+            const eye = {x: walk.position.x, y: walk.position.y + walkthroughSettings.eyeHeight, z: walk.position.z};
+            if (Math.hypot(target.x - eye.x, target.y - eye.y, target.z - eye.z) < 1e-6) return false;
+            setVector(state.camera.position, eye);
+            state.camera.lookAt(target.x, target.y, target.z);
+            walk.lookQuaternion = copyQuaternion(state.camera.quaternion);
+            syncWalkthroughCamera();
+            invalidate();
             return true;
         }
 
@@ -7323,6 +7815,7 @@
                 }
             }
             restoreWalkthroughCamera(snapshot);
+            disposeWalkthroughAvatar();
             walkthrough.previousCamera = null;
             walkthrough.obstaclePolygons = [];
             walkthrough.bounds = null;
@@ -7336,6 +7829,7 @@
             walkthrough.route.destination = null;
             walkthrough.route.reason = reason || 'exited';
             walkthrough.exiting = false;
+            endNavigationInteraction();
             setWalkthroughContextFocus(null);
             applySelection();
             notifyWalkthroughState();
@@ -7345,6 +7839,7 @@
 
         function deactivateWalkthroughForHandoff(reason) {
             const walkthrough = state.walkthrough;
+            disposeWalkthroughAvatar();
             const overviewCamera = walkthrough.previousCamera;
             walkthrough.exiting = true;
             walkthrough.active = false;
@@ -7430,7 +7925,13 @@
                 );
                 return notifyWalkthroughState();
             }
-            const floorY = finite(bounds.minimum.y, 0);
+            const groundRows = groundRuntime && groundRuntime.surfaces(state.currentInput.layout);
+            const groundAtSpawn = groundRows && groundRuntime.sample(groundRows, spawn, 0);
+            if (groundRows && !groundAtSpawn) {
+                walkthrough.lastReason = 'no_ground_at_spawn';
+                return notifyWalkthroughState();
+            }
+            const floorY = groundAtSpawn ? groundAtSpawn.y : finite(bounds.minimum.y, 0);
             walkthrough.previousCamera = handoff && handoff.overviewCamera
                 ? handoff.overviewCamera : cameraSnapshot();
             walkthrough.active = true;
@@ -7441,6 +7942,14 @@
             walkthrough.bounds = bounds;
             walkthrough.floorY = floorY;
             walkthrough.spawn = { x: spawn.x, y: floorY, z: spawn.z };
+            walkthrough.position = Object.assign({}, walkthrough.spawn);
+            // Only planar buckets are used; height does not change walking collision semantics.
+            walkthrough.obstacleIndex = buildDroneSpatialIndex(records.map(record => ({
+                id: record.placementId, polygon: record.polygon, minimumY: 0, maximumY: 1,
+            })));
+            walkthrough.performance = { movementFrames: 0, simulatedSeconds: 0,
+                droppedSeconds: 0, collisionCandidates: 0, contextQueries: 0 };
+            walkthrough.lastContextTime = null;
             walkthrough.targetPlacementId = request.target
                 ? request.target.placementId : null;
             walkthrough.collisionCount = 0;
@@ -7504,6 +8013,12 @@
             if (typeof state.camera.updateMatrixWorld === 'function') {
                 state.camera.updateMatrixWorld(true);
             }
+            const facing = new THREE.Vector3();
+            state.walkthroughControls.getDirection(facing);
+            walkthrough.heading = Math.atan2(-facing.x, -facing.z);
+            walkthrough.lookQuaternion = copyQuaternion(state.camera.quaternion);
+            walkthrough.cameraSettings = cameraPreferences.load();
+            syncWalkthroughCamera();
             const reusePointerLock = Boolean(
                 handoff && handoff.pointerLocked
                 && state.walkthroughControls.isLocked
@@ -7638,11 +8153,13 @@
         }
 
         function dronePlacementInRange(placement, position, rangeSquared) {
-            const point = placement && placement.transform
-                && placement.transform.position;
-            if (!point) return false;
-            const dx = finite(point.x, 0) - finite(position && position.x, 0);
-            const dz = finite(point.z, 0) - finite(position && position.z, 0);
+            if (!placement || !placement.transform) return false;
+            const bounds = transformedBounds(boundsForPlacement(placement), placement);
+            const x = finite(position && position.x, 0);
+            const z = finite(position && position.z, 0);
+            // A nearby end of a long or rotated asset must not vanish with its origin.
+            const dx = Math.max(bounds.minimum.x - x, 0, x - bounds.maximum.x);
+            const dz = Math.max(bounds.minimum.z - z, 0, z - bounds.maximum.z);
             return dx * dx + dz * dz <= rangeSquared;
         }
 
@@ -7673,10 +8190,21 @@
                 finite(state.camera.position && state.camera.position.y, 0)
                     - finite(state.drone.floorY, 0)
             );
-            const requiredFar = Math.min(
+            let requiredFar = Math.min(
                 Math.max(droneSettings.maximumViewDistance * 1.5, 100),
                 Math.hypot(viewDistance, altitude) + 20
             );
+            if (!droneSettings.distanceCulling) {
+                const bounds = state.worldBounds || state.drone.bounds;
+                if (bounds) {
+                    const distances = ['x', 'y', 'z'].map(function (axis) {
+                        const point = finite(state.camera.position[axis], 0);
+                        return Math.max(Math.abs(bounds.minimum[axis] - point),
+                            Math.abs(bounds.maximum[axis] - point));
+                    });
+                    requiredFar = Math.max(requiredFar, Math.hypot(...distances) + 20);
+                }
+            }
             const changed = Math.abs(
                 finite(state.camera.far, requiredFar) - requiredFar
             ) > 0.5;
@@ -7689,6 +8217,11 @@
         }
 
         function droneVisiblePlacementIds(position) {
+            // Full scene is the normal product behavior. Distance hiding is opt-in,
+            // distinct from Three's ordinary camera-frustum culling and asset LOD.
+            if (!droneSettings.distanceCulling) {
+                return new Set(state.placements.map(placement => placement.placementId));
+            }
             const viewDistance = droneEffectiveViewDistance(position);
             const rangeSquared = viewDistance * viewDistance;
             const selected = state.selectedIds;
@@ -7925,6 +8458,10 @@
             }
 
             const handoffCamera = cameraSnapshot();
+            if (sourceMode === 'walkthrough' && state.walkthrough.position) {
+                handoffCamera.position = Object.assign({}, state.walkthrough.position,
+                    { y: state.walkthrough.position.y + walkthroughSettings.eyeHeight });
+            }
             const pointerLocked = Boolean(
                 state.walkthroughControls
                 && state.walkthroughControls.isLocked
@@ -8106,6 +8643,7 @@
             route.reason = reason || 'cancelled';
             if (changed) {
                 state.walkthrough.lastReason = route.reason;
+                endNavigationInteraction();
                 notifyWalkthroughState();
                 invalidate();
             }
@@ -8119,8 +8657,8 @@
             }
             const plan = planWalkthroughRoute({
                 start: {
-                    x: finite(state.camera.position.x, NaN),
-                    z: finite(state.camera.position.z, NaN),
+                    x: finite(walkthrough.position.x, NaN),
+                    z: finite(walkthrough.position.z, NaN),
                 },
                 goal: destination,
                 radius: walkthroughSettings.radius,
@@ -8164,15 +8702,20 @@
             walkthrough.lastReason = walkthrough.route.reason;
             const next = walkthrough.route.points[walkthrough.route.pointIndex];
             if (next && typeof state.camera.lookAt === 'function') {
+                setVector(state.camera.position, { x: walkthrough.position.x,
+                    y: walkthrough.floorY + walkthroughSettings.eyeHeight, z: walkthrough.position.z });
                 state.camera.lookAt(
                     next.x,
                     walkthrough.floorY + walkthroughSettings.eyeHeight,
                     next.z
                 );
+                walkthrough.lookQuaternion = copyQuaternion(state.camera.quaternion);
                 if (typeof state.camera.updateMatrixWorld === 'function') {
                     state.camera.updateMatrixWorld(true);
                 }
             }
+            syncWalkthroughCamera();
+            if (walkthrough.route.active) beginNavigationInteraction();
             notifyWalkthroughState();
             invalidate();
             return plan;
@@ -8233,7 +8776,7 @@
             const code = String(event && (event.code || event.key) || '');
             const aliases = {
                 w: 'KeyW', a: 'KeyA', s: 'KeyS', d: 'KeyD',
-                g: 'KeyG',
+                g: 'KeyG', c: 'KeyC',
                 ArrowUp: 'KeyW', ArrowLeft: 'KeyA',
                 ArrowDown: 'KeyS', ArrowRight: 'KeyD',
                 Shift: 'ShiftLeft',
@@ -8256,7 +8799,17 @@
 
         function handleWalkthroughKey(event, pressed) {
             if (!state.walkthrough.active) return;
+            if (event.target && event.target.closest
+                    && event.target.closest('input,textarea,select,[contenteditable="true"],.ip-walk-camera-panel')) return;
             const code = movementCode(event);
+            if (code === 'KeyC') {
+                if (pressed && !event.repeat) {
+                    if (typeof event.preventDefault === 'function') event.preventDefault();
+                    setWalkthroughCameraMode(state.walkthrough.cameraMode === 'first-person'
+                        ? 'third-person' : 'first-person');
+                }
+                return;
+            }
             if (code === 'KeyG') {
                 if (pressed && !event.repeat) {
                     if (typeof event.preventDefault === 'function') {
@@ -8276,10 +8829,13 @@
             if (pressed && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(code)) {
                 cancelWalkthroughNavigation('manual_input');
             }
+            const hadMovement = walkthroughHasMovement();
             if (pressed) state.walkthrough.keys.add(code);
             else state.walkthrough.keys.delete(code);
+            if (!hadMovement && walkthroughHasMovement()) beginNavigationInteraction();
             if (!walkthroughHasMovement()) {
                 state.walkthrough.lastFrameTime = null;
+                endNavigationInteraction();
             }
             invalidate();
         }
@@ -8287,23 +8843,28 @@
         function updateWalkthrough(timestamp) {
             const walkthrough = state.walkthrough;
             if (!walkthrough.active || !walkthrough.locked
-                    || !walkthroughHasActivity() || !state.camera
+                    || (!walkthroughHasActivity() && !walkthrough.avatarSettling) || !state.camera
                     || !state.walkthroughControls) {
                 walkthrough.lastFrameTime = null;
                 return false;
             }
             const now = finite(timestamp, 0);
-            const deltaSeconds = walkthrough.lastFrameTime === null
+            const elapsedSeconds = walkthrough.lastFrameTime === null
                 ? 1 / 60
-                : Math.max(0.001, Math.min(
-                    0.05, (now - walkthrough.lastFrameTime) / 1000
-                ));
+                : Math.max(0, (now - walkthrough.lastFrameTime) / 1000);
+            // Consume ordinary slow frames in full. Bound long stalls, with no catch-up debt.
+            // Collision subdivision below still checks every spatial step, including thin walls.
+            const deltaSeconds = Math.min(0.25, elapsedSeconds);
+            walkthrough.performance.movementFrames += 1;
+            walkthrough.performance.simulatedSeconds += deltaSeconds;
+            walkthrough.performance.droppedSeconds += elapsedSeconds - deltaSeconds;
             walkthrough.lastFrameTime = now;
             const keys = walkthrough.keys;
             let moveX = 0;
             let moveZ = 0;
             let deltaX = 0;
             let deltaZ = 0;
+            let reachedWaypoint = null;
             const manualMovement = walkthroughHasMovement();
             if (manualMovement) {
                 let forwardVector = null;
@@ -8356,43 +8917,61 @@
                     cancelWalkthroughNavigation('arrived');
                     return true;
                 }
-                const dx = target.x - state.camera.position.x;
-                const dz = target.z - state.camera.position.z;
+                const dx = target.x - walkthrough.position.x;
+                const dz = target.z - walkthrough.position.z;
                 const remaining = Math.sqrt(dx * dx + dz * dz);
                 const maximumDistance = walkthroughSettings.navigationSpeed
                     * deltaSeconds;
                 if (remaining <= Math.max(1e-6, maximumDistance)) {
                     deltaX = dx;
                     deltaZ = dz;
+                    reachedWaypoint = target;
                     walkthrough.route.pointIndex += 1;
                 } else {
                     deltaX = dx / remaining * maximumDistance;
                     deltaZ = dz / remaining * maximumDistance;
                 }
             }
+            const nearby = walkthroughSweptObstacles(walkthrough.obstacleIndex,
+                walkthrough.position, { x: deltaX, z: deltaZ }, walkthroughSettings.radius);
+            walkthrough.performance.collisionCandidates = nearby.length;
             const result = resolveWalkthroughMovement({
-                start: state.camera.position,
+                start: walkthrough.position,
                 delta: {
                     x: deltaX,
                     z: deltaZ,
                 },
                 radius: walkthroughSettings.radius,
                 bounds: walkthrough.bounds,
-                obstacles: walkthrough.obstaclePolygons,
+                obstacles: nearby,
             });
+            if (!result.collided && reachedWaypoint) {
+                result.position = { x: reachedWaypoint.x, z: reachedWaypoint.z };
+            }
+            const groundRows = groundRuntime && groundRuntime.surfaces(state.currentInput.layout);
+            if (groundRows) {
+                const grounded = groundRuntime.move(groundRows, walkthrough.position, result.position);
+                result.position = grounded.position;
+                result.collided = result.collided || grounded.collided;
+                walkthrough.floorY = grounded.position.y;
+            }
             if (result.collided) {
                 walkthrough.collisionCount += 1;
                 if (walkthrough.route.active) {
                     cancelWalkthroughNavigation('route_blocked');
                 }
             }
-            state.camera.position.x = result.position.x;
-            state.camera.position.y = walkthrough.floorY
-                + walkthroughSettings.eyeHeight;
-            state.camera.position.z = result.position.z;
-            if (typeof state.camera.updateMatrixWorld === 'function') {
-                state.camera.updateMatrixWorld(true);
+            const travelX = result.position.x - walkthrough.position.x;
+            const travelZ = result.position.z - walkthrough.position.z;
+            const traveled = Math.hypot(travelX, travelZ);
+            if (traveled > 1e-5) walkthrough.heading = Math.atan2(-travelX, -travelZ);
+            walkthrough.position = { x: result.position.x, y: walkthrough.floorY, z: result.position.z };
+            if (walkthrough.avatar) {
+                walkthrough.avatarSettling = walkthrough.avatar.update({
+                    position: walkthrough.position, heading: walkthrough.heading,
+                    distance: traveled, deltaSeconds: deltaSeconds });
             }
+            syncWalkthroughCamera();
             if (!manualMovement && walkthrough.route.active
                     && walkthrough.route.pointIndex
                         >= walkthrough.route.points.length) {
@@ -8564,6 +9143,14 @@
                 bounds: drone.bounds,
                 volumes: drone.obstacleIndex || drone.obstacleVolumes,
             });
+            const groundRows = groundRuntime && groundRuntime.surfaces(state.currentInput.layout);
+            if (groundRows) {
+                const sample = groundRuntime.sample(groundRows,result.position,result.position.y);
+                if (sample && result.position.y < sample.y+droneSettings.radius) {
+                    result.position = {x:state.camera.position.x,y:state.camera.position.y,z:state.camera.position.z};
+                    result.collided = true;
+                }
+            }
             if (result.collided) drone.collisionCount += 1;
             state.camera.position.x = result.position.x;
             state.camera.position.y = result.position.y;
@@ -8733,6 +9320,41 @@
             };
         }
 
+        function syncGroundEnvironment(rows, bounds) {
+            const signature = JSON.stringify({ground: rows, grid: state.gridVisible, theme: isLightTheme()});
+            if (signature === state.environmentSignature) return true;
+            clearEnvironmentObjects();
+            state.environmentSignature = signature;
+            rows.forEach(function (surface) {
+                const data = groundRuntime.vertices(surface, FLOOR_THICKNESS, bounds.minimum.y-FLOOR_THICKNESS);
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(data.positions, 3));
+                geometry.setIndex(data.indices);
+                geometry.computeVertexNormals();
+                const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+                    color: surface.color, roughness: 1, metalness: 0}));
+                mesh.name = 'InspectorProGround-' + surface.surfaceId;
+                mesh.userData = {facilityEnvironment: 'floor', groundSurfaceId: surface.surfaceId};
+                mesh.receiveShadow = true;
+                state.environmentRoot.add(mesh);
+                state.floorObject = mesh;
+                if (state.gridVisible && surface.startElevation === surface.endElevation) {
+                    const b = {minimum:{x:surface.minX,z:surface.minZ},maximum:{x:surface.maxX,z:surface.maxZ}};
+                    const spacing = Math.max(.05, finite(options.floorGridSpacing,1),
+                        (surface.maxX-surface.minX)/240, (surface.maxZ-surface.minZ)/240);
+                    const grid = createFloorGrid(b, surface.startElevation, spacing, Math.max(spacing, finite(options.floorMajorGridSpacing,5)));
+                    grid.objects.forEach(object => state.environmentRoot.add(object));
+                    state.gridObjects.push(...grid.objects);
+                }
+            });
+            state.environmentDiagnostics = {floorVisible:true, gridVisible:state.gridObjects.length>0,
+                axesVisible:false, groundSurfaceCount:rows.length, minimumElevation:bounds.minimum.y,
+                maximumElevation:bounds.maximum.y, width:bounds.maximum.x-bounds.minimum.x,
+                depth:bounds.maximum.z-bounds.minimum.z};
+            invalidate();
+            return true;
+        }
+
         function syncEnvironment() {
             if (!state.environmentRoot || options.showFloor === false) {
                 clearEnvironmentObjects();
@@ -8741,6 +9363,8 @@
             }
             const bounds = configuredEnvironmentBounds();
             if (!bounds) return false;
+            const groundRows = groundRuntime && groundRuntime.surfaces(state.currentInput && state.currentInput.layout);
+            if (groundRows) return syncGroundEnvironment(groundRows, bounds);
             const width = Math.max(
                 0.01,
                 bounds.maximum.x - bounds.minimum.x
@@ -8870,6 +9494,15 @@
         }
 
         function clearModel() {
+            state.appearanceSceneKey = null;
+            if(state.componentHighlight){disposeObjectGraphs([state.componentHighlight]);state.componentHighlight=null;}
+            disposeObjectGraphs(state.wallObjects);
+            state.wallObjects = [];
+            disposeObjectGraphs(state.floorSurfaceObjects);
+            state.floorSurfaceObjects = [];
+            disposeObjectGraphs(state.wallFinishObjects);
+            state.wallFinishObjects = [];
+            state.wallArtworkLoads = [];
             disposeGhostObject();
             disposeProposalObjects();
             state.renderGroups.forEach(disposeRenderGroup);
@@ -9079,18 +9712,18 @@
             z,
             optionsValue
         ) {
-            if (typeof THREE.BoxGeometry !== 'function'
+            const GeometryType = THREE.PlaneGeometry || THREE.BoxGeometry;
+            if (typeof GeometryType !== 'function'
                     || typeof THREE.Mesh !== 'function') return null;
             const material = floorPaintMaterial(marking, optionsValue);
             if (!material) return null;
-            const mesh = new THREE.Mesh(
-                new THREE.BoxGeometry(
-                    Math.max(0.001, width),
-                    0.0008,
-                    Math.max(0.001, depth)
-                ),
-                material
-            );
+            // Paint has no thickness. Opposing box faces fight for depth at
+            // overview distances; bake the plane rotation so aisle yaw stays local.
+            const geometry = THREE.PlaneGeometry
+                ? new GeometryType(Math.max(0.001, width), Math.max(0.001, depth))
+                : new GeometryType(Math.max(0.001, width), 0.0008, Math.max(0.001, depth));
+            if (THREE.PlaneGeometry) geometry.rotateX(-Math.PI / 2);
+            const mesh = new THREE.Mesh(geometry, material);
             mesh.position.set(finite(x, 0), 0, finite(z, 0));
             mesh.renderOrder = 6;
             rootObject.add(mesh);
@@ -9879,6 +10512,10 @@
             state.controlStartHandler = null;
             state.controlEndHandler = null;
             state.navigationInteracting = false;
+            removeListener(documentObject, 'mousemove', state.walkthroughAimHandler, true);
+            removeListener(state.canvas, 'wheel', state.walkthroughWheelHandler, { passive: false });
+            state.walkthroughAimHandler = null;
+            state.walkthroughWheelHandler = null;
             state.walkthroughChangeHandler = null;
             state.walkthroughLockHandler = null;
             state.walkthroughUnlockHandler = null;
@@ -9945,6 +10582,7 @@
             state.disposed = Boolean(finalDispose);
             state.reloadOnResume = false;
             if (finalDispose) {
+                state.parkedView = null;
                 state.currentInput = null;
                 state.ghostInput = null;
                 state.proposalInput = null;
@@ -10101,7 +10739,28 @@
             return true;
         }
 
+        function park() {
+            if (!state.mounted || state.disposed || state.parkedView) return false;
+            suspend();
+            const saved = { host: state.host, camera: getCameraView() };
+            // Release the sole renderer lease, retaining inputs for this sheet.
+            // Playback is transient and must not appear loaded after teardown.
+            disposeMotion('layout_sheet_parked');
+            disposeActivity('layout_sheet_parked');
+            disposeNavigationPreview('layout_sheet_parked');
+            teardownMount(false);
+            state.parkedView = saved;
+            return true;
+        }
+
         function resume() {
+            if (state.parkedView && !state.disposed) {
+                const saved = state.parkedView;
+                state.parkedView = null;
+                mount(saved.host);
+                if (saved.camera && state.camera) applyCameraView(saved.camera);
+                return true;
+            }
             if (!state.mounted || !state.suspended || state.disposed) return false;
             state.suspended = false;
             state.mountGeneration += 1;
@@ -10240,6 +10899,54 @@
             return result;
         }
 
+        function batchStaticPrototypeMeshes(meshes) {
+            if (typeof options.mergeGeometries !== 'function') return meshes;
+            const buckets = new Map(), output = [];
+            meshes.forEach(function (mesh) {
+                const g = mesh.geometry, m = mesh.material;
+                const attributes = g && g.attributes;
+                if (!mesh.instancingEligible || mesh.source.isInstancedMesh
+                        || !m || Array.isArray(m) || !m.userData?.facilityNeutralAssetMaterial
+                        || !g?.isBufferGeometry || !attributes?.position
+                        || Object.keys(g.morphAttributes || {}).length
+                        || g.drawRange.start !== 0
+                        || (Number.isFinite(g.drawRange.count)
+                            && g.drawRange.count < (g.index?.count || attributes.position.count))
+                        || !mesh.matrix?.determinant || mesh.matrix.determinant() <= 0
+                        || Object.values(attributes).some(a => a.isInterleavedBufferAttribute)) {
+                    output.push(mesh);return;
+                }
+                // Neutral, static meshes only: no texture, animation, source-color or winding changes.
+                const key = JSON.stringify([m.type, m.side, m.flatShading, m.wireframe,
+                    m.color.getHex(), m.roughness, m.metalness, m.opacity, m.transparent,
+                    m.depthTest, m.depthWrite, !!g.index,
+                    Object.keys(attributes).sort().map(name => {
+                        const a=attributes[name];return [name,a.itemSize,a.normalized,a.array.constructor.name];
+                    })]);
+                if (!buckets.has(key)) buckets.set(key, []);
+                buckets.get(key).push(mesh);
+            });
+            buckets.forEach(function (bucket) {
+                if (bucket.length < 2) { output.push(...bucket);return; }
+                const copies = [];
+                let mergedGeometry = null;
+                try {
+                    bucket.forEach(mesh => copies.push(mesh.geometry.clone().applyMatrix4(mesh.matrix)));
+                    const geometry = mergedGeometry = options.mergeGeometries(copies, false);
+                    if (!geometry) { output.push(...bucket);return; }
+                    geometry.computeBoundingBox();geometry.computeBoundingSphere();
+                    output.push(Object.assign({}, bucket[0], { geometry, matrix: new THREE.Matrix4() }));
+                } catch (error) {
+                    if (mergedGeometry) mergedGeometry.dispose();
+                    reportError('static_mesh_batch_failed', error);
+                    output.push(...bucket);
+                } finally {
+                    copies.forEach(geometry => geometry.dispose());
+                }
+            });
+            return output;
+        }
+
         function applyPlacementTransform(object, placement) {
             const transform = placement.transform;
             if (object.position && typeof object.position.set === 'function') {
@@ -10295,7 +11002,7 @@
         }
 
         function baseGroupKey(group) {
-            return group.assetId + '|' + group.assetDefinitionRevision;
+            return group.assetId + '|' + group.assetDefinitionRevision + (group.materialKey || '');
         }
 
         function removeExistingGroup(group) {
@@ -10316,23 +11023,35 @@
                 group.assetDefinitionRevision;
             container.userData.representation = representation;
 
-            const prototypeMeshes = collectPrototypeMeshes(prototype.object);
+            let prototypeMeshes = collectPrototypeMeshes(prototype.object);
+            const sourcePrototypeMeshCount = prototypeMeshes.length;
+            let containsLights = false;
+            if (typeof prototype.object.traverse === 'function') {
+                prototype.object.traverse(object => { if (object.isLight) containsLights = true; });
+            }
             const repeated = group.placements.length > 1;
             const eligible = prototype.instancingEligible !== false
+                && !containsLights
                 && prototypeMeshes.length > 0
                 && prototypeMeshes.every(function (item) {
                     return item.instancingEligible;
                 })
                 && typeof THREE.InstancedMesh === 'function';
-            const useInstancing = repeated && eligible;
+            const useInstancing = repeated && eligible && !group.materialKey;
+            if (useInstancing) prototypeMeshes = batchStaticPrototypeMeshes(prototypeMeshes);
             const pickObjects = [];
             const mappings = [];
 
             if (useInstancing) {
                 prototypeMeshes.forEach(function (mesh, meshIndex) {
+                    // White material lets instance colors specify an exact finish, not a gray tint.
+                    const material = mesh.material.clone();
+                    material.userData = material.userData || {};
+                    material.userData.facilityInstanceBaseColor = material.color.getHex();
+                    material.color.setHex(0xffffff);
                     const instances = new THREE.InstancedMesh(
                         mesh.geometry,
-                        mesh.material,
+                        material,
                         group.placements.length
                     );
                     const placementIds = [];
@@ -10374,6 +11093,7 @@
             } else {
                 group.placements.forEach(function (placement) {
                     const object = cloneRenderable(prototype.object);
+                    if(componentRuntime)componentRuntime.apply(object, placement.source && placement.source.componentMaterials, representation);
                     applyPlacementTransform(object, placement);
                     container.add(object);
                     pickObjects.push(object);
@@ -10383,12 +11103,18 @@
                 });
             }
 
-            container.visible = state.layerVisibility.assets !== false;
+            const visibilityLayer = wallsRuntime.isWallAsset(group.catalog) ? 'walls' : 'assets';
+            let renderedLightCount = 0;
+            if (typeof container.traverse === 'function') {
+                container.traverse(object => { if (object.isLight) renderedLightCount++; });
+            }
+            container.visible = state.layerVisibility[visibilityLayer] !== false;
             state.modelRoot.add(container);
             const record = {
                 baseKey: baseGroupKey(group),
                 representationKey: baseGroupKey(group) + '|' + representation,
                 assetId: group.assetId,
+                visibilityLayer: visibilityLayer,
                 assetDefinitionRevision: group.assetDefinitionRevision,
                 representation: representation,
                 placementIds: group.placements.map(function (placement) {
@@ -10398,6 +11124,8 @@
                 meshCount: useInstancing
                     ? prototypeMeshes.length : pickObjects.length,
                 prototypeMeshCount: prototypeMeshes.length,
+                sourcePrototypeMeshCount: sourcePrototypeMeshCount,
+                renderedLightCount: renderedLightCount,
                 prototypeMatrices: prototypeMeshes.map(function (mesh) {
                     return mesh.matrix;
                 }),
@@ -10765,14 +11493,15 @@
         async function resolveGroup(group, generation, signal) {
             let manifest = null;
             let overviewResolved = false;
-            const retainOverview = preferOverviewForLargeLayouts
+            const desiredRepresentation = group.placements[0]?.source?.componentMaterials?.representation;
+            const retainOverview = desiredRepresentation !== 'detail' && preferOverviewForLargeLayouts
                 && state.placements.length >= largeLayoutDetailThreshold;
             for (let index = 0; index < RESOLUTION_STAGES.length; index += 1) {
                 const stage = RESOLUTION_STAGES[index];
                 if (generation !== state.sceneGeneration || !state.mounted) {
                     return false;
                 }
-                if (stage === 'detail' && retainOverview && overviewResolved) {
+                if (stage === 'detail' && (desiredRepresentation === 'overview' || retainOverview && overviewResolved)) {
                     traceLoad(
                         group,
                         stage,
@@ -10817,8 +11546,16 @@
                             );
                         }
                         traceLoad(group, stage, result ? 'resolved' : 'skipped', null);
+                        if (group.assetId === 'asset-operator'
+                                && group.assetDefinitionRevision === ANIMATED_OPERATOR_REVISION
+                                && avatarRuntime && avatarRuntime.createStandingAvatar) {
+                            const object = avatarRuntime.createStandingAvatar(THREE);
+                            buildRenderedGroup(group, { object: object, bounds: group.bounds }, 'operator-avatar');
+                            traceLoad(group, 'operator-avatar', 'resolved', 'illustrative_operator_visual');
+                            return true;
+                        }
                     } else {
-                        if (stage === 'overview'
+                        if (stage === 'overview' && !desiredRepresentation
                                 && shouldDeferOverview(result)) {
                             group.deferredVisual = result;
                             traceLoad(
@@ -10895,13 +11632,14 @@
             });
             const groups = new Map();
             placements.forEach(function (placement) {
-                const key = placement.assetId + '|'
-                    + placement.assetDefinitionRevision;
+                const catalogKey = placement.assetId + '|' + placement.assetDefinitionRevision;
+                const materialKey = placement.source && placement.source.componentMaterials ? '|components:' + placement.placementId : '';
+                const key = catalogKey + materialKey;
                 if (!groups.has(key)) {
-                    const catalogEntry = catalogIndex.exact.get(key)
+                    const catalogEntry = catalogIndex.exact.get(catalogKey)
                         || catalogIndex.byAsset.get(placement.assetId)
                         || {};
-                    if (!catalogIndex.exact.has(key) && catalogRevision(catalogEntry)
+                    if (!catalogIndex.exact.has(catalogKey) && catalogRevision(catalogEntry)
                         && catalogRevision(catalogEntry)
                             !== placement.assetDefinitionRevision) {
                         warning(
@@ -10911,6 +11649,7 @@
                         );
                     }
                     groups.set(key, {
+                        materialKey: materialKey,
                         assetId: placement.assetId,
                         assetDefinitionRevision:
                             placement.assetDefinitionRevision,
@@ -10931,8 +11670,31 @@
             return { placements: placements, groups: groups };
         }
 
+        function appearanceOnlyKey(layout) {
+            return JSON.stringify(Object.assign({}, layout, {
+                placements: (layout.placements || []).map(function (placement) {
+                    const copy = Object.assign({}, placement);
+                    delete copy.appearance;
+                    return copy;
+                }),
+            }));
+        }
+
         async function setScene(input) {
             const value = input && typeof input === 'object' ? input : {};
+            const previous = state.currentInput;
+            if (state.mounted && !state.suspended && !state.degraded
+                    && state.status !== 'degraded'
+                    && state.renderGroups.size && previous && previous.layout
+                    && state.appearanceSceneKey === appearanceOnlyKey(value.layout || {})
+                    && state.appearanceCatalogKey === JSON.stringify(value.assetCatalog || [])) {
+                state.currentInput = { layout: value.layout || {}, assetCatalog: value.assetCatalog || [] };
+                const byId = new Map((value.layout.placements || []).map(p => [p.placementId, p]));
+                // Keep the group objects alive so pending detail loads also see the new finish.
+                state.placements.forEach(p => { p.source = byId.get(p.placementId) || p.source; });
+                applySelection();
+                return getDiagnostics();
+            }
             if (state.motion.package || state.motion.root) {
                 disposeMotion('scene_changed', true);
             }
@@ -10982,6 +11744,13 @@
             }
 
             clearModel();
+            state.appearanceSceneKey = appearanceOnlyKey(state.currentInput.layout);
+            state.appearanceCatalogKey = JSON.stringify(state.currentInput.assetCatalog);
+            renderPerimeterWalls();
+            if(options.showFloor !== false && floorSurfacesRuntime){
+                state.floorSurfaceObjects=floorSurfacesRuntime.meshes(THREE,documentObject,state.currentInput.layout);
+                state.floorSurfaceObjects.forEach(object=>state.modelRoot.add(object));
+            }
             renderFacilityAisles();
             renderFloorMarkings();
             Array.from(state.baseGroups.keys()).sort().forEach(function (key) {
@@ -11143,6 +11912,13 @@
             };
             const reviewPlacements = state.proposalInput
                 ? state.proposalInput.beforePlacements : [];
+            const groundBounds = groundRuntime && groundRuntime.bounds(groundRuntime.surfaces(state.currentInput && state.currentInput.layout));
+            if (groundBounds && includeConfiguredBounds !== false) {
+                ['x','y','z'].forEach(axis => {
+                    output.minimum[axis] = Math.min(output.minimum[axis], groundBounds.minimum[axis]);
+                    output.maximum[axis] = Math.max(output.maximum[axis], groundBounds.maximum[axis]);
+                });
+            }
             const boundedPlacements = state.placements.concat(
                 reviewPlacements
             );
@@ -11565,6 +12341,7 @@
                 state.controls.update();
             }
             invalidate();
+            loadDeferredVisibleGroups();
             return true;
         }
 
@@ -11583,6 +12360,11 @@
                 state.layerVisibility
             );
             state.layerVisibility = next;
+            state.wallObjects.forEach(function (object) { object.visible = next.walls !== false; });
+            state.wallFinishObjects.forEach(function (object) {
+                const art=object.userData&&object.userData.exteriorArtwork;
+                object.visible = next.walls !== false && (!art || art.status==='ready');
+            });
             state.routeObjects.forEach(function (object) {
                 object.visible = next.routes !== false;
             });
@@ -11591,7 +12373,7 @@
             });
             state.renderGroups.forEach(function (record) {
                 if (record && record.container) {
-                    record.container.visible = next.assets !== false;
+                    record.container.visible = next[record.visibilityLayer || 'assets'] !== false;
                 }
             });
             if (state.proposalRoot) {
@@ -11788,6 +12570,8 @@
                     emissiveIntensity: finite(material.emissiveIntensity, 0),
                 };
             }
+            if (material.userData.facilityHighlightKind === highlightKind) return;
+            material.userData.facilityHighlightKind = highlightKind;
             const original = material.userData.facilitySelectionOriginal;
             if (material.emissive && typeof material.emissive.setHex === 'function') {
                 material.emissive.setHex(
@@ -11801,10 +12585,14 @@
                     ? (highlightKind === 'context' ? 0.58 : 0.75)
                     : original.emissiveIntensity;
             }
-            material.needsUpdate = true;
+            // Emissive values are uniforms; changing them does not require a new shader program.
         }
 
         function applySelection(skipInvalidate) {
+            const appearance = new Map(state.placements.map(function (p) {
+                const color = p.source && p.source.appearance && p.source.appearance.color;
+                return [p.placementId, /^#[0-9a-fA-F]{6}$/.test(color || '') ? parseInt(color.slice(1), 16) : null];
+            }));
             const selectionVisible = !immersiveActive();
             const contextPlacementId = immersiveActive()
                 && state.walkthroughContextFocus
@@ -11813,6 +12601,13 @@
                 if (record.instanced) {
                     record.pickObjects.forEach(function (object) {
                         const placementIds = state.instanceLookup.get(object) || [];
+                        object.userData = object.userData || {};
+                        const selectedIds = placementIds.filter(id => state.selectedIds.has(id));
+                        const focusedId = placementIds.includes(contextPlacementId) ? contextPlacementId : null;
+                        const signature = JSON.stringify([selectionVisible, selectedIds, focusedId,
+                            placementIds, placementIds.map(id => appearance.get(id))]);
+                        if (object.userData.facilityHighlightSignature === signature) return;
+                        object.userData.facilityHighlightSignature = signature;
                         if (typeof object.setColorAt === 'function'
                             && typeof THREE.Color === 'function') {
                             placementIds.forEach(function (placementId, instanceId) {
@@ -11824,7 +12619,8 @@
                                             ? SELECTED_COLOR
                                             : contextPlacementId === placementId
                                                 ? CONTEXT_FOCUS_COLOR
-                                            : NORMAL_INSTANCE_COLOR
+                                            : !isAuthoredSurfaceMaterial(object.material) && appearance.get(placementId) != null ? appearance.get(placementId)
+                                                : object.material.userData.facilityInstanceBaseColor ?? NORMAL_INSTANCE_COLOR
                                     )
                                 );
                             });
@@ -11833,11 +12629,7 @@
                             }
                         }
                         object.userData = object.userData || {};
-                        object.userData.selectedPlacementIds = placementIds.filter(
-                            function (placementId) {
-                                return state.selectedIds.has(placementId);
-                            }
-                        );
+                        object.userData.selectedPlacementIds = selectedIds;
                         object.userData.contextFocusedPlacementId =
                             placementIds.includes(contextPlacementId)
                                 ? contextPlacementId : null;
@@ -11854,6 +12646,14 @@
                         const materials = Array.isArray(candidate && candidate.material)
                             ? candidate.material : [candidate && candidate.material];
                         materials.filter(Boolean).forEach(function (material) {
+                            if (!material.userData?.facilityComponentOverride && !isAuthoredSurfaceMaterial(material) && material.color && typeof material.color.setHex === 'function') {
+                                material.userData = material.userData || {};
+                                if (material.userData.facilityAppearanceBaseColor === undefined) {
+                                    material.userData.facilityAppearanceBaseColor = material.color.getHex();
+                                }
+                                material.color.setHex(appearance.get(placementId) != null
+                                    ? appearance.get(placementId) : material.userData.facilityAppearanceBaseColor);
+                            }
                             applyMaterialSelection(
                                 material,
                                 selected ? 'selected'
@@ -11866,6 +12666,34 @@
                 });
             });
             if (!skipInvalidate) invalidate();
+        }
+
+        async function getComponentMaterials(placementId) {
+            const group=Array.from(state.baseGroups.values()).find(g=>g.placements.some(p=>p.placementId===placementId));
+            if(!group)throw new Error('The selected model is not loaded.');
+            await resolveBaseGroup(group,state.sceneGeneration,state.abortController?.signal);
+            if(group.deferredVisual)await loadDeferredGroup(group,'component_materials');
+            const record=state.renderGroups.get(baseGroupKey(group));
+            if(!record || !['overview','detail'].includes(record.representation))throw new Error('Load the CAD model before editing its components.');
+            return {representation:record.representation,slots:componentRuntime.slots(record.prototypeObject).map(item=>({
+                key:item.key,label:item.label,color:'#'+item.material.color.getHexString(),
+                roughness:finite(item.material.roughness,.6),metalness:finite(item.material.metalness,0)}))};
+        }
+
+        function highlightComponent(placementId,key) {
+            if(state.componentHighlight){
+                state.componentHighlight.removeFromParent();state.componentHighlight.geometry.dispose();state.componentHighlight.material.dispose();state.componentHighlight=null;
+            }
+            if(placementId && THREE.Box3Helper){
+                const record=Array.from(state.renderGroups.values()).find(r=>r.placementIds.includes(placementId));
+                const placement=state.placements.find(p=>p.placementId===placementId);
+                if(record&&placement){
+                    const object=record.prototypeObject.clone(true);applyPlacementTransform(object,placement);object.updateMatrixWorld(true);
+                    const slot=componentRuntime.slots(object).find(v=>v.key===key);
+                    if(slot){const helper=new THREE.Box3Helper(new THREE.Box3().setFromObject(slot.node),0xc99b39);helper.material.depthTest=false;helper.renderOrder=1000;state.modelRoot.add(helper);state.componentHighlight=helper;}
+                }
+            }
+            invalidate();
         }
 
         function setSelection(placementIds) {
@@ -11939,12 +12767,22 @@
             const vector = typeof THREE.Vector2 === 'function'
                 ? new THREE.Vector2(pointer.x, pointer.y) : pointer;
             state.raycaster.setFromCamera(vector, state.camera);
-            const hits = state.raycaster.intersectObjects(
-                state.pickObjects,
-                true
-            ) || [];
+            const previousFar = state.raycaster.far;
+            const maximumDistance = Number(input && input.maximumDistance);
+            let hits;
+            try {
+                if (Number.isFinite(maximumDistance) && maximumDistance > 0) {
+                    state.raycaster.far = maximumDistance;
+                }
+                hits = state.raycaster.intersectObjects(state.pickObjects, true) || [];
+            } finally {
+                state.raycaster.far = previousFar;
+            }
             for (let index = 0; index < hits.length; index += 1) {
                 const hit = hits[index];
+                let ancestor = hit.object, hidden = false;
+                while (ancestor) { if (ancestor.visible === false) { hidden = true; break; } ancestor = ancestor.parent; }
+                if (hidden) continue;
                 let placementId = null;
                 const instanceId = Number.isInteger(hit.instanceId)
                     ? hit.instanceId : null;
@@ -12008,7 +12846,14 @@
                     focusSource: 'center_ray_volume',
                 };
             }
-            const hit = pick({ normalized: true, x: 0, y: 0 });
+            const eye = state.walkthrough.position
+                ? { x: state.walkthrough.position.x,
+                    y: state.walkthrough.position.y + walkthroughSettings.eyeHeight,
+                    z: state.walkthrough.position.z } : state.camera.position;
+            const cameraOffset = Math.hypot(state.camera.position.x - eye.x,
+                state.camera.position.y - eye.y, state.camera.position.z - eye.z);
+            const hit = pick({ normalized: true, x: 0, y: 0,
+                maximumDistance: walkthroughSettings.contextRadius + cameraOffset });
             if (!hit || !hit.placementId) return null;
             const placement = state.placements.find(function (record) {
                 return record.placementId === hit.placementId;
@@ -12016,9 +12861,9 @@
             if (!placement || !placement.transform
                     || !placement.transform.position) return null;
             const point = hit.point || placement.transform.position;
-            const dx = finite(point.x, 0) - finite(state.camera.position.x, 0);
-            const dy = finite(point.y, 0) - finite(state.camera.position.y, 0);
-            const dz = finite(point.z, 0) - finite(state.camera.position.z, 0);
+            const dx = finite(point.x, 0) - finite(eye.x, 0);
+            const dy = finite(point.y, 0) - finite(eye.y, 0);
+            const dz = finite(point.z, 0) - finite(eye.z, 0);
             const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
             const contextRadius = state.drone.active
                 ? droneSettings.contextRadius
@@ -12049,8 +12894,9 @@
             if (sameWalkthroughContext(state.walkthroughContextFocus, next)) {
                 return state.walkthroughContextFocus;
             }
+            const previousId = state.walkthroughContextFocus && state.walkthroughContextFocus.placementId;
             state.walkthroughContextFocus = next;
-            applySelection(true);
+            if (previousId !== (next && next.placementId)) applySelection(true);
             if (typeof state.walkthroughContextHandler === 'function') {
                 state.walkthroughContextHandler(
                     next ? Object.assign({}, next) : null,
@@ -12066,11 +12912,20 @@
             return state.walkthroughContextFocus;
         }
 
-        function updateWalkthroughContextFocus() {
+        function updateWalkthroughContextFocus(timestamp) {
+            const walk = state.walkthrough;
+            if (walk.active && (walkthroughHasActivity() || state.navigationInteracting) && Number.isFinite(timestamp)) {
+                if (walk.lastContextTime !== null && timestamp >= walk.lastContextTime
+                        && timestamp - walk.lastContextTime < 100) return state.walkthroughContextFocus;
+                walk.lastContextTime = timestamp;
+            }
+            if (walk.active) walk.performance.contextQueries += 1;
             return setWalkthroughContextFocus(walkthroughContextCandidate());
         }
 
         function getWalkthroughContextFocus() {
+            // Explicit user actions need a fresh hit, not the throttled hover observation.
+            updateWalkthroughContextFocus();
             return state.walkthroughContextFocus
                 ? Object.assign({}, state.walkthroughContextFocus) : null;
         }
@@ -12119,6 +12974,11 @@
             }
             const ray = state.raycaster.ray;
             if (!ray) return null;
+            if (groundRuntime && groundRuntime.surfaces(state.currentInput && state.currentInput.layout)) {
+                const floors = state.environmentRoot.children.filter(object => object.userData && object.userData.groundSurfaceId);
+                const hits = state.raycaster.intersectObjects(floors, false);
+                return hits.length ? {x:hits[0].point.x, y:hits[0].point.y, z:hits[0].point.z} : null;
+            }
             if (typeof ray.intersectPlane === 'function'
                 && typeof THREE.Plane === 'function'
                 && typeof THREE.Vector3 === 'function') {
@@ -12186,6 +13046,8 @@
                 instanced: record.instanced,
                 meshCount: record.meshCount,
                 prototypeMeshCount: record.prototypeMeshCount,
+                sourcePrototypeMeshCount: record.sourcePrototypeMeshCount,
+                renderedLightCount: record.renderedLightCount,
                 instanceMappings: record.mappings.map(function (item) {
                     return item.placementIds
                         ? {
@@ -12452,11 +13314,30 @@
                 placementCount: state.placements.length,
                 placementTransformAudit: getPlacementTransformAudit(),
                 floorMarkingCount: state.floorMarkingObjects.length,
+                perimeterWallCount: state.wallObjects.length,
+                visiblePerimeterWallCount: state.wallObjects.filter(object => object.visible).length,
+                exteriorFinishObjectCount: state.wallFinishObjects.length,
+                exteriorArtwork: state.wallArtworkLoads.map(function (record) {
+                    const object = state.wallFinishObjects.find(item =>
+                        item.userData && item.userData.exteriorArtwork === record);
+                    let visible = Boolean(object);
+                    for (let node = object; node; node = node.parent) {
+                        if (node.visible === false) visible = false;
+                    }
+                    return Object.assign({}, record, {visible});
+                }),
+                legacyWallPlacementCount: Array.from(state.renderGroups.values())
+                    .filter(record => record.visibilityLayer === 'walls')
+                    .reduce((count, record) => count + record.placementIds.length, 0),
+                visibleLegacyWallPlacementCount: Array.from(state.renderGroups.values())
+                    .filter(record => record.visibilityLayer === 'walls' && record.container.visible)
+                    .reduce((count, record) => count + record.placementIds.length, 0),
                 routeCount: state.routeObjects.length,
                 assetGroupCount: state.baseGroups.size,
                 representationGroups: groups,
                 selectedPlacementIds: Array.from(state.selectedIds).sort(),
-                walkthroughContextFocus: getWalkthroughContextFocus(),
+                walkthroughContextFocus: state.walkthroughContextFocus
+                    ? Object.assign({}, state.walkthroughContextFocus) : null,
                 ghostActive: Boolean(state.ghostInput),
                 proposalPreviewActive: Boolean(state.proposalInput),
                 proposalBeforeCount: state.proposalInput
@@ -12600,9 +13481,12 @@
             mount: mount,
             initialize: initialize,
             suspend: suspend,
+            park: park,
             resume: resume,
             setScene: setScene,
             setSelection: setSelection,
+            getComponentMaterials: getComponentMaterials,
+            highlightComponent: highlightComponent,
             setSelectionHandler: setSelectionHandler,
             setGhostPlacement: setGhostPlacement,
             setProposalPreview: setProposalPreview,
@@ -12617,6 +13501,9 @@
             isometricView: isometricView,
             setNavigationMode: setNavigationMode,
             enterWalkthrough: enterWalkthrough,
+            setWalkthroughCameraMode: setWalkthroughCameraMode,
+            lookWalkthroughAt: lookWalkthroughAt,
+            setWalkthroughCameraSettings: setWalkthroughCameraSettings,
             exitWalkthrough: exitWalkthrough,
             switchImmersiveMode: switchImmersiveMode,
             getWalkthroughState: getWalkthroughState,
@@ -12742,6 +13629,8 @@
         resolveMultiLevelWalkthroughMovement: resolveMultiLevelWalkthroughMovement,
         resolveWalkthroughPostureChange: resolveWalkthroughPostureChange,
         resolveWalkthroughMovement: resolveWalkthroughMovement,
+        walkthroughSweptObstacles: walkthroughSweptObstacles,
+        resolveWalkthroughCamera: resolveWalkthroughCamera,
         resolveDroneMovement: resolveDroneMovement,
         probeDroneClearance: probeDroneClearance,
         sphereIntersectsDroneVolume: sphereIntersectsDroneVolume,

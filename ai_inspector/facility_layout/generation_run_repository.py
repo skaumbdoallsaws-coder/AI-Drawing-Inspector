@@ -66,6 +66,7 @@ _RUN_IMMUTABLE_FIELDS = frozenset(
         "effectiveProvider",
         "effectiveModel",
         "reasoningEffort",
+        "gatewayRevision",
         "intentHash",
         "createdAt",
         "prototypeMode",
@@ -1268,6 +1269,7 @@ class FacilityGenerationRunRepository:
         writable: bool,
         run_id: str | None = None,
         stage_inputs_by_id: Mapping[str, Mapping[str, Any]] | None = None,
+        gateway_route=None,
     ) -> dict[str, Any]:
         tenant_id = _identifier(tenant_id, "tenantId")
         site_id = _identifier(site_id, "siteId")
@@ -1289,6 +1291,7 @@ class FacilityGenerationRunRepository:
                     model_source="generation_run_request",
                     reasoning_effort_source="generation_run_request",
                     compatibility_fallbacks_used=(),
+                    gateway_route=gateway_route,
                 )
             )
         except FacilityProviderConfigurationError as exc:
@@ -1417,6 +1420,8 @@ class FacilityGenerationRunRepository:
                 "saveEligibility": "blocked",
                 "terminalReason": None,
             }
+            if gateway_route is not None:
+                run["gatewayRevision"] = gateway_route.config_revision
             envelope = self._run_envelope(run)
             session_binding = {
                 "schemaVersion": FACILITY_GENERATION_RUN_SCHEMA_VERSION,

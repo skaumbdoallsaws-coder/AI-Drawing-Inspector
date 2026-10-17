@@ -64,6 +64,8 @@ _ANCHOR_FIELDS = {
     "extensions",
 }
 _PLACEMENT_FIELDS = {
+    "appearance",
+    "componentMaterials",
     "placementId",
     "assetId",
     "assetDefinitionRevision",
@@ -1495,6 +1497,20 @@ def validate_layout(
                 f"{path}.processBindings",
             )
         extensions.add_open_object(placement, _PLACEMENT_FIELDS, path)
+        if "appearance" in placement:
+            appearance = _object(placement["appearance"], f"{path}.appearance")
+            _required(appearance, {"color"}, f"{path}.appearance")
+            _closed(appearance, {"color"}, f"{path}.appearance")
+            color = appearance["color"]
+            if not isinstance(color, str) or re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None:
+                _fail("invalid_appearance", "Appearance color must be a six-digit hex color.",
+                      f"{path}.appearance.color")
+        if "componentMaterials" in placement:
+            from .component_materials import normalize_component_materials
+            try:
+                normalize_component_materials(placement["componentMaterials"])
+            except ValueError as exc:
+                _fail("invalid_component_materials", str(exc), f"{path}.componentMaterials")
         _stable_id(placement["assetId"], f"{path}.assetId")
         _revision(
             placement["assetDefinitionRevision"],
@@ -1532,6 +1548,12 @@ def validate_layout(
                     placement_id=str(placement["placementId"]),
                     placement_ids=placement_ids,
                 )
+            elif relationship.get("family") == "wall_attachment":
+                from .wall_attachments import validate_relationship
+                try:
+                    validate_relationship(relationship)
+                except ValueError as exc:
+                    _fail("invalid_layout_shape", str(exc), f"{path}.snapRelationship")
         _mapping_with_max_properties(
             placement["metadata"],
             f"{path}.metadata",
@@ -1896,6 +1918,36 @@ def validate_layout(
     _string(layout["updatedAt"], "$.updatedAt", minimum=1, maximum=64)
 
     root_extensions = layout.get("extensions")
+    if isinstance(root_extensions, Mapping) and "facilityGround" in root_extensions:
+        from .ground import normalize_ground
+        try:
+            normalize_ground(root_extensions["facilityGround"])
+        except ValueError as exc:
+            _fail("invalid_ground", str(exc), "$.extensions.facilityGround")
+    if isinstance(root_extensions, Mapping) and "facilityPerimeterWalls" in root_extensions:
+        from .perimeter_walls import validate_perimeter_walls
+        try:
+            validate_perimeter_walls(layout)
+        except ValueError as exc:
+            _fail("invalid_perimeter_walls", str(exc), "$.extensions.facilityPerimeterWalls")
+    if isinstance(root_extensions, Mapping) and "facilityInteriorWalls" in root_extensions:
+        from .interior_walls import validate_interior_walls
+        try:
+            validate_interior_walls(layout)
+        except ValueError as exc:
+            _fail("invalid_interior_walls", str(exc), "$.extensions.facilityInteriorWalls")
+    if isinstance(root_extensions, Mapping) and "facilityFloorSurfaces" in root_extensions:
+        from .floor_surfaces import normalize_floor_surfaces
+        try:
+            normalize_floor_surfaces(root_extensions["facilityFloorSurfaces"], layout)
+        except ValueError as exc:
+            _fail("invalid_floor_surfaces", str(exc), "$.extensions.facilityFloorSurfaces")
+    if isinstance(root_extensions, Mapping) and "facilityDecals" in root_extensions:
+        from .decals import normalize_decals
+        try:
+            normalize_decals(root_extensions["facilityDecals"], layout)
+        except ValueError as exc:
+            _fail("invalid_decals", str(exc), "$.extensions.facilityDecals")
     if isinstance(root_extensions, Mapping) and "facilityNavigation" in root_extensions:
         validate_facility_navigation_extension(
             root_extensions["facilityNavigation"],

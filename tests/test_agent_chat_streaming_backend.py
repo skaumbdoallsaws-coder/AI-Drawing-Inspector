@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 import time
 from types import SimpleNamespace
+import pytest
+import anyio
 
 from fastapi.testclient import TestClient
 
@@ -51,6 +53,57 @@ def _payload():
         "agent_type": "parts-finder",
         "session_id": "synthetic-session",
     }
+
+
+@pytest.mark.parametrize('disconnect_mode', ['task', 'scope', 'poll'])
+def test_stream_disconnect_cancels_once_and_joins_cleanup(monkeypatch, disconnect_mode):
+    monkeypatch.setenv('INSPECTORPRO_CHAT_STREAMING', '1')
+    monkeypatch.setenv('INSPECTORPRO_STREAMING_AGENTS', 'scout')
+
+    async def exercise():
+        entered = asyncio.Event()
+        cleaned = asyncio.Event()
+        workers = []
+
+        async def pipeline(*_args, **_kwargs):
+            workers.append(asyncio.current_task())
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(0.03)
+                cleaned.set()
+
+        async def disconnected():
+            return entered.is_set() and disconnect_mode == 'poll'
+
+        monkeypatch.setattr(server, '_execute_agent_chat_with_memory', pipeline)
+
+        async def consume():
+            response = await server.agent_chat_v2_stream(server.AgentChatRequest(**_payload()),
+                SimpleNamespace(is_disconnected=disconnected))
+            async for _ in response.body_iterator:
+                pass
+
+        if disconnect_mode == 'scope':
+            async with anyio.create_task_group() as group:
+                group.start_soon(consume)
+                await entered.wait()
+                group.cancel_scope.cancel()
+        else:
+            consumer = asyncio.create_task(consume())
+            await entered.wait()
+            if disconnect_mode == 'task':
+                consumer.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await consumer
+            else:
+                await consumer
+        assert cleaned.is_set(), 'Stream returned before runtime cleanup finished'
+        assert workers[0].done()
+        assert workers[0].cancelling() == 1
+
+    asyncio.run(exercise())
 
 
 def test_accumulate_response_text_accepts_message_and_string():

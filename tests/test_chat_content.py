@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from ai_inspector.chat_content import (
     CHAT_TABLE_TOOL,
     CHAT_VISUALIZATION_TOOL,
@@ -15,6 +17,72 @@ from ai_inspector.chat_content import (
     requested_visualization_type,
     requested_table,
 )
+
+
+def test_generation_source_cards_are_receipt_derived_deduplicated_and_unreviewed():
+    from ai_inspector.facility_layout.generation_presentation import generation_research_source_block
+    first = {"tool": "search_generation_sources", "status": "succeeded", "result": {
+        "sources": [{"url": "https://www.skf.com/a", "title": "First retained title", "retrieval": "search_result"},
+                    {"url": "https://example.com/b", "title": "Second", "retrieval": "search_result"}],
+        "citations": [{"url": "https://www.skf.com/a", "text": "A retained extract."},
+                      {"url": "https://invented.example.com", "text": "Not a retrieved source"}],
+        "retrievedAt": "2026-09-22T12:00:00Z"}}
+    second = {"tool": "read_generation_source", "status": "succeeded", "result": {
+        "complete": True, "requestedUrl": "https://www.skf.com/a",
+        "sources": [{"url": "https://www.skf.com/a", "title": "Later title", "retrieval": "fetched_document"},
+                    {"url": "https://example.com/manual.pdf", "title": "Manual", "retrieval": "fetched_document"}],
+        "citations": [], "retrievedAt": "2026-09-22T12:00:01Z"}}
+    observed = [first, second, {**first, "status": "failed"}, {**first, "tool": "model_presentation"}]
+    before = deepcopy(observed)
+    block = generation_research_source_block(observed)
+    sources = block["sources"]
+    assert [source["url"] for source in sources] == ["https://www.skf.com/a", "https://example.com/b", "https://example.com/manual.pdf"]
+    assert sources[0]["title"] == "Later title" and sources[0]["description"] == ""
+    assert sources[0]["retrievedAt"] == second["result"]["retrievedAt"]
+    assert sources[0]["sourceType"] == "technical-document"
+    assert sources[0]["specifications"]["Retrieval"] == "Document read"
+    assert sources[2]["sourceType"] == "web"
+    assert sources[2]["specifications"]["Retrieval"] == "Read not confirmed"
+    assert generation_research_source_block([second, first])["sources"][0] == sources[0]
+    assert all(source["publisher"] == "" and source["inferIdentity"] is False and source["iconUrl"] is None for source in sources)
+    assert all(source["specifications"]["Review"] == "Pending" for source in sources)
+    assert observed == before
+    table = {"type": "table", "title": "Keep this", "columns": [{"label": "Count"}], "rows": [{"cells": ["2"]}]}
+    payload = normalize_chat_response_payload({"response": "Preview", "content_blocks": [table, block]})
+    assert [item["type"] for item in payload["content_blocks"]] == ["table", "sources"]
+    assert payload["content_blocks"][1] == block
+
+
+def test_incomplete_document_receipt_cannot_upgrade_a_search_card():
+    from ai_inspector.facility_layout.generation_presentation import generation_research_source_block
+    entry = {"tool": "read_generation_source", "status": "succeeded", "result": {
+        "complete": False, "requestedUrl": "https://maker.example/manual", "truncated": True,
+        "sources": [{"url": "https://maker.example/manual", "retrieval": "fetched_document"}]}}
+    card = generation_research_source_block([entry])["sources"][0]
+    assert card["sourceType"] == "web"
+    assert card["specifications"]["Retrieval"] == "Read not confirmed"
+    assert card["specifications"]["Extract"] == "Truncated"
+
+
+def test_generation_cards_ignore_failed_absent_unsafe_and_model_only_sources():
+    from ai_inspector.facility_layout.generation_presentation import generation_research_source_block
+    assert generation_research_source_block([]) is None
+    result = {"sources": [{"url": "javascript:alert(1)"}, {"url": "http://127.0.0.1/private"},
+                          {"url": "https://user:password@example.com"}]}
+    assert generation_research_source_block([{"tool": "read_generation_source", "status": "succeeded", "result": result}]) is None
+    result["sources"] = [{"url": "https://example.com/a"}]
+    assert generation_research_source_block([{"tool": "read_generation_source", "status": "failed", "result": result}]) is None
+    assert generation_research_source_block([{"tool": "preview_generation_package", "status": "succeeded", "result": result}]) is None
+
+
+def test_generation_source_cards_are_bounded_and_stable():
+    from ai_inspector.facility_layout.generation_presentation import generation_research_source_block
+    result = {"sources": [{"url": f"https://example.com/{index}", "title": "T" * 1000} for index in range(25)]}
+    results = [{"tool": "search_generation_sources", "status": "succeeded", "result": result}]
+    block = generation_research_source_block(results)
+    assert len(block["sources"]) == 20 and "first 20" in block["title"]
+    assert all(len(source["title"]) == 240 for source in block["sources"])
+    assert block == generation_research_source_block(results)
 
 
 def test_visualization_tool_contract_is_closed_and_normalizes_rows() -> None:

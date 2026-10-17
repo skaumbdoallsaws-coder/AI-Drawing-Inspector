@@ -35,6 +35,16 @@ test('browser acceptance is an exclusive explicit option', () => {
     assert.throws(() => parseRuntimeOptions([...args, '--browser-acceptance-output', out, flag, out]));
   }
 });
+
+test('generation acceptance is explicit and excludes other acceptance modes', () => {
+  const args = ['--profile-file', path.resolve('profile.json'), '--python', path.resolve('python.exe')];
+  const out = path.resolve('generation-evidence');
+  assert.equal(parseRuntimeOptions(args).generationAcceptanceOutput, undefined);
+  assert.equal(parseRuntimeOptions([...args, '--generation-acceptance-output', out]).generationAcceptanceOutput, out);
+  for (const flag of ['--acceptance-output', '--workflow-acceptance-output', '--browser-acceptance-output', '--startup-diagnostics-output', '--research-acceptance-output']) {
+    assert.throws(() => parseRuntimeOptions([...args, '--generation-acceptance-output', out, flag, out]));
+  }
+});
 for (const suffix of ['/api/parts-manual/MMLE-50D/artifacts/manual.pdf',
   '/api/work-instructions/MMLE-50D/artifact.pdf', '/generated/exports/report.docx',
   '/api/profiles', '/static/logo.png']) {

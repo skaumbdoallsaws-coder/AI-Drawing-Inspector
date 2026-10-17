@@ -686,7 +686,8 @@ class FacilityDesignLoopService:
             "transaction": next_envelope,
             "adoption": adoption,
             "candidateLayout": deepcopy(candidate["candidateLayout"]),
-            "candidateOperations": deepcopy(candidate["operations"]),
+            **({"candidateOperationBatches": deepcopy(candidate["operationBatches"])}
+               if "operationBatches" in candidate else {"candidateOperations": deepcopy(candidate["operations"])}),
             "expectedInstallationFingerprint": expected_fingerprint,
             "transactionBindingRevision": binding_revision,
         }

@@ -24,6 +24,7 @@ failure_behavior:
   contradictory_context: abstain_and_report_conflict
 compatible_models:
   - claude-sonnet
+  - gateway-facility-planner
 evaluation_suite: facility-layout-analysis-v1
 context_budget:
   maximum_tokens: 12000

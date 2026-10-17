@@ -64,6 +64,16 @@ def _registries():
                 "analyze_facility_fit",
                 "preview_facility_move",
                 "build_facility_layout_preview",
+                "amend_facility_program_resource_batch_draft",
+                "build_activity_scenario",
+                "compare_journey_alternatives",
+                "compile_navigation_snapshot",
+                "generate_facility_planning_prototype_draft",
+                "generate_full_factory_draft",
+                "observe_navigation_context",
+                "plan_actor_journey",
+                "propose_navigation_intent",
+                "validate_actor_journey",
                 "present_chat_visualization",
                 "present_chat_table",
                 "inspect_process_map_spatial_layout",
@@ -873,7 +883,7 @@ def test_shadow_submit_builds_context_on_request_thread_and_soft_fails():
 def test_chat_submits_shadow_route_as_an_unused_expression():
     import server
 
-    tree = ast.parse(textwrap.dedent(inspect.getsource(server.agent_chat)))
+    tree = ast.parse(textwrap.dedent(inspect.getsource(server._agent_chat_impl)))
     shadow_calls = []
     assigned_shadow_calls = []
     for node in ast.walk(tree):

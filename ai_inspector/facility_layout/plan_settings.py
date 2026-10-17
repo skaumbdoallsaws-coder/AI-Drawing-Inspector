@@ -127,6 +127,14 @@ def shell_with_plan_boundary(
     """Return the shell with its floor boundary replaced by authored plan bounds."""
 
     result = deepcopy(dict(shell))
+    from .perimeter_walls import append_wall_features
+    append_wall_features(result, layout)
+    from .interior_walls import append_interior_features
+    append_interior_features(result, layout)
+    from .ground import KEY as GROUND_KEY, apply_ground_to_shell
+    if GROUND_KEY in layout.get("extensions", {}):
+        apply_ground_to_shell(result, layout)
+        return result
     settings = plan_settings_from_layout(layout)
     if settings is None:
         return result

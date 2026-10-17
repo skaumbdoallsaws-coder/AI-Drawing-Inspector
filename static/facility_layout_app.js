@@ -152,15 +152,20 @@
         const session = options.session
             || requireFunction(Session.createSession, 'createSession')({
                 previewOperations: transport.previewOperations,
+                siteId: transport.siteId || options.siteId,
+                layoutId: transport.layoutId || options.layoutId,
+                isOperationProposalContextCurrent: function () { return !destroyed && !suspended; },
                 sessionId: transport.sessionId,
                 applyOperations: transport.applyOperations,
                 reloadLayout: transport.reloadLayout,
+                importDecalImage: transport.importDecalImage,
                 placementCandidates: transport.placementCandidates,
                 placementCandidatePreview:
                     transport.placementCandidatePreview,
                 createLayoutProposals: transport.createLayoutProposals,
                 getLayoutProposalPreview:
                     transport.getLayoutProposalPreview,
+                createOperationUndoPreview: transport.createOperationUndoPreview,
                 cancelLayoutProposal: transport.cancelLayoutProposal,
                 approveLayoutProposal: transport.approveLayoutProposal,
                 applyLayoutProposal: transport.applyLayoutProposal,

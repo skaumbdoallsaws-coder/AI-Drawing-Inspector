@@ -600,6 +600,36 @@
         "metadata"
       ],
       "properties": {
+        "appearance": {
+          "type": "object",
+          "required": ["color"],
+          "properties": {"color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}},
+          "additionalProperties": false
+        },
+        "componentMaterials": {
+          "type": "object",
+          "required": ["representation", "overrides"],
+          "properties": {
+            "representation": {"enum": ["overview", "detail"]},
+            "overrides": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 512,
+              "items": {
+                "type": "object",
+                "required": ["key", "color", "roughness", "metalness"],
+                "properties": {
+                  "key": {"type": "string", "pattern": "^m[0-9]{1,6}-s[0-9]{1,4}$"},
+                  "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+                  "roughness": {"type": "number", "minimum": 0, "maximum": 1},
+                  "metalness": {"type": "number", "minimum": 0, "maximum": 1}
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
         "placementId": {
           "type": "string",
           "pattern": "^pl-[A-Za-z0-9][A-Za-z0-9._:-]*$",

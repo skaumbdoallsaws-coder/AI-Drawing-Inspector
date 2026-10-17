@@ -419,6 +419,7 @@ class FacilityLayoutTransactionRuntime:
         session_id: str,
         idempotency_key: str,
         explicit_approval: bool,
+        authorization_mode: str = "explicit",
     ) -> ApprovalRecord:
         with self._authority_lock:
             proposal = self._get_proposal_for_approval(
@@ -466,6 +467,7 @@ class FacilityLayoutTransactionRuntime:
                     principal=principal,
                     idempotency_key=idempotency_key,
                     explicit_approval=explicit_approval,
+                    authorization_mode=authorization_mode,
                 )
             )
 

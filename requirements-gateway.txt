@@ -1,0 +1,2 @@
+# Optional backend-only model transport. Direct Claude operation remains available.
+litellm==1.103.1

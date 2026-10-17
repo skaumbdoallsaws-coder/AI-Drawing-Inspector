@@ -4884,7 +4884,7 @@ def analyze_facility_cell_alternatives(
             "metricId": "user_authored_process_sequence_center_distance",
             "evidenceStatus": "authored",
         }
-    if len(station_ids) < 2:
+    if len(station_ids) < 2 and not (len(station_ids) == 1 and "grid" in requested_strategies):
         return {
             "analysis": "cell_alternatives",
             "resolutionStatus": "unique",
@@ -5008,24 +5008,30 @@ def analyze_facility_cell_alternatives(
 
     records = []
     for strategy in requested_strategies:
+        # Operators occupy real footprint slots in a grid. Putting them on its
+        # centroid can overlap a station or violate the authored edge gap.
+        grid_member_ids = sequence_ids + operator_ids if strategy == "grid" else sequence_ids
         offsets, guide = _cell_strategy_samples(
             strategy,
-            len(station_ids),
+            len(grid_member_ids),
             pitch=pitch,
             invert_u=invert_u,
         )
         required_width = guide["usableWidth"] + maximum_radius * 2.0
         required_depth = guide["usableDepth"] + maximum_radius * 2.0
-        blocker_codes = []
+        blocker_codes = (["cell_requires_at_least_two_stations"]
+                         if len(station_ids) < 2 and strategy != "grid" else [])
         if required_width > maximum_x - minimum_x + GEOMETRY_EPSILON:
             blocker_codes.append("cell_width_insufficient")
         if required_depth > maximum_z - minimum_z + GEOMETRY_EPSILON:
             blocker_codes.append("cell_depth_insufficient")
         target_positions = {
             placement_id: (center_x + offset[0], center_z + offset[1])
-            for placement_id, offset in zip(sequence_ids, offsets)
+            for placement_id, offset in zip(grid_member_ids, offsets)
         }
         for index, placement_id in enumerate(operator_ids):
+            if strategy == "grid":
+                continue
             if strategy == "line":
                 operator_z = center_z - maximum_radius - gap
                 operator_x = center_x + (
@@ -6559,6 +6565,7 @@ def analyze_facility_asset_access(
     scope_ids: Sequence[str] = (),
     use_selection: bool = False,
     maximum_results: int = 20,
+    shell_obstacles: Sequence[Any] = (),
 ) -> dict[str, Any]:
     """Measure an authored asset side without inventing side requirements."""
 
@@ -6733,6 +6740,10 @@ def analyze_facility_asset_access(
             side_record if isinstance(side_record, Mapping)
             else {"side": side_record}
         )
+        if side_record.get("evidenceStatus") in {"unknown", "inferred", "unverified"}:
+            missing.append({"placementId": placement_id, "requestedInterfaceRole": role,
+                            "reason": "functional_side_unverified", "evidenceStatus": "unknown"})
+            continue
         local_side = str(side_record.get("side") or "").casefold()
         local_direction = _interface_direction(side_record, local_side)
         geometry = geometry_by_id.get(placement_id, {})
@@ -6752,7 +6763,18 @@ def analyze_facility_asset_access(
             continue
         transform = placement.get("transform")
         transform = transform if isinstance(transform, Mapping) else {}
-        rotation = _finite_optional(transform.get("rotationDegrees")) or 0.0
+        quaternion = transform.get("quaternion")
+        if isinstance(quaternion, Mapping):
+            q = [float(quaternion.get(axis, 0)) for axis in ("x", "y", "z", "w")]
+            length = math.sqrt(sum(value * value for value in q))
+            if not length or abs(q[0]) > GEOMETRY_EPSILON or abs(q[2]) > GEOMETRY_EPSILON:
+                missing.append({"placementId": placement_id, "requestedInterfaceRole": role,
+                                "reason": "non_planar_orientation", "evidenceStatus": "unknown"})
+                continue
+            q = [value / length for value in q]
+            rotation = math.degrees(math.atan2(2 * q[3] * q[1], 1 - 2 * q[1] * q[1]))
+        else:
+            rotation = _finite_optional(transform.get("rotationDegrees")) or 0.0
         world_direction = _rotate_floor_vector(local_direction, rotation)
         world_side = _cardinal_side_for_direction(world_direction) or None
         world_record = {
@@ -6795,6 +6817,19 @@ def analyze_facility_asset_access(
                 nearest_obstacle["placementId"],
             ):
                 nearest_obstacle = candidate
+        nearest_shell_obstacle = None
+        subject_intervals = [(item.get("minimumY", floor_elevation), item.get("maximumY", floor_elevation))
+                             for item in placement.get("physicalGeometry", [])]
+        for obstacle in shell_obstacles:
+            if not any(min(high, obstacle.maximum_y) - max(low, obstacle.minimum_y) > GEOMETRY_EPSILON
+                       for low, high in subject_intervals):
+                continue
+            obstacle_shape = _shape_from_boundary([{"x": x, "z": z} for x, z in obstacle.polygon])
+            if obstacle_shape is None or probe.intersection(obstacle_shape).area <= GEOMETRY_EPSILON ** 2:
+                continue
+            distance = float(side_line.distance(obstacle_shape))
+            if nearest_shell_obstacle is None or distance < nearest_shell_obstacle["distanceMeters"]:
+                nearest_shell_obstacle = {"shellFeatureId": obstacle.owner_id, "distanceMeters": distance}
         boundary_distance = None
         if shell_shape is not None:
             boundary_crossing = probe.intersection(shell_shape.boundary)
@@ -6808,6 +6843,8 @@ def analyze_facility_asset_access(
             ))
         if boundary_distance is not None:
             limiting.append((boundary_distance, "facility_boundary"))
+        if nearest_shell_obstacle is not None:
+            limiting.append((nearest_shell_obstacle["distanceMeters"], "shell_obstacle"))
         actual_clearance = min(limiting)[0] if limiting else None
         matching_kinds = _matching_route_kinds(matched_role)
         matching_routes = [
@@ -6869,6 +6906,7 @@ def analyze_facility_asset_access(
                 _round(boundary_distance)
                 if boundary_distance is not None else None
             ),
+            "nearestShellObstacle": nearest_shell_obstacle,
             "connectedMatchingRouteIds": connected_route_ids,
             "nearestMatchingRouteDistanceMeters": (
                 _round(min(route_distances)) if route_distances else None

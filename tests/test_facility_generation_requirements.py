@@ -86,6 +86,31 @@ def assert_error(code, fn):
     assert exc.value.code == code
 
 
+@pytest.mark.parametrize("omitted", ["and", "but not both", "."])
+def test_coverage_recovery_locates_exact_omission_without_changing_requirements(omitted):
+    request = body()
+    text = "Use tables and lifts. Read summaries " + omitted + " read the manual."
+    request["turns"][0]["text"] = text
+    start = len("Use tables and lifts. Read summaries ")
+    left = request["requirements"][0]
+    left["source"]["end"] = start
+    right = deepcopy(left)
+    right.update(requirementId="R-2")
+    right["source"].update(start=start + len(omitted), end=len(text))
+    request["requirements"].append(right)
+    before = deepcopy(request)
+    with pytest.raises(GenerationRequirementError) as caught:
+        build_generation_ledger(request)
+    assert caught.value.code == "generation_requirement_clause_unaccounted"
+    gap, = caught.value.details["uncovered"]
+    assert gap["start"] == start and gap["text"] == omitted
+    context = gap["context"]
+    assert context["text"] == text[context["start"]:context["end"]]
+    assert len(context["text"]) <= 240
+    assert "Read summaries" in context["text"]
+    assert request == before
+
+
 def test_clean_base_and_pure_kernel_generation_leave_original_unchanged():
     document = base()
     before = canonical_design_bytes(document)

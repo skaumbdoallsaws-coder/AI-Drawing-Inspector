@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from ai_inspector.facility_layout.canonical import layout_revision
 from ai_inspector.facility_layout.design_brief import canonical_design_bytes
+from ai_inspector.facility_layout.errors import FacilityValidationError
 from ai_inspector.facility_layout.generation_admission import ADMISSION_KIND, PREVIEW_KIND, SOURCE_SCHEMA
 from ai_inspector.facility_layout.generation_requirements import build_generation_ledger
 from ai_inspector.facility_layout.host import LOCAL_LAYOUT_ID, LOCAL_SITE_ID, LocalFacilityLayoutHost
@@ -62,6 +63,8 @@ def case(tmp_path, monkeypatch):
         "processStepRefs": resource["processStepRefs"], "targetArea": resource["targetArea"]}, "Use the reviewed assembly workbench mapping in Assembly.")
     require("resource_pattern", resource["requirementId"], {key: resource[key] for key in ("placementPattern", "semanticOrientation")}, "Arrange assembly benches east-west in rows.")
     require("resource_spacing", resource["requirementId"], deepcopy(resource["authoredSpacing"]), "Use 1.5 metre spacing.")
+    require("process_sequence", LOCAL_LAYOUT_ID, {"processStepIds": [step["processStepId"] for step in context["processSteps"]]},
+            "Material follows receiving, assembly, then inspection.")
     for department in package["departments"]:
         require("department_allocation", department["departmentId"], {key: department[key] for key in ("label", "zoneType", "areaShare", "row")},
                 f"Use the specified allocation for {department['label']}.")
@@ -161,6 +164,56 @@ def test_real_compilation_preview_retry_and_saved_isolation(case, monkeypatch):
     current = case["host"].service.get_layout(case["principal"], LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["layout"]
     assert canonical_design_bytes(current) == canonical_design_bytes(case["saved"])
     assert not case["service"].leases.inspect(case["principal"].tenant_id, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["active"]
+
+
+def test_real_route_refusal_preserves_findings_and_allows_corrected_preview(case):
+    proposal = case["request"]["proposal"]
+    original_routes = deepcopy(proposal["routes"])
+    self_route = deepcopy(original_routes[0])
+    self_route.update(routeId="invalid-self-route", label="Invalid Self Route",
+                      sourceArea="Assembly", targetArea="Assembly", viaAreas=[])
+    proposal["routes"].append(self_route)
+    with pytest.raises(FacilityValidationError) as exc:
+        preview(case)
+    assert exc.value.code == "facility_circulation_repeated_department"
+    assert "cannot repeat a department" in str(exc.value)
+    assert exc.value.__cause__.code == exc.value.code
+    assert exc.value.details == exc.value.__cause__.details
+    # No user requirement demanded this extra route. Repair only the proposed route.
+    proposal["routes"] = original_routes
+    case["request"]["requestKey"] = "admit-repaired-route"
+    receipt = preview(case, key="preview-repaired-route")
+    assert receipt["counts"]["placements"] == 2
+    current = case["host"].service.get_layout(case["principal"], LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["layout"]
+    assert canonical_design_bytes(current) == canonical_design_bytes(case["saved"])
+    assert not case["service"].leases.inspect(case["principal"].tenant_id, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["active"]
+
+
+@pytest.mark.parametrize("error_class", ["FacilityCirculationError", "FacilityKnowledgeContractError",
+    "FacilityProgramError", "FacilityIndustrialPatternError", "FacilityFloorCommunicationError",
+    "FacilityProgramExecutionError"])
+def test_compiler_domain_findings_retain_code_message_and_details(case, monkeypatch, error_class):
+    from ai_inspector.facility_layout import generation_admission as module
+    refusal = getattr(module, error_class)("test_domain_refusal", "An exact compiler finding.",
+                                          details={"affectedIds": ["assembly"], "minimum": 2})
+    def reject(*args):
+        raise refusal
+    monkeypatch.setattr(module, "compile_facility_program_operation_plan", reject)
+    with pytest.raises(FacilityValidationError) as exc:
+        preview(case)
+    assert (exc.value.code, str(exc.value), exc.value.details) == (refusal.code, str(refusal), refusal.details)
+    assert exc.value.__cause__ is refusal
+
+
+def test_unexpected_compiler_fault_is_not_relabelled_as_user_refusal(case, monkeypatch):
+    from ai_inspector.facility_layout import generation_admission as module
+    fault = RuntimeError("Unexpected implementation fault")
+    def reject(*args):
+        raise fault
+    monkeypatch.setattr(module, "compile_facility_program_operation_plan", reject)
+    with pytest.raises(RuntimeError) as exc:
+        preview(case)
+    assert exc.value is fault
 
 
 @pytest.mark.parametrize("location", ["root", "nested"])

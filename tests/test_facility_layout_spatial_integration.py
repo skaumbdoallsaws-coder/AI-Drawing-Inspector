@@ -442,6 +442,83 @@ def test_spatial_http_contract_rejects_screen_coordinates_and_stale_revision(
     assert stale.json()["error"]["code"] == "revision_conflict"
 
 
+def _review_zone(zone_id, *, side=4):
+    return {"zoneId": zone_id, "zoneType": "workcell", "label": "Containment review",
+        "boundary": [{"x": 0, "z": 0}, {"x": side, "z": 0},
+            {"x": side, "z": side}, {"x": 0, "z": side}],
+        "floorElevation": 0, "anchors": [], "evidence": []}
+
+
+@pytest.mark.parametrize("zoned", [False, True])
+@pytest.mark.parametrize("route", ["manual-preview", "manual-apply", "exact-proposal"])
+def test_add_zone_cannot_grandfather_a_placement_moved_in_same_batch(tmp_path, zoned, route):
+    from ai_inspector.facility_layout.operation_proposals import create
+
+    host = LocalFacilityLayoutHost(tmp_path / "facility", private_assets=False)
+    try:
+        bootstrap = host.ensure_bootstrap()
+        principal = host.principal()
+        asset = bootstrap["assetCatalog"][2]
+        placement = {"placementId": "pl-zone-batch", "assetId": asset["assetId"],
+            "assetDefinitionRevision": asset["assetDefinitionRevision"],
+            "transform": {"position": {"x": 10, "y": 0, "z": 10},
+                "quaternion": {"x": 0, "y": 0, "z": 0, "w": 1}, "scale": 1},
+            "positionMode": "manual", "snapRelationship": None, "metadata": {}}
+        seed = [{"op": "place_asset", "placement": placement}]
+        if zoned:
+            seed.insert(0, {"op": "add_zone", "zone": _review_zone("zn-existing", side=14)})
+        saved = host.service.apply_operations(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID,
+            bootstrap["layout"]["revision"], seed)
+        operations = [{"op": "add_zone", "zone": _review_zone("zn-new")},
+            {"op": "move_placement", "placementId": placement["placementId"],
+                "position": {"x": 20, "y": 0, "z": 20}}]
+        before = _snapshot(host.root)
+        with pytest.raises(FacilityValidationError) as raised:
+            if route == "exact-proposal":
+                create(host.service, principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, saved["revision"],
+                    operations=operations)
+            else:
+                operation = (host.service.preview_operations if route == "manual-preview"
+                    else host.service.apply_operations)
+                operation(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, saved["revision"], operations)
+        assert raised.value.code == "spatial_validation_failed"
+        assert any(item["code"] == "zone_containment_violation" and
+            item["subjectRefs"] == [placement["placementId"]] for item in raised.value.details["findings"])
+        assert _snapshot(host.root) == before
+    finally:
+        host.close()
+
+
+def test_add_zone_cannot_exempt_containment_after_shrinking_an_existing_zone(tmp_path):
+    from ai_inspector.facility_layout.operation_proposals import create
+
+    host = LocalFacilityLayoutHost(tmp_path / "facility", private_assets=False)
+    try:
+        bootstrap = host.ensure_bootstrap()
+        principal = host.principal()
+        asset = bootstrap["assetCatalog"][2]
+        placement = {"placementId": "pl-unchanged-zone-batch", "assetId": asset["assetId"],
+            "assetDefinitionRevision": asset["assetDefinitionRevision"],
+            "transform": {"position": {"x": 10, "y": 0, "z": 10},
+                "quaternion": {"x": 0, "y": 0, "z": 0, "w": 1}, "scale": 1},
+            "positionMode": "manual", "snapRelationship": None, "metadata": {}}
+        saved = host.service.apply_operations(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID,
+            bootstrap["layout"]["revision"], [
+                {"op": "add_zone", "zone": _review_zone("zn-existing", side=14)},
+                {"op": "place_asset", "placement": placement}])
+        before = _snapshot(host.root)
+        with pytest.raises(FacilityValidationError) as raised:
+            create(host.service, principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, saved["revision"], operations=[
+                {"op": "add_zone", "zone": _review_zone("zn-new", side=3)},
+                {"op": "edit_zone", "zoneId": "zn-existing",
+                    "patch": {"boundary": _review_zone("zn-existing")["boundary"]}}])
+        assert raised.value.code == "spatial_validation_failed"
+        assert any(item["code"] == "zone_containment_violation" for item in raised.value.details["findings"])
+        assert _snapshot(host.root) == before
+    finally:
+        host.close()
+
+
 def test_spatial_executor_cooperatively_cancels_bounded_job():
     def slow_generate(*_args, cancel_check, **_kwargs):
         while True:

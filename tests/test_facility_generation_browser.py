@@ -140,13 +140,40 @@ def test_shared_workspace_generation_preview(chat, tmp_path, source_mode):
                             assert changed.tobytes() != rendered.tobytes(), "3D camera control did not change the rendered scene"
                         captures.append(filename)
                 assert page.evaluate("() => app.session.getState()") == before
-                page.get_by_role("button", name="Exit planning", exact=True).click()
+                page.set_viewport_size({"width": 1440, "height": 900})
+                page.get_by_role("button", name="Apply unsaved", exact=True).click()
+                page.wait_for_function("""() => (!!app.session.getState().designProposalDraft && !app.session.getState().busy)
+                    || !!document.querySelector('.ip-flw-generation-body [role=alert]')""")
+                assert page.evaluate("() => !!app.session.getState().designProposalDraft"), page.locator('.ip-flw-generation-body').inner_text()
+                installed = page.evaluate("() => app.session.getState()")
+                assert installed["draftRevision"] == receipt["candidateRevision"]
+                assert installed["dirty"] is True
+                assert installed["baseRevision"] == before["baseRevision"]
+                page.screenshot(path=str(artifacts / "generation-applied.png"))
+                if source_mode == "brief":
+                    def lost_ack(route):
+                        accepted = route.fetch()
+                        assert accepted.status == 200
+                        route.fulfill(status=503, content_type="application/json", body=json.dumps({"detail": "Injected lost Undo acknowledgment"}))
+                    page.route("**/undo/acknowledge", lost_ack)
+                    failure = page.evaluate("() => app.session.undo().then(() => null, e => e.message)")
+                    assert failure
+                    pending = page.evaluate("() => app.session.getState()")
+                    assert pending["canSave"] is False
+                    assert pending["designProposalDraft"]["status"] == "undo_acknowledgment_pending"
+                    page.unroute("**/undo/acknowledge", lost_ack)
+                    page.reload(wait_until="networkidle")
+                    page.evaluate("() => window.ready")
+                else:
+                    page.evaluate("() => app.session.undo()")
+                restored = page.evaluate("() => app.session.getState()")
+                for key in ("layout", "draftRevision", "baseRevision", "selectedIds", "history", "dirty"):
+                    assert restored.get(key) == before.get(key), key
                 assert page.evaluate("() => app.workspace.generationPlanningView.activeLayout()") is None
-                assert page.evaluate("() => app.session.getState()") == before
                 assert not errors, errors
                 (artifacts / "browser-report.json").write_text(json.dumps({"scope": "isolated shared workspace; synthetic source; no live provider",
-                    "sourceMode": source_mode, "preview": receipt, "screenshots": captures, "pageErrors": errors, "editorUnchanged": True,
-                    "saveCalls": 0}, indent=2), encoding="utf-8")
+                    "sourceMode": source_mode, "preview": receipt, "screenshots": captures, "pageErrors": errors, "editorRestored": True,
+                    "unsavedApplyAndUndoVerified": True, "lostUndoAckReloadVerified": source_mode == "brief", "saveCalls": 0}, indent=2), encoding="utf-8")
             finally:
                 browser.close()
     finally:

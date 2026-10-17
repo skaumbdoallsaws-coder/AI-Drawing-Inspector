@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from ai_inspector.model_gateway import GatewayError, GatewayRoute, current_config
+
 
 FACILITY_SAGE_PROVIDER_ENV = "INSPECTORPRO_FACILITY_LAYOUT_SAGE_PROVIDER"
 FACILITY_SAGE_ANTHROPIC_MODEL_ENV = (
@@ -25,7 +27,7 @@ SHARED_SAGE_OPENAI_REASONING_EFFORT_ENV = (
 FACILITY_FROZEN_PROVIDER = "anthropic"
 FACILITY_FROZEN_MODEL = "claude-sonnet-4-5-20250929"
 FACILITY_FROZEN_REASONING_EFFORT: str | None = None
-FACILITY_DEFAULT_COMPATIBLE_MODELS = ("claude-sonnet",)
+FACILITY_DEFAULT_COMPATIBLE_MODELS = ("claude-sonnet", "gateway-facility-planner")
 FACILITY_OPENAI_MODEL_DEFAULT = "gpt-5.6-sol"
 FACILITY_OPENAI_REASONING_EFFORT_DEFAULT = "medium"
 OPENAI_REASONING_EFFORTS = frozenset(
@@ -55,6 +57,7 @@ class FacilityProviderConfig:
     model_source: str
     reasoning_effort_source: str
     compatibility_fallbacks_used: tuple[str, ...]
+    gateway_route: GatewayRoute | None = None
 
     def public_metadata(self) -> dict[str, Any]:
         return {
@@ -66,6 +69,7 @@ class FacilityProviderConfig:
             "reasoningEffortSource": self.reasoning_effort_source,
             "compatibilityFallbacksUsed": list(self.compatibility_fallbacks_used),
             "apiKeyRecorded": False,
+            **({"gateway": self.gateway_route.metadata()} if self.gateway_route else {}),
         }
 
 
@@ -101,6 +105,14 @@ def assert_facility_provider_configuration(
     frozen_model: str = FACILITY_FROZEN_MODEL,
     frozen_reasoning_effort: str | None = FACILITY_FROZEN_REASONING_EFFORT,
 ) -> None:
+    if config.gateway_route is not None:
+        route = config.gateway_route
+        route.require("text", "tools", "vision")
+        if ("gateway-facility-planner" not in compatible_models or route.role != "facility-planner"
+                or (config.provider, config.model, config.reasoning_effort) !=
+                (route.provider, route.model, route.reasoning_effort)):
+            raise FacilityProviderConfigurationError("facility_model_mismatch", "Facility skill or request does not match its gateway contract.")
+        return
     if config.provider != frozen_provider:
         raise FacilityProviderConfigurationError(
             "facility_provider_config_mismatch",
@@ -145,6 +157,16 @@ def resolve_facility_provider_config(
     compatible_models: Sequence[str] = FACILITY_DEFAULT_COMPATIBLE_MODELS,
     enforce_frozen: bool = True,
 ) -> FacilityProviderConfig:
+    try:
+        gateway = current_config(environ)
+    except GatewayError as exc:
+        raise FacilityProviderConfigurationError(exc.code, str(exc), details=exc.details) from None
+    if gateway is not None:
+        route = gateway.route("facility-planner")
+        config = FacilityProviderConfig(route.provider, route.model, route.reasoning_effort,
+                                       "gateway", "gateway", "gateway", (), route)
+        assert_facility_provider_configuration(config, compatible_models=compatible_models)
+        return config
     provider, provider_source, provider_fallbacks = _read(
         environ,
         FACILITY_SAGE_PROVIDER_ENV,

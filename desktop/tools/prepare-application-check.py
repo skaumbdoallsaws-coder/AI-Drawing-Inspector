@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sys
@@ -17,11 +18,14 @@ def main():
     parser.add_argument('--destination', type=Path, required=True)
     parser.add_argument('--port', type=int, default=8482)
     parser.add_argument('--include-documents', action='store_true')
+    parser.add_argument('--layout-id', default='fl-reference-manual-20260812')
     args = parser.parse_args()
     destination = args.destination.resolve()
     if destination.exists() or ROOT not in destination.parents: raise ValueError('Use a fresh directory within the project')
     source = ROOT / '.runtime/facility-layout'
-    layout_id = 'fl-reference-manual-20260812'
+    layout_id = args.layout_id
+    if not re.fullmatch(r'fl-[A-Za-z0-9._-]{1,128}', layout_id):
+        raise ValueError('Invalid layout ID')
     relative = Path('layouts/local/site-local/layouts')
     source_file = source / relative / (layout_id + '.json')
     original = source_file.read_bytes()

@@ -132,6 +132,75 @@ def test_create_stamps_server_time_and_establishes_default(tmp_path: Path) -> No
     assert source["createdAt"] == "browser-created"
 
 
+def test_current_validation_cache_reuses_only_successful_exact_bytes(tmp_path, monkeypatch):
+    import ai_inspector.facility_layout.repository as module
+    repository = _repo(tmp_path)
+    created = repository.create_layout(_principal(), "site-a", _document())
+    original = module.canonical_layout_bytes
+    calls = []
+    def counted(document):
+        calls.append(document["layoutId"])
+        return original(document)
+    monkeypatch.setattr(module, "canonical_layout_bytes", counted)
+    first = repository.get_layout(_principal(), "site-a", "fl-empty-cell")
+    first["layout"]["displayName"] = "Changed outside the repository"
+    second = repository.get_layout(_principal(), "site-a", "fl-empty-cell")
+    assert calls == ["fl-empty-cell"]
+    assert second["layout"] == created["layout"]
+    assert second["layout"] is not first["layout"]
+
+
+def test_current_validation_cache_still_checks_bytes_registry_and_authority(tmp_path):
+    repository = _repo(tmp_path)
+    repository.create_layout(_principal(), "site-a", _document())
+    repository.get_layout(_principal(), "site-a", "fl-empty-cell")
+    with pytest.raises(FacilityLayoutAuthorizationError):
+        repository.get_layout(_principal(roles=("catalog_curator",)), "site-a", "fl-empty-cell")
+    asset = repository.root / "tenant-a/site-a/layouts/fl-empty-cell.json"
+    original = asset.read_bytes()
+    # Same length: a stat/size-based shortcut must not permit a stale read.
+    asset.write_bytes(original.replace(b"Empty Cell", b"Other Cell"))
+    with pytest.raises(FacilityLayoutIntegrityError, match="authoritative registry"):
+        repository.get_layout(_principal(), "site-a", "fl-empty-cell")
+    asset.write_bytes(original)
+    registry_path = asset.parent / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="ascii"))
+    registry["layouts"][0]["currentRevision"] = "0" * 64
+    repository._atomic_write(registry_path, json.dumps(
+        registry, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii"))
+    with pytest.raises(FacilityLayoutIntegrityError, match="authoritative registry"):
+        repository.get_layout(_principal(), "site-a", "fl-empty-cell")
+
+
+def test_current_validation_cache_rejects_new_noncanonical_bytes_repeatedly(tmp_path):
+    repository = _repo(tmp_path)
+    created = repository.create_layout(_principal(), "site-a", _document())
+    repository.get_layout(_principal(), "site-a", "fl-empty-cell")
+    _, invalid_revision = _replace_with_noncanonical_current(repository, created)
+    for _ in range(2):
+        with pytest.raises(FacilityLayoutIntegrityError, match="not canonical"):
+            repository.get_layout(_principal(), "site-a", "fl-empty-cell")
+    assert invalid_revision not in repository._validated_current_revisions
+
+
+def test_current_validation_cache_is_bounded_and_evicts(tmp_path, monkeypatch):
+    import ai_inspector.facility_layout.repository as module
+    monkeypatch.setattr(module, "_VALIDATED_CURRENT_CACHE_SIZE", 2)
+    repository = _repo(tmp_path)
+    for name in ("fl-a", "fl-b", "fl-c"):
+        repository.create_layout(_principal(), "site-a", _document(name))
+    original = module.canonical_layout_bytes
+    calls = []
+    def counted(document):
+        calls.append(document["layoutId"])
+        return original(document)
+    monkeypatch.setattr(module, "canonical_layout_bytes", counted)
+    for name in ("fl-a", "fl-b", "fl-c", "fl-c", "fl-a"):
+        repository.get_layout(_principal(), "site-a", name)
+        assert len(repository._validated_current_revisions) <= 2
+    assert calls == ["fl-a", "fl-b", "fl-c", "fl-a"]
+
+
 def test_registry_is_sorted_and_default_pointer_can_change(tmp_path: Path) -> None:
     repository = _repo(tmp_path)
     principal = _principal()

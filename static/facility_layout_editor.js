@@ -9,6 +9,10 @@
     'use strict';
 
     const API_VERSION = 1;
+    const groundRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_ground.js') : root.InspectorProFacilityGround;
+    const wallsRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_walls.js') : root.InspectorProFacilityWalls;
     const DEFAULT_VIEW_PADDING = 24;
     const DEFAULT_PLAN_GRID_SPACING = 1;
     const DEFAULT_PLAN_MAJOR_GRID_SPACING = 5;
@@ -20,6 +24,7 @@
         routes: true,
         markings: true,
         assets: true,
+        walls: true,
     });
     const DEFAULT_FALLBACK_FOOTPRINT = Object.freeze([
         Object.freeze({ x: -0.6, z: -0.4 }),
@@ -352,7 +357,9 @@
             geometry.placements.push({
                 placementId: placement.placementId,
                 assetId: placement.assetId,
+                assetDefinitionRevision: placement.assetDefinitionRevision,
                 positionMode: placement.positionMode,
+                color: placement.appearance && placement.appearance.color || null,
                 transform: clone(placement.transform || {}),
                 position: clone(placement.transform
                     && placement.transform.position || { x: 0, y: 0, z: 0 }),
@@ -460,6 +467,11 @@
         }
         const worldBounds = includeWorldBounds === false
             ? null : normalizedPlanWorldBounds(options);
+        const groundBounds = groundRuntime && groundRuntime.bounds(groundRuntime.surfaces(layout));
+        if (groundBounds && includeWorldBounds !== false) {
+            include(groundBounds.minimum);
+            include(groundBounds.maximum);
+        }
         if (worldBounds) {
             include({ x: worldBounds.minX, z: worldBounds.minZ });
             include({ x: worldBounds.maxX, z: worldBounds.maxZ });
@@ -2208,13 +2220,28 @@
         environmentLayer.setAttribute('data-layer', 'environment');
         environmentLayer.setAttribute('pointer-events', 'none');
         environmentLayer.setAttribute('aria-hidden', 'true');
+        const groundBounds = groundRuntime && groundRuntime.bounds(groundRuntime.surfaces(this.layout));
+        const environmentOptions = groundBounds ? Object.assign({}, this.options, {worldBounds: {
+            minX:groundBounds.minimum.x, minZ:groundBounds.minimum.z,
+            maxX:groundBounds.maximum.x, maxZ:groundBounds.maximum.z, floorY:groundBounds.minimum.y
+        }}) : this.options;
         this.environmentDiagnostics = appendPlanEnvironment(
             this.document,
             environmentLayer,
             this.projection,
-            this.options
+            environmentOptions
         );
         this.svg.appendChild(environmentLayer);
+
+        const floorSurfaceLayer = svgElement(this.document, 'g');
+        floorSurfaceLayer.setAttribute('data-layer', 'floor-surfaces');
+        floorSurfaceLayer.setAttribute('pointer-events', 'none');
+        (this.layout.extensions?.facilityFloorSurfaces?.surfaces || []).forEach(surface => {
+            const polygon=svgElement(this.document,'polygon');
+            setAttributes(polygon,{points:pointString(surface.boundary,this.projection),fill:surface.color,'fill-opacity':.8});
+            floorSurfaceLayer.appendChild(polygon);
+        });
+        this.svg.appendChild(floorSurfaceLayer);
 
         const zoneLayer = svgElement(this.document, 'g');
         zoneLayer.setAttribute('data-layer', 'zones');
@@ -2240,6 +2267,16 @@
             zoneLayer.appendChild(polygon);
         }, this);
         this.svg.appendChild(zoneLayer);
+
+        const wallLayer = svgElement(this.document, 'g');
+        wallLayer.setAttribute('data-layer', 'walls');
+        wallLayer.setAttribute('pointer-events', 'none');
+        if (this.layerVisibility.walls !== false) wallsRuntime.volumes(this.layout).forEach(function (volume) {
+            const polygon = svgElement(this.document, 'polygon');
+            setAttributes(polygon, { points: pointString(volume.polygon, this.projection), fill: volume.color });
+            wallLayer.appendChild(polygon);
+        }, this);
+        this.svg.appendChild(wallLayer);
 
         const routeLayer = svgElement(this.document, 'g');
         routeLayer.setAttribute('data-layer', 'routes');
@@ -2518,7 +2555,8 @@
                 : []
         );
         this.geometry.placements.filter(function (placement) {
-            if (this.layerVisibility.assets === false) return false;
+            const layer = wallsRuntime.isWallAsset(resolveCatalogEntry(placement, this.options)) ? 'walls' : 'assets';
+            if (this.layerVisibility[layer] === false) return false;
             if (activityPlacementIds.has(placement.placementId)) return false;
             const info = stackInfoByPlacement.get(placement.placementId);
             return !info || info.baseId === placement.placementId;
@@ -2601,7 +2639,7 @@
                         ? '#8b5cf6'
                         : (proposalState === 'preserved'
                             ? '#b7ead8'
-                            : (selected ? '#bfe3ff' : '#e8edf2'))),
+                            : (selected ? '#bfe3ff' : placement.color || '#e8edf2'))),
                 stroke: proposalState === 'new'
                     ? '#0284c7'
                     : (proposalState === 'moved'
@@ -3529,7 +3567,10 @@
 
     TopPlanAdapter.prototype.getViewportState = function () {
         if (this.disposed || !this.projection) return null;
-        const bounds = normalizedPlanWorldBounds(this.options);
+        const groundBounds = groundRuntime && groundRuntime.bounds(groundRuntime.surfaces(this.layout));
+        const bounds = groundBounds ? {minX:groundBounds.minimum.x,minZ:groundBounds.minimum.z,
+            maxX:groundBounds.maximum.x,maxZ:groundBounds.maximum.z,floorY:groundBounds.minimum.y}
+            : normalizedPlanWorldBounds(this.options);
         const grid = normalizedPlanGrid(this.options, bounds);
         return {
             projection: clone(this.projection),
@@ -3944,6 +3985,11 @@
         const planPoint = clientPlanPoint(input, this.svg, this.projection);
         if (!planPoint) return null;
         const world = unprojectTopPlanPoint(planPoint, this.projection);
+        const rows = groundRuntime && groundRuntime.surfaces(this.layout);
+        if (rows) {
+            const sample = groundRuntime.sample(rows,world,finiteOr(input && input.floorY,0));
+            return sample ? {x:world.x,y:sample.y,z:world.z} : null;
+        }
         return { x: world.x, y: finiteOr(input && input.floorY, 0), z: world.z };
     };
 

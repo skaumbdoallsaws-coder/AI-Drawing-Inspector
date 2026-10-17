@@ -436,6 +436,7 @@ class ApprovalRequest:
     principal: PrincipalBinding
     idempotency_key: str
     explicit_approval: bool
+    authorization_mode: str = "explicit"
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -463,6 +464,8 @@ class ApprovalRequest:
                 "invalid_explicit_approval",
                 "explicitApproval must be a boolean.",
             )
+        if self.authorization_mode not in {"explicit", "direct"}:
+            raise TransactionValidationError("invalid_authorization_mode", "Unknown approval provenance.")
 
 
 @dataclass(frozen=True)
@@ -477,6 +480,7 @@ class ApprovalRecord:
     created_at: float
     expires_at: float
     status: str = "active"
+    authorization_mode: str = "explicit"
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -534,6 +538,7 @@ class ApprovalRecord:
     def public_dict(self) -> Dict[str, Any]:
         return {
             "approvalToken": self.approval_token,
+            **({"authorizationMode": self.authorization_mode} if self.authorization_mode != "explicit" else {}),
             "proposalId": self.proposal_id,
             "action": self.action,
             **self.binding.to_dict(),

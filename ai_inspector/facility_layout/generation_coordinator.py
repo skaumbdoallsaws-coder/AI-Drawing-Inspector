@@ -406,6 +406,7 @@ def _provider_fingerprint(config: FacilityProviderConfig) -> dict[str, Any]:
         "provider": config.provider,
         "model": config.model,
         "reasoningEffort": config.reasoning_effort,
+        **({"gatewayRevision": config.gateway_route.config_revision} if config.gateway_route else {}),
     }
 
 
@@ -675,6 +676,7 @@ class FacilityGenerationCoordinator:
             "provider": run["effectiveProvider"],
             "model": run["effectiveModel"],
             "reasoningEffort": run["reasoningEffort"],
+            **({"gatewayRevision": run["gatewayRevision"]} if "gatewayRevision" in run else {}),
         }
         if observed != expected:
             raise FacilityGenerationCoordinatorError(
@@ -751,6 +753,7 @@ class FacilityGenerationCoordinator:
             effective_provider=config.provider,
             effective_model=config.model,
             reasoning_effort=config.reasoning_effort,
+            gateway_route=config.gateway_route,
             intent_hash=intent_hash,
             dependency_fingerprint=dependency_fingerprint,
             prototype_mode=prototype_mode,
@@ -925,6 +928,7 @@ class FacilityGenerationCoordinator:
             effective_provider=config.provider,
             effective_model=config.model,
             reasoning_effort=config.reasoning_effort,
+            gateway_route=config.gateway_route,
             intent_hash=intent_hash,
             dependency_fingerprint=dependency_fingerprint,
             prototype_mode=prototype_mode,
@@ -1139,6 +1143,7 @@ class FacilityGenerationCoordinator:
             effective_provider=config.provider,
             effective_model=config.model,
             reasoning_effort=config.reasoning_effort,
+            gateway_route=config.gateway_route,
             intent_hash=intent_hash,
             dependency_fingerprint=dependency_fingerprint,
             prototype_mode=prototype_mode,

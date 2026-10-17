@@ -1,0 +1,4 @@
+# Optional development environment only. Do not add to the desktop package yet.
+openai-codex-cli-bin==0.162.1
+mcp==2.3.0
+jsonschema==4.26.0

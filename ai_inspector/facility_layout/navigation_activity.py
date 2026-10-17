@@ -11,7 +11,7 @@ from typing import Any, Mapping, Sequence
 from shapely.geometry import LineString
 
 from .activity_scenario import (
-    FACILITY_ACTIVITY_SCENARIO_MAXIMUM_ACTORS,
+    FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_ACTORS,
     FACILITY_NAVIGATION_PRESENTATION_QUALIFICATION,
     FACILITY_NAVIGATION_PRESENTATION_SCHEMA,
 )
@@ -179,14 +179,20 @@ def _sampled_pair_minimums(
             "Sample count must be between 2 and 1001.",
         )
     result = []
+    # Each actor has one pose per shared-clock sample, independent of its pair.
+    poses = [
+        [_sample_pose(record, cycle_duration_seconds * (index / (sample_count - 1)))
+         for index in range(sample_count)]
+        for record in records
+    ] if len(records) > 1 else []
     for left_index, left in enumerate(records):
-        for right in records[left_index + 1:]:
+        for right_index in range(left_index + 1, len(records)):
+            right = records[right_index]
             minimum: tuple[float, float] | None = None
             for index in range(sample_count):
                 normalized = index / (sample_count - 1)
-                scenario_time = cycle_duration_seconds * normalized
-                left_pose = _sample_pose(left, scenario_time)
-                right_pose = _sample_pose(right, scenario_time)
+                left_pose = poses[left_index][index]
+                right_pose = poses[right_index][index]
                 distance = math.hypot(
                     float(left_pose["x"]) - float(right_pose["x"]),
                     float(left_pose["z"]) - float(right_pose["z"]),
@@ -216,7 +222,7 @@ def build_navigation_activity_presentation(
 ) -> dict[str, Any]:
     """Build bounded diagnostics without changing actor paths or start phases."""
 
-    if not actors or len(actors) > FACILITY_ACTIVITY_SCENARIO_MAXIMUM_ACTORS:
+    if not actors or len(actors) > FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_ACTORS:
         raise FacilityValidationError(
             "facility_activity_scenario_actor_limit",
             "The navigation activity actor count is outside the supported range.",

@@ -11,3 +11,6 @@ duotone family.
 
 The SVG files are vendored so InspectorPro remains usable offline and does not
 depend on a CDN or a frontend framework.
+
+The walkthrough camera toggle uses the family's camera-rotate duotone symbol
+in camera.svg, with its fill adapted to InspectorPro's cyan toolbar palette.

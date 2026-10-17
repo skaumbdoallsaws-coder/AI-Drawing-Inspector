@@ -54,6 +54,7 @@ assert.ok(index.includes('appInstance.workspace.openAssetBrowser()'));
 [
     ['create', 'Create'],
     ['edit', 'Edit'],
+    ['surfaces', 'Surfaces'],
     ['position', 'Position'],
     ['build', 'Build'],
     ['history', 'History'],
@@ -65,3 +66,6 @@ assert.ok(index.includes('appInstance.workspace.openAssetBrowser()'));
 });
 
 console.log(`Facility ribbon organization: ${commandIds.length} commands remain reachable`);
+assert.ok(index.includes('[data-facility-ribbon-group="surfaces"]'));
+assert.ok(index.includes('[data-overflow-group="surfaces"]'));
+assert.ok(index.includes("['selection', 'create', 'edit', 'surfaces', 'position', 'build', 'history']"));

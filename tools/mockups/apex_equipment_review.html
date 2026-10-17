@@ -1,0 +1,32 @@
+<!doctype html><html><head><meta charset="utf-8"><title>APEX material review</title>
+<style>body{margin:0;background:#d3d9dd;font:16px Arial}canvas{display:block}#label{position:fixed;top:12px;left:16px;color:#20262c;background:#fff;padding:8px}</style>
+<script type="importmap">{"imports":{"three":"/static/vendor/three/0.184.0/build/three.module.min.js"}}</script></head>
+<body><div id="label"></div><script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from '/static/vendor/three/0.184.0/examples/jsm/loaders/GLTFLoader.js';
+const scene=new THREE.Scene(); scene.background=new THREE.Color('#d3d9dd');
+const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
+renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(1);document.body.appendChild(renderer.domElement);
+const camera=new THREE.PerspectiveCamera(36,innerWidth/innerHeight,.001,10000);
+scene.add(new THREE.HemisphereLight(0xffffff,0x65717c,2.5));
+for(const [x,y,z,i] of [[4,6,5,3],[-4,3,-2,2]]){const l=new THREE.DirectionalLight(0xffffff,i);l.position.set(x,y,z);scene.add(l);}
+let model,meshes=[],box,center,size,association;
+function render(){renderer.render(scene,camera);}
+window.review={
+ async load(path,matrix,debug=false,title=''){
+  if(model){scene.remove(model);model.traverse(o=>{o.geometry?.dispose();if(o.material)for(const m of Array.isArray(o.material)?o.material:[o.material])m.dispose();});}
+  const loader=new GLTFLoader();loader.register(parser=>({name:'ReviewEmptyPrimitive',beforeRoot(){parser.json.meshes.forEach((m,i)=>{m.primitives=m.primitives.filter(p=>p.attributes.POSITION>=0);if(!m.primitives.length)for(const n of parser.json.nodes)if(n.mesh===i)delete n.mesh;});}}));
+  const gltf=await loader.loadAsync('/'+path);model=gltf.scene;association=gltf.parser.associations;meshes=[];
+  model.applyMatrix4(new THREE.Matrix4().fromArray(matrix));
+  model.traverse(o=>{if(!o.isMesh)return;meshes.push(o);o.userData.source=association.get(o);const a=o.userData.source||{};o.userData.sourceMaterial=gltf.parser.json.meshes[a.meshes]?.primitives[a.primitives]?.material;
+   if(debug){const hue=debug==='materials'?(o.userData.sourceMaterial||0)*.618:((a.meshes||0)*.618+(a.primitives||0)*.177);o.material=new THREE.MeshStandardMaterial({color:new THREE.Color().setHSL(hue%1,.65,.5),roughness:.6,side:THREE.DoubleSide});}
+  });scene.add(model);box=new THREE.Box3().setFromObject(model);center=box.getCenter(new THREE.Vector3());size=box.getSize(new THREE.Vector3());
+  document.querySelector('#label').textContent=title;
+  this.angle(1,.55,1);return {meshes:meshes.length,size:size.toArray()};
+ },
+ angle(x,y,z){const d=Math.max(size.x,size.y,size.z)*2.2;camera.near=d/1000;camera.far=d*20;camera.position.copy(center).add(new THREE.Vector3(x,y,z).normalize().multiplyScalar(d));camera.lookAt(center);camera.updateProjectionMatrix();render();},
+ pick(x,y){const ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2(x/innerWidth*2-1,1-y/innerHeight*2),camera);const hit=ray.intersectObjects(meshes)[0];return hit?{name:hit.object.name,source:hit.object.userData.source,material:hit.object.userData.sourceMaterial,point:hit.point.toArray()}:null;},
+ highlight(mesh,primitive){for(const o of meshes){const a=o.userData.source||{};o.visible=a.meshes===mesh&&(primitive===undefined||a.primitives===primitive);}render();},
+ showAll(){for(const o of meshes)o.visible=true;render();}
+};
+</script></body></html>

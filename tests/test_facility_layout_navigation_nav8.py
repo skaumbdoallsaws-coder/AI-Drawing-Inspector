@@ -346,6 +346,9 @@ def test_selected_path_playback_names_missing_prerequisites() -> None:
 def test_sage_contract_and_context_are_coordinate_free() -> None:
     specs = navigation_agent_tool_specs()
     assert len(specs) == 7
+    playback = next(spec for spec in specs if spec["name"] == BUILD_ACTIVITY_SCENARIO_TOOL)
+    assert playback["input_schema"]["properties"]["journeySolutionIds"]["maxItems"] == 64
+    assert playback["input_schema"]["properties"]["movementProgramIds"]["maxItems"] == 64
     serialized_specs = json.dumps(specs, sort_keys=True)
     for forbidden_property in (
         '"x"',

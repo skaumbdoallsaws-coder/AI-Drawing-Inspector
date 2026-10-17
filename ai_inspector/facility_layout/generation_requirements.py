@@ -104,7 +104,7 @@ def _validate_predicate(predicate: Any, requirement_kind: str) -> None:
     kind, parameters = predicate["kind"], predicate["parameters"]
     if not isinstance(kind, str):
         _fail("generation_requirement_predicate_unsupported", "Predicate kind must be a registered string.")
-    if requirement_kind == "assumption" and kind != "unsaved_preview":
+    if requirement_kind == "assumption" and kind not in {"unsaved_preview", "research_policy", "planning_claim_scope"}:
         _validate_predicate(predicate, "hard_constraint")
         return
     if kind == "envelope_dimensions" and requirement_kind == "hard_constraint":
@@ -114,6 +114,24 @@ def _validate_predicate(predicate: Any, requirement_kind: str) -> None:
         count = parameters["quantity"]
         if type(count) is not int or not 1 <= count <= 900:
             _fail("generation_requirement_number_invalid", "Resource quantity must be 1-900.")
+    elif kind == "resource_total" and requirement_kind == "hard_constraint":
+        _closed(parameters, {"quantity"}, "expanded resource total")
+        if type(parameters["quantity"]) is not int or not 1 <= parameters["quantity"] <= 900:
+            _fail("generation_requirement_number_invalid", "Expanded quantity must be 1-900.")
+    elif kind in {"area_partition", "cell_layout", "module_repetition"} and requirement_kind == "hard_constraint":
+        from .generation_composition import validate_composition_parameters
+        validate_composition_parameters(kind, parameters)
+    elif kind == "resource_set" and requirement_kind == "hard_constraint":
+        _closed(parameters, {"requirementIds"}, "resource set")
+        _array(parameters["requirementIds"], "requirementIds", 24)
+        for key in parameters["requirementIds"]:
+            identifier(key, "resource requirementId")
+        if len(set(parameters["requirementIds"])) != len(parameters["requirementIds"]):
+            _fail("generation_requirement_duplicate_id", "Resource set IDs must be unique.")
+    elif kind == "route_count" and requirement_kind == "hard_constraint":
+        _closed(parameters, {"count"}, "route count")
+        if type(parameters["count"]) is not int or not 0 <= parameters["count"] <= 32:
+            _fail("generation_requirement_number_invalid", "Route count must be 0-32.")
     elif kind == "unsaved_preview" and requirement_kind == "permission":
         _closed(parameters, {"saveAllowed"}, "preview")
         if parameters["saveAllowed"] is not False:
@@ -158,10 +176,25 @@ def _validate_predicate(predicate: Any, requirement_kind: str) -> None:
     elif kind == "department_presence" and requirement_kind == "hard_constraint":
         _closed(parameters, {"label"}, "department presence")
         _text(parameters["label"], "label", 240)
+    elif kind == "process_sequence" and requirement_kind == "hard_constraint":
+        _closed(parameters, {"processStepIds"}, "process sequence")
+        _array(parameters["processStepIds"], "processStepIds", 32)
+        for key in parameters["processStepIds"]:
+            identifier(key, "processStepId")
+        if len(parameters["processStepIds"]) < 2 or len(set(parameters["processStepIds"])) != len(parameters["processStepIds"]):
+            _fail("generation_process_sequence_invalid", "Use 2-32 distinct process steps in dependency order.")
+    elif kind == "research_policy" and requirement_kind == "hard_constraint":
+        _closed(parameters, {"publicWebAllowed"}, "research policy")
+        if type(parameters["publicWebAllowed"]) is not bool:
+            _fail("generation_requirement_predicate_invalid", "Public research permission must be boolean.")
     elif kind in {"catalog_only", "assumptions_disclosed"} and requirement_kind == "hard_constraint":
         _closed(parameters, {"required"}, kind)
         if parameters["required"] is not True:
             _fail("generation_requirement_predicate_unsupported", f"{kind} requires required=true.")
+    elif kind == "planning_claim_scope" and requirement_kind == "hard_constraint":
+        _closed(parameters, {"planningClaim"}, "planning claim scope")
+        if parameters["planningClaim"] != "illustrative_prototype":
+            _fail("generation_requirement_authority_invalid", "This planner cannot establish manufacturing, throughput or safety approval.")
     elif kind == "source_consulted" and requirement_kind == "hard_constraint":
         _closed(parameters, {"url"}, "source consultation")
         from ai_inspector.research.web import public_url, ResearchError
@@ -169,6 +202,12 @@ def _validate_predicate(predicate: Any, requirement_kind: str) -> None:
             public_url(parameters["url"])
         except ResearchError as exc:
             _fail("generation_requirement_source_invalid", str(exc))
+    elif kind == "local_document_consulted" and requirement_kind == "hard_constraint":
+        _closed(parameters, {"assetId", "assetDefinitionRevision", "action"}, "local document consultation")
+        identifier(parameters["assetId"], "assetId")
+        revision(parameters["assetDefinitionRevision"], "assetDefinitionRevision")
+        if not isinstance(parameters["action"], str) or parameters["action"] not in {"summary", "page"}:
+            _fail("generation_requirement_source_invalid", "Local consultation requires a summary or readable PDF page, not search hits.")
     elif kind == "preserve_prior_requirements" and requirement_kind == "hard_constraint":
         _closed(parameters, {"exceptRequirementIds"}, "preserved requirements")
         _array(parameters["exceptRequirementIds"], "exceptRequirementIds", 32, nonempty=False)
@@ -177,10 +216,17 @@ def _validate_predicate(predicate: Any, requirement_kind: str) -> None:
         if len(set(parameters["exceptRequirementIds"])) != len(parameters["exceptRequirementIds"]):
             _fail("generation_requirement_preservation_invalid", "Preservation exceptions must be unique.")
     else:
-        allowed = ["permission"] if kind == "unsaved_preview" else ["hard_constraint", "assumption"]
+        allowed = (["permission"] if kind == "unsaved_preview" else
+                   ["hard_constraint"] if kind in {"research_policy", "planning_claim_scope"} else ["hard_constraint", "assumption"])
         _fail("generation_requirement_predicate_unsupported",
               f"Predicate {kind!r} does not support requirement kind {requirement_kind!r}; expected {allowed} for a registered predicate.",
               predicateKind=kind, requirementKind=requirement_kind, permittedRequirementKinds=allowed)
+
+
+def local_document_consulted(predicate, documents):
+    return any(item.get("evidenceRef") == predicate["subjectId"]
+               and all(item.get(key) == predicate["parameters"][key] for key in ("assetId", "assetDefinitionRevision", "action"))
+               for item in documents)
 
 
 def build_generation_ledger(body: Mapping[str, Any]) -> dict[str, Any]:
@@ -304,20 +350,31 @@ def build_generation_ledger(body: Mapping[str, Any]) -> dict[str, Any]:
                     spans[-1][1] = index + 1
                 else:
                     spans.append([index, index + 1])
-            _fail("generation_requirement_clause_unaccounted", "Retained user text still needs a disposition; quote each uncovered clause.",
-                  turnId=turn_id, uncovered=[{"start": start, "end": end, "text": text[start:end]} for start, end in spans[:16]])
+            _fail("generation_requirement_clause_unaccounted",
+                  "Retained user text still needs a disposition. Locate each omission using its context and offsets, not another occurrence of the same word. "
+                  "Extend the appropriate existing exact quote for a connective or punctuation; quotes may overlap. "
+                  "A missing substantive instruction still needs its own supported disposition. No requirements were committed.",
+                  turnId=turn_id, uncovered=[{"start": start, "end": end, "text": text[start:end],
+                      "context": {"start": max(0, start - 80), "end": min(len(text), start + 160),
+                                  "text": text[max(0, start - 80):min(len(text), start + 160)]}}
+                      for start, end in spans[:16]])
     active_predicates = {}
     for item in requirements.values():
         if item["disposition"] != "represented":
             continue
         predicate = item["predicate"]
-        if predicate["kind"] in {"envelope_dimensions", "unsaved_preview", "catalog_only", "assumptions_disclosed"} and predicate["subjectId"] != result["layoutId"]:
+        if predicate["kind"] in {"envelope_dimensions", "unsaved_preview", "catalog_only", "research_policy", "assumptions_disclosed", "planning_claim_scope", "process_sequence", "resource_set", "route_count"} and predicate["subjectId"] != result["layoutId"]:
             _fail("generation_requirement_subject_invalid", f"Layout predicate must target layoutId {result['layoutId']!r}.",
                   requirementId=item["requirementId"], expectedSubjectId=result["layoutId"])
         key = (predicate["kind"], predicate["subjectId"])
         if predicate["kind"] == "preserve_prior_requirements":
             key += (item["source"]["turnId"],)
-        signature = canonical_design_bytes(predicate["parameters"])
+        elif predicate["kind"] == "process_sequence":
+            key += tuple(predicate["parameters"]["processStepIds"])
+        parameters = predicate["parameters"]
+        if predicate["kind"] == "resource_set":
+            parameters = {"requirementIds": sorted(parameters["requirementIds"])}
+        signature = canonical_design_bytes(parameters)
         if key in active_predicates and active_predicates[key] != signature:
             conflicts = [entry["requirementId"] for entry in requirements.values()
                          if entry["disposition"] == "represented" and entry["predicate"]["kind"] == predicate["kind"]
@@ -361,6 +418,27 @@ def validate_generation_amendment(previous: Mapping[str, Any], current: Mapping[
         _fail("generation_requirement_history_changed", "New requirements must originate in the correction turn.")
 
 
+def require_generation_planning_coverage(ledger, resource_ids=None, *, allow_unresolved=False):
+    """Check mandatory predicates before commitment and again for the actual package."""
+    if allow_unresolved and any(item["disposition"] in {"needs_clarification", "unsupported"}
+                                for item in ledger["requirements"]):
+        return
+    covered = {(item["predicate"]["kind"], item["predicate"]["subjectId"])
+               for item in ledger["requirements"] if item["disposition"] == "represented"}
+    if resource_ids is None:
+        resource_ids = {subject for kind, subject in covered if kind == "resource_mapping"}
+    required = {("envelope_dimensions", ledger["layoutId"]), ("unsaved_preview", ledger["layoutId"])}
+    required.update(("resource_quantity", subject) for subject in resource_ids)
+    missing = [{"kind": kind, "subjectId": subject} for kind, subject in sorted(required - covered)]
+    if not any(kind == "resource_quantity" for kind, _ in covered) and not any(item["kind"] == "resource_quantity" for item in missing):
+        missing.append({"kind": "resource_quantity", "subjectId": None})
+    if missing:
+        _fail("generation_requirements_incomplete",
+              "Envelope, quantities and preview intent need explicit ledger requirements. "
+              "Complete the missing predicates from the actual user request and bound context before committing.",
+              missingPredicates=missing)
+
+
 def evaluate_generation_requirements(ledger: Mapping[str, Any], package: Mapping[str, Any], *, execution_context=None) -> dict[str, Any]:
     """Compare predicates to a package; this is not source admission or geometry validation."""
     record = validate_generation_ledger(ledger)
@@ -372,6 +450,7 @@ def evaluate_generation_requirements(ledger: Mapping[str, Any], package: Mapping
         if item["disposition"] == "superseded":
             continue
         passed = False
+        details = None
         code = "generation_requirement_unresolved"
         if item["disposition"] == "represented":
             predicate = item["predicate"]
@@ -384,6 +463,13 @@ def evaluate_generation_requirements(ledger: Mapping[str, Any], package: Mapping
                 passed = True
             elif predicate["kind"] == "planning_subject":
                 passed = package.get("productRef", {}).get("displayName") == predicate["parameters"]["productLabel"]
+            elif predicate["kind"] == "process_sequence":
+                from .generation_flow import check_process_sequence
+                details = check_process_sequence(package, predicate["parameters"]["processStepIds"])
+                passed = details["passed"]
+            elif predicate["kind"] == "research_policy":
+                actual = execution_context.get("publicWebAllowed")
+                passed = type(actual) is bool and actual == predicate["parameters"]["publicWebAllowed"]
             elif predicate["kind"] == "catalog_only":
                 entries = package.get("equipmentRequirements", [])
                 eligible = execution_context.get("catalogIdentities", [])
@@ -393,14 +479,45 @@ def evaluate_generation_requirements(ledger: Mapping[str, Any], package: Mapping
             elif predicate["kind"] == "source_consulted":
                 passed = any(source.get("evidenceRef") == predicate["subjectId"] and source.get("url") == predicate["parameters"]["url"]
                              for source in execution_context.get("consultedSources", []))
+            elif predicate["kind"] == "local_document_consulted":
+                passed = local_document_consulted(predicate, execution_context.get("consultedLocalDocuments", []))
             elif predicate["kind"] == "assumptions_disclosed":
                 passed = execution_context.get("assumptionsDisclosed") is True
+            elif predicate["kind"] == "planning_claim_scope":
+                authority = package.get("authority") or {}
+                passed = (authority.get("planningClaim") == predicate["parameters"]["planningClaim"]
+                          and authority.get("productionEligible") is False)
             elif predicate["kind"] == "resource_quantity":
                 entries = package.get("equipmentRequirements", [])
                 matches = [entry for entry in (entries if isinstance(entries, list) else [])
                            if isinstance(entry, Mapping) and entry.get("requirementId") == predicate["subjectId"]]
                 passed = (len(matches) == 1 and type(matches[0].get("quantity")) is int
                           and matches[0]["quantity"] == predicate["parameters"]["quantity"])
+            elif predicate["kind"] == "resource_set":
+                entries = package.get("equipmentRequirements")
+                wanted = set(predicate["parameters"]["requirementIds"])
+                # A later recipe adapter must qualify expanded resources before
+                # this flat-batch predicate can cover its nested inventory.
+                passed = (isinstance(entries, list) and len(entries) == len(wanted)
+                          and all(isinstance(entry, Mapping) and isinstance(entry.get("requirementId"), str)
+                                  for entry in entries)
+                          and {entry["requirementId"] for entry in entries} == wanted
+                          and (not package.get("cellRecipes") and not package.get("moduleFamilies")
+                               or execution_context.get("compositionInventory") is not None))
+            elif predicate["kind"] == "route_count":
+                routes = package.get("routes")
+                passed = (isinstance(routes, list) and len(routes) == predicate["parameters"]["count"]
+                          and all(isinstance(route, Mapping) for route in routes)
+                          and (not package.get("cellRecipes") and not package.get("moduleFamilies")
+                               or execution_context.get("compositionInventory") is not None))
+            elif predicate["kind"] == "resource_total":
+                passed = (execution_context.get("compositionInventory", {}).get("resourceTotals", {}).get(predicate["subjectId"])
+                          == predicate["parameters"]["quantity"])
+            elif predicate["kind"] in {"area_partition", "cell_layout", "module_repetition"}:
+                from .generation_composition import COMPOSITION_FIELDS
+                collection, key, fields = COMPOSITION_FIELDS[predicate["kind"]]
+                matches = [v for v in package.get(collection, []) if v.get(key) == predicate["subjectId"]]
+                passed = len(matches) == 1 and {k: matches[0].get(k) for k in fields} == predicate["parameters"]
             elif predicate["kind"] == "envelope_dimensions":
                 envelope = package.get("facilityEnvelope", {})
                 envelope = envelope if isinstance(envelope, Mapping) else {}
@@ -429,7 +546,7 @@ def evaluate_generation_requirements(ledger: Mapping[str, Any], package: Mapping
                     else:
                         passed = all(entry.get(field) == value for field, value in wanted.items())
         checks.append({"requirementId": item["requirementId"], "passed": passed,
-                       "code": None if passed else code})
+                       "code": None if passed else code, **({"processFlow": details} if details is not None else {})})
     return {"ledgerRevision": record["ledgerRevision"], "checks": checks,
             "requirementsSatisfied": bool(checks) and all(check["passed"] for check in checks),
             "admissionGranted": False}

@@ -43,6 +43,7 @@ from .errors import (
     FacilityValidationError,
 )
 from .canonical import canonical_layout_bytes, canonicalize_layout, layout_revision
+from .diff import build_exact_layout_diff, facility_layout_diff_hash
 from .motion_package import (
     FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V2,
     FacilityMotionPackageStore,
@@ -82,6 +83,7 @@ from .motion_lanes import (
 from .navigation_contract import seal_journey_solution
 from .activity_scenario import (
     FACILITY_ACTIVITY_SCENARIO_MAXIMUM_ACTORS,
+    FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_ACTORS,
     FacilityActivityScenarioStore,
     build_facility_activity_scenario,
     build_navigation_activity_scenario,
@@ -139,6 +141,7 @@ from .routing import (
     ROUTING_ENGINE_VERSION,
     generate_connector_candidates,
     normalized_cardinal_route_heading,
+    persisted_route_fingerprint,
     plan_forklift_route,
     resolve_endpoint,
     route_traversable_corridor,
@@ -369,6 +372,9 @@ class FacilityLayoutService:
         current_asset_definition_resolver: Optional[
             CurrentAssetResolver
         ] = None,
+        component_inventory_resolver: Callable[
+            [FacilityPrincipal, Mapping[str, str], str, str], Mapping[str, Any]
+        ] | None = None,
         process_map_resolver: Optional[ProcessMapResolver] = None,
         evidence_authority_resolver: Optional[
             EvidenceAuthorityResolver
@@ -401,6 +407,7 @@ class FacilityLayoutService:
         self.current_asset_definition_resolver = (
             current_asset_definition_resolver
         )
+        self.component_inventory_resolver = component_inventory_resolver
         self.process_map_resolver = process_map_resolver
         self.evidence_authority_resolver = evidence_authority_resolver
         self.spatial_executor = spatial_executor or FacilitySpatialExecutor()
@@ -759,11 +766,13 @@ class FacilityLayoutService:
         # workcell zone after equipment has already been placed. Preserve the
         # resulting containment findings in diagnostics, but do not make that
         # incremental zone-authoring gesture impossible. The exception is
-        # intentionally narrow: it applies only to pre-existing placements and
-        # only to footprint containment introduced alongside add_zone. New
-        # placements, collisions, exclusion zones, height limits, and category
-        # rules remain hard failures.
-        has_added_zone = any(
+        # intentionally narrow: only untouched placements in a previously
+        # unzoned layout qualify. Mixed batches cannot grandfather equipment
+        # they also edit. Other hard spatial findings remain blocking.
+        adds_first_zone = (
+            isinstance(baseline_layout, Mapping)
+            and baseline_layout.get("zones") == []
+        ) and any(
             isinstance(operation, Mapping)
             and operation.get("op") == "add_zone"
             for operation in (operations or [])
@@ -777,6 +786,13 @@ class FacilityLayoutService:
             )
             if isinstance(placement, Mapping) and placement.get("placementId")
         }
+        if adds_first_zone and introduced:
+            # Use the operation engine's affected IDs, including indirect and
+            # multi-placement edits, rather than maintaining another op list.
+            affected_ids = apply_facility_layout_operations(
+                baseline_layout, operations or []
+            )["affectedIds"]
+            existing_placement_ids.difference_update(affected_ids)
 
         def is_incremental_zone_finding(finding: Mapping[str, Any]) -> bool:
             details = finding.get("details")
@@ -786,7 +802,7 @@ class FacilityLayoutService:
                 if isinstance(item, str) and item
             ]
             return (
-                has_added_zone
+                adds_first_zone
                 and finding.get("code") == "zone_containment_violation"
                 and isinstance(details, Mapping)
                 and details.get("reason") == "footprint_or_setback"
@@ -1431,6 +1447,53 @@ class FacilityLayoutService:
                 ),
             },
         }
+    def _revalidate_route_layout_sources(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        document: Mapping[str, Any],
+        *,
+        inherited_routes: Iterable[Mapping[str, Any]],
+    ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+        """Rebind unchanged inherited routes only after candidate validation."""
+        candidate = deepcopy(dict(document))
+        routing = self._diagnose_routing(principal, site_id, candidate)
+        inherited = {route["routeId"]: route for route in inherited_routes}
+        results = {result["routeId"]: result for result in routing["routes"]}
+        layout_fingerprint = routing_layout_fingerprint(candidate)
+        rebound_ids = []
+        for route in candidate.get("routes", []):
+            route_id = route["routeId"]
+            if route != inherited.get(route_id):
+                continue
+            extensions = route.get("extensions", {})
+            if isinstance(extensions, Mapping) and isinstance(
+                extensions.get("facilityAisle"), Mapping
+            ):
+                continue
+            if not route.get("sourceRevisions", {}).get("layout"):
+                continue
+            errors = [
+                finding for finding in results[route_id]["findings"]
+                if finding.get("severity") in {"error", "blocked"}
+            ]
+            # Validate with the original binding first. External staleness,
+            # endpoint/geometry tampering and swept-volume failures cannot be
+            # repaired by updating a revision. Never rewrite submitted routes.
+            if not errors or any(
+                finding.get("code") != "stale_route_source_revision"
+                or set(finding.get("subjects", [])) != {route_id, "layout"}
+                for finding in errors
+            ):
+                continue
+            route["sourceRevisions"]["layout"] = layout_fingerprint
+            route["routeFingerprint"] = persisted_route_fingerprint(route)
+            rebound_ids.append(route_id)
+        if rebound_ids:
+            candidate = canonicalize_layout(candidate)
+            routing = self._diagnose_routing(principal, site_id, candidate)
+        return candidate, routing, sorted(rebound_ids)
+
     def validate_dependencies(
         self,
         principal: FacilityPrincipal,
@@ -1508,6 +1571,14 @@ class FacilityLayoutService:
         )
         if asset_revisions and self.asset_definition_resolver is None:
             _dependency_unavailable("asset_definition")
+        decal_targets = {
+            art["target"].get("placementId")
+            for art in document.get("extensions", {}).get("facilityDecals", {}).get("artworks", [])
+        }
+        decal_wall_assets = {
+            (placement["assetId"], placement["assetDefinitionRevision"])
+            for placement in document["placements"] if placement["placementId"] in decal_targets
+        }
         for asset_id, revision in asset_revisions:
             resolved = self.asset_definition_resolver(
                 principal,
@@ -1521,6 +1592,13 @@ class FacilityLayoutService:
                 identifier=asset_id,
                 revision=revision,
             )
+            if (asset_id, revision) in decal_wall_assets:
+                definition = resolved.get("definition", resolved) if isinstance(resolved, Mapping) else {}
+                tags = definition.get("tags", [])
+                bounds = definition.get("geometry", {}).get("aabb")
+                if (definition.get("structureKind") != "wall" and "wall" not in tags) or not bounds:
+                    raise FacilityValidationError(
+                        "invalid_decal_target", "Decals require a wall asset with measured bounds.")
 
         vehicle_revisions = sorted(
             {
@@ -1739,6 +1817,32 @@ class FacilityLayoutService:
             "baseRevision": base_revision,
             "dependencies": dependencies.to_dict(),
         }
+
+    def preview_program(self, principal, site_id, layout_id, base_revision, operation_plan):
+        """Validate a server-compiled multi-batch program without saving a draft."""
+        from .generation_requirements import guard_generation_operations
+        from .program_execution import execute_facility_program_operation_plan
+        require_facility_action(principal, tenant_id=principal.tenant_id, site_id=site_id, action="layout.edit")
+        current = self.layout_repository.get_layout(principal, site_id, layout_id)
+        if current["revision"] != base_revision or operation_plan.get("baseLayoutRevision") != base_revision:
+            raise FacilityConflictError("revision_conflict", "Facility Layout revision conflict.")
+        for stage in operation_plan.get("stages", []):
+            for batch in stage.get("batches", []):
+                if batch.get("operations"):
+                    guard_generation_operations(batch["operations"])
+        executed = execute_facility_program_operation_plan(current["layout"], operation_plan)
+        document = executed["draftLayout"]
+        dependencies = self.validate_dependencies(principal, site_id, document)
+        spatial = self._diagnose_spatial(principal, site_id, document)
+        self._require_spatially_valid(spatial)
+        routing = self._diagnose_routing(principal, site_id, document)
+        self._require_routing_valid(routing)
+        latest = self.layout_repository.get_layout(principal, site_id, layout_id)
+        if latest["revision"] != base_revision:
+            raise FacilityConflictError("revision_conflict", "Facility Layout changed during validation.")
+        return {"document": document, "revision": executed["draftLayoutRevision"], "baseRevision": base_revision,
+                "dependencies": dependencies.to_dict(), "findings": [], "spatialDiagnostics": spatial,
+                "routingDiagnostics": routing, "execution": executed}
 
     @staticmethod
     def _raise_transaction_error(error: TransactionError) -> None:
@@ -2158,6 +2262,9 @@ class FacilityLayoutService:
                 "proposal_payload_unavailable",
                 "Facility Layout proposal inputs are unavailable.",
             )
+        from .operation_proposals import PROPOSAL_TYPE, UNDO_TYPE, regenerate
+        if payload.get("proposalType") in {PROPOSAL_TYPE, UNDO_TYPE}:
+            return regenerate(self, principal, site_id, layout_id, payload)
         self._validate_current_proposal_asset_revisions(
             principal,
             site_id,
@@ -2353,6 +2460,9 @@ class FacilityLayoutService:
             "alternativeId": alternative["alternativeId"],
             "strategy": alternative["strategy"],
             "metrics": deepcopy(alternative["metrics"]),
+            **({"requestedEditMode": alternative["editMode"],
+                "directApplyPolicy": deepcopy(alternative["directApplyPolicy"])}
+               if "directApplyPolicy" in alternative else {}),
         }
 
     @classmethod
@@ -2510,6 +2620,8 @@ class FacilityLayoutService:
         session_id: str,
         idempotency_key: str,
         explicit_approval: bool,
+        authorization_mode: str = "explicit",
+        direct_consent: bool = False,
     ) -> dict[str, Any]:
         require_facility_action(
             principal,
@@ -2520,6 +2632,22 @@ class FacilityLayoutService:
         self._require_session_id(session_id)
         try:
             binding = ExactBinding.from_dict(binding_value)
+            if authorization_mode not in {"explicit", "direct"}:
+                raise FacilityValidationError("invalid_authorization_mode", "Unknown edit authorization mode.")
+            if authorization_mode == "direct":
+                if direct_consent is not True:
+                    raise FacilityValidationError("direct_consent_required", "Apply directly must be enabled by the user.")
+                proposal = self.transaction_runtime.get_proposal(proposal_id,
+                    tenant_id=principal.tenant_id, site_id=site_id, layout_id=layout_id,
+                    principal_id=principal.principal_id)
+                if (proposal.payload.get("editMode") != "direct"
+                        or proposal.payload.get("proposalType") not in {"exact-operations-v1", "exact-undo-v1"}
+                        or not proposal.public_summary.get("directApplyPolicy", {}).get("eligible")):
+                    raise FacilityValidationError("direct_review_required", "This change requires preview and approval.")
+                if self.get_layout(principal, site_id, layout_id)["revision"] != proposal.binding.base_revision:
+                    raise FacilityConflictError("revision_conflict", "The layout changed before direct authorization.")
+                # Standing consent authorizes only this validated exact batch.
+                explicit_approval = True
             approval = self.transaction_runtime.approve(
                 tenant_id=principal.tenant_id,
                 site_id=site_id,
@@ -2530,6 +2658,7 @@ class FacilityLayoutService:
                 session_id=session_id,
                 idempotency_key=idempotency_key,
                 explicit_approval=explicit_approval,
+                authorization_mode=authorization_mode,
             )
         except TransactionError as error:
             self._raise_transaction_error(error)
@@ -2590,14 +2719,14 @@ class FacilityLayoutService:
             def commit(self, plan: MutationPlan) -> CommitResult:
                 alternative = plan.payload["alternative"]
                 operations = alternative["operations"]
-                prepared, dependencies = service._prepare_operations(
-                    principal,
-                    site_id,
-                    layout_id,
-                    plan.binding.base_revision,
-                    operations,
-                    required_action="proposal.apply",
-                )
+                from .operation_proposals import UNDO_TYPE, prepare_undo
+                if alternative["strategy"] == UNDO_TYPE:
+                    prepared, dependencies, _ = prepare_undo(service, principal, site_id, layout_id,
+                        plan.binding.base_revision, operations[0]["receiptId"])
+                else:
+                    prepared, dependencies = service._prepare_operations(
+                        principal, site_id, layout_id, plan.binding.base_revision,
+                        operations, required_action="proposal.apply")
                 # The full transaction binding was established during
                 # regeneration. Replaying operations must still preserve the
                 # exact approved content and diff.
@@ -2618,6 +2747,11 @@ class FacilityLayoutService:
                         "transaction_binding_mismatch",
                         "Facility Layout changed during commit.",
                     )
+                from .operation_proposals import PROPOSAL_TYPE
+                if alternative["strategy"] == PROPOSAL_TYPE:
+                    from .proposal_components import validate_proposal_components
+                    validate_proposal_components(service, principal, site_id, layout_id,
+                        plan.binding.base_revision, operations)
                 saved = service.layout_repository.save_approved_layout(
                     principal,
                     site_id,
@@ -2879,12 +3013,32 @@ class FacilityLayoutService:
             baseline_layout=current["layout"],
         )
         operation_result["spatialDiagnostics"] = spatial
-        routing = self._diagnose_routing(
+        document, routing, rebound_ids = self._revalidate_route_layout_sources(
             principal,
             site_id,
             operation_result["document"],
+            inherited_routes=(
+                current["layout"]["routes"] if operation_result["changed"] else []
+            ),
         )
         self._require_no_new_routing_errors(baseline_routing, routing)
+        if rebound_ids:
+            # The approval artifact must bind the revalidated route sources,
+            # not just the caller's placement edits.
+            diff = build_exact_layout_diff(current["layout"], document)
+            operation_result.update(
+                document=document,
+                changed=bool(diff["changed"]),
+                affectedIds=sorted(set(operation_result["affectedIds"]) | set(rebound_ids)),
+                canonicalDiff=diff,
+                diffHash=facility_layout_diff_hash(
+                    layout_id=layout_id,
+                    base_revision=base_revision,
+                    operations=operations,
+                    after=document,
+                    canonical_diff=diff,
+                ),
+            )
         operation_result["routingDiagnostics"] = routing
         return operation_result, dependencies
 
@@ -4437,13 +4591,13 @@ class FacilityLayoutService:
             request.get("prototypeMode") is not True
             or not isinstance(journey_ids, list)
             or not journey_ids
-            or len(journey_ids) > FACILITY_ACTIVITY_SCENARIO_MAXIMUM_ACTORS
+            or len(journey_ids) > FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_ACTORS
             or any(not isinstance(item, str) or not item for item in journey_ids)
             or len(journey_ids) != len(set(journey_ids))
         ):
             raise FacilityValidationError(
                 "facility_navigation_activity_request_invalid",
-                "Explicit prototype mode and 1-20 unique accepted journey IDs are required.",
+                f"Explicit prototype mode and 1-{FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_ACTORS} unique accepted journey IDs are required.",
             )
         handoff_ids = request.get("handoffResultIds", [])
         if (
@@ -4580,7 +4734,8 @@ class FacilityLayoutService:
             repeats = loop_mode != "one_way"
             placement_id = str(placement["placementId"])
             display_name = str(
-                definition.get("displayName") or placement.get("assetId")
+                (placement.get("metadata") or {}).get("instanceLabel")
+                or definition.get("displayName") or placement.get("assetId")
             )
             actors.append({
                 "actorId": f"actor-nav-{index + 1:02d}-{placement_id[3:15]}",

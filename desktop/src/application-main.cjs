@@ -14,7 +14,9 @@ const { documentURL, createDocumentPreview } = require('./document-preview.cjs')
 brandApplication(app);
 const root = path.resolve(__dirname, '../..');
 let window, runtime, network, closing = false, transition = false, booted = false, profile;
+let acceptanceOutput = null;
 let browser = null, browserPromise = null, documents = null, pythonPath, applicationOverlay = false;
+let chatgptAccount = null;
 const trusted = event => !!window && !window.isDestroyed() && event.sender === window.webContents
   && event.senderFrame === window.webContents.mainFrame && network.local(event.senderFrame.url);
 function isDocument(url) { try { documentURL(url, profile.origin); return true; } catch (_) { return false; } }
@@ -86,17 +88,19 @@ async function message(message, detail = '') {
   return dialog.showMessageBox(window, { type: 'info', title: 'InspectorPro', message, detail, buttons: ['OK'] });
 }
 async function shutdown() {
+  chatgptAccount?.close();
   if (browserPromise) {
     const pane = await browserPromise.catch(() => null);
     await pane?.dispose(); browser = null; browserPromise = null;
   }
   await documents?.dispose(); documents = null;
   const cleanup = await runtime?.stop();
-  if (cleanup && (!cleanup.terminationConfirmed || !cleanup.stdioClosed || !cleanup.resourcesClosed)) {
+  if (!acceptanceOutput && cleanup && (!cleanup.terminationConfirmed || !cleanup.stdioClosed || !cleanup.resourcesClosed)) {
     await message('Backend cleanup was not fully confirmed.', 'The diagnostic log has been retained. No unrelated server was stopped.');
   }
   if (profile) await fs.writeFile(path.join(profile.dataRoot, 'last-application-run.json'), JSON.stringify({
     backends: runtime?.getEvidence(), network: network?.getEvidence(), cleanup }, null, 2));
+  return cleanup;
 }
 async function change(kind, destination) {
   if (transition || closing || !booted) return;
@@ -140,6 +144,8 @@ async function external(url) {
 }
 async function start() {
   const options = parseRuntimeOptions(process.argv.slice(app.isPackaged ? 1 : 2));
+  acceptanceOutput = options.codexAcceptanceOutput || options.generationAcceptanceOutput
+    || options.browserAcceptanceOutput || options.workflowAcceptanceOutput || options.acceptanceOutput || null;
   if (options.startupDiagnosticsOutput || options.researchAcceptanceOutput) throw new Error('Application mode does not use restricted acceptance flags.');
   profile = await loadApplicationProfile(options.profileFile);
   const python = await localPath(options.python);
@@ -185,6 +191,10 @@ async function start() {
     }
   });
   window.on('close', event => { if (!closing) { event.preventDefault(); void change('close'); } });
+  chatgptAccount = require('./chatgpt-account.cjs').createChatGPTAccountLauncher({
+    python, root, profileFile: options.profileFile,
+    onError: () => { if (!closing) void message('ChatGPT sign-in could not open.', 'Your existing account and layout were not changed.'); },
+  });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: 'File', submenu: [{ label: 'Close', accelerator: 'Alt+F4', click: () => change('close') }] },
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
@@ -195,24 +205,26 @@ async function start() {
       { label: 'Open in separate window', click: () => void ensureBrowser().then(pane => { pane.show(); pane.detach(); }).catch(error => message('Browser unavailable', error.message)) },
     ] },
     { label: 'Backend', submenu: [{ label: 'Restart backend', click: () => change('restart') }] },
+    { label: 'Sage', submenu: [{ label: 'ChatGPT account', enabled: !!profile.codexRuntime,
+      click: () => { if (!chatgptAccount.open()) void message('The ChatGPT account page is already open in your browser.'); } }] },
   ]));
   const url = new URL(profile.origin);
   if (profile.startupLayoutId) url.searchParams.set('facilityLayoutId', profile.startupLayoutId);
   await window.loadURL(url.href);
   booted = true; window.show(); window.focus();
-  if (options.acceptanceOutput || options.workflowAcceptanceOutput || options.browserAcceptanceOutput) {
+  if (options.acceptanceOutput || options.workflowAcceptanceOutput || options.browserAcceptanceOutput || options.generationAcceptanceOutput || options.codexAcceptanceOutput) {
     let acceptanceTimer;
-    const { run } = options.browserAcceptanceOutput ? require('../tools/application-browser-check.cjs') : options.workflowAcceptanceOutput
+    const output = options.codexAcceptanceOutput || options.generationAcceptanceOutput || options.browserAcceptanceOutput || options.workflowAcceptanceOutput || options.acceptanceOutput;
+    const { run } = options.codexAcceptanceOutput ? require('../tools/application-codex-check.cjs') : options.generationAcceptanceOutput ? require('../tools/application-generation-check.cjs') : options.browserAcceptanceOutput ? require('../tools/application-browser-check.cjs') : options.workflowAcceptanceOutput
       ? require('../tools/application-workflows-check.cjs') : require('../tools/application-check.cjs');
     try {
-      const work=run({ window, runtime, network, profile, root, output: options.browserAcceptanceOutput || options.workflowAcceptanceOutput || options.acceptanceOutput, observe, change, ensureBrowser });
+      const work=run({ window, runtime, network, profile, root, output, observe, change, ensureBrowser });
       if(options.browserAcceptanceOutput) await Promise.race([work,new Promise((_,reject)=>{
         acceptanceTimer=setTimeout(()=>reject(new Error('Browser acceptance exceeded its eight-minute deadline')),480000);
       })]);
       else await work;
     }
     catch (error) {
-      const output = options.browserAcceptanceOutput || options.workflowAcceptanceOutput || options.acceptanceOutput;
       await fs.mkdir(output, { recursive: true });
       await fs.writeFile(path.join(output, 'driver-failure.json'), JSON.stringify({
         status: 'failed', message: error.message, stack: error.stack,
@@ -228,8 +240,34 @@ async function start() {
 }
 app.on('before-quit', event => { if (!closing && window && !window.isDestroyed()) { event.preventDefault(); void change('close'); } });
 app.on('window-all-closed', () => { if (closing) app.quit(); });
-start().catch(async error => {
-  if (app.isReady()) await dialog.showMessageBox({ type: 'error', title: 'InspectorPro startup',
-    message: 'InspectorPro could not start.', detail: (error.code || error.message) + '\nNo existing server was replaced.' });
-  await runtime?.stop(); closing = true; window?.destroy(); app.exit(1);
-});
+async function failStartup(error) {
+  if (!acceptanceOutput) {
+    if (app.isReady()) await dialog.showMessageBox({ type: 'error', title: 'InspectorPro startup',
+      message: 'InspectorPro could not start.', detail: (error.code || error.message) + '\nNo existing server was replaced.' });
+    await runtime?.stop(); closing = true; window?.destroy(); app.exit(1);
+    return;
+  }
+  // Automated runs have no operator to dismiss a startup or cleanup dialog.
+  closing = true;
+  const startupFailure = { code: error.code || 'desktop_startup_failed', message: error.message };
+  let cleanup = null, cleanupError = null;
+  try { cleanup = await shutdown(); }
+  catch (caught) { cleanupError = { code: caught.code || 'desktop_cleanup_failed', message: caught.message }; }
+  try {
+    const backends = runtime?.getEvidence() || [];
+    const evidence = { backends, network: network?.getEvidence() || null,
+      cleanup: cleanup || backends.at(-1)?.cleanup || null, startupFailure,
+      ...(cleanupError ? { cleanupError } : {}) };
+    await fs.mkdir(acceptanceOutput, { recursive: true });
+    await fs.writeFile(path.join(acceptanceOutput, 'driver-failure.json'), JSON.stringify({
+      status: 'failed', phase: 'startup', ...startupFailure, desktop: evidence,
+    }, null, 2));
+    if (profile) await fs.writeFile(path.join(profile.dataRoot, 'last-application-run.json'), JSON.stringify(evidence, null, 2));
+  } catch (caught) {
+    console.error('Could not retain startup failure evidence:', caught.code || caught.message);
+  } finally {
+    if (window && !window.isDestroyed()) window.destroy();
+    app.exit(1);
+  }
+}
+start().catch(failStartup);

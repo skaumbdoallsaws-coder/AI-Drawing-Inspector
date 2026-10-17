@@ -22,7 +22,7 @@ async function localPath(value, { mustExist = true } = {}) {
 }
 function parseRuntimeOptions(args) {
   if (args[0] === '--') args = args.slice(1);
-  const values = {}, allowed = new Set(['--profile-file', '--python', '--acceptance-output', '--startup-diagnostics-output', '--research-acceptance-output', '--workflow-acceptance-output', '--browser-acceptance-output']);
+  const values = {}, allowed = new Set(['--profile-file', '--python', '--acceptance-output', '--startup-diagnostics-output', '--research-acceptance-output', '--workflow-acceptance-output', '--browser-acceptance-output', '--generation-acceptance-output', '--codex-acceptance-output']);
   for (let index = 0; index < args.length; index += 2) {
     if (!allowed.has(args[index]) || Object.hasOwn(values, args[index]) || !args[index + 1] || args[index + 1].startsWith('--')) {
       throw fail('desktop_options_invalid', 'Use npm start -- --profile-file ABSOLUTE_PROFILE_JSON --python ABSOLUTE_PYTHON_EXE');
@@ -30,6 +30,8 @@ function parseRuntimeOptions(args) {
     values[args[index]] = args[index + 1];
   }
   if (!values['--profile-file'] || !values['--python']) throw fail('desktop_profile_required', 'Create an isolated desktop profile, then supply --profile-file and --python. See docs/desktop-runtime-integration.md.');
+  if (values['--codex-acceptance-output'] && [...allowed].some(key => key.endsWith('-output') && key !== '--codex-acceptance-output' && values[key])) throw fail('desktop_options_invalid');
+  if (values['--generation-acceptance-output'] && [...allowed].some(key => key.endsWith('-output') && key !== '--generation-acceptance-output' && values[key])) throw fail('desktop_options_invalid');
   if (values['--browser-acceptance-output'] && ['--acceptance-output', '--startup-diagnostics-output', '--research-acceptance-output', '--workflow-acceptance-output'].some(key => values[key])) throw fail('desktop_options_invalid');
   if (values['--acceptance-output'] && values['--startup-diagnostics-output']) throw fail('desktop_options_invalid', 'Startup diagnostics and application acceptance are separate modes.');
   if (values['--workflow-acceptance-output'] && ['--acceptance-output', '--startup-diagnostics-output', '--research-acceptance-output'].some(key => values[key])) {
@@ -37,7 +39,7 @@ function parseRuntimeOptions(args) {
   }
   if (values['--research-acceptance-output'] && !values['--acceptance-output']) throw fail('desktop_options_invalid', 'Research acceptance requires full application acceptance.');
   for (const value of Object.values(values)) if (!path.isAbsolute(value)) throw fail('desktop_local_path_required');
-  return { ...(values['--browser-acceptance-output'] ? { browserAcceptanceOutput: values['--browser-acceptance-output'] } : {}), ...(values['--workflow-acceptance-output'] ? { workflowAcceptanceOutput: values['--workflow-acceptance-output'] } : {}), ...(values['--research-acceptance-output'] ? { researchAcceptanceOutput: values['--research-acceptance-output'] } : {}), profileFile: values['--profile-file'], python: values['--python'], acceptanceOutput: values['--acceptance-output'] || null,
+  return { ...(values['--codex-acceptance-output'] ? { codexAcceptanceOutput: values['--codex-acceptance-output'] } : {}), ...(values['--generation-acceptance-output'] ? { generationAcceptanceOutput: values['--generation-acceptance-output'] } : {}), ...(values['--browser-acceptance-output'] ? { browserAcceptanceOutput: values['--browser-acceptance-output'] } : {}), ...(values['--workflow-acceptance-output'] ? { workflowAcceptanceOutput: values['--workflow-acceptance-output'] } : {}), ...(values['--research-acceptance-output'] ? { researchAcceptanceOutput: values['--research-acceptance-output'] } : {}), profileFile: values['--profile-file'], python: values['--python'], acceptanceOutput: values['--acceptance-output'] || null,
     startupDiagnosticsOutput: values['--startup-diagnostics-output'] || null };
 }
 async function loadRuntimeProfile(profileFile) {

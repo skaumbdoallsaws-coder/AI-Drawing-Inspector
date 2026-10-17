@@ -172,7 +172,9 @@ def _snapshot(page: Any) -> dict[str, Any]:
                 const group = (three.representationGroups || []).find(
                     (candidate) => candidate.assetId
                         === actor.assetDefinitionRef.assetId
+                        && candidate.assetDefinitionRevision === actor.assetDefinitionRef.assetDefinitionRevision
                 );
+                const visual = activity.actors.find(item => item.actorId === actor.actorId);
                 return {
                     actorId: actor.actorId,
                     actorType: actor.actorType,
@@ -187,6 +189,8 @@ def _snapshot(page: Any) -> dict[str, Any]:
                     endTransferMotionPackageId: actor.endTransferMotionPackageId,
                     startTransferMotionPackageId: actor.startTransferMotionPackageId,
                     visualAlignment: actor.visualAlignment,
+                    visualSource: visual && visual.visualSource,
+                    exactCatalogVisual: visual && visual.exactCatalogVisual,
                     outcome: movement.outcome || null,
                     laneBinding: movement.laneBinding || null,
                     returnOutcome: returnMovement.outcome || null,
@@ -855,8 +859,17 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
                 "unavailableActivity"
             ],
             "bindings": bindings,
-            "allActorsUseExactCatalogVisuals": all(
-                binding["representation"] in {"overview", "detail"}
+            "allActorsUseDeclaredVisuals": all(
+                (binding["representation"] in {"overview", "detail"}
+                 and binding["exactCatalogVisual"] is True)
+                or (binding["actorType"] == "operator"
+                    and binding["assetDefinitionRef"] == {
+                        "assetId": "asset-operator",
+                        "assetDefinitionRevision": "773d3761fb0796587de7a21ccb8b368f4334c71f73c06682b84472d69d4b5757",
+                    }
+                    and binding["representation"] == "operator-avatar"
+                    and binding["visualSource"] == "animated-operator-avatar"
+                    and binding["exactCatalogVisual"] is False)
                 for binding in bindings
             ),
             "visualHeadingAlignment": {
@@ -1000,7 +1013,7 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
         report["activity"]["planVisibleMarkerCount"] >= 4,
         report["activity"]["stationaryEvidence"]["placementCount"] > 0,
         report["activity"]["stationaryTransformsUnchanged"],
-        report["activity"]["allActorsUseExactCatalogVisuals"],
+        report["activity"]["allActorsUseDeclaredVisuals"],
         report["activity"]["visualHeadingAlignment"][
             "allActorsFaceTravel"
         ],

@@ -205,6 +205,8 @@ class FakeObject3D extends FakeEventTarget {
         this.children = [];
         this.parent = null;
         this.position = new FakeVector3();
+        this.rotation = { x: 0, y: 0, z: 0 };
+        this.visible = true;
         this.quaternion = new FakeQuaternion();
         this.scale = new FakeVector3(1, 1, 1);
         this.userData = {};
@@ -223,6 +225,10 @@ class FakeObject3D extends FakeEventTarget {
         const index = this.children.indexOf(child);
         if (index >= 0) this.children.splice(index, 1);
         child.parent = null;
+    }
+
+    removeFromParent() {
+        if (this.parent) this.parent.remove(this);
     }
 
     traverse(visitor) {
@@ -283,7 +289,10 @@ class FakeGeometry {
         this.height = height;
         this.depth = depth;
         this.disposeCount = 0;
+        this.attributes = { position: { count: 0 } };
     }
+
+    setAttribute(name, attribute) { this.attributes[name] = attribute; return this; }
 
     dispose() {
         this.disposeCount += 1;
@@ -318,6 +327,16 @@ class FakeShapeGeometry extends FakeGeometry {
     }
 }
 
+class FakeExtrudeGeometry extends FakeShapeGeometry {
+    constructor(shape, options) { super(shape); this.options = options; }
+    rotateX(angle) { this.rotationX = angle; }
+}
+
+class FakePlaneGeometry extends FakeGeometry {
+    constructor(width, height) { super(width, height); this.isPlaneGeometry = true; }
+    rotateX(angle) { this.rotationX = angle; return this; }
+}
+
 class FakeBufferGeometry extends FakeGeometry {
     constructor() {
         super();
@@ -326,6 +345,11 @@ class FakeBufferGeometry extends FakeGeometry {
 
     setAttribute(name, attribute) {
         this.attributes[name] = attribute;
+        return this;
+    }
+
+    computeVertexNormals() {
+        this.normalsComputed = true;
         return this;
     }
 }
@@ -367,6 +391,9 @@ class FakeMaterial {
         clone.color.setHex(this.color.getHex());
         clone.emissive.setHex(this.emissive.getHex());
         clone.emissiveIntensity = this.emissiveIntensity;
+        clone.roughness = this.roughness;
+        clone.metalness = this.metalness;
+        clone.map = this.map;
         return clone;
     }
 
@@ -652,7 +679,17 @@ function createThree() {
         Matrix4: FakeMatrix4,
         Shape: FakeShape,
         ShapeGeometry: FakeShapeGeometry,
+        ExtrudeGeometry: FakeExtrudeGeometry,
         BoxGeometry: FakeGeometry,
+        PlaneGeometry: FakePlaneGeometry,
+        SphereGeometry: FakeGeometry,
+        CylinderGeometry: FakeGeometry,
+        LatheGeometry: FakeGeometry,
+        Bone: FakeObject3D,
+        Skeleton: class { dispose() {} },
+        SkinnedMesh: class extends FakeMesh { bind() {} },
+        Uint16BufferAttribute: FakeFloat32BufferAttribute,
+        SplineCurve: class { constructor(points) { this.points = points; } getPoints() { return this.points; } },
         BufferGeometry: FakeBufferGeometry,
         Float32BufferAttribute: FakeFloat32BufferAttribute,
         MeshStandardMaterial: FakeMaterial,
@@ -1340,7 +1377,7 @@ function prototype(THREE, name) {
 
 function fixture(options) {
     const scheduler = createFrameScheduler();
-    const THREE = createThree();
+    const THREE = options && options.THREE || createThree();
     const host = new FakeElement('host');
     const documentObject = new FakeEventTarget();
     documentObject.hidden = false;
@@ -1929,6 +1966,31 @@ test('walkthrough route planning is deterministic and clears obstacles', () => {
     ));
 });
 
+test('short walks route on large sites without allocating a whole-site grid', () => {
+    const input = {
+        start: {x: 340, z: 35}, goal: {x: 325, z: 20}, radius: .3,
+        bounds: {minimum: {x: -82, z: 0}, maximum: {x: 376, z: 200}},
+        obstacles: [[{x:330,z:25},{x:334,z:25},{x:334,z:40},{x:330,z:40}]],
+    };
+    const result = runtime.planWalkthroughRoute(input);
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, 'routed');
+    assert(result.visitedNodeCount <= 20000);
+    result.points.slice(1).forEach((p, i) => assert(runtime.walkthroughSegmentValid(result.points[i], p, input)));
+});
+
+test('walk search exhaustion is not reported as proof of no path', () => {
+    const result = runtime.planWalkthroughRoute({
+        start: {x: 10, z: 10}, goal: {x: 30, z: 10}, radius: .3, maximumNodes: 100,
+        bounds: {minimum: {x: 0, z: 0}, maximum: {x: 400, z: 200}},
+        obstacles: [[{x:20,z:0},{x:21,z:0},{x:21,z:150},{x:20,z:150}]],
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'search_budget_exhausted');
+    assert.equal(result.visitedNodeCount, 100);
+    assert.deepEqual(result.points, []);
+});
+
 test('bounded renderer pool reuses one WebGL renderer across adapter remounts', () => {
     const pool = runtime.createRendererPool({ maximumSize: 1 });
     const first = fixture({ rendererPool: pool });
@@ -1950,6 +2012,45 @@ test('bounded renderer pool reuses one WebGL renderer across adapter remounts', 
     assert.strictEqual(pool.dispose(), false);
     assert.strictEqual(renderer.disposeCount, 1);
     assert.strictEqual(renderer.forceContextLossCount, 1);
+});
+
+test('parked sheets share one renderer and restore camera, geometry and selection', async () => {
+    const pool = runtime.createRendererPool({ maximumSize: 1 });
+    const first = fixture({ rendererPool: pool });
+    first.adapter.mount(first.host);
+    await first.adapter.setScene({
+        layout: { placements: [placement('pl-a', 'asset-machine', REV_A, 1, 0, 2)] },
+        assetCatalog: [asset('asset-machine', REV_A)],
+    });
+    first.adapter.setSelection(['pl-a']);
+    const camera = first.adapter.getCameraView();
+    camera.position = { x: 12, y: 18, z: 24 };
+    first.adapter.applyCameraView(camera);
+    const expectedCamera = first.adapter.getCameraView();
+    const controls = FakeControls.instances.at(-1);
+    assert.strictEqual(first.adapter.park(), true);
+    assert.strictEqual(first.adapter.park(), false);
+    assert.strictEqual(first.adapter.getDiagnostics().lifecycle.listenerCount, 0);
+    assert.strictEqual(pool.getDiagnostics().leasedCount, 0);
+
+    const second = fixture({ rendererPool: pool });
+    second.adapter.mount(second.host);
+    assert.strictEqual(second.adapter.getDiagnostics().degraded, false);
+    assert.strictEqual(second.adapter.park(), true);
+    assert.strictEqual(first.adapter.resume(), true);
+    await settleAsync();
+    assert.strictEqual(FakeRenderer.instances.length, 1);
+    assert.notStrictEqual(FakeControls.instances.at(-1), controls);
+    assert.deepStrictEqual(first.adapter.getCameraView(), expectedCamera);
+    assert.deepStrictEqual(first.adapter.getDiagnostics().selectedPlacementIds, ['pl-a']);
+    assert.deepStrictEqual(first.adapter.getDiagnostics().representationGroups
+        .flatMap(group => group.placementIds), ['pl-a']);
+    assert.strictEqual(pool.getDiagnostics().leasedCount, 1);
+    first.adapter.park();
+    first.adapter.dispose();
+    assert.strictEqual(first.adapter.resume(), false);
+    second.adapter.dispose();
+    pool.dispose();
 });
 
 test('renderer pool capacity limits concurrent leases and factory calls', () => {
@@ -2240,6 +2341,49 @@ test('heavy large-layout visuals defer until their placement is selected', async
     data.adapter.dispose();
 });
 
+for (const navigation of ['camera-view', 'toolbar-zoom']) {
+    test(navigation + ' loads visible deferred meshes without selecting equipment', async () => {
+        const data = fixture({
+            largeLayoutDetailThreshold: 2,
+            largeLayoutHeavyVisualBytes: 100,
+            assetResolver: request => {
+                if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+                if (request.stage === 'footprint') return prototype(data.THREE, request.stage);
+                if (request.stage === 'overview') {
+                    const visual = prototype(data.THREE, request.stage);
+                    visual.byteSize = 101;
+                    return visual;
+                }
+                return null;
+            },
+        });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({
+            layout: { placements: [placement('pl-a', 'asset-heavy', REV_A, 1, 0, 2),
+                placement('pl-b', 'asset-heavy', REV_A, 4, 0, 2)] },
+            assetCatalog: [asset('asset-heavy', REV_A)],
+        });
+        const view = data.adapter.getCameraView();
+        view.position = { x: 2, y: 2, z: 100000 };
+        view.target = { x: 2, y: 0, z: 2 };
+        data.adapter.applyCameraView(view);
+        await settleAsync(20);
+        assert.strictEqual(data.adapter.getDiagnostics().rendering.deferredGroupCount, 1);
+        if (navigation === 'camera-view') {
+            view.position = { x: 2, y: 2, z: 8 };
+            data.adapter.applyCameraView(view);
+        } else {
+            data.adapter.zoomBy(10000);
+        }
+        await settleAsync(20);
+        const diagnostics = data.adapter.getDiagnostics();
+        assert.strictEqual(diagnostics.rendering.deferredGroupCount, 0);
+        assert.strictEqual(diagnostics.representationGroups[0].representation, 'overview');
+        assert.deepStrictEqual(diagnostics.selectedPlacementIds, []);
+        data.adapter.dispose();
+    });
+}
+
 test('manual preview waits for an in-flight deferred exact visual', async () => {
     const data = fixture({
         largeLayoutDetailThreshold: 2,
@@ -2397,6 +2541,185 @@ test('renders loaded facility assets in neutral CAD gray without losing selectio
     data.adapter.setSelection('pl-gray');
     assert.strictEqual(renderedMaterial.emissive.getHex(), 0x32a8ff);
     assert.strictEqual(renderedMaterial.emissiveIntensity, 0.75);
+    data.adapter.dispose();
+});
+
+function deferredWallArtworkFixture(target) {
+    const THREE = createThree(), loads = [];
+    THREE.BufferGeometry = class extends FakeBufferGeometry { computeVertexNormals() {} };
+    THREE.Mesh = class extends FakeMesh {
+        updateWorldMatrix() {}
+        getWorldPosition(vector) { return vector.set(this.position.x, this.position.y, this.position.z); }
+        getWorldScale(vector) { return vector.set(this.scale.x, this.scale.y, this.scale.z); }
+    };
+    THREE.TextureLoader = class {
+        load(url, ready, progress, failed) {
+            const texture = {isTexture:true, image:{width:400,height:300}, dispose() {},
+                offset:{set() {}}, repeat:{set() {}}};
+            loads.push({ready:()=>ready(texture), failed});
+            return texture;
+        }
+    };
+    const data = fixture({THREE, assetResolver:()=>null});
+    const wall = asset('asset-wall', REV_A);
+    wall.definition.structureKind = 'wall';
+    const layout = {placements:[placement('wall', 'asset-wall', REV_A, 0, 0, 0)],
+        extensions:{facilityPerimeterWalls:{version:1, panels:[], settings:{
+            boundarySource:'polygon', boundary:[{x:0,z:0},{x:10,z:0},{x:10,z:10},{x:0,z:10}],
+            thicknessMeters:.2, heightMeters:3, openings:[],
+            exteriorFinish:{color:'#222222',jointColor:'#111111',jointWidthMeters:.01,
+                panelWidthMeters:10,panelHeightMeters:3,
+                fittedArtworks:[{artworkId:'deferred-art',imagePath:'/test.png',target,
+                    region:[0,0,1,1],coverage:1,uv:[0,0,1,1]}]}
+        }}}};
+    return Object.assign(data, {loads, input:{layout,assetCatalog:[wall]}});
+}
+
+for (const target of [{placementId:'wall',face:'positive_z'}, {edge:0,side:'interior'}]) {
+    test(`deferred fitted artwork survives layer refresh for ${JSON.stringify(target)}`, async () => {
+        const data = deferredWallArtworkFixture(target);
+        data.adapter.mount(data.host);
+        await data.adapter.setScene(data.input);
+        data.adapter.setLayerVisibility({zones:false,cells:false});
+        data.loads[0].ready();
+        let art = data.adapter.getDiagnostics().exteriorArtwork[0];
+        assert.equal(art.status, 'ready');
+        assert.equal(art.visible, true, 'Ready artwork must unhide its parent as well as its mesh');
+        data.adapter.setLayerVisibility({walls:false});
+        assert.equal(data.adapter.getDiagnostics().exteriorArtwork[0].visible, false);
+        data.adapter.setLayerVisibility({walls:true});
+        assert.equal(data.adapter.getDiagnostics().exteriorArtwork[0].visible, true);
+        data.adapter.dispose();
+    });
+
+    test(`deferred fitted artwork respects walls hidden during load for ${JSON.stringify(target)}`, async () => {
+        const data = deferredWallArtworkFixture(target);
+        data.adapter.mount(data.host);
+        await data.adapter.setScene(data.input);
+        data.adapter.setLayerVisibility({walls:false});
+        data.loads[0].ready();
+        assert.equal(data.adapter.getDiagnostics().exteriorArtwork[0].visible, false);
+        data.adapter.setLayerVisibility({walls:true});
+        assert.equal(data.adapter.getDiagnostics().exteriorArtwork[0].visible, true);
+        data.adapter.dispose();
+    });
+}
+
+test('failed fitted artwork stays hidden when walls are toggled', async () => {
+    const data = deferredWallArtworkFixture({placementId:'wall',face:'positive_z'});
+    data.adapter.mount(data.host);
+    await data.adapter.setScene(data.input);
+    data.loads[0].failed();
+    data.adapter.setLayerVisibility({walls:false});
+    data.adapter.setLayerVisibility({walls:true});
+    const art = data.adapter.getDiagnostics().exteriorArtwork[0];
+    assert.equal(art.status, 'failed');
+    assert.equal(art.visible, false);
+    data.adapter.dispose();
+});
+
+for (const count of [1, 2]) {
+    test(`authored artwork retains its texture and colors on ${count} tinted wall placements`, async () => {
+        const texture = {isTexture:true, disposeCount:0, dispose(){this.disposeCount++;}};
+        const data = fixture({assetResolver:request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage !== 'detail') return null;
+            const visual = prototype(data.THREE, 'sign-wall');
+            const print = visual.children[0].material;
+            print.name = 'printed-logo';
+            print.color.setHex(0xffffff);
+            print.userData.facilityArtwork = true;
+            print.map = texture;
+            const backing = prototype(data.THREE, 'backing').children[0];
+            backing.material.map = texture;
+            visual.add(backing);
+            return visual;
+        }});
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({layout:{placements:Array.from({length:count}, (_, i) =>
+            Object.assign(placement('pl-sign-'+i, 'asset-sign', REV_A, i*8, 0, 2), {appearance:{color:'#ff0000'}}))},
+            assetCatalog:[asset('asset-sign', REV_A)]});
+        data.scheduler.flush();
+        const prints = [], backings = [];
+        FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+            if (!object.isMesh || !object.material) return;
+            if (object.material.name === 'printed-logo') prints.push(object);
+            else if (object.material.userData.facilityNeutralAssetMaterial) backings.push(object);
+        });
+        assert.ok(prints.length && backings.length);
+        for (const object of prints) {
+            assert.strictEqual(object.material.map, texture);
+            assert.strictEqual(object.material.color.getHex(), 0xffffff);
+            if (object.isInstancedMesh) assert.strictEqual(object.colors[0], 0xffffff);
+        }
+        assert.strictEqual(texture.disposeCount, 0, 'A shared artwork texture must remain live');
+        data.adapter.setSelection('pl-sign-0');
+        data.adapter.setSelection([]);
+        for (const object of prints) assert.strictEqual(object.material.color.getHex(), 0xffffff);
+        data.adapter.dispose();
+        assert.ok(texture.disposeCount > 0, 'Artwork texture must be released at teardown');
+    });
+}
+
+for (const count of [1, 2]) {
+    test(`authored metallic finishes survive tint and display settings on ${count} placements`, async () => {
+        const data = fixture({assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage !== 'detail') return null;
+            const visual = prototype(data.THREE, 'gold-trim');
+            const finish = visual.children[0].material;
+            finish.name = 'authored-gold';
+            finish.color.setHex(0xc99b39);
+            finish.metalness = 0.65;
+            finish.roughness = 0.38;
+            finish.userData.facilityAuthoredFinish = true;
+            visual.add(prototype(data.THREE, 'ordinary-wall').children[0]);
+            return visual;
+        }});
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({layout:{placements:Array.from({length:count}, (_, i) =>
+            Object.assign(placement('pl-trim-'+i, 'asset-trim', REV_A, i*8, 0, 2), {appearance:{color:'#292d32'}}))},
+            assetCatalog:[asset('asset-trim', REV_A)]});
+        data.adapter.setVisualSettings({metalness:0.1, roughness:0.9});
+        data.adapter.setSelection('pl-trim-0');
+        data.adapter.setSelection([]);
+        data.scheduler.flush();
+        const trims = [];
+        FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+            if (object.material?.name === 'authored-gold') trims.push(object);
+        });
+        assert.ok(trims.length);
+        for (const object of trims) {
+            assert.strictEqual(object.material.metalness, 0.65);
+            assert.strictEqual(object.material.roughness, 0.38);
+            assert.strictEqual(object.isInstancedMesh ? object.colors[0] : object.material.color.getHex(), 0xc99b39);
+        }
+        data.adapter.dispose();
+    });
+}
+
+test('repeated illuminated assets retain their light children instead of mesh-only instancing', async () => {
+    class AuthoredLight extends FakeObject3D {
+        constructor() { super(); this.isLight = true; this.name = 'authored-wall-light'; }
+        clone(deep) { const light = super.clone(deep); light.isLight = true; return light; }
+    }
+    const data = fixture({assetResolver: request => {
+        if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+        if (request.stage !== 'detail') return null;
+        const visual = prototype(data.THREE, 'illuminated-wall');
+        visual.add(new AuthoredLight());
+        return visual;
+    }});
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({layout:{placements:[
+        placement('pl-light-a', 'asset-light', REV_A, 0, 0, 0),
+        placement('pl-light-b', 'asset-light', REV_A, 8, 0, 0)]},assetCatalog:[asset('asset-light', REV_A)]});
+    data.scheduler.flush();
+    const groups = data.adapter.getDiagnostics().representationGroups;
+    assert.ok(groups.some(g => g.assetId === 'asset-light' && !g.instanced && g.renderedLightCount === 2));
+    let lights = 0;
+    FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => { if (object.name === 'authored-wall-light') lights++; });
+    assert.strictEqual(lights, 2);
     data.adapter.dispose();
 });
 
@@ -3421,6 +3744,11 @@ test('3D viewport projects semantic floor markings from shared world coordinates
     assert.ok(Math.abs(marking.position.y - 0.003) < 0.00001);
     assert.ok(gridY < marking.position.y);
     assert.strictEqual(marking.position.z, 5);
+    assert(marking.children.length > 0);
+    marking.children.forEach(mesh => {
+        assert.strictEqual(mesh.geometry.isPlaneGeometry, true);
+        assert.strictEqual(mesh.geometry.rotationX, -Math.PI / 2);
+    });
     data.adapter.dispose();
 });
 
@@ -3540,6 +3868,7 @@ test('3D layer visibility hides presentation objects without changing scene data
         routes: false,
         markings: false,
         assets: false,
+        walls: true,
     });
     const after = data.adapter.getDiagnostics();
     assert.strictEqual(after.placementCount, 1);
@@ -3552,6 +3881,46 @@ test('3D layer visibility hides presentation objects without changing scene data
     });
     assert.strictEqual(aisle.visible, true);
     assert.strictEqual(marking.visible, true);
+    data.adapter.dispose();
+});
+
+test('perimeter walls and tagged wall assets have an independent presentation layer', async () => {
+    const data = fixture();
+    data.adapter.mount(data.host);
+    const wall = asset('asset-wall', REV_A); wall.tags = ['wall'];
+    const layout = { placements: [placement('pl-wall', 'asset-wall', REV_A, 2, 0, 2)],
+        extensions: { facilityPerimeterWalls: { version: 1, settings: { heightMeters: 3 },
+            panels: [[{x:0,z:0},{x:0,z:4},{x:0.2,z:4}]] } } };
+    const before = JSON.stringify(layout);
+    await data.adapter.setScene({ layout, assetCatalog: [wall] });
+    assert.equal(data.adapter.getDiagnostics().perimeterWallCount, 1);
+    assert.equal(data.adapter.getDiagnostics().visibleLegacyWallPlacementCount, 1);
+    data.adapter.setLayerVisibility({ assets: false });
+    assert.equal(data.adapter.getDiagnostics().visiblePerimeterWallCount, 1);
+    assert.equal(data.adapter.getDiagnostics().visibleLegacyWallPlacementCount, 1);
+    data.adapter.setLayerVisibility({ walls: false });
+    assert.equal(data.adapter.getDiagnostics().visiblePerimeterWallCount, 0);
+    assert.equal(data.adapter.getDiagnostics().visibleLegacyWallPlacementCount, 0);
+    assert.equal(data.adapter.getDiagnostics().placementCount, 1);
+    assert.equal(JSON.stringify(layout), before);
+    data.adapter.setLayerVisibility({ walls: true });
+    assert.equal(data.adapter.getDiagnostics().visiblePerimeterWallCount, 1);
+    await data.adapter.setScene({ layout: {placements:[]}, assetCatalog: [] });
+    assert.equal(data.adapter.getDiagnostics().perimeterWallCount, 0);
+    data.adapter.dispose();
+});
+
+test('interior-only perimeter paint renders without an exterior finish', async () => {
+    const data=fixture();data.adapter.mount(data.host);
+    const layout={placements:[],extensions:{facilityPlan:{widthMeters:10,depthMeters:8},
+        facilityPerimeterWalls:{version:1,settings:{boundarySource:'plan',heightMeters:3,thicknessMeters:.2,
+            openings:[],interiorColor:'#3b4147'},panels:[]}}};
+    const before=JSON.stringify(layout);
+    await data.adapter.setScene({layout,assetCatalog:[]});
+    assert.equal(data.adapter.getDiagnostics().exteriorFinishObjectCount,1);
+    assert.equal(JSON.stringify(layout),before);
+    await data.adapter.setScene({layout:{placements:[]},assetCatalog:[]});
+    assert.equal(data.adapter.getDiagnostics().exteriorFinishObjectCount,0);
     data.adapter.dispose();
 });
 
@@ -5258,7 +5627,7 @@ test('twenty remounts leave exactly one canvas, observer, and render request', (
     assert.strictEqual(diagnostics.lifecycle.teardownCount, 19);
     assert.strictEqual(diagnostics.lifecycle.canvasCount, 1);
     assert.strictEqual(diagnostics.lifecycle.observerActive, true);
-    assert.strictEqual(diagnostics.lifecycle.listenerCount, 14);
+    assert.strictEqual(diagnostics.lifecycle.listenerCount, 16);
     data.adapter.dispose();
     assert.strictEqual(FakeResizeObserver.activeCount, 0);
     assert.strictEqual(data.scheduler.pendingCount, 0);
@@ -5387,6 +5756,545 @@ test('dispose is idempotent and releases canvas, listeners, controls, RAF, and G
     assert.strictEqual(data.scheduler.pendingCount, 0);
     assert(FakeGeometry.totalDisposed > 0);
     assert(FakeMaterial.totalDisposed > 0);
+});
+
+test('avatar camera retracts at thin obstacles, floor and facility boundary', () => {
+    const bounds = { minimum: { x: 0, y: 0, z: 0 }, maximum: { x: 20, y: 5, z: 20 } };
+    const anchor = { x: 10, y: 1.3, z: 10 };
+    const wall = [{ x: 8, z: 12 }, { x: 12, z: 12 }, { x: 12, z: 12.02 }, { x: 8, z: 12.02 }];
+    const input = { anchor, desired: { x: 10, y: 1.45, z: 14 }, floorY: 0, bounds };
+    assert.strictEqual(runtime.resolveWalkthroughCamera(input).obstructed, false);
+    const blocked = runtime.resolveWalkthroughCamera({ ...input, obstacles: [wall] });
+    assert(blocked.obstructed && blocked.position.z < 11.85 && blocked.position.z > 11.7);
+    const floor = runtime.resolveWalkthroughCamera({ ...input, desired: { x: 10, y: -2, z: 14 } });
+    assert(floor.obstructed && floor.position.y >= 0.15);
+    const edge = runtime.resolveWalkthroughCamera({ ...input, anchor: { x: 10, y: 1.3, z: 19 } });
+    assert.strictEqual(edge.obstructed, false);
+    const beyond = runtime.resolveWalkthroughCamera({ ...input, desired: { x: 10, y: 1.3, z: 22 } });
+    assert(beyond.obstructed && beyond.position.z <= 19.85);
+});
+
+test('third-person movement, camera switch, routing and Drone use the walker position', async () => {
+    const data = fixture({ worldBounds: { minX: 0, minZ: 0, maxX: 20, maxZ: 20, floorY: 0 } });
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({ layout: { placements: [] }, assetCatalog: [] });
+    data.scheduler.flush();
+    const overview = data.adapter.getDiagnostics().camera;
+    assert.strictEqual(data.adapter.setWalkthroughCameraMode('invalid'), false);
+    data.adapter.setWalkthroughCameraMode('third-person');
+    data.adapter.enterWalkthrough({ worldPoint: { x: 10, y: 0, z: 10 }, ignoreSelection: true });
+    const start = data.adapter.getWalkthroughState();
+    assert(start.avatar.visible);
+    assert(start.cameraDistance > 3.9);
+    assert.strictEqual(start.position.z, 10);
+    assert.strictEqual(data.adapter.getDiagnostics().camera.position.z, 15);
+    data.documentObject.dispatch('keydown', { code: 'KeyW' });
+    for (let i = 1; i <= 20; i++) data.scheduler.flush(i * 16);
+    const moved = data.adapter.getWalkthroughState();
+    assert(moved.position.z < 9.6);
+    assert(moved.avatar.distanceMeters > 0.4 && moved.avatar.blend > 0.9);
+    assert(moved.avatar.leftHip !== 0);
+    data.documentObject.dispatch('keyup', { code: 'KeyW' });
+    for (let i = 21; i <= 70; i++) data.scheduler.flush(i * 16);
+    assert.strictEqual(data.adapter.getWalkthroughState().avatar.animation, 'idle');
+    assert.strictEqual(data.scheduler.pendingCount, 0);
+    const body = data.adapter.getWalkthroughState().position;
+    data.documentObject.dispatch('keydown', { code: 'KeyC' });
+    assert.deepStrictEqual(data.adapter.getWalkthroughState().position, body);
+    assert.strictEqual(data.adapter.getWalkthroughState().avatar.visible, false);
+    assert.strictEqual(data.adapter.getDiagnostics().camera.position.z, body.z);
+    data.documentObject.dispatch('keydown', { code: 'KeyC', repeat: true });
+    assert.strictEqual(data.adapter.getWalkthroughState().cameraMode, 'first-person');
+    data.documentObject.dispatch('keydown', { code: 'KeyC' });
+    const route = data.adapter.navigateWalkthroughToPoint({ x: body.x + 1, z: body.z });
+    assert(route.ok && Math.abs(route.distance - 1) < 1e-6);
+    assert(data.adapter.getDiagnostics().camera.position.z > body.z + 3);
+    data.adapter.cancelWalkthroughNavigation('test');
+    data.documentObject.dispatch('keydown', { code: 'KeyG' });
+    assert.strictEqual(data.adapter.getWalkthroughState().avatar, null);
+    assert.strictEqual(data.adapter.getDiagnostics().camera.position.z, body.z);
+    data.adapter.exitDrone('test');
+    assert.deepStrictEqual(data.adapter.getDiagnostics().camera, overview);
+    data.adapter.dispose();
+});
+
+test('scripted walk gaze changes only camera and remains valid across camera modes', async () => {
+    const data = fixture({worldBounds: {minX: 0, minZ: 0, maxX: 20, maxZ: 20, floorY: 0}});
+    data.adapter.mount(data.host);
+    const layout = {placements: []};
+    await data.adapter.setScene({layout, assetCatalog: []});
+    assert.equal(data.adapter.lookWalkthroughAt({x: 5, y: 1, z: 5}), false);
+    data.adapter.enterWalkthrough({worldPoint: {x: 10, z: 10}, ignoreSelection: true});
+    const before = data.adapter.getWalkthroughState().position;
+    for (const mode of ['first-person', 'third-person']) {
+        data.adapter.setWalkthroughCameraMode(mode);
+        assert.equal(data.adapter.lookWalkthroughAt({x: 5, y: 1, z: 5}), true);
+        assert.deepEqual(data.adapter.getWalkthroughState().position, before);
+        assert.equal(data.adapter.getWalkthroughState().active, true);
+        assert.equal(data.adapter.lookWalkthroughAt({x: NaN, y: 1, z: 5}), false);
+    }
+    assert.deepEqual(layout, {placements: []});
+    data.adapter.dispose();
+});
+
+test('navigation retains the lookAt quaternion instead of restoring the previous heading', async () => {
+    const THREE = createThree();
+    THREE.PerspectiveCamera = class extends FakePerspectiveCamera {
+        lookAt(x, y, z) {
+            super.lookAt(x, y, z);
+            const heading = Math.atan2(-(x - this.position.x), -(z - this.position.z));
+            this.quaternion.set(0, Math.sin(heading / 2), 0, Math.cos(heading / 2));
+        }
+    };
+    const data = fixture({THREE, worldBounds: {minX: 0, minZ: 0, maxX: 20, maxZ: 20, floorY: 0}});
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({layout: {placements: []}, assetCatalog: []});
+    data.adapter.enterWalkthrough({worldPoint: {x: 10, z: 10}, ignoreSelection: true});
+    data.adapter.setWalkthroughCameraMode('first-person');
+    assert(data.adapter.navigateWalkthroughToPoint({x: 12, z: 10}).ok);
+    const facing = data.adapter.getCameraView().quaternion;
+    assert(Math.abs(facing.y + Math.SQRT1_2) < 1e-6);
+    assert(Math.abs(facing.w - Math.SQRT1_2) < 1e-6);
+    data.scheduler.flush(16);
+    assert.deepEqual(data.adapter.getCameraView().quaternion, facing);
+    data.adapter.dispose();
+});
+
+test('avatar resources and frame work are released on suspend, park, context loss and dispose', async () => {
+    for (const action of ['suspend', 'park', 'context-loss', 'dispose']) {
+        const data = fixture({ worldBounds: { minX: 0, minZ: 0, maxX: 20, maxZ: 20, floorY: 0 } });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({ layout: { placements: [] }, assetCatalog: [] });
+        data.adapter.setWalkthroughCameraMode('third-person');
+        data.adapter.enterWalkthrough({ worldPoint: { x: 10, y: 0, z: 10 } });
+        const geometryBefore = FakeGeometry.totalDisposed;
+        if (action === 'context-loss') FakeRenderer.instances.at(-1).domElement.dispatch('webglcontextlost');
+        else data.adapter[action]();
+        assert.strictEqual(data.adapter.getWalkthroughState().avatar, null, action);
+        assert.strictEqual(data.adapter.getWalkthroughState().active, false, action);
+        assert(FakeGeometry.totalDisposed >= geometryBefore + 5, action);
+        data.adapter.dispose();
+        assert.strictEqual(data.scheduler.pendingCount, 0, action);
+    }
+});
+
+test('blocked walking stops gait; mouse-look retracts camera without moving the walker', async () => {
+    const data = fixture({ worldBounds: { minX: 0, minZ: 0, maxX: 20, maxZ: 20, floorY: 0 } });
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({ layout: { placements: [] }, assetCatalog: [] });
+    data.adapter.setWalkthroughCameraMode('third-person');
+    data.adapter.enterWalkthrough({ worldPoint: { x: 10, y: 0, z: 0.3 } });
+    data.documentObject.dispatch('keydown', { code: 'KeyW' });
+    for (let i = 0; i < 50; i++) data.scheduler.flush(i * 16);
+    const walk = data.adapter.getWalkthroughState();
+    assert.strictEqual(walk.position.z, 0.3);
+    assert(walk.collisionCount > 0);
+    assert.strictEqual(walk.avatar.animation, 'idle');
+    const controls = FakePointerLockControls.instances.at(-1);
+    controls.getDirection = target => target.set(0, 0, 1);
+    controls.dispatch('change');
+    const looked = data.adapter.getWalkthroughState();
+    assert.deepStrictEqual(looked.position, walk.position);
+    assert(looked.cameraObstructed && !looked.avatar.visible);
+    data.adapter.dispose();
+});
+
+test('route arrival settles on slow frames and repeated views never duplicate the avatar', async () => {
+    const data = fixture({ worldBounds: { minX: 0, minZ: 0, maxX: 20, maxZ: 20, floorY: 0 } });
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({ layout: { placements: [] }, assetCatalog: [] });
+    data.adapter.setWalkthroughCameraMode('third-person');
+    data.adapter.enterWalkthrough({ worldPoint: { x: 10, y: 0, z: 10 } });
+    data.adapter.navigateWalkthroughToPoint({ x: 11, z: 10 });
+    for (let i = 0; i < 20; i++) data.scheduler.flush(i * 300);
+    const arrived = data.adapter.getWalkthroughState();
+    assert.strictEqual(arrived.route.reason, 'arrived');
+    assert.strictEqual(arrived.avatar.animation, 'idle');
+    assert.deepStrictEqual(arrived.position, { x: 11, y: 0, z: 10 });
+    assert.strictEqual(data.scheduler.pendingCount, 0);
+    const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+    for (let i = 0; i < 10; i++) {
+        data.adapter.setWalkthroughCameraMode('first-person');
+        data.adapter.setWalkthroughCameraMode('third-person');
+        assert.strictEqual(scene.children.filter(x => x.name === 'facility-walkthrough-avatar').length, 1);
+    }
+    data.adapter.exitWalkthrough();
+    assert.strictEqual(scene.children.filter(x => x.name === 'facility-walkthrough-avatar').length, 0);
+    data.adapter.dispose();
+});
+
+test('camera preferences persist; wheel changes only the third-person camera and cleans up', async () => {
+    const prefs = require('../static/walkthrough_camera_settings.js');
+    prefs.save(prefs.PRESETS.standard);
+    const data = fixture({worldBounds:{minX:0,minZ:0,maxX:50,maxZ:50,floorY:0}});
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({layout:{placements:[]},assetCatalog:[]});
+    data.adapter.setWalkthroughCameraMode('third-person');
+    data.adapter.enterWalkthrough({worldPoint:{x:25,y:0,z:25}});
+    const body = data.adapter.getWalkthroughState().position;
+    data.adapter.setWalkthroughCameraSettings(prefs.PRESETS.wide);
+    assert.deepStrictEqual(data.adapter.getWalkthroughState().position, body);
+    assert(data.adapter.getWalkthroughState().cameraDistance > 9);
+    const canvas = FakeRenderer.instances.at(-1).domElement;
+    assert(canvas.dispatch('wheel',{deltaY:-100}).prevented);
+    assert.strictEqual(data.adapter.getWalkthroughState().cameraSettings.distance, 8.5);
+    assert(!canvas.dispatch('wheel',{deltaY:100,ctrlKey:true}).prevented);
+    data.adapter.setWalkthroughCameraMode('first-person');
+    assert(!canvas.dispatch('wheel',{deltaY:100}).prevented);
+    assert.strictEqual(data.adapter.getWalkthroughState().cameraSettings.distance,8.5);
+    data.adapter.exitWalkthrough();
+    data.adapter.enterWalkthrough({worldPoint:body});
+    assert.strictEqual(data.adapter.getWalkthroughState().cameraSettings.distance,8.5);
+    data.adapter.dispose();
+    assert.strictEqual(canvas.listenerCount(),0);
+    prefs.save(prefs.PRESETS.standard);
+});
+
+test('wide camera tests obstacles beyond the former five-metre search radius', async () => {
+    const prefs = require('../static/walkthrough_camera_settings.js');
+    const data=fixture({worldBounds:{minX:0,minZ:0,maxX:40,maxZ:40,floorY:0}});
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({layout:{placements:[placement('wall','machine',REV_A,20,0,27)]},assetCatalog:[asset('machine',REV_A)]});
+    data.adapter.setWalkthroughCameraSettings(prefs.PRESETS.wide);
+    data.adapter.setWalkthroughCameraMode('third-person');
+    data.adapter.enterWalkthrough({worldPoint:{x:20,y:0,z:20},ignoreSelection:true});
+    const result=data.adapter.getWalkthroughState();
+    assert(result.cameraObstructed);
+    assert(result.cameraDistance < 7);
+    assert.strictEqual(result.cameraSettings.distance,9);
+    data.adapter.dispose();
+    prefs.save(prefs.PRESETS.standard);
+});
+
+test('real operator avatars stay instanced at rest and animate independently in both motion modes', async () => {
+    const { pathToFileURL } = require('node:url');
+    const real = await import(pathToFileURL(path.join(ROOT, 'static/vendor/three/0.184.0/build/three.module.min.js')).href);
+    const THREE = Object.assign({}, real, { WebGLRenderer: FakeRenderer });
+    const revision = '773d3761fb0796587de7a21ccb8b368f4334c71f73c06682b84472d69d4b5757';
+    const data = fixture({ THREE, assetResolver: request => request.stage === 'manifest'
+        ? asset(request.assetId, request.assetDefinitionRevision) : null });
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({ layout: {
+        placements: [placement('actor-placement', 'asset-operator', revision, 1, 0, 2),
+            placement('idle-operator', 'asset-operator', revision, 3, 0, 2)], routes: [], floorMarkings: [],
+    }, assetCatalog: [asset('asset-operator', revision)] });
+    while (data.scheduler.pendingCount) data.scheduler.flush();
+    const diagnostics = data.adapter.getDiagnostics();
+    const group = diagnostics.representationGroups.find(g => g.assetId === 'asset-operator');
+    assert.equal(group.representation, 'operator-avatar');
+    assert.equal(group.instanced, true);
+    assert.equal(group.prototypeMeshCount, 34);
+    const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+    const instances = [];
+    scene.traverse(o => { if (o.isInstancedMesh) instances.push(o); });
+    assert(instances.length > 0);
+    const before = instances.map(o => Array.from(o.instanceMatrix.array));
+    const payload = activityPayload();
+    payload.scenario.actors[0].assetDefinitionRef = { assetId: 'asset-operator', assetDefinitionRevision: revision };
+    await data.adapter.activity.load(payload, REV_B);
+    data.adapter.activity.seek(1.17); data.scheduler.flush(100);
+    const a = data.adapter.activity.getState().actors[0];
+    assert.equal(a.visualSource, 'animated-operator-avatar');
+    assert.equal(a.exactCatalogVisual, false);
+    assert.equal(a.visualForwardAxis, '-Z');
+    assert.equal(a.avatar.animation, 'walk');
+    assert.notEqual(a.avatar.leftHip, 0);
+    assert(a.sourcePlacementSuppressed);
+    assert.deepEqual(data.adapter.activity.getState().duplicateVisiblePlacementIds, []);
+    data.adapter.activity.seek(3.21); data.scheduler.flush(200);
+    const b = data.adapter.activity.getState().actors[0];
+    assert.notEqual(b.avatar.leftHip, a.avatar.leftHip);
+    data.adapter.activity.seek(1.17); data.scheduler.flush(300);
+    assert.deepEqual(data.adapter.activity.getState().actors[0].avatar, a.avatar);
+    data.adapter.activity.pause(); data.scheduler.flush(3000);
+    assert.deepEqual(data.adapter.activity.getState().actors[0].avatar, a.avatar);
+    let rig;
+    scene.traverse(o => { if (o.facilityOperatorAvatar) rig = o.facilityOperatorAvatar; });
+    assert(rig);
+    const cycleDuration = a.cycleDurationSeconds;
+    data.adapter.activity.seek(cycleDuration + .2); data.scheduler.flush(4000);
+    assert.equal(data.adapter.activity.getState().actors[0].avatar.animation, 'idle');
+    data.adapter.activity.seek(cycleDuration + 1 + 1.17); data.scheduler.flush(4100);
+    const reverse = data.adapter.activity.getState().actors[0];
+    assert.equal(reverse.travelDirection, 'return');
+    assert.equal(reverse.avatar.animation, 'walk');
+    data.adapter.activity.dispose('test');
+    assert.equal(rig.snapshot().disposed, true);
+    assert.deepEqual(instances.map(o => Array.from(o.instanceMatrix.array)), before);
+    await data.adapter.navigationPreview.load({ previewId: 'avatar-preview', layoutRevision: REV_B,
+        actorPlacementId: 'actor-placement', actorClass: 'pedestrian',
+        points: [{ x: 1, z: 2 }, { x: 11, z: 2 }], loopMode: 'one_way',
+        direction: 'forward', visualForwardAxis: '+Z', validationStatus: 'validated', pathsVisible: true,
+    }, REV_B);
+    data.adapter.navigationPreview.seek(.17); data.scheduler.flush(5000);
+    const nav = data.adapter.navigationPreview.getState();
+    assert.equal(nav.avatar.animation, 'walk');
+    assert.equal(nav.visualYawRadians, -Math.PI / 2);
+    assert.equal(nav.visualSource, 'animated-operator-avatar');
+    data.adapter.navigationPreview.seek(1); data.scheduler.flush(5100);
+    assert.equal(data.adapter.navigationPreview.getState().avatar.animation, 'idle');
+    data.adapter.navigationPreview.dispose('test');
+    assert.deepEqual(instances.map(o => Array.from(o.instanceMatrix.array)), before);
+    data.adapter.dispose();
+});
+
+for (const fps of [5, 10, 20, 30, 60, 144]) {
+    test('walking retains its specified speed at ' + fps + ' FPS', async () => {
+        const data = fixture({ worldBounds: { minX: 0, minZ: 0, maxX: 100, maxZ: 100 } });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({ layout: { placements: [] } });
+        data.adapter.enterWalkthrough({ worldPoint: { x: 50, z: 50 } });
+        data.documentObject.dispatch('keydown', { code: 'KeyW' });
+        data.scheduler.flush(0);
+        const start = data.adapter.getWalkthroughState().position.z;
+        for (let frame = 1; frame <= fps * 2; frame++) data.scheduler.flush(frame * 1000 / fps);
+        const end = data.adapter.getWalkthroughState();
+        assert(Math.abs(start - end.position.z - end.walkSpeed * 2) < 1e-8);
+        assert.equal(end.performance.droppedSeconds, 0);
+        data.adapter.dispose();
+    });
+}
+
+test('long stalls have bounded travel, no catch-up debt, and blur releases movement', async () => {
+    const data = fixture({ worldBounds: { minX: 0, minZ: 0, maxX: 100, maxZ: 100 } });
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({ layout: { placements: [] } });
+    data.adapter.enterWalkthrough({ worldPoint: { x: 50, z: 50 } });
+    data.documentObject.dispatch('keydown', { code: 'KeyW' });data.scheduler.flush(0);
+    const start = data.adapter.getWalkthroughState().position.z;
+    data.scheduler.flush(10000);
+    const end = data.adapter.getWalkthroughState();
+    assert(Math.abs(start - end.position.z - 1.4 * 0.25) < 1e-8);
+    assert.equal(end.performance.droppedSeconds, 9.75);
+    data.scheduler.flush(10000);
+    assert.deepEqual(data.adapter.getWalkthroughState().position, end.position);
+    data.scheduler.flush(10100);
+    assert(Math.abs(end.position.z - data.adapter.getWalkthroughState().position.z - 0.14) < 1e-8);
+    data.windowObject.dispatch('blur');
+    const stopped = data.adapter.getWalkthroughState().position;
+    data.scheduler.flush(20000);
+    assert.deepEqual(data.adapter.getWalkthroughState().position, stopped);
+    data.adapter.dispose();
+});
+
+test('indexed collision candidates preserve full-scan results, corners, slides and overflow walls', () => {
+    const rectangle = (x, z, w, d) => [{x,z},{x:x+w,z},{x:x+w,z:z+d},{x,z:z+d}];
+    const polygons = Array.from({length:836}, (_,i) => rectangle((i%30)*5-70, Math.floor(i/30)*5-60, 2, 1));
+    polygons.push(rectangle(-20000, -20, 40000, 0.03));
+    const index = runtime.buildDroneSpatialIndex(polygons.map((polygon,i) => ({id:String(i),polygon,minimumY:0,maximumY:1})));
+    assert.equal(index.overflow.length, 1);
+    const bounds = {minimum:{x:-30000,z:-100},maximum:{x:30000,z:100}};
+    let seed=7181, largestCandidateCount=0;
+    const random=()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)/4294967296);
+    for(let i=0;i<600;i++) {
+        const start={x:random()*140-70,z:random()*120-60};
+        const delta={x:random()*8-4,z:random()*8-4},radius=0.3;
+        const nearby=runtime.walkthroughSweptObstacles(index,start,delta,radius);
+        largestCandidateCount=Math.max(largestCandidateCount,nearby.length);
+        const input={start,delta,radius,bounds};
+        assert.deepEqual(runtime.resolveWalkthroughMovement({...input,obstacles:nearby}),
+            runtime.resolveWalkthroughMovement({...input,obstacles:polygons}));
+    }
+    assert(largestCandidateCount<10);
+    const start={x:0,z:-19},delta={x:2,z:-3};
+    assert(runtime.walkthroughSweptObstacles(index,start,delta,0.3).some(p=>p[0].x===-20000));
+});
+
+test('slow-frame sprint cannot tunnel through a thin wall', async () => {
+    const data=fixture({walkthroughFastSpeed:15,worldBounds:{minX:0,minZ:0,maxX:100,maxZ:100}});
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({layout:{placements:[placement('wall','wall',REV_A,50,0,50)]},
+        assetCatalog:[asset('wall',REV_A,{minimum:{x:-8,y:0,z:-0.02},maximum:{x:8,y:6,z:0.02}})]});
+    data.adapter.enterWalkthrough({worldPoint:{x:50,z:51.5}});
+    data.documentObject.dispatch('keydown',{code:'ShiftLeft'});
+    data.documentObject.dispatch('keydown',{code:'KeyW'});
+    data.scheduler.flush(0);data.scheduler.flush(200);
+    const state=data.adapter.getWalkthroughState();
+    assert(state.position.z>50.3);
+    assert(state.collisionCount>0);
+    assert.equal(state.performance.collisionCandidates,1);
+    data.adapter.dispose();
+});
+
+test('walk and route use interactive resolution and restore it at rest and on exit', async () => {
+    const data=fixture({pixelRatio:2,navigationResolutionRestoreDelayMs:0,
+        worldBounds:{minX:0,minZ:0,maxX:100,maxZ:100}});
+    data.adapter.mount(data.host);await data.adapter.setScene({layout:{placements:[]}});
+    data.adapter.enterWalkthrough({worldPoint:{x:50,z:50}});
+    const renderer=FakeRenderer.instances.at(-1);
+    data.documentObject.dispatch('keydown',{code:'KeyW'});data.scheduler.flush(0);
+    assert.equal(renderer.pixelRatio,1);
+    data.documentObject.dispatch('keyup',{code:'KeyW'});data.scheduler.flush(100);
+    assert.equal(renderer.pixelRatio,2);
+    data.adapter.navigateWalkthroughToPoint({x:51,z:50});
+    assert.equal(renderer.pixelRatio,1);
+    data.adapter.cancelWalkthroughNavigation('test');data.scheduler.flush(200);
+    assert.equal(renderer.pixelRatio,2);
+    data.documentObject.dispatch('keydown',{code:'KeyW'});
+    data.adapter.exitWalkthrough();
+    assert.equal(renderer.pixelRatio,2);
+    data.adapter.dispose();
+});
+
+test('moving context queries are bounded in rate and range, with fresh explicit reads', async () => {
+    const queries=[];
+    class RecordingRaycaster extends FakeRaycaster {
+        constructor(){super();this.far=Infinity;}
+        intersectObjects(){queries.push(this.far);return super.intersectObjects();}
+    }
+    const THREE=createThree();THREE.Raycaster=RecordingRaycaster;
+    const data=fixture({THREE,worldBounds:{minX:0,minZ:0,maxX:100,maxZ:100}});
+    data.adapter.mount(data.host);await data.adapter.setScene({layout:{placements:[]}});
+    data.adapter.enterWalkthrough({worldPoint:{x:50,z:50}});
+    data.scheduler.flush();queries.length=0;
+    data.documentObject.dispatch('keydown',{code:'KeyW'});
+    for(let i=0;i<6;i++)data.scheduler.flush(i*16);
+    assert.deepEqual(queries,[5]);
+    data.adapter.getWalkthroughContextFocus();
+    assert.deepEqual(queries,[5,5]);
+    data.adapter.pick({normalized:true,x:0,y:0});
+    assert.equal(queries.at(-1),Infinity);
+    data.documentObject.dispatch('keyup',{code:'KeyW'});data.scheduler.flush(101);
+    assert.equal(queries.at(-1),5);
+    data.adapter.dispose();
+});
+
+test('appearance survives instancing selection reset and scene updates without reloading geometry', async () => {
+    const data = fixture(); data.adapter.mount(data.host);
+    const layout = {placements: [placement('pl-one','one',REV_A,1,0,1),
+        placement('pl-a','repeat',REV_A,3,0,1), placement('pl-b','repeat',REV_A,5,0,1)]};
+    const catalog = [asset('one',REV_A), asset('repeat',REV_A)];
+    await data.adapter.setScene({layout, assetCatalog: catalog}); data.scheduler.flush();
+    const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+    let instances, single;
+    scene.traverse(o => {
+        if (o.isInstancedMesh && o.userData.facilityInstancePlacementIds?.includes('pl-a')) instances = o;
+        if (o.userData?.placementId === 'pl-one') single = o;
+    });
+    assert(instances && single);
+    const originalColors = instances.colors.slice();
+    const meshes=[]; single.traverse(o => {if(o.material) meshes.push(o);});
+    const originalSingle = meshes[0].material.color.getHex();
+    const changed = JSON.parse(JSON.stringify(layout));
+    changed.placements[0].appearance={color:'#28866b'};
+    changed.placements[1].appearance={color:'#2478bc'};
+    await data.adapter.setScene({layout:changed, assetCatalog:catalog});
+    assert.equal(instances.colors[0], 0x2478bc);
+    assert.equal(instances.colors[1], originalColors[1]);
+    assert.equal(meshes[0].material.color.getHex(), 0x28866b);
+    data.adapter.setSelection(['pl-a', 'pl-one']);
+    assert.equal(instances.colors[0], 0x32a8ff);
+    data.adapter.setSelection([]);
+    assert.equal(instances.colors[0], 0x2478bc);
+    assert.equal(meshes[0].material.color.getHex(), 0x28866b);
+    await data.adapter.setScene({layout, assetCatalog:catalog});
+    assert.deepEqual(instances.colors, originalColors);
+    assert.equal(meshes[0].material.color.getHex(), originalSingle);
+    assert.equal(meshes[0].material.disposeCount, 0);
+    data.adapter.dispose();
+});
+
+test('late detail load takes the current appearance rather than the original request', async () => {
+    let finish, started;
+    const waiting = new Promise(r => { started = r; });
+    const data = fixture({assetResolver: request => {
+        if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+        if (request.stage !== 'detail') return null;
+        started();
+        return new Promise(resolve => { finish = () => resolve(prototype(data.THREE, 'late-detail')); });
+    }});
+    data.adapter.mount(data.host);
+    const input = {layout:{placements:[placement('pl-late','one',REV_A,1,0,1)]}, assetCatalog:[asset('one',REV_A)]};
+    const pending = data.adapter.setScene(input);
+    await waiting;
+    const colored = JSON.parse(JSON.stringify(input));
+    colored.layout.placements[0].appearance={color:'#bb4040'};
+    await data.adapter.setScene(colored);
+    finish(); await pending; data.scheduler.flush();
+    let material;
+    FakeRenderer.instances.at(-1).lastRender.scene.traverse(o => {
+        if (o.userData?.placementId === 'pl-late') o.traverse(c => {if(c.material) material=c.material;});
+    });
+    assert.equal(material.color.getHex(), 0xbb4040);
+    data.adapter.dispose();
+});
+
+test('selection changes uniforms without invalidating shaders or redundant instance colors', async () => {
+    const data=fixture();data.adapter.mount(data.host);
+    await data.adapter.setScene({layout:{placements:[placement('single','one',REV_A,1,0,1),
+        placement('first','repeat',REV_A,3,0,1),placement('second','repeat',REV_A,5,0,1)]},
+        assetCatalog:[asset('one',REV_A),asset('repeat',REV_A)]});
+    data.scheduler.flush();const scene=FakeRenderer.instances.at(-1).lastRender.scene;
+    let writes=0;const materials=[];
+    scene.traverse(o=>{
+        if(o.material){materials.push(o.material);o.material.needsUpdate=false;}
+        if(o.isInstancedMesh){const original=o.setColorAt.bind(o);o.setColorAt=(...args)=>{writes++;original(...args);};}
+    });
+    data.adapter.setSelection([]);assert.equal(writes,0);
+    data.adapter.setSelection(['first','single']);assert(writes>0);
+    const previous=writes;data.adapter.setSelection(['first','single']);assert.equal(writes,previous);
+    assert(materials.every(m=>m.needsUpdate===false));
+    data.adapter.dispose();
+});
+
+for (const distanceCulling of [false, true]) {
+    test('Drone ' + (distanceCulling ? 'opt-in culling uses wall extents' : 'defaults to the complete factory'), async () => {
+        const data = fixture({
+            ...(distanceCulling ? { droneDistanceCulling: true } : {}),
+            worldBounds: { minX: 0, minZ: 0, maxX: 300, maxZ: 200, floorY: 0 },
+        });
+        data.adapter.mount(data.host);
+        await data.adapter.setScene({ layout: { placements: [
+            placement('operator-near', 'operator', REV_A, 20, 0, 40),
+            placement('operator-far', 'operator', REV_A, 280, 0, 160),
+            placement('long-wall', 'wall', REV_A, 150, 0, 20),
+        ] }, assetCatalog: [asset('operator', REV_A), asset('wall', REV_A, {
+            minimum: {x:-140,y:0,z:-.125}, maximum:{x:140,y:6,z:.125},
+        })] });
+        data.scheduler.flush();
+        const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+        let operators, wall;
+        scene.traverse(object => {
+            if (object.userData?.facilityInstancePlacementIds?.includes('operator-near')) operators = object;
+            if (object.userData?.placementId === 'long-wall') wall = object;
+        });
+        assert(operators && wall);
+        const entered = data.adapter.enterDrone({ignoreSelection:true,worldPoint:{x:15,y:2,z:35}});
+        assert(entered.active);
+        assert.equal(operators.count, distanceCulling ? 1 : 2);
+        assert.equal(wall.visible, true, 'Nearby wall must not disappear because its center is distant');
+        assert.equal(data.adapter.getDroneState().distanceCulling, distanceCulling);
+        if (!distanceCulling) {
+            const camera = data.adapter.getCameraView();
+            assert(camera.far > Math.hypot(300-camera.position.x,200-camera.position.z,6-camera.position.y));
+        }
+        data.adapter.switchImmersiveMode('walkthrough');
+        assert.equal(operators.count,2);assert.equal(wall.visible,true);
+        data.adapter.exitWalkthrough();
+        data.adapter.enterDrone({ignoreSelection:true,worldPoint:{x:15,y:2,z:35}});
+        data.adapter.exitDrone();
+        assert.equal(operators.count,2);assert.equal(wall.visible,true);
+        data.adapter.dispose();
+    });
+}
+
+test('ground surfaces render and walkthrough follows the ramp without changing the layout', async () => {
+    const THREE=createThree();
+    THREE.BufferGeometry=class extends FakeBufferGeometry {
+        setIndex(value){this.index=value;return this;}
+        computeVertexNormals(){this.normalsComputed=true;}
+    };
+    const data=fixture({THREE,worldBounds:{minX:0,minZ:0,maxX:40,maxZ:10,floorY:0}});
+    const surface=(id,a,b,y,end=y)=>({surfaceId:id,minX:a,maxX:b,minZ:0,maxZ:10,startElevation:y,endElevation:end,slopeAxis:'x',color:'#888888'});
+    const layout={placements:[],extensions:{facilityGround:{schemaVersion:1,surfaces:[surface('yard',-30,-20,-1.35),surface('ramp',-20,0,-1.35,0),surface('factory',0,40,0)]}}};
+    const before=JSON.stringify(layout);data.adapter.mount(data.host);
+    await data.adapter.setScene({layout});data.scheduler.flush();
+    assert.equal(data.adapter.getDiagnostics().environment.groundSurfaceCount,3);
+    const entered=data.adapter.enterWalkthrough({worldPoint:{x:-25,z:5},ignoreSelection:true});assert.equal(entered.position.y,-1.35);
+    assert(data.adapter.navigateWalkthroughToPoint({x:2,z:5}).ok);
+    for(let i=0;i<1800&&data.adapter.getWalkthroughState().route.active;i++)data.scheduler.flush(i*33);
+    const end=data.adapter.getWalkthroughState();assert(Math.abs(end.position.x-2)<.01);assert.equal(end.position.y,0);
+    assert.equal(JSON.stringify(layout),before);data.adapter.dispose();
 });
 
 async function run() {

@@ -9,6 +9,7 @@
     'use strict';
 
     const API_VERSION = 1;
+    const NAVIGATION_ACTIVITY_MAXIMUM_ACTORS = 64;
     const MAX_SESSION_ID_LENGTH = 128;
     const HASH_PATTERN = /^[0-9a-f]{64}$/;
     let sessionSequence = 0;
@@ -496,9 +497,9 @@
         });
         if (!Array.isArray(source.journeySolutionIds)
                 || !source.journeySolutionIds.length
-                || source.journeySolutionIds.length > 20) {
+                || source.journeySolutionIds.length > NAVIGATION_ACTIVITY_MAXIMUM_ACTORS) {
             throw new TypeError(
-                'journeySolutionIds must contain between 1 and 20 identities'
+                'journeySolutionIds must contain between 1 and ' + NAVIGATION_ACTIVITY_MAXIMUM_ACTORS + ' identities'
             );
         }
         const journeySolutionIds = source.journeySolutionIds.map(
@@ -657,6 +658,20 @@
             return result;
         }
 
+        async function importDecalImage(file, requestOptions) {
+            if (!file || !['image/png', 'image/jpeg'].includes(file.type) || file.size > 10 * 1024 * 1024) {
+                throw new TypeError('Choose a PNG or JPEG image smaller than 10 MB.');
+            }
+            const response = await fetchImpl(layoutUrl + '/decal-images', {
+                method: 'POST', credentials: options.credentials || 'same-origin',
+                headers: Object.assign({}, headers, {'Content-Type': file.type, 'X-InspectorPro-Session': sessionId}),
+                body: file, signal: requestOptions && requestOptions.signal,
+            });
+            const result = await response.json().catch(function () { return {}; });
+            if (!response.ok) throw errorFromResponse(response, result);
+            return result;
+        }
+
         async function generationRequest(path, method, body, requestOptions) {
             const requestConfig = requestOptions || {};
             const init = {
@@ -713,6 +728,24 @@
             generationUrl: generationUrl,
             designUrl: designUrl,
             sessionId: sessionId,
+            listLayouts: function () {
+                return designRequest('', 'GET', undefined, {},
+                    baseUrl + '/api/facility-layouts/' + encodedSite);
+            },
+            getLayout: function (id) {
+                return designRequest('', 'GET', undefined, {},
+                    baseUrl + '/api/facility-layouts/' + encodedSite + '/'
+                        + encodeURIComponent(boundedIdentifier(id, 'layoutId', 132)));
+            },
+            createLayout: function (layout) {
+                return designRequest('', 'POST', { layout: object(layout, 'layout'), makeDefault: false }, {},
+                    baseUrl + '/api/facility-layouts/' + encodedSite);
+            },
+            archiveLayout: function (id, revision) {
+                return designRequest('/archive', 'POST', { baseRevision: hash(revision, 'baseRevision') }, {},
+                    baseUrl + '/api/facility-layouts/' + encodedSite + '/'
+                        + encodeURIComponent(boundedIdentifier(id, 'layoutId', 132)));
+            },
             listGenerationPlanningSources: function () {
                 return designRequest('/sources', 'GET', undefined, {},
                     baseUrl + '/api/facility-layout-planning/' + encodedSite + '/' + encodedLayout);
@@ -722,6 +755,19 @@
                     workspaceId: boundedIdentifier(summary.workspaceId, 'workspaceId'),
                     request: {previewId: hash(summary.previewId, 'previewId'), previewRevision: hash(summary.previewRevision, 'previewRevision')},
                     editorContext: editorContext,
+                }, {}, baseUrl + '/api/facility-layout-planning/' + encodedSite + '/' + encodedLayout);
+            },
+            selectGenerationPlanningPreview: function (summary, editorContext) {
+                return designRequest('/select', 'POST', {
+                    workspaceId: boundedIdentifier(summary.workspaceId, 'workspaceId'),
+                    request: {previewId: hash(summary.previewId, 'previewId'), previewRevision: hash(summary.previewRevision, 'previewRevision')},
+                    editorContext: editorContext,
+                }, {}, baseUrl + '/api/facility-layout-planning/' + encodedSite + '/' + encodedLayout);
+            },
+            createGenerationDestination: function (request, editorContext) {
+                return designRequest('/destination', 'POST', {
+                    workspaceId: boundedIdentifier('destination-' + sessionId, 'workspaceId'),
+                    request: request, editorContext: editorContext,
                 }, {}, baseUrl + '/api/facility-layout-planning/' + encodedSite + '/' + encodedLayout);
             },
             getConstructionPreview: function (proposalId) {
@@ -1302,6 +1348,7 @@
             reloadLayout: function () {
                 return request('', 'GET');
             },
+            importDecalImage: importDecalImage,
             createMotionPackage: function (payload, requestOptions) {
                 const value = object(payload, 'motion package payload');
                 return request('/motion-packages', 'POST', {
@@ -1511,6 +1558,14 @@
                     requestOptions
                 );
             },
+            createOperationUndoPreview: function (payload, requestOptions) {
+                const value = object(payload, 'operation undo preview payload');
+                return request('/operation-undo-preview', 'POST', {
+                    baseRevision: nonEmptyString(value.baseRevision, 'baseRevision'),
+                    receiptId: boundedIdentifier(value.receiptId, 'receiptId'),
+                    ...(value.editMode === 'direct' ? { editMode: 'direct' } : {}),
+                }, requestOptions);
+            },
             cancelLayoutProposal: function (payload, requestOptions) {
                 const value = object(payload, 'layout proposal cancel payload');
                 const proposalId = boundedIdentifier(
@@ -1526,7 +1581,8 @@
             },
             approveLayoutProposal: function (payload, requestOptions) {
                 const value = object(payload, 'layout proposal approval payload');
-                if (value.explicitApproval !== true) {
+                const direct = value.authorizationMode === 'direct' && value.directConsent === true;
+                if (value.explicitApproval !== true && !direct) {
                     throw new TypeError('explicitApproval must equal true');
                 }
                 return request('/approvals', 'POST', {
@@ -1536,7 +1592,8 @@
                     ),
                     binding: transactionBinding(value.binding),
                     idempotencyKey: idempotencyKey(value.idempotencyKey),
-                    explicitApproval: true,
+                    explicitApproval: !direct,
+                    ...(direct ? { authorizationMode: 'direct', directConsent: true } : {}),
                 }, requestOptions);
             },
             applyLayoutProposal: function (payload, requestOptions) {
@@ -1569,6 +1626,7 @@
 
     return Object.freeze({
         API_VERSION: API_VERSION,
+        NAVIGATION_ACTIVITY_MAXIMUM_ACTORS: NAVIGATION_ACTIVITY_MAXIMUM_ACTORS,
         createHttpTransport: createHttpTransport,
     });
 }));

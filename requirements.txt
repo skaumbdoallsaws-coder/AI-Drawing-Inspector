@@ -8,7 +8,7 @@ Pillow                    # Image processing
 numpy                     # Array operations
 scipy                     # Hungarian matching for dimension verification
 pyyaml                    # YAML parsing for datasets
-shapely                   # Exact Facility polygon unions and evaluation IoU
+shapely>=2.1               # Exact polygon unions and constrained wall triangulation
 
 # ---------- Web Server (InspectorPro UI) ----------
 fastapi                   # REST API framework

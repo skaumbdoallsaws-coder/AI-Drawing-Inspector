@@ -9,13 +9,26 @@ async function loadApplicationProfile(file) {
   file = await localPath(file);
   if ((await fs.stat(file)).size > 16384) throw fail('desktop_profile_invalid');
   const p = JSON.parse(await fs.readFile(file, 'utf8'));
-  if (!p || Object.keys(p).length !== KEYS.length || KEYS.some(k => !Object.hasOwn(p, k))
+  if (!p || Object.keys(p).some(k => !KEYS.includes(k) && !['modelGateway', 'codexRuntime'].includes(k)) || KEYS.some(k => !Object.hasOwn(p, k))
       || p.schemaVersion !== 1 || p.mode !== 'application'
       || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(p.profileId)
       || ['backendId', 'storeId'].some(k => !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(p[k]))
       || !(p.startupLayoutId === null || /^fl-[A-Za-z0-9._-]{1,128}$/.test(p.startupLayoutId))) throw fail('desktop_profile_invalid');
   canonicalOrigin(p.origin);
   for (const k of ['dataRoot', 'facilityRoot', 'libraryRoot']) p[k] = await localPath(p[k]);
+  if (Object.hasOwn(p, 'modelGateway')) {
+    const gateway = p.modelGateway;
+    if (!gateway || typeof gateway !== 'object' || Array.isArray(gateway)
+        || Object.keys(gateway).sort().join(',') !== 'configPath,dependencyRoot') throw fail('desktop_gateway_profile_invalid');
+    const configPath = await localPath(gateway.configPath), dependencyRoot = await localPath(gateway.dependencyRoot);
+    const config = await fs.stat(configPath);
+    if (!config.isFile() || config.size > 65536 || !(await fs.stat(dependencyRoot)).isDirectory()
+        || !(await fs.stat(await localPath(path.join(dependencyRoot, 'litellm', '__init__.py')))).isFile()) {
+      throw fail('desktop_gateway_profile_invalid');
+    }
+    p.modelGateway = Object.freeze({ configPath, dependencyRoot });
+  }
+  if (Object.hasOwn(p, 'codexRuntime')) p.codexRuntime = await require('./codex-config.cjs').validateCodexConfig(p.codexRuntime, p);
   const binding = [p.backendId, p.storeId, p.facilityRoot, p.libraryRoot].join('\n');
   return Object.freeze({ ...p, profileFile: file, stateRoot: path.join(p.dataRoot, 'desktop-client'),
     partition: 'persist:ip-application-' + createHash('sha256').update(binding).digest('hex').slice(0, 32) });

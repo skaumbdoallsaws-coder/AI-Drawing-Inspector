@@ -45,6 +45,8 @@ FACILITY_NAVIGATION_PRESENTATION_QUALIFICATION = (
 )
 FACILITY_ACTIVITY_SCENARIO_MAXIMUM_ACTORS = 24
 FACILITY_ACTIVITY_SCENARIO_MAXIMUM_CANONICAL_BYTES = 65_536
+FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_ACTORS = 64
+FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_CANONICAL_BYTES = 524_288
 FACILITY_ACTIVITY_SCENARIO_STORE_TTL_SECONDS = 900.0
 FACILITY_ACTIVITY_SCENARIO_STORE_MAXIMUM_ENTRIES = 32
 
@@ -929,16 +931,18 @@ def validate_facility_activity_scenario(
         minimum=0.001,
     )
     actors = value["actors"]
+    maximum_actors = (FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_ACTORS
+                      if navigation_activity else FACILITY_ACTIVITY_SCENARIO_MAXIMUM_ACTORS)
     if (
         not isinstance(actors, list)
         or not actors
-        or len(actors) > FACILITY_ACTIVITY_SCENARIO_MAXIMUM_ACTORS
+        or len(actors) > maximum_actors
     ):
         raise FacilityActivityScenarioError(
             "facility_activity_scenario_actor_limit",
             "The activity scenario actor count is outside the supported range.",
             details={
-                "maximumActors": FACILITY_ACTIVITY_SCENARIO_MAXIMUM_ACTORS,
+                "maximumActors": maximum_actors,
             },
         )
     actor_ids: set[str] = set()
@@ -1259,14 +1263,16 @@ def validate_facility_activity_scenario(
             "Facility activity scenario ID does not match its canonical content.",
         )
     encoded = _canonical_bytes(value)
-    if len(encoded) > FACILITY_ACTIVITY_SCENARIO_MAXIMUM_CANONICAL_BYTES:
+    maximum_bytes = (FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_CANONICAL_BYTES
+                     if navigation_activity else FACILITY_ACTIVITY_SCENARIO_MAXIMUM_CANONICAL_BYTES)
+    if len(encoded) > maximum_bytes:
         raise FacilityActivityScenarioError(
             "facility_activity_scenario_too_large",
             "The activity scenario exceeds its canonical package budget.",
             details={
                 "canonicalBytes": len(encoded),
                 "maximumCanonicalBytes": (
-                    FACILITY_ACTIVITY_SCENARIO_MAXIMUM_CANONICAL_BYTES
+                    maximum_bytes
                 ),
             },
         )
@@ -1473,6 +1479,8 @@ class FacilityActivityScenarioStore:
 
 
 __all__ = [
+    "FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_ACTORS",
+    "FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_CANONICAL_BYTES",
     "FACILITY_ACTIVITY_SCENARIO_MAXIMUM_ACTORS",
     "FACILITY_ACTIVITY_SCENARIO_QUALIFICATION",
     "FACILITY_ACTIVITY_SCENARIO_SCHEMA_VERSION",

@@ -174,13 +174,23 @@ async def serve(profile, private, control, *, application=False):
     checkpoint('uvicorn-import', private['instanceId'])
     import uvicorn
     checkpoint('application-import', private['instanceId'])
+    import_diagnostic = None
     if application:
-        import faulthandler
-        faulthandler.dump_traceback_later(20, repeat=True)
+        try:
+            from desktop.runtime.startup_diagnostics import CooperativeTracebackHandler
+            import_diagnostic = CooperativeTracebackHandler()
+            import_diagnostic.dump_traceback_later(20, repeat=True, file=sys.stderr)
+        except Exception as error:
+            emit('DIAGNOSTIC_ERROR', {'schemaVersion': 1, 'instanceId': private['instanceId'],
+                'processId': os.getpid(), 'operation': 'start', 'errorType': type(error).__name__})
     try:
         import server
     finally:
-        if application: faulthandler.cancel_dump_traceback_later()
+        if import_diagnostic is not None:
+            try: import_diagnostic.cancel_dump_traceback_later()
+            except Exception as error:
+                emit('DIAGNOSTIC_ERROR', {'schemaVersion': 1, 'instanceId': private['instanceId'],
+                    'processId': os.getpid(), 'operation': 'stop', 'errorType': type(error).__name__})
     checkpoint('application-store-validation', private['instanceId'])
     if application:
         from desktop.runtime.application_boundary import ApplicationBoundary as Boundary

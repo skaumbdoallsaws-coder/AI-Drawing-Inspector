@@ -106,6 +106,10 @@ class FakeElement {
         return child;
     }
 
+    remove() {
+        if (this.parentNode) this.parentNode.removeChild(this);
+    }
+
     get firstChild() {
         return this.children[0] || null;
     }
@@ -233,6 +237,13 @@ class FakeDocument {
 
     createElement(name) {
         return new FakeElement(this, name);
+    }
+
+    createTextNode(text) {
+        const node = new FakeElement(this, '#text');
+        node.nodeType = 3;
+        node.textContent = String(text);
+        return node;
     }
 }
 
@@ -482,6 +493,15 @@ class FakeSession {
         }
         this._notify();
         return this.getState();
+    }
+
+    async setSelectedAppearance(color) {
+        this.calls.push(['setSelectedAppearance', color]);
+        this.state.layout.placements.filter(p => this.state.selection.includes(p.placementId)).forEach(p => {
+            if (color === null) delete p.appearance;
+            else p.appearance = {color};
+        });
+        return this._gesture('Appearance');
     }
 
     selectMany(ids, options) {
@@ -1840,6 +1860,12 @@ class FakeAdapter {
                 clone(this.walkthroughContextFocus)
             );
         }
+    }
+
+    setWalkthroughCameraMode(mode) {
+        this.walkthrough.cameraMode = mode;
+        if (this.walkthroughHandler) this.walkthroughHandler(this.getWalkthroughState());
+        return true;
     }
 
     getWalkthroughState() {
@@ -4714,7 +4740,40 @@ async function main() {
             data.workspace.destroy();
         });
 
-    await check('3D heads-up toolbar controls only camera and display state',
+    await check('appearance swatches custom color reset mixed selection and stale guards', async () => {
+        const data = fixture();
+        data.session.selectMany(['pl-a', 'pl-b']);
+        data.session.state.layout.placements[0].appearance = {color:'#112233'};
+        data.session._notify();
+        assert.equal(data.workspace.openAppearanceDialog(), true);
+        let dialog = data.workspace.appearanceDialog;
+        assert.equal(dialog.querySelector('.ip-flw-appearance-value').textContent, 'Mixed colors');
+        dialog.querySelector('[data-appearance-swatch="#2478bc"]').dispatch('click');
+        dialog.querySelector('[data-appearance-apply]').dispatch('click');
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(data.session.calls.filter(c => c[0] === 'setSelectedAppearance'), [['setSelectedAppearance','#2478bc']]);
+        data.workspace.openAppearanceDialog();
+        dialog = data.workspace.appearanceDialog;
+        const picker = dialog.querySelector('[data-appearance-color]');
+        picker.value='#112233'; picker.dispatch('change');
+        assert.equal(dialog.querySelector('.ip-flw-appearance-value').textContent, '#112233');
+        dialog.querySelector('[data-appearance-reset]').dispatch('click');
+        assert.equal(dialog.querySelector('.ip-flw-appearance-value').textContent, 'Default');
+        data.session.select('pl-a');
+        assert.equal(dialog.querySelector('[data-appearance-apply]').disabled, true);
+        dialog.querySelector('[data-appearance-apply]').dispatch('click');
+        assert.equal(data.session.calls.filter(c => c[0] === 'setSelectedAppearance').length, 1);
+        for (const key of ['generatedDraft','designProposalDraft','layoutProposal','conflict']) {
+            data.workspace.state[key]={};
+            assert.equal(data.workspace.openAppearanceDialog(), false);
+            data.workspace.state[key]=null;
+        }
+        data.workspace.suspend();
+        assert.equal(data.workspace.appearanceDialog, null);
+        data.workspace.destroy();
+    });
+
+    await check('3D heads-up toolbar includes appearance alongside camera and display controls',
         async () => {
             const data = fixture();
             const before = clone(data.session.getState().layout);
@@ -4722,7 +4781,7 @@ async function main() {
             const controls = data.workspace.threeNavigation.querySelectorAll(
                 '[data-three-command]'
             );
-            assert.strictEqual(controls.length, 16);
+            assert.strictEqual(controls.length, 18);
             assert.deepStrictEqual(controls.map(button => (
                 button.getAttribute('data-three-command')
             )), [
@@ -4732,9 +4791,11 @@ async function main() {
                 'pan',
                 'view-orientation',
                 'display-settings',
+                'appearance',
                 'layers',
                 'orbit',
                 'walkthrough',
+                'avatar-view',
                 'drone',
                 'switch-immersive',
                 'walk-to-selected',
@@ -4800,6 +4861,13 @@ async function main() {
                 true
             );
             assert.strictEqual(command('walkthrough').getAttribute('aria-pressed'), 'true');
+            command('avatar-view').dispatch('click');
+            assert.strictEqual(data.three.walkthrough.cameraMode, 'third-person');
+            assert.strictEqual(command('avatar-view').getAttribute('aria-pressed'), 'true');
+            assert.strictEqual(command('avatar-view').getAttribute('title'), 'Use first-person Walkthrough (C)');
+            command('avatar-view').dispatch('click');
+            assert.strictEqual(data.three.walkthrough.cameraMode, 'first-person');
+            assert.strictEqual(command('avatar-view').getAttribute('aria-pressed'), 'false');
             assert.strictEqual(data.workspace.threeWalkthroughHud.hidden, false);
             command('walkthrough').dispatch('click');
             assert.strictEqual(data.three.walkthroughExits.at(-1), 'toolbar_exit');
@@ -5822,6 +5890,147 @@ async function main() {
             assert.strictEqual(data.session.getState().dirty, false);
             data.workspace.destroy();
         });
+
+    await check('saved movement choices preserve complete groups and never truncate', async () => {
+        const actors = Array.from({length: 65}, (_, i) => ({placementId: 'p' + i, metadata: {instanceLabel: 'Person ' + i}}));
+        const programs = actors.map((p, i) => ({movementProgramId: 'nmp-' + i, actorPlacementId: p.placementId}));
+        const context = {state: {selection: ['p1'], layout: {placements: actors, extensions: {
+            facilityNavigation: {movementPrograms: programs},
+            facilityProcessPresentation: {schemaVersion: 1, groups: [
+                null, 'invalid metadata',
+                {label: 'Good group', movementProgramIds: ['nmp-0', 'nmp-1']},
+                {label: 'Too many', movementProgramIds: programs.map(p => p.movementProgramId)},
+                {label: 'Missing', movementProgramIds: ['nmp-missing']},
+                {label: 'Duplicate', movementProgramIds: ['nmp-0', 'nmp-0']},
+            ]},
+        }}}};
+        const choices = workspaceModule.Workspace.prototype.savedMovementChoices.call(context);
+        assert.deepStrictEqual(choices[0], {label: 'Selected actors', movementProgramIds: ['nmp-1']});
+        assert.deepStrictEqual(choices[1], {label: 'Good group', movementProgramIds: ['nmp-0', 'nmp-1']});
+        assert.strictEqual(choices.length, 67);
+        assert(!choices.some(c => ['Too many', 'Missing', 'Duplicate'].includes(c.label)));
+        assert(!choices.some(c => c.label.startsWith('All saved movement')));
+    });
+
+    for (const cancelled of [false, true]) {
+    await check('all saved movement defaults to all and respects cancellation: ' + cancelled, async () => {
+        const data = fixture();
+        const w = data.workspace;
+        const actors = Array.from({length:40}, (_,i) => ({placementId:'p'+i}));
+        const ids = actors.map((p,i) => 'nmp-'+i);
+        w.state.layout = {placements:actors, extensions:{facilityNavigation:{movementPrograms:
+            actors.map((p,i) => ({movementProgramId:ids[i],actorPlacementId:p.placementId}))}}};
+        let finish, started=0, request;
+        w.startNavigationActivityPlayback = input => { request=input; return new Promise(resolve => {finish=resolve;}); };
+        w.threeAdapter.activity.play = () => { started++; };
+        assert.strictEqual(w.savedMovementChoices()[0].label,'All saved movement (40 actors)');
+        assert.strictEqual(w.openSavedMovementDialog(),true);
+        const play = w.savedMovementDialog.querySelector('[data-saved-movement-prepare]');
+        assert.strictEqual(play.textContent,'Play movement');
+        play.dispatch('click');
+        assert.deepStrictEqual(request.movementProgramIds,ids);
+        assert.strictEqual(started,0);
+        if (cancelled) w.savedMovementDialog.dispatch('keydown', {key:'Escape'});
+        finish({}); await new Promise(resolve => setImmediate(resolve));
+        assert.strictEqual(started,cancelled ? 0 : 1);
+        assert.strictEqual(w.savedMovementDialog,null);
+        w.destroy();
+    });
+    }
+
+    await check('saved movement publishes enabled state to the external ribbon', async () => {
+        const data = fixture({externalCommandSurface: true});
+        const w = data.workspace;
+        assert.strictEqual(w.getCommandStates()['saved-movement'].disabled, true);
+        const actor = w.state.layout.placements[0];
+        w.state.layout.extensions = {facilityNavigation: {movementPrograms: [
+            {movementProgramId: 'nmp-saved', actorPlacementId: actor.placementId},
+        ]}};
+        w._renderToolbarState();
+        assert.strictEqual(w.getCommandStates()['saved-movement'].disabled, false);
+        w.constructionPreview = {proposal: {}};
+        w._renderToolbarState();
+        assert.strictEqual(w.getCommandStates()['saved-movement'].disabled, true);
+        assert.strictEqual(w.openSavedMovementDialog(), false);
+        w.constructionPreview = null;
+        w.capabilities.navigationMultiActor = false;
+        w._renderToolbarState();
+        assert.strictEqual(w.getCommandStates()['saved-movement'].disabled, true);
+        w.destroy();
+    });
+
+    for (const outcome of ['loaded', 'refused', 'cancelled']) {
+        await check('saved movement restores ribbon availability after ' + outcome, async () => {
+            const abort = new AbortController();
+            let data;
+            const motionTransport = {
+                async compileNavigationSnapshot() {},
+                async planActorJourney() {},
+                async buildNavigationActivityScenario() {
+                    const w = data.workspace;
+                    assert.strictEqual(w.activityRequestPending, true);
+                    // Camera/selection updates can publish command state during preparation.
+                    w._renderToolbarState();
+                    assert.strictEqual(w.getCommandStates()['saved-movement'].disabled, true);
+                    if (outcome === 'refused') throw new Error('Journey refused');
+                    if (outcome === 'cancelled') abort.abort();
+                    return {scenarioId: 'fas-nav-one', layoutRevision: 'rev-1'};
+                },
+                async getActivityScenario() {
+                    return {scenario: {scenarioId: 'fas-nav-one', label: 'Saved movement',
+                        prototypeMode: true, cycleDurationSeconds: 12, actors: []},
+                        actorPayloads: {}, navigationPresentation: {}};
+                },
+            };
+            data = fixture({externalCommandSurface: true, motionTransport});
+            const w = data.workspace;
+            w.state.layout.extensions = {facilityNavigation: {movementPrograms: [
+                {movementProgramId: 'nmp-one', actorPlacementId: w.state.layout.placements[0].placementId},
+            ]}};
+            w._renderToolbarState();
+            const pending = w.startNavigationActivityPlayback({
+                journeySolutionIds: ['njs-one'], prototypeMode: true, signal: abort.signal,
+            });
+            if (outcome === 'loaded') await pending;
+            else await assert.rejects(pending, outcome === 'refused' ? /Journey refused/ : /cancelled/);
+            assert.strictEqual(w.activityRequestPending, false);
+            assert.strictEqual(w.getCommandStates()['saved-movement'].disabled, false);
+            assert.strictEqual(w.openSavedMovementDialog(), true);
+            w.destroy();
+        });
+    }
+
+    for (const reason of ['abort-before', 'abort-after-compile', 'stale-after-compile', 'destroy-after-compile']) {
+        await check('saved movement rejects ' + reason + ' before installing a result', async () => {
+            const abort = new AbortController();
+            let compiled = 0, planned = 0;
+            let data;
+            const transport = {
+                async compileNavigationSnapshot() {
+                    compiled += 1;
+                    if (reason === 'abort-after-compile') abort.abort();
+                    if (reason === 'stale-after-compile') data.workspace.session.getState = () => ({baseRevision: 'other', layout: {}, operations: []});
+                    if (reason === 'destroy-after-compile') data.workspace.destroyed = true;
+                    return {summary: {navigationPackageId: 'navpkg-one'}};
+                },
+                async planActorJourney() { planned += 1; },
+                async buildNavigationActivityScenario() { throw Error('Must not build'); },
+                async getActivityScenario() { throw Error('Must not fetch'); },
+            };
+            data = fixture({motionTransport: transport});
+            if (reason === 'abort-before') abort.abort();
+            await assert.rejects(data.workspace.startNavigationActivityPlayback({
+                movementProgramIds: ['nmp-one'], prototypeMode: true, signal: abort.signal,
+            }), error => error.code === (reason.startsWith('stale')
+                ? 'facility_navigation_activity_stale' : 'facility_navigation_activity_cancelled'));
+            assert.strictEqual(compiled, reason === 'abort-before' ? 0 : 1);
+            assert.strictEqual(planned, 0);
+            assert.strictEqual(data.top.activityPresentations.length, 0);
+            assert.strictEqual(data.workspace.activityRequestPending, false);
+            data.workspace.destroyed = false;
+            data.workspace.destroy();
+        });
+    }
 
     await check('navigation activity rollout flag fails closed before transport',
         async () => {

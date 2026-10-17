@@ -856,9 +856,27 @@ check('top plan layer visibility is presentation-only and hierarchy-aware', () =
         routes: false,
         markings: false,
         assets: false,
+        walls: true,
     });
     assert.strictEqual(JSON.stringify(input), authoritative);
     adapter.dispose();
+});
+
+check('Plan walls hide independently of assets and preserve the document', () => {
+    const { documentRef, host } = makeHost();
+    const input = layout([placement('pl-wall', 'asset-wall', 2, 2)]);
+    input.extensions = { facilityPerimeterWalls: { version: 1,
+        panels: [[{x:0,z:0},{x:0,z:10},{x:.2,z:10}]] } };
+    const adapter = facility.createTopPlanAdapter(host, { document: documentRef,
+        assetCatalog: [{assetId:'asset-wall', assetDefinitionRevision:input.placements[0].assetDefinitionRevision,tags:['wall']}] });
+    const before = JSON.stringify(input);
+    adapter.setLayout(input); adapter.setLayerVisibility({assets:false});
+    assert.equal(host.findByAttribute('data-placement-id','pl-wall').length,1);
+    assert.equal(host.findByAttribute('data-layer','walls')[0].children.length,1);
+    adapter.setLayerVisibility({walls:false});
+    assert.equal(host.findByAttribute('data-placement-id','pl-wall').length,0);
+    assert.equal(host.findByAttribute('data-layer','walls')[0].children.length,0);
+    assert.equal(JSON.stringify(input),before); adapter.dispose();
 });
 
 check('top plan collapses a vertical stack into one counted footprint', () => {
@@ -1155,6 +1173,20 @@ check('plan duplicate drag previews a copy while the source remains fixed', () =
     );
     assert.strictEqual(JSON.stringify(source), before);
     adapter.dispose();
+});
+
+check('Plan uses saved appearance and restores it after deselection', () => {
+    const {documentRef, host} = makeHost();
+    const top = facility.createTopPlanAdapter(host, {document:documentRef, ResizeObserver:FakeResizeObserver});
+    const doc = layout();
+    doc.placements.find(p => p.placementId === 'pl-machine').appearance = {color:'#2478bc'};
+    top.setLayout(doc);
+    const color = () => host.findByAttribute('data-placement-id','pl-machine')[0]
+        .findByAttribute('class','ip-flw-plan-card-body')[0].getAttribute('fill');
+    assert.equal(color(), '#2478bc');
+    top.setSelection('pl-machine'); assert.equal(color(), '#bfe3ff');
+    top.setSelection(null); assert.equal(color(), '#2478bc');
+    top.dispose();
 });
 
 check('zones and placements are mouse and keyboard selectable', () => {

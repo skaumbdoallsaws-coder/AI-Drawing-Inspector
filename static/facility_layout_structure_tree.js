@@ -89,6 +89,7 @@
             ? settings.displayName
             : function (assetId) { return assetId; };
         const onRename = typeof settings.onRename === 'function' ? settings.onRename : null;
+        const onActivateLayout = typeof settings.onActivateLayout === 'function' ? settings.onActivateLayout : null;
         const iconBase = typeof settings.iconBase === 'string' ? settings.iconBase : ICON_BASE;
 
         // expansion[namespace] = { rowId: true }
@@ -446,7 +447,21 @@
             if (!model) return;
             // The layout row is drawn even when the layout is empty, so its
             // name is always present and always renameable.
-            appendLayout();
+            const layouts = current.layouts || [];
+            if (layouts.length > 1) {
+                if (!layouts.some(function (layout) { return layout.layoutId === current.view.layoutId; })) {
+                    appendLayout();
+                }
+                layouts.forEach(function (layout) {
+                    if (layout.layoutId === current.view.layoutId) { appendLayout(); return; }
+                    const row = rowNode({ rowId: '\u0000sheet:' + layout.layoutId, kind: 'layout-sheet',
+                        depth: 0, label: layout.displayName + (layout.dirty ? ' *' : ''),
+                        icon: 'layout', expandable: false });
+                    row.setAttribute('data-layout-id', layout.layoutId);
+                    row.setAttribute('title', 'Open ' + layout.displayName);
+                    host.appendChild(row);
+                });
+            } else appendLayout();
             if (model.counts.zones === 0 && model.counts.placements === 0) {
                 host.appendChild(element(doc, 'div', {
                     className: 'ip-fst-empty',
@@ -480,6 +495,10 @@
             if (!row) return;
             const rowId = row.getAttribute('data-row-id');
             const kind = row.getAttribute('data-row-kind');
+            if (kind === 'layout-sheet') {
+                if (onActivateLayout) onActivateLayout(row.getAttribute('data-layout-id'));
+                return;
+            }
             const onCaret = Boolean(
                 event.target.getAttribute
                 && event.target.getAttribute('data-caret') === 'true'
@@ -523,7 +542,9 @@
             const expandable = row.getAttribute('aria-expanded') !== null;
             const expanded = row.getAttribute('aria-expanded') === 'true';
 
-            if (event.key === 'ArrowDown' && index < rows.length - 1) {
+            if ((event.key === 'Enter' || event.key === ' ') && row.getAttribute('data-row-kind') === 'layout-sheet') {
+                if (onActivateLayout) onActivateLayout(row.getAttribute('data-layout-id'));
+            } else if (event.key === 'ArrowDown' && index < rows.length - 1) {
                 rows[index + 1].focus();
             } else if (event.key === 'ArrowUp' && index > 0) {
                 rows[index - 1].focus();

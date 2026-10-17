@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections import UserDict
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
+import random
 
 import pytest
 
@@ -16,10 +19,53 @@ from ai_inspector.facility_layout.operations import (
     FacilityLayoutOperationError,
     apply_facility_layout_operations,
     create_layout_document,
+    _reference_matches,
 )
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "facility_layout"
+
+
+def test_reference_walk_preserves_nested_mapping_and_list_semantics() -> None:
+    class ListSubclass(list):
+        pass
+
+    for value in (
+        {"placementId": "pl-target"},
+        {"nested": [0, False, None, {"placementId": "pl-target"}]},
+        UserDict({"nested": ListSubclass([UserDict({"placementId": "pl-target"})])}),
+    ):
+        assert _reference_matches(value, "placementId", "pl-target")
+        assert not _reference_matches(value, "placementId", "pl-other")
+    for value in ("pl-target", ["pl-target"], {"label": "pl-target"},
+                  ({"placementId": "pl-target"},), {"placementId": ["pl-target"]}):
+        assert not _reference_matches(value, "placementId", "pl-target")
+
+
+def test_reference_walk_matches_previous_contract_for_generated_json_trees() -> None:
+    def previous(value, key, identifier):
+        if isinstance(value, Mapping):
+            return value.get(key) == identifier or any(
+                previous(item, key, identifier) for item in value.values()
+            )
+        if isinstance(value, list):
+            return any(previous(item, key, identifier) for item in value)
+        return False
+
+    rng = random.Random(7626)
+
+    def tree(depth):
+        if depth == 0 or rng.randrange(3) == 0:
+            return rng.choice([None, True, False, 1, 3.5, "pl-target", "zn-target"])
+        children = [tree(depth - 1) for _ in range(rng.randrange(5))]
+        if rng.randrange(2):
+            return children
+        return dict(zip(["placementId", "zoneId", "label", "nested"], children))
+
+    for _ in range(500):
+        value = tree(5)
+        for key, identifier in (("placementId", "pl-target"), ("zoneId", "zn-target")):
+            assert _reference_matches(value, key, identifier) == previous(value, key, identifier)
 
 
 def _fixture(name: str) -> dict:

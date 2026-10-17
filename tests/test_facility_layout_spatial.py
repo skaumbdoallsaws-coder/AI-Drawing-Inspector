@@ -13,6 +13,7 @@ import pytest
 
 from ai_inspector.facility_layout.service import FacilityLayoutService
 from ai_inspector.facility_layout.spatial import (
+    GEOMETRY_EPSILON,
     SpatialRecord,
     UniformGridSpatialIndex,
     brute_force_query,
@@ -1211,6 +1212,183 @@ def test_semantic_aisle_reports_obstruction_and_unverified_clearance(
     assert result["metrics"]["aisleCount"] == 1
     assert result["metrics"]["obstructedAisleCount"] == 1
     assert result["metrics"]["aisleClearanceUnverifiedCount"] == 1
+
+
+def _aisle_doorway_scene(
+    minimum_x: float = 7.0,
+    width: float = 3.0,
+    *,
+    yaw_degrees: float = 0.0,
+    intrusion: float = 0.0,
+) -> tuple[dict, dict]:
+    angle = math.radians(yaw_degrees)
+
+    def point(x: float, z: float) -> dict:
+        return {
+            "x": x * math.cos(angle) - z * math.sin(angle),
+            "z": x * math.sin(angle) + z * math.cos(angle),
+        }
+
+    layout = {"placements": [], "routes": [{
+        "routeId": "rt-doorway",
+        "corridorWidth": width,
+        "centerline": [point(minimum_x + width / 2, 0),
+                       point(minimum_x + width / 2, 8.5)],
+        "extensions": {"facilityAisle": {
+            "clearanceEvidenceStatus": "unverified",
+        }},
+    }]}
+    shell = {"features": [
+        {
+            "featureId": feature_id,
+            "featureKind": "wall",
+            "geometry": {"boundary": [
+                point(low, -0.15), point(high, -0.15),
+                point(high, 0.15), point(low, 0.15),
+            ], "height": 3.0},
+        }
+        for feature_id, low, high in (
+            ("wall-left", 0.0, minimum_x + intrusion),
+            ("wall-right", minimum_x + width, 26.0),
+        )
+    ]}
+    return layout, shell
+
+
+@pytest.mark.parametrize(("minimum_x", "width"), [(7.0, 3.0), (22.0, 1.5)])
+@pytest.mark.parametrize("yaw_degrees", [0.0, 33.0, 90.0])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_aisle_exact_doorway_boundary_contact_is_not_obstructed(
+    minimum_x: float, width: float, yaw_degrees: float, reverse: bool,
+) -> None:
+    layout, shell = _aisle_doorway_scene(minimum_x, width, yaw_degrees=yaw_degrees)
+    if reverse:
+        layout["routes"][0]["centerline"].reverse()
+        for feature in shell["features"]:
+            feature["geometry"]["boundary"].reverse()
+    before = deepcopy((layout, shell))
+
+    result = diagnose_layout(layout, [], shell=shell)
+
+    assert "aisle_shell_obstructed" not in _codes(result)
+    assert result["metrics"]["obstructedAisleCount"] == 0
+    assert result["metrics"]["aisleCount"] == 1
+    assert result["metrics"]["aisleClearanceUnverifiedCount"] == 1
+    assert "aisle_clearance_unverified" in _codes(result, "unverified")
+    assert result["safe"] is False
+    assert (layout, shell) == before
+    assert diagnose_layout(layout, [], shell=shell) == result
+
+
+@pytest.mark.parametrize("yaw_degrees", [0.0, 33.0])
+@pytest.mark.parametrize(("intrusion", "blocked"), [
+    (-1.0e-6, False),
+    (-GEOMETRY_EPSILON / 2, False),
+    (0.0, False),
+    (GEOMETRY_EPSILON / 2, False),
+    (2 * GEOMETRY_EPSILON, True),
+    (1.0e-6, True),
+    (0.05, True),
+])
+def test_aisle_wall_contact_tolerance_preserves_positive_overlap(
+    yaw_degrees: float, intrusion: float, blocked: bool,
+) -> None:
+    layout, shell = _aisle_doorway_scene(yaw_degrees=yaw_degrees, intrusion=intrusion)
+
+    result = diagnose_layout(layout, [], shell=shell)
+
+    hits = [item for item in result["findings"] if item["code"] == "aisle_shell_obstructed"]
+    assert len(hits) == int(blocked)
+    assert result["metrics"]["obstructedAisleCount"] == int(blocked)
+    if blocked:
+        assert hits[0]["severity"] == "warning"
+        assert hits[0]["details"] == {
+            "shellFeatureId": "wall-left", "segmentIndexes": [0], "corridorWidth": 3.0,
+        }
+
+
+@pytest.mark.parametrize(("boundary", "blocked"), [
+    pytest.param([(5, 3), (7, 4), (5, 5)], False, id="corner-contact"),
+    pytest.param([(9, 9.5), (11, 7.5), (12, 10.5)], False, id="diagonal-corner-contact"),
+    pytest.param([(8, 2), (9, 2), (9, 3), (8, 3)], True, id="contained-wall"),
+    pytest.param([(8, 1), (8 + GEOMETRY_EPSILON / 2, 1),
+                  (8 + GEOMETRY_EPSILON / 2, 7), (8, 7)],
+                 True, id="thin-contained-wall"),
+    pytest.param([(7, 0), (10, 0), (10, 8.5), (7, 8.5)], True, id="coincident"),
+    pytest.param([(5, 3), (12, 3), (12, 4), (5, 4)], True, id="crossing-edges"),
+    pytest.param([(5, 1), (7.25, 1), (7.25, 2), (6, 2), (6, 7), (5, 7)],
+                 True, id="concave-intrusion"),
+])
+def test_aisle_wall_contact_checks_polygon_interiors(
+    boundary: list[tuple[float, float]], blocked: bool,
+) -> None:
+    layout, shell = _aisle_doorway_scene()
+    shell["features"] = shell["features"][:1]
+    shell["features"][0]["geometry"]["boundary"] = [
+        {"x": x, "z": z} for x, z in boundary
+    ]
+
+    result = diagnose_layout(layout, [], shell=shell)
+
+    assert ("aisle_shell_obstructed" in _codes(result)) is blocked
+    assert result["metrics"]["obstructedAisleCount"] == int(blocked)
+
+
+@pytest.mark.parametrize("feature_kind", ["column", "door", "fixed_obstacle"])
+def test_aisle_non_wall_shell_contact_still_obstructs(feature_kind: str) -> None:
+    layout, shell = _aisle_doorway_scene()
+    shell["features"][0]["featureKind"] = feature_kind
+
+    result = diagnose_layout(layout, [], shell=shell)
+
+    hits = [item for item in result["findings"] if item["code"] == "aisle_shell_obstructed"]
+    assert [item["details"]["shellFeatureId"] for item in hits] == ["wall-left"]
+    assert result["metrics"]["obstructedAisleCount"] == 1
+
+
+def test_aisle_wall_contact_exception_keeps_placement_wall_collisions() -> None:
+    layout, shell = _aisle_doorway_scene()
+    asset = _box_asset("asset-doorway", 3.0, 1.0, 1.0)
+    layout["placements"] = [_placement("pl-doorway", asset["assetId"], 8.5, 0.0)]
+
+    result = diagnose_layout(layout, [asset], shell=shell)
+
+    assert "aisle_shell_obstructed" not in _codes(result)
+    assert "aisle_obstructed" in _codes(result, "warning")
+    assert "shell_obstacle_collision" in _codes(result, "error")
+    assert result["metrics"]["shellObstacleCollisions"] == 2
+    assert result["valid"] is False
+
+
+def test_aisle_wall_contact_exception_keeps_placement_aisle_contact() -> None:
+    layout, shell = _aisle_doorway_scene()
+    asset = _box_asset("asset-touching", 1.0, 1.0, 1.0)
+    layout["placements"] = [_placement("pl-touching", asset["assetId"], 10.5, 4.0)]
+
+    result = diagnose_layout(layout, [asset], shell=shell)
+
+    assert "aisle_shell_obstructed" not in _codes(result)
+    assert "aisle_obstructed" in _codes(result, "warning")
+    assert result["metrics"]["obstructedAisleCount"] == 1
+
+
+def test_aisle_wall_contact_exception_keeps_hard_clearance_contact(golden: dict) -> None:
+    layout, shell = _aisle_doorway_scene()
+    asset = _asset(golden, "asset-machine-golden")
+    obstacle = _box_asset("asset-clearance-contact", 1.0, 1.0, 1.0)
+    layout["placements"] = [
+        _placement("pl-machine", asset["assetId"], 8.5, 4.0),
+        _placement("pl-clearance-contact", obstacle["assetId"], 10.5, 4.0),
+    ]
+
+    result = diagnose_layout(
+        layout, [asset, obstacle], shell=shell, evidence_authority=golden["authority"],
+    )
+
+    assert "aisle_shell_obstructed" not in _codes(result)
+    assert "placement_collision" not in _codes(result)
+    assert "safety_clearance_violation" in _codes(result, "error")
+    assert result["valid"] is False
 
 
 def test_floor_load_without_evidence_is_unverified_not_exceeded(golden: dict) -> None:

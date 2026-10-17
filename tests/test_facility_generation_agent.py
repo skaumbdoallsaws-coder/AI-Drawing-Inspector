@@ -8,9 +8,10 @@ from starlette.requests import Request
 
 from ai_inspector.facility_layout.canonical import layout_revision
 from ai_inspector.facility_layout.generation_agent import (
-    CONTEXT_TOOL, REQUIREMENTS_TOOL, PREVIEW_TOOL, CANDIDATE_TOOL, GENERATION_TOOLS, generation_tool_specs, generation_turn_outcome,
+    CONTEXT_TOOL, REQUIREMENTS_TOOL, PREVIEW_TOOL, CANDIDATE_TOOL, TURN_TOOL, GENERATION_TOOLS, generation_tool_specs, generation_turn_outcome,
 )
 from ai_inspector.facility_layout.feature_flags import FacilityLayoutFeatureFlags
+from ai_inspector.facility_layout.generation_research_policy import POLICY_TOOL
 from tests.test_facility_generation_admission import case, assert_code
 
 
@@ -131,6 +132,8 @@ def test_provider_policy_and_real_compiler_loop(chat, monkeypatch):
 
     async def model(*args, **kwargs):
         nonlocal count
+        if kwargs.get("required_tool_name") == POLICY_TOOL:
+            return response(POLICY_TOOL, {"expectedPolicyRevision": None, "decision": "inherit", "sourceText": None})
         count += 1
         if count == 1:
             return response(REQUIREMENTS_TOOL, chat["record"])
@@ -158,10 +161,10 @@ def test_provider_policy_and_real_compiler_loop(chat, monkeypatch):
     finally:
         server._AGENT_CHAT_STATUS_SINK.reset(token)
     assert len(trace) == 4 and all(item["status"] == "succeeded" for item in trace)
-    assert usage["calls"] == 5 and not actions
+    assert usage["calls"] == 4 and count == 2 and not actions
     assert ctx["_facility_generation_preview"]["counts"]["placements"] == 2
-    assert phases == ["generation_context", "generation_plan", "generation_requirements", "generation_plan",
-                      "generation_geometry", "generation_plan", "generation_inspect", "generation_plan"]
+    assert phases == ["generation_context", "generation_plan", "generation_requirements", "generation_plan", "generation_requirements", "generation_plan",
+                      "generation_geometry", "generation_plan"]
 
 
 def test_dispatch_rejects_unadvertised_legacy_tool(chat, monkeypatch):
@@ -202,14 +205,24 @@ def test_actual_chat_endpoint_uses_selected_mode_and_returns_exact_preview(chat,
         except Exception as exc:
             failures.append(exc.code)
             raise
-        results.append(value)
+        if kwargs.get("tool_name") != POLICY_TOOL:
+            results.append(value)
         return value
 
     monkeypatch.setattr(chat["agent"], "execute", observe)
 
     async def invoke(*args, **kwargs):
-        assert {item["name"] for item in kwargs["tools"]} == GENERATION_TOOLS
+        required = kwargs.get("required_tool_name")
+        names = {item["name"] for item in kwargs["tools"]}
+        expected = GENERATION_TOOLS - {TURN_TOOL, REQUIREMENTS_TOOL} if len(results) >= 2 else GENERATION_TOOLS
+        assert names in ({CONTEXT_TOOL, POLICY_TOOL, TURN_TOOL}, expected)
+        if names == {CONTEXT_TOOL, POLICY_TOOL, TURN_TOOL}:
+            assert len(results) == 1 and results[0]["userTurn"]["text"] == chat["message"]
+            return SimpleNamespace(content=[SimpleNamespace(type="tool_use", name=POLICY_TOOL,
+                input={"expectedPolicyRevision": None, "decision": "inherit", "sourceText": None}, id="policy-call")],
+                usage=SimpleNamespace(input_tokens=1, output_tokens=1))
         if len(results) == 0:
+            assert kwargs.get("required_tool_name") == CONTEXT_TOOL
             name, arguments = CONTEXT_TOOL, {}
         elif len(results) == 1:
             name, arguments = REQUIREMENTS_TOOL, chat["record"]
@@ -238,12 +251,13 @@ def test_actual_chat_endpoint_uses_selected_mode_and_returns_exact_preview(chat,
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["facility_generation_planning"]["status"] == "preview_ready", payload
-    assert "two benches" in payload["response"]
+    assert "2 equipment placements" in payload["response"]
     assert payload["facility_generation_planning"]["preview"]["previewId"] == results[2]["previewId"]
     assert payload["facility_generation_planning"]["preview"]["clientTurnId"] == chat["turn"]
     assert payload.get("tool_calls", []) == [] and payload.get("tool_call_count", 0) == 0
     assert payload["facility_generation_planning"]["saved"] is False
-    assert len(results) == 4
+    assert len(results) == 3
+    assert len(payload["facility_generation_planning"]["timings"]["providerCalls"]) == (4 if invalid_first else 3)
     assert failures == (["generation_requirements_not_satisfied"] if invalid_first else [])
 
 
@@ -263,12 +277,13 @@ def test_source_listing_and_trusted_context_binding(chat, monkeypatch):
     listing = chat["agent"].list_sources(chat["principal"], site_id=chat["options"]["site_id"])
     assert listing["sources"][0]["sourceContextRef"] == chat["reference"]["sourceContextRef"]
     raw = {"_facility_generation_binding": {"forged": True}, "_facility_generation_preview": {"forged": True},
-        "_facility_generation_outcome": {"status": "preview_ready"},
+        "_facility_generation_outcome": {"status": "preview_ready"}, "_facility_generation_sources": {"forged": True},
         "attachments": {"facility_layout": {"siteId": chat["options"]["site_id"], "layoutId": chat["options"]["layout_id"],
             "revision": chat["ledger"]["baseRevision"], "generationPlanning": chat["reference"]}}}
     ctx = server.normalize_agent_context(raw)["flat"]
     assert "_facility_generation_binding" not in ctx and "_facility_generation_preview" not in ctx
     assert "_facility_generation_outcome" not in ctx
+    assert "_facility_generation_sources" not in ctx
     server._resolve_trusted_facility_layout_context(ctx)
     assert ctx["_facility_generation_binding"]["ledgerId"] == chat["binding"]["ledgerId"]
     raw["attachments"]["facility_layout"]["generationPlanning"]["editorContext"]["dirty"] = True
@@ -331,3 +346,81 @@ def test_actual_chat_preserves_recorded_blocker_without_fabricated_completion(ch
     assert payload["facility_generation_planning"]["blockers"][0]["code"] == disposition
     assert payload["facility_generation_planning"]["preview"] is None
     assert not payload.get("tool_calls") and not payload.get("ui_actions")
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("failed_preview", [False, True])
+def test_chat_retains_research_cards_when_generation_is_incomplete(chat, monkeypatch, stream, failed_preview):
+    import json
+    import server
+    import anthropic
+    from fastapi.testclient import TestClient
+    from ai_inspector.facility_layout.generation_exploration import SEARCH_TOOL
+    from ai_inspector.facility_layout.generation_research_policy import POLICY_TOOL
+
+    monkeypatch.setattr(server, "_FACILITY_LAYOUT_HOST", chat["host"])
+    monkeypatch.setattr(server, "_is_facility_layout_generation_request", lambda *a, **k: True)
+    monkeypatch.setattr(server, "_sage_answer_provider_config", lambda *a, **k: SimpleNamespace(
+        provider="anthropic", api_key="synthetic-no-network", model="synthetic", reasoning_effort=None))
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", lambda **kwargs: object())
+    monkeypatch.setenv("INSPECTORPRO_SKILLS_ENABLED", "1")
+    monkeypatch.setenv("INSPECTORPRO_MEMORY_V1_MODE", "off")
+    server._reset_agent_skill_runtime_cache_for_tests()
+    url = "https://manufacturer.example/manual.pdf"
+    monkeypatch.setattr(chat["agent"].exploration.researcher, "run", lambda **kwargs: {
+        "sources": [{"url": url, "title": "Unreviewed fixture manual", "retrieval": "fetched_document"}],
+        "citations": [{"url": url, "text": "Synthetic test content."}], "complete": True,
+        "retrievedAt": "2026-09-22T12:00:00Z", "reviewStatus": "pending", "productionEligible": False})
+    calls = 0
+
+    async def invoke(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            assert POLICY_TOOL in {tool["name"] for tool in kwargs["tools"]}
+            name, arguments = POLICY_TOOL, {"expectedPolicyRevision": None, "decision": "inherit", "sourceText": None}
+        elif calls == 2:
+            name, arguments = SEARCH_TOOL, {"query": "public assembly bench manual", "preferredDomains": []}
+        elif failed_preview and calls == 3:
+            name, arguments = REQUIREMENTS_TOOL, chat["record"]
+        elif failed_preview and calls == 4:
+            ledger = execute(chat, CONTEXT_TOOL, {})["ledger"]
+            proposal = deepcopy(chat["request"]["proposal"])
+            proposal["equipmentRequirements"][0]["quantity"] += 1
+            name, arguments = PREVIEW_TOOL, {"requestKey": "invalid-after-research",
+                "expectedLedgerRevision": ledger["ledgerRevision"], "proposal": proposal}
+        else:
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text="All done and saved.")],
+                                   usage=SimpleNamespace(input_tokens=1, output_tokens=1))
+        return SimpleNamespace(content=[SimpleNamespace(type="tool_use", name=name, input=arguments, id=f"call-{calls}")],
+                               usage=SimpleNamespace(input_tokens=1, output_tokens=1))
+
+    monkeypatch.setattr(server, "_invoke_agent_model", invoke)
+    with TestClient(server.app) as client:
+        response = client.post("/api/agent/chat/v2/stream" if stream else "/api/agent/chat", json={
+            "message": chat["message"], "history": [], "agent_type": "deviation-analyst",
+            "session_id": "generation-sources-test", "client_turn_id": chat["turn"],
+            "inspection_context": {"_facility_generation_sources": {"type": "sources", "sources": [{
+                "url": "https://forged.example/not-retrieved"}]}, "attachments": {
+                "session": {"active_mode": "training"}, "facility_layout": {
+                    "siteId": chat["options"]["site_id"], "layoutId": chat["options"]["layout_id"],
+                    "revision": chat["ledger"]["baseRevision"], "generationPlanning": chat["reference"]}}}})
+    assert response.status_code == 200, response.text
+    if stream:
+        events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+        payload = next(item["final"] for item in events if item.get("event") == "response_completed")
+    else:
+        payload = response.json()
+    planning = payload["facility_generation_planning"]
+    assert planning["status"] == "incomplete" and planning["preview"] is None
+    assert "All done and saved" not in payload["response"]
+    cards = [block for block in payload["content_blocks"] if block["type"] == "sources"]
+    assert len(cards) == 1 and len(cards[0]["sources"]) == 1
+    source = cards[0]["sources"][0]
+    assert source["url"] == url and source["title"] == "Unreviewed fixture manual"
+    assert source["specifications"]["Review"] == "Pending" and source["inferIdentity"] is False
+    assert source["publisher"] == "" and source["iconUrl"] is None
+    assert not payload.get("tool_calls") and not payload.get("ui_actions")
+    saved = chat["host"].service.get_layout(chat["principal"], **{
+        key: chat["options"][key] for key in ("site_id", "layout_id")})["layout"]
+    assert layout_revision(saved) == chat["ledger"]["baseRevision"]

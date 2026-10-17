@@ -27,6 +27,8 @@ def main():
     os.environ.pop('PYTHON_DOTENV_DISABLED', None)
     os.environ['INSPECTORPRO_FACILITY_LAYOUT_ROOT'] = profile.value['facilityRoot']
     os.environ['INSPECTORPRO_LIBRARY_DIR'] = profile.value['libraryRoot']
+    from desktop.runtime.codex_config import configure_codex
+    configure_codex(profile, ROOT)
     os.chdir(ROOT)
     control = PrivateControl(pipe)
     threading.Thread(target=control.read, name='desktop-private-control', daemon=True).start()

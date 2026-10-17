@@ -14,6 +14,7 @@ import re
 from typing import Any, Iterable, Mapping, Sequence
 
 from .navigation_contract import FACILITY_NAVIGATION_LIMITS
+from .activity_scenario import FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_ACTORS
 
 
 OBSERVE_NAVIGATION_CONTEXT_TOOL = "observe_navigation_context"
@@ -927,11 +928,11 @@ def navigation_agent_tool_specs() -> list[dict[str, Any]]:
                 "required": ["prototypeMode", "scenarioLabel"],
                 "properties": {
                     "journeySolutionIds": {
-                        "type": "array", "maxItems": 20, "uniqueItems": True,
+                        "type": "array", "maxItems": FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_ACTORS, "uniqueItems": True,
                         "items": stable_id,
                     },
                     "movementProgramIds": {
-                        "type": "array", "maxItems": 20, "uniqueItems": True,
+                        "type": "array", "maxItems": FACILITY_NAVIGATION_ACTIVITY_MAXIMUM_ACTORS, "uniqueItems": True,
                         "items": stable_id,
                     },
                     "handoffResultIds": {

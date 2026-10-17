@@ -1,0 +1,2 @@
+# Independent JSON Schema validation for the construction contract parity tests.
+jsonschema==4.26.0

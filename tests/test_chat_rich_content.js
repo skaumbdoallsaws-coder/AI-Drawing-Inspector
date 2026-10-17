@@ -179,4 +179,18 @@ test('structured tables preserve ordered columns and bounded cells', () => {
     assert.strictEqual(table.rows[0].entityId, 'zone-machining');
 });
 
+test('retained research sources do not acquire inferred publishers or favicon URLs', () => {
+    const raw = {title: '<script>not markup</script>', url: 'https://www.skf.com/product.pdf',
+        publisher: '', iconUrl: null, inferIdentity: false,
+        specifications: {Authority: 'Supporting', Review: 'Pending', Use: 'Not production approval'}};
+    const once = rich.normalizeSource(raw, 0);
+    const twice = rich.normalizeSource(once, 0);
+    assert.strictEqual(twice.publisher, '');
+    assert.strictEqual(twice.iconUrl, null);
+    assert.strictEqual(twice.domain, 'skf.com');
+    assert.strictEqual(twice.inferIdentity, false);
+    assert.strictEqual(twice.title, raw.title);
+    assert.deepStrictEqual(twice.specifications, raw.specifications);
+});
+
 console.log(passed + ' passed, ' + (process.exitCode ? 1 : 0) + ' failed');

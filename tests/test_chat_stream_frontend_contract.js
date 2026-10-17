@@ -90,7 +90,7 @@ test('answer bubble promotion requires a visible text delta', () => {
 });
 
 test('stream failures retain rendered partial text and attach retry to it', () => {
-    assert(html.includes("err.streamingMessage.fail('Response interrupted. Retry the request to continue.')"));
+    assert(html.includes("'Response interrupted. Retry the request to continue.'"));
     assert(html.includes('function _showAgentStreamRetry('));
     assert(html.includes('frozenRequest'));
 });
@@ -107,6 +107,31 @@ test('provider failures never fall through to the generic part-loaded response',
     assert(handler.includes('} else if (err && err.agentServiceFailure) {'));
     assert(handler.includes('_agentServiceFailureText(originAgent, err)'));
     assert(handler.includes('streamTurnFailed = true;'));
+});
+
+test('runtime failures explain recovery without exposing raw provider messages', () => {
+    const start = html.indexOf('function _agentServiceFailureText(');
+    const end = html.indexOf('async function _requestAgentChatStream(', start);
+    const format = new Function('AGENTS', html.slice(start, end) + '\nreturn _agentServiceFailureText;')({
+        inspector: { name: 'Sage' },
+    });
+    for (const code of ['codex_protocol_timeout', 'codex_time_budget_exhausted', 'codex_runtime_stopped', 'codex_runtime_failed']) {
+        const message = format('inspector', { agentErrorCode: code, message: 'secret-provider-detail' });
+        assert(message.includes('Sage'));
+        assert(message.includes('No engineering changes were made'));
+        assert(message.includes('Send a new request'));
+        assert(!message.includes('secret-provider-detail'));
+    }
+    assert(format('inspector', { agentErrorCode: 'unrecognized' }).includes('could not generate'));
+});
+
+test('non-replayable terminal failures do not offer the old request ID as Retry', () => {
+    const start = html.indexOf('async function handleAgentSend(');
+    const end = html.indexOf('// === Scout Browser Search', start);
+    const handler = html.slice(start, end);
+    assert.equal(handler.split('if (err.streamRetryable !== false) _showAgentStreamRetry(').length - 1, 2);
+    assert(handler.includes('err.streamCancelled || err.streamRetryable === false'));
+    assert(handler.includes('Response stopped. Send a new request to continue.'));
 });
 
 test('send button aborts instead of starting a second turn', () => {
@@ -183,8 +208,8 @@ test('Scout state does not leak into the Sage or Iris send path', () => {
 });
 
 test('agent switching synchronizes the composer placeholder', () => {
-    assert(html.includes('id="agentInput" placeholder="Message Iris..."'));
-    assert(html.includes("let currentAgent = 'inspector';"));
+    assert(html.includes('id="agentInput" placeholder="Message your agent..."'));
+    assert(html.includes('let currentAgent = DEFAULT_AGENT_KEY;'));
     assert(html.includes('function _syncAgentInputPlaceholder()'));
     assert(html.includes("`Message ${AGENTS[currentAgent]?.name || 'agent'}...`"));
     const start = html.indexOf('function selectAgent(');

@@ -171,6 +171,28 @@ def _state():
     }
 
 
+def test_route_semantics_separate_entered_zones_from_edge_contact():
+    state = _state()
+    state["routes"] = [{
+        "routeId": "rt-stub",
+        "label": "Stub aisle",
+        "routeKind": "forklift",
+        "corridorWidth": 3,
+        "centerline": [
+            {"x": 10, "y": 0, "z": 5},
+            {"x": 20, "y": 0, "z": 5},
+        ],
+    }]
+
+    route = build_facility_semantic_map(state)["routes"][0]
+
+    # The aisle ends exactly on the Automation edge: touching, not reaching.
+    assert route["connectedZoneIds"] == ["dept-automation", "dept-machining"]
+    assert route["enteredZoneIds"] == ["dept-machining"]
+    assert route["edgeContactZoneIds"] == ["dept-automation"]
+    assert "edgeContactZoneIds" in route["qualification"]
+
+
 def test_semantic_map_derives_area_hierarchy_roles_routes_and_metrics():
     semantic = build_facility_semantic_map(_state())
 

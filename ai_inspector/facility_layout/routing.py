@@ -59,6 +59,9 @@ PROCESS_SEMANTICS = {
     "policy": "spatial_proximity_never_implies_process_precedence",
 }
 _SEVERITY_ORDER = {"error": 0, "blocked": 1, "warning": 2, "info": 3}
+# An aisle bound to a department must extend at least this far inside it.
+# Stopping at the department's edge leaves its equipment and doors unreached.
+AISLE_ZONE_ENTRY_MINIMUM_METERS = 0.05
 
 
 class FacilityRoutingResourceError(FacilityValidationError):
@@ -902,6 +905,9 @@ def validate_facility_aisle_route(
                 details={"clearanceEvidenceStatus": evidence_status},
             )
         )
+    findings.extend(
+        _aisle_zone_binding_findings(layout, route_id, centerline, aisle)
+    )
     ordered = _sort_findings(findings)
     return {
         "routeId": route_id,
@@ -914,6 +920,66 @@ def validate_facility_aisle_route(
         "findings": ordered,
         "processSemantics": dict(PROCESS_SEMANTICS),
     }
+
+
+def _aisle_zone_binding_findings(
+    layout: Mapping[str, Any],
+    route_id: str,
+    centerline: Sequence[Mapping[str, Any]],
+    aisle: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Warn when an aisle never extends into a department it is bound to.
+
+    Reachability and review tools report the bound departments as connected,
+    so a centerline drawn only up to a department's edge would otherwise read
+    as access to the racks and doors inside it.
+    """
+    if LineString is None or Polygon is None or len(centerline) < 2:
+        return []
+    bound = [("source", aisle.get("sourceZoneId"))]
+    bound.extend(("via", item) for item in aisle.get("viaZoneIds") or [])
+    bound.append(("target", aisle.get("targetZoneId")))
+    zones = {
+        str(zone.get("zoneId")): zone
+        for zone in layout.get("zones", [])
+        if isinstance(zone, Mapping) and zone.get("zoneId")
+    }
+    try:
+        line = LineString([_point2(point, "centerline") for point in centerline])
+    except ValueError:
+        return []  # Malformed centerlines already fail aisle validation.
+    findings = []
+    for role, zone_id in bound:
+        zone = zones.get(str(zone_id or ""))
+        if zone is None:
+            continue  # Unknown zone references are reported by layout validation.
+        try:
+            polygon = Polygon(
+                [_point2(point, "zone.boundary") for point in zone.get("boundary") or []]
+            )
+        except ValueError:
+            continue
+        if not polygon.is_valid or polygon.area <= EPSILON:
+            continue
+        interior = polygon.buffer(-AISLE_ZONE_ENTRY_MINIMUM_METERS)
+        if line.intersection(interior).length > EPSILON:
+            continue
+        findings.append(
+            _finding(
+                "aisle_zone_not_entered",
+                "warning",
+                "Aisle stops at or runs along the edge of a department it is "
+                "bound to without extending into it.",
+                subjects=(route_id, str(zone_id)),
+                details={
+                    "bindingRole": role,
+                    "zoneId": str(zone_id),
+                    "zoneLabel": str(zone.get("label") or zone_id),
+                    "minimumEntryMeters": AISLE_ZONE_ENTRY_MINIMUM_METERS,
+                },
+            )
+        )
+    return findings
 
 
 def _interface_findings(

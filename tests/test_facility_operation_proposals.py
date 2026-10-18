@@ -68,6 +68,66 @@ def test_preview_approval_commit_replay_and_exact_undo(context):
     assert expected == actual
 
 
+def _zones_and_spine_aisle(start_x, end_x):
+    def zone(zone_id, label, zone_type, x0, x1):
+        return {"op": "add_zone", "zoneId": zone_id, "zone": {
+            "label": label, "zoneType": zone_type, "anchors": [], "evidence": [], "floorElevation": 0,
+            "boundary": [{"x": x0, "z": 0}, {"x": x1, "z": 0}, {"x": x1, "z": 10}, {"x": x0, "z": 10}]}}
+    return [
+        zone("zn-receiving", "Receiving", "receiving", 0, 10),
+        zone("zn-machining", "Machining", "workcell", 10, 30),
+        zone("zn-shipping", "Shipping", "shipping", 30, 40),
+        {"op": "add_aisle", "routeId": "rt-spine", "aisle": {
+            "label": "Forklift spine", "aisleKind": "forklift", "direction": "two_way",
+            "corridorWidth": 3.5, "color": "#d9a514", "clearanceEvidenceStatus": "unverified",
+            "centerline": [{"x": start_x, "y": 0, "z": 5}, {"x": end_x, "y": 0, "z": 5}],
+            "sourceZoneId": "zn-receiving", "targetZoneId": "zn-shipping", "viaZoneIds": ["zn-machining"],
+            "areaAccounting": "overlay", "widthAuthority": "unknown"}},
+    ]
+
+
+def test_staged_aisle_that_stops_at_department_edges_is_named(context):
+    # The agent sees routing findings only as a count, so the proposal itself
+    # must say which aisle falls short of its departments.
+    short = propose(context, operations=_zones_and_spine_aisle(10, 30))
+    reach = short["alternative"]["validation"]["aisleReach"]
+    assert reach["status"] == "aisles_stop_short"
+    assert sorted((item["label"], item["bindingRole"], item["zoneLabel"]) for item in reach["aisles"]) == [
+        ("Forklift spine", "source", "Receiving"), ("Forklift spine", "target", "Shipping")]
+
+    reaching = propose(context, operations=_zones_and_spine_aisle(2, 38))
+    assert "aisleReach" not in reaching["alternative"]["validation"]
+
+
+def _workbench_at(host, z):
+    asset = next(item for item in host.ensure_bootstrap()["assetCatalog"]
+        if item["assetId"] == "asset-workbench")
+    return {"op": "place_asset", "placement": {
+        "placementId": "pl-bench", "assetId": asset["assetId"],
+        "assetDefinitionRevision": asset["assetDefinitionRevision"],
+        "transform": {"position": {"x": 20, "y": 0, "z": z},
+            "quaternion": {"x": 0, "y": 0, "z": 0, "w": 1}, "scale": 1},
+        "positionMode": "manual", "snapRelationship": None, "metadata": {}}}
+
+
+def test_staged_equipment_inside_an_aisle_is_named_and_needs_review(asset_host):
+    # An obstructed aisle is only a warning, so without this the proposal
+    # reported no new errors and applied directly with a bench in the lane.
+    context = asset_host.service, asset_host.principal()
+    blocked = propose(context, edit_mode="direct",
+        operations=_zones_and_spine_aisle(2, 38) + [_workbench_at(asset_host, 5)])
+    review = blocked["alternative"]["validation"]["aisleObstructions"]
+    assert review["status"] == "aisles_obstructed" and review["count"] == 1
+    assert review["obstructions"] == [{"routeId": "rt-spine", "aisleLabel": "Forklift spine",
+        "aisleKind": "forklift", "placementId": "pl-bench", "assetId": "asset-workbench"}]
+    assert blocked["alternative"]["directApplyPolicy"]["eligible"] is False
+
+    clear = propose(context, edit_mode="direct",
+        operations=_zones_and_spine_aisle(2, 38) + [_workbench_at(asset_host, 8.8)])
+    assert "aisleObstructions" not in clear["alternative"]["validation"]
+    assert clear["alternative"]["directApplyPolicy"]["eligible"] is True
+
+
 @pytest.fixture
 def asset_host(tmp_path):
     host = LocalFacilityLayoutHost(tmp_path / "facility", private_assets=False)

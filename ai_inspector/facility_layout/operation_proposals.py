@@ -81,10 +81,69 @@ def prepare_undo(service, principal, site_id, layout_id, base_revision, receipt_
     return prepared, dependencies, operations
 
 
+def _review_changed_aisle_reach(prepared, affected):
+    """Name changed aisles that stop at the edge of a department they are bound to.
+
+    Routing findings reach the proposal only as a count, so without this the
+    agent staging the edit never learns which aisle falls short.
+    """
+    labels = {route.get("routeId"): route.get("label") for route in prepared["document"].get("routes", [])}
+    aisles = []
+    for finding in prepared["routingDiagnostics"].get("findings", []):
+        subjects = set(finding.get("subjects") or [])
+        if finding.get("code") != "aisle_zone_not_entered" or not subjects & affected:
+            continue
+        details = finding.get("details") or {}
+        route_id = next((item for item in sorted(subjects) if item in labels), None)
+        aisles.append({"routeId": route_id, "label": labels.get(route_id),
+            "bindingRole": details.get("bindingRole"), "zoneId": details.get("zoneId"),
+            "zoneLabel": details.get("zoneLabel")})
+    if not aisles:
+        return None
+    return {"status": "aisles_stop_short", "aisles": aisles, "message": (
+        "These aisles stop at or run along the edge of a department they are bound to "
+        "without extending into it, so they do not reach its equipment, storage or doors. "
+        "Extend each aisle into the department or bind it to the departments it enters.")}
+
+
+AISLE_OBSTRUCTION_REVIEW_LIMIT = 25
+
+
+def _review_changed_aisle_obstructions(prepared, affected):
+    """Name equipment that a changed aisle runs through, or that is placed in an aisle.
+
+    Spatial findings reach the proposal only as a count, and an obstructed aisle
+    is a warning rather than an error, so a staged edit could otherwise put a
+    machine in a forklift lane while reporting no new errors.
+    """
+    document = prepared["document"]
+    routes = {route.get("routeId"): route for route in document.get("routes", [])}
+    placements = {item.get("placementId"): item for item in document.get("placements", [])}
+    obstructions = []
+    for finding in prepared["spatialDiagnostics"].get("findings", []):
+        subjects = set(finding.get("subjectRefs") or [])
+        if finding.get("code") != "aisle_obstructed" or not subjects & affected:
+            continue
+        route_id = next((item for item in sorted(subjects) if item in routes), None)
+        placement_id = next((item for item in sorted(subjects) if item in placements), None)
+        aisle = ((routes.get(route_id) or {}).get("extensions") or {}).get("facilityAisle") or {}
+        obstructions.append({"routeId": route_id, "aisleLabel": (routes.get(route_id) or {}).get("label"),
+            "aisleKind": aisle.get("aisleKind"), "placementId": placement_id,
+            "assetId": (placements.get(placement_id) or {}).get("assetId")})
+    if not obstructions:
+        return None
+    return {"status": "aisles_obstructed", "count": len(obstructions),
+        "obstructions": obstructions[:AISLE_OBSTRUCTION_REVIEW_LIMIT], "message": (
+        "This equipment sits inside an aisle corridor, so forklifts or people cannot pass. "
+        "Move the equipment out of the aisle, or reroute the aisle around it.")}
+
+
 def prepare(service, principal, site_id, layout_id, base_revision, request, *, undo=False, edit_mode="preview"):
     component_proofs = []
     design_review = None
     workstation_review = None
+    aisle_review = None
+    obstruction_review = None
     if undo:
         prepared, dependencies, operations = prepare_undo(
             service, principal, site_id, layout_id, base_revision, request["receiptId"])
@@ -109,6 +168,8 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
         design_review = review_changed_parking(current["layout"], prepared["document"])
         from .workstation_review import review_changed_workstations
         workstation_review = review_changed_workstations(service, principal, site_id, current["layout"], prepared["document"])
+        aisle_review = _review_changed_aisle_reach(prepared, affected)
+        obstruction_review = _review_changed_aisle_obstructions(prepared, affected)
     dependency_hash = fingerprint({"schemaVersion": 1, "dependencies": dependencies.to_dict(),
         "spatialEngineVersion": prepared["spatialDiagnostics"].get("spatialEngineVersion"),
         "routingEngineVersion": prepared["routingDiagnostics"].get("routingEngineVersion"),
@@ -120,7 +181,11 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
         "metrics": {"operationCount": len(operations), "affectedCount": len(prepared["affectedIds"])},
         "operationReceipt": deepcopy(prepared), "ghostPreview": {"layout": deepcopy(prepared["document"])},
         "transactionBinding": binding.to_dict(), "validation": {
-            "noNewErrors": True, "spatial": service._diagnostic_receipt_summary(prepared["spatialDiagnostics"]),
+            "noNewErrors": True,
+            # Early in the payload: agents may see only the start of a large result.
+            **({"aisleObstructions": obstruction_review} if obstruction_review is not None else {}),
+            **({"aisleReach": aisle_review} if aisle_review is not None else {}),
+            "spatial": service._diagnostic_receipt_summary(prepared["spatialDiagnostics"]),
             "routing": service._diagnostic_receipt_summary(prepared["routingDiagnostics"]),
             **({"workstationReview": workstation_review} if workstation_review is not None else {}),
             **({"functionalDesign": design_review} if design_review is not None else {})}}
@@ -130,6 +195,9 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
     if design_review is not None:
         alternative["directApplyPolicy"].update(eligible=False,
             reason="Review the parking access and circulation findings before applying.")
+    elif obstruction_review is not None:
+        alternative["directApplyPolicy"].update(eligible=False,
+            reason="Review the equipment placed inside aisles before applying.")
     return alternative, binding, prepared, dependencies
 
 

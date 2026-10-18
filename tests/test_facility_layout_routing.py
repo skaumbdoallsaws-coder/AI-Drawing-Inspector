@@ -233,6 +233,77 @@ def test_semantic_aisle_uses_world_endpoints_without_vehicle_authority():
     ]
 
 
+def _department_bound_aisle(start_x: float, end_x: float):
+    route = {
+        "routeId": "rt-spine",
+        "routeKind": "forklift",
+        "sourceEndpoint": {
+            "kind": "world_point",
+            "position": {"x": start_x, "y": 0.0, "z": 5.0},
+        },
+        "targetEndpoint": {
+            "kind": "world_point",
+            "position": {"x": end_x, "y": 0.0, "z": 5.0},
+        },
+        "routingMode": "polyline",
+        "centerline": [
+            {"x": start_x, "y": 0.0, "z": 5.0},
+            {"x": end_x, "y": 0.0, "z": 5.0},
+        ],
+        "corridorWidth": 3.5,
+        "sourceRevisions": {"layoutBaseRevision": "d" * 64},
+        "requirements": [],
+        "evidence": [],
+        "extensions": {
+            "facilityAisle": {
+                "schemaVersion": 1,
+                "aisleKind": "forklift",
+                "direction": "two_way",
+                "color": "#d9a514",
+                "clearanceEvidenceStatus": "unverified",
+                "sourceZoneId": "zn-receiving",
+                "targetZoneId": "zn-shipping",
+                "viaZoneIds": ["zn-machining"],
+                "areaAccounting": "overlay",
+                "widthAuthority": "unknown",
+            }
+        },
+    }
+    route["routeFingerprint"] = persisted_route_fingerprint(route)
+    return route
+
+
+def test_aisle_bound_to_departments_must_extend_into_them():
+    # Sage drew a Receiving-to-Shipping aisle that stopped at both department
+    # edges, and review tools then reported the racks and docks as connected.
+    layout = _layout()
+    layout["zones"] = [
+        {"zoneId": "zn-receiving", "label": "Receiving",
+         "boundary": _rectangle(0.0, 0.0, 10.0, 10.0)},
+        {"zoneId": "zn-machining", "label": "Machining",
+         "boundary": _rectangle(10.0, 0.0, 30.0, 10.0)},
+        {"zoneId": "zn-shipping", "label": "Shipping",
+         "boundary": _rectangle(30.0, 0.0, 40.0, 10.0)},
+    ]
+
+    stopping = validate_facility_aisle_route(layout, _department_bound_aisle(10.0, 30.0))
+    unreached = [
+        item for item in stopping["findings"]
+        if item["code"] == "aisle_zone_not_entered"
+    ]
+    assert stopping["valid"] is True
+    assert {item["severity"] for item in unreached} == {"warning"}
+    assert sorted(
+        (item["details"]["bindingRole"], item["details"]["zoneLabel"])
+        for item in unreached
+    ) == [("source", "Receiving"), ("target", "Shipping")]
+
+    reaching = validate_facility_aisle_route(layout, _department_bound_aisle(2.0, 38.0))
+    assert "aisle_zone_not_entered" not in [
+        item["code"] for item in reaching["findings"]
+    ]
+
+
 def _utility_network():
     return {
         "utilityNetworkId": "un-air",

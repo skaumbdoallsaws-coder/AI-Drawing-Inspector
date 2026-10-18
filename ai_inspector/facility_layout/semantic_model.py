@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover - exercised by deployment preflight.
     nearest_points = None
     make_valid = None
 
+from .routing import AISLE_ZONE_ENTRY_MINIMUM_METERS
 from .spatial import (
     GEOMETRY_EPSILON,
     point_in_polygon,
@@ -766,6 +767,23 @@ def _line_intersects_polygon(
     return False
 
 
+def _line_enters_polygon(
+    line: Sequence[tuple[float, float]],
+    polygon: Sequence[tuple[float, float]],
+) -> bool:
+    """True when part of the line lies inside the polygon, not only on its edge."""
+    if LineString is None or Polygon is None or len(line) < 2:
+        return True  # Without the geometry engine keep the edge-inclusive answer.
+    try:
+        shape = Polygon(polygon)
+        if not shape.is_valid or shape.area <= GEOMETRY_EPSILON:
+            return True
+        interior = shape.buffer(-AISLE_ZONE_ENTRY_MINIMUM_METERS)
+        return LineString(line).intersection(interior).length > GEOMETRY_EPSILON
+    except (ValueError, GEOSException):
+        return True
+
+
 def _line_length(line: Sequence[tuple[float, float]]) -> float:
     return sum(
         math.hypot(
@@ -859,6 +877,12 @@ def _route_semantics(
         for zone_id, polygon in polygons.items()
         if len(line) >= 2 and _line_intersects_polygon(line, polygon)
     )
+    # Touching a zone's edge counts as connected above; record separately
+    # whether the route actually extends into the zone.
+    entered = [
+        zone_id for zone_id in connected
+        if _line_enters_polygon(line, polygons[zone_id])
+    ]
     source_zones = sorted(
         zone_id for zone_id, polygon in polygons.items()
         if line and point_in_polygon(line[0], polygon)
@@ -884,12 +908,19 @@ def _route_semantics(
         "clearanceEvidenceStatus": clearance_status,
         "clearanceAuthoritative": clearance_authoritative,
         "connectedZoneIds": connected,
+        "enteredZoneIds": entered,
+        "edgeContactZoneIds": [
+            zone_id for zone_id in connected if zone_id not in entered
+        ],
         "sourceZoneIds": source_zones,
         "targetZoneIds": target_zones,
         "directionEvidenceStatus": "derived" if line else "unknown",
         "qualification": (
             "Geometric connection does not by itself prove route capacity, "
-            "clearance, accessibility, or operational sequence."
+            "clearance, accessibility, or operational sequence. A route only "
+            "touches or runs along the edge of each zone in edgeContactZoneIds; "
+            "it does not extend into that zone, so it does not reach the "
+            "equipment, storage or doors inside it."
         ),
     }
 

@@ -134,6 +134,17 @@ def test_registry_names_compass_sides_for_exact_revisions():
         assert all(item["side"] in COMPASS_HEADINGS for item in sides.values()), asset_id
 
 
+def test_agent_instructions_do_not_call_reviewed_fronts_unverified():
+    # Reviewed fronts are marked inferred because no manufacturer drawing confirms
+    # them. Without this explanation Sage called every facing orientation unverified.
+    from ai_inspector.codex_runtime.pilot import EDIT_INSTRUCTIONS
+    assert {item["evidenceStatus"] for _, semantics in REGISTERED_ASSET_SEMANTICS.values()
+            for item in semantics["functionalSides"].values()} == {"inferred"}
+    text = " ".join(EDIT_INSTRUCTIONS.split())
+    assert "evidenceStatus inferred only means no manufacturer drawing confirms it" in text
+    assert "Do not call an orientation set with facing unverified." in text
+
+
 def test_edit_schema_takes_orientation_in_place_of_a_quaternion():
     validator = Draft202012Validator(edit_tool_specs()[0]["input_schema"])
     placement = {"assetId": "asset-desk", "assetDefinitionRevision": REVIEWED, "positionMode": "manual",

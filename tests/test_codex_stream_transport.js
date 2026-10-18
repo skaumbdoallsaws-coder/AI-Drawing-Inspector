@@ -233,6 +233,26 @@ test('required-stream failure uses an actionable message without provider detail
     assert(!message.includes('secret'));
 });
 
+test('an open preview or unsaved edit names the step that unblocks the request', async () => {
+    const f = fixture({ fetchStream: (_, stream) => stream([
+        { event: 'response_error', code: 'codex_saved_layout_required',
+            message: 'The pilot inspects saved layouts only.', retryable: false },
+    ]) });
+    let failure;
+    await assert.rejects(f.send(), error => { failure = error; return error.agentServiceFailure; });
+    assert.equal(failure.streamRetryable, false);
+    const start = html.indexOf('function _agentServiceFailureText(');
+    const format = new Function('AGENTS', html.slice(start, streamStart) + '\nreturn _agentServiceFailureText;')({
+        'deviation-analyst': { name: 'Configured agent' },
+    });
+    const message = format('deviation-analyst', failure);
+    assert(message.startsWith('Configured agent can only work from the saved layout.'));
+    assert(message.includes('Approve or dismiss the open preview'));
+    assert(message.includes('No engineering changes were made'));
+    assert(!message.includes('could not generate') && !message.includes('pilot'));
+    f.assertClean();
+});
+
 test('partial answers display budget failures rather than mislabeling them as user Stop', async () => {
     const f = fixture({ fetchStream: (_, stream) => stream([
         { event: 'text_delta', text: 'I will create the court.' },

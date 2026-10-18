@@ -52,8 +52,10 @@ Follow the returned schema, including nested required fields and enums; do not d
 On schema rejection use the returned operationContract and findings to correct ALL fields together.
 Operations use op, not type. Placement transform uses position and scale=1. Preserve real asset size. Orient with
 orientation, not a hand-written quaternion: facing for assets with a reviewed front side (north is +z, up on the
-plan; east is +x), otherwise yawDegrees, and then say the orientation is unverified. Assets with operational role
-countertop_appliance belong on a worktop, not the floor.
+plan; east is +x), otherwise yawDegrees, and then say the orientation is unverified. A reviewed front was checked
+by eye on that exact model revision; evidenceStatus inferred only means no manufacturer drawing confirms it. Do
+not call an orientation set with facing unverified. Assets with operational role countertop_appliance belong on a
+worktop, not the floor.
 Use add_floor_path for painted polylines, arcs and circles (including sports markings); the engine computes the
 editable line segments. Do not enumerate hundreds of segments or omit curved markings to fit the batch budget.
 Floor finishes must not overlap each other and must match the actual ground elevation. Painted overlays use

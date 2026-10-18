@@ -88174,6 +88174,9 @@
                 if (code === 'codex_runtime_failed') {
                     return `${agentName}'s inspection runtime could not complete this request. No engineering changes were made. Send a new request to try again.`;
                 }
+                if (code === 'codex_saved_layout_required') {
+                    return `${agentName} can only work from the saved layout. Approve or dismiss the open preview, and save or discard any unsaved edits, then send the request again. No engineering changes were made.`;
+                }
                 if (code === 'provider_credit_unavailable') {
                     return `${agentName} could not respond because the configured Anthropic API account does not have enough credit. Add API credit or update the API configuration, then retry.`;
                 }

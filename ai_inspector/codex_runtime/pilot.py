@@ -50,7 +50,10 @@ cosmetic floor material is a floor surface; physical floor elevation is ground. 
 Before constructing unfamiliar operations, call inspect_facility_operation_contracts with the operation names.
 Follow the returned schema, including nested required fields and enums; do not discover it by trial and error.
 On schema rejection use the returned operationContract and findings to correct ALL fields together.
-Operations use op, not type. Placement transform uses position, quaternion and scale=1. Preserve real asset size.
+Operations use op, not type. Placement transform uses position and scale=1. Preserve real asset size. Orient with
+orientation, not a hand-written quaternion: facing for assets with a reviewed front side (north is +z, up on the
+plan; east is +x), otherwise yawDegrees, and then say the orientation is unverified. Assets with operational role
+countertop_appliance belong on a worktop, not the floor.
 Use add_floor_path for painted polylines, arcs and circles (including sports markings); the engine computes the
 editable line segments. Do not enumerate hundreds of segments or omit curved markings to fit the batch budget.
 Floor finishes must not overlap each other and must match the actual ground elevation. Painted overlays use

@@ -198,12 +198,28 @@ def operation_batch_schema():
         "This is decorative paint, not an aisle/access corridor. Expanded entity count still controls review thresholds.")
     new_placement = entity_shape("placement", "placementId")
     new_placement["properties"]["componentMaterials"] = {"type": "null"}
-    operation("place_asset", {"placementId": ref("placementId"), "placement": new_placement}, ["placement"],
-              "For component finishes, first save the new placement, inspect its visual slots, then preview set_component_materials.")
+    # orientation replaces the quaternion; the gateway resolves it before validation.
+    new_placement["properties"]["transform"]["required"].remove("quaternion")
+    orientation = {"oneOf": [obj({"facing": {"enum": ["north", "east", "south", "west"]}}),
+                             obj({"yawDegrees": number(-360, 360)})]}
+    orientation_help = (
+        "Prefer orientation over a raw quaternion. Compass: north is +z (up on the plan), east is +x. "
+        "facing turns the asset's reviewed front side (facilitySemantics.functionalSides.front) to that direction; "
+        "assets without one fail, so use yawDegrees, which turns the unrotated model as a compass heading turns "
+        "(90 turns its north side east), and say the orientation is unverified.")
+    operation("place_asset", {"placementId": ref("placementId"), "placement": new_placement,
+              "orientation": orientation}, ["placement"],
+              "Give orientation or placement.transform.quaternion. " + orientation_help +
+              " For component finishes, first save the new placement, inspect its visual slots, then preview set_component_materials.")
+    variants[-1]["allOf"] = [{"if": {"not": {"required": ["orientation"]}}, "then": {"properties": {
+        "placement": {"properties": {"transform": {"required": ["quaternion"]}}}}},
+        "else": {"properties": {"placement": {"properties": {"transform": {"not": {"required": ["quaternion"]}}}}}}}]
     operation("move_placement", {"placementId": ref("placementId"), "position": ref("vector3"),
                                 "movementKind": {"enum": ["user", "automatic"]}}, ["placementId", "position"])
     operation("rotate_placement", {"placementId": ref("placementId"), "quaternion": ref("quaternion"),
-                                  "movementKind": {"enum": ["user", "automatic"]}}, ["placementId", "quaternion"])
+                                  "orientation": orientation, "movementKind": {"enum": ["user", "automatic"]}},
+              ["placementId"], "Give quaternion or orientation. " + orientation_help)
+    variants[-1]["oneOf"] = [{"required": ["quaternion"]}, {"required": ["orientation"]}]
     operation("duplicate_placement", {"sourcePlacementId": ref("placementId"), "newPlacementId": ref("placementId"),
         "positionMode": POSITION_MODE, "transform": placement["transform"], "position": ref("vector3"),
         "quaternion": ref("quaternion"), "snapRelationship": placement["snapRelationship"]}, ["sourcePlacementId"])

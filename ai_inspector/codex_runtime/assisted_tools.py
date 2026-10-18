@@ -1,4 +1,5 @@
 """Proposal-only tools. Approval and commit are deliberately not MCP capabilities."""
+from ai_inspector.facility_layout.asset_orientation import resolve_orientation_intents
 from ai_inspector.facility_layout.operation_proposals import create
 from .edit_schemas import obj, operation_batch_schema, text
 from .facility_tools import FacilityReadGateway, tool_specs
@@ -73,8 +74,14 @@ class FacilityEditGateway(FacilityReadGateway):
             return prepare_lettering(self.runtime, self.principal, self.reference, arguments)
         if name not in {"preview_facility_operations", "preview_facility_undo"}:
             return super()._read_data(name, arguments)
+        operations = arguments.get("operations")
+        if any(isinstance(item, dict) and "orientation" in item for item in operations or []):
+            from .facility_tools import read_bound_layout
+            operations = resolve_orientation_intents(operations,
+                catalog=self.runtime.asset_catalog_provider(self.principal, self.reference["siteId"]),
+                layout=read_bound_layout(self.runtime, self.principal, self.reference)["layout"])
         result = create(self.runtime.service, self.principal, self.reference["siteId"], self.reference["layoutId"],
-            self.reference["revision"], operations=arguments.get("operations"), undo_receipt_id=arguments.get("receiptId"),
+            self.reference["revision"], operations=operations, undo_receipt_id=arguments.get("receiptId"),
             edit_mode=self.edit_mode)
         self.proposal = {**self.reference, "proposalId": result["proposalId"]}
         alternative = result["alternative"]

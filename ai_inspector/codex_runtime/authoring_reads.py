@@ -78,8 +78,12 @@ def read_authoring(runtime, principal, reference, name, arguments):
         definition = runtime.service._resolve_asset_definition(principal, reference["siteId"], asset_id, revision)
         fields = ("assetId", "displayName", "category", "description", "tags", "geometry", "coordinateFrame",
                   "connectors", "clearances", "capabilities", "facilitySemantics", "utilities", "mounting")
-        return dict(base, assetId=asset_id, assetDefinitionRevision=revision,
-                    definition={k: deepcopy(definition[k]) for k in fields if k in definition})
+        selected = {k: deepcopy(definition[k]) for k in fields if k in definition}
+        # Reviewed sides live on the catalog record, beside the revisioned definition.
+        record = next((a for a in candidates if a.get("assetDefinitionRevision") == revision), None)
+        if "facilitySemantics" not in selected and record is not None and record.get("facilitySemantics"):
+            selected["facilitySemantics"] = deepcopy(record["facilitySemantics"])
+        return dict(base, assetId=asset_id, assetDefinitionRevision=revision, definition=selected)
     ext, view = layout.get("extensions", {}), arguments["view"]
     if view in {"overview", "plan"}:
         from ai_inspector.facility_layout.plan_settings import plan_settings_from_layout, plan_world_bounds

@@ -23,6 +23,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from .api import create_facility_layout_router
+from .asset_orientation import attach_registered_semantics
 from .authority_repository import (
     FacilityShellRepository,
     PolicySetRepository,
@@ -881,7 +882,7 @@ class LocalFacilityLayoutHost:
             else LOCAL_ASSET_CATALOG
         )
         self._catalog = {
-            item["assetId"]: deepcopy(item)
+            item["assetId"]: attach_registered_semantics(item)
             for item in catalog_source
         }
         # Private visual definitions are new immutable revisions, not

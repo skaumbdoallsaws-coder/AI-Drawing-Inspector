@@ -258,13 +258,14 @@ async def inspect_facility(request, host, http_request, normalized, *, text_sink
                     if progress:
                         answer = await progress.finish(answer)
                     gateway.check()
-                    if not any(receipt["ok"] for receipt in gateway.receipts):
-                        raise PilotError("codex_evidence_required", "The runtime returned no successful inspection evidence. No engineering changes were made.")
         result = {"response": answer, "tool_calls": [], "tool_call_count": 0,
             "facility_action_mode": "READ_ONLY",
             "facility_runtime_policy": {"mode": "READ_ONLY", "allowedToolNames": []},
             "tool_source": "codex_readonly_pilot", "codex_inspection": {
                 "readOnly": True, "document": reference, "verifiedToolCalls": gateway.receipts,
+                # A reply with no successful check (a greeting, say) is kept, and the chat
+                # pane marks it "No layout checks" so it never passes for a checked answer.
+                "checkedLayout": any(receipt["ok"] for receipt in gateway.receipts),
                 "runtimeTimeline": getattr(runtime, "timeline", []),
                 "engineeringChanges": 0, "completion": "inspection_response",
                 "authMode": settings.auth_mode, "apiFallback": False}}

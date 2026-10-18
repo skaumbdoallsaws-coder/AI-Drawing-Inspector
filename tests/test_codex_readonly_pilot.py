@@ -685,10 +685,13 @@ def test_pilot_lifecycle_journals_results_without_replaying(host, tmp_path, monk
         return await inspect_facility(request, host, None, context, settings=settings, transport_factory=Transport,
             memory_context="server memory context")
 
-    if outcome == "success":
+    if outcome in ("success", "no_evidence"):
         result = asyncio.run(invoke())
         assert result["facility_action_mode"] == "READ_ONLY" and result["tool_calls"] == []
         assert result["codex_inspection"]["engineeringChanges"] == 0
+        # A reply without a successful check (a greeting) is kept but marked unchecked.
+        assert result["codex_inspection"]["checkedLayout"] is (outcome == "success")
+        assert result["response"] == "Inspection complete."
         assert asyncio.run(invoke()) == result
     elif outcome == "cancel":
         with pytest.raises(asyncio.CancelledError):
@@ -696,11 +699,11 @@ def test_pilot_lifecycle_journals_results_without_replaying(host, tmp_path, monk
     else:
         with pytest.raises(PilotError) as caught:
             asyncio.run(invoke())
-        assert caught.value.code == ("codex_evidence_required" if outcome == "no_evidence" else "codex_time_budget_exhausted")
-    if outcome != "success":
+        assert caught.value.code == "codex_time_budget_exhausted"
+    if outcome in ("cancel", "timeout"):
         with pytest.raises(PilotError, match="not be silently replayed"):
             asyncio.run(invoke())
     assert state["starts"] == 1 and state["closed"] and state["gateway"].closed
     with Journal(settings.root).db() as db:
         assert db.execute("SELECT status FROM turns").fetchone()[0] == {
-            "success": "completed", "cancel": "interrupted", "timeout": "failed", "no_evidence": "failed"}[outcome]
+            "success": "completed", "cancel": "interrupted", "timeout": "failed", "no_evidence": "completed"}[outcome]

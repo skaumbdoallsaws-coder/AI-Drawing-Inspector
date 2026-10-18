@@ -332,6 +332,8 @@ test('the collapsed record counts steps, time and failures in plain words', () =
     assert.equal(helpers._agentStepSummaryText({ steps: tools(10, 1), seconds: 59 }), '10 steps in 59 s · 1 failed');
     assert.equal(helpers._agentStepSummaryText({ steps: [...tools(1), { kind: 'remark', label: 'A remark' }],
         seconds: 4 }), '1 step in 4 s');
+    assert.equal(helpers._agentStepSummaryText({ steps: [], seconds: 11 }), 'No layout checks · 11 s');
+    assert.equal(helpers._agentStepSummaryText({ steps: tools(2, 2), seconds: 12 }), '2 steps in 12 s · 2 failed');
     assert.equal(helpers._agentDurationText(192), '3 min 12 s');
     assert.equal(helpers._agentDurationText(120), '2 min');
     assert.equal(helpers._agentElapsedClock(44900), '0:44');

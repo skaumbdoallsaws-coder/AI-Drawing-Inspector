@@ -17462,6 +17462,9 @@
         }
         .agent-working-row {
             display: flex;
+            /* The message list is a fixed-height flex column; without this a long
+               chat squeezes the row to its min-height and its steps overflow. */
+            flex-shrink: 0;
             gap: 8px;
             align-items: flex-start;
             align-self: flex-start;
@@ -17576,8 +17579,39 @@
             padding: 0;
             list-style: none;
         }
-        .agent-working-steps:empty {
+        .agent-working-steps:empty,
+        .agent-working-steps[hidden] {
             display: none;
+        }
+        .agent-working-count {
+            margin-left: 4px;
+            padding: 0;
+            border: 0;
+            background: none;
+            color: var(--text-secondary);
+            font: inherit;
+            font-weight: 400;
+            cursor: pointer;
+        }
+        .agent-working-count::after {
+            content: ' \25B8';
+        }
+        .agent-working-count[aria-expanded="true"]::after {
+            content: ' \25BE';
+        }
+        .agent-working-count:hover,
+        .agent-working-count:focus-visible {
+            color: var(--text-primary);
+        }
+        .agent-working-failed {
+            color: var(--missing, #ef5350);
+        }
+        .agent-working-remark {
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-style: italic;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
         }
         .agent-step {
             position: relative;
@@ -79018,9 +79052,12 @@
                     .map(_agentStepFromEvent)
                     .filter(step => step && step.kind === 'tool');
                 const failed = tools.filter(step => step.state === 'failed').length;
-                let text = tools.length + (tools.length === 1 ? ' step' : ' steps');
-                if (Number(record && record.seconds) > 0) text += ' in ' + _agentDurationText(record.seconds);
-                return failed ? text + ' \u00b7 ' + failed + ' failed' : text;
+                const seconds = Number(record && record.seconds) > 0 ? _agentDurationText(record.seconds) : '';
+                const parts = tools.length
+                    ? [tools.length + (tools.length === 1 ? ' step' : ' steps') + (seconds ? ' in ' + seconds : '')]
+                    : ['No layout checks', seconds].filter(Boolean);
+                if (failed) parts.push(failed + ' failed');
+                return parts.join(' \u00b7 ');
             }
 
             function _syncAgentStepList(list, steps) {
@@ -79042,7 +79079,14 @@
                 const steps = (Array.isArray(record && record.steps) ? record.steps : [])
                     .map(_agentStepFromEvent)
                     .filter(Boolean);
-                if (!steps.some(step => step.kind === 'tool')) return null;
+                if (!steps.some(step => step.kind === 'tool')) {
+                    // A reply backed by no layout check says so instead of looking checked.
+                    if (!(record && record.unchecked)) return null;
+                    const line = document.createElement('div');
+                    line.className = 'agent-steps-record is-unchecked';
+                    line.textContent = _agentStepSummaryText(record);
+                    return line;
+                }
                 const details = document.createElement('details');
                 details.className = 'agent-steps-record';
                 const summary = document.createElement('summary');
@@ -79063,10 +79107,12 @@
                 let uiState = RESPONSE_UI_STATES.WORKING;
                 let currentOperation = _agentWorkingOperationLabel(initialOperation || 'Preparing request');
                 let completedOperations = [];
-                // Step mode lists real steps under a running clock instead of phase labels.
+                // Step mode shows the current real step on one line under a running clock;
+                // finished steps collapse into a count that opens the full list.
                 let stepMode = false;
                 let steps = [];
                 let stepPhase = '';
+                let stepsExpanded = false;
                 let clockTimer = null;
                 let row = null;
                 let removalTimer = null;
@@ -79098,8 +79144,36 @@
                         operationEl.textContent = !stepMode ? currentOperation
                             : running ? running.label : stepPhase;
                     }
+                    const finished = steps.filter(step => step.state !== 'running');
                     const stepsEl = currentRow.querySelector('.agent-working-steps');
-                    if (stepsEl) _syncAgentStepList(stepsEl, steps.filter(step => step.state !== 'running'));
+                    if (stepsEl) {
+                        stepsEl.hidden = !stepsExpanded;
+                        _syncAgentStepList(stepsEl, stepsExpanded ? finished : []);
+                    }
+                    const countEl = currentRow.querySelector('.agent-working-count');
+                    if (countEl) {
+                        const tools = finished.filter(step => step.kind === 'tool');
+                        const failed = tools.filter(step => step.state === 'failed').length;
+                        const text = '\u00b7 ' + tools.length + (tools.length === 1 ? ' step' : ' steps')
+                            + (failed ? ', ' : '');
+                        countEl.hidden = !stepMode || !tools.length;
+                        countEl.setAttribute('aria-expanded', stepsExpanded ? 'true' : 'false');
+                        if (countEl.dataset.shown !== text + failed) {
+                            countEl.dataset.shown = text + failed;
+                            const failedEl = document.createElement('span');
+                            failedEl.className = 'agent-working-failed';
+                            failedEl.textContent = failed ? failed + ' failed' : '';
+                            countEl.replaceChildren(document.createTextNode(text), failedEl);
+                        }
+                    }
+                    // Sage's latest remark stays readable until the answer; it would
+                    // otherwise vanish as soon as the step it introduces starts.
+                    const remarkEl = currentRow.querySelector('.agent-working-remark');
+                    if (remarkEl) {
+                        const remark = finished.filter(step => step.kind === 'remark').pop();
+                        remarkEl.hidden = !remark || stepsExpanded;
+                        remarkEl.textContent = remark ? remark.label : '';
+                    }
                     renderClock(currentRow);
                     const historyEl = currentRow.querySelector('.agent-working-history');
                     if (historyEl) {
@@ -79175,8 +79249,28 @@
                     clock.className = 'agent-working-clock';
                     clock.setAttribute('aria-hidden', 'true');
                     name.appendChild(clock);
+                    // The current step line is announced; the count and the opened list
+                    // would only repeat it to a screen reader.
+                    const count = document.createElement('button');
+                    count.type = 'button';
+                    count.className = 'agent-working-count';
+                    count.hidden = true;
+                    count.setAttribute('aria-live', 'off');
+                    count.addEventListener('click', () => {
+                        stepsExpanded = !stepsExpanded;
+                        render();
+                        // The row sits at the bottom of the chat, so an opened list grows
+                        // out of view; bring its newest steps and the current line up.
+                        if (stepsExpanded) agentMessages.scrollTop = agentMessages.scrollHeight;
+                    });
+                    name.appendChild(count);
                     const stepList = document.createElement('ol');
                     stepList.className = 'agent-working-steps';
+                    stepList.hidden = true;
+                    stepList.setAttribute('aria-live', 'off');
+                    const remark = document.createElement('div');
+                    remark.className = 'agent-working-remark';
+                    remark.hidden = true;
 
                     const activity = document.createElement('div');
                     activity.className = 'agent-working-activity';
@@ -79197,6 +79291,7 @@
                     history.className = 'agent-working-history';
                     content.appendChild(name);
                     content.appendChild(stepList);
+                    content.appendChild(remark);
                     content.appendChild(activity);
                     content.appendChild(history);
                     nextRow.appendChild(avatar);
@@ -79254,7 +79349,7 @@
                         attach();
                         render();
                     },
-                    stepRecord: () => (stepMode && steps.some(step => step.kind === 'tool') ? {
+                    stepRecord: () => (stepMode ? {
                         steps: steps.map(step => ({ kind: step.kind, state: step.state, label: step.label })),
                         seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
                     } : null),
@@ -89376,7 +89471,8 @@
                             _agentServiceFailureText(originAgent, err),
                             'assistant',
                             originAgent,
-                            failedSteps ? { meta: { agentSteps: failedSteps } } : undefined
+                            failedSteps && failedSteps.steps.some(step => step.kind === 'tool')
+                                ? { meta: { agentSteps: failedSteps } } : undefined
                         );
                         if (err.streamRetryable !== false) _showAgentStreamRetry(
                             originAgent,
@@ -89469,10 +89565,15 @@
                         toolCalls,
                     }
                 );
-                // A Facility turn's step list moves into the answer as a collapsed record.
+                // A Facility turn's step list moves into the answer as a collapsed record,
+                // and a reply with no successful layout check is marked as such.
                 if (workingAssistant && workingAssistant.stepMode) {
                     const agentSteps = workingAssistant.stepRecord();
-                    if (agentSteps) assistantPresentation.meta.agentSteps = agentSteps;
+                    const inspection = terminalResponseData && terminalResponseData.codex_inspection;
+                    if (inspection && inspection.checkedLayout === false) agentSteps.unchecked = true;
+                    if (agentSteps.unchecked || agentSteps.steps.some(step => step.kind === 'tool')) {
+                        assistantPresentation.meta.agentSteps = agentSteps;
+                    }
                     workingAssistant.complete();
                 }
 

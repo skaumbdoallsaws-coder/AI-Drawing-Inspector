@@ -178,7 +178,7 @@ def saved_layout_reference(normalized):
 
 
 async def inspect_facility(request, host, http_request, normalized, *, text_sink=None, status_sink=None,
-                           settings=None, transport_factory=AppServer, memory_context=""):
+                           step_sink=None, settings=None, transport_factory=AppServer, memory_context=""):
     settings = settings or PilotSettings.from_environment()
     if not live_allowed():
         raise PilotError("codex_paid_testing_disabled", "Codex live inference is disabled pending approval. The existing manual tools remain available.")
@@ -206,6 +206,12 @@ async def inspect_facility(request, host, http_request, normalized, *, text_sink
         gateway.edit_mode = edit_mode
     if subscription:
         gateway.credential_check = subscription.check
+    progress = None
+    if step_sink:
+        from .progress import TurnProgress
+        progress = TurnProgress(step_sink, text_sink=text_sink, status_sink=status_sink,
+                                names=gateway.layout_names, edit_mode=edit_mode if editing else None)
+        gateway.progress = progress
     binding = digest({"tenant": principal.tenant_id, "principal": principal.principal_id,
         "session": session_id, "conversation": request.conversation_id, "document": reference,
         "roles": sorted(principal.roles), "sites": sorted(principal.allowed_site_ids),
@@ -247,7 +253,10 @@ async def inspect_facility(request, host, http_request, normalized, *, text_sink
                         instructions=(EDIT_INSTRUCTIONS if editing else INSTRUCTIONS) + ENGINEERING_INSTRUCTIONS + RESEARCH_INSTRUCTIONS
                             + f"\nThis turn allows {settings.max_calls} tool calls and {settings.timeout_seconds} seconds.\n",
                         on_thread=lambda value: journal.bind_thread(binding, value),
-                         text_sink=text_sink, status_sink=status_sink, check=gateway.check)
+                         text_sink=progress.text if progress else text_sink,
+                         status_sink=progress.status if progress else status_sink, check=gateway.check)
+                    if progress:
+                        answer = await progress.finish(answer)
                     gateway.check()
                     if not any(receipt["ok"] for receipt in gateway.receipts):
                         raise PilotError("codex_evidence_required", "The runtime returned no successful inspection evidence. No engineering changes were made.")

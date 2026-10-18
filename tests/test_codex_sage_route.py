@@ -153,3 +153,24 @@ def test_sage_stream_transports_pilot_progress_and_response(monkeypatch):
     assert [e["phase"] for e in events if e.get("phase", "").startswith("codex_")] == ["codex_connecting", "codex_inspecting", "codex_researching"]
     assert events[-1]["event"] == "response_completed"
     assert events[-1]["final"]["content_blocks"][0]["sources"][0]["url"] == "https://www.access-board.gov/ada/"
+
+
+def test_sage_stream_carries_plain_language_steps_before_the_answer(monkeypatch):
+    import json
+    monkeypatch.setenv(FLAG, "1")
+    monkeypatch.setenv("INSPECTORPRO_CHAT_STREAMING", "1")
+    monkeypatch.setenv("INSPECTORPRO_STREAMING_AGENTS", "sage")
+    monkeypatch.setenv("INSPECTORPRO_MEMORY_V1_MODE", "off")
+    async def inspect(*_, **kwargs):
+        await kwargs["step_sink"]({"id": 1, "kind": "tool", "state": "running", "label": "Reading the layout overview"})
+        await kwargs["step_sink"]({"id": 1, "kind": "tool", "state": "done", "label": "Read the layout overview"})
+        await kwargs["text_sink"]("Two zones.")
+        return {"response": "Two zones.", "tool_calls": [], "tool_source": "codex_readonly_pilot"}
+    monkeypatch.setattr(pilot, "inspect_facility", inspect)
+    response = TestClient(server.app).post("/api/agent/chat/v2/stream", json=payload().model_dump())
+    assert response.status_code == 200, response.text
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    kinds = [e["event"] for e in events]
+    assert [(e["step"]["state"], e["step"]["label"]) for e in events if e["event"] == "agent_step"] == [
+        ("running", "Reading the layout overview"), ("done", "Read the layout overview")]
+    assert kinds.index("agent_step") < kinds.index("text_delta") < kinds.index("response_completed")

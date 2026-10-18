@@ -66,6 +66,7 @@ class FacilityReadGateway:
         self.turn_id, self.max_calls = turn_id, max_calls
         self.deadline = time.monotonic() + timeout
         self.status_sink = status_sink
+        self.progress = None  # TurnProgress when the chat pane shows steps
         self.closed, self.calls = False, 0
         self.credential_check = None
         self.receipts = []
@@ -86,6 +87,7 @@ class FacilityReadGateway:
     async def call(self, name, arguments):
         async with self.lock:
             self.before_call(name)
+            step = await self.progress.tool_started(name, arguments) if self.progress else None
             started = time.monotonic()
             self.calls += 1
             try:
@@ -142,10 +144,19 @@ class FacilityReadGateway:
                 "argumentHash": hashlib.sha256(json.dumps(arguments, sort_keys=True).encode()).hexdigest(),
                 "durationMs": round((time.monotonic() - started) * 1000),
                 "errorCode": result.get("error", {}).get("code")})
+            if step:
+                await self.progress.tool_finished(step, result)
             return result
 
     def before_call(self, name):
         pass
+
+    def layout_names(self):
+        """Zone, item and catalog names for progress wording, at the bound revision."""
+        from .progress import LayoutNames
+        layout = read_bound_layout(self.runtime, self.principal, self.reference)["layout"]
+        provider = getattr(self.runtime, "asset_catalog_provider", None)
+        return LayoutNames(layout, provider(self.principal, self.reference["siteId"]) if provider else [])
 
     def _read_data(self, name, arguments):
         from .engineering_tools import ENGINEERING_READ_NAMES, read_engineering_facts

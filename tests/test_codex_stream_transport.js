@@ -38,7 +38,12 @@ function fixture(options = {}) {
         listeners.add(fn); return () => listeners.delete(fn);
     } } };
     let released = 0;
-    const working = { setOperation() {}, beginStreaming() {} };
+    const calls = [], bubbles = [];
+    const working = {
+        setOperation() {}, beginStreaming() { calls.push(['beginStreaming']); },
+        enableSteps() { calls.push(['enableSteps']); }, setPhase(label) { calls.push(['phase', label]); },
+        step(step) { calls.push(['step', step.kind, step.state, step.label]); },
+    };
     const payload = { message: nativePrompt, inspection_context: { attachments: {
         session: { active_mode: options.mode || 'facility_layout' },
         facility_layout: { siteId: 'site', layoutId: 'gym', revision: 'r1' },
@@ -52,7 +57,13 @@ function fixture(options = {}) {
         _trainFacilityLayoutAuthoringApp: app, _trainIsFacilityLayoutMode: () => true,
         _chatMemoryRuntime: memoryRuntime, _parseAgentStreamEventLine: runtime.parseEventLine,
         ensureAgentWorkingState: () => working, setWaiting() {}, removeTypingIndicator() {},
-        createStreamingAssistantMessage: () => ({ message: { meta: {} }, appendInitialText() {}, appendText() {} }),
+        createStreamingAssistantMessage: () => {
+            const bubble = { message: { meta: {} }, text: '', discarded: false,
+                appendInitialText(text) { bubble.text += text; }, appendText(text) { bubble.text += text; },
+                discard() { bubble.discarded = true; } };
+            bubbles.push(bubble);
+            return bubble;
+        },
         window: { InspectorProChatStreamRuntime: { ...runtime,
             guardSavedFacilityContext: args => runtime.guardSavedFacilityContext({ ...args,
                 setInterval: fn => { timers.add(fn); return fn; }, clearInterval: fn => timers.delete(fn),
@@ -79,7 +90,7 @@ function fixture(options = {}) {
     vm.runInContext(html.slice(streamStart, streamEnd) + '\n' +
         'async function send(payload, originAgent, originSession, turnId, workingAssistant) {' +
         'let streamingAssistant, streamTrace;\n' + html.slice(sendStart, sendEnd) + '\nreturn data;\n}', context);
-    return { state, session, context, requests, payload, working,
+    return { state, session, context, requests, payload, working, calls, bubbles,
         send: () => context.send(payload, options.agent || 'deviation-analyst', session, 1, working),
         notify: () => { for (const fn of listeners) fn(); },
         poll: () => { for (const fn of timers) fn(); },
@@ -251,6 +262,82 @@ test('an open preview or unsaved edit names the step that unblocks the request',
     assert(message.includes('No engineering changes were made'));
     assert(!message.includes('could not generate') && !message.includes('pilot'));
     f.assertClean();
+});
+
+const step = (id, state, label, kind = 'tool') => ({ event: 'agent_step', step: { id, kind, state, label } });
+
+test('Facility turns list real steps and keep them visible while the answer streams', async () => {
+    const f = fixture({ fetchStream: (_, stream) => stream([
+        { event: 'status', phase: 'routing' },
+        { event: 'status', phase: 'codex_connecting' },
+        step(1, 'running', 'Reading the layout overview'),
+        { event: 'status', phase: 'codex_inspecting' },
+        step(1, 'done', 'Read the layout overview'),
+        { event: 'text_delta', text: 'Two zones.' },
+        { event: 'status', phase: 'finalizing' },
+        { event: 'response_completed', final: { response: 'Two zones.', tool_calls: [] } },
+    ]) });
+    assert.equal((await f.send()).response, 'Two zones.');
+    assert.deepEqual(f.calls, [
+        ['enableSteps'],
+        ['step', 'tool', 'running', 'Reading the layout overview'],
+        ['step', 'tool', 'done', 'Read the layout overview'],
+        ['phase', 'Writing the answer'],
+        ['phase', 'Finishing up'],
+        ['phase', 'Finishing up'],
+    ]);
+    assert.equal(f.bubbles.length, 1);
+    assert.equal(f.bubbles[0].text, 'Two zones.');
+    f.assertClean();
+});
+
+test('a remark between steps leaves the answer bubble and joins the step list', async () => {
+    const f = fixture({ fetchStream: (_, stream) => stream([
+        { event: 'text_delta', text: 'The first preview left out the racks.' },
+        step(1, 'done', 'The first preview left out the racks.', 'remark'),
+        step(2, 'running', 'Staging 12 changes for your review'),
+        step(2, 'done', 'Staged 12 changes for your review'),
+        { event: 'text_delta', text: 'I staged the revised batch.' },
+        { event: 'response_completed', final: { response: 'I staged the revised batch.', tool_calls: [] } },
+    ]) });
+    assert.equal((await f.send()).response, 'I staged the revised batch.');
+    assert.deepEqual(f.bubbles.map(item => [item.text, item.discarded]), [
+        ['The first preview left out the racks.', true], ['I staged the revised batch.', false]]);
+    assert.deepEqual(f.calls.filter(call => call[0] === 'step').map(call => call[1]), ['remark', 'tool', 'tool']);
+    assert(!f.calls.some(call => call[0] === 'beginStreaming'));
+    f.assertClean();
+});
+
+test('other streams keep their phase labels and ignore step events', async () => {
+    const f = fixture({ status: { facilityRuntime: 'legacy', enabled: true, agents: ['sage'] },
+        fetchStream: (_, stream) => stream([
+            step(1, 'running', 'Reading the layout overview'),
+            { event: 'text_delta', text: 'Facts' },
+            { event: 'response_completed', final: { response: 'Facts', tool_calls: [] } },
+        ]) });
+    f.payload.message = 'Inspect this layout';
+    assert.equal((await f.send()).response, 'Facts');
+    assert.deepEqual(f.calls, [['beginStreaming']]);
+    f.assertClean();
+});
+
+test('the collapsed record counts steps, time and failures in plain words', () => {
+    const start = html.indexOf('function _agentStepFromEvent(');
+    const end = html.indexOf('function _syncAgentStepList(', start);
+    assert(start >= 0 && end > start);
+    const helpers = new Function(html.slice(start, end)
+        + '\nreturn { _agentStepFromEvent, _agentElapsedClock, _agentDurationText, _agentStepSummaryText };')();
+    const tools = (count, failed = 0) => Array.from({ length: count }, (_, index) => (
+        { kind: 'tool', state: index < failed ? 'failed' : 'done', label: 'Step ' + index }));
+    assert.equal(helpers._agentStepSummaryText({ steps: tools(10, 1), seconds: 59 }), '10 steps in 59 s · 1 failed');
+    assert.equal(helpers._agentStepSummaryText({ steps: [...tools(1), { kind: 'remark', label: 'A remark' }],
+        seconds: 4 }), '1 step in 4 s');
+    assert.equal(helpers._agentDurationText(192), '3 min 12 s');
+    assert.equal(helpers._agentDurationText(120), '2 min');
+    assert.equal(helpers._agentElapsedClock(44900), '0:44');
+    assert.equal(helpers._agentElapsedClock(192000), '3:12');
+    assert.equal(helpers._agentStepFromEvent({ kind: 'tool', state: 'weird', label: '  Read\n it  ' }).state, 'done');
+    assert.equal(helpers._agentStepFromEvent({ label: '   ' }), null);
 });
 
 test('partial answers display budget failures rather than mislabeling them as user Stop', async () => {

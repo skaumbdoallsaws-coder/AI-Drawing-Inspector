@@ -17560,6 +17560,72 @@
             background: var(--accent, #4fc3f7);
             opacity: 0.72;
         }
+        .agent-working-row.is-steps .agent-working-content {
+            gap: 5px;
+        }
+        .agent-working-clock {
+            margin-left: 4px;
+            color: var(--text-secondary);
+            font-weight: 400;
+            font-variant-numeric: tabular-nums;
+        }
+        .agent-working-steps {
+            display: grid;
+            gap: 3px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+        .agent-working-steps:empty {
+            display: none;
+        }
+        .agent-step {
+            position: relative;
+            padding-left: 16px;
+            color: var(--text-secondary);
+            font-size: 11px;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+        }
+        .agent-step::before {
+            position: absolute;
+            top: 0;
+            left: 1px;
+            width: 11px;
+            text-align: center;
+            font-weight: 700;
+        }
+        .agent-step.is-done::before {
+            content: '\2713';
+            color: var(--accent, #4fc3f7);
+        }
+        .agent-step.is-failed {
+            color: var(--text-primary);
+        }
+        .agent-step.is-failed::before {
+            content: '!';
+            color: var(--missing, #ef5350);
+        }
+        .agent-step.is-remark {
+            font-style: italic;
+        }
+        .agent-step.is-remark::before {
+            content: '\201C';
+            font-style: normal;
+        }
+        .agent-steps-record {
+            margin: 2px 0 6px;
+            color: var(--text-secondary);
+            font-size: 11px;
+        }
+        .agent-steps-record > summary {
+            width: fit-content;
+            cursor: pointer;
+            user-select: none;
+        }
+        .agent-steps-record[open] > summary {
+            margin-bottom: 5px;
+        }
         .agent-stream-pending.agent-stream-enter .agent-msg {
             animation: agentStreamBubbleIn 160ms ease-out both;
         }
@@ -76380,6 +76446,10 @@
                 nameEl.textContent = msg.role === 'user' ? 'Shadrack' : AGENTS[agentKey].name;
                 content.appendChild(nameEl);
 
+                const stepRecord = msg.role === 'assistant' && msg.meta && msg.meta.agentSteps
+                    ? _renderAgentStepRecord(msg.meta.agentSteps) : null;
+                if (stepRecord) content.appendChild(stepRecord);
+
                 for (const block of msg.blocks) {
                     content.appendChild(renderBlockToDOM(block, msg.role));
                 }
@@ -78917,13 +78987,87 @@
                 }[key] || String(operation || 'Preparing the response');
             }
 
+            // Facility turns report each real tool step (agent_step stream events)
+            // in plain words; these render them while working and in the answer.
+            function _agentStepFromEvent(raw) {
+                if (!raw || typeof raw !== 'object') return null;
+                const label = String(raw.label || '').replace(/\s+/g, ' ').trim().slice(0, 400);
+                if (!label) return null;
+                return {
+                    id: Number.isFinite(Number(raw.id)) ? Number(raw.id) : null,
+                    kind: raw.kind === 'remark' ? 'remark' : 'tool',
+                    state: ['running', 'done', 'failed'].includes(raw.state) ? raw.state : 'done',
+                    label,
+                };
+            }
+
+            function _agentElapsedClock(milliseconds) {
+                const seconds = Math.max(0, Math.floor(Number(milliseconds) / 1000) || 0);
+                return Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+            }
+
+            function _agentDurationText(seconds) {
+                const total = Math.max(1, Math.round(Number(seconds) || 0));
+                if (total < 60) return total + ' s';
+                const rest = total % 60;
+                return Math.floor(total / 60) + ' min' + (rest ? ' ' + rest + ' s' : '');
+            }
+
+            function _agentStepSummaryText(record) {
+                const tools = (Array.isArray(record && record.steps) ? record.steps : [])
+                    .map(_agentStepFromEvent)
+                    .filter(step => step && step.kind === 'tool');
+                const failed = tools.filter(step => step.state === 'failed').length;
+                let text = tools.length + (tools.length === 1 ? ' step' : ' steps');
+                if (Number(record && record.seconds) > 0) text += ' in ' + _agentDurationText(record.seconds);
+                return failed ? text + ' \u00b7 ' + failed + ' failed' : text;
+            }
+
+            function _syncAgentStepList(list, steps) {
+                // Steps only append in practice, so a screen reader announces each once.
+                steps.forEach((step, index) => {
+                    let item = list.children[index];
+                    if (!item) {
+                        item = document.createElement('li');
+                        list.appendChild(item);
+                    }
+                    const className = 'agent-step is-' + (step.kind === 'remark' ? 'remark' : step.state);
+                    if (item.className !== className) item.className = className;
+                    if (item.textContent !== step.label) item.textContent = step.label;
+                });
+                while (list.children.length > steps.length) list.lastElementChild.remove();
+            }
+
+            function _renderAgentStepRecord(record) {
+                const steps = (Array.isArray(record && record.steps) ? record.steps : [])
+                    .map(_agentStepFromEvent)
+                    .filter(Boolean);
+                if (!steps.some(step => step.kind === 'tool')) return null;
+                const details = document.createElement('details');
+                details.className = 'agent-steps-record';
+                const summary = document.createElement('summary');
+                summary.textContent = _agentStepSummaryText(record);
+                const list = document.createElement('ol');
+                list.className = 'agent-working-steps';
+                _syncAgentStepList(list, steps);
+                details.appendChild(summary);
+                details.appendChild(list);
+                return details;
+            }
+
             function createAgentWorkingState(targetAgentKey, initialOperation) {
                 const agentKey = targetAgentKey || currentAgent || 'deviation-analyst';
                 const session = getAgentSession(agentKey);
                 const workingId = 'agent_working_' + (++_agentWorkingIdSeq);
+                const startedAt = Date.now();
                 let uiState = RESPONSE_UI_STATES.WORKING;
                 let currentOperation = _agentWorkingOperationLabel(initialOperation || 'Preparing request');
                 let completedOperations = [];
+                // Step mode lists real steps under a running clock instead of phase labels.
+                let stepMode = false;
+                let steps = [];
+                let stepPhase = '';
+                let clockTimer = null;
                 let row = null;
                 let removalTimer = null;
                 let api = null;
@@ -78935,11 +79079,28 @@
                     return row;
                 };
 
+                const renderClock = (target) => {
+                    const currentRow = target || visibleRow();
+                    const clockEl = currentRow && currentRow.querySelector('.agent-working-clock');
+                    if (clockEl) {
+                        clockEl.textContent = stepMode
+                            ? '\u00b7 ' + _agentElapsedClock(Date.now() - startedAt) : '';
+                    }
+                };
+
                 const render = () => {
                     const currentRow = visibleRow();
                     if (!currentRow) return;
+                    currentRow.classList.toggle('is-steps', stepMode);
+                    const running = stepMode ? steps.filter(step => step.state === 'running').pop() : null;
                     const operationEl = currentRow.querySelector('.agent-working-operation');
-                    if (operationEl) operationEl.textContent = currentOperation;
+                    if (operationEl) {
+                        operationEl.textContent = !stepMode ? currentOperation
+                            : running ? running.label : stepPhase;
+                    }
+                    const stepsEl = currentRow.querySelector('.agent-working-steps');
+                    if (stepsEl) _syncAgentStepList(stepsEl, steps.filter(step => step.state !== 'running'));
+                    renderClock(currentRow);
                     const historyEl = currentRow.querySelector('.agent-working-history');
                     if (historyEl) {
                         historyEl.replaceChildren();
@@ -78957,6 +79118,10 @@
                 };
 
                 const stopAnimation = () => {
+                    if (clockTimer) {
+                        clearInterval(clockTimer);
+                        clockTimer = null;
+                    }
                     const currentRow = visibleRow();
                     if (currentRow) currentRow.classList.add('is-stopped');
                 };
@@ -79006,6 +79171,12 @@
                     const name = document.createElement('div');
                     name.className = 'agent-msg-name';
                     name.textContent = agent.name;
+                    const clock = document.createElement('span');
+                    clock.className = 'agent-working-clock';
+                    clock.setAttribute('aria-hidden', 'true');
+                    name.appendChild(clock);
+                    const stepList = document.createElement('ol');
+                    stepList.className = 'agent-working-steps';
 
                     const activity = document.createElement('div');
                     activity.className = 'agent-working-activity';
@@ -79025,6 +79196,7 @@
                     const history = document.createElement('div');
                     history.className = 'agent-working-history';
                     content.appendChild(name);
+                    content.appendChild(stepList);
                     content.appendChild(activity);
                     content.appendChild(history);
                     nextRow.appendChild(avatar);
@@ -79042,7 +79214,8 @@
                     attach,
                     setOperation: (operation) => {
                         if (uiState !== RESPONSE_UI_STATES.WORKING) return;
-                        const next = _agentWorkingOperationLabel(operation);
+                        // Step mode shows real steps, not routing or connection phases.
+                        const next = stepMode ? null : _agentWorkingOperationLabel(operation);
                         if (next && next !== currentOperation) {
                             if (currentOperation && !completedOperations.includes(currentOperation)) {
                                 completedOperations.push(currentOperation);
@@ -79053,6 +79226,38 @@
                         attach();
                         render();
                     },
+                    enableSteps: () => {
+                        if (uiState !== RESPONSE_UI_STATES.WORKING || stepMode) return;
+                        stepMode = true;
+                        stepPhase = 'Reading your request';
+                        completedOperations = [];
+                        clockTimer = setInterval(() => renderClock(), 1000);
+                        attach();
+                        render();
+                    },
+                    step: (event) => {
+                        if (!stepMode || uiState !== RESPONSE_UI_STATES.WORKING) return;
+                        const step = _agentStepFromEvent(event);
+                        if (!step) return;
+                        const index = step.id === null ? -1 : steps.findIndex(item => item.id === step.id);
+                        if (index >= 0) steps[index] = step;
+                        else steps.push(step);
+                        if (step.kind === 'tool' && step.state !== 'running') stepPhase = 'Working out the next step';
+                        const keepBottom = agentKey === currentAgent && _agentMessagesNearBottom();
+                        attach();
+                        render();
+                        if (keepBottom) agentMessages.scrollTop = agentMessages.scrollHeight;
+                    },
+                    setPhase: (label) => {
+                        if (!stepMode || uiState !== RESPONSE_UI_STATES.WORKING) return;
+                        stepPhase = String(label || stepPhase);
+                        attach();
+                        render();
+                    },
+                    stepRecord: () => (stepMode && steps.some(step => step.kind === 'tool') ? {
+                        steps: steps.map(step => ({ kind: step.kind, state: step.state, label: step.label })),
+                        seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
+                    } : null),
                     beginStreaming: () => {
                         if (uiState !== RESPONSE_UI_STATES.WORKING) return;
                         uiState = RESPONSE_UI_STATES.STREAMING;
@@ -79083,6 +79288,7 @@
                         detach(true);
                     },
                     get uiState() { return uiState; },
+                    get stepMode() { return stepMode; },
                     get id() { return workingId; },
                 };
                 session.activeWorkingState = api;
@@ -88225,6 +88431,9 @@
 
                 const workingState = preResponseWorkingState
                     || ensureAgentWorkingState(originAgent, 'Preparing request');
+                // Facility turns list Sage's real steps instead of routing phases.
+                const stepMode = codexFacility;
+                if (stepMode) workingState.enableSteps();
                 const controller = new AbortController();
                 const active = {
                     controller,
@@ -88302,7 +88511,9 @@
                 let activeMessageId = null;
                 const beginStreaming = () => {
                     if (streamMessage) return streamMessage;
-                    workingState.beginStreaming();
+                    // Steps stay visible above the streamed answer until it is committed.
+                    if (stepMode) workingState.setPhase('Writing the answer');
+                    else workingState.beginStreaming();
                     streamMessage = createStreamingAssistantMessage(originAgent, {
                         source: 'provider_stream',
                         showStatus: false,
@@ -88363,8 +88574,22 @@
                                     else workingState.setOperation('Routing');
                                     break;
                                 case 'status':
-                                    if (!streamMessage) workingState.setOperation(
+                                    if (stepMode) {
+                                        if (event.phase === 'finalizing') workingState.setPhase('Finishing up');
+                                    } else if (!streamMessage) workingState.setOperation(
                                         window.InspectorProChatStreamRuntime.statusLabel(event.phase));
+                                    break;
+                                case 'agent_step':
+                                    if (!stepMode) break;
+                                    if (event.step && event.step.kind === 'remark' && streamMessage) {
+                                        // The text before this step was a remark, not the answer.
+                                        streamMessage.discard();
+                                        streamMessage = null;
+                                        active.streamingMessage = null;
+                                        active.partial = false;
+                                        preambleText = '';
+                                    }
+                                    workingState.step(event.step);
                                     break;
                                 case 'text_delta': {
                                     const delta = String(event.text || '');
@@ -88388,7 +88613,8 @@
                                     break;
                                 case 'response_completed':
                                     finalData = event.final || null;
-                                    if (!streamMessage) workingState.setOperation('Finalizing response');
+                                    if (stepMode) workingState.setPhase('Finishing up');
+                                    else if (!streamMessage) workingState.setOperation('Finalizing response');
                                     terminal = true;
                                     break;
                                 case 'response_cancelled': {
@@ -89140,13 +89366,17 @@
                         streamTurnFailed = true;
                         response = '';
                     } else if (err && err.agentServiceFailure) {
+                        // Keep the steps that ran, so a long failed turn still shows what was done.
+                        const failedSteps = workingAssistant && workingAssistant.stepMode
+                            ? workingAssistant.stepRecord() : null;
                         if (workingAssistant && workingAssistant.uiState === RESPONSE_UI_STATES.WORKING) {
                             workingAssistant.cancel();
                         }
                         const failureMessage = addMessage(
                             _agentServiceFailureText(originAgent, err),
                             'assistant',
-                            originAgent
+                            originAgent,
+                            failedSteps ? { meta: { agentSteps: failedSteps } } : undefined
                         );
                         if (err.streamRetryable !== false) _showAgentStreamRetry(
                             originAgent,
@@ -89239,6 +89469,12 @@
                         toolCalls,
                     }
                 );
+                // A Facility turn's step list moves into the answer as a collapsed record.
+                if (workingAssistant && workingAssistant.stepMode) {
+                    const agentSteps = workingAssistant.stepRecord();
+                    if (agentSteps) assistantPresentation.meta.agentSteps = agentSteps;
+                    workingAssistant.complete();
+                }
 
                 // Handle narration vs normal response
                 if (response && typeof response === 'object' && response._isNarration) {

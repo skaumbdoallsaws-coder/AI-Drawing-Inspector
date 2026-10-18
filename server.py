@@ -20544,6 +20544,10 @@ _AGENT_CHAT_STREAM_META: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
 _AGENT_CHAT_STATUS_SINK: ContextVar[Optional[Callable[[str], Awaitable[None]]]] = ContextVar(
     "agent_chat_status_sink", default=None
 )
+# Plain-language Facility steps for the chat pane (ai_inspector/codex_runtime/progress.py).
+_AGENT_CHAT_STEP_SINK: ContextVar[Optional[Callable[[Dict[str, Any]], Awaitable[None]]]] = ContextVar(
+    "agent_chat_step_sink", default=None
+)
 _AGENT_MEMORY_CONTINUITY: ContextVar[Optional[str]] = ContextVar(
     "agent_memory_continuity", default=None
 )
@@ -39642,7 +39646,7 @@ async def agent_chat(
             return await inspect_facility(request, _FACILITY_LAYOUT_HOST, http_request,
                 normalize_agent_context(request.inspection_context or request.context or {})["flat"],
                 text_sink=_AGENT_CHAT_STREAM_SINK.get(), status_sink=_AGENT_CHAT_STATUS_SINK.get(),
-                memory_context=memory_context)
+                step_sink=_AGENT_CHAT_STEP_SINK.get(), memory_context=memory_context)
         except PilotError as exc:
             raise HTTPException(status_code=exc.status_code, detail={"error": {
                 "code": exc.code, "message": str(exc), "retryable": False,
@@ -43962,12 +43966,16 @@ async def agent_chat_v2_stream(payload: AgentChatRequest, http_request: Request)
     async def _status_sink(phase: str) -> None:
         await queue.put(("status", phase))
 
+    async def _step_sink(step: Dict[str, Any]) -> None:
+        await queue.put(("step", step))
+
     pipeline_failure: Optional[Exception] = None
 
     async def _run_authoritative_pipeline() -> None:
         nonlocal pipeline_failure
         sink_token = _AGENT_CHAT_STREAM_SINK.set(_sink)
         status_token = _AGENT_CHAT_STATUS_SINK.set(_status_sink)
+        step_token = _AGENT_CHAT_STEP_SINK.set(_step_sink)
         meta_token = _AGENT_CHAT_STREAM_META.set(stream_meta)
         try:
             final_result = await _execute_agent_chat_with_memory(
@@ -43994,6 +44002,7 @@ async def agent_chat_v2_stream(payload: AgentChatRequest, http_request: Request)
             await queue.put(("error", exc))
         finally:
             _AGENT_CHAT_STREAM_META.reset(meta_token)
+            _AGENT_CHAT_STEP_SINK.reset(step_token)
             _AGENT_CHAT_STATUS_SINK.reset(status_token)
             _AGENT_CHAT_STREAM_SINK.reset(sink_token)
 
@@ -44110,6 +44119,10 @@ async def agent_chat_v2_stream(payload: AgentChatRequest, http_request: Request)
 
                 if kind == "status":
                     yield _event("status", phase=value)
+                    continue
+
+                if kind == "step":
+                    yield _event("agent_step", step=value)
                     continue
 
                 if kind == "delta":

@@ -2129,6 +2129,104 @@
         return boundedText('Proposal diagnostics: ' + parts.join('; ') + '.', 360);
     }
 
+    // Plain-language lines for the proposal card. The engineering detail (bindings,
+    // full diagnostics) stays in the card's collapsed technical details.
+    function countPhrase(count, singular, plural) {
+        return count + ' ' + (count === 1 ? singular : plural);
+    }
+
+    function proposalPlainChangeSummary(review) {
+        const source = review || {};
+        const zones = source.zoneChanges || {};
+        const routes = source.routeChanges || {};
+        const parts = [];
+        [
+            [(source.newPlacementIds || []).length, 'new item', 'new items'],
+            [(source.movedPlacementIds || []).length, 'moved item', 'moved items'],
+            [(source.removedPlacementIds || []).length, 'removed item', 'removed items'],
+            [finite(zones.added, 0), 'new zone', 'new zones'],
+            [finite(zones.changed, 0), 'changed zone', 'changed zones'],
+            [finite(zones.removed, 0), 'removed zone', 'removed zones'],
+            [finite(routes.added, 0), 'new aisle', 'new aisles'],
+            [finite(routes.changed, 0), 'changed aisle', 'changed aisles'],
+            [finite(routes.removed, 0), 'removed aisle', 'removed aisles'],
+        ].forEach(function (item) {
+            if (item[0] > 0) parts.push(countPhrase(item[0], item[1], item[2]));
+        });
+        return parts.length
+            ? 'Changes: ' + parts.join(', ') + '.'
+            : 'No items, zones or aisles change.';
+    }
+
+    function proposalPlainCheckSummary(alternative) {
+        const source = alternative || {};
+        const metrics = source.metrics && typeof source.metrics === 'object'
+            ? source.metrics : {};
+        const findings = Array.isArray(source.findings) ? source.findings : [];
+        // The server's check counts (agent previews) come first; option metrics and
+        // findings (Auto Arrange) are the fallback.
+        const checks = source.validationSummary && typeof source.validationSummary === 'object'
+            ? source.validationSummary : null;
+        function countFindings(severity) {
+            return findings.filter(function (finding) {
+                return String(
+                    finding && (finding.severity || finding.level) || ''
+                ).toLowerCase() === severity;
+            }).length;
+        }
+        function total(values) {
+            const known = values.filter(function (value) {
+                return value !== null && value !== undefined && Number.isFinite(Number(value));
+            });
+            return known.length ? known.reduce(function (sum, value) {
+                return sum + Number(value);
+            }, 0) : null;
+        }
+        const errors = checks
+            ? total([checks.errorCount, checks.routingErrorCount])
+            : firstFiniteMetric(metrics, ['spatialErrorCount', 'errorCount']);
+        const warnings = checks
+            ? total([checks.warningCount])
+            : firstFiniteMetric(metrics, ['spatialWarningCount', 'warningCount']);
+        const collisions = checks
+            ? total([checks.placementCollisions, checks.shellObstacleCollisions])
+            : firstFiniteMetric(metrics, ['placementCollisions', 'physicalCollisions']);
+        const clearance = checks ? total([checks.clearanceConflicts]) : null;
+        const blockedAisles = checks ? total([checks.obstructedAisleCount]) : null;
+        const blockedRoutes = checks ? total([checks.blockedRouteCount]) : null;
+        if (!checks && errors === null && warnings === null && collisions === null
+                && !findings.length) {
+            // Saying "no problems" without any check results would overstate them.
+            return { text: 'Checks: no results came with this preview.', status: 'unknown' };
+        }
+        const errorCount = errors === null ? countFindings('error') : errors;
+        const warningCount = warnings === null ? countFindings('warning') : warnings;
+        const problems = [];
+        if (errorCount > 0) problems.push(countPhrase(errorCount, 'error', 'errors'));
+        if (collisions > 0) problems.push(countPhrase(collisions, 'collision', 'collisions'));
+        if (blockedAisles > 0) problems.push(countPhrase(blockedAisles, 'blocked aisle', 'blocked aisles'));
+        if (blockedRoutes > 0) problems.push(countPhrase(blockedRoutes, 'blocked route', 'blocked routes'));
+        if (clearance > 0) {
+            problems.push(countPhrase(clearance, 'clearance conflict', 'clearance conflicts'));
+        }
+        if (warningCount > 0) problems.push(countPhrase(warningCount, 'warning', 'warnings'));
+        // Unverified items and unreported checks stay in the technical details.
+        return {
+            text: problems.length
+                ? 'Checks: ' + problems.join(', ') + '.'
+                : 'Checks: no problems found.',
+            status: errorCount > 0 || collisions > 0 || blockedAisles > 0 || blockedRoutes > 0
+                ? 'error' : problems.length ? 'warning' : 'ok',
+        };
+    }
+
+    function readableProposalStrategy(strategy) {
+        const text = String(strategy || '').trim();
+        // Internal identifiers such as exact-operations-v1 mean nothing to a reviewer.
+        if (!text || /^exact[-_ ]?operations/i.test(text)) return '';
+        return boundedText(text.replace(/[_-]+/g, ' '), 48);
+    }
+
     function proposalChangeSummary(review) {
         const source = review || {};
         const zones = source.zoneChanges || {};
@@ -10664,13 +10762,27 @@
             className: 'ip-flw-proposal-review-line',
             'data-proposal-review': 'diagnostics',
         });
+        // Reviewers see the changes and the check result in plain words; the
+        // bindings and the full diagnostics stay one click away for engineers.
+        this.proposalCheckText = element(this.document, 'div', {
+            className: 'ip-flw-proposal-review-line',
+            'data-proposal-review': 'checks',
+        });
+        this.proposalDetails = element(this.document, 'details', {
+            className: 'ip-flw-proposal-details',
+        });
+        append(this.proposalDetails,
+            element(this.document, 'summary', {}, 'Technical details'),
+            this.proposalBindingText,
+            this.proposalDiagnosticText
+        );
         this.proposalLegend = element(this.document, 'div', {
             className: 'ip-flw-proposal-legend',
             'aria-label': 'Proposal visual legend',
         });
         [
-            ['new', 'New proposal'],
-            ['moved', 'Moved proposal'],
+            ['new', 'New'],
+            ['moved', 'Moved'],
             ['before', 'Original position'],
         ].forEach(function (item) {
             const label = element(this.document, 'span', {
@@ -10688,9 +10800,9 @@
         }, this);
         append(this.proposalReview,
             this.proposalChangeText,
-            this.proposalBindingText,
-            this.proposalDiagnosticText,
-            this.proposalLegend
+            this.proposalCheckText,
+            this.proposalLegend,
+            this.proposalDetails
         );
         append(this.candidateControls,
             this.candidateSummary,
@@ -12972,35 +13084,37 @@
                 'aria-label',
                 'Full-layout alternatives'
             );
-            this.candidateSummary.textContent = 'Preview not saved. Layout option '
-                + (layoutProposal.selectedIndex + 1)
-                + ' of ' + layoutProposal.alternatives.length
-                + ': ' + boundedText(
-                    String(alternative.strategy || '').replace(/_/g, ' '),
-                    48
-                )
-                + (candidateMetricSummary(alternative.metrics)
-                    ? '. ' + candidateMetricSummary(alternative.metrics)
-                    : '')
-                + '.';
+            const optionCount = layoutProposal.alternatives.length;
+            const strategy = readableProposalStrategy(alternative.strategy);
+            this.candidateSummary.textContent = optionCount > 1
+                ? 'Proposed layout, option ' + (layoutProposal.selectedIndex + 1)
+                    + ' of ' + optionCount + (strategy ? ': ' + strategy : '')
+                    + '. Not saved yet.'
+                : 'Proposed change. Not saved yet.';
             const review = buildLayoutProposalReview(
                 this.state.layout,
                 alternative.ghostPreview.layout
             );
             this.proposalReview.hidden = false;
             this.proposalChangeText.textContent =
-                proposalChangeSummary(review);
+                proposalPlainChangeSummary(review);
+            const check = proposalPlainCheckSummary(alternative);
+            this.proposalCheckText.textContent = check.text;
+            this.proposalCheckText.setAttribute('data-check-status', check.status);
             this.proposalBindingText.textContent =
                 proposalBindingSummary(layoutProposal, alternative);
             this.proposalDiagnosticText.textContent =
                 proposalDiagnosticSummary(alternative);
-            const cycleDisabled = layoutProposal.alternatives.length < 2
-                || this.state.busy;
+            const cycleDisabled = optionCount < 2 || this.state.busy;
             ['previous', 'next'].forEach(function (action) {
                 const button = this.candidateControls.querySelector(
                     '[data-candidate-action="' + action + '"]'
                 );
-                if (button) button.disabled = cycleDisabled;
+                if (button) {
+                    // A single proposal has nothing to page through.
+                    button.hidden = optionCount < 2;
+                    button.disabled = cycleDisabled;
+                }
             }, this);
             if (acceptButton) {
                 acceptButton.disabled = this.state.busy;
@@ -13029,6 +13143,7 @@
         }
         this.proposalReview.hidden = true;
         this.proposalChangeText.textContent = '';
+        this.proposalCheckText.textContent = '';
         this.proposalBindingText.textContent = '';
         this.proposalDiagnosticText.textContent = '';
         const proposal = this.state.placementAlternatives;
@@ -13090,7 +13205,10 @@
             const button = this.candidateControls.querySelector(
                 '[data-candidate-action="' + action + '"]'
             );
-            if (button) button.disabled = cycleDisabled;
+            if (button) {
+                button.hidden = false;
+                button.disabled = cycleDisabled;
+            }
         }, this);
         ['accept', 'dismiss'].forEach(function (action) {
             const button = this.candidateControls.querySelector(

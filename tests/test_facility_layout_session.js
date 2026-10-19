@@ -582,6 +582,13 @@ function fullLayoutProposalReceipt(base, revision) {
                 placementCollisions: 0,
                 movedAutoCount: 1,
             },
+            ...(index === 1 ? { validation: {
+                noNewErrors: true,
+                spatial: { metrics: {
+                    errorCount: 0, warningCount: 0, placementCollisions: 0, obstructedAisleCount: 1,
+                } },
+                routing: { metrics: { errorCount: 0, blockedCount: 0 } },
+            } } : {}),
             transactionBinding: layoutBinding(
                 revision,
                 index === 1 ? 'd' : 'c'
@@ -2518,6 +2525,13 @@ async function main() {
                 state.layoutProposal.alternatives[0].createdAt,
                 1785283200
             );
+            // The review card reports the server's check counts, not just its own.
+            assert.deepStrictEqual(state.layoutProposal.alternatives[0].validationSummary, {
+                noNewErrors: true, errorCount: 0, warningCount: 0, placementCollisions: 0,
+                shellObstacleCollisions: null, clearanceConflicts: null, obstructedAisleCount: 1,
+                blockedRouteCount: 0, routingErrorCount: 0,
+            });
+            assert.strictEqual(state.layoutProposal.alternatives[1].validationSummary, null);
             assert.deepStrictEqual(state.layout, before.layout);
             assert.deepStrictEqual(state.baseLayout, before.baseLayout);
             assert.deepStrictEqual(state.operations, []);

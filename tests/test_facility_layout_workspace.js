@@ -3752,6 +3752,56 @@ async function main() {
             data.workspace.destroy();
         });
 
+    await check('a single proposal reads plainly and offers no option paging',
+        async () => {
+            // Agent previews arrive as one option named exact-operations-v1, which
+            // used to fill the card with internal metrics, hashes and "not reported".
+            const data = fixture();
+            await data.workspace.executeCommand('auto-arrange');
+            await data.workspace.whenIdle();
+            const proposal = data.session.state.layoutProposal;
+            proposal.alternatives = proposal.alternatives.slice(0, 1);
+            Object.assign(proposal.alternatives[0], {
+                strategy: 'exact-operations-v1',
+                findings: [],
+                metrics: { spatialErrorCount: 0, spatialWarningCount: 0, placementCollisions: 0 },
+            });
+            data.session._notify();
+            await data.workspace.whenIdle();
+            assert.strictEqual(data.workspace.candidateSummary.textContent,
+                'Proposed change. Not saved yet.');
+            assert.strictEqual(data.workspace.proposalCheckText.textContent,
+                'Checks: no problems found.');
+            assert.strictEqual(
+                data.workspace.proposalCheckText.getAttribute('data-check-status'), 'ok');
+            ['previous', 'next'].forEach(action => assert.strictEqual(
+                data.workspace.candidateControls.querySelector(
+                    '[data-candidate-action="' + action + '"]'
+                ).hidden, true));
+            // Agent previews carry the server's check counts; a blocked aisle is a problem.
+            proposal.alternatives[0].validationSummary = {
+                noNewErrors: true, errorCount: 0, warningCount: 0, placementCollisions: 0,
+                shellObstacleCollisions: 0, clearanceConflicts: 0, obstructedAisleCount: 1,
+                blockedRouteCount: 0, routingErrorCount: 0,
+            };
+            data.session._notify();
+            await data.workspace.whenIdle();
+            assert.strictEqual(data.workspace.proposalCheckText.textContent,
+                'Checks: 1 blocked aisle.');
+            assert.strictEqual(
+                data.workspace.proposalCheckText.getAttribute('data-check-status'), 'error');
+            // Without any check results the card must not claim there were no problems.
+            delete proposal.alternatives[0].validationSummary;
+            proposal.alternatives[0].metrics = {};
+            data.session._notify();
+            await data.workspace.whenIdle();
+            assert.strictEqual(data.workspace.proposalCheckText.textContent,
+                'Checks: no results came with this preview.');
+            assert.strictEqual(
+                data.workspace.proposalCheckText.getAttribute('data-check-status'), 'unknown');
+            data.workspace.destroy();
+        });
+
     await check('full-layout preview renders in plan and 3D without dirtying',
         async () => {
             const data = fixture();
@@ -3776,7 +3826,13 @@ async function main() {
                 'true'
             );
             assert.ok(data.workspace.candidateSummary.textContent.includes(
-                'Preview not saved'
+                'Not saved yet'
+            ));
+            assert.ok(data.workspace.candidateSummary.textContent.includes(
+                'option 1 of'
+            ));
+            assert.ok(!/Metrics|affectedCount|exact-operations/.test(
+                data.workspace.candidateSummary.textContent
             ));
             assert.strictEqual(
                 data.workspace.candidateControls.getAttribute(
@@ -3785,9 +3841,24 @@ async function main() {
                 'full-layout'
             );
             assert.strictEqual(data.workspace.proposalReview.hidden, false);
+            // Reviewers read plain changes and a check result; the bindings and the
+            // full diagnostics sit in the collapsed technical details.
             assert.ok(data.workspace.proposalChangeText.textContent.includes(
-                '1 new assets, 1 moved assets, 1 removed assets'
+                '1 new item, 1 moved item, 1 removed item'
             ));
+            assert.ok(/^Checks: /.test(
+                data.workspace.proposalCheckText.textContent
+            ));
+            assert.ok(['ok', 'warning', 'error'].includes(
+                data.workspace.proposalCheckText.getAttribute('data-check-status')
+            ));
+            assert.strictEqual(data.workspace.proposalBindingText.parentNode,
+                data.workspace.proposalDetails);
+            assert.strictEqual(data.workspace.proposalDiagnosticText.parentNode,
+                data.workspace.proposalDetails);
+            assert.strictEqual(data.workspace.candidateControls.querySelector(
+                '[data-candidate-action="next"]'
+            ).hidden, false);
             assert.ok(data.workspace.proposalBindingText.textContent.includes(
                 'Proposal binding: map rev-1'
             ));

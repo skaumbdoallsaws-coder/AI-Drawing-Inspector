@@ -110,6 +110,30 @@
         return nonEmptyString(value, label);
     }
 
+    // The counts the server's checks reported for a proposal, so the review card
+    // can say what they found. The full validation payload stays on the server.
+    function proposalValidationSummary(validation) {
+        if (!validation || typeof validation !== 'object') return null;
+        const spatial = validation.spatial && validation.spatial.metrics || {};
+        const routing = validation.routing && validation.routing.metrics || {};
+        function count(source, key) {
+            const value = Number(source[key]);
+            return Number.isFinite(value) ? value : null;
+        }
+        return {
+            noNewErrors: typeof validation.noNewErrors === 'boolean'
+                ? validation.noNewErrors : null,
+            errorCount: count(spatial, 'errorCount'),
+            warningCount: count(spatial, 'warningCount'),
+            placementCollisions: count(spatial, 'placementCollisions'),
+            shellObstacleCollisions: count(spatial, 'shellObstacleCollisions'),
+            clearanceConflicts: count(spatial, 'clearanceConflicts'),
+            obstructedAisleCount: count(spatial, 'obstructedAisleCount'),
+            blockedRouteCount: count(routing, 'blockedCount'),
+            routingErrorCount: count(routing, 'errorCount'),
+        };
+    }
+
     function worldPosition(value) {
         object(value, 'world position');
         return {
@@ -804,6 +828,7 @@
             ),
             findings: clone(source.findings || []),
             newHardFindingIds: clone(source.newHardFindingIds || []),
+            validationSummary: proposalValidationSummary(source.validation),
         };
     }
 

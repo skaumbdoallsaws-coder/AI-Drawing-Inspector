@@ -16258,6 +16258,9 @@
             background: linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.006) 100%);
         }
 
+        .agent-context-shell[hidden] {
+            display: none;
+        }
         .agent-context-shell {
             flex-shrink: 0;
             padding: 7px 10px 0;
@@ -20379,7 +20382,7 @@
         }
     };
     </script>
-    <link rel="stylesheet" href="/static/facility_layout_workspace.css?v=20261013-authoring-1">
+    <link rel="stylesheet" href="/static/facility_layout_workspace.css?v=20261018-review-card-2">
     <link rel="stylesheet" href="/static/walkthrough_camera_settings.css?v=20260927-1">
     <link rel="stylesheet" href="/static/facility_layout_sheets.css?v=20260929-open-layout-1">
     <script type="importmap">
@@ -21291,10 +21294,10 @@
     <script src="/static/facility_layout_sheets.js?v=20260929-open-layout-1"></script>
     <script src="/static/facility_layout_patterns.js?v=20260912-construction-contract"></script>
     <script src="/static/facility_layout_command_adapter.js?v=20260912-contract-v1-retry-fix"></script>
-    <script src="/static/facility_layout_session.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_session.js?v=20261018-review-card-2"></script>
     <script src="/static/facility_layout_transport.js?v=20261013-decals-1"></script>
     <script src="/static/facility_layout_generation_view.js?v=20260917-generation-research"></script>
-    <script src="/static/facility_layout_workspace.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_workspace.js?v=20261018-review-card-2"></script>
     <script src="/static/facility_layout_app.js?v=20261013-decals-1"></script>
     <script src="/static/desktop_workflow_observation.js?v=20260915-workflow-coverage"></script>
     <script src="/static/desktop_runtime_bridge.js?v=20260915-workflow-coverage"></script>
@@ -90827,6 +90830,18 @@
                 agentContextTitle.textContent = titleParts.join(' | ');
                 agentContextSubtitle.textContent = viewport;
                 if (agentContextDot) agentContextDot.style.background = agent.color || 'var(--accent)';
+                // Show the bar only when it names or controls something: a loaded part, a
+                // selection, a hidden or transparent part, or motion. Facility Layout has
+                // none of these, so its "No active viewport override" bar was clutter.
+                const activeCounts = _agentContextSelectionCounts();
+                const activeOverrides = _agentContextOverrideCounts();
+                const showBar = !_trainIsFacilityLayoutMode() && !!(
+                    state.partNumber || state.partName
+                    || activeCounts.parts || activeCounts.features || activeCounts.drawingDims
+                    || activeOverrides.hidden || activeOverrides.transparent
+                    || _agentContextMotionText());
+                agentContextShell.hidden = !showBar;
+                if (!showBar && agentContextExpanded) setAgentContextExpanded(false);
 
                 if (agentContextRows) {
                     agentContextRows.innerHTML = _agentContextRowsData()

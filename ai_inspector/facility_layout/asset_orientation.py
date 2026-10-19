@@ -52,6 +52,13 @@ REGISTERED_ASSET_SEMANTICS: dict[str, tuple[str, dict[str, Any]]] = {
     "asset-import-bzkhmca1or28": (
         "41bc7a95f479524f7497693d4ce0f99c520f993c24fcd3e3f711dae0d4959801",
         _sides("east", operator="east", rear="west")),
+    # Corner cubicle (reviewed 2026-10-18): an L of panels and worktop along the
+    # south and west sides, open to the north and east. Its footprint leaves the
+    # north-east quarter free, so the chair sits inside there facing the rear.
+    # The two other cubicle models share the look but block their whole square.
+    "asset-import-cubicle-corner-workstation": (
+        "fb73cc329447cf13c40251ab781dd8e5f512c6143dc0cbb56ddb26b98618b372",
+        _sides("north", operator="north", rear="south")),
     # Kitchen: appliance doors face the front; small appliances belong on a
     # worktop such as the kitchen assembly, not on the floor.
     "asset-breakroom-refrigerator": (

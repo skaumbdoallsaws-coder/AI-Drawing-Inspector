@@ -935,3 +935,28 @@ def test_model_authored_coordinates_are_rejected_before_p8(host):
     assert getattr(caught.value, "code", "") == (
         "semantic_plan_contains_raw_geometry"
     )
+
+
+def test_asset_search_ignores_plurals_and_finds_word_starts(host):
+    # Matching only the exact phrase, "tooling shelf" missed "Tooling Shelves" and the
+    # agent placed an office bookshelf in a CNC area (2026-10-18 demo dry run).
+    principal, current, _bundle = _context(host)
+
+    def names(query, turn):
+        result = host.agent_runtime.execute_read_tool(
+            principal,
+            site_id=LOCAL_SITE_ID,
+            layout_id=LOCAL_LAYOUT_ID,
+            expected_revision=current["revision"],
+            tool_name="search_industrial_assets",
+            arguments={"query": query, "pageSize": 50},
+            turn_id=f"turn-plural-search-{turn}",
+        )
+        return {record["displayName"] for record in result["records"]}
+
+    assert names("pallet racks", 1) == {"Pallet Rack"}
+    assert names("workbenches", 2) == {"Assembly Workbench"}
+    assert names("mills", 3) == {"CNC Milling Machine"}
+    assert names("forklifts electric", 4) == {"Electric Forklift"}
+    assert names("cnc", 5) == {"CNC Milling Machine"}
+    assert names("refrigerator", 6) == set()

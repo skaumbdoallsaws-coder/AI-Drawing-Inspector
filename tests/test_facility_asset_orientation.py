@@ -196,3 +196,29 @@ def test_agent_gateway_stages_a_facing_placement_as_an_exact_quaternion(tmp_path
         assert inspected["data"]["definition"]["facilitySemantics"]["functionalSides"]["front"]["side"] == "east"
     finally:
         host.close()
+
+
+def test_library_search_shows_reviewed_fronts(tmp_path, monkeypatch):
+    # The front used to reach the agent only through inspect_facility_asset. Search results
+    # said facilitySemantics {}, so in the 2026-10-18 demo dry run Sage placed a reviewed
+    # band saw, racks and pallet truck with an unverified default rotation.
+    bench = next(item for item in LOCAL_ASSET_CATALOG if item["assetId"] == "asset-workbench")
+    monkeypatch.setitem(asset_orientation.REGISTERED_ASSET_SEMANTICS, "asset-workbench",
+                        (bench["assetDefinitionRevision"], asset_orientation._sides("east")))
+    host = LocalFacilityLayoutHost(tmp_path / "facility", private_assets=False)
+    try:
+        host.ensure_bootstrap()
+        principal = host.principal()
+        revision = host.service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["revision"]
+        gateway = FacilityEditGateway(host.agent_runtime, principal, {
+            "siteId": LOCAL_SITE_ID, "layoutId": LOCAL_LAYOUT_ID, "revision": revision}, turn_id="search-test")
+        found = asyncio.run(gateway.call("search_industrial_assets", {"query": "workbench", "pageSize": 10}))
+        assert found["ok"], found
+        records = {record["assetId"]: record for record in found["data"]["records"]}
+        sides = records["asset-workbench"]["facilitySemantics"]["functionalSides"]
+        assert sides["front"] == {"side": "east", "evidenceStatus": "inferred"}
+        # Unreviewed models still report no sides rather than a guess.
+        assert all("functionalSides" not in record["facilitySemantics"]
+                   for asset_id, record in records.items() if asset_id != "asset-workbench")
+    finally:
+        host.close()

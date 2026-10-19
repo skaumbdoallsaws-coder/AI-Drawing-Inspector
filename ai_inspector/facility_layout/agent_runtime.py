@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import threading
 import time
@@ -213,6 +214,42 @@ def _revision(value: Any, label: str) -> str:
     return text
 
 
+def _search_terms(text: str) -> set[str]:
+    """Lowercase words of text, each with simple singular forms ("shelves" -> "shelf")."""
+    terms: set[str] = set()
+    for word in re.findall(r"[a-z0-9]+", text.lower()):
+        terms.add(word)
+        if len(word) > 4 and word.endswith("ves"):
+            terms.update((word[:-3] + "f", word[:-3] + "fe"))
+        elif len(word) > 4 and word.endswith("ies"):
+            terms.add(word[:-3] + "y")
+        elif len(word) > 3 and word.endswith("es"):
+            terms.update((word[:-2], word[:-1]))
+        elif len(word) > 3 and word.endswith("s"):
+            terms.add(word[:-1])
+    return terms
+
+
+def _asset_query_matches(query: str, haystack: str) -> bool:
+    """The exact phrase as before, or every query word ignoring plurals.
+
+    A query word of four or more letters may also start a longer word, so "mill"
+    finds "milling". Matching only the exact phrase, "tooling shelf" missed
+    "Tooling Shelves" and the agent substituted an office bookshelf.
+    """
+    if not query or query in haystack:
+        return True
+    words = re.findall(r"[a-z0-9]+", query)
+    available = _search_terms(haystack)
+
+    def found(word: str) -> bool:
+        forms = _search_terms(word)
+        return bool(forms & available) or (len(word) >= 4 and any(
+            term.startswith(form) for form in forms for term in available))
+
+    return bool(words) and all(found(word) for word in words)
+
+
 def _bounded_page_size(value: Any) -> int:
     if value is None:
         return min(25, MAXIMUM_READ_PAGE_SIZE)
@@ -350,6 +387,14 @@ class FacilityLayoutAgentRuntime:
                 or raw.get("revision")
                 or _fingerprint(definition)
             )
+            document = deepcopy(dict(definition))
+            # Reviewed functional sides sit on the catalog record beside the
+            # revisioned definition (asset_orientation.attach_registered_semantics).
+            # Without them library search reported no sides at all, and the agent
+            # fell back to an unverified default rotation for reviewed models.
+            semantics = raw.get("facilitySemantics")
+            if "facilitySemantics" not in document and isinstance(semantics, Mapping):
+                document["facilitySemantics"] = deepcopy(dict(semantics))
             assets.append(
                 {
                     "revision": _revision(
@@ -359,7 +404,7 @@ class FacilityLayoutAgentRuntime:
                     "previewPlanningEligible": (
                         raw.get("previewPlanningEligible") is True
                     ),
-                    "document": deepcopy(dict(definition)),
+                    "document": document,
                 }
             )
         assets.sort(
@@ -1656,17 +1701,16 @@ class FacilityLayoutAgentRuntime:
                 item
                 for item in state.get("assets", [])
                 if isinstance(item, Mapping)
-                and (
-                    not query
-                    or query
-                    in " ".join(
+                and _asset_query_matches(
+                    query,
+                    " ".join(
                         (
                             str(item.get("assetId") or ""),
                             str(item.get("displayName") or ""),
                             str(item.get("category") or ""),
                             " ".join(item.get("capabilityIds", [])),
                         )
-                    ).lower()
+                    ).lower(),
                 )
                 and (
                     not category

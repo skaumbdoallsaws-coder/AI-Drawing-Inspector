@@ -61,6 +61,10 @@
         assets: true,
         walls: true,
     });
+    // Zone limits on the 3D floor: the plan's zone outline color, and the line
+    // width in metres.
+    const ZONE_LIMIT_COLOR = '#4d7c8a';
+    const ZONE_LIMIT_WIDTH = 0.1;
     const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1 =
         'facility-motion-package-v1';
     const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V2 =
@@ -2254,6 +2258,7 @@
             themeCleanup: null,
             modelRoot: null,
             floorMarkingObjects: [],
+            zoneObjects: [],
             wallObjects: [],
             floorSurfaceObjects: [],
             wallFinishObjects: [],
@@ -9509,6 +9514,8 @@
             state.renderGroups.clear();
             disposeObjectGraphs(state.floorMarkingObjects);
             state.floorMarkingObjects = [];
+            disposeObjectGraphs(state.zoneObjects);
+            state.zoneObjects = [];
             disposeObjectGraphs(state.routeObjects);
             state.routeObjects = [];
             state.pickObjects = [];
@@ -10012,6 +10019,100 @@
                     z: finite(point.z, 0),
                 };
             });
+        }
+
+        // Zone limits on the 3D floor: a thin line along every zone edge in the
+        // plan's zone outline color, centred on the boundary so neighbouring
+        // zones share one line. Presentation only: the layout is unchanged and
+        // nothing here is pickable.
+        function zoneFloorPoints(zone) {
+            const points = (Array.isArray(zone && zone.boundary) ? zone.boundary : [])
+                .map(function (point) {
+                    return {
+                        x: finite(point && point.x, NaN),
+                        z: finite(point && point.z, NaN),
+                    };
+                })
+                .filter(function (point) {
+                    return Number.isFinite(point.x) && Number.isFinite(point.z);
+                });
+            const first = points[0];
+            const last = points[points.length - 1];
+            if (points.length > 1 && first.x === last.x && first.z === last.z) {
+                points.pop();
+            }
+            return points;
+        }
+
+        function addZoneLimits(rootObject, points) {
+            points.forEach(function (start, index) {
+                const end = points[(index + 1) % points.length];
+                const dx = end.x - start.x;
+                const dz = end.z - start.z;
+                const length = Math.hypot(dx, dz);
+                if (!(length > 0.000001)) return;
+                // Half a line longer at each end, so corners close.
+                const segment = addFloorPaintRectangle(
+                    rootObject,
+                    { fillColor: ZONE_LIMIT_COLOR },
+                    length + ZONE_LIMIT_WIDTH,
+                    ZONE_LIMIT_WIDTH,
+                    (start.x + end.x) / 2,
+                    (start.z + end.z) / 2,
+                    { color: ZONE_LIMIT_COLOR, opacity: 0.95 }
+                );
+                if (!segment) return;
+                const radians = -Math.atan2(dz, dx);
+                setQuaternion(segment.quaternion, {
+                    x: 0,
+                    y: Math.sin(radians / 2),
+                    z: 0,
+                    w: Math.cos(radians / 2),
+                });
+                segment.renderOrder = 3;
+            });
+        }
+
+        function renderZoneMarkings() {
+            if (!state.modelRoot || typeof THREE.Mesh !== 'function') return 0;
+            const RootType = THREE.Group || THREE.Object3D;
+            if (typeof RootType !== 'function') return 0;
+            const layout = state.currentInput && state.currentInput.layout || {};
+            const zones = Array.isArray(layout.zones) ? layout.zones.slice() : [];
+            zones.sort(function (left, right) {
+                return String(left && left.zoneId || '').localeCompare(
+                    String(right && right.zoneId || '')
+                );
+            });
+            zones.forEach(function (zone, index) {
+                const points = zoneFloorPoints(zone);
+                if (points.length < 3) return;
+                const object = new RootType();
+                object.name = 'FacilityZone:' + String(zone.zoneId || index);
+                addZoneLimits(object, points);
+                if (!object.children || !object.children.length) return;
+                if (object.position && typeof object.position.set === 'function') {
+                    object.position.set(
+                        0,
+                        finite(zone.floorElevation, 0) + 0.001 + index * 0.000001,
+                        0
+                    );
+                }
+                const extensions = zone.extensions || {};
+                const knowledge = extensions.knowledgeFoundation || {};
+                object.userData = Object.assign({}, object.userData, {
+                    facilityZone: true,
+                    zoneId: zone.zoneId,
+                    zoneType: zone.zoneType,
+                    visibilityLayer: knowledge.parentZoneId ? 'cells' : 'zones',
+                });
+                object.visible = state.layerVisibility[
+                    object.userData.visibilityLayer
+                ] !== false;
+                state.modelRoot.add(object);
+                state.zoneObjects.push(object);
+            });
+            return state.zoneObjects.length;
         }
 
         function renderFacilityAisles() {
@@ -11751,6 +11852,7 @@
                 state.floorSurfaceObjects=floorSurfacesRuntime.meshes(THREE,documentObject,state.currentInput.layout);
                 state.floorSurfaceObjects.forEach(object=>state.modelRoot.add(object));
             }
+            renderZoneMarkings();
             renderFacilityAisles();
             renderFloorMarkings();
             Array.from(state.baseGroups.keys()).sort().forEach(function (key) {
@@ -12370,6 +12472,9 @@
             });
             state.floorMarkingObjects.forEach(function (object) {
                 object.visible = next.markings !== false;
+            });
+            state.zoneObjects.forEach(function (object) {
+                object.visible = next[object.userData.visibilityLayer] !== false;
             });
             state.renderGroups.forEach(function (record) {
                 if (record && record.container) {
@@ -13314,6 +13419,7 @@
                 placementCount: state.placements.length,
                 placementTransformAudit: getPlacementTransformAudit(),
                 floorMarkingCount: state.floorMarkingObjects.length,
+                zoneMarkingCount: state.zoneObjects.length,
                 perimeterWallCount: state.wallObjects.length,
                 visiblePerimeterWallCount: state.wallObjects.filter(object => object.visible).length,
                 exteriorFinishObjectCount: state.wallFinishObjects.length,

@@ -3752,6 +3752,74 @@ test('3D viewport projects semantic floor markings from shared world coordinates
     data.adapter.dispose();
 });
 
+function styledZone(zoneId, boundary, fillColor, parentZoneId) {
+    return {
+        zoneId,
+        zoneType: 'workcell',
+        label: zoneId,
+        boundary,
+        floorElevation: 0,
+        extensions: Object.assign(
+            { style: { fillColor } },
+            parentZoneId ? { knowledgeFoundation: { parentZoneId } } : {}
+        ),
+    };
+}
+
+function sceneObjects(predicate) {
+    const found = [];
+    FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+        if (predicate(object)) found.push(object);
+    });
+    return found;
+}
+
+test('3D floor outlines zone limits and hides them with their layer', async () => {
+    const data = fixture();
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: {
+            placements: [],
+            zones: [
+                styledZone('zn-cnc', [
+                    { x: 0, z: 0 }, { x: 20, z: 0 }, { x: 20, z: 10 }, { x: 0, z: 10 },
+                ], '#5b8def'),
+                styledZone('zn-cell', [
+                    { x: 2, z: 2 }, { x: 6, z: 2 }, { x: 6, z: 5 }, { x: 2, z: 5 },
+                ], '#58b6a6', 'zn-cnc'),
+            ],
+        },
+        assetCatalog: [],
+    });
+    data.scheduler.flush();
+    assert.strictEqual(data.adapter.getDiagnostics().zoneMarkingCount, 2);
+    const zones = {};
+    sceneObjects(object => object.userData.facilityZone === true)
+        .forEach(object => { zones[object.userData.zoneId] = object; });
+    const cnc = zones['zn-cnc'];
+    // Only the limits: one line per edge, no fill or lettering, in the plan's
+    // zone outline color rather than the zone's own color.
+    assert.strictEqual(cnc.children.length, 4);
+    cnc.children.forEach(mesh => {
+        assert.strictEqual(mesh.geometry.isPlaneGeometry, true);
+        assert.strictEqual(mesh.material.options.color, 0x4d7c8a);
+    });
+    // Each line is centred on its edge, so neighbouring zones share one line.
+    assert.deepStrictEqual(
+        cnc.children.map(mesh => [mesh.position.x, mesh.position.z])
+            .sort((left, right) => left[0] - right[0] || left[1] - right[1]),
+        [[0, 5], [10, 0], [10, 10], [20, 5]]
+    );
+    // Departments follow the zones layer; child areas follow the cells layer.
+    data.adapter.setLayerVisibility({ zones: false });
+    assert.strictEqual(cnc.visible, false);
+    assert.strictEqual(zones['zn-cell'].visible, true);
+    data.adapter.setLayerVisibility({ zones: true, cells: false });
+    assert.strictEqual(cnc.visible, true);
+    assert.strictEqual(zones['zn-cell'].visible, false);
+    data.adapter.dispose();
+});
+
 test('3D viewport projects semantic aisles from native route coordinates', async () => {
     const data = fixture();
     data.adapter.mount(data.host);

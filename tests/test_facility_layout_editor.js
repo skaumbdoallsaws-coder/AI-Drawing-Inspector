@@ -865,7 +865,7 @@ check('top plan layer visibility is presentation-only and hierarchy-aware', () =
 check('Plan walls hide independently of assets and preserve the document', () => {
     const { documentRef, host } = makeHost();
     const input = layout([placement('pl-wall', 'asset-wall', 2, 2)]);
-    input.extensions = { facilityPerimeterWalls: { version: 1,
+    input.extensions = { facilityPerimeterWalls: { version: 1, settings: { heightMeters: 6 },
         panels: [[{x:0,z:0},{x:0,z:10},{x:.2,z:10}]] } };
     const adapter = facility.createTopPlanAdapter(host, { document: documentRef,
         assetCatalog: [{assetId:'asset-wall', assetDefinitionRevision:input.placements[0].assetDefinitionRevision,tags:['wall']}] });
@@ -1001,6 +1001,111 @@ check('zone labels at the plan boundary avoid a clamped top-outside slot', () =>
     assert.notStrictEqual(
         label.getAttribute('data-zone-label-edge'),
         'top-outside'
+    );
+    adapter.dispose();
+});
+
+function zoneLabelBox(host, zoneId) {
+    const box = host.findByAttribute('data-zone-label-box-for', zoneId)[0];
+    const minX = Number(box.getAttribute('x'));
+    const minY = Number(box.getAttribute('y'));
+    return {
+        minX, minY,
+        maxX: minX + Number(box.getAttribute('width')),
+        maxY: minY + Number(box.getAttribute('height')),
+    };
+}
+
+function roomyZoneLabelPlan(label, worldBounds) {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const source = layout([]);
+    source.routes = [];
+    if (label) source.zones[0].label = label;
+    // By default there is free space all round the zone, so an outside slot is
+    // open and unclamped.
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        worldBounds: worldBounds || { minX: -10, minZ: -10, maxX: 22, maxZ: 18 },
+    });
+    adapter.setLayout(source);
+    return { documentRef, host, source, adapter };
+}
+
+function boxesOverlap(left, right) {
+    return Math.min(left.maxX, right.maxX) > Math.max(left.minX, right.minX)
+        && Math.min(left.maxY, right.maxY) > Math.max(left.minY, right.minY);
+}
+
+check('a zone name too wide for one line wraps to stay inside its zone', () => {
+    // The 12 m zone is about 145 px wide; "Raw Material Storage" needs 152 px on one line.
+    const { host, adapter } = roomyZoneLabelPlan('Raw Material Storage');
+    const label = host.findByAttribute('data-zone-label-for', 'zn-cell')[0];
+    assert.strictEqual(label.getAttribute('data-zone-label-lines'), '2');
+    assert.match(label.getAttribute('data-zone-label-edge'), /-inside$/);
+    const spans = label.descendants().filter(element => element.nodeName === 'tspan');
+    assert.deepStrictEqual(spans.map(span => span.textContent.trim()), ['Raw Material', 'Storage']);
+    assert.strictEqual(spans.map(span => span.textContent).join(''), 'Raw Material Storage');
+    const box = zoneLabelBox(host, 'zn-cell');
+    assert.strictEqual(box.maxY - box.minY, 36);
+    adapter.dispose();
+});
+
+check('zone labels keep clear of the plan size readout', () => {
+    // The zone shares the plan's top-left corner, where the readout is drawn.
+    const { host, adapter } = roomyZoneLabelPlan(
+        null, { minX: 0, minZ: -10, maxX: 30, maxZ: 8 });
+    const caption = host.findByAttribute('class', 'ip-flw-plan-grid-caption')[0];
+    const x = Number(caption.getAttribute('x'));
+    const y = Number(caption.getAttribute('y'));
+    // A browser draws the 11 px readout about 5 px a character and 14 px tall.
+    const readout = { minX: x, minY: y - 12, maxX: x + caption.textContent.length * 5, maxY: y + 2 };
+    assert.ok(!boxesOverlap(zoneLabelBox(host, 'zn-cell'), readout));
+    assert.match(
+        host.findByAttribute('data-zone-label-for', 'zn-cell')[0]
+            .getAttribute('data-zone-label-edge'),
+        /-inside$/
+    );
+    adapter.dispose();
+});
+
+check('zone labels sit inside a zone that has room for them', () => {
+    const { host, adapter } = roomyZoneLabelPlan();
+    assert.strictEqual(
+        host.findByAttribute('data-zone-label-for', 'zn-cell')[0]
+            .getAttribute('data-zone-label-edge'),
+        'top-inside'
+    );
+    adapter.dispose();
+});
+
+check('zone labels move out from under controls floating over the plan', () => {
+    const { documentRef, host, source, adapter } = roomyZoneLabelPlan();
+    const covered = zoneLabelBox(host, 'zn-cell');
+    // A toolbar over the label's first-choice slot, as the plan navigation can be.
+    const svg = host.children.find(child => child.nodeName === 'svg');
+    svg.getBoundingClientRect = () => ({
+        left: 0, top: 0, right: 640, bottom: 360, width: 640, height: 360,
+    });
+    const toolbar = {
+        getBoundingClientRect: () => ({
+            left: covered.minX, top: covered.minY,
+            right: covered.maxX, bottom: covered.maxY,
+            width: covered.maxX - covered.minX, height: covered.maxY - covered.minY,
+        }),
+    };
+    documentRef.querySelectorAll = selector => (
+        selector === '[data-plan-overlay]' ? [toolbar] : []);
+    adapter.setLayout(source);
+    const moved = zoneLabelBox(host, 'zn-cell');
+    const overlapWidth = Math.min(moved.maxX, covered.maxX) - Math.max(moved.minX, covered.minX);
+    const overlapHeight = Math.min(moved.maxY, covered.maxY) - Math.max(moved.minY, covered.minY);
+    assert.ok(overlapWidth <= -4 || overlapHeight <= -4, JSON.stringify({ covered, moved }));
+    assert.match(
+        host.findByAttribute('data-zone-label-for', 'zn-cell')[0]
+            .getAttribute('data-zone-label-edge'),
+        /-inside$/
     );
     adapter.dispose();
 });

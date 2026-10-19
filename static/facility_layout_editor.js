@@ -914,10 +914,54 @@
         return width * height;
     }
 
+    // Label box size for one or two lines of 11 px bold text.
+    function zoneLabelSize(lines) {
+        const longest = Math.max.apply(null, lines.map(function (line) {
+            return line.length;
+        }));
+        return {
+            width: Math.max(
+                lines.length > 1 ? 56 : 72,
+                Math.min(236, longest * 6.5 + 22)
+            ),
+            height: 23 + (lines.length - 1) * 13,
+        };
+    }
+
+    // Inside its own zone a label is unambiguous; outside it lands on a
+    // neighbouring zone or an aisle. A label fits when the inset slots
+    // (8 px from a side, 5 px from the top or bottom) stay in the zone.
+    function zoneLabelFitsInside(bounds, size) {
+        return bounds.width >= size.width + 8
+            && bounds.height >= size.height + 10;
+    }
+
+    // A name too wide for its zone goes on two lines when that keeps it
+    // inside; otherwise it stays on one line and the placer puts it outside.
+    function zoneLabelLines(text, bounds) {
+        const single = [text];
+        if (zoneLabelFitsInside(bounds, zoneLabelSize(single))) return single;
+        const words = text.split(/\s+/).filter(Boolean);
+        let best = null;
+        for (let index = 1; index < words.length; index += 1) {
+            const lines = [
+                words.slice(0, index).join(' '),
+                words.slice(index).join(' '),
+            ];
+            const longest = Math.max(lines[0].length, lines[1].length);
+            if (!best || longest < best.longest) {
+                best = { lines: lines, longest: longest };
+            }
+        }
+        return best && zoneLabelFitsInside(bounds, zoneLabelSize(best.lines))
+            ? best.lines : single;
+    }
+
     function zoneLabelScreenRect(zone, projection, obstacles, occupied, size) {
         const bounds = projectedPointBounds(zone.points, projection);
         const width = size.width;
         const height = size.height;
+        const fitsInside = zoneLabelFitsInside(bounds, size);
         const viewportPadding = 5;
         const minimumX = viewportPadding;
         const maximumX = Math.max(
@@ -975,6 +1019,7 @@
                     score: [
                         labelOverlap > 0 ? 1 : 0,
                         labelOverlap,
+                        fitsInside && rowIndex < 2 ? 1 : 0,
                         equipmentOverlap > 0 ? 1 : 0,
                         equipmentOverlap,
                         outsideClampPenalty,
@@ -998,6 +1043,32 @@
             equipmentOverlapArea: selected.equipmentOverlapArea,
             labelOverlapArea: selected.labelOverlapArea,
         });
+    }
+
+    // Controls floating over the plan (marked data-plan-overlay, such as the
+    // navigation toolbar) hide whatever is drawn beneath them, so zone labels
+    // treat them as occupied. Returned in the plan's drawing units (size).
+    function planOverlayRects(svg, size) {
+        if (!svg || typeof svg.getBoundingClientRect !== 'function') return [];
+        const scope = (typeof svg.closest === 'function'
+            && svg.closest('.ip-flw-viewport-stack')) || svg.ownerDocument;
+        if (!scope || typeof scope.querySelectorAll !== 'function') return [];
+        const frame = svg.getBoundingClientRect();
+        if (!frame || !(frame.width > 0) || !(frame.height > 0)) return [];
+        const scaleX = size.width / frame.width;
+        const scaleY = size.height / frame.height;
+        return Array.from(scope.querySelectorAll('[data-plan-overlay]'))
+            .map(function (element) {
+                const box = element.getBoundingClientRect();
+                if (!box || !(box.width > 0) || !(box.height > 0)) return null;
+                return {
+                    minX: (box.left - frame.left) * scaleX - 4,
+                    minY: (box.top - frame.top) * scaleY - 4,
+                    maxX: (box.right - frame.left) * scaleX + 4,
+                    maxY: (box.bottom - frame.top) * scaleY + 4,
+                };
+            })
+            .filter(Boolean);
     }
 
     function categorySymbol(value) {
@@ -1077,7 +1148,9 @@
         return path;
     }
 
-    function appendPlanEnvironment(documentRef, parent, projection, options) {
+    // reservedRects, when given, receives the screen boxes of text drawn here
+    // that zone labels must not cover.
+    function appendPlanEnvironment(documentRef, parent, projection, options, reservedRects) {
         const bounds = normalizedPlanWorldBounds(options);
         const grid = normalizedPlanGrid(options, bounds);
         if (!bounds || !grid) return null;
@@ -1225,6 +1298,21 @@
                     'aria-hidden': 'true',
                 }, planDisplayDimension(z, options));
             });
+            if (Array.isArray(reservedRects)) {
+                // The 10 px axis numbers: a strip below the floor (baselines 15 px
+                // under its edge) and one left of it (right-aligned 7 px out).
+                reservedRects.push({
+                    minX: topLeft.x - 12,
+                    minY: bottomRight.y + 5,
+                    maxX: bottomRight.x + 12,
+                    maxY: bottomRight.y + 19,
+                }, {
+                    minX: topLeft.x - 36,
+                    minY: topLeft.y - 7,
+                    maxX: topLeft.x - 4,
+                    maxY: bottomRight.y + 7,
+                });
+            }
         }
         appendSvgText(documentRef, parent, {
             class: 'ip-flw-plan-axis-label ip-flw-plan-axis-label-x',
@@ -1242,6 +1330,12 @@
             'pointer-events': 'none',
             'aria-hidden': 'true',
         }, '+Z');
+        const caption = planDisplayDimension(bounds.maxX - bounds.minX, options) + ' x '
+            + planDisplayDimension(bounds.maxZ - bounds.minZ, options) + ' '
+            + normalizedPlanDisplayUnit(options) + (gridVisible
+                ? ' | Grid ' + planDisplayDimension(grid.spacing, options)
+                    + ' ' + normalizedPlanDisplayUnit(options)
+                : ' | Grid hidden');
         appendSvgText(documentRef, parent, {
             class: 'ip-flw-plan-grid-caption',
             x: topLeft.x + 7,
@@ -1252,12 +1346,16 @@
             tabindex: '0',
             'data-plan-settings-trigger': 'dimensions',
             'aria-label': 'Edit facility dimensions and grid spacing',
-        }, planDisplayDimension(bounds.maxX - bounds.minX, options) + ' x '
-            + planDisplayDimension(bounds.maxZ - bounds.minZ, options) + ' '
-            + normalizedPlanDisplayUnit(options) + (gridVisible
-                ? ' | Grid ' + planDisplayDimension(grid.spacing, options)
-                    + ' ' + normalizedPlanDisplayUnit(options)
-                : ' | Grid hidden'));
+        }, caption);
+        if (Array.isArray(reservedRects)) {
+            // 11 px semibold text, about 5 px a character; the box allows 5.6.
+            reservedRects.push({
+                minX: topLeft.x + 4,
+                minY: topLeft.y,
+                maxX: topLeft.x + 10 + caption.length * 5.6,
+                maxY: topLeft.y + 18,
+            });
+        }
         return {
             bounds: Object.assign({}, bounds),
             spacing: grid.spacing,
@@ -2186,6 +2284,9 @@
     TopPlanAdapter.prototype._render = function () {
         if (this.disposed || this.suspended || !this.svg) return;
         const size = this._measure();
+        // Areas zone labels must not cover. The floating controls are measured
+        // here, before the plan is rebuilt, while the page layout is current.
+        const reservedLabelRects = planOverlayRects(this.svg, size);
         setAttributes(this.svg, {
             viewBox: '0 0 ' + size.width + ' ' + size.height,
         });
@@ -2229,7 +2330,8 @@
             this.document,
             environmentLayer,
             this.projection,
-            environmentOptions
+            environmentOptions,
+            reservedLabelRects
         );
         this.svg.appendChild(environmentLayer);
 
@@ -2851,18 +2953,16 @@
             const fullLabel = String(zone.label || zone.zoneId || 'Zone');
             const displayLabel = fullLabel.length > 42
                 ? fullLabel.slice(0, 39) + '...' : fullLabel;
-            const labelSize = {
-                width: Math.max(
-                    72,
-                    Math.min(236, displayLabel.length * 6.5 + 22)
-                ),
-                height: 23,
-            };
+            const lines = zoneLabelLines(
+                displayLabel,
+                projectedPointBounds(zone.points, this.projection)
+            );
+            const labelSize = zoneLabelSize(lines);
             const labelRect = zoneLabelScreenRect(
                 zone,
                 this.projection,
                 labelObstacles,
-                occupiedLabels,
+                occupiedLabels.concat(reservedLabelRects),
                 labelSize
             );
             if (!selected && labelRect.labelOverlapArea > 1) {
@@ -2874,6 +2974,7 @@
             setAttributes(labelGroup, {
                 'data-zone-label-for': zone.zoneId,
                 'data-zone-label-edge': labelRect.edge,
+                'data-zone-label-lines': String(lines.length),
                 'data-zone-presentation-layer': zonePresentationLayer(zone),
             });
             const labelBackground = svgElement(this.document, 'rect');
@@ -2899,7 +3000,20 @@
                 'font-size': '11',
                 'font-weight': '700',
             });
-            labelText.textContent = displayLabel;
+            if (lines.length === 1) {
+                labelText.textContent = displayLabel;
+            } else {
+                lines.forEach(function (line, index) {
+                    const span = svgElement(this.document, 'tspan');
+                    setAttributes(span, {
+                        x: labelRect.minX + 11,
+                        dy: index ? '13' : '0',
+                    });
+                    // The trailing space keeps the words apart in the text.
+                    span.textContent = index < lines.length - 1 ? line + ' ' : line;
+                    labelText.appendChild(span);
+                }, this);
+            }
             labelGroup.appendChild(labelBackground);
             labelGroup.appendChild(labelText);
             zoneLabelLayer.appendChild(labelGroup);

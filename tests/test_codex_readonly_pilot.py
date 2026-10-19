@@ -707,3 +707,27 @@ def test_pilot_lifecycle_journals_results_without_replaying(host, tmp_path, monk
     with Journal(settings.root).db() as db:
         assert db.execute("SELECT status FROM turns").fetchone()[0] == {
             "success": "completed", "cancel": "interrupted", "timeout": "failed", "no_evidence": "completed"}[outcome]
+
+
+def test_edit_instructions_keep_answers_short_and_name_zone_types_that_reject_placements():
+    from ai_inspector.codex_runtime.pilot import EDIT_INSTRUCTIONS
+    from ai_inspector.facility_layout.g1_planner import G1_ZONE_TYPES
+    from ai_inspector.facility_layout.spatial import _NON_PLACEMENT_ZONE_TYPES
+    text = " ".join(EDIT_INSTRUCTIONS.split())
+    # Sage echoed the old wording back to users as "The app will report whether it saved".
+    assert "the app reports the actual save result" not in text
+    for rule in ("Lead with the outcome in one sentence", "not raw coordinates",
+                 "do not narrate routine checks", "Stay under 120 words",
+                 # Repeated every turn in the 2026-10-18 demo dry run.
+                 "Do not add Gaps, Open items, Unverified or Site review sections",
+                 "state the direction as fact",
+                 # A room wall along the outer wall sealed the staff entrance (2026-10-18).
+                 "Never close an existing door or walkway with a wall"):
+        assert rule in text
+    # Furniture placed in operator or service zones was rejected batch after batch.
+    def names(phrase):
+        return set(phrase.replace(" and ", ", ").replace(" or ", ", ").split(", "))
+    rejecting = text.split("Zone types ", 1)[1].split(" reject every placement", 1)[0]
+    accepting = text.split("maintenance, in ", 1)[1].split(" zones.", 1)[0]
+    assert names(rejecting) == set(_NON_PLACEMENT_ZONE_TYPES)
+    assert names(accepting) == set(G1_ZONE_TYPES) - set(_NON_PLACEMENT_ZONE_TYPES)

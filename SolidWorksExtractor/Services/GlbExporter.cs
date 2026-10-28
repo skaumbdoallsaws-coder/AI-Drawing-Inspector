@@ -195,6 +195,8 @@ namespace SolidWorksExtractor.Services
             // features stay single-sided -- the solid hull dominates visually
             // and double-siding it can darken interior shading.
             public bool IsSheetBody;
+            // The CAD faces of the feature's mesh, each one unbroken run of its triangles (as MeshData.Faces).
+            public List<FaceRun> Faces = new List<FaceRun>();
         }
 
         /// <summary>
@@ -574,6 +576,7 @@ namespace SolidWorksExtractor.Services
                         // Sequential indices
                         for (uint i = 0; i < (uint)vertexCount; i++)
                             meshData.Indices.Add(indexOffset + i);
+                        meshData.Faces.Add(DescribeFace(f, (int)(indexOffset / 3), vertexCount / 3));
                         indexOffset += (uint)vertexCount;
                     }
 
@@ -1222,6 +1225,7 @@ namespace SolidWorksExtractor.Services
                 sb.Append(",\"NORMAL\":").Append(normAccessor).Append("}");
                 sb.Append(",\"indices\":").Append(idxAccessor);
                 sb.Append(",\"material\":").Append(i);
+                AppendFaceExtras(sb, meshes[i].Faces);
                 sb.Append("}]}");
             }
             sb.Append("],");
@@ -2265,15 +2269,15 @@ namespace SolidWorksExtractor.Services
         /// features named once, then one row per face of [first triangle, triangle count, kind, feature,
         /// radius]. Each face's triangles are one unbroken run, in the order they were appended.
         /// </summary>
-        private void AppendFaceExtras(StringBuilder sb, MeshData mesh)
+        private void AppendFaceExtras(StringBuilder sb, List<FaceRun> faces)
         {
-            if (mesh.Faces == null || mesh.Faces.Count == 0) return;
+            if (faces == null || faces.Count == 0) return;
             var kinds = new List<string>();
             var features = new List<string>();
             var kindIndex = new Dictionary<string, int>(StringComparer.Ordinal);
             var featureIndex = new Dictionary<string, int>(StringComparer.Ordinal);
             var rows = new StringBuilder();
-            foreach (var face in mesh.Faces)
+            foreach (var face in faces)
             {
                 string kind = face.Kind ?? "other";
                 string feature = face.Feature ?? "";
@@ -2455,7 +2459,7 @@ namespace SolidWorksExtractor.Services
                 sb.Append(",\"NORMAL\":").Append(normAccessor).Append("}");
                 sb.Append(",\"indices\":").Append(idxAccessor);
                 sb.Append(",\"material\":").Append(i);
-                AppendFaceExtras(sb, meshes[i]);
+                AppendFaceExtras(sb, meshes[i].Faces);
                 sb.Append("}]}");
             }
             sb.Append("],");

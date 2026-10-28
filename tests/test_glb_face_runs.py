@@ -13,6 +13,8 @@ LIBRARY = REPO / "generated" / "industrial_assets" / "local_library"
 # Re-exported with face runs on 2026-10-26.
 FACE_MACHINES = ("asset-abb-irb6650-robot", "asset-mobile-lift-mmle-50d", "asset-forklift-telescopic-red",
                  "asset-fanuc-14tes2-robot")
+# The engine parts of the 3D Model tab (per-feature GLBs), re-exported with face runs on 2026-10-28.
+FACE_PARTS = ("100002", "100003", "100004", "100005", "100006", "100007", "100008", "100009")
 KINDS = {"plane", "cylinder", "cone", "sphere", "torus", "other"}
 
 
@@ -84,7 +86,18 @@ def test_re_exported_machines_carry_face_runs(asset_id: str) -> None:
     assert len(faces) > 100
 
 
+@pytest.mark.parametrize("number", FACE_PARTS)
+def test_re_exported_parts_carry_face_runs(number: str) -> None:
+    for path in (REPO / "400S_Sorted_Library" / "parts" / number / "revA" / f"{number}_colored.glb",
+                 REPO / "400S_Sorted_Library" / f"{number}_colored.glb"):
+        document = _gltf(path)
+        assert document["asset"].get("generator") == "SolidWorksExtractor-PartFeature"
+        assert face_run_problems(document) == []
+
+
 def test_the_exporter_writes_face_runs() -> None:
     source = (REPO / "SolidWorksExtractor" / "Services" / "GlbExporter.cs").read_text(encoding="utf-8")
-    assert "AppendFaceExtras(sb, meshes[i]);" in source
+    # Assemblies and machines, then a part's features.
+    assert source.count("AppendFaceExtras(sb, meshes[i].Faces);") == 2
     assert source.count("faces.Add(DescribeFace(face,") == 3
+    assert "meshData.Faces.Add(DescribeFace(f, (int)(indexOffset / 3), vertexCount / 3));" in source

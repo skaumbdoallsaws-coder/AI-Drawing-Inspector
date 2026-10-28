@@ -31,6 +31,8 @@
         'delete_wall_artwork',
         'replace_asset',
         'place_asset',
+        'place_asset_array',
+        'delete_asset_array',
         'move_placement',
         'rotate_placement',
         'duplicate_placement',
@@ -131,6 +133,10 @@
             obstructedAisleCount: count(spatial, 'obstructedAisleCount'),
             blockedRouteCount: count(routing, 'blockedCount'),
             routingErrorCount: count(routing, 'errorCount'),
+            ...(validation.siteContext ? {
+                siteFindingCount: count(validation.siteContext, 'findingCount')
+                    ?? (validation.siteContext.findings || []).length,
+            } : {}),
         };
     }
 
@@ -2780,7 +2786,10 @@
             if (receiptId && selected.strategy === 'exact-operations-v1') {
                 lastApprovedOperationCommit = { receiptId, revision: baseRevision,
                     siteId: baseLayout.association && baseLayout.association.siteId,
-                    layoutId: baseLayout.layoutId, editorGenerationId, directApply: true };
+                    layoutId: baseLayout.layoutId, editorGenerationId, directApply: true,
+                    // What it changed, so the workspace can show it where its review would have opened.
+                    operationNames: (selected.operations || []).map(function (operation) {
+                        return operation && operation.op; }).slice(0, 1000) };
             }
             selectedIds = selectedIdsInLayout(draftLayout, savedSelection);
             lastError = null;
@@ -4736,16 +4745,128 @@
             return commitGesture('Replace asset', [replacementOperation(placementId,asset)], 'preserve');
         }
 
-        async function setSelectedAppearance(color) {
-            if (color !== null && (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color))) {
+        async function setSelectedAppearance(value) {
+            return setPlacementsAppearance(selectedPlacements().map(function (placement) {
+                return placement.placementId;
+            }), value);
+        }
+
+        // One finish on whole placements: a hex color (the original form), a
+        // library or custom finish object, or null to restore the asset's own
+        // finish. Placements that already match are left out of the edit.
+        async function setPlacementsAppearance(placementIds, value) {
+            requireLoaded();
+            const finish = value !== null && typeof value === 'object';
+            if (value !== null && !finish && (typeof value !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(value))) {
                 throw new TypeError('Color must be a six-digit hex color or null');
             }
-            const ids = selectedPlacements().filter(function (placement) {
-                return (placement.appearance && placement.appearance.color || null)
-                    !== (color && color.toLowerCase());
+            if (finish && (typeof value.appearanceId !== 'string' || !value.appearanceId)) {
+                throw new TypeError('A finish needs an appearanceId');
+            }
+            const wanted = value === null ? null : finish ? clone(value) : { color: value.toLowerCase() };
+            const known = new Set((Array.isArray(placementIds) ? placementIds : []).map(String));
+            const ids = draftLayout.placements.filter(function (placement) {
+                return known.has(placement.placementId)
+                    && JSON.stringify(placement.appearance || null) !== JSON.stringify(wanted);
             }).map(function (placement) { return placement.placementId; });
-            return commitGesture(color === null ? 'Reset appearance' : 'Change appearance',
-                ids.length ? [{ op: 'set_appearance', placementIds: ids, color: color }] : [], 'preserve');
+            const operation = finish
+                ? { op: 'set_appearance', placementIds: ids, appearance: wanted }
+                : { op: 'set_appearance', placementIds: ids, color: value };
+            return commitGesture(value === null ? 'Reset appearance' : 'Change appearance',
+                ids.length ? [operation] : [], 'preserve');
+        }
+
+        async function setCustomAppearances(appearances) {
+            return commitGesture('Edit custom finishes',
+                [{ op: 'set_custom_appearances', appearances: clone(appearances) }], 'preserve');
+        }
+
+        async function setViewportScene(scene) {
+            return commitGesture(scene ? 'Change scene' : 'Reset scene',
+                [{ op: 'set_scene', scene: scene ? clone(scene) : null }], 'preserve');
+        }
+
+        // Site context: where the layout sits on the Earth, and its aerial imagery.
+        async function setSiteContext(siteContext, gestureLabel) {
+            return commitGesture(siteContext ? (gestureLabel || 'Place on a site') : 'Remove site',
+                [{ op: 'set_site_context', siteContext: siteContext ? clone(siteContext) : null }], 'preserve');
+        }
+
+        async function fetchSiteImagery(payload, requestOptions) {
+            requireLoaded();
+            if (typeof options.fetchSiteImagery !== 'function') throw new Error('Site imagery is unavailable.');
+            return options.fetchSiteImagery(payload, requestOptions);
+        }
+
+        async function setBuildingPose(pose) {
+            return commitGesture('Position building on site', [{ op: 'set_building_pose', buildingPose: clone(pose) }], 'preserve');
+        }
+
+        async function fetchSiteParcel(payload, requestOptions) {
+            requireLoaded();
+            if (typeof options.fetchSiteParcel !== 'function') throw new Error('Parcel lookup is unavailable.');
+            return options.fetchSiteParcel(payload, requestOptions);
+        }
+
+        // Trace a paved feature on the stored photo, at a point or inside a box, for the current draft.
+        async function traceSitePhoto(request, requestOptions) {
+            requireLoaded();
+            if (typeof options.traceSitePhoto !== 'function') throw new Error('Tracing is unavailable.');
+            return options.traceSitePhoto(Object.assign({ layout: clone(draftLayout) }, request), requestOptions);
+        }
+
+        async function fetchSiteRoads(payload, requestOptions) {
+            requireLoaded();
+            if (typeof options.fetchSiteRoads !== 'function') throw new Error('Roads are unavailable.');
+            return options.fetchSiteRoads(payload, requestOptions);
+        }
+
+        async function fetchSiteOverlay(payload, requestOptions) {
+            requireLoaded();
+            if (typeof options.fetchSiteOverlay !== 'function') throw new Error('Reference layers are unavailable.');
+            return options.fetchSiteOverlay(payload, requestOptions);
+        }
+
+        async function checkSiteLayers(requestOptions) {
+            requireLoaded();
+            if (typeof options.checkSiteLayers !== 'function') throw new Error('Layer checks are unavailable.');
+            return options.checkSiteLayers({ layout: clone(draftLayout) }, requestOptions);
+        }
+
+        async function analyzeSiteContext(requestOptions, representedLayout) {
+            requireLoaded();
+            if (typeof options.analyzeSiteContext !== 'function') throw new Error('Site analysis is unavailable.');
+            const layout = representedLayout || draftLayout;
+            if (layout.layoutId !== draftLayout.layoutId ||
+                (layout.association && layout.association.siteId) !== (draftLayout.association && draftLayout.association.siteId)) {
+                throw new Error('Site analysis belongs to another layout.');
+            }
+            return options.analyzeSiteContext({ layout: clone(layout) }, requestOptions);
+        }
+
+        async function upsertSiteArea(area) {
+            return commitGesture('Edit outdoor area', [{ op: 'upsert_site_area', area: clone(area) }], 'preserve');
+        }
+
+        async function deleteSiteArea(areaId) {
+            return commitGesture('Delete outdoor area', [{ op: 'delete_site_area', areaId: areaId }], 'preserve');
+        }
+
+        async function geocodeAddress(address, requestOptions) {
+            requireLoaded();
+            if (typeof options.geocodeAddress !== 'function') throw new Error('Address lookup is unavailable.');
+            return options.geocodeAddress(address, requestOptions);
+        }
+
+        async function prefetchSiteGlobe(payload, requestOptions) {
+            requireLoaded();
+            if (typeof options.prefetchSiteGlobe !== 'function') throw new Error('The globe is unavailable.');
+            return options.prefetchSiteGlobe(payload, requestOptions);
+        }
+
+        async function setEquipmentDecals(decals) {
+            return commitGesture('Edit equipment decals',
+                [{ op: 'set_equipment_decals', decals: clone(decals) }], 'preserve');
         }
 
         async function setSelectedLocked(locked) {
@@ -5386,6 +5507,23 @@
             deleteSelected: deleteSelected,
             lockSelected: function () { return setSelectedLocked(true); },
             setSelectedAppearance: setSelectedAppearance,
+            setPlacementsAppearance: setPlacementsAppearance,
+            setCustomAppearances: setCustomAppearances,
+            setViewportScene: setViewportScene,
+            setSiteContext: setSiteContext,
+            setBuildingPose: setBuildingPose,
+            upsertSiteArea: upsertSiteArea,
+            deleteSiteArea: deleteSiteArea,
+            analyzeSiteContext: analyzeSiteContext,
+            fetchSiteImagery: fetchSiteImagery,
+            fetchSiteParcel: fetchSiteParcel,
+            fetchSiteRoads: fetchSiteRoads,
+            traceSitePhoto: traceSitePhoto,
+            fetchSiteOverlay: fetchSiteOverlay,
+            checkSiteLayers: checkSiteLayers,
+            geocodeAddress: geocodeAddress,
+            prefetchSiteGlobe: prefetchSiteGlobe,
+            setEquipmentDecals: setEquipmentDecals,
             setComponentMaterials: setComponentMaterials,
             setInteriorWalls: setInteriorWalls,
             setFloorSurfaces: setFloorSurfaces,

@@ -112,3 +112,39 @@ test('read-only, busy, conflicted and preview states cannot edit walls', () => {
     workspace.generationPlanningView=null;workspace.capabilities.manualAuthoring=false;
     assert.equal(walls.canEdit(workspace),false);
 });
+
+test('a band runs level round every wall over the panels and stops at doors',()=>{
+    const finish={color:'#06b6d4',jointColor:'#16191b',panelWidthMeters:2,panelHeightMeters:1.2,jointWidthMeters:.012,
+        bands:[{bottomMeters:9,heightMeters:1,color:'#ffffff'}]};
+    const layout={extensions:{facilityPlan:{widthMeters:10,depthMeters:8},facilityPerimeterWalls:{version:1,settings:{
+        boundarySource:'plan',heightMeters:10,thicknessMeters:.3,openings:[{edge:0,startMeters:4,endMeters:6}],exteriorFinish:finish}}}};
+    const surfaces=walls.exteriorSurfaces(layout),bands=surfaces.filter(s=>s.color==='#ffffff');
+    assert.deepEqual([...new Set(bands.map(s=>s.edge))].sort(),[0,1,2,3]);
+    assert.equal(bands.filter(s=>s.edge===0).length,2);  // either side of the door
+    assert.ok(bands.every(s=>Math.abs(s.y-9.5)<1e-9&&s.height===1));
+    assert.ok(bands.filter(s=>s.edge===0).every(s=>s.x+s.width/2<=4.00001||s.x-s.width/2>=5.99999));
+    const panel=surfaces.find(s=>s.edge===0&&s.color==='#06b6d4');
+    assert.ok(Math.abs(bands[0].z)>Math.abs(panel.z));  // drawn just outside the panels
+    delete finish.bands;
+    assert.equal(walls.exteriorSurfaces(layout).filter(s=>s.color==='#ffffff').length,0);
+});
+
+test('a door with a head height keeps the wall above it: a header volume, and panels and bands over the door',()=>{
+    const finish={color:'#06b6d4',jointColor:'#111111',panelWidthMeters:2,panelHeightMeters:1.2,jointWidthMeters:.012,
+        bands:[{bottomMeters:9,heightMeters:1,color:'#ffffff'}]};
+    const layout={extensions:{facilityPlan:{widthMeters:20,depthMeters:10},facilityPerimeterWalls:{version:1,panels:[],
+        settings:{boundarySource:'plan',heightMeters:10,thicknessMeters:.3,exteriorFinish:finish,
+            openings:[{edge:0,startMeters:4,endMeters:7,heightMeters:3.05},{edge:0,startMeters:10,endMeters:12}]}}}};
+    const heads=walls.volumes(layout,0).filter(v=>v.id.startsWith('layout-perimeter-header-'));
+    assert.equal(heads.length,1);  // only the door with a head height
+    assert.equal(heads[0].minimumY,3.05);
+    assert.equal(heads[0].maximumY,10);
+    const xs=heads[0].polygon.map(p=>p.x),zs=heads[0].polygon.map(p=>p.z);
+    assert.deepEqual([Math.min(...xs),Math.max(...xs)],[4,7]);
+    assert.ok(Math.abs(Math.min(...zs)+.15)<1e-9&&Math.abs(Math.max(...zs)-.15)<1e-9);  // the wall's full thickness
+    const front=walls.exteriorSurfaces(layout).filter(s=>s.edge===0);
+    const overDoor=front.filter(s=>s.x>4&&s.x<7);
+    assert.ok(overDoor.length&&overDoor.every(s=>s.y-s.height/2>=3.05-1e-9));  // nothing below the door head
+    assert.ok(overDoor.some(s=>s.color==='#ffffff'));  // the band runs on over the door
+    assert.ok(!front.some(s=>s.x>10&&s.x<12));  // a full-height opening stays open
+});

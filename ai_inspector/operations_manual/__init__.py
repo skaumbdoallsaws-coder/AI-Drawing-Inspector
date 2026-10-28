@@ -8,6 +8,7 @@ from .document import (
 from .artifacts import (
     OperationsManualArtifactError,
     attach_draft_render_artifacts,
+    carry_draft_render_artifacts,
     draft_render_path,
     store_draft_render_artifact,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "OperationsManualExportError",
     "assert_pages_within_bounds",
     "attach_draft_render_artifacts",
+    "carry_draft_render_artifacts",
     "build_operations_manual_document",
     "publication_layout",
     "prototype_export_path",

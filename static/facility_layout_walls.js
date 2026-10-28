@@ -6,10 +6,32 @@
     'use strict';
     function data(layout) { return layout && layout.extensions && layout.extensions.facilityPerimeterWalls; }
     function interiorWalls(layout) { return layout?.extensions?.facilityInteriorWalls?.walls || []; }
+    function outline(layout, settings) {
+        const plan = layout.extensions.facilityPlan;
+        return settings.boundarySource === 'polygon' ? settings.boundary
+            : [{x:0,z:0},{x:plan.widthMeters,z:0},{x:plan.widthMeters,z:plan.depthMeters},{x:0,z:plan.depthMeters}];
+    }
+    // A door opening with a height keeps the wall above it: a header from the door head to the top of the wall.
+    function doorHeads(layout, settings) {
+        const doors = (settings.openings || []).filter(o => o.heightMeters < settings.heightMeters);
+        const plan = layout && layout.extensions && layout.extensions.facilityPlan;
+        if (!doors.length || (settings.boundarySource !== 'polygon' && !plan)) return [];
+        const boundary = outline(layout, settings), half = settings.thicknessMeters / 2;
+        return doors.map(o => {
+            const a = boundary[o.edge], b = boundary[(o.edge + 1) % boundary.length];
+            const length = Math.hypot(b.x - a.x, b.z - a.z), tx = (b.x - a.x) / length, tz = (b.z - a.z) / length;
+            const at = (t, side) => ({x: a.x + tx * t - tz * half * side, z: a.z + tz * t + tx * half * side});
+            return {polygon: [at(o.startMeters, 1), at(o.endMeters, 1), at(o.endMeters, -1), at(o.startMeters, -1)],
+                bottom: o.heightMeters};
+        });
+    }
     function volumes(layout, floorY=0) {
         const value=data(layout), result=value&&value.version===1?value.panels.map((polygon,index)=>({
             id:'layout-perimeter-wall-'+index,placementId:'layout-perimeter-wall-'+index,polygon,
             minimumY:floorY,maximumY:floorY+value.settings.heightMeters,color:'#b0bac1'})):[];
+        if (value && value.version === 1) doorHeads(layout, value.settings).forEach((head, index) => result.push({
+            id:'layout-perimeter-header-'+index,placementId:'layout-perimeter-header-'+index,polygon:head.polygon,
+            minimumY:floorY+head.bottom,maximumY:floorY+value.settings.heightMeters,color:'#b0bac1'}));
         interiorWalls(layout).forEach(wall=>wall.panels.forEach((polygon,index)=>{
             const id='layout-interior-wall-'+wall.wallId+'-'+index;
             result.push({id,placementId:id,polygon,minimumY:wall.baseElevation,maximumY:wall.baseElevation+wall.heightMeters,color:wall.color});
@@ -40,26 +62,31 @@
             const nx = direction*tz, nz = -direction*tx;
             surfaces.push(Object.assign({x:a.x+tx*(start+width/2)+nx*(thickness+offset),
                 z:a.z+tz*(start+width/2)+nz*(thickness+offset),y:bottom+h/2,
-                width,height:h,nx,nz,color,edge},extra));
+                width,height:h,nx,nz,color,edge,offset},extra));
         }
         boundary.forEach((a, edge) => {
             const b=boundary[(edge+1)%boundary.length],length=Math.hypot(b.x-a.x,b.z-a.z);
             const openings=settings.openings.filter(o=>o.edge===edge).sort((a,b)=>a.startMeters-b.startMeters);
+            // Wall spans start at the ground; a door with a head height leaves the wall above it as a span too.
             const spans=[];let cursor=-thickness;
-            openings.forEach(o=>{if(o.startMeters>cursor)spans.push([cursor,o.startMeters]);cursor=o.endMeters;});
-            if(cursor<length+thickness)spans.push([cursor,length+thickness]);
-            spans.forEach(([start,end])=>{
-                if(settings.interiorColor)rect(edge,start,end-start,0,height,settings.interiorColor,.002,{},'interior');
+            openings.forEach(o=>{if(o.startMeters>cursor)spans.push([cursor,o.startMeters,0]);cursor=o.endMeters;
+                if(o.heightMeters<height)spans.push([o.startMeters,o.endMeters,o.heightMeters]);});
+            if(cursor<length+thickness)spans.push([cursor,length+thickness,0]);
+            spans.forEach(([start,end,bottom])=>{
+                if(settings.interiorColor)rect(edge,start,end-start,bottom,height-bottom,settings.interiorColor,.002,{},'interior');
                 if(!finish)return;
-                rect(edge,start,end-start,0,height,finish.jointColor,.001);
+                rect(edge,start,end-start,bottom,height-bottom,finish.jointColor,.001);
                 const gap=finish.jointWidthMeters/2;
                 for(let x=Math.floor(start/finish.panelWidthMeters)*finish.panelWidthMeters;x<end;x+=finish.panelWidthMeters) {
                     const left=Math.max(start,x)+gap,right=Math.min(end,x+finish.panelWidthMeters)-gap;
                     for(let y=0;y<height;y+=finish.panelHeightMeters) {
-                        const top=Math.min(height,y+finish.panelHeightMeters)-gap;
-                        if(right>left&&top>y+gap)rect(edge,left,right-left,y+gap,top-y-gap,finish.color);
+                        const low=Math.max(y,bottom)+gap,top=Math.min(height,y+finish.panelHeightMeters)-gap;
+                        if(right>left&&top>low)rect(edge,left,right-left,low,top-low,finish.color);
                     }
                 }
+                // Level bands run round the perimeter over the panels, broken only by door openings.
+                (finish.bands||[]).forEach(band=>{const low=Math.max(band.bottomMeters,bottom),high=band.bottomMeters+band.heightMeters;
+                    if(high>low)rect(edge,start,end-start,low,high-low,band.color,.004);});
             });
         });
         if(!finish)return surfaces;
@@ -229,7 +256,7 @@
                 start.max = end.max = Math.hypot(b.x-a.x,b.z-a.z); }
             limit(); edge.addEventListener('change', limit);
             const remove = el('button', { type: 'button', title: 'Remove opening', 'aria-label': 'Remove opening' }, 'x');
-            const entry = { edge, start, end };
+            const entry = { edge, start, end, heightMeters: value.heightMeters };  // a door keeps its head height
             remove.addEventListener('click', () => { openings = openings.filter(item => item !== entry); row.remove(); });
             row.append(edge, start, end, remove); rows.appendChild(row); openings.push(entry);
         }
@@ -266,7 +293,8 @@
             try {
                 const value = { boundarySource: source.value === 'plan' ? 'plan' : 'polygon',
                     heightMeters: Number(height.value), thicknessMeters: Number(thickness.value),
-                    openings: openings.map(item => ({edge:Number(item.edge.value),startMeters:Number(item.start.value),endMeters:Number(item.end.value)})) };
+                    openings: openings.map(item => Object.assign({edge:Number(item.edge.value),startMeters:Number(item.start.value),
+                        endMeters:Number(item.end.value)}, typeof item.heightMeters === 'number' ? {heightMeters:item.heightMeters} : {})) };
                 if (legacyPerimeter && value.boundarySource === 'plan')
                     throw new Error('This layout already has placed perimeter walls. Remove those assets before creating another perimeter.');
                 if (value.boundarySource === 'polygon') value.boundary = boundary();

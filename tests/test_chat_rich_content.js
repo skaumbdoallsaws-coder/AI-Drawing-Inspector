@@ -193,4 +193,65 @@ test('retained research sources do not acquire inferred publishers or favicon UR
     assert.deepStrictEqual(twice.specifications, raw.specifications);
 });
 
+test('a file card links only to an app file and opens it outside the chat', () => {
+    const [card] = rich.normalizeBlocks([{ type: 'file', fileName: 'Bayport warehouse - layout plan.pdf',
+        url: '/api/facility-layouts/site-local/fl-a/plan.pdf?revision=r-1', mimeType: 'application/pdf',
+        detail: 'PDF - 3 sheets' }]);
+    assert.deepStrictEqual(card, { type: 'file', fileName: 'Bayport warehouse - layout plan.pdf',
+        url: '/api/facility-layouts/site-local/fl-a/plan.pdf?revision=r-1', detail: 'PDF - 3 sheets',
+        mimeType: 'application/pdf' });
+    for (const url of ['https://example.com/a.pdf', '//example.com/a.pdf', 'javascript:alert(1)', '/generated/a.pdf']) {
+        assert.strictEqual(rich.normalizeBlocks([{ type: 'file', fileName: 'a.pdf', url }]).length, 0);
+    }
+    const made = [];
+    const node = tag => { const item = { tagName: tag, children: [], style: { setProperty() {} },
+        setAttribute(key, value) { this[key] = value; }, appendChild(child) { this.children.push(child); return child; } };
+        made.push(item); return item; };
+    const rendered = rich.renderBlock({ createElement: node, createTextNode: text => ({ text }) }, card);
+    const link = made.find(item => item.className === 'agent-file-card');
+    assert.ok(rendered && link && link.href === card.url && link.target === '_blank' && link.rel === 'noopener');
+});
+
+test('a link to a public page shows its text, an arrow and a chip with the site icon and domain', () => {
+    const html = rich.renderMarkdownHtml('Read [the ST-30 specs](https://legacy-aem.haascnc.com/st-30.html?a=1&b=2), '
+        + 'the [Review PDF](/api/specification-sheet/x/pdf) and [a trap](javascript:alert(1)).');
+    assert.ok(html.includes('<a class="agent-link" href="https://legacy-aem.haascnc.com/st-30.html?a=1&amp;b=2" '
+        + 'target="_blank" rel="noopener noreferrer">the ST-30 specs</a><span class="agent-link-arrow"'));
+    // The icon comes from the link's own origin, never a third-party favicon service.
+    assert.ok(html.includes('<img src="https://legacy-aem.haascnc.com/favicon.ico" alt="" referrerpolicy="no-referrer"'));
+    assert.ok(html.includes('data-initial="L"') && html.includes('<span class="agent-link-site">legacy-aem.haascnc.com</span>'));
+    // A host without its own icon tries its parent domain once, never a two-part public suffix.
+    assert.ok(html.includes('data-next="https://haascnc.com/favicon.ico"'));
+    assert.ok(!rich.renderMarkdownHtml('[x](https://www.m-sankyo.co.jp/a)').includes('data-next="https://co.jp'));
+    assert.ok(html.includes('<a href="/api/specification-sheet/x/pdf">Review PDF</a>'));
+    assert.strictEqual((html.match(/agent-link-chip/g) || []).length, 1);
+    assert.ok(!html.includes('javascript:'));
+});
+
+test('a research source card shows its link as the same text, arrow and site chip, never a raw address', () => {
+    const [block] = rich.normalizeBlocks([{ type: 'sources', title: 'Research sources (unreviewed)', sources: [
+        { url: 'https://assets.mach4metal.com/machines/129/brochures/mori-seiki-cl-200-6882.pdf?id=642b',
+          title: 'https://assets.mach4metal.com/machines/129/brochures/mori-seiki-cl-200-6882.pdf?id=642b',
+          inferIdentity: false, specifications: { Retrieval: 'Search discovery only', Review: 'Pending' } },
+        { url: 'https://www.haascnc.com/machines/lathes/st/models/st-30.html', title: 'ST-30 | Haas CNC',
+          inferIdentity: false }] }]);
+    const made = [];
+    const node = tag => { const item = { tagName: tag, children: [], style: { setProperty() {} },
+        setAttribute(key, value) { this[key] = value; }, appendChild(child) { this.children.push(child); return child; },
+        addEventListener() {} };
+        made.push(item); return item; };
+    rich.renderBlock({ createElement: node, createTextNode: text => ({ text }) }, block);
+    const titles = made.filter(item => item.className === 'agent-source-title').map(item => item.innerHTML);
+    assert.strictEqual(titles.length, 2);
+    assert.ok(titles[0].startsWith('<a class="agent-link" href="https://assets.mach4metal.com/machines/129/brochures/'
+        + 'mori-seiki-cl-200-6882.pdf?id=642b" target="_blank" rel="noopener noreferrer">Mori seiki cl 200 6882 (PDF)</a>'));
+    assert.ok(titles[0].includes('<span class="agent-link-site">assets.mach4metal.com</span>'));
+    assert.ok(titles[1].includes('>ST-30 | Haas CNC</a>') && titles[1].includes('haascnc.com/favicon.ico'));
+    // The chip is the link: no letter badge and no separate View source button.
+    assert.ok(!made.some(item => item.className === 'agent-source-identity'));
+    assert.ok(!made.some(item => item.textContent === 'View source'));
+    assert.ok(made.some(item => item.tagName === 'dl' && item.className === 'agent-source-specs'));
+    assert.strictEqual(rich.linkLabel('https://us.dmgmori.com/', 'https://us.dmgmori.com/'), 'us.dmgmori.com');
+});
+
 console.log(passed + ' passed, ' + (process.exitCode ? 1 : 0) + ' failed');

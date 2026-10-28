@@ -1,0 +1,869 @@
+{
+  "schemaVersion": 1,
+  "libraryVersion": "2026.10.25.2",
+  "notes": "Safety signs are visual layout aids. Check site requirements and current ISO 7010 editions before relying on them.",
+  "groups": [
+    {
+      "groupId": "warning",
+      "label": "Warning signs"
+    },
+    {
+      "groupId": "mandatory",
+      "label": "Mandatory action signs"
+    },
+    {
+      "groupId": "prohibition",
+      "label": "Prohibition signs"
+    },
+    {
+      "groupId": "emergency",
+      "label": "Emergency and first aid"
+    },
+    {
+      "groupId": "fire",
+      "label": "Fire equipment"
+    }
+  ],
+  "decals": [
+    {
+      "decalId": "iso7010-w001",
+      "label": "General warning",
+      "code": "ISO 7010 W001",
+      "group": "warning",
+      "file": "decals/iso7010-w001.svg",
+      "aspect": 1.145,
+      "widthMeters": 0.3,
+      "bytes": 256,
+      "sha256": "dff34a181f65e16b0758869ca4e69690fa01ebc27c68ac09570469374c194824",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W001.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/7/7e/ISO_7010_W001.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "dff34a181f65e16b0758869ca4e69690fa01ebc27c68ac09570469374c194824",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-w002",
+      "label": "Explosive material",
+      "code": "ISO 7010 W002",
+      "group": "warning",
+      "file": "decals/iso7010-w002.svg",
+      "aspect": 1.1429,
+      "widthMeters": 0.3,
+      "bytes": 19999,
+      "sha256": "418827de5c7951b1b5b708de9578859f44f1e39c8098355dd2830935060557fb",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W002.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/0/00/ISO_7010_W002.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "11ed702b6d4bac77da575f456f288ef00ffab610478dfb10405ccff82b2a8607",
+        "retrieved": "2026-10-25",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-w007",
+      "label": "Floor-level obstacle",
+      "code": "ISO 7010 W007",
+      "group": "warning",
+      "file": "decals/iso7010-w007.svg",
+      "aspect": 1.1454,
+      "widthMeters": 0.3,
+      "bytes": 3782,
+      "sha256": "4cdc92e0764baff2f1ef5c5949a2ad2e510a637ec7130f9c5c94952d24fad2ab",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W007.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/b/b6/ISO_7010_W007.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "4cdc92e0764baff2f1ef5c5949a2ad2e510a637ec7130f9c5c94952d24fad2ab",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-w011",
+      "label": "Slippery surface",
+      "code": "ISO 7010 W011",
+      "group": "warning",
+      "file": "decals/iso7010-w011.svg",
+      "aspect": 1.1454,
+      "widthMeters": 0.3,
+      "bytes": 3856,
+      "sha256": "fe20fb31c6ef3d836a19bfd26d3a553cbd7256a7c9c723132284b3c276c33bb5",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W011.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/6/6a/ISO_7010_W011.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "fe20fb31c6ef3d836a19bfd26d3a553cbd7256a7c9c723132284b3c276c33bb5",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-w012",
+      "label": "Electricity",
+      "code": "ISO 7010 W012",
+      "group": "warning",
+      "file": "decals/iso7010-w012.svg",
+      "aspect": 1.145,
+      "widthMeters": 0.3,
+      "bytes": 257,
+      "sha256": "7be82f846822961e763fb5975512531b91e59b99a2016018971ad87b92464bab",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W012.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2a/ISO_7010_W012.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "7be82f846822961e763fb5975512531b91e59b99a2016018971ad87b92464bab",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-w014",
+      "label": "Forklift trucks",
+      "code": "ISO 7010 W014",
+      "group": "warning",
+      "file": "decals/iso7010-w014.svg",
+      "aspect": 1.1454,
+      "widthMeters": 0.3,
+      "bytes": 5281,
+      "sha256": "df9b43c53f1014f639a46eeae4d91abbef6a3b955f2a86e503d1c6182305708a",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W014.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/6/61/ISO_7010_W014.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "df9b43c53f1014f639a46eeae4d91abbef6a3b955f2a86e503d1c6182305708a",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-w015",
+      "label": "Overhead load",
+      "code": "ISO 7010 W015",
+      "group": "warning",
+      "file": "decals/iso7010-w015.svg",
+      "aspect": 1.1454,
+      "widthMeters": 0.3,
+      "bytes": 3879,
+      "sha256": "c339bb3f53d42e74da8df485341636dad67f2e4442c9a5856988963e48cbea3d",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W015.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/0/05/ISO_7010_W015.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "c339bb3f53d42e74da8df485341636dad67f2e4442c9a5856988963e48cbea3d",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-w016",
+      "label": "Toxic material",
+      "code": "ISO 7010 W016",
+      "group": "warning",
+      "file": "decals/iso7010-w016.svg",
+      "aspect": 1.1429,
+      "widthMeters": 0.3,
+      "bytes": 3779,
+      "sha256": "cd466d50193ba6a1157c1a726e11d98f059b1e80baebcf14cbcb1f8fb8ee093d",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W016.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/e/ee/ISO_7010_W016.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "cd466d50193ba6a1157c1a726e11d98f059b1e80baebcf14cbcb1f8fb8ee093d",
+        "retrieved": "2026-10-25",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-w017",
+      "label": "Hot surface",
+      "code": "ISO 7010 W017",
+      "group": "warning",
+      "file": "decals/iso7010-w017.svg",
+      "aspect": 1.1429,
+      "widthMeters": 0.3,
+      "bytes": 2753,
+      "sha256": "f145688b9b31fdc30c25060c8148f7b3090a474796d5807d11199561ac9f96af",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W017.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/7/7f/ISO_7010_W017.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "45069d1cc78b327e7e76d676a32b679d571fb22ee159039d919bc40fee2141f9",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-w018",
+      "label": "Automatic start-up",
+      "code": "ISO 7010 W018",
+      "group": "warning",
+      "file": "decals/iso7010-w018.svg",
+      "aspect": 1.1429,
+      "widthMeters": 0.3,
+      "bytes": 4976,
+      "sha256": "a58aa636268043552bdf40baf9e6b810b0d9c42bd9c26f00a1f75a448a6bb9eb",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W018.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/5/53/ISO_7010_W018.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "aaa018a0f8782ca9ac73e9f79bda7fdc861d4f4b0465c4193f17d5438f3b9ede",
+        "retrieved": "2026-10-25",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-w019",
+      "label": "Crushing",
+      "code": "ISO 7010 W019",
+      "group": "warning",
+      "file": "decals/iso7010-w019.svg",
+      "aspect": 1.1454,
+      "widthMeters": 0.3,
+      "bytes": 3215,
+      "sha256": "48f51b3fbf7993d95001248b9915ca2fde5b3f4b9555532e98c106b9d3c376cc",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W019.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/1/16/ISO_7010_W019.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "48f51b3fbf7993d95001248b9915ca2fde5b3f4b9555532e98c106b9d3c376cc",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-w021",
+      "label": "Flammable material",
+      "code": "ISO 7010 W021",
+      "group": "warning",
+      "file": "decals/iso7010-w021.svg",
+      "aspect": 1.1429,
+      "widthMeters": 0.3,
+      "bytes": 4268,
+      "sha256": "b687c93891c9b8a9844918781903e53d39ba0fc2d089fe11dbb9eeadd8a3dcc3",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W021.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/8/80/ISO_7010_W021.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "11a6df6161e60d64ac6d159a8d987af19bea0f2456f35c373cf2294e2f38415d",
+        "retrieved": "2026-10-25",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-w022",
+      "label": "Sharp element",
+      "code": "ISO 7010 W022",
+      "group": "warning",
+      "file": "decals/iso7010-w022.svg",
+      "aspect": 1.1482,
+      "widthMeters": 0.3,
+      "bytes": 5523,
+      "sha256": "045c7918019740ae195f1b04ecc249fa53226ec2cafa19ebabe6f887945fbf2a",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W022.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/f/f9/ISO_7010_W022.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "CC0 1.0",
+        "originalSha256": "c5cf4ebd55136bc859688c29125f2db92588f320840fff13ad78273d5d242804",
+        "retrieved": "2026-10-25",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-w023",
+      "label": "Corrosive substance",
+      "code": "ISO 7010 W023",
+      "group": "warning",
+      "file": "decals/iso7010-w023.svg",
+      "aspect": 1.1429,
+      "widthMeters": 0.3,
+      "bytes": 5673,
+      "sha256": "adebc7d480990ef03d2837367fb219337692902dcfd61f70d0cf4e31498fc6a1",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W023.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/4/4b/ISO_7010_W023.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "4d9e4468f80bc3caadd6e197842f543e8d8f350a0d9a09eeba1eda82a026ac4c",
+        "retrieved": "2026-10-25",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-w024",
+      "label": "Crushing of hands",
+      "code": "ISO 7010 W024",
+      "group": "warning",
+      "file": "decals/iso7010-w024.svg",
+      "aspect": 1.1429,
+      "widthMeters": 0.3,
+      "bytes": 2370,
+      "sha256": "1dd2fa0ecc2576c7c53d4b157d6fdfe083db22c44aeb238ef23678ba67f0ffa7",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W024.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/4/45/ISO_7010_W024.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "e48b5715213db4ef978f55e8d0e1f12739ee1d8d6a10f0154556e43532edc74d",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-w025",
+      "label": "Counter-rotating rollers",
+      "code": "ISO 7010 W025",
+      "group": "warning",
+      "file": "decals/iso7010-w025.svg",
+      "aspect": 1.1429,
+      "widthMeters": 0.3,
+      "bytes": 7022,
+      "sha256": "62874aea4968192b7a94dc5d5a2b97f7a2478b4b53864594f9b0cd21c1a01fa3",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W025.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/0/0e/ISO_7010_W025.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "2dce8771bc2a4e66da2a9bdd34ba3164c56d7b2c13662f24a58d75852c00b864",
+        "retrieved": "2026-10-25",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-w026",
+      "label": "Battery charging",
+      "code": "ISO 7010 W026",
+      "group": "warning",
+      "file": "decals/iso7010-w026.svg",
+      "aspect": 1.1429,
+      "widthMeters": 0.3,
+      "bytes": 4326,
+      "sha256": "87fa7b90a5da9be7ea8cdbd9a501b67b8068c34efe116bfcec054628591717e4",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_W026.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/8/8d/ISO_7010_W026.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "3149e96e5d40a0527f6165d961c2bbb688af1c9c0e13acc176e6ea7928074643",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-m001",
+      "label": "General mandatory action",
+      "code": "ISO 7010 M001",
+      "group": "mandatory",
+      "file": "decals/iso7010-m001.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 711,
+      "sha256": "f0ac78b64c727f50422281fa852a9af0b46cede86ddc43c134ad20b02672b609",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_M001.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/e/ee/ISO_7010_M001.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "74cf07c66b3f4f310b28ec3567261da5d9d2c9c662f34f41f1eab8858b9fd83f",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-m003",
+      "label": "Wear ear protection",
+      "code": "ISO 7010 M003",
+      "group": "mandatory",
+      "file": "decals/iso7010-m003.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 1334,
+      "sha256": "7ce29ade3df9fae5dd8ee79654ab15415466146f7cb1b729df748b0b8d7662cf",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_M003.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/7/75/ISO_7010_M003.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "95011a231679328752fee3f4244d312e5e8a6370f52b0b113eea80f34c3faa7f",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-m004",
+      "label": "Wear eye protection",
+      "code": "ISO 7010 M004",
+      "group": "mandatory",
+      "file": "decals/iso7010-m004.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 2794,
+      "sha256": "737c60270ca2736e8bbd00ae8c67df87bd2e57436816baeff639b96665058f53",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_M004.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/0/01/ISO_7010_M004.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "4f48fc3c89c5cbe968886cae45c448f347f8488db9d4662b7fc3472ffdadf47c",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-m008",
+      "label": "Wear safety footwear",
+      "code": "ISO 7010 M008",
+      "group": "mandatory",
+      "file": "decals/iso7010-m008.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 1369,
+      "sha256": "37bca69bede3cd04db0d7294f06da240d1a5711a498de4bae4f14ea2b39565de",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_M008.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/3/3c/ISO_7010_M008.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "f8ede9fe797aace32b52002ef4c4f7ddff86f56c5372817f2c81ea9e0b542e87",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-m009",
+      "label": "Wear protective gloves",
+      "code": "ISO 7010 M009",
+      "group": "mandatory",
+      "file": "decals/iso7010-m009.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 2328,
+      "sha256": "b2f5392f4dff16270df6af269e3be1c1f6a9c5a13d35486f1a05ed364c034c5f",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_M009.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/7/7c/ISO_7010_M009.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "889059fbb7391d931ae44efa0c0a46d4c065f26729b08875c3a9ddf6f7f709b3",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-m014",
+      "label": "Wear head protection",
+      "code": "ISO 7010 M014",
+      "group": "mandatory",
+      "file": "decals/iso7010-m014.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 1896,
+      "sha256": "e75c3593c1e51c3cb3fb35a3d9d51b32302594f3ffa7a6c5bf81df619641c8d0",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_M014.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/0/0c/ISO_7010_M014.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "46bdad9a9f23237d0faa48880d85c2af626c497db03d00463e097e9b7bcf0382",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-m015",
+      "label": "Wear high-visibility clothing",
+      "code": "ISO 7010 M015",
+      "group": "mandatory",
+      "file": "decals/iso7010-m015.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 751,
+      "sha256": "ff314dc636f2fd3e2a86a3b01a85d6f0e8d14e4c0b82f08bce7ced64b7cd81f8",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_M015.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/e/e6/ISO_7010_M015.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "d1243bda63566bf9ab9dacd6f45b00ebb29f7d99922ce549b9913389c316e198",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-p001",
+      "label": "General prohibition",
+      "code": "ISO 7010 P001",
+      "group": "prohibition",
+      "file": "decals/iso7010-p001.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 664,
+      "sha256": "5ecbe9ea2f42a045e55e84b554590eab87c6f524954b79326a348e1480b04068",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_P001.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/4/4f/ISO_7010_P001.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "78b3f28eb44e7d074659547bb10492a57a1fdbbc4c59adc9e38b1b1dffc62719",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-p002",
+      "label": "No smoking",
+      "code": "ISO 7010 P002",
+      "group": "prohibition",
+      "file": "decals/iso7010-p002.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 1672,
+      "sha256": "fa9cfe518c4a02047025fd4d428224f015d4d54af3b9ae3ec85eccc50eb57cae",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_P002.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/2/21/ISO_7010_P002.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "b59edc488d87ac6801460440ea88798a67d5e6e9e453c3d7ebef942040decbb6",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-p003",
+      "label": "No open flame",
+      "code": "ISO 7010 P003",
+      "group": "prohibition",
+      "file": "decals/iso7010-p003.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 1952,
+      "sha256": "cd79a237df0bd7ce41685294a8e392f0d3a1293aad4d655e2fe2cf703f834538",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_P003.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/a/ad/ISO_7010_P003.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "ee930b5c17855b7c7a26c6a6312af8f92795245e69836d3b4dd6c9b6481507b3",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-p004",
+      "label": "No thoroughfare",
+      "code": "ISO 7010 P004",
+      "group": "prohibition",
+      "file": "decals/iso7010-p004.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 1542,
+      "sha256": "829a0ab7166802455f8b530240cd28eb9d75d8dce6d19fafc81cd4fa5a5614fb",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_P004.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/8/80/ISO_7010_P004.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "ff5c50c572254ffc59fde954b9c18a35ce87df9d85108850d9526ed7570e7b6f",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-p006",
+      "label": "No forklift trucks",
+      "code": "ISO 7010 P006",
+      "group": "prohibition",
+      "file": "decals/iso7010-p006.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 2301,
+      "sha256": "b63c70fcc06c047935e2f08bf08ed7f589c31544552477e61b090b28ecf39c23",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_P006.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/2/24/ISO_7010_P006.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "8d380c2b4573b08138a2b392cb5395e08f3453381b723873b672c16d4b886a19",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-p010",
+      "label": "Do not touch",
+      "code": "ISO 7010 P010",
+      "group": "prohibition",
+      "file": "decals/iso7010-p010.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 1657,
+      "sha256": "946751dce31bcf52f4143150545a6b4132edf93b012e5446ab80aa1c478c6091",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_P010.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/3/38/ISO_7010_P010.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "0c5e067a2074188fcfe9d037dac16eedf597ca0d4f33334605ab5f8c424fb97b",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-p015",
+      "label": "No reaching in",
+      "code": "ISO 7010 P015",
+      "group": "prohibition",
+      "file": "decals/iso7010-p015.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 1719,
+      "sha256": "362b3f201ac8537538900d79178a67ab552346925afab6f837ce3960a3613c17",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_P015.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/1/17/ISO_7010_P015.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "dd32a3bd448517fef6c1ba9f876c7b53b3ee7f0de938c8b4c3eb532c0f540c1f",
+        "retrieved": "2026-10-25",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-e001",
+      "label": "Emergency exit, left",
+      "code": "ISO 7010 E001",
+      "group": "emergency",
+      "file": "decals/iso7010-e001.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 2715,
+      "sha256": "ee988614ccfb3f37dbd3efbf772261e93487919c6344a1cbe7e37da9985d6cbd",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_E001.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/5/57/ISO_7010_E001.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "ee988614ccfb3f37dbd3efbf772261e93487919c6344a1cbe7e37da9985d6cbd",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-e002",
+      "label": "Emergency exit, right",
+      "code": "ISO 7010 E002",
+      "group": "emergency",
+      "file": "decals/iso7010-e002.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 2728,
+      "sha256": "76c0b1a3e2e7b1cb96a76672d7024a61ffadfbcf0502c4bd3d27a3a03d9f09ff",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_E002.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/3/35/ISO_7010_E002.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "76c0b1a3e2e7b1cb96a76672d7024a61ffadfbcf0502c4bd3d27a3a03d9f09ff",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-e003",
+      "label": "First aid",
+      "code": "ISO 7010 E003",
+      "group": "emergency",
+      "file": "decals/iso7010-e003.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 543,
+      "sha256": "beb947d67ed4d41cb29ca5104933bea20b7012acfe610702fe3f3486112ac333",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_E003_-_First_aid_sign.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/0/0e/ISO_7010_E003_-_First_aid_sign.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "beb947d67ed4d41cb29ca5104933bea20b7012acfe610702fe3f3486112ac333",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-e004",
+      "label": "Emergency telephone",
+      "code": "ISO 7010 E004",
+      "group": "emergency",
+      "file": "decals/iso7010-e004.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 2004,
+      "sha256": "d34644ebfd189daefcc7df781b15761766ab2fefe260695b0bc8e74135b721d0",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_E004.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/c/c2/ISO_7010_E004.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "d34644ebfd189daefcc7df781b15761766ab2fefe260695b0bc8e74135b721d0",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-e007",
+      "label": "Evacuation assembly point",
+      "code": "ISO 7010 E007",
+      "group": "emergency",
+      "file": "decals/iso7010-e007.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 2971,
+      "sha256": "5b1239b7a088f9d9e2408cc52d0b3dd53b26793279bc17aa34684109ffd3dfcf",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_E007.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/5/57/ISO_7010_E007.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "5b1239b7a088f9d9e2408cc52d0b3dd53b26793279bc17aa34684109ffd3dfcf",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-e011",
+      "label": "Eyewash station",
+      "code": "ISO 7010 E011",
+      "group": "emergency",
+      "file": "decals/iso7010-e011.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 4515,
+      "sha256": "29d888dbb32701eeeb1323c285a04f714201a3dcfd2dacbb80bcdf54000f37ed",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_E011.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/1/13/ISO_7010_E011.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "29d888dbb32701eeeb1323c285a04f714201a3dcfd2dacbb80bcdf54000f37ed",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-e012",
+      "label": "Safety shower",
+      "code": "ISO 7010 E012",
+      "group": "emergency",
+      "file": "decals/iso7010-e012.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 3736,
+      "sha256": "ff98df8baa144fecea67e74bad91d1e85ce88ccd99a093dec2f3c444d1391ccd",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_E012.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/c/c0/ISO_7010_E012.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "ff98df8baa144fecea67e74bad91d1e85ce88ccd99a093dec2f3c444d1391ccd",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-f001",
+      "label": "Fire extinguisher",
+      "code": "ISO 7010 F001",
+      "group": "fire",
+      "file": "decals/iso7010-f001.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 3128,
+      "sha256": "a046a0dbf6b0b0d852c64bad6b058a9f92c7523bc31c156267d5985e9ada5fc6",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_F001.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/3/3e/ISO_7010_F001.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "8eab9ee3de88fa5a8fe09f22bc3b3f659af44a68e6887799422d3ba817cddd49",
+        "retrieved": "2026-10-19",
+        "modifications": "Added an explicit viewBox."
+      }
+    },
+    {
+      "decalId": "iso7010-f002",
+      "label": "Fire hose reel",
+      "code": "ISO 7010 F002",
+      "group": "fire",
+      "file": "decals/iso7010-f002.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 5247,
+      "sha256": "5a1051c8bc9e461702565390bda4c249db73798d110167aff9a460790482bc6b",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_F002.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/9/94/ISO_7010_F002.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "5a1051c8bc9e461702565390bda4c249db73798d110167aff9a460790482bc6b",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-f004",
+      "label": "Firefighting equipment",
+      "code": "ISO 7010 F004",
+      "group": "fire",
+      "file": "decals/iso7010-f004.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 4578,
+      "sha256": "b04808eba83528e3878799243991a1a624936f9b74162f81042c79dd1a3ca57d",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_F004.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/4/4a/ISO_7010_F004.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "b04808eba83528e3878799243991a1a624936f9b74162f81042c79dd1a3ca57d",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "decalId": "iso7010-f005",
+      "label": "Fire alarm call point",
+      "code": "ISO 7010 F005",
+      "group": "fire",
+      "file": "decals/iso7010-f005.svg",
+      "aspect": 1.0,
+      "widthMeters": 0.3,
+      "bytes": 4641,
+      "sha256": "014b0e28ad4c619ad887d81035bb1385e81064d9059283c7203c169b335066de",
+      "source": {
+        "provider": "Wikimedia Commons",
+        "url": "https://commons.wikimedia.org/wiki/File:ISO_7010_F005.svg",
+        "fileUrl": "https://upload.wikimedia.org/wikipedia/commons/0/00/ISO_7010_F005.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+        "license": "Public domain",
+        "originalSha256": "014b0e28ad4c619ad887d81035bb1385e81064d9059283c7203c169b335066de",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    }
+  ]
+}

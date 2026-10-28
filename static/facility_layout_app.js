@@ -159,6 +159,15 @@
                 applyOperations: transport.applyOperations,
                 reloadLayout: transport.reloadLayout,
                 importDecalImage: transport.importDecalImage,
+                fetchSiteImagery: transport.fetchSiteImagery,
+                fetchSiteParcel: transport.fetchSiteParcel,
+                fetchSiteRoads: transport.fetchSiteRoads,
+                traceSitePhoto: transport.traceSitePhoto,
+                fetchSiteOverlay: transport.fetchSiteOverlay,
+                checkSiteLayers: transport.checkSiteLayers,
+                analyzeSiteContext: transport.analyzeSiteContext,
+                geocodeAddress: transport.geocodeAddress,
+                prefetchSiteGlobe: transport.prefetchSiteGlobe,
                 placementCandidates: transport.placementCandidates,
                 placementCandidatePreview:
                     transport.placementCandidatePreview,
@@ -260,6 +269,7 @@
                     options.useAuthoritativePlacementCandidates === true,
                 onAssetBrowserStateChange:
                     options.onAssetBrowserStateChange,
+                onOpenAppearanceLibrary: options.onOpenAppearanceLibrary,
                 onCommandStateChange: options.onCommandStateChange,
                 onMotionPanelVisibilityChange:
                     options.onMotionPanelVisibilityChange,

@@ -14,3 +14,6 @@ depend on a CDN or a frontend framework.
 
 The walkthrough camera toggle uses the family's camera-rotate duotone symbol
 in camera.svg, with its fill adapted to InspectorPro's cyan toolbar palette.
+
+file-export.svg (the Export PDF button: a sheet with a down arrow) is
+InspectorPro's own drawing in the same duotone style, not a Phosphor file.

@@ -708,6 +708,22 @@ def test_private_local_catalog_binds_only_available_web_glbs(tmp_path):
         ]
 
 
+def test_a_lighter_copy_beside_a_private_model_is_drawn_and_the_model_kept_as_detail(tmp_path):
+    relative = "generated/industrial_assets/p0_spike/toyota_forklift/User Library-Toyota Forklift_colored.glb"
+    model = tmp_path / relative
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"full-model-with-every-bolt")
+    before = next(item for item in build_private_local_asset_catalog(tmp_path) if item["assetId"] == "asset-forklift")
+    assert "detail" not in before
+    model.with_name(model.stem + ".overview.glb").write_bytes(b"light")
+    after = next(item for item in build_private_local_asset_catalog(tmp_path) if item["assetId"] == "asset-forklift")
+    assert after["overview"]["path"].endswith("Forklift_colored.overview.glb") and after["overview"]["byteSize"] == 5
+    assert after["detail"]["path"] == before["overview"]["path"] and after["detail"]["byteSize"] == model.stat().st_size
+    assert after["detail"]["sourceToCanonical"] == after["overview"]["sourceToCanonical"]
+    # The revision comes from the definition, so placements of the asset stay valid.
+    assert after["assetDefinitionRevision"] == before["assetDefinitionRevision"]
+
+
 def test_private_local_catalog_falls_back_when_artifact_is_absent(tmp_path):
     catalog = build_private_local_asset_catalog(tmp_path)
     assert len(catalog) == 4

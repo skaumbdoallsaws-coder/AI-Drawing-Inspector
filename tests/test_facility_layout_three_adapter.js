@@ -1508,8 +1508,10 @@ test('camera orientation reports the facility direction at the top of the view',
         reports.push(value);
     }), true);
     assert.strictEqual(reports.length, 1);
-    assert.ok(Math.abs(reports[0].headingDegrees) < 0.001);
-    assert.deepStrictEqual(reports[0].screenTop, { x: 0, z: 1 });
+    // An unturned three.js camera looks along -Z, which is south on the plan.
+    // (Before 2026-10-21 the report gave the bottom of the view instead.)
+    assert.ok(Math.abs(reports[0].headingDegrees - 180) < 0.001);
+    assert.deepStrictEqual(reports[0].screenTop, { x: 0, z: -1 });
 
     const halfTurn = Math.sqrt(0.5);
     assert.strictEqual(data.adapter.applyCameraView({
@@ -1521,11 +1523,12 @@ test('camera orientation reports the facility direction at the top of the view',
     }), true);
     data.scheduler.flush();
     assert.strictEqual(reports.length, 2);
-    assert.ok(Math.abs(reports[1].headingDegrees - 90) < 0.001);
-    assert.ok(Math.abs(reports[1].screenTop.x - 1) < 0.001);
+    // A quarter turn left about +Y points the camera along -X, west.
+    assert.ok(Math.abs(reports[1].headingDegrees - 270) < 0.001);
+    assert.ok(Math.abs(reports[1].screenTop.x + 1) < 0.001);
     assert.ok(Math.abs(reports[1].screenTop.z) < 0.001);
     assert.ok(Math.abs(
-        data.adapter.getDiagnostics().cameraOrientation.headingDegrees - 90
+        data.adapter.getDiagnostics().cameraOrientation.headingDegrees - 270
     ) < 0.001);
 
     data.adapter.invalidate();
@@ -3937,6 +3940,9 @@ test('3D layer visibility hides presentation objects without changing scene data
         markings: false,
         assets: false,
         walls: true,
+        ground: true,
+        surfaces: true,
+        site: true,
     });
     const after = data.adapter.getDiagnostics();
     assert.strictEqual(after.placementCount, 1);
@@ -6363,6 +6369,441 @@ test('ground surfaces render and walkthrough follows the ramp without changing t
     for(let i=0;i<1800&&data.adapter.getWalkthroughState().route.active;i++)data.scheduler.flush(i*33);
     const end=data.adapter.getWalkthroughState();assert(Math.abs(end.position.x-2)<.01);assert.equal(end.position.y,0);
     assert.equal(JSON.stringify(layout),before);data.adapter.dispose();
+});
+
+// ---- Appearance library: finishes, scenes and equipment decals --------------
+// These run against the real three.js r184 math, materials and geometry, with
+// the harness renderer and raycaster standing in for WebGL.
+
+let realThreeModule = null;
+async function libraryThree() {
+    if (!realThreeModule) {
+        const { pathToFileURL } = require('url');
+        realThreeModule = await import(pathToFileURL(path.join(ROOT,
+            'static/vendor/three/0.184.0/build/three.module.min.js')).href);
+    }
+    const THREE = Object.assign({}, realThreeModule);
+    THREE.WebGLRenderer = FakeRenderer;
+    THREE.Raycaster = FakeRaycaster;
+    delete THREE.PMREMGenerator;
+    THREE.TextureLoader = class {
+        load(url, onLoad) {
+            const texture = new realThreeModule.Texture();
+            texture.userData.url = url;
+            libraryThree.loads.push(url);
+            Promise.resolve().then(() => onLoad && onLoad(texture));
+            return texture;
+        }
+    };
+    return THREE;
+}
+libraryThree.loads = [];
+
+function libraryStore() {
+    const read = name => JSON.parse(fs.readFileSync(path.join(ROOT, 'static/facility_library', name + '.json'), 'utf8'));
+    const libraryApi = require('../static/facility_layout_library.js');
+    const library = libraryApi.indexLibrary({ appearances: read('appearances'), scenes: read('scenes'), decals: read('decals') });
+    return { get: () => library, load: () => Promise.resolve(library) };
+}
+
+async function libraryFixture(extra) {
+    const THREE = await libraryThree();
+    let resolverCalls = 0;
+    const data = fixture(Object.assign({
+        THREE,
+        facilityLibrary: libraryStore(),
+        assetResolver: request => {
+            resolverCalls += 1;
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage === 'overview') {
+                const object = new THREE.Group();
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 0.5), new THREE.MeshStandardMaterial({ color: 0x8899aa }));
+                mesh.userData.facilityPartKey = 'p:Body#0';
+                object.add(mesh);
+                return object;
+            }
+            return null;
+        },
+    }, extra || {}));
+    data.resolverCalls = () => resolverCalls;
+    data.adapter.mount(data.host);
+    return data;
+}
+
+function finishPlacement(id, assetId, x, appearance) {
+    const value = placement(id, assetId, REV_A, x, 0, 1);
+    if (appearance) value.appearance = appearance;
+    return value;
+}
+
+function renderedScene() {
+    return FakeRenderer.instances.at(-1).lastRender.scene;
+}
+
+test('library finishes group identical finishes into one instanced batch and leave plain colors alone', async () => {
+    const data = await libraryFixture();
+    await data.adapter.setScene({ layout: { placements: [
+        finishPlacement('oak-1', 'rack', 0, { appearanceId: 'wood-oak', grain: 'length' }),
+        finishPlacement('oak-2', 'rack', 3, { appearanceId: 'wood-oak', grain: 'length' }),
+        finishPlacement('plain', 'rack', 6, { color: '#bb4040' }),
+        finishPlacement('steel', 'bench', 9, { appearanceId: 'steel-polished' }),
+    ] }, assetCatalog: [asset('rack', REV_A), asset('bench', REV_A)] });
+    await settleAsync();
+    data.scheduler.flush();
+    const batches = [];
+    let plainMaterial = null, steelMaterial = null;
+    renderedScene().traverse(object => {
+        if (object.isInstancedMesh && object.material.userData.facilityAppearanceFinish) batches.push(object);
+        if (object.userData && object.userData.placementId === 'plain') object.traverse(c => { if (c.isMesh) plainMaterial = c.material; });
+        if (object.userData && object.userData.placementId === 'steel') object.traverse(c => { if (c.isMesh) steelMaterial = c.material; });
+    });
+    assert.strictEqual(batches.length, 1, 'both oak racks share one instanced batch');
+    assert.strictEqual(batches[0].count, 2);
+    assert.ok(batches[0].geometry.attributes.uv, 'textured finishes carry projected UVs');
+    assert.ok(batches[0].material.map && batches[0].material.map.userData.url.endsWith('wood-oak/color.jpg'));
+    assert.strictEqual(plainMaterial.color.getHex(), 0xbb4040, 'plain colors keep the original tint path');
+    assert.ok(steelMaterial.userData.facilityAppearanceFinish && steelMaterial.metalness === 1);
+    data.adapter.setSelection(['oak-1', 'steel']);
+    assert.strictEqual(steelMaterial.color.getHexString(), 'c6c9cb', 'selection never overwrites a finish color');
+    assert.ok(batches[0].material.color.getHex() === 0xffffff, 'the shared finish material is never tinted');
+    const diagnostics = data.adapter.getDiagnostics().appearanceLibrary;
+    assert.strictEqual(diagnostics.finishGroups, 2);
+    assert.ok(diagnostics.projectedGeometries >= 1);
+    data.adapter.dispose();
+});
+
+test('colors, scenes and library finishes update without reloading models; geometry edits still rebuild', async () => {
+    const data = await libraryFixture();
+    const layout = { placements: [finishPlacement('one', 'rack', 0, null), finishPlacement('two', 'rack', 3, null)] };
+    const input = { layout, assetCatalog: [asset('rack', REV_A)] };
+    await data.adapter.setScene(input);
+    await settleAsync();
+    const afterFirstBuild = data.resolverCalls();
+    const colored = JSON.parse(JSON.stringify(input));
+    colored.layout.placements[0].appearance = { color: '#2478bc' };
+    await data.adapter.setScene(colored);
+    const scened = JSON.parse(JSON.stringify(colored));
+    scened.layout.extensions = { facilityScene: { version: 1, sceneId: 'presentation-light' } };
+    await data.adapter.setScene(scened);
+    assert.strictEqual(data.resolverCalls(), afterFirstBuild, 'no model reload for colors or scenes');
+    assert.strictEqual(data.adapter.getViewportScene().sceneId, 'presentation-light');
+    const finished = JSON.parse(JSON.stringify(scened));
+    finished.layout.placements[1].appearance = { appearanceId: 'brass-brushed' };
+    await data.adapter.setScene(finished);
+    await settleAsync();
+    data.scheduler.flush();
+    assert.strictEqual(data.resolverCalls(), afterFirstBuild, 'a finish-only edit reuses the models on screen');
+    const materialOf = id => {
+        let found = null;
+        renderedScene().traverse(o => { if (o.userData && o.userData.placementId === id) o.traverse(c => { if (c.isMesh) found = c.material; }); });
+        return found;
+    };
+    assert.ok(materialOf('two').userData.facilityAppearanceFinish && /brass-brushed/.test(materialOf('two').name));
+    assert.ok(!materialOf('one').userData.facilityAppearanceFinish, 'the other copy keeps its own finish');
+    assert.strictEqual(data.adapter.getDiagnostics().appearanceLibrary.finishGroups, 1);
+    await data.adapter.setScene(scened);
+    await settleAsync();
+    data.scheduler.flush();
+    assert.strictEqual(data.resolverCalls(), afterFirstBuild, 'removing the finish regroups without a reload too');
+    let batches = 0;
+    renderedScene().traverse(o => { if (o.isInstancedMesh && o.count === 2) batches += 1; });
+    assert.ok(batches >= 1, 'both copies share an instanced batch again');
+    const moved = JSON.parse(JSON.stringify(scened));
+    moved.layout.placements[0].transform.position.x = 1.5;
+    await data.adapter.setScene(moved);
+    await settleAsync();
+    assert.ok(data.resolverCalls() > afterFirstBuild, 'geometry edits still rebuild the scene');
+    data.adapter.dispose();
+});
+
+test('the saved scene sets base lighting and the viewer settings scale it; Classic keeps the original look', async () => {
+    const data = await libraryFixture();
+    const scene = sceneId => ({ layout: { placements: [], extensions: sceneId ? { facilityScene: { version: 1, sceneId,
+        adjustments: { exposure: 0.9 } } } : {} }, assetCatalog: [] });
+    await data.adapter.setScene(scene(null));
+    data.scheduler.flush();
+    const sceneObject = renderedScene();
+    const renderer = FakeRenderer.instances.at(-1);
+    let hemisphere = null;
+    sceneObject.traverse(object => { if (object.isHemisphereLight) hemisphere = object; });
+    assert.strictEqual(hemisphere.intensity, 1.55, 'Classic equals the original defaults');
+    assert.strictEqual(renderer.toneMappingExposure, 1.22);
+    await data.adapter.setScene(scene('machine-shop'));
+    const shopAmbient = sceneManifest('machine-shop').ambient;
+    assert.ok(Math.abs(hemisphere.intensity - shopAmbient) < 1e-9);
+    assert.ok(Math.abs(renderer.toneMappingExposure - 0.9) < 1e-9, 'scene adjustments apply');
+    data.adapter.setVisualSettings({ ambient: 1.55 * 1.5 });
+    assert.ok(Math.abs(hemisphere.intensity - shopAmbient * 1.5) < 1e-9, 'Display settings scale the scene');
+    await data.adapter.setScene(scene('presentation-dark'));
+    assert.strictEqual(sceneObject.background.getHexString(), '1c2026', 'the scene backdrop shows when the viewer has none');
+    data.adapter.setVisualSettings({ background: '#112233' });
+    assert.strictEqual(sceneObject.background.getHexString(), '112233', 'a viewer background color wins');
+    data.adapter.dispose();
+});
+
+function sceneManifest(sceneId) {
+    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'static/facility_library/scenes.json'), 'utf8'));
+    return manifest.scenes.find(scene => scene.sceneId === sceneId);
+}
+
+test('under a scene environment finishes keep their own reflections while plain models take the gentler fill', async () => {
+    const THREE = await libraryThree();
+    THREE.PMREMGenerator = class {
+        fromScene() { return { texture: new realThreeModule.Texture() }; }
+        fromEquirectangular() { return { texture: new realThreeModule.Texture() }; }
+        dispose() {}
+    };
+    const data = await libraryFixture({ THREE, RoomEnvironment: class { dispose() {} } });
+    const placements = [finishPlacement('shiny', 'rack', 0, { appearanceId: 'steel-polished' }), finishPlacement('plain', 'bench', 3, null)];
+    const input = extensions => ({ layout: { placements, extensions }, assetCatalog: [asset('rack', REV_A), asset('bench', REV_A)] });
+    await data.adapter.setScene(input({}));
+    await settleAsync();
+    data.scheduler.flush();
+    const finishMaterial = () => {
+        let found = null;
+        renderedScene().traverse(o => { if (o.isMesh && o.material && o.material.userData.facilityAppearanceFinish) found = o.material; });
+        return found;
+    };
+    const classic = finishMaterial();
+    assert.strictEqual(classic.envMap.userData.facilityEnvironment, 'room', 'Classic gives finishes a room to reflect');
+    assert.strictEqual(classic.envMapIntensity, 0.7);
+    assert.strictEqual(renderedScene().environment, null, 'Classic adds no environment light to plain models');
+
+    const preset = sceneManifest('presentation-light');
+    await data.adapter.setScene(input({ facilityScene: { version: 1, sceneId: 'presentation-light' } }));
+    data.scheduler.flush();
+    const lit = finishMaterial();
+    assert.strictEqual(renderedScene().environment, lit.envMap, 'finishes reflect the scene environment themselves');
+    assert.strictEqual(renderedScene().environmentIntensity, preset.environmentIntensity, 'plain models take the scene fill');
+    assert.ok(Math.abs(lit.envMapIntensity - Math.min(2, 2 * preset.environmentIntensity)) < 1e-9);
+
+    await data.adapter.setScene(input({ facilityScene: { version: 1, sceneId: 'presentation-light',
+        adjustments: { environmentIntensity: 0.25, environmentRotationDegrees: 90 } } }));
+    data.scheduler.flush();
+    const turned = finishMaterial();
+    assert.ok(Math.abs(turned.envMapIntensity - 0.5) < 1e-9, 'the Reflections setting still scales finishes');
+    assert.ok(Math.abs(turned.envMapRotation.y - Math.PI / 2) < 1e-9, 'finish reflections turn with the scene');
+
+    await data.adapter.setScene(input({}));
+    data.scheduler.flush();
+    const back = finishMaterial();
+    assert.strictEqual(back.envMap.userData.facilityEnvironment, 'room');
+    assert.strictEqual(back.envMapIntensity, 0.7);
+    assert.strictEqual(back.envMapRotation.y, 0, 'back in Classic the room is unturned');
+    data.adapter.dispose();
+});
+
+test('equipment decals project onto their placement and go away with the saved row', async () => {
+    const THREE = await libraryThree();
+    class FakeDecalGeometry extends THREE.BufferGeometry {
+        constructor(mesh, position, orientation, size) {
+            super();
+            FakeDecalGeometry.calls.push({ mesh, position: position.clone(), size: size.clone() });
+            this.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
+            this.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
+            this.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1], 2));
+        }
+    }
+    FakeDecalGeometry.calls = [];
+    const data = await libraryFixture({ DecalGeometry: FakeDecalGeometry });
+    const row = { decalId: 'edecal-1', label: 'Forklift warning', imagePath: '/api/facility-decal-images/site-a/' + 'b'.repeat(64) + '.png',
+        placementId: 'one', anchor: { position: { x: 0, y: 0.5, z: 0.25 }, normal: { x: 0, y: 0, z: 1 }, rotationDegrees: 0 },
+        widthMeters: 0.3, heightMeters: 0.26 };
+    const input = { layout: { placements: [finishPlacement('one', 'rack', 4, null)],
+        extensions: { facilityEquipmentDecals: { version: 1, decals: [row] } } }, assetCatalog: [asset('rack', REV_A)] };
+    await data.adapter.setScene(input);
+    await settleAsync();
+    data.scheduler.flush();
+    assert.strictEqual(data.adapter.getDiagnostics().appearanceLibrary.equipmentDecals, 1);
+    const call = FakeDecalGeometry.calls.at(-1);
+    assert.ok(Math.abs(call.position.x - 4) < 1e-9 && Math.abs(call.position.z - 1.25) < 1e-9,
+        'the anchor follows the placement transform into world space');
+    let decalMeshes = 0;
+    renderedScene().traverse(object => { if (object.userData && object.userData.facilityEquipmentDecal) decalMeshes += 1; });
+    assert.ok(decalMeshes >= 1);
+    const without = JSON.parse(JSON.stringify(input));
+    without.layout.extensions.facilityEquipmentDecals.decals = [];
+    await data.adapter.setScene(without);
+    assert.strictEqual(data.adapter.getDiagnostics().appearanceLibrary.equipmentDecals, 0);
+    data.adapter.dispose();
+});
+
+test('a live finish preview replaces the copy on screen and clearing restores it untouched', async () => {
+    const data = await libraryFixture();
+    await data.adapter.setScene({ layout: { placements: [finishPlacement('first', 'rack', 0, null),
+        finishPlacement('second', 'rack', 3, null)] }, assetCatalog: [asset('rack', REV_A)] });
+    await settleAsync();
+    data.scheduler.flush();
+    let batch = null;
+    renderedScene().traverse(object => { if (object.isInstancedMesh) batch = object; });
+    const before = new realThreeModule.Matrix4();
+    batch.getMatrixAt(0, before);
+    assert.ok(data.adapter.previewFinish({ placementIds: ['first'], appearance: { appearanceId: 'brass-polished' } }));
+    const hidden = new realThreeModule.Matrix4();
+    batch.getMatrixAt(0, hidden);
+    assert.ok(hidden.elements.every(value => value === 0 || value === 1) && hidden.elements[0] === 0, 'the instance is hidden');
+    let previews = 0;
+    renderedScene().traverse(object => { if (object.userData && object.userData.facilityFinishPreview) previews += 1; });
+    assert.strictEqual(previews, 1);
+    assert.ok(data.adapter.clearFinishPreview());
+    const restored = new realThreeModule.Matrix4();
+    batch.getMatrixAt(0, restored);
+    assert.deepStrictEqual(Array.from(restored.elements), Array.from(before.elements));
+    previews = 0;
+    renderedScene().traverse(object => { if (object.userData && object.userData.facilityFinishPreview) previews += 1; });
+    assert.strictEqual(previews, 0);
+    data.adapter.dispose();
+});
+
+test('picking reports the surface normal and the stable part key under the cursor', async () => {
+    const data = await libraryFixture();
+    await data.adapter.setScene({ layout: { placements: [finishPlacement('solo', 'bench', 2, null)] },
+        assetCatalog: [asset('bench', REV_A)] });
+    await settleAsync();
+    data.scheduler.flush();
+    let mesh = null;
+    renderedScene().traverse(object => { if (object.isMesh && object.userData.facilityPartKey) mesh = object; });
+    mesh.updateMatrixWorld(true);
+    FakeRaycaster.nextHits = [{ object: mesh, point: { x: 2, y: 0.5, z: 1.25 },
+        face: { normal: new realThreeModule.Vector3(0, 0, 1) } }];
+    const hit = data.adapter.pick({ normalized: true, x: 0, y: 0 });
+    assert.strictEqual(hit.placementId, 'solo');
+    assert.strictEqual(hit.partKey, 'p:Body#0');
+    assert.ok(Math.abs(hit.normal.z - 1) < 1e-9);
+    const anchor = data.adapter.decalAnchorAt({ normalized: true, x: 0, y: 0 }, 15);
+    assert.strictEqual(anchor.placementId, 'solo');
+    assert.deepStrictEqual(anchor.anchor.position, { x: 0, y: 0.5, z: 0.25 }, 'anchors are saved in placement coordinates');
+    assert.strictEqual(anchor.anchor.rotationDegrees, 15);
+    data.adapter.dispose();
+});
+
+test('object finishes replace authored asset colors but keep printed artwork', async () => {
+    const THREE = await libraryThree();
+    const authored = () => {
+        const material = new THREE.MeshStandardMaterial({ color: 0x17191c });
+        material.name = 'APEX frame';
+        material.userData = { facilityAuthoredFinish: true, facilityMaterialRole: 'frame' };
+        return material;
+    };
+    const artwork = () => {
+        const material = new THREE.MeshStandardMaterial({ map: new realThreeModule.Texture() });
+        material.userData = { facilityArtwork: true };
+        return material;
+    };
+    const data = await libraryFixture({
+        assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage !== 'overview') return null;
+            const object = new THREE.Group();
+            const frame = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 0.5), authored());
+            const print = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.01), artwork());
+            frame.userData.facilityPartKey = 'p:world/frame#0';
+            object.add(frame, print);
+            return object;
+        },
+    });
+    const finishes = () => {
+        const seen = { finish: 0, artwork: 0, authoredKept: 0 };
+        renderedScene().traverse(o => {
+            if (!o.isMesh || !o.material) return;
+            const u = o.material.userData || {};
+            if (u.facilityAppearanceFinish) seen.finish += 1;
+            else if (u.facilityArtwork) seen.artwork += 1;
+            else if (u.facilityAuthoredFinish) seen.authoredKept += 1;
+        });
+        return seen;
+    };
+    await data.adapter.setScene({ layout: { placements: [finishPlacement('solo', 'table', 0, { appearanceId: 'brass-polished' })] },
+        assetCatalog: [asset('table', REV_A)] });
+    await settleAsync();
+    data.scheduler.flush();
+    let seen = finishes();
+    assert.ok(seen.finish >= 1 && seen.authoredKept === 0, 'a single copy takes the finish over its authored color');
+    assert.ok(seen.artwork >= 1, 'printed artwork keeps its look');
+    await data.adapter.setScene({ layout: { placements: [finishPlacement('one', 'table', 0, { appearanceId: 'brass-polished' }),
+        finishPlacement('two', 'table', 3, { appearanceId: 'brass-polished' })] }, assetCatalog: [asset('table', REV_A)] });
+    await settleAsync();
+    data.scheduler.flush();
+    seen = finishes();
+    assert.ok(seen.finish >= 1 && seen.authoredKept === 0, 'instanced copies take the finish too');
+    assert.ok(seen.artwork >= 1);
+    data.adapter.dispose();
+});
+
+test('a previewed object stays pickable, and instanced copies report a part only when asked', async () => {
+    const data = await libraryFixture();
+    await data.adapter.setScene({ layout: { placements: [finishPlacement('first', 'rack', 0, null),
+        finishPlacement('second', 'rack', 3, null)] }, assetCatalog: [asset('rack', REV_A)] });
+    await settleAsync();
+    data.scheduler.flush();
+    let batch = null;
+    renderedScene().traverse(object => { if (object.isInstancedMesh) batch = object; });
+    const original = FakeRaycaster.prototype.intersectObjects;
+    let targets = [];
+    FakeRaycaster.prototype.intersectObjects = function (list) { targets = list; return original.call(this, list); };
+    FakeRaycaster.prototype.intersectObject = function (object) {
+        let mesh = null;
+        object.traverse(item => { if (!mesh && item.isMesh && item.userData.facilityPartKey) mesh = item; });
+        return mesh ? [{ object: mesh }] : [];
+    };
+    try {
+        const face = { normal: new realThreeModule.Vector3(0, 1, 0) };
+        FakeRaycaster.nextHits = [{ object: batch, instanceId: 1, point: { x: 3, y: 1, z: 0 }, face }];
+        assert.strictEqual(data.adapter.pick({ normalized: true, x: 0, y: 0 }).partKey, undefined,
+            'plain picks skip the part search');
+        const asked = data.adapter.pick({ normalized: true, x: 0, y: 0, parts: true });
+        assert.strictEqual(asked.placementId, 'second');
+        assert.strictEqual(asked.partKey, 'p:Body#0', 'the part is found on a copy of the instanced model');
+
+        assert.ok(data.adapter.previewFinish({ placementIds: ['first'], appearance: { appearanceId: 'brass-polished' } }));
+        let previewMesh = null;
+        renderedScene().traverse(object => {
+            if (object.userData && object.userData.facilityFinishPreview) {
+                object.traverse(item => { if (!previewMesh && item.isMesh) previewMesh = item; });
+            }
+        });
+        previewMesh.updateMatrixWorld(true);
+        FakeRaycaster.nextHits = [{ object: previewMesh, point: { x: 0, y: 1, z: 0 }, face }];
+        const hit = data.adapter.pick({ normalized: true, x: 0, y: 0, parts: true });
+        assert.ok(targets.some(item => item.userData && item.userData.facilityFinishPreview),
+            'the preview is among the pick targets');
+        assert.strictEqual(hit.placementId, 'first', 'the preview picks as the placement it stands in for');
+        assert.strictEqual(hit.partKey, 'p:Body#0');
+        data.adapter.clearFinishPreview();
+    } finally {
+        FakeRaycaster.prototype.intersectObjects = original;
+        delete FakeRaycaster.prototype.intersectObject;
+    }
+    data.adapter.dispose();
+});
+
+test('the ground layer hides the paving and keeps it hidden when the paving is rebuilt', async () => {
+    const THREE=createThree();
+    THREE.BufferGeometry=class extends FakeBufferGeometry {
+        setIndex(value){this.index=value;return this;}
+        computeVertexNormals(){this.normalsComputed=true;}
+    };
+    const data=fixture({THREE,worldBounds:{minX:0,minZ:0,maxX:40,maxZ:10,floorY:0}});
+    const surface=(id,a,b)=>({surfaceId:id,minX:a,maxX:b,minZ:0,maxZ:10,startElevation:0,endElevation:0,slopeAxis:'x',color:'#888888'});
+    const layout=surfaces=>({placements:[],extensions:{facilityGround:{schemaVersion:1,surfaces:surfaces}}});
+    const shown=name=>{
+        let found=null;
+        FakeRenderer.instances.at(-1).lastRender.scene.traverse(object=>{if(object.name===name)found=object;});
+        if(!found)return null;
+        for(let object=found;object;object=object.parent){if(!object.visible)return false;}
+        return true;
+    };
+    const before=layout([surface('yard',-30,0),surface('factory',0,40)]);
+    const authoritative=JSON.stringify(before);data.adapter.mount(data.host);
+    await data.adapter.setScene({layout:before});data.scheduler.flush();
+    assert.equal(shown('InspectorProGround-yard'),true);
+    assert.equal(data.adapter.setLayerVisibility({ground:false}).ground,false);data.scheduler.flush();
+    assert.equal(shown('InspectorProGround-yard'),false);
+    await data.adapter.setScene({layout:layout([surface('yard',-35,0),surface('factory',0,40)])});data.scheduler.flush();
+    assert.equal(shown('InspectorProGround-yard'),false);
+    assert.equal(data.adapter.setLayerVisibility({ground:true}).ground,true);data.scheduler.flush();
+    assert.equal(shown('InspectorProGround-yard'),true);
+    assert.equal(JSON.stringify(before),authoritative);data.adapter.dispose();
 });
 
 async function run() {

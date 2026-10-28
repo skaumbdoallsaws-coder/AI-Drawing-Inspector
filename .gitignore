@@ -53,6 +53,7 @@ venv/
 !tests/fixtures/process_map_spatial/*.json
 !static/contracts/facility-*.json
 !static/contracts/industrial-*.json
+!static/facility_library/*.json
 !tests/fixtures/facility_layout/**/*.json
 
 # OS files

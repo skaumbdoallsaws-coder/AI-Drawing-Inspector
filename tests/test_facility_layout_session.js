@@ -2508,6 +2508,9 @@ async function main() {
                 initial,
                 'rev-1'
             );
+            proposalReceipt.alternatives[0].validation.siteContext = {
+                findingCount: 7, findingsTruncated: true, findings: [{ severity: 'warning' }],
+            };
             const authority = fakeAuthority(initial, {
                 createLayoutProposals: async () => clone(proposalReceipt),
                 cancelLayoutProposal: async request => {
@@ -2530,6 +2533,7 @@ async function main() {
                 noNewErrors: true, errorCount: 0, warningCount: 0, placementCollisions: 0,
                 shellObstacleCollisions: null, clearanceConflicts: null, obstructedAisleCount: 1,
                 blockedRouteCount: 0, routingErrorCount: 0,
+                siteFindingCount: 7,
             });
             assert.strictEqual(state.layoutProposal.alternatives[1].validationSummary, null);
             assert.deepStrictEqual(state.layout, before.layout);

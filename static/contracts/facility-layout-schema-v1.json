@@ -133,6 +133,25 @@
   },
   "additionalProperties": true,
   "$defs": {
+    "facilityAppearance": {
+      "description": "A library or custom finish (static/facility_library/appearances.json or extensions.facilityAppearances) with optional per-use adjustments. Visual only: never changes mass, density, strength or engineering material.",
+      "type": "object",
+      "required": ["appearanceId"],
+      "properties": {
+        "appearanceId": {"type": "string", "pattern": "^(custom-[a-z0-9][a-z0-9-]{0,56}|[a-z0-9][a-z0-9-]{0,63})$"},
+        "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+        "roughness": {"type": "number", "minimum": 0, "maximum": 1},
+        "metalness": {"type": "number", "minimum": 0, "maximum": 1},
+        "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+        "textureStrength": {"type": "number", "minimum": 0, "maximum": 1},
+        "sizeMeters": {"type": "number", "minimum": 0.01, "maximum": 50},
+        "rotationDegrees": {"type": "number", "minimum": -360, "maximum": 360},
+        "offsetMeters": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": -100, "maximum": 100}},
+        "mapping": {"enum": ["box", "cylindrical", "uv"]},
+        "grain": {"enum": ["part", "length", "width", "height"]}
+      },
+      "additionalProperties": false
+    },
     "stableId": {
       "type": "string",
       "minLength": 1,
@@ -601,10 +620,15 @@
       ],
       "properties": {
         "appearance": {
-          "type": "object",
-          "required": ["color"],
-          "properties": {"color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}},
-          "additionalProperties": false
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["color"],
+              "properties": {"color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}},
+              "additionalProperties": false
+            },
+            {"$ref": "#/$defs/facilityAppearance"}
+          ]
         },
         "componentMaterials": {
           "type": "object",
@@ -616,15 +640,38 @@
               "minItems": 1,
               "maxItems": 512,
               "items": {
-                "type": "object",
-                "required": ["key", "color", "roughness", "metalness"],
-                "properties": {
-                  "key": {"type": "string", "pattern": "^m[0-9]{1,6}-s[0-9]{1,4}$"},
-                  "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
-                  "roughness": {"type": "number", "minimum": 0, "maximum": 1},
-                  "metalness": {"type": "number", "minimum": 0, "maximum": 1}
-                },
-                "additionalProperties": false
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": ["key", "color", "roughness", "metalness"],
+                    "properties": {
+                      "key": {"type": "string", "maxLength": 512, "pattern": "^(m[0-9]{1,6}-s[0-9]{1,4}|p:[A-Za-z0-9._%@~/-]{1,500}#[0-9]{1,4})$"},
+                      "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+                      "roughness": {"type": "number", "minimum": 0, "maximum": 1},
+                      "metalness": {"type": "number", "minimum": 0, "maximum": 1}
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "required": ["key", "appearanceId"],
+                    "properties": {
+                      "key": {"type": "string", "maxLength": 512, "pattern": "^(m[0-9]{1,6}-s[0-9]{1,4}|p:[A-Za-z0-9._%@~/-]{1,500}#[0-9]{1,4})$"},
+                      "appearanceId": {"type": "string", "pattern": "^(custom-[a-z0-9][a-z0-9-]{0,56}|[a-z0-9][a-z0-9-]{0,63})$"},
+                      "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"},
+                      "roughness": {"type": "number", "minimum": 0, "maximum": 1},
+                      "metalness": {"type": "number", "minimum": 0, "maximum": 1},
+                      "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+                      "textureStrength": {"type": "number", "minimum": 0, "maximum": 1},
+                      "sizeMeters": {"type": "number", "minimum": 0.01, "maximum": 50},
+                      "rotationDegrees": {"type": "number", "minimum": -360, "maximum": 360},
+                      "offsetMeters": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": -100, "maximum": 100}},
+                      "mapping": {"enum": ["box", "cylindrical", "uv"]},
+                      "grain": {"enum": ["part", "length", "width", "height"]}
+                    },
+                    "additionalProperties": false
+                  }
+                ]
               }
             }
           },

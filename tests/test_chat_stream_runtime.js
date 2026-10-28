@@ -35,6 +35,17 @@ test('facility identity preserves retries and authoritative memory identifiers',
     assert.deepStrictEqual(runtime.ensureFacilityTurnIdentity(original, 'different-local-id', () => { throw Error('must not regenerate'); }), original);
 });
 
+test('documentation, assembly and 3D Model turns get the same identity as facility turns', () => {
+    for (const mode of ['documentation', 'assembly', '3dmodel']) {
+        const original = { session_id: 'local-chat', inspection_context: { attachments: { session: { active_mode: mode } } } };
+        const turn = runtime.ensureFacilityTurnIdentity(original, 'conversation-a', () => 'turn-1');
+        assert.strictEqual(turn.conversation_id, 'conversation-a');
+        assert.strictEqual(turn.client_turn_id, 'turn-1');
+    }
+    const other = { inspection_context: { attachments: { session: { active_mode: 'report' } } } };
+    assert.strictEqual(runtime.ensureFacilityTurnIdentity(other, 'conversation', () => { throw Error('not used'); }), other);
+});
+
 test('non-facility chat payloads retain their existing identity behavior', () => {
     const original = { message: 'hello' };
     assert.strictEqual(runtime.ensureFacilityTurnIdentity(original, 'conversation', () => { throw Error('not used'); }), original);

@@ -1409,6 +1409,7 @@ class FacilityLayoutAgentRuntime:
             "returnedCount": len(page),
             "totalCount": len(records),
             "nextCursor": cursor_factory(end) if end < len(records) else None,
+            "nextOffset": end if end < len(records) else None,
         }
         while (
             len(_canonical_bytes(result))
@@ -1419,6 +1420,7 @@ class FacilityLayoutAgentRuntime:
             result["returnedCount"] = len(result["records"])
             next_offset = offset + len(result["records"])
             result["nextCursor"] = cursor_factory(next_offset)
+            result["nextOffset"] = next_offset
         if len(_canonical_bytes(result)) > FACILITY_LAYOUT_AGENT_MAXIMUM_RESPONSE_BYTES:
             raise FacilityLayoutAgentRuntimeError(
                 "facility_agent_response_budget_exceeded",
@@ -1476,9 +1478,14 @@ class FacilityLayoutAgentRuntime:
         revision = str(state["identity"]["revision"])
         args = deepcopy(dict(arguments))
         cursor = args.pop("cursor", None)
-        filter_hash = _fingerprint(args)
-        offset = (
-            self._decode_cursor(
+        requested_offset = args.pop("offset", None)
+        # The page size changes how many records come back, not which records match,
+        # so it does not scope a cursor; agents changed it between pages and lost theirs.
+        filter_hash = _fingerprint(
+            {key: value for key, value in args.items() if key != "pageSize"}
+        )
+        if cursor:
+            offset = self._decode_cursor(
                 str(cursor),
                 principal=principal,
                 site_id=site_id,
@@ -1487,9 +1494,22 @@ class FacilityLayoutAgentRuntime:
                 tool_name=tool_name,
                 filter_hash=filter_hash,
             )
-            if cursor
-            else 0
-        )
+        elif requested_offset is not None:
+            # A plain record offset (the previous page's nextOffset) pages the same
+            # authorized results; agents can repeat a number without mistakes, unlike a
+            # long signed cursor.
+            if (
+                isinstance(requested_offset, bool)
+                or not isinstance(requested_offset, int)
+                or requested_offset < 0
+            ):
+                raise FacilityLayoutAgentRuntimeError(
+                    "facility_agent_arguments_invalid",
+                    "offset must be a whole number of records, 0 or more.",
+                )
+            offset = requested_offset
+        else:
+            offset = 0
         page_size = _bounded_page_size(args.get("pageSize"))
         base_envelope = {
             "ok": True,
@@ -2278,6 +2298,17 @@ class FacilityLayoutAgentRuntime:
                     asset_revision = str(
                         resolved.get("assetDefinitionRevision") or ""
                     )
+            if asset_id and not asset_revision:
+                # As in inspect_facility_asset: an asset with a single revision in
+                # the authorized catalog needs no revision argument. Agents left it
+                # out and spent a second call on the retry.
+                revisions = {
+                    str(item.get("assetDefinitionRevision") or "")
+                    for item in state.get("assets", [])
+                    if isinstance(item, Mapping) and item.get("assetId") == asset_id
+                }
+                if len(revisions) == 1:
+                    asset_revision = revisions.pop()
             asset_id = _stable_id(asset_id, "assetId")
             asset_revision = _revision(
                 asset_revision,

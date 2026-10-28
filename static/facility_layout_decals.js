@@ -84,7 +84,9 @@
     }
 
     function closeDialog(workspace) { if (workspace.decalDialogClose) workspace.decalDialogClose(); }
-    function openDialog(workspace, mode) {
+    // `prefill` comes from the appearance library: an already-imported sign
+    // image ({ imported, label }) and optionally the wall it was dropped on.
+    function openDialog(workspace, mode, prefill) {
         const isText = mode === 'lettering', title = isText ? 'Wall lettering' : 'Wall decals';
         const state = workspace.session.getState();
         if (!walls.canEdit(workspace, state)) throw new Error('Finish the active preview or operation before editing decals.');
@@ -291,7 +293,21 @@
         const selection=state.selection || [];
         const first=available.findIndex(s=>selection.includes(s.target.placementId));
         if(first>=0)surface.value=String(first);
-        defaults();refresh();dialog.showModal();name.focus();
+        if(prefill&&prefill.target){
+            const chosen=available.findIndex(s=>sameTarget(s.target,prefill.target));
+            if(chosen>=0)surface.value=String(chosen);
+        }
+        defaults();
+        if(prefill&&prefill.imported&&!isText){
+            imported=clone(prefill.imported);name.value=String(prefill.label||'').slice(0,120);
+            if(prefill.aspect>0){
+                const s=currentSurface();
+                if(s){const w=Math.min((s.end-s.start)*.9,Number(prefill.widthMeters)||.3,s.height*.85*prefill.aspect);
+                    width.value=w.toFixed(4);height.value=(w/prefill.aspect).toFixed(4);}
+            }
+            loadImage(imported).catch(e=>{if(!closed)status.textContent=e.message;});
+        }
+        refresh();dialog.showModal();name.focus();
     }
     return {records, targets, makeRecord, sameTarget, openDialog, closeDialog};
 }));

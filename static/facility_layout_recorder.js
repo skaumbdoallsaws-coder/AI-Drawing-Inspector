@@ -222,7 +222,17 @@
                 width,
                 height
             );
+            // Record what is displayed: the 3D canvas is shown mirrored so it
+            // agrees with the plan (facility_layout_three_adapter.js).
+            const mirrored = /scaleX\(\s*-1\s*\)/.test(
+                (sourceCanvas.style && sourceCanvas.style.transform) || ''
+            );
             try {
+                if (mirrored) {
+                    outputContext.save();
+                    outputContext.translate(2 * frame.x + frame.width, 0);
+                    outputContext.scale(-1, 1);
+                }
                 outputContext.drawImage(
                     sourceCanvas,
                     frame.x,
@@ -232,6 +242,8 @@
                 );
             } catch (error) {
                 state.error = 'The 3D viewport could not be copied.';
+            } finally {
+                if (mirrored) outputContext.restore();
             }
             if (typeof activeSettings.overlayRenderer === 'function') {
                 activeSettings.overlayRenderer({

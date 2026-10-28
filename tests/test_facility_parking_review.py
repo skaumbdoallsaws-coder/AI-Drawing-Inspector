@@ -104,6 +104,16 @@ def test_explicit_bay_geometry_counts_even_when_role_is_decorative():
     assert result(value)["containedBays"] == 10
 
 
+def test_staging_footprints_at_dock_doors_are_not_parking():
+    before = layout()
+    before["zones"][0].update(zoneId="zn-receiving", zoneType="receiving", label="Receiving")
+    before["floorMarkings"] = []
+    after = deepcopy(before)
+    after["floorMarkings"] = [dict(bay(i), semanticRole="staging", label=f"DOOR {i + 1}") for i in range(4)]
+    assert review.review_changed_parking(before, after) is None
+    assert codes(review.review_parking(after, ["zn-receiving"])["reviews"][0]) >= {"parking_spaces_unrepresented"}
+
+
 def test_loose_lines_do_not_establish_bay_capacity():
     value = layout()
     for mark in value["floorMarkings"]:

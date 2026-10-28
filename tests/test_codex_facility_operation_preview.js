@@ -593,7 +593,7 @@ test('existing Undo and proposal controls require explicit approval and remain v
             querySelectorAll: () => [undoButton] },
         candidateControls: element(), candidateSummary: element(), validationNotice: element(),
         proposalReview: element(), proposalChangeText: element(), proposalBindingText: element(),
-        proposalDiagnosticText: element(),
+        proposalDiagnosticText: element(), proposalCheckText: element(),
         _invoke(_label, action) { this.pending = Promise.resolve(action()); return this.pending; },
     });
     w.candidateControls.querySelector = selector => candidates[selector.match(/="([^"]+)"/)[1]];

@@ -172,7 +172,7 @@ check('integrated Facility Layout editing commands live in the main ribbon', () 
     assert.ok(index.includes('FACILITY_LAYOUT_RIBBON_CONFIG'));
     assert.ok(index.includes('function _trainRenderFacilityLayoutRibbon'));
     assert.ok(index.includes('externalCommandSurface: true'));
-    assert.ok(index.includes('20260807-viewport-recording'));
+    assert.ok(/<script src="\/static\/facility_layout_recorder\.js\?v=[^"]+"/.test(index), 'the viewport recorder is loaded');
     [
         'Selection',
         'Create',

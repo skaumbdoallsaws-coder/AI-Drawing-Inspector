@@ -764,6 +764,13 @@
         }).join(' ');
     }
 
+    function appendPolygonVertex(points, point) {
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.z)) return points;
+        const previous = points[points.length - 1];
+        if (!previous || previous.x !== point.x || previous.z !== point.z) points.push(Object.assign({}, point));
+        return points;
+    }
+
     function activityDisplayOffsetPoints(points, requestedOffset) {
         const offset = Number(requestedOffset);
         if (!Array.isArray(points) || points.length < 2
@@ -957,21 +964,36 @@
             ? best.lines : single;
     }
 
-    function zoneLabelScreenRect(zone, projection, obstacles, occupied, size) {
+    // frame (optional): the building on screen, for a zone inside it. Its label
+    // stays inside the walls; hung past them it reads as the ground's.
+    function zoneLabelScreenRect(zone, projection, obstacles, occupied, size, frame) {
         const bounds = projectedPointBounds(zone.points, projection);
         const width = size.width;
         const height = size.height;
         const fitsInside = zoneLabelFitsInside(bounds, size);
         const viewportPadding = 5;
-        const minimumX = viewportPadding;
+        const wallPadding = 4;
+        const minimumX = Math.max(
+            viewportPadding,
+            frame ? frame.minX + wallPadding : -Infinity
+        );
         const maximumX = Math.max(
             minimumX,
-            projection.width - width - viewportPadding
+            Math.min(
+                projection.width - viewportPadding,
+                frame ? frame.maxX - wallPadding : Infinity
+            ) - width
         );
-        const minimumY = viewportPadding;
+        const minimumY = Math.max(
+            viewportPadding,
+            frame ? frame.minY + wallPadding : -Infinity
+        );
         const maximumY = Math.max(
             minimumY,
-            projection.height - height - viewportPadding
+            Math.min(
+                projection.height - viewportPadding,
+                frame ? frame.maxY - wallPadding : Infinity
+            ) - height
         );
         const xPositions = [
             bounds.minX + 8,
@@ -2373,7 +2395,10 @@
         const wallLayer = svgElement(this.document, 'g');
         wallLayer.setAttribute('data-layer', 'walls');
         wallLayer.setAttribute('pointer-events', 'none');
-        if (this.layerVisibility.walls !== false) wallsRuntime.volumes(this.layout).forEach(function (volume) {
+        // A plan is cut about 1.2 m above the floor: door heads stay out of it, so doors read as openings.
+        if (this.layerVisibility.walls !== false) wallsRuntime.volumes(this.layout).filter(function (volume) {
+            return !(volume.minimumY > 1.2);
+        }).forEach(function (volume) {
             const polygon = svgElement(this.document, 'polygon');
             setAttributes(polygon, { points: pointString(volume.polygon, this.projection), fill: volume.color });
             wallLayer.appendChild(polygon);
@@ -2919,6 +2944,19 @@
         }, this);
         const occupiedLabels = [];
         const suppressedZoneIds = [];
+        const building = normalizedPlanWorldBounds(this.options);
+        const buildingFrame = building ? projectedPointBounds([
+            { x: building.minX, z: building.minZ },
+            { x: building.maxX, z: building.maxZ },
+        ], this.projection) : null;
+        const indoors = function (zone) {
+            const bounds = geometryBounds(zone.points);
+            return Boolean(building)
+                && bounds.minX >= building.minX - 0.5
+                && bounds.maxX <= building.maxX + 0.5
+                && bounds.minZ >= building.minZ - 0.5
+                && bounds.maxZ <= building.maxZ + 0.5;
+        };
         const childZones = this.geometry.zones.filter(function (zone) {
             return Boolean(zone.parentZoneId);
         });
@@ -2963,7 +3001,8 @@
                 this.projection,
                 labelObstacles,
                 occupiedLabels.concat(reservedLabelRects),
-                labelSize
+                labelSize,
+                indoors(zone) ? buildingFrame : null
             );
             if (!selected && labelRect.labelOverlapArea > 1) {
                 suppressedZoneIds.push(zone.zoneId);
@@ -4089,6 +4128,26 @@
         return this._fit(false);
     };
 
+    // The building alone, with a margin for the labels and door numbers round it: Fit Facility also frames the paved
+    // ground past the walls, which leaves the building small in the view.
+    TopPlanAdapter.prototype.fitBuilding = function () {
+        if (this.disposed || !this.layout) return null;
+        const building = normalizedPlanWorldBounds(this.options);
+        if (!building) return this.fitFacility();
+        const viewport = this._measure();
+        this.projection = createTopPlanProjection(
+            building,
+            viewport,
+            Math.max(
+                finiteOr(this.options.padding, DEFAULT_VIEW_PADDING),
+                Math.min(viewport.width, viewport.height) * 0.08
+            )
+        );
+        this.semanticBaseScale = this.projection.scale;
+        this._render();
+        return clone(this.projection);
+    };
+
     TopPlanAdapter.prototype.fit = function () {
         return this.fitFacility();
     };
@@ -4724,5 +4783,7 @@
         placementFootprint: placementFootprint,
         projectTopPlanPoint: projectTopPlanPoint,
         unprojectTopPlanPoint: unprojectTopPlanPoint,
+        polygonPointString: pointString,
+        appendPolygonVertex: appendPolygonVertex,
     });
 }));

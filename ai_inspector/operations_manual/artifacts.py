@@ -223,6 +223,86 @@ def attach_draft_render_artifacts(
     return result
 
 
+def _figure_request(request: Mapping[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in request.items() if key != "image"}
+
+
+def carry_draft_render_artifacts(
+    root: str | Path,
+    assembly_number: str,
+    previous: Mapping[str, Any],
+    document: Mapping[str, Any],
+) -> int:
+    """Keep the figures captured for the previous revision when an edit left them as they were (a page's text, say):
+    a page whose figure request is unchanged gets its capture under the new revision. Returns how many were kept."""
+    old_revision = str(previous.get("documentRevision") or "")
+    new_revision = str(document.get("documentRevision") or "")
+    if not old_revision or not new_revision or old_revision == new_revision:
+        return 0
+    if any(previous.get(key) != document.get(key) for key in ("sourceRevision", "manualPlanRevision")):
+        return 0
+    try:
+        old_directory = _render_directory(root, assembly_number, old_revision)
+        new_directory = _render_directory(root, assembly_number, new_revision)
+    except OperationsManualArtifactError:
+        return 0
+    old_pages = {
+        str(page.get("pageId") or ""): page
+        for page in previous.get("pages") or []
+        if isinstance(page, Mapping)
+    }
+    kept = 0
+    for page in document.get("pages") or []:
+        request = page.get("renderRequest") if isinstance(page, Mapping) else None
+        old_request = (old_pages.get(str(page.get("pageId") or "")) or {}).get("renderRequest")
+        if not isinstance(request, Mapping) or not isinstance(old_request, Mapping):
+            continue
+        if _figure_request(request) != _figure_request(old_request):
+            continue
+        try:
+            safe_page = _safe(str(page.get("pageId") or ""), "page ID")
+        except OperationsManualArtifactError:
+            continue
+        if os.path.isfile(_filesystem_path(new_directory / f"{safe_page}.png")):
+            continue
+        try:
+            with open(_filesystem_path(old_directory / f"{safe_page}.json"), "r", encoding="ascii") as handle:
+                artifact = json.load(handle)
+            with open(_filesystem_path(old_directory / f"{safe_page}.png"), "rb") as handle:
+                payload = handle.read()
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        if (
+            artifact.get("documentRevision") != old_revision
+            or artifact.get("sha256") != hashlib.sha256(payload).hexdigest()
+        ):
+            continue
+        artifact = {
+            **artifact,
+            "documentRevision": new_revision,
+            "url": str(artifact.get("url") or "").replace(
+                f"/renders/{old_revision}/", f"/renders/{new_revision}/"
+            ),
+        }
+        _write_atomic(new_directory / f"{safe_page}.png", payload)
+        _write_atomic(
+            new_directory / f"{safe_page}.json",
+            (
+                json.dumps(
+                    artifact,
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    indent=2,
+                    separators=(",", ": "),
+                    allow_nan=False,
+                )
+                + "\n"
+            ).encode("ascii"),
+        )
+        kept += 1
+    return kept
+
+
 def draft_render_path(
     root: str | Path,
     assembly_number: str,

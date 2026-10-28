@@ -21,9 +21,33 @@ FIND = ("Finding", "Found", "find")
 COMPARE = ("Comparing", "Compared", "compare")
 PREPARE = ("Preparing", "Prepared", "prepare")
 RUN = ("Running", "Ran", "run")
+QUEUE = ("Queueing", "Queued", "queue")
+BUILD = ("Building", "Built", "build")
+RECORD = ("Recording", "Recorded", "record")
+DRAFT = ("Drafting", "Drafted", "draft")
+UPDATE = ("Updating", "Updated", "update")
+EXPORT = ("Exporting", "Exported", "export")
+PLACE = ("Placing", "Placed", "place")
+REMOVE = ("Removing", "Removed", "remove")
 
 SIMPLE = {
     "inspect_facility_context": (READ, "the layout overview"),
+    "inspect_site_context": (READ, "the property and outdoor areas"),
+    "analyze_site_fit": (CHECK, "building and outdoor space on the property"),
+    "look_at_site_photo": (READ, "the site photo"),
+    "trace_site_feature": (READ, "a feature on the site photo"),
+    "plan_warehouse_building": (CHECK, "the warehouse building"),
+    "plan_warehouse_zones": (CHECK, "the zones"),
+    "plan_floor_markings": (CHECK, "the floor markings"),
+    "plan_storage_layout": (CHECK, "the rack rows and aisles"),
+    "plan_site_docks": (CHECK, "the dock doors, truck court and drive"),
+    "plan_site_parking": (CHECK, "the employee car park"),
+    "plan_warehouse_contents": (CHECK, "the racks, forklifts, trucks and cars"),
+    "plan_design_paint": (CHECK, "the colours for the walls, trucks, cars and racks"),
+    "suggest_site_references": (CHECK, "reference points for setting out the building"),
+    "prepare_layout_pdf": (CHECK, "the printable layout sheets"),
+    "check_site_references": (CHECK, "how well the photo, map and reference points agree"),
+    "preview_planned_design": (STAGE, "the planned changes for review"),
     "inspect_facility_findings": (READ, "layout findings"),
     "inspect_pattern_provenance": (READ, "how equipment patterns were made"),
     "inspect_cell_layout_provenance": (READ, "how work cells were set up"),
@@ -33,6 +57,38 @@ SIMPLE = {
     "inspect_facility_operation_contracts": (READ, "the rules for these edits"),
     "prepare_facility_lettering": (PREPARE, "floor lettering"),
     "preview_facility_undo": (PREPARE, "an undo"),
+    "inspect_documentation_context": (READ, "the document types and what this assembly has for them"),
+    "build_inspection_sheet": (BUILD, "the inspection sheet"),
+    "find_library_machines": (SEARCH, "the machine library"),
+    "open_library_machine": (QUEUE, "the library machine to open"),
+    "propose_specification_template": (PREPARE, "specification names for this type of machine"),
+    "approve_specification_template": (RECORD, "your approval of the specification names"),
+    "draft_specification_text": (DRAFT, "the specification sheet's wording"),
+    "inspect_assembly": (READ, "the assembly"),
+    "list_appearances": (READ, "the finishes and the machine's parts"),
+    "list_part_faces": (READ, "the part's faces"),
+    "list_signs_and_scenes": (READ, "the safety signs and scenes"),
+    "measure_assembly": (MEASURE, "the machine's faces"),
+    "show_assembly_parts": (QUEUE, "the parts to show in the 3D view"),
+    "inspect_part": (READ, "the part and its features"),
+    "measure_part": (MEASURE, "the part's faces"),
+}
+# Documentation (documentation_tools.py): the document each read or workflow is about.
+DOCUMENTS = {
+    "illustrated_parts_manual": "parts manual", "operations_and_maintenance_manual": "operations manual",
+    "product_specification_sheet": "specification sheet", "work_instructions": "work instructions",
+    "inspection_sheet": "inspection sheet",
+}
+WORKFLOW_STEPS = {
+    "propose_parts_manual_structure": "a parts manual structure proposal",
+    "generate_parts_manual_draft": "the parts manual build", "generate_and_publish_parts_manual": "the parts manual PDF",
+    "edit_parts_manual_composition": "figure edits",
+    "generate_operations_manual_draft": "the operations manual build",
+    "publish_operations_manual": "the operations manual export",
+    "generate_specification_sheet_draft": "the specification sheet build",
+    "publish_specification_sheet": "the specification sheet export",
+    "generate_work_instructions_draft": "the work instructions build",
+    "publish_work_instructions": "the work instructions export",
 }
 AUTHORING_VIEWS = {
     "placements": "placed equipment", "zones": "zones", "routes": "aisles and routes",
@@ -69,6 +125,8 @@ ANALYSES = {
 }
 CHANGES = {
     "place_asset": ("new item", "new items"), "duplicate_placement": ("copied item", "copied items"),
+    "place_asset_array": ("row of items", "rows of items"),
+    "delete_asset_array": ("removed row", "removed rows"),
     "move_placement": ("move", "moves"), "rotate_placement": ("turn", "turns"),
     "delete_placement": ("removal", "removals"), "replace_asset": ("swap", "swaps"),
     "add_zone": ("new zone", "new zones"), "edit_zone": ("zone change", "zone changes"),
@@ -82,6 +140,11 @@ REASONS = {
     "codex_tool_budget_exhausted": "step limit reached",
     "codex_tool_denied": "not allowed",
     "codex_document_unavailable": "the layout changed",
+    "documentation_workflow_blocked": "the app cannot build it yet",
+    "documentation_assembly_required": "no assembly is loaded",
+    "documentation_assembly_changed": "the assembly changed",
+    "documentation_value_not_stated": "not in your message",
+    "documentation_build_failed": "the build failed",
 }
 
 
@@ -170,7 +233,7 @@ def _listing(noun, args, names, paged=False):
     offset, size = args.get("offset"), args.get("pageSize")
     if paged and type(offset) is int and offset > 0:
         subject += f", items {offset + 1}-{offset + (size if type(size) is int and size > 0 else 10)}"
-    elif args.get("cursor"):
+    elif args.get("cursor") or args.get("offset"):
         subject += ", more results"
     return subject
 
@@ -242,12 +305,69 @@ def _step(name, args, names, edit_mode):
         category = _short(args.get("category"))
         target = _quoted(args.get("query")) or (f"{category} items" if category else None)
         subject = f"the library for {target}" if target else "the equipment library"
-        return SEARCH, subject + (", more results" if args.get("cursor") else "")
+        return SEARCH, subject + (", more results" if args.get("cursor") or args.get("offset") else "")
     if name == "search_public_sources":
         query = _quoted(args.get("query"))
         return SEARCH, f"public sources for {query}" if query else "public sources"
     if name == "preview_facility_operations":
         return STAGE, _changes(args.get("operations")) + (" for your review" if edit_mode == "preview" else "")
+    if name == "inspect_documentation_type":
+        return READ, f"the {DOCUMENTS.get(args.get('documentType'), 'document')} details"
+    if name == "inspect_parts_manual_bom":
+        return READ, "the section's parts list" if args.get("sectionId") else "the parts list"
+    if name == "run_documentation_workflow":
+        return QUEUE, WORKFLOW_STEPS.get(args.get("workflow"), "a documentation workflow")
+    if name == "provide_inspection_sheet_values":
+        count = len(args.get("values") or [])
+        return RECORD, f"{count} value{'' if count == 1 else 's'} for the inspection sheet"
+    if name in ("provide_document_values", "record_researched_values"):
+        count = len(args.get("values") or [])
+        return RECORD, (f"{count} value{'' if count == 1 else 's'}"
+                        + (" from a public source" if name == "record_researched_values" else " you gave"))
+    if name == "accept_specification_values":
+        count = len(args.get("slots") or [])
+        return RECORD, f"your acceptance of {count} value{'' if count == 1 else 's'}"
+    if name == "edit_specification_sheet":
+        return UPDATE, {"set_units": "the sheet's units", "set_type": "the machine type"}.get(
+            args.get("operation"), "the specification rows")
+    if name == "export_specification_sheet":
+        return EXPORT, "the fillable specification PDF" if args.get("fillable") else "the specification sheet PDF"
+    if name == "read_document_pages":
+        return READ, f"the {DOCUMENTS.get(args.get('documentType'), 'document')} pages"
+    if name == "edit_document_text":
+        count = len(args.get("edits") or [])
+        return UPDATE, (f"{count} text{'' if count == 1 else 's'} in the "
+                        f"{DOCUMENTS.get(args.get('documentType'), 'document')}")
+    if name == "set_assembly_scene":
+        return UPDATE, "the machine's lighting scene"
+    if name == "place_assembly_signs":
+        count = len(args.get("signs") or [])
+        return PLACE, f"{count} sign{'' if count == 1 else 's'} on the machine"
+    if name == "remove_assembly_signs":
+        count = len(args.get("signIds") or [])
+        return REMOVE, "the machine's signs" if args.get("all") or count != 1 else "a sign from the machine"
+    if name == "place_assembly_dimensions":
+        count = len(args.get("dimensions") or [])
+        return PLACE, f"{count} dimension{'' if count == 1 else 's'} on the machine"
+    if name == "remove_assembly_dimensions":
+        count = len(args.get("dimIds") or [])
+        return REMOVE, "the machine's dimensions" if args.get("all") or count != 1 else "a dimension from the machine"
+    if name == "highlight_part_features":
+        return QUEUE, "clearing the feature highlight" if args.get("clear") else "the features to highlight"
+    if name == "place_part_dimensions":
+        count = len(args.get("dimensions") or [])
+        return PLACE, f"{count} dimension{'' if count == 1 else 's'} on the part"
+    if name == "remove_part_dimensions":
+        count = len(args.get("dimIds") or [])
+        return REMOVE, "the part's dimensions" if args.get("all") or count != 1 else "a dimension from the part"
+    if name == "set_part_appearance":
+        count = len(args.get("assignments") or [])
+        return UPDATE, (("the part's finishes" if count != 1 else "a finish on the part")
+                        if count or not args.get("clear") else "the part's finishes (cleared)")
+    if name == "set_assembly_appearance":
+        count = len(args.get("assignments") or [])
+        return UPDATE, ("the machine's finishes" if count != 1 else "a finish on the machine") \
+            if count or not args.get("clear") else "the machine's finishes (cleared)"
     return RUN, "a layout check"
 
 

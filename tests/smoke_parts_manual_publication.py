@@ -235,7 +235,7 @@ def run() -> int:
                 timeout=90_000,
             )
 
-            page.get_by_role("button", name="Parts Manual", exact=True).click()
+            page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
             manual = page.locator("#documentationWorkspace")
             manual.wait_for(state="visible", timeout=120_000)
             entry_snapshot = page.evaluate(

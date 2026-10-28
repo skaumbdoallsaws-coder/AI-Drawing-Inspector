@@ -3791,6 +3791,17 @@ async function main() {
             assert.strictEqual(
                 data.workspace.proposalCheckText.getAttribute('data-check-status'), 'error');
             // Without any check results the card must not claim there were no problems.
+            Object.assign(proposal.alternatives[0].validationSummary, {
+                obstructedAisleCount: 0, siteFindingCount: 7,
+            });
+            proposal.alternatives[0].operations = [{ op: 'set_building_pose' }];
+            data.session._notify();
+            await data.workspace.whenIdle();
+            assert.strictEqual(data.workspace.proposalCheckText.textContent,
+                'Checks: 7 site findings.');
+            assert.strictEqual(
+                data.workspace.proposalCheckText.getAttribute('data-check-status'), 'warning');
+            assert.ok(data.workspace.proposalChangeText.textContent.includes('1 site edit'));
             delete proposal.alternatives[0].validationSummary;
             proposal.alternatives[0].metrics = {};
             data.session._notify();
@@ -3805,6 +3816,10 @@ async function main() {
     await check('full-layout preview renders in plan and 3D without dirtying',
         async () => {
             const data = fixture();
+            const siteFrames = [];
+            data.workspace.siteView = { element: data.workspace.document.createElement('div'),
+                render: (layout, options) => siteFrames.push({ layout: clone(layout), options }),
+                show() {}, hide() {}, destroy() {} };
             const saved = clone(data.session.getState().layout);
             const autoArrange = toolbarButton(data, 'auto-arrange');
             autoArrange.focus();
@@ -3821,6 +3836,8 @@ async function main() {
             );
             assert.strictEqual(state.dirty, false);
             assert.deepStrictEqual(state.layout, saved);
+            assert.strictEqual(siteFrames.at(-1).options.readOnly, true);
+            assert.deepStrictEqual(siteFrames.at(-1).layout, state.layoutProposal.alternatives[state.layoutProposal.selectedIndex].ghostPreview.layout);
             assert.strictEqual(
                 data.root.getAttribute('data-full-layout-preview'),
                 'true'
@@ -5384,6 +5401,166 @@ async function main() {
             );
             assert.deepStrictEqual(reopened.session.getState().layout, layoutBefore);
             reopened.workspace.destroy();
+        });
+
+    await check('painting models keeps the 3D view where it is; moving one fits the view again',
+        async () => {
+            const data = fixture();
+            const reenter3d = async function (change) {
+                const next = clone(data.session.state.layout);
+                change(next);
+                data.session.state.layout = next;
+                data.session._notify();
+                data.workspace._setViewMode('plan');
+                data.workspace._setViewMode('3d');
+                await data.workspace.whenIdle();
+                await Promise.resolve();
+                await Promise.resolve();
+            };
+            data.workspace._setViewMode('3d');
+            await data.workspace.whenIdle();
+            await Promise.resolve();
+            await Promise.resolve();
+            const fitted = data.three.fitLayoutCount;
+            assert.strictEqual(fitted, 1);
+            await reenter3d(next => {
+                next.placements[0].componentMaterials = {
+                    representation: 'overview',
+                    overrides: [{ key: 'p:body#0', color: '#1565c0' }],
+                };
+            });
+            assert.strictEqual(data.three.fitLayoutCount, fitted);
+            await reenter3d(next => { next.placements[0].transform.position.x += 2; });
+            assert.strictEqual(data.three.fitLayoutCount, fitted + 1);
+            data.workspace.destroy();
+        });
+
+    await check('a review that only repaints keeps the views; one that moves something fits them',
+        async () => {
+            const data = fixture();
+            data.workspace._setViewMode('3d');
+            await data.workspace.whenIdle();
+            const stage = function (change, operations) {
+                const ghost = clone(data.session.state.layout);
+                change(ghost);
+                data.session.state.layoutProposal = {
+                    authority: 'server-authoritative', previewPure: true, baseRevision: 'rev-1', selectedIndex: 0,
+                    alternatives: [{ proposalId: 'proposal-look', alternativeId: 'alternative-look', operations,
+                        ghostPreview: { layout: ghost, routeProposals: [] }, metrics: {}, findings: [],
+                        newHardFindingIds: [] }],
+                };
+                data.session._notify();
+            };
+            const close = function () {
+                data.session.state.layoutProposal = null;
+                data.session._notify();
+            };
+            const paint = { representation: 'overview', overrides: [{ key: 'p:body#0', color: '#1565c0' }] };
+            const before = data.controller.fitCount;
+            stage(ghost => { ghost.placements[0].componentMaterials = paint; },
+                [{ op: 'set_component_materials', placementId: 'pl-a', materials: paint, visualSha256: 'a'.repeat(64) }]);
+            assert.strictEqual(data.controller.fitCount, before);
+            close();
+            assert.strictEqual(data.controller.fitCount, before);
+            stage(ghost => { ghost.placements[0].transform.position.x += 3; },
+                [{ op: 'move_placement', placementId: 'pl-a' }]);
+            assert.strictEqual(data.controller.fitCount, before + 1);
+            close();
+            assert.strictEqual(data.controller.fitCount, before + 2);
+            data.workspace.destroy();
+        });
+
+    await check('a Sage review opens in the view that shows it: a building step leaves the site photo for the plan',
+        async () => {
+            const data = fixture();
+            data.workspace.siteView = { element: data.workspace.document.createElement('div'),
+                render() {}, show() {}, hide() {}, destroy() {} };
+            data.workspace.siteTab = data.workspace.document.createElement('button');
+            data.workspace._setViewMode('site');
+            await data.workspace.whenIdle();
+            let staged = 0;
+            const stage = function (operations) {
+                const ghost = clone(data.session.state.layout);
+                ghost.placements[0].transform.position.x += 0.5 + staged++;
+                data.session.state.layoutProposal = {
+                    authority: 'server-authoritative', previewPure: true, baseRevision: 'rev-1', selectedIndex: 0,
+                    alternatives: [{ proposalId: 'proposal-view', alternativeId: 'alternative-view', operations,
+                        ghostPreview: { layout: ghost, routeProposals: [] }, metrics: {}, findings: [],
+                        newHardFindingIds: [] }],
+                };
+                data.session._notify();
+            };
+            const close = function () {
+                data.session.state.layoutProposal = null;
+                data.session._notify();
+            };
+            const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+            stage([{ op: 'add_zone', zone: { zoneId: 'zn-receiving' } }]);  // a building step: the 2D plan
+            await settle();
+            assert.strictEqual(data.workspace.viewMode, 'plan');
+            close();
+            stage([{ op: 'upsert_site_area', area: { areaId: 'area-truck-court' } }]);  // the docks: the site photo
+            await settle();
+            assert.strictEqual(data.workspace.viewMode, 'site');
+            close();
+            stage([{ op: 'place_asset', placement: { placementId: 'pl-forklift-01' } }]);  // models, from the site: 3D
+            await settle();
+            assert.strictEqual(data.workspace.viewMode, '3d');
+            close();
+            stage([{ op: 'add_zone', zone: { zoneId: 'zn-storage' } }]);  // Plan and 3D stay the user's choice
+            await settle();
+            assert.strictEqual(data.workspace.viewMode, '3d');
+            close();
+            data.workspace.destroy();
+        });
+
+    await check('a step applied directly (Apply Directly mode) moves the view as its review would have',
+        async () => {
+            const data = fixture();
+            data.workspace.siteView = { element: data.workspace.document.createElement('div'),
+                render() {}, show() {}, hide() {}, destroy() {} };
+            data.workspace.siteTab = data.workspace.document.createElement('button');
+            data.workspace._setViewMode('site');
+            await data.workspace.whenIdle();
+            let receipts = 0;
+            const applied = function (operationNames) {
+                data.session.state.lastApprovedOperationCommit = { receiptId: 'receipt-' + ++receipts,
+                    directApply: true, operationNames };
+                data.session._notify();
+            };
+            const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+            let buildingFits = 0;
+            data.workspace._fitPlanToBuilding = function () { buildingFits += 1; };
+            applied(['set_plan_settings', 'set_building_pose', 'set_perimeter_walls']);  // the building: the 2D plan
+            await settle();
+            await settle();
+            assert.strictEqual(data.workspace.viewMode, 'plan');
+            assert.strictEqual(buildingFits, 1);  // shown large in the plan
+            applied(['add_zone', 'add_floor_marking']);  // the next building step, in the plan: shown large again
+            await settle();
+            await settle();
+            assert.strictEqual(buildingFits, 2);
+            applied(['edit_perimeter_walls', 'add_zone', 'set_site_context', 'upsert_site_area']);  // docks: the photo
+            await settle();
+            assert.strictEqual(data.workspace.viewMode, 'site');
+            applied(['place_asset_array', 'place_asset', 'upsert_interior_wall']);  // contents: 3D
+            await settle();
+            assert.strictEqual(data.workspace.viewMode, '3d');
+            applied(['edit_perimeter_walls', 'set_ground', 'set_component_materials']);  // paint stays in 3D
+            await settle();
+            assert.strictEqual(data.workspace.viewMode, '3d');
+            applied(['add_zone', 'set_site_context', 'upsert_site_area', 'add_aisle']);  // the car park, from 3D: 3D
+            await settle();
+            assert.strictEqual(data.workspace.viewMode, '3d');
+            applied(['upsert_site_reference', 'upsert_site_reference']);  // reference points show on the photo only
+            await settle();
+            assert.strictEqual(data.workspace.viewMode, 'site');
+            data.session._notify();  // the same commit again moves nothing
+            data.workspace._setViewMode('plan');
+            data.session._notify();
+            await settle();
+            assert.strictEqual(data.workspace.viewMode, 'plan');
+            data.workspace.destroy();
         });
 
     await check('toolbar commands delegate exactly once and Fit changes only view',

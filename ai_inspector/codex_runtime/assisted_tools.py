@@ -1,7 +1,12 @@
 """Proposal-only tools. Approval and commit are deliberately not MCP capabilities."""
 from ai_inspector.facility_layout.asset_orientation import resolve_orientation_intents
 from ai_inspector.facility_layout.operation_proposals import create
+from ai_inspector.facility_layout.placement_intents import PLACEMENT_INTENT_KEYS, resolve_placement_intents
 from .edit_schemas import obj, operation_batch_schema, text
+from .policy import PilotError
+
+PACKAGE_LIMITS = (1000, 600_000)  # a design package from the server's planner, not model-written operations
+PREVIEWS = {"preview_facility_operations", "preview_facility_undo", "preview_planned_design"}
 from .facility_tools import FacilityReadGateway, tool_specs
 from .authoring_artifacts import prepare_lettering, tool_specs as artifact_specs
 from .operation_contracts import contracts, tool_spec as contract_spec
@@ -20,6 +25,13 @@ def edit_tool_specs():
          "Zone color is extensions.style.fillColor; prefer upsert_floor_surface for a targeted floor finish. "
          "Artwork must reference existing content-addressed images; this tool cannot import files or generate images. "
          "At most 50 operations and 24000 serialized bytes per batch.", "input_schema": schema},
+        {"name": "preview_planned_design", "description":
+         "Stage a whole package by its packageId, as one review: one build step (plan_warehouse_building, "
+         "plan_warehouse_zones, plan_floor_markings, plan_storage_layout, plan_site_docks, plan_site_parking, "
+         "plan_warehouse_contents) or the paint plan_design_paint prepared. The same validation as "
+         "preview_facility_operations; this tool never saves. In Apply Directly mode the app applies a package "
+         "without findings after your turn (approvalRequired false); otherwise it opens a review. A package belongs "
+         "to this turn and the saved layout it was planned on.", "input_schema": obj({"packageId": text(40)})},
         {"name": "preview_facility_undo", "description":
          "Prepare an exact Undo preview for an approved commit receipt. Fails if the layout has changed since that commit. "
          "The app handles user authorization according to the selected edit mode; this tool never saves.",
@@ -39,12 +51,12 @@ class FacilityEditGateway(FacilityReadGateway):
         self.edit_mode = "preview"
 
     def before_call(self, name):
-        if name in {"preview_facility_operations", "preview_facility_undo"}:
+        if name in PREVIEWS:
             self.proposal = None
 
     async def call(self, name, arguments):
         result = await super().call(name, arguments)
-        if name in {"preview_facility_operations", "preview_facility_undo"} and not result["ok"]:
+        if name in PREVIEWS and not result["ok"]:
             self.proposal = None
         if name == "preview_facility_operations" and result.get("error", {}).get("code") == "codex_tool_arguments_invalid":
             import json
@@ -72,17 +84,32 @@ class FacilityEditGateway(FacilityReadGateway):
             return {"readOnly": True, "schema": contracts(self.operation_schema, arguments["operations"])}
         if name == "prepare_facility_lettering":
             return prepare_lettering(self.runtime, self.principal, self.reference, arguments)
+        if name == "preview_planned_design":
+            package = self.packages.get(arguments["packageId"])
+            if package is None:
+                raise PilotError("codex_design_package_unknown",
+                                 "Plan it first with a build step or plan_design_paint and use the packageId it returned.", 404)
+            result = create(self.runtime.service, self.principal, self.reference["siteId"], self.reference["layoutId"],
+                            self.reference["revision"], operations=package, edit_mode=self.edit_mode, limits=PACKAGE_LIMITS,
+                            planned=True)
+            return self._staged(result)
         if name not in {"preview_facility_operations", "preview_facility_undo"}:
             return super()._read_data(name, arguments)
         operations = arguments.get("operations")
-        if any(isinstance(item, dict) and "orientation" in item for item in operations or []):
+        intents = ("orientation", *PLACEMENT_INTENT_KEYS)
+        if any(isinstance(item, dict) and any(key in item for key in intents) for item in operations or []):
             from .facility_tools import read_bound_layout
-            operations = resolve_orientation_intents(operations,
-                catalog=self.runtime.asset_catalog_provider(self.principal, self.reference["siteId"]),
-                layout=read_bound_layout(self.runtime, self.principal, self.reference)["layout"])
+            catalog = self.runtime.asset_catalog_provider(self.principal, self.reference["siteId"])
+            layout = read_bound_layout(self.runtime, self.principal, self.reference)["layout"]
+            # Turns first, so an item can sit on a desk placed and turned earlier in the batch.
+            operations = resolve_orientation_intents(operations, catalog=catalog, layout=layout)
+            operations = resolve_placement_intents(operations, catalog=catalog, layout=layout)
         result = create(self.runtime.service, self.principal, self.reference["siteId"], self.reference["layoutId"],
             self.reference["revision"], operations=operations, undo_receipt_id=arguments.get("receiptId"),
             edit_mode=self.edit_mode)
+        return self._staged(result)
+
+    def _staged(self, result):
         self.proposal = {**self.reference, "proposalId": result["proposalId"]}
         alternative = result["alternative"]
         if self.edit_mode == "direct":

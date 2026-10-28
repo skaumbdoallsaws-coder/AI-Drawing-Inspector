@@ -980,6 +980,10 @@ def _normalize_annotation(
         "dimensionType": raw_annotation.get("dimensionType"),
         "isReference": bool(raw_annotation.get("isReference", False)),
         "isDriven": bool(raw_annotation.get("isDriven", False)),
+        # Tolerances in metres as extracted (DrawingData.cs); the FAI table and inspection sheet read them.
+        "toleranceType": raw_annotation.get("toleranceType"),
+        "tolerancePlus": _coerce_float(raw_annotation.get("tolerancePlus")),
+        "toleranceMinus": _coerce_float(raw_annotation.get("toleranceMinus")),
     }
     return normalized
 

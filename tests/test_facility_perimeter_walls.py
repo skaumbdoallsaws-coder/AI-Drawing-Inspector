@@ -142,3 +142,19 @@ def test_saved_wall_geometry_survives_repository_reload(tmp_path):
     assert saved['revision'] == loaded['revision']
     assert loaded['layout']['extensions'][KEY] == changed['extensions'][KEY]
     validate_perimeter_walls(loaded['layout'])
+
+
+def test_a_door_added_after_the_dock_doors_validates():
+    # Bayport warehouse 5: eleven dock doors on the west wall, then an employee door on the north wall.
+    # The stored settings keep openings sorted; cutting them in the given order instead left the panels a
+    # few bits apart, so the new door failed "geometry does not match its authored settings".
+    doc = layout()
+    doc['extensions']['facilityPlan'].update(widthMeters=93.0, depthMeters=56.0)
+    docks = [dict(edge=3, startMeters=round(5 + 4.3 * i, 1), endMeters=round(8 + 4.3 * i, 1)) for i in range(11)]
+    value = dict(boundarySource='plan', heightMeters=10.0, thicknessMeters=0.3,
+                 openings=docks + [dict(edge=2, startMeters=67.72, endMeters=69.22)])
+    walls = apply_facility_layout_operations(doc, [dict(op='set_perimeter_walls', wallSettings=value)])['document']
+    validate_perimeter_walls(walls)
+    stored = walls['extensions'][KEY]
+    assert [(o['edge'], o['startMeters']) for o in stored['settings']['openings']][:2] == [(2, 67.72), (3, 5.0)]
+    assert compile_perimeter_walls(value, walls) == compile_perimeter_walls(stored['settings'], walls) == stored

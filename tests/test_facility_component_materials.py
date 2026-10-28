@@ -23,11 +23,13 @@ def test_published_schema_describes_component_materials():
     assert contract['properties']['representation']['enum'] == ['overview', 'detail']
     overrides = contract['properties']['overrides']
     assert (overrides['minItems'], overrides['maxItems']) == (1, 512)
-    finish = overrides['items']
+    finish, library_finish = overrides['items']['oneOf']
     assert set(finish['required']) == set(material()['overrides'][0])
     assert finish['additionalProperties'] is False
     for field in ('roughness', 'metalness'):
         assert finish['properties'][field] == dict(type='number', minimum=0, maximum=1)
+    assert set(library_finish['required']) == {'key', 'appearanceId'}
+    assert library_finish['additionalProperties'] is False
 
 
 def test_one_occurrence_preserves_other_instances_and_geometry():

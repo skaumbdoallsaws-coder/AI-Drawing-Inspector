@@ -9,7 +9,8 @@ from .errors import FacilityConflictError, FacilityLayoutError, FacilityValidati
 def validate_proposal_components(service, principal, site_id, layout_id, base_revision, operations):
     for op in operations:
         placement = op.get("placement")
-        if (op.get("op") == "place_asset" and isinstance(placement, Mapping)
+        # A rack row's template is a placement too: its copies would carry the finish past the proof below.
+        if (op.get("op") in ("place_asset", "place_asset_array") and isinstance(placement, Mapping)
                 and placement.get("componentMaterials") is not None):
             raise FacilityValidationError("component_target_requires_saved_visual",
                 "Place and save the asset without componentMaterials, inspect its components, "
@@ -24,6 +25,9 @@ def validate_proposal_components(service, principal, site_id, layout_id, base_re
     placements = {row["placementId"]: row for row in current["layout"]["placements"]}
     replaced = {op.get("placementId") for op in operations if op.get("op") in {"replace_asset", "delete_placement"}}
     proofs = []
+    # A visual's bytes and part keys follow from its asset revision and representation alone, so each distinct
+    # visual is read once however many placements share it (a planned site paints 300+ copies of three models).
+    visuals = {}
     for op in edits:
         expected_hash = op.get("visualSha256")
         if not isinstance(expected_hash, str) or not re.fullmatch(r"[a-f0-9]{64}", expected_hash):
@@ -38,21 +42,25 @@ def validate_proposal_components(service, principal, site_id, layout_id, base_re
             materials = normalize_component_materials(op["materials"])
         except ValueError as exc:
             raise FacilityValidationError("invalid_component_materials", str(exc)) from exc
-        resolver = service.component_inventory_resolver
-        if resolver is None:
-            raise FacilityValidationError("component_inventory_unavailable", "This host cannot verify component visual authority.")
-        try:
-            inventory = resolver(principal, reference, identifier, materials["representation"])
-        except FacilityLayoutError:
-            raise
-        except Exception as exc:
-            raise FacilityValidationError("component_inventory_unavailable",
-                "The saved visual could not be verified. Inspect its components again before proposing changes.") from exc
-        if (inventory.get("identity") != reference or inventory.get("placementId") != identifier
-                or inventory.get("assetId") != placement["assetId"]
-                or inventory.get("assetDefinitionRevision") != placement["assetDefinitionRevision"]
-                or inventory.get("representation") != materials["representation"]):
-            raise FacilityConflictError("component_visual_revision_conflict", "The component visual binding has changed. Inspect it again.")
+        visual = (placement["assetId"], placement["assetDefinitionRevision"], materials["representation"])
+        if visual not in visuals:
+            resolver = service.component_inventory_resolver
+            if resolver is None:
+                raise FacilityValidationError("component_inventory_unavailable", "This host cannot verify component visual authority.")
+            try:
+                inventory = resolver(principal, reference, identifier, materials["representation"])
+            except FacilityLayoutError:
+                raise
+            except Exception as exc:
+                raise FacilityValidationError("component_inventory_unavailable",
+                    "The saved visual could not be verified. Inspect its components again before proposing changes.") from exc
+            if (inventory.get("identity") != reference or inventory.get("placementId") != identifier
+                    or inventory.get("assetId") != placement["assetId"]
+                    or inventory.get("assetDefinitionRevision") != placement["assetDefinitionRevision"]
+                    or inventory.get("representation") != materials["representation"]):
+                raise FacilityConflictError("component_visual_revision_conflict", "The component visual binding has changed. Inspect it again.")
+            visuals[visual] = inventory
+        inventory = visuals[visual]
         if inventory.get("visualSha256") != expected_hash:
             raise FacilityConflictError("component_visual_revision_conflict",
                 "The visual bytes have changed since component inspection. Inspect the current visual and preview again.")

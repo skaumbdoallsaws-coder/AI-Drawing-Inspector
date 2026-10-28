@@ -31,6 +31,17 @@ def test_new_unimported_artwork_is_rejected(scope, path):
         validate_proposal_artwork(service, principal, "site-a", {}, [{"imagePath": path}])
 
 
+def test_the_site_planners_own_artwork_needs_no_import_but_other_wall_art_still_does(scope):
+    from ai_inspector.facility_layout.site_plan import LOGO_IMAGE, TARGET_IMAGE
+    service, principal = scope
+    validate_proposal_artwork(service, principal, "site-a", {}, [
+        {"op": "set_wall_finishes", "artwork": [{"imagePath": LOGO_IMAGE}]},
+        {"op": "set_ground", "ground": {"marks": [{"imagePath": TARGET_IMAGE}]}}])
+    with pytest.raises(FacilityValidationError, match="import|Import"):
+        validate_proposal_artwork(service, principal, "site-a", {},
+                                  [{"imagePath": "/generated/facility-wall-art/" + "c" * 64 + ".png"}])
+
+
 def test_only_same_scope_imported_image_is_authorized(scope):
     service, principal = scope
     data = BytesIO()

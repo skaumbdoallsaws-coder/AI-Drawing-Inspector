@@ -5,6 +5,9 @@
     if(root)root.InspectorProFacilityComponentMaterials=api;
 }(typeof globalThis!=='undefined'?globalThis:this,function(dialogs){
     'use strict';
+    // Each part (mesh primitive) has two keys: the legacy traversal key mN-sN,
+    // valid only for the representation it was authored on, and the stable
+    // p:<node path>#<primitive> key tagged on load from the glTF node names.
     function slots(object){
         const result=[];let index=0;
         object.traverse(node=>{
@@ -12,20 +15,92 @@
             const mesh=index++;
             (Array.isArray(node.material)?node.material:[node.material]).forEach((material,slot)=>{
                 if(!material||!material.color)return;
-                result.push({key:'m'+mesh+'-s'+slot,node,material,slot,
-                    label:(node.name||'Mesh '+(mesh+1))+' / '+(material.name||'Material '+(slot+1))});
+                const stable=node.userData&&node.userData.facilityPartKey;
+                const legacyKey='m'+mesh+'-s'+slot;
+                result.push({key:stable&&slot===0?stable:legacyKey,legacyKey,node,material,slot,
+                    label:(node.userData&&node.userData.facilityPartLabel||node.name||'Mesh '+(mesh+1))+' / '+String(material.name||'Material '+(slot+1)).replace(/:FacilityNeutral$/,'')});
             });
         });
         return result;
     }
-    function apply(object,config,representation){
-        if(!config||config.representation!==representation)return;
-        const byKey=new Map(config.overrides.map(v=>[v.key,v]));
+    // Precedence: a part override beats the placement's finish, which beats the
+    // asset's own material. `finishes.materialFor(override, mesh)` builds library
+    // finishes; without it, appearance overrides are skipped rather than guessed.
+    function apply(object,config,representation,finishes){
+        if(!config||!Array.isArray(config.overrides))return [];
+        const sameRepresentation=config.representation===representation;
+        const byKey=new Map(config.overrides.filter(v=>sameRepresentation||!/^m\d/.test(v.key)).map(v=>[v.key,v]));
+        const applied=[];
         slots(object).forEach(item=>{
-            const v=byKey.get(item.key);if(!v)return;
-            const m=item.material;m.color.set(v.color);m.roughness=v.roughness;m.metalness=v.metalness;
+            const v=byKey.get(item.key)||(sameRepresentation?byKey.get(item.legacyKey):null);if(!v)return;
+            if(v.appearanceId){
+                const material=finishes&&finishes.materialFor(v,item.node);
+                if(!material)return;
+                material.userData=material.userData||{};material.userData.facilityComponentOverride=true;
+                if(Array.isArray(item.node.material)){const list=item.node.material.slice();list[item.slot]=material;item.node.material=list;}
+                else item.node.material=material;
+                applied.push(v.key);return;
+            }
+            let m=item.material;
+            // A placement finish shares one material across its parts; copy it so
+            // the override changes only this part.
+            if(m.userData&&m.userData.facilityAppearanceFinish&&typeof m.clone==='function'){
+                m=m.clone();m.userData=Object.assign({},item.material.userData,{facilityAppearanceFinish:false});
+                if(Array.isArray(item.node.material)){const list=item.node.material.slice();list[item.slot]=m;item.node.material=list;}
+                else item.node.material=m;
+            }
+            m.color.set(v.color);m.roughness=v.roughness;m.metalness=v.metalness;
             m.userData=m.userData||{};m.userData.facilityComponentOverride=true;
+            applied.push(v.key);
         });
+        return applied;
+    }
+    // Percent-encode every UTF-8 byte outside [A-Za-z0-9._-]; must match the
+    // server's component inventory so agents and the browser agree on keys.
+    function encodeName(name){
+        const bytes=typeof TextEncoder==='function'?Array.from(new TextEncoder().encode(name)):Array.from(unescape(encodeURIComponent(name))).map(c=>c.charCodeAt(0));
+        return bytes.map(b=>(b>=48&&b<=57)||(b>=65&&b<=90)||(b>=97&&b<=122)||b===46||b===95||b===45?String.fromCharCode(b):'%'+b.toString(16).toUpperCase().padStart(2,'0')).join('');
+    }
+    function nodePaths(json){
+        const nodes=json.nodes||[],scenes=json.scenes||[],paths=new Map();
+        const roots=(scenes[json.scene||0]||{}).nodes||[];
+        function visit(children,prefix){
+            const names=children.map(i=>nodes[i]&&typeof nodes[i].name==='string'&&nodes[i].name?nodes[i].name:null);
+            const counts=new Map(),seen=new Map();
+            names.forEach(n=>{if(n!==null)counts.set(n,(counts.get(n)||0)+1);});
+            children.forEach((index,i)=>{
+                if(paths.has(index)||!nodes[index])return;
+                const name=names[i];let segment;
+                if(name===null)segment='@'+index;
+                else{const ordinal=seen.get(name)||0;seen.set(name,ordinal+1);segment=encodeName(name)+(counts.get(name)>1?'~'+ordinal:'');}
+                const path=prefix?prefix+'/'+segment:segment;
+                paths.set(index,{path,label:nodes[index].name||('Node '+index)});
+                visit(nodes[index].children||[],path);
+            });
+        }
+        visit(roots,'');
+        return paths;
+    }
+    // Tag every mesh in a freshly loaded glTF with its stable part key. Must run
+    // before the scene is cloned: the loader's associations do not survive clones.
+    function annotatePartKeys(gltf){
+        const parser=gltf&&gltf.parser,scene=gltf&&gltf.scene;
+        if(!parser||!parser.json||!parser.associations||!scene)return 0;
+        const paths=nodePaths(parser.json);let count=0;
+        scene.traverse(object=>{
+            if(!object.isMesh)return;
+            const own=parser.associations.get(object)||{};
+            const nodeIndex=own.nodes!==undefined?own.nodes:(parser.associations.get(object.parent)||{}).nodes;
+            if(nodeIndex===undefined||!paths.has(nodeIndex))return;
+            const primitive=own.primitives!==undefined?own.primitives:0;
+            let key='p:'+paths.get(nodeIndex).path+'#'+primitive;
+            if(key.length>512)key='p:@'+nodeIndex+'#'+primitive;
+            object.userData=object.userData||{};
+            object.userData.facilityPartKey=key;
+            object.userData.facilityPartLabel=paths.get(nodeIndex).label;
+            count+=1;
+        });
+        return count;
     }
     async function open(workspace){
         const state=workspace.session.getState(),ids=state.selection||[];
@@ -60,5 +135,5 @@
             ui.message('');ui.disable(false);show();
         }catch(e){ui.message(e.message);ui.disable(true);}
     }
-    return {slots,apply,open};
+    return {slots,apply,open,encodeName,nodePaths,annotatePartKeys};
 }));

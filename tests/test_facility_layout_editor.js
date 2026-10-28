@@ -401,6 +401,31 @@ check('top plan renders the measured facility floor grid axes and origin', () =>
     adapter.dispose();
 });
 
+check('top plan fits the building alone, large in the view, whatever lies past its walls', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const source = layout([
+        placement('pl-machine', 'asset-machine', 3, 2),
+        placement('pl-far', 'asset-rack', 120, 70),  // e.g. a car out in the car park
+    ]);
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+        units: 'm',
+        originMode: 'corner',
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(source);
+    const facilityProjection = adapter.fitFacility();
+    const building = adapter.fitBuilding();
+    assert(building.scale > 2 * facilityProjection.scale);
+    // The 40 x 30 m building fills the height bar the margin and fits the width.
+    assert(building.scale * 30 >= 0.8 * 650 && building.scale * 30 <= 650);
+    assert(building.scale * 40 <= 900);
+    adapter.dispose();
+});
+
 check('top plan updates dimensions grid rulers and view-only scale together', () => {
     FakeResizeObserver.reset();
     const { documentRef, host } = makeHost();
@@ -980,6 +1005,33 @@ check('zone header tabs avoid equipment occupying the upper-left corner', () => 
             .getAttribute('data-zone-label-edge'),
         'top-inside'
     );
+    adapter.dispose();
+});
+
+check('a zone inside the building keeps its label inside the walls', () => {
+    // Live 2026-10-24: "Forklift charging", a 1 m strip along the east wall, hung its label past the wall.
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const source = layout([]);
+    source.routes = [];
+    source.zones.push(Object.assign({}, source.zones[0], {
+        zoneId: 'zn-charging',
+        zoneType: 'charging',
+        label: 'Forklift charging',
+        boundary: [{ x: 11, z: 2 }, { x: 12, z: 2 }, { x: 12, z: 6 }, { x: 11, z: 6 }],
+    }));
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        worldBounds: { minX: 0, minZ: 0, maxX: 12, maxZ: 8 },
+    });
+    adapter.setLayout(source);
+    const walls = host.findByAttribute('data-zone-id', 'zn-cell')[0].getAttribute('points')
+        .split(' ').map(pair => pair.split(',').map(Number));
+    const label = zoneLabelBox(host, 'zn-charging');
+    assert.ok(label.minX >= Math.min(...walls.map(p => p[0])) && label.maxX <= Math.max(...walls.map(p => p[0]))
+        && label.minY >= Math.min(...walls.map(p => p[1])) && label.maxY <= Math.max(...walls.map(p => p[1])),
+    JSON.stringify({ label, walls }));
     adapter.dispose();
 });
 

@@ -722,6 +722,84 @@ def _op_place_asset(
     return [placement_id], [placement_id]
 
 
+MAX_ARRAY_COUNT = 200
+_ARRAY_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,59}")
+
+
+def _op_place_asset_array(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    index: int,
+    base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    """A straight row of copies of one placement (racks, parked cars): ids pl-<arrayId>-001 onward,
+    each `step` metres on from the last. Placing the same arrayId again replaces the earlier row."""
+    if set(operation) - {"op", "arrayId", "placement", "step", "count"}:
+        _fail("invalid_operation_field", "place_asset_array takes arrayId, placement, step and count.")
+    array_id = operation.get("arrayId")
+    if not isinstance(array_id, str) or _ARRAY_ID.fullmatch(array_id) is None:
+        _fail("invalid_operation_field", "arrayId must be 1 to 60 lowercase letters, digits and hyphens.")
+    count = operation.get("count")
+    if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= MAX_ARRAY_COUNT:
+        _fail("invalid_operation_field", f"count must be a whole number from 1 to {MAX_ARRAY_COUNT}.")
+    step = _mapping(operation.get("step"), "step")
+    if set(step) - {"x", "y", "z"}:
+        _fail("invalid_operation_field", "step takes x, y and z.")
+    offsets = []
+    for axis in ("x", "y", "z"):
+        value = step.get(axis, 0.0)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not abs(value) <= 1000:
+            _fail("invalid_operation_field", f"step.{axis} must be a number of metres within 1000.")
+        offsets.append(float(value))
+    template = _mapping(operation.get("placement"), "placement")
+    position = _mapping(_mapping(template.get("transform"), "placement.transform").get("position"),
+                        "placement.transform.position")
+    for axis in ("x", "y", "z"):
+        if isinstance(position.get(axis), bool) or not isinstance(position.get(axis), (int, float)):
+            _fail("invalid_operation_field", f"placement.transform.position.{axis} must be a number.")
+    prefix = f"pl-{array_id}-"
+    removed = [str(item.get("placementId")) for item in document.get("placements", [])
+               if str(item.get("placementId", "")).startswith(prefix)]
+    for placement_id in removed:
+        _op_delete_placement(document, {"op": "delete_placement", "placementId": placement_id}, index, base_revision)
+    label = (template.get("metadata") or {}).get("instanceLabel") if isinstance(template.get("metadata"), Mapping) else None
+    created: List[str] = []
+    for number in range(count):
+        placement = deepcopy(dict(template))
+        placement.pop("placementId", None)
+        moved = placement["transform"]["position"]
+        for axis, offset in zip(("x", "y", "z"), offsets):
+            moved[axis] = round(float(moved[axis]) + offset * number, 6)
+        placement["placementId"] = f"{prefix}{number + 1:03}"
+        if label:
+            placement["metadata"] = {**placement["metadata"], "instanceLabel": f"{label} {number + 1}"[:120]}
+        made, _ = _op_place_asset(document, {"op": "place_asset", "placement": placement}, index, base_revision)
+        created.extend(made)
+    return created, created + removed
+
+
+def _op_delete_asset_array(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    index: int,
+    base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    """Remove a whole row placed by place_asset_array."""
+    if set(operation) != {"op", "arrayId"}:
+        _fail("invalid_operation_field", "delete_asset_array takes arrayId.")
+    array_id = operation.get("arrayId")
+    if not isinstance(array_id, str) or _ARRAY_ID.fullmatch(array_id) is None:
+        _fail("invalid_operation_field", "arrayId must be 1 to 60 lowercase letters, digits and hyphens.")
+    prefix = f"pl-{array_id}-"
+    removed = [str(item.get("placementId")) for item in document.get("placements", [])
+               if str(item.get("placementId", "")).startswith(prefix)]
+    if not removed:
+        _fail("object_not_found", f"No row has arrayId '{array_id}'.")
+    for placement_id in removed:
+        _op_delete_placement(document, {"op": "delete_placement", "placementId": placement_id}, index, base_revision)
+    return [], removed
+
+
 def _movement(
     document: Dict[str, Any],
     operation: Mapping[str, Any],
@@ -915,29 +993,198 @@ def _op_delete_placement(
     ]
     from .decals import remove_bound_decals
     remove_bound_decals(document, lambda target: target.get("placementId") == placement_id)
+    from .equipment_decals import remove_equipment_decals
+    remove_equipment_decals(document, placement_id)
     return [], [placement_id]
 
 
 def _op_set_appearance(document, operation, _index, _base_revision):
+    """Set or remove one finish on whole placements.
+
+    ``color`` keeps the original plain-color form. ``appearance`` applies a
+    library or custom finish (``{"appearanceId": ..., <overrides>}``); null in
+    either form removes the override so the asset's own finish shows again.
+    """
     ids = operation.get("placementIds")
     if not isinstance(ids, list) or not 1 <= len(ids) <= 5000:
         _fail("invalid_operation_field", "placementIds must contain 1 to 5000 IDs.")
     ids = [_clean_id(value, "placementId", "pl") for value in ids]
     if len(set(ids)) != len(ids):
         _fail("invalid_operation_field", "placementIds must be unique.")
-    if "color" not in operation:
-        _fail("invalid_operation_field", "color is required; use null to reset appearance.")
-    color = operation["color"]
-    if color is not None and (not isinstance(color, str)
-                             or re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None):
-        _fail("invalid_operation_field", "color must be a six-digit hex color or null.")
-    placements = [_find(document, "placements", "placementId", value, "Placement") for value in ids]
+    if ("color" in operation) == ("appearance" in operation):
+        _fail("invalid_operation_field", "Give color or appearance; use null to reset appearance.")
+    if "appearance" in operation:
+        value = operation["appearance"]
+        if value is not None:
+            from .appearance_library import normalize_appearance
+            try:
+                value = normalize_appearance(value, document)
+            except ValueError as exc:
+                _fail("invalid_appearance", str(exc))
+    else:
+        color = operation["color"]
+        if color is not None and (not isinstance(color, str)
+                                 or re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None):
+            _fail("invalid_operation_field", "color must be a six-digit hex color or null.")
+        value = None if color is None else {"color": color.lower()}
+    placements = [_find(document, "placements", "placementId", value_id, "Placement") for value_id in ids]
     for placement in placements:
-        if color is None:
+        if value is None:
             placement.pop("appearance", None)
         else:
-            placement["appearance"] = {"color": color.lower()}
+            placement["appearance"] = deepcopy(value)
     return [], ids
+
+
+def _op_set_custom_appearances(document, operation, _index, _base_revision):
+    from .appearance_library import CUSTOM_KEY, normalize_custom_appearances, validate_layout_references
+    if set(operation) != {"op", "appearances"}:
+        _fail("invalid_custom_appearances", "Expected appearances")
+    try:
+        value = normalize_custom_appearances(operation["appearances"])
+    except ValueError as exc:
+        _fail("invalid_custom_appearances", str(exc))
+    extensions = document.setdefault("extensions", {})
+    previous = extensions.get(CUSTOM_KEY)
+    if value["custom"]:
+        extensions[CUSTOM_KEY] = value
+    else:
+        extensions.pop(CUSTOM_KEY, None)
+    try:
+        validate_layout_references(document)
+    except ValueError as exc:
+        if previous is None:
+            extensions.pop(CUSTOM_KEY, None)
+        else:
+            extensions[CUSTOM_KEY] = previous
+        _fail("custom_appearance_in_use", f"{exc}. Change those finishes before deleting it.")
+    return [], []
+
+
+def _op_set_scene(document, operation, _index, _base_revision):
+    from .appearance_library import SCENE_KEY, normalize_scene
+    if set(operation) != {"op", "scene"}:
+        _fail("invalid_scene", "Expected scene")
+    extensions = document.setdefault("extensions", {})
+    if operation["scene"] is None:
+        extensions.pop(SCENE_KEY, None)
+        return [], []
+    try:
+        extensions[SCENE_KEY] = normalize_scene(operation["scene"])
+    except ValueError as exc:
+        _fail("invalid_scene", str(exc))
+    return [], []
+
+
+def _op_set_site_context(document, operation, _index, _base_revision):
+    """Place the layout on the Earth, or take it off (site context; site_context.py)."""
+    from .site_context import KEY, normalize_site_context
+    if set(operation) != {"op", "siteContext"}:
+        _fail("invalid_site_context", "Expected siteContext")
+    extensions = document.setdefault("extensions", {})
+    if operation["siteContext"] is None:
+        extensions.pop(KEY, None)
+        return [], []
+    try:
+        extensions[KEY] = normalize_site_context(operation["siteContext"], document)
+    except ValueError as exc:
+        _fail("invalid_site_context", str(exc))
+    return [], []
+
+
+def _op_set_building_pose(document, operation, _index, _base_revision):
+    from .site_context import KEY, normalize_site_context
+    if set(operation) != {"op", "buildingPose"}:
+        _fail("invalid_building_pose", "Expected buildingPose")
+    context = (document.get("extensions") or {}).get(KEY)
+    if context is None:
+        _fail("site_context_missing", "Place the layout on a site before moving the building")
+    try:
+        document["extensions"][KEY] = normalize_site_context({**context, "buildingPose": operation["buildingPose"]}, document)
+    except ValueError as exc:
+        _fail("invalid_building_pose", str(exc))
+    return [], []
+
+
+def _op_upsert_site_area(document, operation, _index, _base_revision):
+    from .site_context import KEY, normalize_site_context, normalize_site_area
+    if set(operation) != {"op", "area"}:
+        _fail("invalid_site_area", "Expected area")
+    context = (document.get("extensions") or {}).get(KEY)
+    if context is None:
+        _fail("site_context_missing", "Place the layout on a site first")
+    try:
+        area = normalize_site_area(operation["area"])
+        existing = context.get("areas", [])
+        created = not any(item["areaId"] == area["areaId"] for item in existing)
+        areas = [area if item["areaId"] == area["areaId"] else item for item in existing]
+        if created:
+            areas.append(area)
+        document["extensions"][KEY] = normalize_site_context({**context, "areas": areas}, document)
+    except ValueError as exc:
+        _fail("invalid_site_area", str(exc))
+    return [area["areaId"]] if created else [], [area["areaId"]]
+
+
+def _op_upsert_site_reference(document, operation, _index, _base_revision):
+    from .site_context import KEY, normalize_site_context, normalize_site_reference
+    if set(operation) != {"op", "reference"}:
+        _fail("invalid_site_reference", "Expected reference")
+    context = (document.get("extensions") or {}).get(KEY)
+    if context is None:
+        _fail("site_context_missing", "Place the layout on a site first")
+    try:
+        reference = normalize_site_reference(operation["reference"])
+        existing = context.get("references", [])
+        created = not any(item["referenceId"] == reference["referenceId"] for item in existing)
+        references = [reference if item["referenceId"] == reference["referenceId"] else item for item in existing]
+        if created:
+            references.append(reference)
+        document["extensions"][KEY] = normalize_site_context({**context, "references": references}, document)
+    except ValueError as exc:
+        _fail("invalid_site_reference", str(exc))
+    return [reference["referenceId"]] if created else [], [reference["referenceId"]]
+
+
+def _op_delete_site_reference(document, operation, _index, _base_revision):
+    from .site_context import KEY, normalize_site_context
+    if set(operation) != {"op", "referenceId"} or not isinstance(operation["referenceId"], str):
+        _fail("invalid_site_reference", "Expected referenceId")
+    context = (document.get("extensions") or {}).get(KEY)
+    if context is None or not any(item["referenceId"] == operation["referenceId"]
+                                  for item in context.get("references", [])):
+        _fail("site_reference_missing", "Reference point was not found")
+    references = [item for item in context["references"] if item["referenceId"] != operation["referenceId"]]
+    document["extensions"][KEY] = normalize_site_context({**context, "references": references}, document)
+    return [], [operation["referenceId"]]
+
+
+def _op_delete_site_area(document, operation, _index, _base_revision):
+    from .site_context import KEY, normalize_site_context
+    if set(operation) != {"op", "areaId"} or not isinstance(operation["areaId"], str):
+        _fail("invalid_site_area", "Expected areaId")
+    context = (document.get("extensions") or {}).get(KEY)
+    if context is None or not any(area["areaId"] == operation["areaId"] for area in context.get("areas", [])):
+        _fail("site_area_missing", "Outdoor area was not found")
+    document["extensions"][KEY] = normalize_site_context({**context, "areas": [
+        area for area in context["areas"] if area["areaId"] != operation["areaId"]]}, document)
+    return [], [operation["areaId"]]
+
+
+def _op_set_equipment_decals(document, operation, _index, _base_revision):
+    from .equipment_decals import KEY, normalize_equipment_decals
+    if set(operation) != {"op", "decals"}:
+        _fail("invalid_equipment_decals", "Expected decals")
+    try:
+        value = normalize_equipment_decals(operation["decals"], document)
+    except ValueError as exc:
+        _fail("invalid_equipment_decals", str(exc))
+    extensions = document.setdefault("extensions", {})
+    if value["decals"]:
+        extensions[KEY] = value
+    else:
+        extensions.pop(KEY, None)
+    return [], sorted({row["placementId"] for row in value["decals"]})
 
 
 def _op_replace_asset(document, operation, _index, _base_revision):
@@ -967,6 +1214,8 @@ def _op_replace_asset(document, operation, _index, _base_revision):
     placement["assetId"] = asset_id
     placement["assetDefinitionRevision"] = revision
     placement.pop("componentMaterials", None)
+    from .equipment_decals import remove_equipment_decals
+    remove_equipment_decals(document, identifier)
     if not keep: placement.pop("appearance", None)
     _set_or_stale_layout_provenance(placement, operation, container="metadata")
     return [], [identifier]
@@ -1066,7 +1315,7 @@ def _op_set_component_materials(document, operation, _index, _base_revision):
         placement.pop("componentMaterials", None)
     else:
         try:
-            placement["componentMaterials"] = normalize_component_materials(operation["materials"])
+            placement["componentMaterials"] = normalize_component_materials(operation["materials"], document)
         except ValueError as exc:
             _fail("invalid_component_materials", str(exc))
     return [], [identifier]
@@ -2393,12 +2642,23 @@ _HANDLERS: Dict[str, _Handler] = {
     "edit_floor_marking": _op_edit_floor_marking,
     "delete_floor_marking": _op_delete_floor_marking,
     "place_asset": _op_place_asset,
+    "place_asset_array": _op_place_asset_array,
+    "delete_asset_array": _op_delete_asset_array,
     "move_placement": _op_move_placement,
     "rotate_placement": _op_rotate_placement,
     "duplicate_placement": _op_duplicate_placement,
     "delete_placement": _op_delete_placement,
     "set_position_mode": _op_set_position_mode,
     "set_appearance": _op_set_appearance,
+    "set_custom_appearances": _op_set_custom_appearances,
+    "set_scene": _op_set_scene,
+    "set_site_context": _op_set_site_context,
+    "set_building_pose": _op_set_building_pose,
+    "upsert_site_area": _op_upsert_site_area,
+    "delete_site_area": _op_delete_site_area,
+    "upsert_site_reference": _op_upsert_site_reference,
+    "delete_site_reference": _op_delete_site_reference,
+    "set_equipment_decals": _op_set_equipment_decals,
     "set_component_materials": _op_set_component_materials,
     "set_interior_walls": _op_set_interior_walls,
     "set_floor_surfaces": _op_set_floor_surfaces,

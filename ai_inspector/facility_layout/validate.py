@@ -1499,16 +1499,23 @@ def validate_layout(
         extensions.add_open_object(placement, _PLACEMENT_FIELDS, path)
         if "appearance" in placement:
             appearance = _object(placement["appearance"], f"{path}.appearance")
-            _required(appearance, {"color"}, f"{path}.appearance")
-            _closed(appearance, {"color"}, f"{path}.appearance")
-            color = appearance["color"]
-            if not isinstance(color, str) or re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None:
-                _fail("invalid_appearance", "Appearance color must be a six-digit hex color.",
-                      f"{path}.appearance.color")
+            if "appearanceId" not in appearance:
+                _required(appearance, {"color"}, f"{path}.appearance")
+                _closed(appearance, {"color"}, f"{path}.appearance")
+                color = appearance["color"]
+                if not isinstance(color, str) or re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None:
+                    _fail("invalid_appearance", "Appearance color must be a six-digit hex color.",
+                          f"{path}.appearance.color")
+            else:
+                from .appearance_library import normalize_appearance
+                try:
+                    normalize_appearance(appearance, layout)
+                except ValueError as exc:
+                    _fail("invalid_appearance", str(exc), f"{path}.appearance")
         if "componentMaterials" in placement:
             from .component_materials import normalize_component_materials
             try:
-                normalize_component_materials(placement["componentMaterials"])
+                normalize_component_materials(placement["componentMaterials"], layout)
             except ValueError as exc:
                 _fail("invalid_component_materials", str(exc), f"{path}.componentMaterials")
         _stable_id(placement["assetId"], f"{path}.assetId")
@@ -1948,6 +1955,35 @@ def validate_layout(
             normalize_decals(root_extensions["facilityDecals"], layout)
         except ValueError as exc:
             _fail("invalid_decals", str(exc), "$.extensions.facilityDecals")
+    if isinstance(root_extensions, Mapping) and "facilityAppearances" in root_extensions:
+        from .appearance_library import normalize_custom_appearances
+        try:
+            normalize_custom_appearances(root_extensions["facilityAppearances"])
+        except ValueError as exc:
+            _fail("invalid_custom_appearances", str(exc), "$.extensions.facilityAppearances")
+    if isinstance(root_extensions, Mapping) and "facilityScene" in root_extensions:
+        from .appearance_library import normalize_scene
+        try:
+            normalize_scene(root_extensions["facilityScene"])
+        except ValueError as exc:
+            _fail("invalid_scene", str(exc), "$.extensions.facilityScene")
+    if isinstance(root_extensions, Mapping) and "facilitySiteContext" in root_extensions:
+        from .site_context import normalize_site_context
+        try:
+            normalize_site_context(root_extensions["facilitySiteContext"], layout)
+        except ValueError as exc:
+            _fail("invalid_site_context", str(exc), "$.extensions.facilitySiteContext")
+    if isinstance(root_extensions, Mapping) and "facilityEquipmentDecals" in root_extensions:
+        from .equipment_decals import normalize_equipment_decals
+        try:
+            normalize_equipment_decals(root_extensions["facilityEquipmentDecals"], layout)
+        except ValueError as exc:
+            _fail("invalid_equipment_decals", str(exc), "$.extensions.facilityEquipmentDecals")
+    from .appearance_library import validate_layout_references
+    try:
+        validate_layout_references(layout)
+    except ValueError as exc:
+        _fail("invalid_appearance", str(exc), "$.placements")
     if isinstance(root_extensions, Mapping) and "facilityNavigation" in root_extensions:
         validate_facility_navigation_extension(
             root_extensions["facilityNavigation"],

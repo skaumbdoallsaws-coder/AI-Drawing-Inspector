@@ -273,6 +273,24 @@ from ai_inspector.assembly_knowledge.library_registry import (
     DocumentationLibraryRegistryError,
     load_documentation_library_sources,
 )
+from ai_inspector.assembly_knowledge.assembly_appearance import (
+    AssemblyAppearanceError,
+    AssemblyAppearanceStore,
+    face_key as assembly_appearance_face_key,
+    part_numbers as assembly_appearance_part_numbers,
+    revision as assembly_appearance_revision,
+    view as assembly_appearance_view,
+)
+from ai_inspector.assembly_knowledge.library_machines import (
+    BODIES_NOT_PARTS,
+    LibraryMachineError,
+    LibraryMachineRegistry,
+    is_library_machine,
+    library_catalog,
+    library_machine_source,
+    load_library_machine_sources,
+    search_library_machines,
+)
 from ai_inspector.parts_manual import (
     DocumentationSceneBindingError,
     DocumentationSceneConflictError,
@@ -315,6 +333,7 @@ from ai_inspector.operations_manual import (
     OperationsManualExportError,
     attach_draft_render_artifacts,
     build_operations_manual_document,
+    carry_draft_render_artifacts,
     draft_render_path,
     prototype_export_path,
     prototype_export_readiness,
@@ -329,12 +348,33 @@ from ai_inspector.specification_sheet import (
     SpecificationSheetError,
     SpecificationSheetExportError,
     build_specification_sheet_document,
+    read_returned_specification_sheet,
     specification_docx_path,
     specification_export_path,
     specification_export_readiness,
+    specification_fillable_path,
     store_specification_docx,
+    store_specification_fillable_pdf,
     store_specification_pdf,
 )
+from ai_inspector.specification_sheet.cad import assembly_mass, glb_extents
+from ai_inspector.specification_sheet.slots import (
+    SpecificationSlotError,
+    SlotStore as SpecificationSlotStore,
+    TemplateStore as SpecificationTemplateStore,
+    row_key as specification_row_key,
+)
+from ai_inspector.inspection_sheet.document import (
+    InspectionSheetError,
+    build_inspection_sheet_document,
+    conformance as inspection_sheet_conformance,
+)
+from ai_inspector.inspection_sheet.exports import (
+    InspectionSheetExportError,
+    build_inspection_sheet_pdf_bytes,
+    read_returned_inspection_sheet,
+)
+from ai_inspector.inspection_sheet.store import InspectionSheetStore, InspectionSheetStoreError
 from ai_inspector.work_instructions import (
     WorkInstructionError,
     WorkInstructionExportError,
@@ -1194,6 +1234,14 @@ def _index_assembly_profile(assy_number: str, assy_data: dict) -> int:
     return mappings
 
 
+LIBRARY_MACHINE_REGISTRY_FILENAME = "library_machines.json"
+
+
+def _library_machine_registry() -> LibraryMachineRegistry:
+    """The library machines the user opened as assemblies (docs/specification-sheet-slots-plan.md, SS5)."""
+    return LibraryMachineRegistry(library_path(LIBRARY_MACHINE_REGISTRY_FILENAME))
+
+
 def _load_assembly_profiles():
     """Load legacy and prepared-package assemblies into one viewer registry."""
     global assembly_part_lookup, assembly_profiles, prepared_assembly_sources
@@ -1279,6 +1327,16 @@ def _load_assembly_profiles():
             assy_number,
             source["profile"],
         )
+
+    for asset_id, source in load_library_machine_sources(
+        REPO_ROOT, _library_machine_registry().ids()
+    ).items():
+        if asset_id in assembly_profiles or asset_id in prepared_assembly_sources:
+            logger.error("Library machine %s collides with a loaded assembly and was skipped.", asset_id)
+            continue
+        # Bodies, not numbered parts: kept out of the part lookup and the part-number registry.
+        prepared_assembly_sources[asset_id] = source
+        assembly_profiles[asset_id] = source["profile"]
 
     logger.info(
         "Loaded %s assembly profile(s), including %s prepared source(s), "
@@ -1613,9 +1671,12 @@ app.include_router(_FACILITY_LAYOUT_HOST.create_router())
 @app.middleware("http")
 async def _telemetry_endpoint_timing(request, call_next):
     path = request.url.path
-    if not path.startswith("/api/") or path.startswith("/api/metrics/"):
+    if (not path.startswith("/api/") or path.startswith("/api/metrics/")
+            or path.startswith("/api/facility-site-globe/")):
         # Skip /, /static/*, /favicon.ico, and the dashboard's own
-        # metrics API so usage tracking does not count itself.
+        # metrics API so usage tracking does not count itself. The Site
+        # tab's globe flight loads a hundred-odd map tiles in seconds;
+        # recording each one blocks the loop and stalls the flight.
         return await call_next(request)
     import time as _time
     _start = _time.perf_counter()
@@ -11689,6 +11750,85 @@ WORK_INSTRUCTION_ROOT = (
     if _WORK_INSTRUCTION_ROOT_OVERRIDE
     else REPO_ROOT / "generated" / "work_instructions"
 )
+_INSPECTION_SHEET_ROOT_OVERRIDE = os.environ.get(
+    "INSPECTORPRO_INSPECTION_SHEET_ROOT", ""
+).strip()
+INSPECTION_SHEET_ROOT = (
+    Path(_INSPECTION_SHEET_ROOT_OVERRIDE).expanduser().resolve()
+    if _INSPECTION_SHEET_ROOT_OVERRIDE
+    else REPO_ROOT / "generated" / "inspection_sheets"
+)
+_ASSEMBLY_APPEARANCE_ROOT_OVERRIDE = os.environ.get(
+    "INSPECTORPRO_ASSEMBLY_APPEARANCE_ROOT", ""
+).strip()
+# Finishes from the appearance library on an assembly or its parts (docs/assembly-appearance-plan.md).
+ASSEMBLY_APPEARANCE_ROOT = (
+    Path(_ASSEMBLY_APPEARANCE_ROOT_OVERRIDE).expanduser().resolve()
+    if _ASSEMBLY_APPEARANCE_ROOT_OVERRIDE
+    else REPO_ROOT / "generated" / "assembly_appearances"
+)
+
+
+def _assembly_appearance_store() -> AssemblyAppearanceStore:
+    return AssemblyAppearanceStore(ASSEMBLY_APPEARANCE_ROOT)
+
+
+_PART_APPEARANCE_ROOT_OVERRIDE = os.environ.get("INSPECTORPRO_PART_APPEARANCE_ROOT", "").strip()
+# Finishes and Smart Dimensions on a single part in the 3D Model tab, kept as an assembly's are: the part's CAD
+# features (one mesh each in its GLB) stand where an assembly's parts do.
+PART_APPEARANCE_ROOT = (
+    Path(_PART_APPEARANCE_ROOT_OVERRIDE).expanduser().resolve()
+    if _PART_APPEARANCE_ROOT_OVERRIDE
+    else REPO_ROOT / "generated" / "part_appearances"
+)
+
+
+def _part_appearance_store() -> AssemblyAppearanceStore:
+    return AssemblyAppearanceStore(PART_APPEARANCE_ROOT)
+
+
+def _part_feature_colors_path(part_number: str) -> Optional[Path]:
+    safe = re.sub(r"[^\w\-]", "", str(part_number or ""))
+    if not safe:
+        return None
+    path = _resolve_part_asset(safe, "revA", f"{safe}_feature_colors.json")
+    if path is None:
+        root = library_path() / f"{safe}_feature_colors.json"
+        path = root if root.exists() else None
+    return path
+
+
+def _part_appearance_features(part_number: str) -> Dict[str, str]:
+    """The part's CAD features as the 3D Model tab draws them, one mesh per feature: its GLB node name and its name.
+    A finish, a face or a dimension on the part is on one of these. LookupError for a part without them."""
+    path = _part_feature_colors_path(part_number)
+    if path is None:
+        raise LookupError(str(part_number))
+    with open(path, "r", encoding="utf-8-sig") as handle:
+        data = json.load(handle)
+    features = {}
+    for row in data.get("features") or []:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("glb_node_name") or row.get("cad_feature_id") or "").strip()
+        if key and key not in features:
+            features[key] = str(row.get("display_label") or row.get("sw_name") or key)[:160]
+    # A body the GLB does not name is drawn as the viewer's __base__.
+    features.setdefault("__base__", "Base body")
+    return features
+
+
+def _part_appearance_name(part_number: str) -> str:
+    safe = re.sub(r"[^\w\-]", "", str(part_number or ""))
+    path = _resolve_part_asset(safe, "revA", f"{safe}.json") if safe else None
+    if path is None and safe and (library_path() / f"{safe}.json").exists():
+        path = library_path() / f"{safe}.json"
+    try:
+        with open(path, "r", encoding="utf-8-sig") as handle:
+            identity = (json.load(handle) or {}).get("identity") or {}
+        return str(identity.get("description") or safe)[:160]
+    except (OSError, TypeError, ValueError):
+        return safe
 
 
 class ProcessMapPutBody(BaseModel):
@@ -15155,6 +15295,9 @@ def _build_part_properties(part_color_legend: list) -> list:
         phys = profile.get("physical", {})
         comp = profile.get("comparison", {})
         feats = profile.get("features", {})
+        # The fallback is a reviewed inspection profile, whose "features" is a list of inspection features, not the
+        # extraction's feature dict. Without this one part stopped the whole assembly from loading.
+        phys, comp, feats = (value if isinstance(value, dict) else {} for value in (phys, comp, feats))
 
         # Mass (kg) and material
         mass_kg = phys.get("mass")
@@ -15931,11 +16074,27 @@ def _operations_manual_editable_page_targets(
                 if value
             ]
         )
-        block_ids = [
-            str(block.get("blockId"))
-            for block in page.get("layoutBlocks") or []
-            if isinstance(block, Mapping) and block.get("blockId")
-        ]
+        block_ids = []
+        for block in page.get("layoutBlocks") or []:
+            if not isinstance(block, Mapping) or not block.get("blockId"):
+                continue
+            block_id = str(block.get("blockId"))
+            block_ids.append(block_id)
+            # A table's cells and a list's items are edited on the page one by one ("<block>.r<row>.c<column>",
+            # "<block>.i<item>"); the exports use them (operations_manual/exports.py, _edited_block).
+            if block.get("blockType") in ("table", "key_value_table"):
+                block_ids.extend(
+                    f"{block_id}.r{row_index}.c{column}"
+                    for row_index, row in enumerate(block.get("rows") or [])
+                    if isinstance(row, Mapping)
+                    for column in range(len(row.get("cells") or []))
+                )
+            elif block.get("blockType") in ("list", "figure_legend"):
+                block_ids.extend(
+                    f"{block_id}.i{item_index}"
+                    for item_index, item in enumerate(block.get("items") or [])
+                    if isinstance(item, Mapping)
+                )
         page_targets: Dict[str, List[str]] = {
             "figure": [page_id] if render_request else [],
             "manual_group": [],
@@ -16002,16 +16161,90 @@ def _specification_sheet_scene_repository() -> DocumentationSceneRepository:
     return DocumentationSceneRepository(SPECIFICATION_SHEET_ROOT)
 
 
-def _specification_sheet_base_document(
+_SPECIFICATION_SHEET_EXTENTS_CACHE: Dict[Tuple[Any, ...], Optional[Dict[str, float]]] = {}
+
+
+def _specification_sheet_cad(
     assembly_data: Mapping[str, Any],
     catalog: Mapping[str, Any],
 ) -> Dict[str, Any]:
-    return build_specification_sheet_document(
+    """What the CAD says for the sheet: the model's overall extents and, when every part has a material, its
+    weight. Nothing is estimated."""
+    extents = None
+    path = _resolve_assembly_model_path(str(catalog["assemblyNumber"]), None)
+    zones = tuple((assembly_data.get("libraryMachine") or {}).get("zoneBodies") or ()) \
+        if is_library_machine(assembly_data) else ()
+    if path is not None:
+        try:
+            stat = path.stat()
+            key = (str(path), stat.st_mtime_ns, stat.st_size, zones)
+            if key not in _SPECIFICATION_SHEET_EXTENTS_CACHE:
+                _SPECIFICATION_SHEET_EXTENTS_CACHE[key] = glb_extents(path, exclude=zones)
+            extents = _SPECIFICATION_SHEET_EXTENTS_CACHE[key]
+        except OSError:
+            extents = None
+    mass = (
+        {"massKg": None, "note": "a library model carries no materials"}
+        if is_library_machine(assembly_data)
+        else assembly_mass(assembly_data)
+    )
+    return {"extents": extents, "massKg": mass["massKg"], "massNote": mass["note"]}
+
+
+def _specification_sheet_compile(
+    assembly_data: Mapping[str, Any],
+    catalog: Mapping[str, Any],
+    *,
+    documentation_scene: Optional[Mapping[str, Any]] = None,
+    documentation_scene_revision: Optional[str] = None,
+) -> Dict[str, Any]:
+    document = build_specification_sheet_document(
         assembly_data,
         catalog,
         evidence_root=OPERATIONS_MANUAL_EVIDENCE_ROOT,
         profile_root=SPECIFICATION_SHEET_PROFILE_ROOT,
+        slot_root=SPECIFICATION_SHEET_ROOT,
+        cad=_specification_sheet_cad(assembly_data, catalog),
+        documentation_scene=documentation_scene,
+        documentation_scene_revision=documentation_scene_revision,
+        appearance_revision=_specification_sheet_appearance_revision(str(catalog.get("assemblyNumber") or "")),
     )
+    return _specification_sheet_attach_capture(document)
+
+
+def _specification_sheet_appearance_revision(assembly_number: str) -> str:
+    """A changed appearance makes the product picture stale (docs/assembly-appearance-plan.md)."""
+    try:
+        return assembly_appearance_revision(_assembly_appearance_store().read(assembly_number))
+    except AssemblyAppearanceError:
+        return ""
+
+
+def _specification_sheet_attach_capture(document: Dict[str, Any]) -> Dict[str, Any]:
+    """The product picture is stored under the figure revision, so editing the words keeps it. It is shown as
+    current for this document revision, which is what the browser and the export check."""
+    assembly_number = str(document["product"]["assemblyNumber"])
+    probe = attach_draft_render_artifacts(
+        SPECIFICATION_SHEET_ROOT,
+        assembly_number,
+        {**document, "documentRevision": document["figureRevision"]},
+    )
+    for page, attached in zip(document.get("pages") or [], probe.get("pages") or []):
+        image = ((attached or {}).get("renderRequest") or {}).get("image") or {}
+        if image.get("status") == "ready":
+            page["renderRequest"]["image"] = {
+                **image,
+                "figureRevision": document["figureRevision"],
+                "documentRevision": document["documentRevision"],
+            }
+    return document
+
+
+def _specification_sheet_base_document(
+    assembly_data: Mapping[str, Any],
+    catalog: Mapping[str, Any],
+) -> Dict[str, Any]:
+    return _specification_sheet_compile(assembly_data, catalog)
 
 
 def _specification_sheet_build_document_with_scene(
@@ -16045,18 +16278,11 @@ def _specification_sheet_build_document_with_scene(
             scene_manual_plan_revision=str(scene.get("manualPlanRevision") or ""),
             current_manual_plan_revision=plan_revision,
         )
-    document = build_specification_sheet_document(
+    document = _specification_sheet_compile(
         assembly_data,
         catalog,
-        evidence_root=OPERATIONS_MANUAL_EVIDENCE_ROOT,
-        profile_root=SPECIFICATION_SHEET_PROFILE_ROOT,
         documentation_scene=loaded_scene["scene"],
         documentation_scene_revision=str(loaded_scene["revision"]),
-    )
-    document = attach_draft_render_artifacts(
-        SPECIFICATION_SHEET_ROOT,
-        str(catalog["assemblyNumber"]),
-        document,
     )
     return document, loaded_scene
 
@@ -16970,6 +17196,13 @@ def operations_manual_documentation_scene_command(
             documentation_scene=result["scene"],
             documentation_scene_revision=result["revision"],
         )
+        # An edit that leaves a figure as it was (a page's text) keeps its capture.
+        carry_draft_render_artifacts(
+            OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"]), current_document, next_document
+        )
+        next_document = attach_draft_render_artifacts(
+            OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"]), next_document
+        )
     except (
         PartsManualRepositoryError,
         DocumentationSceneError,
@@ -17021,6 +17254,13 @@ def _operations_manual_documentation_history(
             evidence_root=OPERATIONS_MANUAL_EVIDENCE_ROOT,
             documentation_scene=result["scene"],
             documentation_scene_revision=result["revision"],
+        )
+        # An edit that leaves a figure as it was (a page's text) keeps its capture.
+        carry_draft_render_artifacts(
+            OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"]), current_document, next_document
+        )
+        next_document = attach_draft_render_artifacts(
+            OPERATIONS_MANUAL_ROOT, str(catalog["assemblyNumber"]), next_document
         )
     except (
         PartsManualRepositoryError,
@@ -17421,6 +17661,13 @@ def work_instructions_documentation_scene_command(
             scene=result["scene"],
             scene_revision=result["revision"],
         )
+        # An edit that leaves a figure as it was (a page's text) keeps its capture.
+        carry_draft_render_artifacts(
+            WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"]), current_document, next_document
+        )
+        next_document = attach_draft_render_artifacts(
+            WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"]), next_document
+        )
     except (
         PartsManualRepositoryError,
         DocumentationSceneError,
@@ -17476,6 +17723,13 @@ def _work_instructions_documentation_history(
             catalog,
             scene=result["scene"],
             scene_revision=result["revision"],
+        )
+        # An edit that leaves a figure as it was (a page's text) keeps its capture.
+        carry_draft_render_artifacts(
+            WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"]), current_document, next_document
+        )
+        next_document = attach_draft_render_artifacts(
+            WORK_INSTRUCTION_ROOT, str(catalog["assemblyNumber"]), next_document
         )
     except (
         PartsManualRepositoryError,
@@ -17776,6 +18030,9 @@ def specification_sheet_get(assembly_number: str):
         "releaseGate": document["releaseGate"],
         "evidenceSummary": document["evidenceSummary"],
         "evidenceCitations": document.get("evidenceCitations") or [],
+        "sheet": document["sheet"],
+        "slots": document["slots"],
+        "slotOrder": document["slotOrder"],
         "sceneRevision": loaded_scene["revision"],
         "sceneCurrent": bool(
             loaded_scene["sourceCurrent"] and loaded_scene["manualPlanCurrent"]
@@ -17876,11 +18133,9 @@ def specification_sheet_documentation_scene_command(
             command=command,
             page_targets=_operations_manual_editable_page_targets(current_document),
         )
-        next_document = build_specification_sheet_document(
+        next_document = _specification_sheet_compile(
             assembly_data,
             catalog,
-            evidence_root=OPERATIONS_MANUAL_EVIDENCE_ROOT,
-            profile_root=SPECIFICATION_SHEET_PROFILE_ROOT,
             documentation_scene=result["scene"],
             documentation_scene_revision=result["revision"],
         )
@@ -17930,11 +18185,9 @@ def _specification_sheet_documentation_history(
             base_revision=body.baseRevision,
             direction=direction,
         )
-        next_document = build_specification_sheet_document(
+        next_document = _specification_sheet_compile(
             assembly_data,
             catalog,
-            evidence_root=OPERATIONS_MANUAL_EVIDENCE_ROOT,
-            profile_root=SPECIFICATION_SHEET_PROFILE_ROOT,
             documentation_scene=result["scene"],
             documentation_scene_revision=result["revision"],
         )
@@ -18006,6 +18259,7 @@ async def specification_sheet_page_render(
     sourceRevision: str = Form(...),
     renderPipelineVersion: int | None = Form(None),
     balloons: str = Form("[]"),
+    figureRevision: str | None = Form(None),
 ):
     try:
         assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -18017,7 +18271,8 @@ async def specification_sheet_page_render(
             raise OperationsManualArtifactError(
                 "the specification-sheet renderer is stale; refresh InspectorPro"
             )
-        if documentRevision != document["documentRevision"]:
+        if documentRevision != document["documentRevision"] \
+                and figureRevision != document["figureRevision"]:
             raise OperationsManualArtifactError(
                 "the specification sheet changed; regenerate the product image"
             )
@@ -18037,7 +18292,7 @@ async def specification_sheet_page_render(
         artifact = store_draft_render_artifact(
             SPECIFICATION_SHEET_ROOT,
             catalog["assemblyNumber"],
-            document,
+            {**document, "documentRevision": document["figureRevision"]},
             page_id,
             payload,
             source_revision=sourceRevision,
@@ -18045,6 +18300,11 @@ async def specification_sheet_page_render(
             balloons=None,
             api_route="specification-sheet",
         )
+        artifact = {
+            **artifact,
+            "figureRevision": document["figureRevision"],
+            "documentRevision": document["documentRevision"],
+        }
     except (
         PartsManualRepositoryError,
         DocumentationSceneError,
@@ -18055,6 +18315,304 @@ async def specification_sheet_page_render(
     ) as error:
         return _specification_sheet_error_response(error, operation="page_render")
     return {"success": True, "artifact": artifact}
+
+
+# Specification-sheet slots (docs/specification-sheet-slots-plan.md): the values the user types or says, the row
+# list, accepting unreviewed values, the units and machine type, and the per-type templates.
+class SpecificationSheetValuesBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    values: List[Dict[str, Any]] = Field(min_length=1, max_length=40)
+
+
+class SpecificationSheetRowsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: str
+    key: Optional[str] = None
+    label: Optional[str] = None
+    unit: Optional[str] = None
+    after: Optional[str] = None
+    direction: Optional[int] = None
+    provisional: Optional[bool] = None
+
+
+class SpecificationSheetAcceptBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slots: List[str] = Field(min_length=1, max_length=40)
+
+
+class SpecificationSheetSettingsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    units: Optional[str] = None
+    type: Optional[str] = None
+    typeLabel: Optional[str] = None
+
+
+class SpecificationSheetTemplateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: str
+
+
+_SPECIFICATION_SHEET_SLOT_ERRORS = (
+    PartsManualRepositoryError,
+    DocumentationSceneError,
+    OperationsManualEvidenceError,
+    OperationsManualArtifactError,
+    SpecificationSheetError,
+    ValueError,
+)
+
+
+def _specification_sheet_slot_change(assembly_number: str, change) -> Dict[str, Any]:
+    """Apply one change to the sheet's stored slots and return the sheet as the viewport shows it."""
+    assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+    base = _specification_sheet_compile(assembly_data, catalog)
+    store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"]))
+    outcome = change(base, store) or {}
+    try:
+        document, loaded_scene = _specification_sheet_build_document_with_scene(
+            assembly_data=assembly_data,
+            catalog=catalog,
+        )
+    except DocumentationSceneBindingError:
+        document, loaded_scene = _specification_sheet_compile(assembly_data, catalog), {}
+    return {
+        "success": True,
+        **loaded_scene,
+        **outcome,
+        "document": document,
+        "occurrences": catalog["occurrences"],
+        "editableTargets": _operations_manual_editable_page_targets(document),
+    }
+
+
+def _specification_sheet_store_values(
+    base: Mapping[str, Any],
+    store: SpecificationSlotStore,
+    items: Iterable[Mapping[str, Any]],
+    source: str,
+    *,
+    quote: Optional[str] = None,
+) -> Dict[str, Any]:
+    known = set(base["slotOrder"])
+    for item in items:
+        slot = str(item.get("slot") or "")
+        if slot not in known:
+            raise SpecificationSlotError(f"{slot[:60] or 'that slot'} is not on this sheet")
+    # A row added with a placeholder name is keyed by the first real name it gets.
+    provisional = {row["key"] for row in store.read()["rows"] or [] if row.get("provisional")}
+    renamed: Dict[str, str] = {}
+    pending = []
+    for item in items:
+        slot = str(item.get("slot") or "")
+        parts = slot.split(".")
+        if (len(parts) == 3 and parts[0] == "spec" and parts[2] == "label" and parts[1] in provisional
+                and str(item.get("value") or "").strip()):
+            new_key = store.name_new_row(parts[1], str(item.get("value")))
+            provisional.discard(parts[1])
+            for part in ("label", "value"):
+                renamed[f"spec.{parts[1]}.{part}"] = f"spec.{new_key}.{part}"
+            continue
+        pending.append(item)
+    cleaned = []
+    for item in pending:
+        slot = renamed.get(str(item.get("slot") or ""), str(item.get("slot") or ""))
+        entry = {"slot": slot, "value": item.get("value")}
+        if quote:
+            entry["quote"] = quote[:400]
+        if item.get("citation"):
+            entry["citation"] = item["citation"]
+        cleaned.append(entry)
+    if cleaned:
+        store.set_values(cleaned, source)
+    return {"storedSlots": [item["slot"] for item in cleaned] + sorted(set(renamed.values())),
+            "renamedSlots": renamed}
+
+
+def _specification_sheet_rows_change(
+    base: Mapping[str, Any],
+    store: SpecificationSlotStore,
+    body: SpecificationSheetRowsBody,
+    source: str = "workspace",
+) -> Dict[str, Any]:
+    rows = [dict(row) for row in base["sheet"]["rows"]]
+    keys = [row["key"] for row in rows]
+    operation = body.operation
+    if operation == "reset":
+        store.reset_rows()
+        return {"rowKey": None}
+    if operation == "add":
+        label = " ".join(str(body.label or "").split())
+        if not label:
+            raise SpecificationSlotError("a new row needs a name")
+        key = specification_row_key(label, keys)
+        row = {"key": key, "label": label, "source": source}
+        if body.provisional:
+            row["provisional"] = True
+        if body.unit:
+            row["unit"] = str(body.unit)
+        index = keys.index(body.after) + 1 if body.after in keys else len(rows)
+        rows.insert(index, row)
+    elif operation in {"remove", "move"}:
+        key = str(body.key or "")
+        if key not in keys:
+            raise SpecificationSlotError(f"there is no row {key[:60]} on this sheet")
+        index = keys.index(key)
+        if operation == "remove":
+            rows.pop(index)
+        else:
+            target = index + (1 if (body.direction or 0) > 0 else -1)
+            if not 0 <= target < len(rows):
+                raise SpecificationSlotError("that row cannot move further")
+            rows[index], rows[target] = rows[target], rows[index]
+    else:
+        raise SpecificationSlotError("row operations are add, remove, move and reset")
+    store.set_rows(rows)
+    return {"rowKey": key}
+
+
+def _specification_sheet_approve_template(
+    store: SpecificationSlotStore,
+    type_key: str,
+    by: str,
+) -> Dict[str, Any]:
+    """Approving a type's proposed names makes them the type's template; a sheet that already has its own row list
+    takes the template's rows first and keeps the rows it added."""
+    payload = SpecificationTemplateStore(SPECIFICATION_SHEET_ROOT).approve(type_key, by=by)
+    store.set_type(type_key, str(payload.get("label") or type_key), by)
+    stored = store.read()
+    if stored["rows"] is not None:
+        template_rows = list(payload["approved"]["rows"])
+        keys = {row["key"] for row in template_rows}
+        store.set_rows(template_rows + [row for row in stored["rows"] if row["key"] not in keys])
+    return {"approvedTemplate": type_key}
+
+
+def _specification_sheet_propose_template(store: SpecificationSlotStore, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Sage's names for a machine type: stored as a proposal (used once approved) and the sheet takes the type."""
+    rows: List[Dict[str, Any]] = []
+    taken: List[str] = []
+    for row in payload["rows"]:
+        key = {"dimensions": "overall_dimensions", "weight": "weight"}.get(str(row.get("cad") or "")) \
+            or specification_row_key(row["label"], taken)
+        if key in taken:
+            raise SpecificationSlotError(f"two rows are both {row['label'][:60]}")
+        taken.append(key)
+        rows.append({"key": key, "label": row["label"],
+                     **{field: row[field] for field in ("unit", "hint") if row.get(field)}})
+    SpecificationTemplateStore(SPECIFICATION_SHEET_ROOT).propose(
+        payload["type"], payload["typeLabel"], rows, by="sage", assembly_number=store.assembly_number,
+        units=store.read()["units"])
+    store.set_type(payload["type"], payload["typeLabel"], "sage")
+    return {"proposedRows": [{"key": row["key"], "label": row["label"], "unit": row.get("unit")} for row in rows]}
+
+
+_SPECIFICATION_SHEET_AGENT_ROW_OPERATIONS = {"add_row": "add", "remove_row": "remove", "move_row": "move",
+                                             "reset_rows": "reset"}
+
+
+def _specification_sheet_agent_edit(base, store: SpecificationSlotStore, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    operation = payload["operation"]
+    if operation == "set_units":
+        store.set_units(str(payload.get("units") or ""))
+        return {}
+    if operation == "set_type":
+        type_key = str(payload.get("type") or "")
+        template = SpecificationTemplateStore(SPECIFICATION_SHEET_ROOT).get(type_key)
+        if not template or not template.get("approved"):
+            raise SpecificationSlotError(f"{type_key or 'that type'} has no approved names; propose them first")
+        store.set_type(type_key, str(payload.get("typeLabel") or template.get("label") or type_key), "chat")
+        return {}
+    body = SpecificationSheetRowsBody(
+        operation=_SPECIFICATION_SHEET_AGENT_ROW_OPERATIONS[operation],
+        **{field: payload[field] for field in ("key", "label", "unit", "after", "direction") if field in payload},
+    )
+    return _specification_sheet_rows_change(base, store, body, source="chat")
+
+
+@app.get("/api/specification-sheet/{assembly_number}/slots")
+def specification_sheet_slots(assembly_number: str):
+    try:
+        assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        document = _specification_sheet_compile(assembly_data, catalog)
+        templates = SpecificationTemplateStore(SPECIFICATION_SHEET_ROOT).list()
+    except _SPECIFICATION_SHEET_SLOT_ERRORS as error:
+        return _specification_sheet_error_response(error, operation="slots")
+    return {
+        "success": True,
+        "assemblyNumber": catalog["assemblyNumber"],
+        "slots": document["slots"],
+        "slotOrder": document["slotOrder"],
+        "sheet": document["sheet"],
+        "releaseGate": document["releaseGate"],
+        "templates": templates,
+    }
+
+
+@app.post("/api/specification-sheet/{assembly_number}/values")
+def specification_sheet_values(assembly_number: str, body: SpecificationSheetValuesBody):
+    try:
+        return _specification_sheet_slot_change(
+            assembly_number,
+            lambda base, store: _specification_sheet_store_values(base, store, body.values, "workspace"),
+        )
+    except _SPECIFICATION_SHEET_SLOT_ERRORS as error:
+        return _specification_sheet_error_response(error, operation="values")
+
+
+@app.post("/api/specification-sheet/{assembly_number}/rows")
+def specification_sheet_rows(assembly_number: str, body: SpecificationSheetRowsBody):
+    try:
+        return _specification_sheet_slot_change(
+            assembly_number,
+            lambda base, store: _specification_sheet_rows_change(base, store, body),
+        )
+    except _SPECIFICATION_SHEET_SLOT_ERRORS as error:
+        return _specification_sheet_error_response(error, operation="rows")
+
+
+@app.post("/api/specification-sheet/{assembly_number}/accept")
+def specification_sheet_accept(assembly_number: str, body: SpecificationSheetAcceptBody):
+    def change(base, store):
+        unknown = [slot for slot in body.slots if slot not in set(base["slotOrder"])]
+        if unknown:
+            raise SpecificationSlotError(f"{unknown[0][:60]} is not on this sheet")
+        return {"acceptedSlots": store.accept(body.slots, "workspace")}
+
+    try:
+        return _specification_sheet_slot_change(assembly_number, change)
+    except _SPECIFICATION_SHEET_SLOT_ERRORS as error:
+        return _specification_sheet_error_response(error, operation="accept")
+
+
+@app.post("/api/specification-sheet/{assembly_number}/settings")
+def specification_sheet_settings(assembly_number: str, body: SpecificationSheetSettingsBody):
+    def change(_base, store):
+        if body.units is not None:
+            store.set_units(body.units)
+        if body.type is not None:
+            store.set_type(body.type, body.typeLabel or body.type.replace("_", " "), "workspace")
+        return {}
+
+    try:
+        return _specification_sheet_slot_change(assembly_number, change)
+    except _SPECIFICATION_SHEET_SLOT_ERRORS as error:
+        return _specification_sheet_error_response(error, operation="settings")
+
+
+@app.post("/api/specification-sheet/{assembly_number}/template/approve")
+def specification_sheet_template_approve(assembly_number: str, body: SpecificationSheetTemplateBody):
+    try:
+        return _specification_sheet_slot_change(
+            assembly_number,
+            lambda _base, store: _specification_sheet_approve_template(store, body.type, "workspace"),
+        )
+    except _SPECIFICATION_SHEET_SLOT_ERRORS as error:
+        return _specification_sheet_error_response(error, operation="template_approve")
 
 
 @app.get(
@@ -18182,6 +18740,353 @@ def specification_sheet_docx_get(
         filename=path.name,
         headers={"Cache-Control": "private, max-age=31536000, immutable"},
     )
+
+
+MAX_RETURNED_SPECIFICATION_SHEET_BYTES = 25 * 1024 * 1024
+
+
+@app.post("/api/specification-sheet/{assembly_number}/fillable-pdf")
+def specification_sheet_fillable_export(assembly_number: str):
+    """The sheet with its open slots as amber form fields, to fill in any PDF reader and give back."""
+    try:
+        assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        document, _loaded_scene = _specification_sheet_build_document_with_scene(
+            assembly_data=assembly_data,
+            catalog=catalog,
+        )
+        readiness = specification_export_readiness(document)
+        if readiness["status"] != "READY":
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "success": False,
+                    "error": "specification_sheet_capture_required",
+                    "message": "Capture the assembled product image for the current revision before export.",
+                    "documentRevision": document["documentRevision"],
+                    **readiness,
+                },
+            )
+        artifact = store_specification_fillable_pdf(
+            SPECIFICATION_SHEET_ROOT,
+            str(catalog["assemblyNumber"]),
+            document,
+        )
+    except (*_SPECIFICATION_SHEET_SLOT_ERRORS, SpecificationSheetExportError) as error:
+        return _specification_sheet_error_response(error, operation="fillable_pdf")
+    count = artifact["fieldCount"]
+    return {
+        "success": True,
+        "stage": "fillable_exported",
+        "message": (
+            f"Generated the fillable specification PDF with {count} open field{'' if count == 1 else 's'}."
+            if count else "Generated the fillable specification PDF; the sheet has no open slots."
+        ),
+        "documentRevision": document["documentRevision"],
+        "releaseGate": document["releaseGate"],
+        "fillablePdf": artifact,
+    }
+
+
+@app.get(
+    "/api/specification-sheet/{assembly_number}/documents/{document_revision}/fillable-pdf"
+)
+def specification_sheet_fillable_get(
+    assembly_number: str,
+    document_revision: str,
+):
+    try:
+        path = specification_fillable_path(
+            SPECIFICATION_SHEET_ROOT,
+            assembly_number,
+            document_revision,
+        )
+    except SpecificationSheetExportError as error:
+        return _specification_sheet_error_response(error, operation="fillable_pdf_get")
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=path.name,
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
+
+
+def _specification_sheet_returned_change(returned: Mapping[str, Any]):
+    """Values from a returned copy fill slots that are still open (or were filled by an earlier returned copy).
+    An empty field never clears a value, and a slot filled since the export keeps its value."""
+
+    def change(base: Mapping[str, Any], store: SpecificationSlotStore) -> Dict[str, Any]:
+        stored = store.read()["values"]
+        items, kept, ignored = [], [], []
+        for name, entry in sorted(returned["fields"].items()):
+            info = base["slots"].get(name)
+            if entry.get("kind") != "text" or info is None:
+                ignored.append(name)
+                continue
+            value = str(entry.get("value") or "").strip()
+            if not value:
+                continue
+            if info["open"] or (stored.get(name) or {}).get("source") == "returned_pdf":
+                items.append({"slot": name, "value": value})
+            elif str(info.get("value") or "") != value:
+                kept.append(name)
+        outcome = (_specification_sheet_store_values(base, store, items, "returned_pdf")
+                   if items else {"storedSlots": [], "renamedSlots": {}})
+        return {**outcome, "returned": {
+            "returnedRevision": returned["documentRevision"],
+            "set": [item["slot"] for item in items],
+            "kept": kept,
+            "ignored": ignored,
+        }}
+
+    return change
+
+
+@app.post("/api/specification-sheet/{assembly_number}/returned-pdf")
+async def specification_sheet_returned_pdf(assembly_number: str, file: UploadFile = File(...)):
+    data = await file.read(MAX_RETURNED_SPECIFICATION_SHEET_BYTES + 1)
+    if len(data) > MAX_RETURNED_SPECIFICATION_SHEET_BYTES:
+        return JSONResponse(status_code=413, content={
+            "success": False, "error": "specification_sheet_too_large",
+            "message": "The returned PDF is larger than 25 MB."})
+    try:
+        returned = await asyncio.to_thread(read_returned_specification_sheet, data)
+        _assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        number = str(catalog["assemblyNumber"])
+        if returned["assemblyNumber"].lower() != number.lower():
+            return JSONResponse(status_code=409, content={
+                "success": False, "error": "specification_sheet_other_assembly",
+                "message": f"This PDF is the specification sheet for {returned['assemblyNumber']}, not {number}."})
+        return await asyncio.to_thread(
+            _specification_sheet_slot_change, assembly_number, _specification_sheet_returned_change(returned)
+        )
+    except (*_SPECIFICATION_SHEET_SLOT_ERRORS, SpecificationSheetExportError) as error:
+        return _specification_sheet_error_response(error, operation="returned_pdf")
+
+
+# Inspection sheet (docs/inspection-sheet-open-fields-plan.md): characteristics from each part's drawing map or
+# inspection profile, a fillable PDF, and every value the app does not know left as an open field.
+_INSPECTION_SHEET_STORE: Optional[InspectionSheetStore] = None
+MAX_RETURNED_INSPECTION_SHEET_BYTES = 25 * 1024 * 1024
+_INSPECTION_SHEET_ERRORS = (
+    PartsManualRepositoryError,
+    InspectionSheetError,
+    InspectionSheetExportError,
+    InspectionSheetStoreError,
+    ValueError,
+)
+
+
+class InspectionSheetValuesBody(BaseModel):
+    values: List[Dict[str, Any]]
+
+
+def _inspection_sheet_store() -> InspectionSheetStore:
+    global _INSPECTION_SHEET_STORE
+    if _INSPECTION_SHEET_STORE is None or _INSPECTION_SHEET_STORE.root != INSPECTION_SHEET_ROOT:
+        _INSPECTION_SHEET_STORE = InspectionSheetStore(INSPECTION_SHEET_ROOT)
+    return _INSPECTION_SHEET_STORE
+
+
+def _inspection_sheet_error_response(error: Exception) -> JSONResponse:
+    status, code = 422, "inspection_sheet_validation"
+    if isinstance(error, PartsManualNotFoundError):
+        status, code = 404, "inspection_sheet_not_found"
+    return JSONResponse(status_code=status, content={"success": False, "error": code, "message": str(error)})
+
+
+def _inspection_profile_for_sheet(safe_pn: str) -> Optional[dict]:
+    """The part's reviewed inspection profile (not its extraction JSON, not an intake stub)."""
+    library_dir = library_path()
+    for path in (library_dir / f"{safe_pn}_inspection_profile.json",
+                 *_part_asset_candidates(safe_pn, "revA", f"{safe_pn}_inspection_profile.json")):
+        if not path.exists():
+            continue
+        try:
+            with open(path, "r", encoding="utf-8-sig") as handle:
+                profile = json.load(handle)
+        except (OSError, ValueError):
+            logger.warning("Unreadable inspection profile for %s", safe_pn)
+            return None
+        if isinstance(profile, dict) and not _is_intake_stub_profile(profile) and profile.get("features"):
+            return profile
+        return None
+    return None
+
+
+def _inspection_sheet_part_sources(part_number: str) -> Dict[str, Any]:
+    safe_pn = sanitize_part_number(part_number)
+    if not safe_pn or safe_pn != str(part_number).strip():
+        return {}
+    sources: Dict[str, Any] = {}
+    try:
+        drawing_map = load_drawing_map(safe_pn, LIBRARY_DIR)
+    except Exception:
+        logger.warning("Unreadable drawing map for %s", safe_pn, exc_info=True)
+        drawing_map = None
+    if drawing_map:
+        sources["drawingMap"] = drawing_map
+        descriptions_path = _find_dimension_descriptions_path(safe_pn, LIBRARY_DIR)
+        if descriptions_path is not None:
+            try:
+                sources["descriptions"] = json.loads(descriptions_path.read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError):
+                logger.warning("Unreadable dimension descriptions for %s", safe_pn)
+        drawing_pdf = _resolve_part_drawing_pdf_path(safe_pn)
+        if drawing_pdf is not None:
+            sources["drawingPdf"] = drawing_pdf
+            sources["hasDrawingPdf"] = True
+    profile = _inspection_profile_for_sheet(safe_pn)
+    if profile is not None:
+        sources["profile"] = profile
+    return sources
+
+
+def _inspection_sheet_document(assembly_number: str) -> Tuple[dict, Dict[str, Path]]:
+    assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+    rows = catalog["occurrences"]
+    parts = [row["occurrenceId"] for row in rows if row.get("kind") == "part" and not row.get("suppressed")]
+    bom = [{"item": row.get("item"), "partNumber": row.get("displayPartNumber"),
+            "description": row.get("description"), "quantity": row.get("quantity")}
+           for row in build_scoped_bom(rows, parts)]
+    sources: Dict[str, Dict[str, Any]] = {}
+    for row in bom:
+        part_number = str(row["partNumber"] or "").strip()
+        if part_number and part_number != "Not specified" and part_number not in sources:
+            sources[part_number] = _inspection_sheet_part_sources(part_number)
+    number = str(catalog["assemblyNumber"])
+    document = build_inspection_sheet_document(
+        assembly={"assemblyNumber": number,
+                  "name": (assembly_data.get("identity") or {}).get("description") or number,
+                  "sourceRevision": catalog["sourceRevision"]},
+        bom=bom,
+        parts=sources,
+        values=_inspection_sheet_store().values(number),
+    )
+    drawings = {part_number: source["drawingPdf"] for part_number, source in sources.items()
+                if source.get("drawingPdf") is not None}
+    return document, drawings
+
+
+def _inspection_sheet_payload(document: dict) -> dict:
+    store = _inspection_sheet_store()
+    number = document["assemblyNumber"]
+    manifest = store.manifest(number, document["documentRevision"])
+    last_return = store.last_return(number)
+    return {
+        "success": True,
+        "assemblyNumber": number,
+        "assemblyName": document["assemblyName"],
+        "sourceRevision": document["sourceRevision"],
+        "documentRevision": document["documentRevision"],
+        "summary": document["summary"],
+        "openFields": document["openFields"],
+        "providedFields": [{"name": field["name"], "label": field["label"], "value": field["value"]}
+                           for field in document["fields"]
+                           if field["role"] == "provide" and field["value"] not in (None, "")],
+        "sections": [{"item": section["item"], "partNumber": section["partNumber"],
+                      "description": section["description"], "quantity": section["quantity"],
+                      "source": section["source"],
+                      "characteristics": len(section.get("characteristics") or section.get("features") or []),
+                      "generalTolerance": section.get("generalTolerance")}
+                     for section in document["sections"]],
+        "built": manifest and {
+            "pages": manifest.get("pages"),
+            "builtAt": manifest.get("builtAt"),
+            "pdfUrl": f"/api/inspection-sheet/{number}/documents/{document['documentRevision']}/pdf",
+        },
+        "lastReturn": last_return and {
+            "receivedAt": last_return.get("receivedAt"),
+            "counts": (last_return.get("conformance") or {}).get("counts"),
+            "disagreements": (last_return.get("conformance") or {}).get("disagreements"),
+        },
+    }
+
+
+@app.get("/api/inspection-sheet/{assembly_number}")
+def inspection_sheet_get(assembly_number: str):
+    try:
+        document, _drawings = _inspection_sheet_document(assembly_number)
+        return _inspection_sheet_payload(document)
+    except _INSPECTION_SHEET_ERRORS as error:
+        return _inspection_sheet_error_response(error)
+
+
+@app.post("/api/inspection-sheet/{assembly_number}/build")
+def inspection_sheet_build(assembly_number: str):
+    try:
+        document, drawings = _inspection_sheet_document(assembly_number)
+        built_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        result = build_inspection_sheet_pdf_bytes(document, drawing_pdfs=drawings, built_at=built_at)
+        _inspection_sheet_store().save_document(document["assemblyNumber"], document, result["pdf"],
+                                                pages=result["pages"], built_at=built_at)
+        return _inspection_sheet_payload(document)
+    except _INSPECTION_SHEET_ERRORS as error:
+        return _inspection_sheet_error_response(error)
+
+
+@app.get("/api/inspection-sheet/{assembly_number}/documents/{document_revision}/pdf")
+def inspection_sheet_pdf_get(assembly_number: str, document_revision: str):
+    try:
+        path = _inspection_sheet_store().document_path(assembly_number, document_revision)
+    except InspectionSheetStoreError as error:
+        return _inspection_sheet_error_response(error)
+    if path is None:
+        return JSONResponse(status_code=404, content={"success": False, "error": "inspection_sheet_not_found",
+                                                      "message": "No inspection sheet was built at that revision."})
+    return FileResponse(path, media_type="application/pdf", filename=path.name,
+                        headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+@app.post("/api/inspection-sheet/{assembly_number}/values")
+def inspection_sheet_values(assembly_number: str, body: InspectionSheetValuesBody):
+    try:
+        document, _drawings = _inspection_sheet_document(assembly_number)
+        result = _inspection_sheet_store().set_values(document["assemblyNumber"], body.values[:200],
+                                                      document["fields"], source="workspace")
+        document, _drawings = _inspection_sheet_document(assembly_number)
+        return {**_inspection_sheet_payload(document), "values": result}
+    except _INSPECTION_SHEET_ERRORS as error:
+        return _inspection_sheet_error_response(error)
+
+
+@app.post("/api/inspection-sheet/{assembly_number}/returned-pdf")
+async def inspection_sheet_returned_pdf(assembly_number: str, file: UploadFile = File(...)):
+    data = await file.read(MAX_RETURNED_INSPECTION_SHEET_BYTES + 1)
+    if len(data) > MAX_RETURNED_INSPECTION_SHEET_BYTES:
+        return JSONResponse(status_code=413, content={"success": False, "error": "inspection_sheet_too_large",
+                                                      "message": "The returned PDF is larger than 25 MB."})
+    try:
+        returned = await asyncio.to_thread(read_returned_inspection_sheet, data)
+        document, _drawings = await asyncio.to_thread(_inspection_sheet_document, assembly_number)
+        number = document["assemblyNumber"]
+        if returned["assemblyNumber"].lower() != number.lower():
+            return JSONResponse(status_code=409, content={
+                "success": False, "error": "inspection_sheet_other_assembly",
+                "message": f"This PDF is the inspection sheet for {returned['assemblyNumber']}, not {number}."})
+        known = {field["name"] for field in document["fields"]}
+        updates = [{"name": name, "value": entry["value"]} for name, entry in returned["fields"].items()
+                   if name in known and entry["kind"] != "signature"]
+        store = _inspection_sheet_store()
+        result = store.set_values(number, updates, document["fields"], source="returned_pdf")
+        document, _drawings = await asyncio.to_thread(_inspection_sheet_document, assembly_number)
+        check = inspection_sheet_conformance(document, store.values(number))
+        record = {
+            "receivedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "returnedRevision": returned["documentRevision"],
+            "currentRevision": document["documentRevision"],
+            "set": result["set"],
+            "ignored": sorted(name for name in returned["fields"] if name not in known),
+            "signed": sorted(name for name, entry in returned["fields"].items()
+                             if entry["kind"] == "signature" and entry["value"]),
+            "conformance": check,
+        }
+        store.save_return(number, record)
+        return {**_inspection_sheet_payload(document), "returned": {
+            key: record[key] for key in ("receivedAt", "returnedRevision", "set", "ignored", "signed")
+        } | {"counts": check["counts"], "disagreements": check["disagreements"],
+             "failures": [row for row in check["rows"] if row["status"] in ("FAIL", "UNREADABLE")][:40]}}
+    except _INSPECTION_SHEET_ERRORS as error:
+        return _inspection_sheet_error_response(error)
 
 
 @app.get("/api/parts-manual/{assembly_number}")
@@ -19026,6 +19931,7 @@ async def get_assembly_context(part_number: str):
         "part_properties": part_properties,
         "explode_steps": assy_data.get("explodeSteps", []),
         "kinematic_chain": _build_kinematic_chain(assy_data),
+        "library_machine": assy_data.get("libraryMachine") if is_library_machine(assy_data) else None,
     }
     result.update(functional_context)
     if functional_diagnostics:
@@ -19283,8 +20189,377 @@ async def get_motion_info(assembly_number: str):
     }
 
 
+@app.get("/api/library-machines")
+def library_machines_search(q: str = "", category: Optional[str] = None, limit: int = 12):
+    """Machines in the industrial asset library, searched by name, tags and category, to open as assemblies."""
+    opened = set(_library_machine_registry().ids())
+    machines = search_library_machines(REPO_ROOT, q[:80], category=category, limit=limit)
+    return {
+        "success": True,
+        "machines": [{**row, "opened": row["assetId"] in opened} for row in machines],
+        "categories": sorted({entry["category"] for entry in library_catalog(REPO_ROOT).values()}),
+    }
+
+
+@app.post("/api/library-machines/{asset_id}/open")
+def library_machine_open(asset_id: str):
+    """Open a library machine as an assembly: one part per body, its GLB as the model. It stays in the library
+    after a restart. Only the Specification Sheet is offered for it."""
+    try:
+        source = library_machine_source(REPO_ROOT, asset_id)
+        added = _library_machine_registry().add(asset_id)
+    except LibraryMachineError as error:
+        return JSONResponse(status_code=404, content={
+            "success": False, "error": "library_machine_unknown", "message": str(error)})
+    except OSError as error:
+        logger.error("Could not record the opened library machine %s: %s", asset_id, error)
+        return JSONResponse(status_code=500, content={
+            "success": False, "error": "library_machine_registry",
+            "message": "The library machine could not be recorded."})
+    if added or asset_id not in assembly_profiles:
+        _load_assembly_profiles()
+    machine = source["profile"]["libraryMachine"]
+    return {"success": True, "assemblyNumber": asset_id, "displayName": machine["displayName"],
+            "category": machine["category"], "bodies": machine["bodyCount"], "added": added}
+
+
+def _assembly_appearance_parts(assembly_number: str) -> Dict[str, str]:
+    _assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+    return assembly_appearance_part_numbers(catalog)
+
+
+@app.get("/api/assembly-appearance/{assembly_number}")
+def assembly_appearance_get(assembly_number: str):
+    """The finishes on an assembly and its parts, resolved for the viewer, with the revision a capture records."""
+    try:
+        store = _assembly_appearance_store()
+        document = store.read(assembly_number)
+        geometry = store.read_geometry(assembly_number)
+    except AssemblyAppearanceError as error:
+        return JSONResponse(status_code=400, content={"success": False, "error": "assembly_appearance_invalid",
+                                                      "message": str(error)})
+    # Where the 3D view drew each sign and face finish (or why it could not), as it last reported.
+    landed = geometry.get("signs") or {}
+    shown = {row["signId"]: landed[row["signId"]]["status"] for row in document.get("signs") or []
+             if row["signId"] in landed}
+    drawn = geometry.get("faces") or {}
+    faces_shown = {key: drawn[key]["status"] for key in map(assembly_appearance_face_key, document.get("faces") or [])
+                   if key in drawn}
+    return {"success": True, **assembly_appearance_view(document), "signStatus": shown, "faceStatus": faces_shown}
+
+
+class AssemblyAppearancePutBody(BaseModel):
+    whole: Optional[Dict[str, Any]] = None
+    parts: Dict[str, Any] = {}
+    faces: Optional[List[Dict[str, Any]]] = None
+
+
+@app.put("/api/assembly-appearance/{assembly_number}")
+def assembly_appearance_put(assembly_number: str, body: AssemblyAppearancePutBody):
+    """Replace the assembly's finishes: {"whole": finish | null, "parts": {partNumber: finish}, "faces": [{part,
+    mesh, face, fingerprint, finish}]} (faces left out stay as they are; docs/assembly-face-selection-plan.md)."""
+    try:
+        parts = _assembly_appearance_parts(assembly_number)
+        extra = {} if body.faces is None else {"faces": body.faces}
+        document = _assembly_appearance_store().write(assembly_number, body.whole, body.parts or {},
+                                                      part_numbers=parts, by="workspace", **extra)
+    except PartsManualNotFoundError:
+        return JSONResponse(status_code=404, content={"success": False, "error": "assembly_unknown",
+                                                      "message": "Unknown assembly."})
+    except AssemblyAppearanceError as error:
+        return JSONResponse(status_code=400, content={"success": False, "error": "assembly_appearance_invalid",
+                                                      "message": str(error)})
+    return {"success": True, **assembly_appearance_view(document)}
+
+
+@app.delete("/api/assembly-appearance/{assembly_number}")
+def assembly_appearance_delete(assembly_number: str):
+    """Back to the viewer's own look: no finish, scene or sign (imported images stay available)."""
+    try:
+        document = _assembly_appearance_store().clear(assembly_number, by="workspace")
+    except AssemblyAppearanceError as error:
+        return JSONResponse(status_code=400, content={"success": False, "error": "assembly_appearance_invalid",
+                                                      "message": str(error)})
+    return {"success": True, **assembly_appearance_view(document)}
+
+
+def _assembly_appearance_error(error: Exception, status_code: int = 400) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content={
+        "success": False, "error": "assembly_appearance_invalid", "message": str(error)})
+
+
+class AssemblyScenePutBody(BaseModel):
+    sceneId: Optional[str] = None
+
+
+@app.put("/api/assembly-appearance/{assembly_number}/scene")
+def assembly_appearance_scene_put(assembly_number: str, body: AssemblyScenePutBody):
+    """Light the assembly with a library scene; none (or classic) is the viewer's own light
+    (docs/assembly-signs-scenes-plan.md)."""
+    try:
+        document = _assembly_appearance_store().set_scene(assembly_number, body.sceneId, by="workspace")
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    return {"success": True, **assembly_appearance_view(document)}
+
+
+class AssemblySignsPutBody(BaseModel):
+    signs: List[Dict[str, Any]] = []
+
+
+@app.put("/api/assembly-appearance/{assembly_number}/signs")
+def assembly_appearance_signs_put(assembly_number: str, body: AssemblySignsPutBody):
+    """Replace the safety signs and logos on the assembly's parts."""
+    try:
+        parts = _assembly_appearance_parts(assembly_number)
+        document = _assembly_appearance_store().set_signs(assembly_number, body.signs, part_numbers=parts,
+                                                          by="workspace")
+    except PartsManualNotFoundError:
+        return JSONResponse(status_code=404, content={"success": False, "error": "assembly_unknown",
+                                                      "message": "Unknown assembly."})
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    return {"success": True, **assembly_appearance_view(document)}
+
+
+class AssemblyDimensionsPutBody(BaseModel):
+    dimensions: List[Dict[str, Any]] = []
+    units: Optional[str] = None
+
+
+@app.put("/api/assembly-appearance/{assembly_number}/dimensions")
+def assembly_appearance_dimensions_put(assembly_number: str, body: AssemblyDimensionsPutBody):
+    """Replace the Smart Dimensions on the assembly and the units they are shown in
+    (docs/assembly-smart-dimension-plan.md). Not part of the appearance revision."""
+    try:
+        parts = _assembly_appearance_parts(assembly_number)
+        store = _assembly_appearance_store()
+        if body.units is None:
+            document = store.set_dimensions(assembly_number, body.dimensions, part_numbers=parts, by="workspace")
+        else:
+            document = store.set_dimensions(assembly_number, body.dimensions, units=body.units, part_numbers=parts,
+                                            by="workspace")
+    except PartsManualNotFoundError:
+        return JSONResponse(status_code=404, content={"success": False, "error": "assembly_unknown",
+                                                      "message": "Unknown assembly."})
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    shown = assembly_appearance_view(document)
+    return {"success": True, "dimensions": shown["dimensions"], "dimensionUnits": shown["dimensionUnits"],
+            "dimensionsRevision": shown["dimensionsRevision"]}
+
+
+@app.post("/api/assembly-appearance/{assembly_number}/images")
+async def assembly_appearance_image_post(assembly_number: str, request: Request, label: str = ""):
+    """Import a logo (PNG or JPEG bytes) for this assembly's signs: re-encoded as PNG without its metadata, cut to
+    its visible pixels, at most 4096 pixels."""
+    from ai_inspector.facility_layout.decal_images import normalize_image
+    payload = await request.body()
+    try:
+        png, metadata = await asyncio.to_thread(normalize_image, payload)
+        trimmed = await asyncio.to_thread(_assembly_appearance_trim_image, png, metadata["uv"])
+    except ValueError as error:
+        return _assembly_appearance_error(error)
+    width, height = metadata["width"], metadata["height"]
+    if trimmed is not None:
+        png, width, height = trimmed
+    try:
+        image = _assembly_appearance_store().add_image(assembly_number, png, label=label, width=width,
+                                                       height=height, by="workspace")
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    return {"success": True, "image": image}
+
+
+def _assembly_appearance_trim_image(png: bytes, uv):
+    """The importer reports the box of the visible pixels; a sign shows only those, so the margin is cut off."""
+    from io import BytesIO
+    from PIL import Image
+    with Image.open(BytesIO(png)) as source:
+        width, height = source.size
+        left, bottom, right, top = uv
+        box = (round(left * width), round((1 - top) * height), round(right * width), round((1 - bottom) * height))
+        if box == (0, 0, width, height) or box[2] <= box[0] or box[3] <= box[1]:
+            return None
+        cropped = source.crop(box)
+        output = BytesIO()
+        cropped.save(output, format="PNG")
+        return output.getvalue(), cropped.width, cropped.height
+
+
+@app.get("/api/assembly-appearance-images/{image_name}")
+def assembly_appearance_image_get(image_name: str):
+    image_id = image_name[:-4] if image_name.endswith(".png") else ""
+    try:
+        path = _assembly_appearance_store().image_path(image_id)
+    except AssemblyAppearanceError:
+        raise HTTPException(status_code=404, detail="Unknown image")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Unknown image")
+    return FileResponse(path=str(path), media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+class AssemblyGeometryPutBody(BaseModel):
+    parts: Optional[Dict[str, Any]] = None
+    bounds: Optional[Dict[str, Any]] = None
+    signs: Dict[str, Any] = {}
+    faces: Dict[str, Any] = {}
+    selection: Optional[List[Dict[str, Any]]] = None
+    dimensions: Dict[str, Any] = {}
+    revision: Optional[str] = None
+    # What the view shows: the whole machine or a group of parts on its own (a part's highlighted features).
+    view: Optional[Dict[str, Any]] = None
+
+
+@app.put("/api/assembly-appearance/{assembly_number}/geometry")
+def assembly_appearance_geometry_put(assembly_number: str, body: AssemblyGeometryPutBody):
+    """The viewer reports what it measured of the loaded model (part centres and sizes in metres, the machine's
+    bounds), where each sign landed, whether each face finish was drawn and which faces the user selected, so Sage
+    can tell the base from the wrist, knows which signs show and can work on the selected faces."""
+    try:
+        parts = _assembly_appearance_parts(assembly_number)
+        document = _assembly_appearance_store().write_geometry(
+            assembly_number, {"parts": body.parts, "bounds": body.bounds, "signs": body.signs, "faces": body.faces,
+                              "selection": body.selection, "dimensions": body.dimensions,
+                              "revision": body.revision, "view": body.view}, part_numbers=parts)
+    except PartsManualNotFoundError:
+        return JSONResponse(status_code=404, content={"success": False, "error": "assembly_unknown",
+                                                      "message": "Unknown assembly."})
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    return {"success": True, "parts": len(document["parts"]), "signs": len(document["signs"])}
+
+
+class AssemblyFaceReportPutBody(BaseModel):
+    parts: Dict[str, Any] = {}
+
+
+@app.put("/api/assembly-appearance/{assembly_number}/faces")
+def assembly_appearance_faces_put(assembly_number: str, body: AssemblyFaceReportPutBody):
+    """The viewer's list of each part's largest faces on the loaded model (kind, area, where, which way it looks),
+    for Sage's list_part_faces (docs/assembly-face-selection-plan.md)."""
+    try:
+        parts = _assembly_appearance_parts(assembly_number)
+        document = _assembly_appearance_store().write_face_report(assembly_number, {"parts": body.parts},
+                                                                  part_numbers=parts)
+    except PartsManualNotFoundError:
+        return JSONResponse(status_code=404, content={"success": False, "error": "assembly_unknown",
+                                                      "message": "Unknown assembly."})
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    return {"success": True, "parts": len(document["parts"])}
+
+
+# ---- A single part's finishes and dimensions (the 3D Model tab) ----
+def _part_appearance_unknown() -> JSONResponse:
+    return JSONResponse(status_code=404, content={"success": False, "error": "part_unknown",
+                                                  "message": "This part has no feature model."})
+
+
+@app.get("/api/part-appearance/{part_number}")
+def part_appearance_get(part_number: str):
+    """The finishes on a part, its features and their faces, and its Smart Dimensions, for the 3D Model tab."""
+    try:
+        store = _part_appearance_store()
+        document = store.read(part_number)
+        geometry = store.read_geometry(part_number)
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    drawn = geometry.get("faces") or {}
+    faces_shown = {key: drawn[key]["status"] for key in map(assembly_appearance_face_key, document.get("faces") or [])
+                   if key in drawn}
+    return {"success": True, **assembly_appearance_view(document), "faceStatus": faces_shown}
+
+
+@app.put("/api/part-appearance/{part_number}")
+def part_appearance_put(part_number: str, body: AssemblyAppearancePutBody):
+    """Replace the part's finishes: {"whole": finish | null, "parts": {feature: finish}, "faces": [...]}."""
+    try:
+        features = _part_appearance_features(part_number)
+        extra = {} if body.faces is None else {"faces": body.faces}
+        document = _part_appearance_store().write(part_number, body.whole, body.parts or {},
+                                                  part_numbers=features, by="workspace", **extra)
+    except LookupError:
+        return _part_appearance_unknown()
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    return {"success": True, **assembly_appearance_view(document)}
+
+
+@app.delete("/api/part-appearance/{part_number}")
+def part_appearance_delete(part_number: str):
+    try:
+        document = _part_appearance_store().clear(part_number, by="workspace")
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    return {"success": True, **assembly_appearance_view(document)}
+
+
+@app.put("/api/part-appearance/{part_number}/dimensions")
+def part_appearance_dimensions_put(part_number: str, body: AssemblyDimensionsPutBody):
+    """Replace the Smart Dimensions on the part and the units they are shown in."""
+    try:
+        features = _part_appearance_features(part_number)
+        store = _part_appearance_store()
+        if body.units is None:
+            document = store.set_dimensions(part_number, body.dimensions, part_numbers=features, by="workspace")
+        else:
+            document = store.set_dimensions(part_number, body.dimensions, units=body.units, part_numbers=features,
+                                            by="workspace")
+    except LookupError:
+        return _part_appearance_unknown()
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    shown = assembly_appearance_view(document)
+    return {"success": True, "dimensions": shown["dimensions"], "dimensionUnits": shown["dimensionUnits"],
+            "dimensionsRevision": shown["dimensionsRevision"]}
+
+
+@app.put("/api/part-appearance/{part_number}/geometry")
+def part_appearance_geometry_put(part_number: str, body: AssemblyGeometryPutBody):
+    """What the 3D Model tab measured of the part (each feature's centre and size, the part's bounds), whether
+    each face finish was drawn, the faces the user selected and what each dimension shows, for Sage."""
+    try:
+        features = _part_appearance_features(part_number)
+        document = _part_appearance_store().write_geometry(
+            part_number, {"parts": body.parts, "bounds": body.bounds, "signs": {}, "faces": body.faces,
+                          "selection": body.selection, "dimensions": body.dimensions,
+                          "revision": body.revision, "view": body.view}, part_numbers=features)
+    except LookupError:
+        return _part_appearance_unknown()
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    return {"success": True, "parts": len(document["parts"])}
+
+
+@app.put("/api/part-appearance/{part_number}/faces")
+def part_appearance_faces_put(part_number: str, body: AssemblyFaceReportPutBody):
+    """The 3D Model tab's list of each feature's largest faces, for Sage's list_part_faces."""
+    try:
+        features = _part_appearance_features(part_number)
+        document = _part_appearance_store().write_face_report(part_number, {"parts": body.parts},
+                                                              part_numbers=features)
+    except LookupError:
+        return _part_appearance_unknown()
+    except AssemblyAppearanceError as error:
+        return _assembly_appearance_error(error)
+    return {"success": True, "parts": len(document["parts"])}
+
+
+def _assembly_model_file(request: Request, path: Path, filename: str):
+    """A GLB a new export can replace: the browser asks again each time (no-cache) and gets 304 while the file is
+    unchanged, so a re-exported model (docs/assembly-face-selection-plan.md) is never shown from a stale cache."""
+    stat = path.stat()
+    etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+    headers = {"Cache-Control": "no-cache", "ETag": etag}
+    if etag in [item.strip() for item in (request.headers.get("if-none-match") or "").split(",")]:
+        return Response(status_code=304, headers=headers)
+    return FileResponse(path=str(path), media_type="model/gltf-binary", filename=filename, headers=headers)
+
+
 @app.get("/api/assembly-model/{assembly_number}")
-async def get_assembly_model(assembly_number: str, revision: Optional[str] = None):
+async def get_assembly_model(request: Request, assembly_number: str, revision: Optional[str] = None):
     """Serve the colored GLB 3D model for an assembly, optionally for a specific revision."""
     safe_num = re.sub(r'[^\w\-]', '', assembly_number)
     if not safe_num:
@@ -19303,22 +20578,15 @@ async def get_assembly_model(assembly_number: str, revision: Optional[str] = Non
         if _entry:
             _verify = _motion_verify_pin(_entry)
             if _verify["ok"]:
-                return FileResponse(
-                    path=str(_verify["glb_path"]),
-                    media_type="model/gltf-binary",
-                    filename=str(_verify["pin"].get("fileName") or f"{safe_num}_colored.glb"),
-                )
+                return _assembly_model_file(request, Path(_verify["glb_path"]),
+                                            str(_verify["pin"].get("fileName") or f"{safe_num}_colored.glb"))
             logger.warning("[Motion] GLB pin failed for %s: %s -- serving library GLB", safe_num, _verify["error"])
 
     glb_path = _resolve_assembly_model_path(safe_num, revision)
     if glb_path is None:
         raise HTTPException(status_code=404, detail=f"No 3D model found for assembly '{assembly_number}'")
 
-    return FileResponse(
-        path=str(glb_path),
-        media_type="model/gltf-binary",
-        filename=glb_path.name,
-    )
+    return _assembly_model_file(request, Path(glb_path), glb_path.name)
 
 
 @app.get("/api/assembly-revisions/{assembly_number}")
@@ -22166,394 +23434,20 @@ _CHAT_TABLE_AGENT_TOOL_SPEC = {
     "args": {},
     "input_schema": copy.deepcopy(chat_table_tool_spec()["input_schema"]),
 }
-_PARTS_MANUAL_PROPOSAL_AGENT_TOOL_SPEC = {
-    "name": "propose_parts_manual_structure",
-    "description": (
-        "Open the Illustrated Parts Manual workspace and compile one read-only, "
-        "evidence-backed manual structure proposal for the currently loaded "
-        "assembly. Use only when the user asks to suggest, plan, or generate "
-        "manual groups/sections. This tool never approves groups, changes the "
-        "CAD assembly, captures pages, generates a PDF, or commits anything."
-    ),
-    "args": {},
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "additionalProperties": False,
-    },
-}
-_OPERATIONS_MANUAL_DRAFT_AGENT_TOOL_SPEC = {
-    "name": "generate_operations_manual_draft",
-    "description": (
-        "Open the shared Documentation workspace and generate the evidence-backed "
-        "Operations and Maintenance Manual for the currently loaded assembly. "
-        "Use when the user explicitly asks to build, create, or generate an operations "
-        "manual. The live application reveals each 16:9 landscape page progressively, captures "
-        "every requested technical figure in Hidden Lines Removed style during that fresh "
-        "build, and stops with a review-ready document in the workspace. Its terminal receipt includes the "
-        "registered evidence sources, public source links, claim counts, and original PDF "
-        "source-page locators used by the "
-        "compiled manual. Publishing review PDF and DOCX artifacts is a separate explicit tool. This tool "
-        "never approves safety content, resolves evidence conflicts, changes source CAD, "
-        "or publishes any artifact. Its successful terminal stage is review_ready."
-    ),
-    "args": {},
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "additionalProperties": False,
-    },
-}
-_OPERATIONS_MANUAL_PUBLICATION_AGENT_TOOL_SPEC = {
-    "name": "publish_operations_manual",
-    "description": (
-        "Publish revision-bound Operations and Maintenance Manual review artifacts for "
-        "the currently loaded assembly. Use only when the user explicitly asks to publish "
-        "or export the operations manual, PDF, or editable DOCX. The live application opens "
-        "the correct Documentation workflow, builds a review baseline when needed, freshly "
-        "recaptures every required technical figure for this run, validates the resulting "
-        "document revision, and exports both review PDF and DOCX artifacts. This is not a "
-        "controlled release and never changes source CAD. Its receipt preserves claim-level "
-        "source-page locators for every cited PDF."
-    ),
-    "args": {},
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "open_pdf": {
-                "type": "boolean",
-                "description": "Open the exported review PDF after validation.",
-            },
-            "open_docx": {
-                "type": "boolean",
-                "description": "Open the exported editable DOCX after validation.",
-            },
-        },
-        "required": ["open_pdf", "open_docx"],
-        "additionalProperties": False,
-    },
-}
-_SPECIFICATION_SHEET_DRAFT_AGENT_TOOL_SPEC = {
-    "name": "generate_specification_sheet_draft",
-    "description": (
-        "Open the shared Documentation workspace and generate the evidence-backed "
-        "one-page product Specification Sheet for the currently loaded assembly. "
-        "Use when the user explicitly asks to build, create, or generate a specification "
-        "sheet, spec sheet, or product data sheet without asking to publish it. The live "
-        "application starts blank, reveals the page progressively, and freshly captures "
-        "the current assembled CAD product view before returning review_ready. This tool "
-        "never invents product values, changes source CAD, or publishes an artifact."
-    ),
-    "args": {},
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "additionalProperties": False,
-    },
-}
-_SPECIFICATION_SHEET_PUBLICATION_AGENT_TOOL_SPEC = {
-    "name": "publish_specification_sheet",
-    "description": (
-        "Publish the revision-bound one-page product Specification Sheet review PDF and "
-        "editable DOCX for "
-        "the currently loaded assembly. Use only when the user explicitly asks to publish "
-        "or export the specification sheet, spec sheet, product data sheet, PDF, or DOCX. "
-        "The live application opens the correct Documentation workflow, generates a "
-        "review baseline when needed, freshly recaptures the assembled CAD product image "
-        "for this run, validates the current document revision, and exports both artifacts. "
-        "This is not a controlled release and never changes source CAD."
-    ),
-    "args": {},
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "open_pdf": {
-                "type": "boolean",
-                "description": "Open the exported review PDF after validation.",
-            },
-            "open_docx": {
-                "type": "boolean",
-                "description": "Open the exported editable DOCX after validation.",
-            },
-        },
-        "required": ["open_pdf", "open_docx"],
-        "additionalProperties": False,
-    },
-}
-_WORK_INSTRUCTIONS_DRAFT_AGENT_TOOL_SPEC = {
-    "name": "generate_work_instructions_draft",
-    "description": (
-        "Open the shared Documentation workspace and generate operator-facing "
-        "Assembly Work Instructions for the loaded assembly. Use when the user "
-        "explicitly asks to build, create, or generate work instructions or assembly "
-        "instructions without asking for a PDF. The prototype treats the registered "
-        "planning-ready process package as an assumed baseline, reveals every 16:9 "
-        "page progressively, and freshly captures every required CAD figure. It never "
-        "represents that assumption as manufacturing approval or controlled release."
-    ),
-    "args": {},
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "additionalProperties": False,
-    },
-}
-_WORK_INSTRUCTIONS_PUBLICATION_AGENT_TOOL_SPEC = {
-    "name": "publish_work_instructions",
-    "description": (
-        "Export the revision-bound Assembly Work Instructions prototype review PDF and "
-        "editable DOCX "
-        "for the loaded assembly. Use only when the user explicitly asks to export "
-        "or publish the work instructions, PDF, or DOCX. The live application builds "
-        "the baseline when needed, freshly recaptures every required CAD figure for "
-        "the current revision, validates the captures, and exports both artifacts. This "
-        "is not manufacturing approval or controlled release."
-    ),
-    "args": {},
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "open_pdf": {
-                "type": "boolean",
-                "description": "Open the exported prototype review PDF.",
-            },
-            "open_docx": {
-                "type": "boolean",
-                "description": "Open the exported editable DOCX.",
-            },
-        },
-        "required": ["open_pdf", "open_docx"],
-        "additionalProperties": False,
-    },
-}
-_PARTS_MANUAL_DRAFT_AGENT_TOOL_SPEC = {
-    "name": "generate_parts_manual_draft",
-    "description": (
-        "Open the shared Documentation workspace and generate an illustrated parts manual "
-        "for review without publishing a PDF. Use when the user explicitly asks to build, "
-        "create, generate, draft, or prepare a parts manual but does not ask to publish or "
-        "export it. The application creates or reuses the validated semantic hierarchy, "
-        "reveals every page progressively, and freshly recaptures every required Hidden "
-        "Lines Removed figure before returning review_ready. This is different from the "
-        "read-only structure proposal tool and never changes source CAD geometry."
-    ),
-    "args": {},
-    "input_schema": {
-        "type": "object",
-        "properties": {},
-        "additionalProperties": False,
-    },
-}
-_PARTS_MANUAL_PUBLICATION_AGENT_TOOL_SPEC = {
-    "name": "generate_and_publish_parts_manual",
-    "description": (
-        "Run the complete, publication-gated illustrated-parts-manual workflow "
-        "for the currently loaded assembly. Use only when the current user turn "
-        "explicitly requests PDF publication or the complete end-to-end manual "
-        "result. Deterministic application code preserves an existing publishable "
-        "manual structure, optionally approves only complete trusted proposal "
-        "candidates, compiles the Documentation scene, captures every required "
-        "Hidden Lines Removed figure, validates revision-bound plan/render/callout "
-        "evidence, and publishes the PDF. It never changes source CAD geometry and "
-        "never replaces an existing publishable manual hierarchy. A successful "
-        "stage=published result with a PDF artifact is required before claiming "
-        "publication."
-    ),
-    "args": {},
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "approval_mode": {
-                "type": "string",
-                "enum": [
-                    "use_approved_structure",
-                    "approve_trusted_ready_candidates",
-                ],
-                "description": (
-                    "Use the existing publishable structure, or allow the runtime "
-                    "to approve a complete zero-conflict proposal backed only by "
-                    "trusted CAD hierarchy or process-map evidence."
-                ),
-            },
-            "layout_mode": {
-                "type": "string",
-                "enum": [
-                    "preserve_current",
-                    "generate_baseline_if_missing",
-                ],
-                "description": (
-                    "Preserve all current Documentation composition, optionally "
-                    "allowing deterministic baseline presentation where none exists."
-                ),
-            },
-            "open_pdf": {
-                "type": "boolean",
-                "description": "Open the published PDF in InspectorPro after validation.",
-            },
-        },
-        "required": ["approval_mode", "layout_mode", "open_pdf"],
-        "additionalProperties": False,
-    },
-}
-_PARTS_MANUAL_DOCUMENTATION_AGENT_TOOL_SPEC = {
-    "name": "edit_parts_manual_composition",
-    "description": (
-        "Edit the presentation of an existing illustrated-parts-manual figure. "
-        "Use only when the user explicitly asks to move, rotate, align, distribute, "
-        "resize, adjust explosion spacing, change the publication view, or reset a figure or page, "
-        "semantic manual group, exact component instance, item balloon, or leader, "
-        "to add/remove/clear/restore page callouts, change a leader endpoint, "
-        "snap a leader anchor, or explicitly asks "
-        "to undo/redo a documentation edit. This changes documentation overrides "
-        "only: it never changes CAD geometry, assembly transforms, manual-group "
-        "membership, or source assembly identity. Documentation BOM rows and quantities "
-        "are deterministically derived from the selected CAD definitions. Human and Sage edits use "
-        "the same revision-bound command and undo/redo system."
-    ),
-    "args": {},
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "operation": {
-                "type": "string",
-                "enum": [
-                    "translate",
-                    "rotate",
-                    "align",
-                    "distribute",
-                    "resize",
-                    "adjust_explode",
-                    "set_view",
-                    "set_anchor",
-                    "set_leader_style",
-                    "auto_route",
-                    "set_end_condition",
-                    "set_repeated_strategy",
-                    "clear_callouts",
-                    "add_callout",
-                    "remove_callout",
-                    "restore_callouts",
-                    "reset",
-                    "reset_page",
-                    "undo",
-                    "redo",
-                ],
-            },
-            "page": {
-                "type": "string",
-                "description": "Figure number, page ID, or exact figure title.",
-            },
-            "target_type": {
-                "type": "string",
-                "enum": [
-                    "figure",
-                    "manual_group",
-                    "occurrence",
-                    "balloon",
-                    "leader",
-                    "page_element",
-                ],
-            },
-            "target": {
-                "type": "string",
-                "description": "Exact visible group/component name or stable target ID.",
-            },
-            "targets": {
-                "type": "array",
-                "items": {"type": "string"},
-                "minItems": 2,
-                "maxItems": 64,
-                "description": "Exact visible target names or stable IDs for align/distribute.",
-            },
-            "direction": {
-                "type": "string",
-                "enum": ["left", "right", "up", "down"],
-            },
-            "amount": {
-                "type": "number",
-                "minimum": 0.001,
-                "maximum": 10.0,
-                "description": (
-                    "Movement in model units for figures/groups/components, or normalized "
-                    "page fraction for balloons/leaders (0.05 means 5%); defaults to 0.05."
-                ),
-            },
-            "axis": {
-                "type": "string",
-                "enum": ["x", "y", "z"],
-                "description": "Presentation rotation axis; defaults to y.",
-            },
-            "degrees": {
-                "type": "number",
-                "minimum": -180.0,
-                "maximum": 180.0,
-                "description": "Signed presentation rotation in degrees.",
-            },
-            "alignment": {
-                "type": "string",
-                "enum": ["left", "center", "right", "top", "middle", "bottom"],
-            },
-            "distribution": {
-                "type": "string",
-                "enum": ["horizontal", "vertical"],
-            },
-            "width_delta": {
-                "type": "number",
-                "minimum": -1.0,
-                "maximum": 1.0,
-                "description": "Publication-width change as a page fraction.",
-            },
-            "height_delta": {
-                "type": "number",
-                "minimum": -1.0,
-                "maximum": 1.0,
-                "description": "Publication-height change as a page fraction.",
-            },
-            "view": {
-                "type": "string",
-                "enum": ["isometric", "front", "top", "right"],
-                "description": "Deterministic publication camera for the selected figure.",
-            },
-            "explode_delta": {
-                "type": "number",
-                "minimum": -1.0,
-                "maximum": 1.0,
-                "description": "Signed change to exploded-view spacing; typical steps are +/-0.15.",
-            },
-            "anchor_side": {
-                "type": "string",
-                "enum": ["center", "left", "right", "top", "bottom"],
-                "description": "Projected selection-box center or visible target edge for set_anchor.",
-            },
-            "leader_style": {
-                "type": "string",
-                "enum": ["auto", "straight", "orthogonal"],
-                "description": (
-                    "Route style for set_leader_style. Auto restores deterministic "
-                    "straight-first routing; straight forces a direct free-angle leader; "
-                    "orthogonal keeps a manually editable elbow route."
-                ),
-            },
-            "end_condition": {
-                "type": "string",
-                "enum": ["arrow", "dot", "none"],
-                "description": "Target-end marker for set_end_condition on a leader.",
-            },
-            "repeated_part_strategy": {
-                "type": "string",
-                "enum": ["representative_with_count", "branched"],
-                "description": (
-                    "Repeated-part callout strategy for set_repeated_strategy on a "
-                    "leader. Generation always defaults to representative_with_count "
-                    "(one balloon, one leader, an nX badge); request branched only "
-                    "when the user explicitly asks for a leader per occurrence."
-                ),
-            },
-        },
-        "required": ["operation"],
-        "additionalProperties": False,
-    },
-}
+# The Documentation workspace's browser workflows (ai_inspector/documentation/agent_tools.py), shared with
+# Sage on Codex (codex_runtime/documentation_tools.py).
+from ai_inspector.documentation.agent_tools import DOCUMENTATION_AGENT_TOOL_SPECS as _DOCUMENTATION_AGENT_TOOL_SPECS
+_PARTS_MANUAL_PROPOSAL_AGENT_TOOL_SPEC = _DOCUMENTATION_AGENT_TOOL_SPECS["propose_parts_manual_structure"]
+_OPERATIONS_MANUAL_DRAFT_AGENT_TOOL_SPEC = _DOCUMENTATION_AGENT_TOOL_SPECS["generate_operations_manual_draft"]
+_OPERATIONS_MANUAL_PUBLICATION_AGENT_TOOL_SPEC = _DOCUMENTATION_AGENT_TOOL_SPECS["publish_operations_manual"]
+_SPECIFICATION_SHEET_DRAFT_AGENT_TOOL_SPEC = _DOCUMENTATION_AGENT_TOOL_SPECS["generate_specification_sheet_draft"]
+_SPECIFICATION_SHEET_PUBLICATION_AGENT_TOOL_SPEC = _DOCUMENTATION_AGENT_TOOL_SPECS["publish_specification_sheet"]
+_WORK_INSTRUCTIONS_DRAFT_AGENT_TOOL_SPEC = _DOCUMENTATION_AGENT_TOOL_SPECS["generate_work_instructions_draft"]
+_WORK_INSTRUCTIONS_PUBLICATION_AGENT_TOOL_SPEC = _DOCUMENTATION_AGENT_TOOL_SPECS["publish_work_instructions"]
+_PARTS_MANUAL_DRAFT_AGENT_TOOL_SPEC = _DOCUMENTATION_AGENT_TOOL_SPECS["generate_parts_manual_draft"]
+_PARTS_MANUAL_PUBLICATION_AGENT_TOOL_SPEC = _DOCUMENTATION_AGENT_TOOL_SPECS["generate_and_publish_parts_manual"]
+_PARTS_MANUAL_DOCUMENTATION_AGENT_TOOL_SPEC = _DOCUMENTATION_AGENT_TOOL_SPECS["edit_parts_manual_composition"]
+from ai_inspector.documentation.agent_tools import OPEN_LIBRARY_MACHINE as _OPEN_LIBRARY_MACHINE_AGENT_TOOL_SPEC
 
 AGENT_TOOL_SPECS = {
     "inspector": [
@@ -22592,6 +23486,7 @@ AGENT_TOOL_SPECS = {
         _OPERATIONS_MANUAL_PUBLICATION_AGENT_TOOL_SPEC,
         _SPECIFICATION_SHEET_DRAFT_AGENT_TOOL_SPEC,
         _SPECIFICATION_SHEET_PUBLICATION_AGENT_TOOL_SPEC,
+        _OPEN_LIBRARY_MACHINE_AGENT_TOOL_SPEC,
         _WORK_INSTRUCTIONS_DRAFT_AGENT_TOOL_SPEC,
         _WORK_INSTRUCTIONS_PUBLICATION_AGENT_TOOL_SPEC,
         _PARTS_MANUAL_DRAFT_AGENT_TOOL_SPEC,
@@ -22610,6 +23505,8 @@ AGENT_TOOL_SPECS = {
         {"name": "show_geometry_diff", "description": "Show geometry diff overlay on 3D compare viewer", "args": {}},
         {"name": "animate_motion", "description": "Start or stop motion animation", "args": {"action": "start or stop"}},
         {"name": "set_explode_level", "description": "Set assembly explode level (0-1)", "args": {"level": "float 0.0 to 1.0"}},
+        {"name": "clear_feature_highlights", "description": "End the 3D Model tab's feature highlight (Sage on Codex)", "args": {}},
+        {"name": "show_assembly_parts", "description": "Show a group of parts on its own in the Assembly tab, exploded or not (Sage on Codex)", "args": {"parts": "part numbers", "occurrence_ids": "exact occurrences", "group_parts": "a subassembly's part numbers", "explode": "bool", "spacing": "0.5 to 3", "label": "string"}},
         {"name": "ui_actions", "description": "Chat-first action registry validated against UI action contract v1 -- workspace plus ordered CAD viewport or non-persistent process-map selection actions.", "args": {"workspace": "string", "actions": "ordered list of contract-v1 action objects"}},
         {"name": "create_edit_session", "description": "Create an edit-session audit record from a cad-edit-handoff payload; does not execute CAD edits.", "args": {"handoffPayload": "cad-edit-handoff payload object", "notes": "optional note string"}},
         *_PROCESS_MAP_SPATIAL_AGENT_TOOL_SPECS,
@@ -22639,6 +23536,7 @@ AGENT_TOOL_SPECS = {
         _OPERATIONS_MANUAL_PUBLICATION_AGENT_TOOL_SPEC,
         _SPECIFICATION_SHEET_DRAFT_AGENT_TOOL_SPEC,
         _SPECIFICATION_SHEET_PUBLICATION_AGENT_TOOL_SPEC,
+        _OPEN_LIBRARY_MACHINE_AGENT_TOOL_SPEC,
         _WORK_INSTRUCTIONS_DRAFT_AGENT_TOOL_SPEC,
         _WORK_INSTRUCTIONS_PUBLICATION_AGENT_TOOL_SPEC,
         _PARTS_MANUAL_DRAFT_AGENT_TOOL_SPEC,
@@ -39617,15 +40515,656 @@ async def _deterministic_semantic_chat_result(
     return None
 
 
+class _DocumentationAgentHost:
+    """The Documentation workspace's reads for Sage on Codex (codex_runtime/documentation_tools.py): the same
+    functions as the workspace's own GET routes, nothing that writes."""
+
+    _STATE_ROUTES = {
+        "operations_and_maintenance_manual": "operations_manual_get",
+        "product_specification_sheet": "specification_sheet_get",
+        "work_instructions": "work_instructions_get",
+    }
+
+    @staticmethod
+    def _short(value, limit=300):
+        text = " ".join(str(value or "").split())
+        return text if len(text) <= limit else text[:limit - 3].rstrip() + "..."
+
+    def resolve_principal(self, http_request):
+        return _FACILITY_LAYOUT_HOST.resolve_principal(http_request)
+
+    def library(self):
+        if not assembly_profiles:
+            try:
+                _load_assembly_profiles()
+            except Exception:
+                logger.exception("Failed to load assembly profiles for documentation")
+        return [{"assemblyNumber": number,
+                 "name": (data.get("identity") or {}).get("description") or number,
+                 **({"libraryMachine": True} if is_library_machine(data) else {})}
+                for number, data in sorted(assembly_profiles.items()) if isinstance(data, dict)]
+
+    @staticmethod
+    def assembly_appearance(assembly_number):
+        return _assembly_appearance_store().read(assembly_number)
+
+    @staticmethod
+    def assembly_parts(assembly_number):
+        return _assembly_appearance_parts(assembly_number)
+
+    @staticmethod
+    def write_assembly_appearance(assembly_number, whole, parts, faces=None):
+        extra = {} if faces is None else {"faces": faces}
+        return _assembly_appearance_store().write(assembly_number, whole, parts,
+                                                  part_numbers=_assembly_appearance_parts(assembly_number), by="sage",
+                                                  **extra)
+
+    @staticmethod
+    def assembly_geometry(assembly_number):
+        """What the viewer measured of the loaded model: part centres and sizes, where each sign landed, whether each
+        face finish was drawn and the faces the user selected."""
+        return _assembly_appearance_store().read_geometry(assembly_number)
+
+    @staticmethod
+    def assembly_face_report(assembly_number):
+        """Each part's largest faces as the viewer measured them (docs/assembly-face-selection-plan.md)."""
+        return _assembly_appearance_store().read_face_report(assembly_number)
+
+    @staticmethod
+    def write_assembly_scene(assembly_number, scene_id):
+        return _assembly_appearance_store().set_scene(assembly_number, scene_id, by="sage")
+
+    @staticmethod
+    def write_assembly_signs(assembly_number, signs):
+        return _assembly_appearance_store().set_signs(assembly_number, signs,
+                                                      part_numbers=_assembly_appearance_parts(assembly_number),
+                                                      by="sage")
+
+    @staticmethod
+    def write_assembly_dimensions(assembly_number, dimensions, units=None):
+        """Smart Dimensions on faces (docs/assembly-smart-dimension-plan.md); units None keeps the machine's."""
+        extra = {} if units is None else {"units": units}
+        return _assembly_appearance_store().set_dimensions(assembly_number, dimensions,
+                                                           part_numbers=_assembly_appearance_parts(assembly_number),
+                                                           by="sage", **extra)
+
+    @staticmethod
+    def find_library_machines(query, category=None):
+        opened = set(_library_machine_registry().ids())
+        return [{**row, "opened": row["assetId"] in opened}
+                for row in search_library_machines(REPO_ROOT, query, category=category, limit=10)]
+
+    def open_library_machine(self, asset_id):
+        from ai_inspector.codex_runtime.policy import PilotError
+        payload = library_machine_open(asset_id)
+        if isinstance(payload, JSONResponse):
+            raise PilotError("library_machine_unknown", self._error(payload)["message"], 404)
+        return payload
+
+    @staticmethod
+    def assembly_groups(assembly_number):
+        """The assembly's subassemblies, each with exactly its own part occurrences and their part names (the
+        viewer's part keys), for show_assembly_parts."""
+        try:
+            _assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        except (PartsManualRepositoryError, ValueError):
+            return []
+        rows = [row for row in catalog.get("occurrences") or [] if not row.get("suppressed")]
+        children = {}
+        for row in rows:
+            children.setdefault(row.get("parentOccurrenceId"), []).append(row)
+        groups = []
+        for row in rows:
+            if row.get("kind") != "subassembly":
+                continue
+            occurrence_ids, parts, seen = [], [], set()
+            stack = list(children.get(row["occurrenceId"], []))
+            while stack:
+                child = stack.pop(0)
+                if child["occurrenceId"] in seen:
+                    continue
+                seen.add(child["occurrenceId"])
+                if child.get("kind") == "subassembly":
+                    stack.extend(children.get(child["occurrenceId"], []))
+                elif child.get("partNumber"):
+                    occurrence_ids.append(child["occurrenceId"])
+                    parts.append(str(child["partNumber"]))
+            if not occurrence_ids:
+                continue
+            described = row.get("description") if row.get("descriptionSource") == "component_property" else None
+            groups.append({"name": str(row.get("name") or row["occurrenceId"])[:120],
+                           "description": str(described)[:120] if described else None,
+                           "occurrenceIds": occurrence_ids, "parts": list(dict.fromkeys(parts))})
+        return groups
+
+    def assembly(self, assembly_number):
+        try:
+            assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        except (PartsManualRepositoryError, ValueError) as exc:
+            raise LookupError(str(assembly_number)) from exc
+        rows = catalog["occurrences"]
+        parts = [row for row in rows if row.get("kind") == "part" and not row.get("suppressed")]
+        numbered = sum(1 for row in parts if row.get("displayPartNumber") not in (None, "", "Not specified"))
+        if is_library_machine(assembly_data):
+            machine = assembly_data["libraryMachine"]
+            return {"assemblyNumber": catalog["assemblyNumber"], "name": machine["displayName"],
+                    "sourceRevision": catalog["sourceRevision"], "libraryMachine": True,
+                    "category": machine["category"], "bodies": len(parts),
+                    "partInstances": len(parts), "partDefinitions": len(parts), "subassemblies": 0,
+                    "partNumbers": {"withPartNumber": 0, "notSpecified": len(parts),
+                                    "note": BODIES_NOT_PARTS}}
+        return {
+            "assemblyNumber": catalog["assemblyNumber"],
+            "name": (assembly_data.get("identity") or {}).get("description") or catalog["assemblyNumber"],
+            "sourceRevision": catalog["sourceRevision"],
+            "partInstances": len(parts),
+            "partDefinitions": len({row.get("definitionId") for row in parts}),
+            "subassemblies": sum(1 for row in rows if row.get("kind") == "subassembly"),
+            "partNumbers": {"withPartNumber": numbered, "notSpecified": len(parts) - numbered},
+        }
+
+    def _error(self, response):
+        try:
+            body = json.loads(response.body)
+        except (TypeError, ValueError):
+            body = {}
+        return {"ok": False, "code": str(body.get("error") or "documentation_unavailable"),
+                "message": self._short(body.get("message") or "The app could not read this document.")}
+
+    def state(self, assembly_number, document_type, detail=False):
+        if document_type != "product_specification_sheet" and is_library_machine(
+                assembly_profiles.get(assembly_number)):
+            return {"ok": False, "code": "library_machine_bodies",
+                    "message": f"{assembly_number} is a library machine: {BODIES_NOT_PARTS}, so only the "
+                               "Specification Sheet is offered for it"}
+        if document_type == "illustrated_parts_manual":
+            return self._parts_manual(assembly_number, detail)
+        if document_type == "product_specification_sheet":
+            return self._specification_state(assembly_number, detail)
+        if document_type == "inspection_sheet":
+            return self._inspection_sheet(assembly_number, detail)
+        route = globals()[self._STATE_ROUTES[document_type]]
+        payload = route(assembly_number)
+        if isinstance(payload, JSONResponse):
+            error = self._error(payload)
+            if "bound to a different assembly" in error["message"]:
+                # One evidence folder serves the operations manual (and the work instructions' nomenclature).
+                registered = self._evidence_assembly()
+                if registered:
+                    error["message"] = (f"the registered operations-manual evidence (docs/operations-manual) is for "
+                                        f"{registered}; {assembly_number} has no registered evidence")
+            return error
+        gate = payload.get("releaseGate") or {}
+        findings = gate.get("findings") or []
+        data = {
+            "releaseGate": {
+                "status": gate.get("status"),
+                "reviewPdfAllowed": gate.get("reviewPdfAllowed"),
+                "controlledPdfAllowed": gate.get("controlledPdfAllowed"),
+                "message": self._short(gate.get("message")) or None,
+                "blockingFindings": gate.get("blockingFindingCount", sum(1 for item in findings if item.get("blocking"))),
+            },
+            "evidence": {key: value for key, value in (payload.get("evidenceSummary") or {}).items()
+                         if isinstance(value, (int, str))},
+            "citedSources": [{"title": self._short(item.get("title"), 120), "kind": item.get("kind"),
+                              "authority": item.get("authority")}
+                             for item in (payload.get("evidenceCitations") or [])][:12],
+        }
+        if payload.get("planSummary"):
+            data["planSummary"] = payload["planSummary"]
+        if detail:
+            data["findings"] = [{"severity": item.get("severity"), "topic": item.get("topic"),
+                                 "blocking": item.get("blocking"), "message": self._short(item.get("message"), 240)}
+                                for item in findings][:24]
+            sections = (payload.get("evidenceSummary") or {}).get("reviewPrioritySections")
+            if sections:
+                data["reviewPrioritySections"] = sections[:12]
+        return {"ok": True, "data": data}
+
+    @staticmethod
+    def _evidence_assembly():
+        try:
+            payload = json.loads((OPERATIONS_MANUAL_EVIDENCE_ROOT / "publication-nomenclature.json").read_text(
+                encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            return None
+        value = str(payload.get("assemblyNumber") or "").strip() if isinstance(payload, dict) else ""
+        return value if re.fullmatch(r"[A-Za-z0-9_-]{1,80}", value) else None
+
+    def _parts_manual(self, assembly_number, detail):
+        payload = parts_manual_get(assembly_number)
+        if isinstance(payload, JSONResponse):
+            return self._error(payload)
+        readiness = payload.get("publicationReadiness") or {}
+        sections = payload["plan"].get("sections") or []
+        data = {"structure": {
+            "approvedSections": len(sections),
+            # The browser's _documentationPlanIsReady: current with the CAD, audit PASS, at least one section.
+            "publishable": bool(payload.get("sourceCurrent") and readiness.get("status") == "PASS" and sections),
+            "sourceCurrent": bool(payload.get("sourceCurrent")),
+            "coveragePercent": readiness.get("coveragePercent"),
+            "auditFindings": len(readiness.get("findings") or []),
+        }}
+        proposal = parts_manual_structure_proposal(assembly_number)
+        if isinstance(proposal, JSONResponse):
+            data["proposal"] = {"available": False, **self._error(proposal)}
+        else:
+            candidates = proposal["proposal"].get("candidates") or []
+            summary = proposal["proposal"].get("summary") or {}
+            data["proposal"] = {
+                **{key: summary.get(key) for key in ("candidateCount", "readyCount", "conflictCount",
+                                                     "unassignedCount", "coveragePercent")},
+                "evidence": sorted({str(item.get("source")) for item in candidates if item.get("source")}),
+                "trustedForPublish": self._trusted_for_publish(candidates, payload["plan"]),
+            }
+        if detail:
+            data["sections"] = [{"sectionId": item.get("sectionId"), "name": item.get("name"),
+                                 "parts": len(item.get("occurrenceIds") or []), "source": item.get("source"),
+                                 "inManual": item.get("includeInManual", True)} for item in sections][:60]
+            data["auditFindings"] = [{"severity": item.get("severity"), "code": item.get("code"),
+                                      "message": self._short(item.get("message"), 240)}
+                                     for item in (readiness.get("findings") or [])][:20]
+            if not isinstance(proposal, JSONResponse):
+                data["proposalCandidates"] = [
+                    {"name": item.get("name"), "status": item.get("status"), "evidence": item.get("source"),
+                     "confidence": item.get("confidence"), "parts": len(item.get("occurrenceIds") or []),
+                     "conflicts": len(item.get("conflicts") or [])}
+                    for item in (proposal["proposal"].get("candidates") or [])][:40]
+            if data["structure"]["publishable"]:
+                scene = parts_manual_documentation_scene_get(assembly_number)
+                if not isinstance(scene, JSONResponse):
+                    document = scene.get("document") or {}
+                    data["document"] = {"pageCount": document.get("pageCount"),
+                                        "documentRevision": document.get("documentRevision")}
+                    data["figures"] = [
+                        {"figure": page.get("figureNumber"), "title": page.get("title"), "page": page.get("pageNumber"),
+                         "bomItems": page.get("bomItemCount"),
+                         "view": (page.get("renderRequest") or {}).get("cameraPreset"),
+                         "captured": ((page.get("renderRequest") or {}).get("image") or {}).get("status") == "ready"}
+                        for page in (document.get("pages") or []) if page.get("renderRequest") and page.get("figureNumber")
+                    ][:60]
+        return {"ok": True, "data": data}
+
+    @staticmethod
+    def _trusted_for_publish(candidates, plan):
+        """The browser's _partsManualTrustedProposalAssessment, for the ready candidates: whether publishing may
+        approve them itself (the summary's coverage and conflicts are checked by the caller)."""
+        ready = [item for item in candidates if item.get("status") == "ready"]
+        untrusted = sorted({str(item.get("source") or "unknown") for item in ready
+                            if item.get("source") not in ("cad_hierarchy", "process_map")})
+        low = [item for item in ready if not isinstance(item.get("confidence"), (int, float))
+               or item["confidence"] < 0.80]
+        unexplained = [item for item in (plan.get("exclusions") or []) if not str(item.get("reason") or "").strip()]
+        if untrusted:
+            return {"ok": False, "reason": "these sections come from " + ", ".join(untrusted) + " evidence"}
+        if low:
+            return {"ok": False, "reason": f"{len(low)} sections are below 0.80 confidence"}
+        if unexplained:
+            return {"ok": False, "reason": f"{len(unexplained)} excluded parts have no reason"}
+        return {"ok": bool(ready)}
+
+    def bom(self, assembly_number, section_id=None):
+        from ai_inspector.codex_runtime.policy import PilotError
+        _assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        rows = catalog["occurrences"]
+        if section_id:
+            payload = parts_manual_section_bom(assembly_number, section_id)
+            if isinstance(payload, JSONResponse):
+                error = self._error(payload)
+                raise PilotError("documentation_section_unavailable", error["message"], 404)
+            scope, bom = payload["sectionName"], payload["bom"]
+        else:
+            parts = [row["occurrenceId"] for row in rows if row.get("kind") == "part" and not row.get("suppressed")]
+            scope, bom = "whole assembly", build_scoped_bom(rows, parts)
+        return {"scope": scope, "rows": [{"item": row.get("item"), "partNumber": row.get("displayPartNumber"),
+                                          "description": self._short(row.get("description"), 120),
+                                          "quantity": row.get("quantity")} for row in bom]}
+
+
+    # The Specification Sheet (docs/specification-sheet-slots-plan.md): slots Sage reads and writes.
+    def _specification_state(self, assembly_number, detail):
+        try:
+            view = self.specification_sheet(assembly_number)
+        except (*_SPECIFICATION_SHEET_SLOT_ERRORS, LookupError) as error:
+            return {"ok": False, "code": "specification_sheet_unavailable", "message": self._short(error)}
+        sheet_type = view["type"] or {}
+        data = {
+            "releaseGate": {"status": "REVIEW_READY", "reviewPdfAllowed": True, "controlledPdfAllowed": False,
+                            "message": view["gate"], "blockingFindings": 0},
+            "sheet": {"hasProfile": view["hasProfile"], "units": view["units"],
+                      "machineType": sheet_type.get("label") or sheet_type.get("type"),
+                      "namesApproved": bool(sheet_type.get("approved")) or view["hasProfile"],
+                      "namesProposed": bool(sheet_type.get("proposal")),
+                      "rows": len(view["rows"]), "openSlots": view["openSlots"],
+                      "unreviewed": sum(1 for item in view["findings"] if item["topic"] == "unreviewed"),
+                      "captureCurrent": view["export"]["captureCurrent"]},
+        }
+        if detail:
+            data["specificationSheet"] = view
+        return {"ok": True, "data": data}
+
+    def specification_sheet(self, assembly_number):
+        """The sheet as Sage reads it: each slot's value and source (open ones with their hint), the rows, the
+        machine type and its names, the units, the release gate, the approved types, and whether the product picture
+        is current, so the sheet can be exported now."""
+        assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        document = _specification_sheet_compile(assembly_data, catalog)
+        try:
+            bound, _scene = _specification_sheet_build_document_with_scene(assembly_data=assembly_data,
+                                                                           catalog=catalog)
+            capture_current = specification_export_readiness(bound)["status"] == "READY"
+        except DocumentationSceneError:
+            capture_current = False
+        return self._specification_view(document, capture_current)
+
+    def _specification_view(self, document, capture_current):
+        slots, sheet, gate = document["slots"], document["sheet"], document["releaseGate"]
+        view = {}
+        for slot in document["slotOrder"]:
+            item = slots[slot]
+            entry = {"name": item["name"], "value": item.get("value"), "source": item.get("source"),
+                     "open": item["open"]}
+            for key, field in (("unreviewed", "unreviewed"), ("hint", "hint"), ("overrides", "typedOver")):
+                if item.get(key):
+                    entry[field] = item[key]
+            if item.get("citation"):
+                entry["link"] = (item["citation"] or {}).get("url")
+            view[slot] = entry
+        return {"hasProfile": bool(sheet.get("hasProfile")), "units": sheet.get("units"), "type": sheet.get("type"),
+                "rows": [{"key": row["key"], "label": row["label"], "unit": row.get("unit")}
+                         for row in sheet.get("rows") or []],
+                "maxRows": sheet.get("maxRows"), "slots": view, "openSlots": gate.get("openSlotCount"),
+                "gate": gate.get("message"),
+                "findings": [{"slot": item.get("slot"), "topic": item.get("topic"),
+                              "message": self._short(item.get("message"), 200)}
+                             for item in gate.get("findings") or []][:20],
+                "approvedTypes": [item for item in SpecificationTemplateStore(SPECIFICATION_SHEET_ROOT).list()
+                                  if item.get("approved")][:30],
+                "export": {"captureCurrent": capture_current}}
+
+    def specification_sheet_change(self, assembly_number, kind, payload):
+        """One change Sage makes to the sheet, through the same helpers as the workspace's routes."""
+        from ai_inspector.codex_runtime.policy import PilotError
+        outcome: Dict[str, Any] = {}
+
+        def change(base, store):
+            if kind == "values":
+                result = _specification_sheet_store_values(base, store, payload["values"], payload["source"],
+                                                           quote=payload.get("quote"))
+            elif kind == "propose_template":
+                result = _specification_sheet_propose_template(store, payload)
+            elif kind == "approve_template":
+                result = _specification_sheet_approve_template(store, payload["type"], "chat")
+            elif kind == "accept":
+                unknown = [slot for slot in payload["slots"] if slot not in set(base["slotOrder"])]
+                if unknown:
+                    raise SpecificationSlotError(f"{unknown[0][:60]} is not on this sheet")
+                result = {"acceptedSlots": store.accept(payload["slots"], "chat")}
+            elif kind == "edit":
+                result = _specification_sheet_agent_edit(base, store, payload)
+            else:
+                raise SpecificationSlotError(f"unknown sheet change {kind}")
+            outcome.update(result or {})
+            return result
+
+        try:
+            response = _specification_sheet_slot_change(assembly_number, change)
+        except _SPECIFICATION_SHEET_SLOT_ERRORS as exc:
+            raise PilotError("specification_sheet_change_failed", self._short(exc), 422) from exc
+        return {**outcome, "sheet": {"openSlots": response["document"]["releaseGate"].get("openSlotCount"),
+                                     "gate": response["document"]["releaseGate"].get("message"),
+                                     "rows": [{"key": row["key"], "label": row["label"], "unit": row.get("unit")}
+                                              for row in response["document"]["sheet"].get("rows") or []]}}
+
+    # The text on the operations manual's and work instructions' pages: the documentation-scene routes the page's own
+    # double-click edits use, so Sage's edits are the user's kind (pageElementOverrides) and the exports use them.
+    _TEXT_ROUTES = {
+        "operations_and_maintenance_manual": ("operations_manual_documentation_scene_get",
+                                              "operations_manual_documentation_scene_command"),
+        "work_instructions": ("work_instructions_documentation_scene_get",
+                              "work_instructions_documentation_scene_command"),
+    }
+
+    def _text_scene(self, assembly_number, document_type):
+        from ai_inspector.codex_runtime.policy import PilotError
+        if is_library_machine(assembly_profiles.get(assembly_number)):
+            raise PilotError("library_machine_bodies", f"{assembly_number} is a library machine: only the "
+                             "Specification Sheet is offered for it.", 409)
+        payload = globals()[self._TEXT_ROUTES[document_type][0]](assembly_number)
+        if isinstance(payload, JSONResponse):
+            raise PilotError("documentation_unavailable", self._error(payload)["message"], 409)
+        return payload
+
+    def document_pages(self, assembly_number, document_type):
+        return self._text_scene(assembly_number, document_type)["document"].get("pages") or []
+
+    def edit_document_text(self, assembly_number, document_type, edits):
+        from ai_inspector.codex_runtime.policy import PilotError
+        scene = self._text_scene(assembly_number, document_type)
+        command = globals()[self._TEXT_ROUTES[document_type][1]]
+        revision, document = scene["revision"], scene["document"]
+        changed = []
+        for edit in edits:
+            response = command(assembly_number, DocumentationSceneCommandBody(
+                baseRevision=revision, sourceRevision=str(document["sourceRevision"]),
+                manualPlanRevision=str(document["manualPlanRevision"]), operation="update_text",
+                pageId=edit["pageId"], targetType="page_element", targetId=edit["targetId"],
+                text=edit["text"], actor="sage"))
+            if isinstance(response, JSONResponse):
+                made = f" The {len(changed)} edit(s) before it were made." if changed else ""
+                raise PilotError("document_text_edit_failed",
+                                 f"{edit['targetId'][:80]}: {self._error(response)['message']}{made}", 422)
+            revision = response["revision"]
+            changed.append({"pageId": edit["pageId"], "targetId": edit["targetId"]})
+        return changed
+
+    def export_specification_sheet(self, assembly_number, fillable=False):
+        from ai_inspector.codex_runtime.policy import PilotError
+        payload = (specification_sheet_fillable_export if fillable else specification_sheet_export)(assembly_number)
+        if isinstance(payload, JSONResponse):
+            raise PilotError("documentation_export_failed", self._error(payload)["message"], 422)
+        return payload
+
+    # The Inspection Sheet (docs/inspection-sheet-open-fields-plan.md): read, build, and the values the user states.
+    def _inspection_sheet(self, assembly_number, detail):
+        try:
+            document, _drawings = _inspection_sheet_document(assembly_number)
+            payload = _inspection_sheet_payload(document)
+        except _INSPECTION_SHEET_ERRORS as error:
+            return self._error(_inspection_sheet_error_response(error))
+        data = {"summary": payload["summary"], "built": payload["built"], "lastReturn": payload["lastReturn"],
+                "openFields": payload["openFields"] if detail else payload["openFields"][:12]}
+        if detail:
+            data["providedFields"] = payload["providedFields"]
+            data["sections"] = payload["sections"]
+            data["rows"] = self._inspection_sheet_rows(document)
+            total = sum(len(section.get("characteristics") or section.get("features") or [])
+                        for section in document["sections"])
+            if len(data["rows"]) < total:
+                data["rowsNote"] = f"The first {len(data['rows'])} of {total} rows; the PDF has them all."
+        return {"ok": True, "data": data}
+
+    def _inspection_sheet_rows(self, document, limit=100):  # about 430 bytes a row: well inside a 64 KB read
+        """Each row Sage can record a result for, with its field names: what the user calls 'dimension 4 on the
+        piston' is part 100006, row 4."""
+        rows = []
+        for section in document["sections"]:
+            for row in section.get("characteristics") or section.get("features") or []:
+                if len(rows) >= limit:
+                    return rows
+                names = row.get("fields") or {}
+                rows.append({"part": section["partNumber"], "n": row["number"],
+                             "what": self._short(row.get("text") or row.get("name"), 60),
+                             "description": self._short(row.get("description") or row.get("reason"), 90) or None,
+                             "lower": row.get("lower"), "upper": row.get("upper"),
+                             "status": row.get("status"),
+                             "fields": {key: names[key] for key in ("requirement", "measured", "gauge")
+                                        if key in names}})
+        return rows
+
+    def build_inspection_sheet(self, assembly_number):
+        from ai_inspector.codex_runtime.policy import PilotError
+        if is_library_machine(assembly_profiles.get(assembly_number)):
+            raise PilotError("library_machine_bodies", f"{assembly_number} is a library machine: {BODIES_NOT_PARTS}, "
+                             "so only the Specification Sheet is offered for it.", 409)
+        payload = inspection_sheet_build(assembly_number)
+        if isinstance(payload, JSONResponse):
+            raise PilotError("documentation_build_failed", self._error(payload)["message"], 422)
+        return payload
+
+    def provide_inspection_sheet_values(self, assembly_number, values, quote):
+        from ai_inspector.codex_runtime.policy import PilotError
+        try:
+            document, _drawings = _inspection_sheet_document(assembly_number)
+            kinds = {field["name"]: field["kind"] for field in document["fields"]}
+            boxes = [item for item in values if kinds.get(item["name"]) in ("checkbox", "signature")]
+            result = _inspection_sheet_store().set_values(
+                document["assemblyNumber"], [{**item, "quote": quote} for item in values if item not in boxes],
+                document["fields"], source="chat")
+            document, _drawings = _inspection_sheet_document(assembly_number)
+        except _INSPECTION_SHEET_ERRORS as exc:
+            raise PilotError("documentation_values_failed", self._short(exc), 422) from exc
+        refused = [{"name": item["name"], "reason": "tick boxes and signatures are set in the PDF or the workspace"}
+                   for item in boxes]
+        return {"set": result["set"], "refused": refused + result["refused"],
+                "openFieldCount": len(document["openFields"]), "openFields": document["openFields"][:20]}
+
+
+_DOCUMENTATION_AGENT_HOST = _DocumentationAgentHost()
+
+
+class _PartAgentHost:
+    """The 3D Model tab's reads and writes for Sage on Codex (codex_runtime/part_tools.py): the part shown, its
+    CAD features and its finishes and dimensions, through the same store the tab's own routes use."""
+
+    def resolve_principal(self, http_request):
+        return _FACILITY_LAYOUT_HOST.resolve_principal(http_request)
+
+    @staticmethod
+    def assembly(part_number):
+        path = _part_feature_colors_path(part_number)
+        if path is None:
+            raise LookupError(str(part_number))
+        features = _part_appearance_features(part_number)
+        return {"partNumber": str(part_number), "name": _part_appearance_name(part_number),
+                "featureCount": len([key for key in features if key != "__base__"]),
+                "sourceRevision": f"{path.stat().st_mtime_ns:x}"}
+
+    @staticmethod
+    def part_features(part_number):
+        """Each CAD feature with its kind, colour in the feature view and the parameters the extractor read."""
+        path = _part_feature_colors_path(part_number)
+        if path is None:
+            raise LookupError(str(part_number))
+        with open(path, "r", encoding="utf-8-sig") as handle:
+            data = json.load(handle)
+        rows = []
+        for row in data.get("features") or []:
+            if not isinstance(row, dict) or not (row.get("glb_node_name") or row.get("cad_feature_id")):
+                continue
+            rows.append({"feature": str(row.get("glb_node_name") or row.get("cad_feature_id")),
+                         "name": str(row.get("display_label") or row.get("sw_name") or "")[:160],
+                         "type": str(row.get("type") or "")[:60],
+                         "color": str(row.get("color") or "")[:16],
+                         "colorName": str(row.get("color_name") or "")[:40],
+                         "faceCount": row.get("face_count"),
+                         "parameters": {str(key)[:60]: value for key, value in (row.get("parameters") or {}).items()
+                                        if isinstance(value, (int, float, str, bool))}})
+        return rows
+
+    @staticmethod
+    def part_physical(part_number):
+        """Mass, material and size as the CAD export gives them (the 3D Model tab's Properties read the same)."""
+        safe = re.sub(r"[^\w\-]", "", str(part_number or ""))
+        path = _resolve_part_asset(safe, "revA", f"{safe}.json") if safe else None
+        if path is None and safe and (library_path() / f"{safe}.json").exists():
+            path = library_path() / f"{safe}.json"
+        try:
+            with open(path, "r", encoding="utf-8-sig") as handle:
+                data = json.load(handle) or {}
+        except (OSError, TypeError, ValueError):
+            return {}
+        physical = data.get("physical") or {}
+        identity = data.get("identity") or {}
+        out = {}
+        material = physical.get("assignedMaterial") or identity.get("material")
+        if material:
+            out["material"] = str(material)[:80]
+        for key, name, scale in (("mass", "massKg", 1), ("volume", "volumeMm3", 1e9),
+                                 ("surfaceArea", "surfaceAreaMm2", 1e6)):
+            value = physical.get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                out[name] = float(f"{value * scale:.6g}")
+        box = physical.get("boundingBox") or {}
+        size = [box.get(key) for key in ("length", "width", "height")]
+        if all(isinstance(value, (int, float)) for value in size):
+            out["boundingBoxMm"] = {"length": round(size[0] * 1000, 2), "width": round(size[1] * 1000, 2),
+                                    "height": round(size[2] * 1000, 2)}
+        if out:
+            out["note"] = "As the CAD export gives them."
+        return out
+
+    @staticmethod
+    def assembly_appearance(part_number):
+        return _part_appearance_store().read(part_number)
+
+    @staticmethod
+    def assembly_parts(part_number):
+        return _part_appearance_features(part_number)
+
+    @staticmethod
+    def write_assembly_appearance(part_number, whole, parts, faces=None):
+        extra = {} if faces is None else {"faces": faces}
+        return _part_appearance_store().write(part_number, whole, parts,
+                                              part_numbers=_part_appearance_features(part_number), by="sage",
+                                              **extra)
+
+    @staticmethod
+    def assembly_geometry(part_number):
+        return _part_appearance_store().read_geometry(part_number)
+
+    @staticmethod
+    def assembly_face_report(part_number):
+        return _part_appearance_store().read_face_report(part_number)
+
+    @staticmethod
+    def write_assembly_dimensions(part_number, dimensions, units=None):
+        extra = {} if units is None else {"units": units}
+        return _part_appearance_store().set_dimensions(part_number, dimensions,
+                                                       part_numbers=_part_appearance_features(part_number),
+                                                       by="sage", **extra)
+
+
+_PART_AGENT_HOST = _PartAgentHost()
+
+
+def _codex_documentation_enabled() -> bool:
+    """Sage in Workflows > Documentation runs on Codex: with the ChatGPT plan sign-in (whose other route refuses
+    every non-facility chat) or when INSPECTORPRO_CODEX_DOCUMENTATION=1; =0 turns it off."""
+    from ai_inspector.codex_runtime.chatgpt_accounts import subscription_mode
+    from ai_inspector.codex_runtime.policy import enabled
+    setting = os.environ.get("INSPECTORPRO_CODEX_DOCUMENTATION", "").strip()
+    return enabled() and setting != "0" and (setting == "1" or subscription_mode())
+
+
+def _codex_documentation_turn(request) -> bool:
+    """Documentation, the Assembly tab (its assembly and appearance tools, docs/assembly-appearance-plan.md) or the
+    3D Model tab (the part shown: its features, finishes and dimensions)."""
+    return (getattr(request, "agent_type", None) == "deviation-analyst"
+            and _chat_stream_active_mode(request) in ("documentation", "assembly", "3dmodel")
+            and _codex_documentation_enabled())
+
+
 def _require_subscription_chat_route(request):
     from ai_inspector.codex_runtime.chatgpt_accounts import subscription_mode
     from ai_inspector.codex_runtime.policy import enabled
     if subscription_mode() and not (enabled() and request.agent_type == "deviation-analyst"
-            and _chat_stream_active_mode(request) == "facility_layout"):
+            and _chat_stream_active_mode(request) == "facility_layout") and not _codex_documentation_turn(request):
         raise HTTPException(status_code=409, detail={"error": {
             "code": "codex_subscription_workflow_unavailable",
-            "message": "ChatGPT plan sign-in currently supports Sage in Facility Layout. "
-                       "This workflow has not been migrated. No paid API fallback was attempted.",
+            "message": "ChatGPT plan sign-in currently supports Sage in Facility Layout, Documentation, the "
+                       "Assembly tab and the 3D Model tab. This workflow has not been migrated. No paid API "
+                       "fallback was attempted.",
             "retryable": False,
         }})
 
@@ -39647,6 +41186,24 @@ async def agent_chat(
                 normalize_agent_context(request.inspection_context or request.context or {})["flat"],
                 text_sink=_AGENT_CHAT_STREAM_SINK.get(), status_sink=_AGENT_CHAT_STATUS_SINK.get(),
                 step_sink=_AGENT_CHAT_STEP_SINK.get(), memory_context=memory_context)
+        except PilotError as exc:
+            raise HTTPException(status_code=exc.status_code, detail={"error": {
+                "code": exc.code, "message": str(exc), "retryable": False,
+            }}) from None
+    if _codex_documentation_turn(request):
+        from ai_inspector.codex_runtime.documentation_pilot import inspect_documentation
+        active_mode = _chat_stream_active_mode(request)
+        workspace = {"assembly": "assembly", "3dmodel": "part"}.get(active_mode, "documentation")
+        try:
+            prepare_memory = _AGENT_MEMORY_ENVELOPE_PREPARER.get()
+            memory_context = prepare_memory({}) if prepare_memory else ""
+            return await inspect_documentation(request,
+                _PART_AGENT_HOST if workspace == "part" else _DOCUMENTATION_AGENT_HOST, http_request,
+                normalize_agent_context(request.inspection_context or request.context or {})["flat"],
+                text_sink=_AGENT_CHAT_STREAM_SINK.get(), status_sink=_AGENT_CHAT_STATUS_SINK.get(),
+                step_sink=_AGENT_CHAT_STEP_SINK.get(), memory_context=memory_context,
+                guard_tool_calls=lambda calls: apply_tool_guardrails(calls, request.agent_type, "codex_documentation"),
+                workspace=workspace)
         except PilotError as exc:
             raise HTTPException(status_code=exc.status_code, detail={"error": {
                 "code": exc.code, "message": str(exc), "retryable": False,
@@ -42541,7 +44098,7 @@ def _memory_model_metadata(request: AgentChatRequest, *, streaming: bool) -> Dic
     agent_type = str(request.agent_type or "").strip().lower()
     from ai_inspector.codex_runtime.policy import enabled as codex_pilot_enabled, RUNTIME_VERSION
     if (codex_pilot_enabled() and agent_type == "deviation-analyst"
-            and _chat_stream_active_mode(request) == "facility_layout"):
+            and _chat_stream_active_mode(request) == "facility_layout") or _codex_documentation_turn(request):
         return {"provider": "openai", "model": os.environ.get("INSPECTORPRO_CODEX_MODEL", ""),
                 "runtime": "codex_app_server", "runtimeVersion": RUNTIME_VERSION,
                 "agentType": agent_type, "transport": "stream" if streaming else "batch"}
@@ -43591,10 +45148,10 @@ async def agent_chat_endpoint(
 ):
     from ai_inspector.codex_runtime.policy import enabled as codex_pilot_enabled
     if (codex_pilot_enabled() and request.agent_type == "deviation-analyst"
-            and _chat_stream_active_mode(request) == "facility_layout"):
+            and _chat_stream_active_mode(request) == "facility_layout") or _codex_documentation_turn(request):
         raise HTTPException(status_code=409, detail={"error": {
             "code": "codex_stream_required",
-            "message": "Codex facility requests require the cancellable streaming endpoint.",
+            "message": "Codex facility and documentation requests require the cancellable streaming endpoint.",
             "retryable": False,
         }})
     result = await _execute_agent_chat_with_memory(
@@ -43894,6 +45451,10 @@ def agent_chat_streaming_status():
         "contract_version": 1,
         "endpoint": "/api/agent/chat/v2/stream",
         "facilityRuntime": "codex" if codex_pilot_enabled() else "legacy",
+        "documentationRuntime": "codex" if _codex_documentation_enabled() else "legacy",
+        "assemblyRuntime": "codex" if _codex_documentation_enabled() else "legacy",
+        # The 3D Model tab's Sage: the part shown (codex_runtime/part_tools.py).
+        "partRuntime": "codex" if _codex_documentation_enabled() else "legacy",
         **settings,
     }
 
@@ -43918,7 +45479,7 @@ async def agent_chat_v2_stream(payload: AgentChatRequest, http_request: Request)
     agent_name = _chat_stream_agent_name(payload.agent_type or "")
     active_mode = _chat_stream_active_mode(payload)
     codex_facility = (codex_pilot_enabled() and payload.agent_type == "deviation-analyst"
-                      and active_mode == "facility_layout")
+                      and active_mode == "facility_layout") or _codex_documentation_turn(payload)
     if not codex_facility and (not settings["enabled"] or agent_name not in set(settings["agents"])):
         raise HTTPException(status_code=404, detail="Chat streaming is not enabled for this agent")
 

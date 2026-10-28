@@ -99,7 +99,7 @@ def run() -> int:
                 arg=ASSEMBLY,
                 timeout=90_000,
             )
-            page.get_by_role("button", name="Parts Manual", exact=True).click()
+            page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
             workspace = page.locator("#documentationWorkspace")
             workspace.wait_for(state="visible", timeout=120_000)
             page.wait_for_function(

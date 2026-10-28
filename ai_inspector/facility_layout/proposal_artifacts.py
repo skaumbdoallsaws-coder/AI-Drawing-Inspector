@@ -1,4 +1,4 @@
-"""New artwork references must come from the site's controlled image importer."""
+"""New artwork references must come from the site's controlled image importer, or be artwork the app ships."""
 from collections.abc import Mapping
 
 from .decal_images import scope_directory
@@ -18,8 +18,14 @@ def image_references(value):
             yield from image_references(item)
 
 
+def shipped_artwork():
+    """The fixed images the site planner puts in its designs (the logo on the side walls, the yard crosshair)."""
+    from .site_plan import LOGO_IMAGE, TARGET_IMAGE
+    return {LOGO_IMAGE, TARGET_IMAGE}
+
+
 def validate_proposal_artwork(service, principal, site_id, layout, operations):
-    known = set(image_references(layout))
+    known = set(image_references(layout)) | shipped_artwork()
     for path in set(image_references(operations)) - known:
         if not IMAGE_PATH.fullmatch(path) or path.split("/")[3] != site_id:
             raise FacilityValidationError("artwork_import_required",

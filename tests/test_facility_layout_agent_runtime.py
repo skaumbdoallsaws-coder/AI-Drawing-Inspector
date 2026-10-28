@@ -386,6 +386,32 @@ def test_asset_search_cursor_is_opaque_and_scope_bound(host):
     assert caught.value.code == "facility_agent_cursor_scope_mismatch"
 
 
+def test_asset_search_pages_by_offset_and_cursor_survives_page_size(host):
+    principal, current, _ = _context(host)
+
+    def search(**arguments):
+        return host.agent_runtime.execute_read_tool(
+            principal,
+            site_id=LOCAL_SITE_ID,
+            layout_id=LOCAL_LAYOUT_ID,
+            expected_revision=current["revision"],
+            tool_name="search_industrial_assets",
+            arguments=arguments,
+            turn_id="turn-offset-search",
+        )
+
+    first = search(pageSize=1)
+    assert first["nextOffset"] == 1
+    by_offset = search(pageSize=1, offset=first["nextOffset"])
+    # Agents changed the page size between pages; the cursor still continues.
+    by_cursor = search(pageSize=2, cursor=first["nextCursor"])
+    assert by_offset["records"][0]["assetId"] == by_cursor["records"][0]["assetId"]
+    assert by_offset["records"][0]["assetId"] != first["records"][0]["assetId"]
+    with pytest.raises(FacilityLayoutAgentRuntimeError) as caught:
+        search(pageSize=1, offset=-1)
+    assert caught.value.code == "facility_agent_arguments_invalid"
+
+
 def test_read_tools_are_bounded_and_stable_id_driven(host):
     principal, current, bundle = _context(host)
     response = host.agent_runtime.execute_read_tool(

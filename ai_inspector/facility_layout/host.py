@@ -24,6 +24,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from .api import create_facility_layout_router
 from .asset_orientation import attach_registered_semantics
+from .model_axes import mirror_catalog_record
 from .authority_repository import (
     FacilityShellRepository,
     PolicySetRepository,
@@ -682,12 +683,23 @@ def build_private_local_asset_catalog(
             "available": available,
         }
         if available:
+            # A lighter copy beside the model (<name>.overview.glb: the same parts and materials at a
+            # fraction of the triangles) is what busy layouts draw; the full model stays as the detail.
+            light = artifact_path.with_name(artifact_path.stem + ".overview.glb")
+            shown = relative.with_name(light.name) if light.is_file() else relative
             entry["overview"] = {
-                "path": "/" + quote(relative.as_posix(), safe="/"),
-                "byteSize": artifact_path.stat().st_size,
+                "path": "/" + quote(shown.as_posix(), safe="/"),
+                "byteSize": (root / shown).stat().st_size,
                 "sourceToCanonical": matrix,
                 "instancingEligible": True,
             }
+            if shown != relative:
+                entry["detail"] = {
+                    "path": "/" + quote(relative.as_posix(), safe="/"),
+                    "byteSize": artifact_path.stat().st_size,
+                    "sourceToCanonical": matrix,
+                    "instancingEligible": True,
+                }
         thumbnail_relative = relative.parent / "thumbnail.webp"
         if (root / thumbnail_relative).is_file():
             entry["thumbnail"] = {
@@ -881,8 +893,11 @@ class LocalFacilityLayoutHost:
             if use_private_assets
             else LOCAL_ASSET_CATALOG
         )
+        # Model-space data (footprints, support surfaces, reviewed sides and
+        # seats) is authored in each model file's own axes; the catalog carries
+        # it in the layout's model space, mirrored once across x = 0 (model_axes).
         self._catalog = {
-            item["assetId"]: attach_registered_semantics(item)
+            item["assetId"]: mirror_catalog_record(attach_registered_semantics(item))
             for item in catalog_source
         }
         # Private visual definitions are new immutable revisions, not
@@ -890,7 +905,7 @@ class LocalFacilityLayoutHost:
         # Keep both so existing placements remain verifiable while the asset
         # browser offers the current private definition for new placements.
         self._asset_versions = {
-            (item["assetId"], item["assetDefinitionRevision"]): deepcopy(item)
+            (item["assetId"], item["assetDefinitionRevision"]): mirror_catalog_record(item)
             for item in (*LOCAL_ASSET_CATALOG, *catalog_source)
         }
         self.transaction_runtime = FacilityLayoutTransactionRuntime(

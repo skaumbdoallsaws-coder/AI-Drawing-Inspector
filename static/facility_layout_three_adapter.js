@@ -17,6 +17,16 @@
         || (typeof require === 'function' ? require('./facility_layout_component_materials.js') : null);
     const floorSurfacesRuntime = root.InspectorProFacilityFloorSurfaces
         || (typeof require === 'function' ? require('./facility_layout_floor_surfaces.js') : null);
+    const siteRuntime = root.InspectorProFacilitySite
+        || (typeof require === 'function' ? require('./facility_layout_site.js') : null);
+    const finishesRuntime = root.InspectorProFacilityFinishes
+        || (typeof require === 'function' ? require('./facility_layout_finishes.js') : null);
+    const libraryRuntime = root.InspectorProFacilityLibrary
+        || (typeof require === 'function' ? require('./facility_layout_library.js') : null);
+    const scenesRuntime = root.InspectorProFacilityScenes
+        || (typeof require === 'function' ? require('./facility_layout_scenes.js') : null);
+    const equipmentDecalsRuntime = root.InspectorProFacilityEquipmentDecals
+        || (typeof require === 'function' ? require('./facility_layout_equipment_decals.js') : null);
 
     const cameraPreferences = root.InspectorProWalkthroughCamera
         || (typeof require === 'function' ? require('./walkthrough_camera_settings.js') : null);
@@ -60,6 +70,12 @@
         markings: true,
         assets: true,
         walls: true,
+        // Viewer-only: the paving (ground tiles, ground marks and the site's outdoor areas), the floor
+        // finishes, and the site overlays (the property line, routes to the main road). The aerial
+        // photo always stays, so hiding all three with the rest shows the lot as it was.
+        ground: true,
+        surfaces: true,
+        site: true,
     });
     // Zone limits on the 3D floor: the plan's zone outline color, and the line
     // width in metres.
@@ -301,6 +317,76 @@
         return Math.max(minimum, Math.min(maximum, finite(value, fallback)));
     }
 
+    // Mirror a loaded model file across its canonical x = 0 plane: the frame
+    // the wrapper defines (ai_inspector/facility_layout/model_axes.py). The
+    // vertex data is mirrored, not the transform: negative-determinant
+    // transforms break instanced rendering and raycast culling. Geometry is
+    // cloned first, so a cached model is never mirrored twice, and a geometry
+    // shared by two parts is mirrored once per part frame.
+    function mirrorModelFileGeometry(THREE, wrapper) {
+        if (typeof wrapper.updateMatrixWorld === 'function') wrapper.updateMatrixWorld(true);
+        const toWrapper = new THREE.Matrix4().copy(wrapper.matrixWorld).invert();
+        const mirror = new THREE.Matrix4().makeScale(-1, 1, 1);
+        const clones = new Map();
+        wrapper.traverse(function (node) {
+            if (!node.isMesh || node.isSkinnedMesh || node.isInstancedMesh || !node.geometry
+                    || typeof node.geometry.clone !== 'function') return;
+            const local = new THREE.Matrix4().multiplyMatrices(toWrapper, node.matrixWorld);
+            const reflect = new THREE.Matrix4().copy(local).invert()
+                .multiply(mirror).multiply(local);
+            const key = node.geometry.uuid + ':' + reflect.elements
+                .map(function (value) { return value.toFixed(7); }).join(',');
+            let geometry = clones.get(key);
+            if (!geometry) {
+                geometry = node.geometry.clone();
+                geometry.applyMatrix4(reflect);
+                reverseTriangleWinding(geometry);
+                const tangent = geometry.attributes && geometry.attributes.tangent;
+                if (tangent && tangent.itemSize === 4 && !tangent.isInterleavedBufferAttribute) {
+                    for (let index = 0; index < tangent.count; index += 1) {
+                        tangent.array[index * 4 + 3] = -tangent.array[index * 4 + 3];
+                    }
+                    tangent.needsUpdate = true;
+                }
+                clones.set(key, geometry);
+            }
+            node.geometry = geometry;
+        });
+        return wrapper;
+    }
+
+    // A mirror turns every triangle inside out; swap two corners to turn it back.
+    function reverseTriangleWinding(geometry) {
+        if (geometry.index) {
+            const array = geometry.index.array;
+            for (let index = 0; index + 2 < array.length; index += 3) {
+                const swap = array[index + 1];
+                array[index + 1] = array[index + 2];
+                array[index + 2] = swap;
+            }
+            geometry.index.needsUpdate = true;
+            return;
+        }
+        Object.keys(geometry.attributes || {}).forEach(function (name) {
+            const attribute = geometry.attributes[name];
+            const interleaved = Boolean(attribute.isInterleavedBufferAttribute);
+            const array = interleaved ? attribute.data.array : attribute.array;
+            const stride = interleaved ? attribute.data.stride : attribute.itemSize;
+            const offset = interleaved ? attribute.offset : 0;
+            for (let vertex = 0; vertex + 2 < attribute.count; vertex += 3) {
+                for (let component = 0; component < attribute.itemSize; component += 1) {
+                    const first = (vertex + 1) * stride + offset + component;
+                    const second = (vertex + 2) * stride + offset + component;
+                    const swap = array[first];
+                    array[first] = array[second];
+                    array[second] = swap;
+                }
+            }
+            if (interleaved) attribute.data.needsUpdate = true;
+            else attribute.needsUpdate = true;
+        });
+    }
+
     function cameraOrientationFromQuaternion(value) {
         const quaternion = value && typeof value === 'object' ? value : null;
         if (!quaternion) return null;
@@ -309,14 +395,16 @@
         const z = finite(quaternion.z, 0);
         const w = finite(quaternion.w, 1);
 
-        // Project the camera's screen-right axis onto the facility floor. Its
-        // perpendicular is the world direction shown at the top of the view.
+        // Project the camera's screen-right axis onto the facility floor. The
+        // direction shown at the top of the view is the camera's forward one,
+        // a quarter turn from right: (right.z, -right.x). Until 2026-10-21 this
+        // used the opposite quarter turn and reported the bottom of the view.
         const rightX = 1 - 2 * (y * y + z * z);
         const rightZ = 2 * (x * z - w * y);
         const magnitude = Math.hypot(rightX, rightZ);
         if (magnitude < 1e-8) return null;
-        const projectedTopX = -rightZ / magnitude;
-        const projectedTopZ = rightX / magnitude;
+        const projectedTopX = rightZ / magnitude;
+        const projectedTopZ = -rightX / magnitude;
         const topX = Math.abs(projectedTopX) < 1e-12 ? 0 : projectedTopX;
         const topZ = Math.abs(projectedTopZ) < 1e-12 ? 0 : projectedTopZ;
         const headingDegrees = (
@@ -2027,6 +2115,12 @@
             || (THREE && THREE.GLTFLoader)
             || (root && root.GLTFLoader);
         const assetResolver = options.assetResolver || null;
+        // Appearance/scene/decal library store ({ get, load }) plus the optional
+        // three.js addons that realistic finishes, scenes and decals need.
+        const facilityLibrary = options.facilityLibrary || null;
+        const RoomEnvironmentType = options.RoomEnvironment || null;
+        const HDRLoaderType = options.HDRLoader || null;
+        const DecalGeometryType = options.DecalGeometry || null;
         const placementFootprintResolver = options.placementFootprint || null;
         const documentObject = options.document || (root && root.document);
         const ResizeObserverType = options.ResizeObserver
@@ -2234,6 +2328,11 @@
             : Boolean(reducedMotionMedia && reducedMotionMedia.matches);
 
         const state = {
+            // Layout axes (+X east, +Z north, north up on the plan) are left-handed;
+            // three.js renders right-handed. Mirroring the displayed canvas makes the
+            // 3D view agree with the plan; model files are mirrored once in model
+            // space so they still look true (ai_inspector/facility_layout/model_axes.py).
+            displayMirror: options.displayMirror !== false,
             host: null,
             parkedView: null,
             mounted: false,
@@ -2249,6 +2348,13 @@
             ambientLight: null,
             directionalLight: null,
             environmentRoot: null,
+            siteRoot: null,
+            siteGround: null,
+            siteGroundKey: '',
+            siteAreaObjects: [],
+            siteRouteObjects: [],
+            siteRouteKey: '',
+            siteAreaKey: '',
             floorObject: null,
             gridObjects: [],
             axisObjects: [],
@@ -2468,6 +2574,19 @@
                 assistedFlight: droneSettings.assistedFlight,
                 lastNotificationTime: null,
             },
+            // Library finishes, viewport scene and equipment decals.
+            finishTextures: null,
+            finishGeometryCache: new Map(),
+            environmentLoader: null,
+            viewportScene: null,
+            viewportSceneRequest: 0,
+            sceneBackgroundKey: JSON.stringify(['theme', null]),
+            sceneEnvironment: null,
+            sceneBackgroundTexture: null,
+            equipmentDecalObjects: new Map(),
+            decalTextures: new Map(),
+            finishPreview: null,
+            libraryWaiting: false,
         };
 
         function motionStateSnapshot() {
@@ -6185,6 +6304,49 @@
             };
         }
 
+        // On a mirrored canvas, dragging right must still turn and pan the view
+        // to the right: horizontal input is mirrored before the controls use it.
+        function mirrorOrbitControls(controls) {
+            const rotateLeft = controls._rotateLeft;
+            const panLeft = controls._panLeft;
+            const updateZoom = controls._updateZoomParameters;
+            if (typeof rotateLeft === 'function') {
+                controls._rotateLeft = function (angle) { return rotateLeft.call(this, -angle); };
+            }
+            if (typeof panLeft === 'function') {
+                controls._panLeft = function (distance, objectMatrix) {
+                    return panLeft.call(this, -distance, objectMatrix);
+                };
+            }
+            if (typeof updateZoom === 'function') {
+                controls._updateZoomParameters = function (x, y) {
+                    const rect = this.domElement.getBoundingClientRect();
+                    return updateZoom.call(this, 2 * rect.left + rect.width - x, y);
+                };
+            }
+        }
+
+        // PointerLockControls registers its mouse handler on connect(); swap in
+        // one that turns the view the way the mirrored canvas shows it.
+        function mirrorPointerLockLook(controls) {
+            if (typeof controls.disconnect !== 'function' || typeof controls.connect !== 'function'
+                    || typeof THREE.Euler !== 'function') return;
+            const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+            const halfPi = Math.PI / 2;
+            controls.disconnect();
+            controls._onMouseMove = function (event) {
+                if (controls.enabled === false || controls.isLocked === false) return;
+                euler.setFromQuaternion(controls.object.quaternion);
+                euler.y += event.movementX * 0.002 * controls.pointerSpeed;
+                euler.x -= event.movementY * 0.002 * controls.pointerSpeed;
+                euler.x = Math.max(halfPi - controls.maxPolarAngle,
+                    Math.min(halfPi - controls.minPolarAngle, euler.x));
+                controls.object.quaternion.setFromEuler(euler);
+                controls.dispatchEvent({ type: 'change' });
+            };
+            controls.connect(state.canvas);
+        }
+
         function appendCanvas(host, canvas) {
             if (!host || !canvas || typeof host.appendChild !== 'function') return;
             if (canvas.parentNode !== host) host.appendChild(canvas);
@@ -6192,6 +6354,7 @@
                 canvas.style.display = 'block';
                 canvas.style.width = '100%';
                 canvas.style.height = '100%';
+                canvas.style.transform = state.displayMirror ? 'scaleX(-1)' : '';
             }
             if (typeof canvas.setAttribute === 'function') {
                 canvas.setAttribute('aria-label', 'Facility layout 3D view');
@@ -6201,6 +6364,8 @@
         function removeCanvas() {
             const canvas = state.canvas;
             if (!canvas) return;
+            // A pooled renderer's canvas may serve another view next.
+            if (canvas.style) canvas.style.transform = '';
             if (canvas.parentNode && typeof canvas.parentNode.removeChild === 'function') {
                 canvas.parentNode.removeChild(canvas);
             } else if (typeof canvas.remove === 'function') {
@@ -6272,9 +6437,16 @@
         }
 
         function cameraOrientationSnapshot() {
-            return state.camera
-                ? cameraOrientationFromQuaternion(state.camera.quaternion)
-                : null;
+            const orientation = state.camera ? cameraOrientationFromQuaternion(state.camera.quaternion) : null;
+            const site = state.currentInput && state.currentInput.layout.extensions && state.currentInput.layout.extensions.facilitySiteContext;
+            if (orientation && site) {
+                orientation.planHeadingDegrees = orientation.headingDegrees;
+                orientation.headingDegrees = (orientation.headingDegrees + site.buildingPose.bearingDegrees + 360) % 360;
+                const angle = orientation.headingDegrees * Math.PI / 180;
+                orientation.screenTop = { x: Math.sin(angle), z: Math.cos(angle) };
+                orientation.reference = 'true-north';
+            }
+            return orientation;
         }
 
         function orientationDelta(left, right) {
@@ -6457,6 +6629,13 @@
             state.environmentRoot = new RootType();
             state.environmentRoot.name = 'InspectorProFacilityEnvironmentRoot';
             state.scene.add(state.environmentRoot);
+            state.siteRoot = new RootType();
+            state.siteRoot.name = 'InspectorProFacilitySiteRoot';
+            state.scene.add(state.siteRoot);
+            state.siteGround = null;
+            state.siteGroundKey = '';
+            state.siteAreaObjects = [];
+            state.siteAreaKey = '';
             state.modelRoot = new RootType();
             state.modelRoot.name = 'InspectorProFacilityModelRoot';
             state.scene.add(state.modelRoot);
@@ -6571,6 +6750,7 @@
                 state.controls.rotateSpeed = navigationSettings.rotateSpeed;
                 state.controls.screenSpacePanning = true;
                 state.controls.enableDamping = false;
+                if (state.displayMirror) mirrorOrbitControls(state.controls);
                 setNavigationMode(state.navigationMode);
                 state.controlChangeHandler = invalidate;
                 state.controlStartHandler = beginNavigationInteraction;
@@ -6586,6 +6766,7 @@
                     state.canvas
                 );
                 state.walkthroughControls.enabled = false;
+                if (state.displayMirror) mirrorPointerLockLook(state.walkthroughControls);
                 state.walkthroughChangeHandler = function () {
                     if (state.walkthrough.active) {
                         state.walkthrough.lookQuaternion = copyQuaternion(state.camera.quaternion);
@@ -6757,6 +6938,13 @@
                 const candidate = material[key];
                 if (candidate && candidate.isTexture && !seenTextures.has(candidate)) {
                     seenTextures.add(candidate);
+                    const shared = candidate.userData && (candidate.userData.facilityEnvironment
+                        || candidate.userData.facilitySharedTexture);
+                    // Scene environments and decal images are shared; their owners dispose them.
+                    if (shared) return;
+                    if (state.finishTextures && finishesRuntime && finishesRuntime.isLibraryTexture(candidate)) {
+                        state.finishTextures.forget(candidate);
+                    }
                     if (typeof candidate.dispose === 'function') candidate.dispose();
                 }
             });
@@ -6810,6 +6998,14 @@
         function isAuthoredSurfaceMaterial(material) {
             return isArtworkMaterial(material) || Boolean(material
                 && material.userData && material.userData.facilityAuthoredFinish === true);
+        }
+
+        // A library finish chosen for an object replaces the asset's own colors,
+        // authored ones included (an object finish beats the asset's material).
+        // Only printed artwork and placed signs keep their look.
+        function isFinishProtectedMaterial(material) {
+            return isArtworkMaterial(material) || Boolean(material
+                && material.userData && material.userData.facilityEquipmentDecal === true);
         }
 
         function createNeutralAssetMaterial(sourceMaterial) {
@@ -6926,7 +7122,9 @@
                 const materials = Array.isArray(candidate.material)
                     ? candidate.material : [candidate.material];
                 materials.filter(Boolean).forEach(function (material) {
-                    if (material.userData && (material.userData.facilityAuthoredFinish === true || material.userData.facilityComponentOverride === true)) {
+                    if (material.userData && (material.userData.facilityAuthoredFinish === true
+                            || material.userData.facilityComponentOverride === true
+                            || material.userData.facilityAppearanceFinish === true)) {
                         material.wireframe = state.visualSettings.wireframe;
                         return;
                     }
@@ -6951,17 +7149,25 @@
                 + state.visualSettings.contrast.toFixed(2) + ')';
         }
 
+        // The saved scene sets the base lighting; the viewer's Display settings
+        // scale it. The Classic scene equals the defaults, so its result is
+        // exactly the original viewport.
+        function sceneRelativeSetting(key) {
+            const value = state.visualSettings[key];
+            const scene = state.viewportScene;
+            if (!scene || !Number.isFinite(Number(scene[key])) || !DEFAULT_VISUAL_SETTINGS[key]) return value;
+            return Number(scene[key]) * (value / DEFAULT_VISUAL_SETTINGS[key]);
+        }
+
         function applyVisualSettingsRuntime() {
             if (state.ambientLight) {
-                state.ambientLight.intensity = state.visualSettings.ambient;
+                state.ambientLight.intensity = sceneRelativeSetting('ambient');
             }
             if (state.directionalLight) {
-                state.directionalLight.intensity =
-                    state.visualSettings.directional;
+                state.directionalLight.intensity = sceneRelativeSetting('directional');
             }
             if (state.renderer) {
-                state.renderer.toneMappingExposure =
-                    state.visualSettings.exposure;
+                state.renderer.toneMappingExposure = sceneRelativeSetting('exposure');
             }
             if (state.controls) {
                 state.controls.autoRotate = !immersiveActive()
@@ -7014,9 +7220,22 @@
             if (!state.scene) return false;
             disposeSceneBackground();
             let background = null;
+            const sceneBackground = state.viewportScene && state.viewportScene.background;
+            if ('backgroundBlurriness' in state.scene) state.scene.backgroundBlurriness = 0;
+            // A viewer's own background color wins; otherwise the saved scene decides.
+            if (state.visualSettings.background === 'auto' && sceneBackground === 'environment'
+                    && state.sceneEquirect) {
+                state.scene.background = state.sceneEquirect;
+                if ('backgroundBlurriness' in state.scene) state.scene.backgroundBlurriness = 0.35;
+                state.ownsBackground = false;
+                return true;
+            }
             if (state.visualSettings.background !== 'auto'
                     && typeof THREE.Color === 'function') {
                 background = new THREE.Color(state.visualSettings.background);
+            } else if (/^#[0-9a-f]{6}$/i.test(String(sceneBackground || ''))
+                    && typeof THREE.Color === 'function') {
+                background = new THREE.Color(sceneBackground);
             } else if (typeof options.backgroundFactory === 'function') {
                 try {
                     background = options.backgroundFactory({
@@ -7297,19 +7516,24 @@
             }
             wallsRuntime.exteriorSurfaces(layout).forEach(function (surface) {
                 if (!surface.artwork) {
-                    const vertices = batches.get(surface.color) || [];
+                    // Layers (joint backing, panels, band, strips) sit millimetres apart; batched by layer so each
+                    // keeps its own depth bias below, or far views z-fight into black streaks.
+                    const key = surface.color + '|' + finite(surface.offset, .003);
+                    const vertices = batches.get(key) || [];
                     const corners = [[-.5,-.5],[.5,-.5],[.5,.5],[-.5,.5]].map(function (p) {
                         return [surface.x+p[0]*surface.width*surface.nz,
                             floorY+surface.y+p[1]*surface.height,
                             surface.z-p[0]*surface.width*surface.nx];
                     });
                     [0,1,2,0,2,3].forEach(i=>vertices.push(...corners[i]));
-                    batches.set(surface.color,vertices); return;
+                    batches.set(key,vertices); return;
                 }
                 const art = surface.artwork;
                 const record = {artworkId:art.artworkId,imagePath:art.imagePath,status:'loading'};
                 state.wallArtworkLoads.push(record);
-                const material = new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,alphaTest:.01,depthWrite:false,toneMapped:false});
+                // The outermost layer (14 mm out): its depth bias must beat the panels' and band's, as its offset does.
+                const material = new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,alphaTest:.01,depthWrite:false,toneMapped:false,
+                    polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-Math.max(1,Math.round(finite(surface.offset,.014)*1000))});
                 const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1,1),material);
                 mesh.userData.exteriorArtwork=record;
                 mesh.name = 'exterior-artwork-'+art.artworkId;
@@ -7326,6 +7550,7 @@
                     const uv=art.uv||[0,0,1,1];
                     loaded.colorSpace=THREE.SRGBColorSpace;
                     loaded.offset.set(uv[0],uv[1]);loaded.repeat.set(uv[2]-uv[0],uv[3]-uv[1]);
+                    mirrorTextureForDisplay(loaded);
                     const ratio=loaded.image.width*(uv[2]-uv[0])/(loaded.image.height*(uv[3]-uv[1]));
                     const width=Math.min(surface.width-.2,(surface.height-.2)*ratio);
                     mesh.scale.set(width,width/ratio,1);
@@ -7336,10 +7561,14 @@
                 });
                 material.map=texture;
             });
-            batches.forEach(function (vertices,color) {
+            batches.forEach(function (vertices,key) {
+                const [color, offset] = key.split('|');
                 const geometry=new THREE.BufferGeometry();
                 geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));geometry.computeVertexNormals();
-                adopt(new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color,roughness:.82,metalness:.08})));
+                // An outer layer is pulled toward the camera in depth-buffer steps: it wins over the layers under it
+                // and over the wall face at any distance.
+                adopt(new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color,roughness:.82,metalness:.08,
+                    polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-Math.max(1,Math.round(Number(offset)*1000))})));
             });
             const catalog=buildCatalogIndex(state.currentInput.assetCatalog);
             ((finish && finish.wallFaces)||[]).forEach(function (face) {
@@ -7415,11 +7644,12 @@
                             #ifdef USE_MAP
                                 vec2 artUv=(vMapUv-artworkFrame.xy)/artworkFrame.zw;
                                 if(any(lessThan(artUv,vec2(0.0)))||any(greaterThan(artUv,vec2(1.0))))discard;
+                                ${state.displayMirror ? 'artUv.x=1.0-artUv.x; // reads left to right on the mirrored canvas' : ''}
                                 diffuseColor*=texture2D(map,mix(artworkCrop.xy,artworkCrop.zw,artUv));
                             #endif
                         `);
                     };
-                    material.customProgramCacheKey=()=> 'fitted-wall-art-v1';
+                    material.customProgramCacheKey=()=> state.displayMirror ? 'fitted-wall-art-v1-mirrored' : 'fitted-wall-art-v1';
                     material.needsUpdate=true;
                     mesh.visible=true;
                     mesh.updateWorldMatrix(true,false);
@@ -8886,7 +9116,9 @@
                 ) || 1;
                 forward.x /= forwardLength;
                 forward.z /= forwardLength;
-                const right = { x: -forward.z, z: forward.x };
+                // Screen right on the mirrored canvas is the camera's left.
+                const side = state.displayMirror ? -1 : 1;
+                const right = { x: -forward.z * side, z: forward.x * side };
                 if (keys.has('KeyW')) {
                     moveX += forward.x;
                     moveZ += forward.z;
@@ -9068,10 +9300,12 @@
             forward.y /= forwardLength;
             forward.z /= forwardLength;
             const horizontalLength = Math.hypot(forward.x, forward.z) || 1;
+            // Screen right on the mirrored canvas is the camera's left.
+            const side = state.displayMirror ? -1 : 1;
             const right = {
-                x: -forward.z / horizontalLength,
+                x: -forward.z / horizontalLength * side,
                 y: 0,
-                z: forward.x / horizontalLength,
+                z: forward.x / horizontalLength * side,
             };
             const movement = { x: 0, y: 0, z: 0 };
             if (keys.has('KeyW')) {
@@ -9326,7 +9560,11 @@
         }
 
         function syncGroundEnvironment(rows, bounds) {
-            const signature = JSON.stringify({ground: rows, grid: state.gridVisible, theme: isLightTheme()});
+            const extensionsNow = state.currentInput && state.currentInput.layout && state.currentInput.layout.extensions;
+            const planNow = extensionsNow && extensionsNow.facilityPlan;
+            const marks = (extensionsNow && extensionsNow.facilityGround && extensionsNow.facilityGround.marks) || [];
+            const signature = JSON.stringify({ground: rows, marks: marks, grid: state.gridVisible, theme: isLightTheme(),
+                plan: planNow ? [planNow.widthMeters, planNow.depthMeters] : null});
             if (signature === state.environmentSignature) return true;
             clearEnvironmentObjects();
             state.environmentSignature = signature;
@@ -9343,15 +9581,44 @@
                 mesh.receiveShadow = true;
                 state.environmentRoot.add(mesh);
                 state.floorObject = mesh;
-                if (state.gridVisible && surface.startElevation === surface.endElevation) {
-                    const b = {minimum:{x:surface.minX,z:surface.minZ},maximum:{x:surface.maxX,z:surface.maxZ}};
+                // The grid belongs to the facility plan: ground reaching past it (a paved yard) has none.
+                const plan = state.currentInput && state.currentInput.layout && state.currentInput.layout.extensions
+                    && state.currentInput.layout.extensions.facilityPlan;
+                const planWidth = plan ? finite(plan.widthMeters, Infinity) : Infinity;
+                const planDepth = plan ? finite(plan.depthMeters, Infinity) : Infinity;
+                const gridMinX = Math.max(surface.minX, plan ? 0 : -Infinity), gridMaxX = Math.min(surface.maxX, planWidth);
+                const gridMinZ = Math.max(surface.minZ, plan ? 0 : -Infinity), gridMaxZ = Math.min(surface.maxZ, planDepth);
+                if (state.gridVisible && surface.startElevation === surface.endElevation
+                        && gridMaxX - gridMinX > 1e-6 && gridMaxZ - gridMinZ > 1e-6) {
+                    const b = {minimum:{x:gridMinX,z:gridMinZ},maximum:{x:gridMaxX,z:gridMaxZ}};
                     const spacing = Math.max(.05, finite(options.floorGridSpacing,1),
-                        (surface.maxX-surface.minX)/240, (surface.maxZ-surface.minZ)/240);
+                        (gridMaxX-gridMinX)/240, (gridMaxZ-gridMinZ)/240);
                     const grid = createFloorGrid(b, surface.startElevation, spacing, Math.max(spacing, finite(options.floorMajorGridSpacing,5)));
                     grid.objects.forEach(object => state.environmentRoot.add(object));
                     state.gridObjects.push(...grid.objects);
                 }
             });
+            // Ground marks: images painted flat on the paving, just above the surface under each one's centre.
+            if (typeof THREE.TextureLoader === 'function' && typeof THREE.PlaneGeometry === 'function') {
+                marks.forEach(function (mark) {
+                    const below = groundRuntime.sample(rows, {x: mark.x, z: mark.z}, 0);
+                    if (!below) return;
+                    const texture = new THREE.TextureLoader().load(mark.imagePath, function () { invalidate(); });
+                    if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+                    texture.offset.set(mark.uv[0], mark.uv[1]);
+                    texture.repeat.set(mark.uv[2] - mark.uv[0], mark.uv[3] - mark.uv[1]);
+                    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(mark.widthMeters, mark.depthMeters),
+                        new THREE.MeshBasicMaterial({map: texture, transparent: true, alphaTest: .01, depthWrite: false,
+                            toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2}));
+                    mesh.rotation.order = 'YXZ';  // lie flat, then turn about the vertical like a floor marking
+                    mesh.rotation.set(-Math.PI / 2, finite(mark.rotationDegrees, 0) * Math.PI / 180, 0);
+                    mesh.position.set(mark.x, below.y + 0.012, mark.z);
+                    mesh.name = 'InspectorProGroundMark-' + mark.markId;
+                    mesh.userData = {facilityEnvironment: 'ground-mark', groundMarkId: mark.markId};
+                    mesh.raycast = function () {};
+                    state.environmentRoot.add(mesh);
+                });
+            }
             state.environmentDiagnostics = {floorVisible:true, gridVisible:state.gridObjects.length>0,
                 axesVisible:false, groundSurfaceCount:rows.length, minimumElevation:bounds.minimum.y,
                 maximumElevation:bounds.maximum.y, width:bounds.maximum.x-bounds.minimum.x,
@@ -9360,7 +9627,83 @@
             return true;
         }
 
+        // Site context (SC1): the layout's aerial photo lies just under the building
+        // floor, at true scale. The server keeps each photo's corners in the
+        // property frame (+X east, +Z north); the building pose maps them into the
+        // layout's own frame. u runs east and v north, so the photo reads true on
+        // the mirrored canvas without a flip (see state.displayMirror).
+        function propertyToLayout(pose, x, z) {
+            const bearing = finite(pose && pose.bearingDegrees, 0) * Math.PI / 180;
+            const dx = x - finite(pose && pose.x, 0);
+            const dz = z - finite(pose && pose.z, 0);
+            return {
+                x: dx * Math.cos(bearing) - dz * Math.sin(bearing),
+                z: dx * Math.sin(bearing) + dz * Math.cos(bearing),
+            };
+        }
+
+        function disposeSiteGround() {
+            const ground = state.siteGround;
+            state.siteGround = null;
+            state.siteGroundKey = '';
+            if (!ground) return;
+            if (ground.parent && typeof ground.parent.remove === 'function') ground.parent.remove(ground);
+            if (ground.geometry && typeof ground.geometry.dispose === 'function') ground.geometry.dispose();
+            if (ground.material) {
+                if (ground.material.map && typeof ground.material.map.dispose === 'function') {
+                    ground.material.map.dispose();
+                }
+                if (typeof ground.material.dispose === 'function') ground.material.dispose();
+            }
+        }
+
+        function syncSiteGround() {
+            const layout = state.currentInput && state.currentInput.layout;
+            const site = layout && layout.extensions && layout.extensions.facilitySiteContext;
+            const image = site && Array.isArray(site.imagery) ? site.imagery[0] : null;
+            const usable = image && Array.isArray(image.corners) && image.corners.length === 4
+                && typeof image.imagePath === 'string';
+            const floorY = finite(layout && layout.coordinateFrame && layout.coordinateFrame.floorElevation, 0);
+            const key = usable ? JSON.stringify([image.imageId, image.corners, site.buildingPose, floorY]) : '';
+            if (key === state.siteGroundKey && (key === '' || state.siteGround)) return;
+            disposeSiteGround();
+            if (!usable || !state.siteRoot || typeof THREE.BufferGeometry !== 'function'
+                    || typeof THREE.MeshBasicMaterial !== 'function'
+                    || typeof THREE.TextureLoader !== 'function') return;
+            const corners = image.corners.map(function (corner) {
+                return propertyToLayout(site.buildingPose, finite(corner.x, 0), finite(corner.z, 0));
+            });
+            const y = floorY - 0.05;
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute([].concat.apply([],
+                corners.map(function (corner) { return [corner.x, y, corner.z]; })), 3));
+            geometry.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+            geometry.setIndex([0, 2, 1, 0, 3, 2]);
+            geometry.computeVertexNormals();
+            const texture = new THREE.TextureLoader().load(image.imagePath, function () { invalidate(); });
+            if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+            if (state.renderer && state.renderer.capabilities
+                    && typeof state.renderer.capabilities.getMaxAnisotropy === 'function') {
+                texture.anisotropy = Math.min(8, state.renderer.capabilities.getMaxAnisotropy());
+            }
+            const material = new THREE.MeshBasicMaterial({
+                map: texture, side: THREE.DoubleSide, toneMapped: false,
+            });
+            const ground = new THREE.Mesh(geometry, material);
+            ground.name = 'InspectorProFacilitySiteGround';
+            ground.renderOrder = -20;
+            ground.userData = { facilityEnvironment: 'site-ground', imageId: image.imageId };
+            ground.raycast = function () {};
+            state.siteRoot.add(ground);
+            state.siteGround = ground;
+            state.siteGroundKey = key;
+            invalidate();
+        }
+
         function syncEnvironment() {
+            syncSiteGround();
+            syncSiteAreas();
+            syncSiteRoutes();
             if (!state.environmentRoot || options.showFloor === false) {
                 clearEnvironmentObjects();
                 invalidate();
@@ -9500,7 +9843,10 @@
 
         function clearModel() {
             state.appearanceSceneKey = null;
+            state.finishSceneKey = null;
             if(state.componentHighlight){disposeObjectGraphs([state.componentHighlight]);state.componentHighlight=null;}
+            clearFinishPreview();
+            clearEquipmentDecals();
             disposeObjectGraphs(state.wallObjects);
             state.wallObjects = [];
             disposeObjectGraphs(state.floorSurfaceObjects);
@@ -9520,6 +9866,12 @@
             state.routeObjects = [];
             state.pickObjects = [];
             state.instanceLookup.clear();
+            // Prototypes reload on a full rebuild, so their projected copies are stale.
+            state.finishGeometryCache.forEach(function (geometry) {
+                if (geometry && geometry.userData && geometry.userData.facilityFinishGeometry
+                        && typeof geometry.dispose === 'function') geometry.dispose();
+            });
+            state.finishGeometryCache.clear();
             if (state.modelRoot && Array.isArray(state.modelRoot.children)) {
                 while (state.modelRoot.children.length) {
                     const child = state.modelRoot.children[0];
@@ -9648,9 +10000,9 @@
             } else {
                 context.fillRect(0, 0, 512, 512);
             }
-            return configureFloorMarkingTexture(
+            return mirrorTextureForDisplay(configureFloorMarkingTexture(
                 new THREE.CanvasTexture(canvas)
-            );
+            ), 'v');
         }
 
         function floorMarkingTextTexture(marking, value) {
@@ -9671,9 +10023,22 @@
             context.textAlign = 'center';
             context.textBaseline = 'middle';
             context.fillText(label, 1024, 256, 1960);
-            return configureFloorMarkingTexture(
+            return mirrorTextureForDisplay(configureFloorMarkingTexture(
                 new THREE.CanvasTexture(canvas)
-            );
+            ), 'v');
+        }
+
+        // Writing and pictures must still read correctly on the mirrored canvas,
+        // so they are sampled mirrored (u -> offset + repeat - repeat * u). On a
+        // wall the flip is left-right. A floor plane's texture "up" points south
+        // (PlaneGeometry turned -90 degrees about x), so floor writing flips top
+        // to bottom instead and then reads upright with north up, as on the plan.
+        function mirrorTextureForDisplay(texture, axis) {
+            if (!state.displayMirror || !texture || !texture.offset || !texture.repeat) return texture;
+            const key = axis === 'v' ? 'y' : 'x';
+            texture.offset[key] += texture.repeat[key];
+            texture.repeat[key] = -texture.repeat[key];
+            return texture;
         }
 
         function floorPaintMaterial(marking, optionsValue) {
@@ -10631,6 +10996,26 @@
             clearModel();
             clearEnvironmentObjects();
             disposeSceneBackground();
+            // Library resources are bound to this renderer; a pooled renderer
+            // must not inherit them.
+            if (state.scene) {
+                state.scene.environment = null;
+                if (state.scene.background === state.sceneEquirect) state.scene.background = null;
+            }
+            if (state.environmentLoader) state.environmentLoader.dispose();
+            state.environmentLoader = null;
+            state.sceneEnvironment = null;
+            state.sceneEquirect = null;
+            state.viewportSceneSignature = null;
+            state.viewportSceneRequest += 1;
+            state.sceneBackgroundKey = JSON.stringify(['theme', null]);
+            state.shadowsActive = false;
+            state.sunDefaultPosition = null;
+            if (state.renderer && state.renderer.shadowMap) state.renderer.shadowMap.enabled = false;
+            if (state.finishTextures) state.finishTextures.dispose();
+            state.finishTextures = null;
+            state.decalTextures.forEach(function (texture) { texture.dispose(); });
+            state.decalTextures.clear();
             if (typeof state.themeCleanup === 'function') {
                 state.themeCleanup();
             }
@@ -10660,7 +11045,11 @@
             state.scene = null;
             state.ambientLight = null;
             state.directionalLight = null;
+            disposeSiteGround();
+            disposeSiteAreas();
+            disposeSiteRoutes();
             state.environmentRoot = null;
+            state.siteRoot = null;
             state.floorObject = null;
             state.gridObjects = [];
             state.axisObjects = [];
@@ -11124,13 +11513,24 @@
                 group.assetDefinitionRevision;
             container.userData.representation = representation;
 
-            let prototypeMeshes = collectPrototypeMeshes(prototype.object);
+            const repeated = group.placements.length > 1;
+            const finish = group.finish && finishesRuntime ? group.finish : null;
+            // The group shares its part finishes, so they go onto one copy of the prototype and every
+            // instance carries them. With a library finish as well, parts must win over it, which the
+            // per-placement copies below already do.
+            const sharedParts = repeated && !finish && componentRuntime && group.componentKey
+                ? group.placements[0].source && group.placements[0].source.componentMaterials : null;
+            let prototypeObject = prototype.object;
+            if (sharedParts) {
+                prototypeObject = cloneRenderable(prototype.object);
+                componentRuntime.apply(prototypeObject, sharedParts, representation, partFinishContext(group.placements[0]));
+            }
+            let prototypeMeshes = collectPrototypeMeshes(prototypeObject);
             const sourcePrototypeMeshCount = prototypeMeshes.length;
             let containsLights = false;
             if (typeof prototype.object.traverse === 'function') {
                 prototype.object.traverse(object => { if (object.isLight) containsLights = true; });
             }
-            const repeated = group.placements.length > 1;
             const eligible = prototype.instancingEligible !== false
                 && !containsLights
                 && prototypeMeshes.length > 0
@@ -11138,20 +11538,33 @@
                     return item.instancingEligible;
                 })
                 && typeof THREE.InstancedMesh === 'function';
-            const useInstancing = repeated && eligible && !group.materialKey;
-            if (useInstancing) prototypeMeshes = batchStaticPrototypeMeshes(prototypeMeshes);
+            // Part finishes instance when the whole group shares them; a library finish
+            // alone still instances, since the whole group shares it.
+            const useInstancing = repeated && eligible && (!group.componentKey || Boolean(sharedParts));
+            const finishMapping = finish ? finishesRuntime.mappingFor(THREE, prototype.object, finish) : null;
+            if (useInstancing && !finish) prototypeMeshes = batchStaticPrototypeMeshes(prototypeMeshes);
+            const groupFinishMaterial = finish && useInstancing
+                ? createFinishMaterialFor(finish, group.finishScale) : null;
             const pickObjects = [];
             const mappings = [];
 
             if (useInstancing) {
                 prototypeMeshes.forEach(function (mesh, meshIndex) {
-                    // White material lets instance colors specify an exact finish, not a gray tint.
-                    const material = mesh.material.clone();
-                    material.userData = material.userData || {};
-                    material.userData.facilityInstanceBaseColor = material.color.getHex();
-                    material.color.setHex(0xffffff);
+                    let material;
+                    let geometry = mesh.geometry;
+                    if (groupFinishMaterial && !isFinishProtectedMaterial(mesh.material)) {
+                        material = groupFinishMaterial;
+                        geometry = finishesRuntime.cachedFinishGeometry(THREE, state.finishGeometryCache,
+                            mesh.geometry, mesh.matrix, finishMapping);
+                    } else {
+                        // White material lets instance colors specify an exact finish, not a gray tint.
+                        material = mesh.material.clone();
+                        material.userData = material.userData || {};
+                        material.userData.facilityInstanceBaseColor = material.color.getHex();
+                        material.color.setHex(0xffffff);
+                    }
                     const instances = new THREE.InstancedMesh(
-                        mesh.geometry,
+                        geometry,
                         material,
                         group.placements.length
                     );
@@ -11194,12 +11607,27 @@
             } else {
                 group.placements.forEach(function (placement) {
                     const object = cloneRenderable(prototype.object);
-                    if(componentRuntime)componentRuntime.apply(object, placement.source && placement.source.componentMaterials, representation);
+                    // Each copy gets its own finish material so a selection glow
+                    // stays on the selected placement.
+                    if (finish) applyObjectFinish(object, createFinishMaterialFor(finish, placement.transform.scale), finishMapping);
+                    if (typeof object.updateMatrixWorld === 'function') object.updateMatrixWorld(true);
+                    if(componentRuntime)componentRuntime.apply(object, placement.source && placement.source.componentMaterials,
+                        representation, partFinishContext(placement));
                     applyPlacementTransform(object, placement);
                     container.add(object);
                     pickObjects.push(object);
                     mappings.push({
                         placementId: placement.placementId,
+                    });
+                });
+            }
+            if (prototypeObject !== prototype.object && typeof prototypeObject.traverse === 'function') {
+                // The finished copy only lent its materials (each instanced mesh cloned its own);
+                // its geometry is the prototype's, which stays.
+                prototypeObject.traverse(function (object) {
+                    if (!object.isMesh) return;
+                    [].concat(object.material || []).forEach(function (material) {
+                        if (material && typeof material.dispose === 'function') material.dispose();
                     });
                 });
             }
@@ -11233,10 +11661,13 @@
                 mappings: mappings,
                 container: container,
                 prototypeObject: prototype.object,
+                prototypeInstancingEligible: prototype.instancingEligible !== false,
                 pickObjects: pickObjects,
             };
             state.renderGroups.set(record.baseKey, record);
             state.pickObjects = state.pickObjects.concat(pickObjects);
+            if (state.shadowsActive) setShadowCasting(container, true);
+            renderEquipmentDecals(record.placementIds);
             if (state.drone.active) applyCurrentDroneRecordWindow(record);
             else applySelection();
             invalidate();
@@ -11312,6 +11743,25 @@
             return null;
         }
 
+        // Model files enter a layout mirrored across their canonical x = 0 plane
+        // (ai_inspector/facility_layout/model_axes.py), so that on the mirrored
+        // canvas they look true (see mirrorModelFileGeometry).
+        function mirrorModelFile(wrapper) {
+            if (!state.displayMirror || !wrapper || typeof wrapper.traverse !== 'function'
+                    || typeof THREE.Matrix4 !== 'function') return wrapper;
+            if (wrapper.userData && wrapper.userData.modelAxesMirrored) return wrapper;
+            const probe = new THREE.Matrix4();
+            if (['copy', 'invert', 'multiply', 'multiplyMatrices', 'makeScale']
+                .some(function (name) { return typeof probe[name] !== 'function'; })) return wrapper;
+            try {
+                mirrorModelFileGeometry(THREE, wrapper);
+            } catch (error) {
+                reportError('model_axes_mirror_failed', error);
+            }
+            wrapper.userData = Object.assign({}, wrapper.userData, { modelAxesMirrored: true });
+            return wrapper;
+        }
+
         function canonicalPrototypeObject(object, matrixValues) {
             if (!matrixValues) return object;
             const wrapper = createContainer();
@@ -11351,6 +11801,11 @@
                 ? result
                 : (result && (result.url || result.href || result.path));
             if (url) resolved = await loadUrl(String(url));
+            // Stable part keys come from the glTF node names; the loader's
+            // associations are gone once the scene is cloned, so tag them now.
+            if (componentRuntime && typeof componentRuntime.annotatePartKeys === 'function') {
+                try { componentRuntime.annotatePartKeys(resolved); } catch (error) { reportError('part_keys_failed', error); }
+            }
             const object = objectFromResult(resolved);
             if (!object) {
                 if (stage === 'footprint') {
@@ -11360,10 +11815,10 @@
                 }
                 return null;
             }
-            const canonicalObject = canonicalPrototypeObject(
+            const canonicalObject = mirrorModelFile(canonicalPrototypeObject(
                 object,
                 canonicalMatrix
-            );
+            ));
             applyAssetMaterialPolicy(canonicalObject);
             return {
                 object: canonicalObject,
@@ -11734,7 +12189,14 @@
             const groups = new Map();
             placements.forEach(function (placement) {
                 const catalogKey = placement.assetId + '|' + placement.assetDefinitionRevision;
-                const materialKey = placement.source && placement.source.componentMaterials ? '|components:' + placement.placementId : '';
+                // Placements of one asset group by their exact part finishes (and scale, which textured
+                // finishes depend on) and by their exact library finish, so identical finishes stay
+                // instanced: a yard of identically painted racks is one group, not hundreds.
+                const parts = placement.source && placement.source.componentMaterials;
+                const componentKey = parts ? '|components:' + shortHash(JSON.stringify([parts, placement.transform.scale])) : '';
+                const finish = placementFinish(placement);
+                const finishKey = finish ? '|finish:' + shortHash(libraryRuntime.finishSignature(finish, placement.transform.scale)) : '';
+                const materialKey = componentKey + finishKey;
                 const key = catalogKey + materialKey;
                 if (!groups.has(key)) {
                     const catalogEntry = catalogIndex.exact.get(catalogKey)
@@ -11751,6 +12213,9 @@
                     }
                     groups.set(key, {
                         materialKey: materialKey,
+                        componentKey: componentKey,
+                        finish: finish,
+                        finishScale: placement.transform.scale,
                         assetId: placement.assetId,
                         assetDefinitionRevision:
                             placement.assetDefinitionRevision,
@@ -11771,11 +12236,129 @@
             return { placements: placements, groups: groups };
         }
 
-        function appearanceOnlyKey(layout) {
+        // The layout with every finish removed: object and part finishes,
+        // custom finishes, the scene and equipment decals. When only those
+        // change, the geometry on screen is still right.
+        function finishOnlyKey(layout) {
+            const extensions = Object.assign({}, layout.extensions || {});
+            delete extensions.facilityScene;
+            delete extensions.facilityEquipmentDecals;
+            delete extensions.facilityAppearances;
             return JSON.stringify(Object.assign({}, layout, {
+                extensions: extensions,
                 placements: (layout.placements || []).map(function (placement) {
                     const copy = Object.assign({}, placement);
                     delete copy.appearance;
+                    delete copy.componentMaterials;
+                    return copy;
+                }),
+            }));
+        }
+
+        function groupMembershipSignature(group) {
+            return JSON.stringify(group.placements.map(function (placement) {
+                return [placement.placementId, placement.transform.scale,
+                    placement.source && placement.source.componentMaterials || null];
+            }));
+        }
+
+        // Finish-only edits regroup placements without reloading any model:
+        // each new or changed group is built from a copy of a model already on
+        // screen. Anything that cannot be served that way returns false and
+        // the caller rebuilds the scene as usual.
+        function regroupFinishes(value) {
+            const layout = value.layout || {};
+            const catalog = value.assetCatalog || [];
+            if (!state.mounted || state.suspended || state.degraded || state.status === 'degraded'
+                    || !state.renderGroups.size || state.pendingLoads > 0
+                    || state.finishSceneKey !== finishOnlyKey(layout)
+                    || state.appearanceCatalogKey !== JSON.stringify(catalog)
+                    || state.motion.package || state.motion.root || state.activity.scenario || state.activity.root
+                    || state.navigationPreview.payload || state.navigationPreview.root
+                    || state.walkthrough.active || state.drone.active) return false;
+            let complete = true;
+            state.baseGroups.forEach(function (group) {
+                if (!group.resolved || group.deferredVisual || group.deferredLoading) complete = false;
+            });
+            if (!complete) return false;
+            const sources = new Map();
+            state.renderGroups.forEach(function (record) {
+                const assetKey = record.assetId + '|' + record.assetDefinitionRevision;
+                if (record.prototypeObject && record.representation !== 'operator-avatar' && !sources.has(assetKey)) {
+                    sources.set(assetKey, record);
+                }
+            });
+            const previousInput = state.currentInput;
+            state.currentInput = { layout: layout, assetCatalog: catalog };
+            const built = createBaseGroups(layout, catalog);
+            const previousGroups = state.baseGroups;
+            const previousRecords = new Map(state.renderGroups);
+            const plan = [];
+            for (const entry of built.groups) {
+                const key = entry[0], group = entry[1];
+                const oldGroup = previousGroups.get(key);
+                const record = previousRecords.get(key);
+                if (oldGroup && record && groupMembershipSignature(oldGroup) === groupMembershipSignature(group)) {
+                    plan.push({ group: group, keep: oldGroup });
+                    continue;
+                }
+                const source = record && record.prototypeObject ? record
+                    : sources.get(group.assetId + '|' + group.assetDefinitionRevision);
+                const desired = group.placements[0] && group.placements[0].source
+                    && group.placements[0].source.componentMaterials
+                    && group.placements[0].source.componentMaterials.representation;
+                if (!source || (desired === 'detail' && source.representation !== 'detail')) {
+                    state.currentInput = previousInput;
+                    return false;
+                }
+                plan.push({ group: group, source: source });
+            }
+            clearFinishPreview();
+            state.placements = built.placements;
+            state.baseGroups = built.groups;
+            // Kept groups carry their resolved state; rebuilt ones copy it from the model they reuse.
+            plan.forEach(function (step) {
+                if (step.keep) {
+                    step.keep.placements = step.group.placements;
+                    state.baseGroups.set(baseGroupKey(step.group), step.keep);
+                    return;
+                }
+                const prototype = {
+                    object: cloneRenderable(step.source.prototypeObject),
+                    bounds: (previousGroups.get(step.source.baseKey) || {}).bounds || step.group.bounds,
+                    instancingEligible: step.source.prototypeInstancingEligible !== false,
+                };
+                step.group.bounds = prototype.bounds;
+                step.group.resolved = true;
+                buildRenderedGroup(step.group, prototype, step.source.representation);
+            });
+            previousRecords.forEach(function (record, key) {
+                if (!state.baseGroups.has(key)) {
+                    disposeRenderGroup(record);
+                    state.renderGroups.delete(key);
+                }
+            });
+            state.appearanceSceneKey = appearanceOnlyKey(layout);
+            state.finishSceneKey = finishOnlyKey(layout);
+            applySelection();
+            syncViewportSceneFromLayout();
+            renderEquipmentDecals();
+            invalidate();
+            return true;
+        }
+
+        // Changes that leave every model group intact skip the full rebuild:
+        // plain-color appearances, the viewport scene and equipment decals.
+        // Library finishes regroup models (see regroupFinishes).
+        function appearanceOnlyKey(layout) {
+            const extensions = Object.assign({}, layout.extensions || {});
+            delete extensions.facilityScene;
+            delete extensions.facilityEquipmentDecals;
+            return JSON.stringify(Object.assign({}, layout, {
+                extensions: extensions,
+                placements: (layout.placements || []).map(function (placement) {
+                    const copy = Object.assign({}, placement);
+                    if (!(copy.appearance && copy.appearance.appearanceId)) delete copy.appearance;
                     return copy;
                 }),
             }));
@@ -11783,6 +12366,17 @@
 
         async function setScene(input) {
             const value = input && typeof input === 'object' ? input : {};
+            // Library finishes and scenes resolve from the bundled manifests;
+            // load them before grouping so the first build is already correct.
+            if (layoutNeedsLibrary(value.layout) && facilityLibrary && typeof facilityLibrary.get === 'function'
+                    && !facilityLibrary.get() && typeof facilityLibrary.load === 'function') {
+                try {
+                    await facilityLibrary.load();
+                } catch (error) {
+                    warning('appearance_library_unavailable',
+                        'The appearance library could not be loaded; neutral finishes are shown.', null);
+                }
+            }
             const previous = state.currentInput;
             if (state.mounted && !state.suspended && !state.degraded
                     && state.status !== 'degraded'
@@ -11793,9 +12387,14 @@
                 const byId = new Map((value.layout.placements || []).map(p => [p.placementId, p]));
                 // Keep the group objects alive so pending detail loads also see the new finish.
                 state.placements.forEach(p => { p.source = byId.get(p.placementId) || p.source; });
+                state.finishSceneKey = finishOnlyKey(state.currentInput.layout);
                 applySelection();
+                syncViewportSceneFromLayout();
+                renderEquipmentDecals();
                 return getDiagnostics();
             }
+            if (regroupFinishes(value)) return getDiagnostics();
+            clearFinishPreview();
             if (state.motion.package || state.motion.root) {
                 disposeMotion('scene_changed', true);
             }
@@ -11846,11 +12445,13 @@
 
             clearModel();
             state.appearanceSceneKey = appearanceOnlyKey(state.currentInput.layout);
+            state.finishSceneKey = finishOnlyKey(state.currentInput.layout);
             state.appearanceCatalogKey = JSON.stringify(state.currentInput.assetCatalog);
             renderPerimeterWalls();
             if(options.showFloor !== false && floorSurfacesRuntime){
                 state.floorSurfaceObjects=floorSurfacesRuntime.meshes(THREE,documentObject,state.currentInput.layout);
                 state.floorSurfaceObjects.forEach(object=>state.modelRoot.add(object));
+                applyGroundLayers();
             }
             renderZoneMarkings();
             renderFacilityAisles();
@@ -11867,6 +12468,7 @@
             renderGhostObject();
             state.worldBounds = computeWorldBounds();
             syncEnvironment();
+            syncViewportSceneFromLayout();
             notifyStatus('loading', null);
 
             const keys = Array.from(state.baseGroups.keys()).sort();
@@ -12336,9 +12938,118 @@
             return state.lastFit.rootUnchanged;
         }
 
+        function disposeSiteAreas() {
+            state.siteAreaObjects.forEach(object => { if (object.parent) object.parent.remove(object); });
+            disposeObjectGraphs(state.siteAreaObjects);
+            state.siteAreaObjects = []; state.siteAreaKey = '';
+        }
+
+        // Vehicle routes to the main road (site_access.vehicle_routes): two flat lanes just above the photo,
+        // incoming solid and outgoing dashed, each on its own side of the street, with arrowheads; colours as
+        // on the Site tab.
+        function disposeSiteRoutes() {
+            state.siteRouteObjects.forEach(object => { if (object.parent) object.parent.remove(object); });
+            disposeObjectGraphs(state.siteRouteObjects);
+            state.siteRouteObjects = []; state.siteRouteKey = '';
+        }
+
+        function routeMesh(strips, triangles, width, y, color, pose) {
+            const positions = [];
+            const at = point => propertyToLayout(pose, point.x, point.z);
+            strips.forEach(function (strip) {
+                for (let i = 1; i < strip.length; i++) {
+                    const a = strip[i - 1], b = strip[i], length = Math.hypot(b.x - a.x, b.z - a.z);
+                    if (length < 1e-6) continue;
+                    const nx = -(b.z - a.z) / length * width / 2, nz = (b.x - a.x) / length * width / 2;
+                    const corners = [{ x: a.x + nx, z: a.z + nz }, { x: a.x - nx, z: a.z - nz },
+                        { x: b.x - nx, z: b.z - nz }, { x: b.x + nx, z: b.z + nz }].map(at);
+                    [0, 1, 2, 0, 2, 3].forEach(k => positions.push(corners[k].x, y, corners[k].z));
+                }
+            });
+            triangles.forEach(triangle => triangle.map(at).forEach(p => positions.push(p.x, y + 0.002, p.z)));
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+                color: color, side: THREE.DoubleSide, toneMapped: false, depthWrite: false }));
+            mesh.renderOrder = -5;
+            mesh.raycast = function () {};
+            return mesh;
+        }
+
+        function syncSiteRoutes() {
+            const layout = state.currentInput && state.currentInput.layout;
+            const site = siteRuntime && siteRuntime.siteContextOf(layout);
+            const routes = site && options.showFloor !== false && typeof siteRuntime.offsetLine === 'function'
+                ? (site.routes || []).filter(route => route.mainRoad && route.points.length > 1) : [];
+            const key = routes.length ? JSON.stringify([routes, site.buildingPose, layout.coordinateFrame]) : '';
+            if (key === state.siteRouteKey) return;
+            disposeSiteRoutes();
+            if (!key || !state.siteRoot || typeof THREE.BufferGeometry !== 'function'
+                    || typeof THREE.MeshBasicMaterial !== 'function') return;
+            // Just above paving and floor finishes, so the lanes show where they cross the paved lot.
+            const y = finite(layout.coordinateFrame && layout.coordinateFrame.floorElevation, 0) + 0.02;
+            routes.forEach(function (route) {
+                const color = siteRuntime.routeColor(route.use);
+                const inward = siteRuntime.offsetLine(route.points.slice().reverse(), 3.2);
+                const outward = siteRuntime.offsetLine(route.points, 3.2);
+                [[[inward], inward], [siteRuntime.dashes(outward, 7, 5), outward]].forEach(function (pair) {
+                    const mesh = routeMesh(pair[0], siteRuntime.arrowsAlong(pair[1], 30, 2.4), 1.4, y, color,
+                        site.buildingPose);
+                    mesh.name = 'SiteRoute:' + route.routeId;
+                    mesh.userData.facilitySiteRoute = route.routeId;
+                    state.siteRoot.add(mesh);
+                    state.siteRouteObjects.push(mesh);
+                });
+            });
+            state.siteRouteKey = key;
+            applyGroundLayers();
+            invalidate();
+        }
+
+        function syncSiteAreas() {
+            const layout = state.currentInput && state.currentInput.layout;
+            const site = siteRuntime && siteRuntime.siteContextOf(layout);
+            const key = site && options.showFloor !== false ? JSON.stringify([site.property, site.areas, site.buildingPose, layout.coordinateFrame]) : '';
+            if (key === state.siteAreaKey) return;
+            disposeSiteAreas();
+            if (!key || !state.siteRoot || !floorSurfacesRuntime || !THREE.ShapeGeometry) return;
+            const surfaces = siteRuntime.areaSurfaces(layout);
+            state.siteAreaObjects = floorSurfacesRuntime.meshes(THREE, documentObject,
+                { extensions: { facilityFloorSurfaces: { surfaces: surfaces } } });
+            state.siteAreaObjects.forEach((mesh, i) => {
+                mesh.name = 'SiteArea:' + surfaces[i].surfaceId;
+                mesh.userData.facilitySiteArea = surfaces[i].surfaceId;
+                mesh.renderOrder = -10; mesh.raycast = function () {}; state.siteRoot.add(mesh);
+            });
+            if (site.property && THREE.LineLoop) {
+                const y = finite(layout.coordinateFrame && layout.coordinateFrame.floorElevation, 0) + 0.025;
+                const points = site.property.boundary.map(p => propertyToLayout(site.buildingPose, p.x, p.z));
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(points.flatMap(p => [p.x, y, p.z]), 3));
+                const line = new THREE.LineLoop(geometry, new THREE.LineBasicMaterial({ color: '#6fe3ae' }));
+                line.name = 'SitePropertyBoundary'; line.raycast = function () {};
+                state.siteRoot.add(line); state.siteAreaObjects.push(line);
+            }
+            applyGroundLayers();
+            state.siteAreaKey = key; invalidate();
+        }
+
+        function siteFitBounds() {
+            const base = configuredEnvironmentBounds() || state.worldBounds;
+            const layout = state.currentInput && state.currentInput.layout;
+            const site = siteRuntime && siteRuntime.siteContextOf(layout);
+            if (!base || !site) return base;
+            const points = (site.property ? site.property.boundary : []).concat(...(site.areas || []).map(area => area.boundary))
+                .map(p => propertyToLayout(site.buildingPose, p.x, p.z));
+            return { minimum: { x: Math.min(base.minimum.x, ...points.map(p => p.x)), y: base.minimum.y,
+                z: Math.min(base.minimum.z, ...points.map(p => p.z)) },
+                maximum: { x: Math.max(base.maximum.x, ...points.map(p => p.x)), y: base.maximum.y,
+                    z: Math.max(base.maximum.z, ...points.map(p => p.z)) } };
+        }
+
         function fitFacility() {
             return fitBounds(
-                configuredEnvironmentBounds() || state.worldBounds,
+                siteFitBounds(),
                 'facility'
             );
         }
@@ -12481,15 +13192,48 @@
                     record.container.visible = next[record.visibilityLayer || 'assets'] !== false;
                 }
             });
+            state.equipmentDecalObjects.forEach(function (entry) {
+                entry.meshes.forEach(function (mesh) { mesh.visible = next.assets !== false; });
+            });
             if (state.proposalRoot) {
                 state.proposalRoot.visible = next.assets !== false;
             }
+            applyGroundLayers();
             invalidate();
             return Object.assign({}, state.layerVisibility);
         }
 
+        // Paving, floor finishes and site overlays are rebuilt as the layout changes; each rebuild
+        // calls this too, so a hidden layer stays hidden.
+        function applyGroundLayers() {
+            const layers = state.layerVisibility || DEFAULT_LAYER_VISIBILITY;
+            if (state.environmentRoot) state.environmentRoot.visible = layers.ground !== false;
+            (state.floorSurfaceObjects || []).forEach(function (object) { object.visible = layers.surfaces !== false; });
+            (state.siteAreaObjects || []).concat(state.siteRouteObjects || []).forEach(function (object) {
+                const paving = object.userData && object.userData.facilitySiteArea;
+                object.visible = (paving ? layers.ground : layers.site) !== false;
+            });
+        }
+
         function getLayerVisibility() {
             return Object.assign({}, state.layerVisibility);
+        }
+
+        // View only, until the walls are next drawn: hide the wall pieces whose names start with one of `prefixes`
+        // (e.g. a closed dock door's panel, 'layout-interior-wall-iw-dock-door-3-', as a camera flies out through
+        // it); an empty list shows them all again. The layout is not changed.
+        function setWallPiecesHidden(prefixes) {
+            const hidden = Array.isArray(prefixes) ? prefixes.filter(function (prefix) {
+                return typeof prefix === 'string' && prefix;
+            }) : [];
+            let count = 0;
+            state.wallObjects.forEach(function (object) {
+                const hide = hidden.some(function (prefix) { return String(object.name).indexOf(prefix) === 0; });
+                object.visible = state.layerVisibility.walls !== false && !hide;
+                if (hide) count += 1;
+            });
+            invalidate();
+            return count;
         }
 
         function setEnvironmentSettings(settings) {
@@ -12587,7 +13331,7 @@
                             >= Number(requestedBounds.minimum[axis]);
                 }) ? requestedBounds : null;
             const bounds = boundedRequest
-                || configuredEnvironmentBounds() || state.worldBounds;
+                || siteFitBounds();
             if (!state.camera || !state.modelRoot || !bounds
                     || state.degraded) return false;
             const beforeRoot = objectTransform(state.modelRoot);
@@ -12632,7 +13376,9 @@
                     size.z
                 ) * 20);
             }
-            setVector(state.camera.up, { x: 0, y: 0, z: -1 });
+            const site = siteRuntime && siteRuntime.siteContextOf(state.currentInput && state.currentInput.layout);
+            const bearing = site ? site.buildingPose.bearingDegrees * Math.PI / 180 : null;
+            setVector(state.camera.up, site ? { x: -Math.sin(bearing), y: 0, z: Math.cos(bearing) } : { x: 0, y: 0, z: -1 });
             setVector(state.camera.position, {
                 x: center.x,
                 y: center.y + distance,
@@ -12694,8 +13440,11 @@
         }
 
         function applySelection(skipInvalidate) {
+            // Plain-color appearances tint here. Library finishes own their
+            // materials (their color is already in the material), so they are skipped.
             const appearance = new Map(state.placements.map(function (p) {
-                const color = p.source && p.source.appearance && p.source.appearance.color;
+                const value = p.source && p.source.appearance;
+                const color = value && !value.appearanceId && value.color;
                 return [p.placementId, /^#[0-9a-fA-F]{6}$/.test(color || '') ? parseInt(color.slice(1), 16) : null];
             }));
             const selectionVisible = !immersiveActive();
@@ -12751,7 +13500,8 @@
                         const materials = Array.isArray(candidate && candidate.material)
                             ? candidate.material : [candidate && candidate.material];
                         materials.filter(Boolean).forEach(function (material) {
-                            if (!material.userData?.facilityComponentOverride && !isAuthoredSurfaceMaterial(material) && material.color && typeof material.color.setHex === 'function') {
+                            if (!material.userData?.facilityComponentOverride && !material.userData?.facilityAppearanceFinish
+                                    && !isAuthoredSurfaceMaterial(material) && material.color && typeof material.color.setHex === 'function') {
                                 material.userData = material.userData || {};
                                 if (material.userData.facilityAppearanceBaseColor === undefined) {
                                     material.userData.facilityAppearanceBaseColor = material.color.getHex();
@@ -12773,6 +13523,543 @@
             if (!skipInvalidate) invalidate();
         }
 
+        // ---- Appearance library: finishes, viewport scenes, equipment decals ----
+
+        function shortHash(text) {
+            let first = 0x811c9dc5, second = 0x9dc5811c;
+            for (let index = 0; index < text.length; index += 1) {
+                const code = text.charCodeAt(index);
+                first = Math.imul(first ^ code, 0x01000193) >>> 0;
+                second = Math.imul(second ^ code, 0x01000193) >>> 0;
+            }
+            return first.toString(16).padStart(8, '0') + second.toString(16).padStart(8, '0');
+        }
+
+        function currentLayout() {
+            return state.currentInput && state.currentInput.layout || {};
+        }
+
+        function currentLibrary() {
+            return facilityLibrary && typeof facilityLibrary.get === 'function' ? facilityLibrary.get() : null;
+        }
+
+        function layoutNeedsLibrary(layout) {
+            if (!layout || typeof layout !== 'object') return false;
+            if (layout.extensions && layout.extensions.facilityScene) return true;
+            return (layout.placements || []).some(function (placement) {
+                if (placement && placement.appearance && placement.appearance.appearanceId) return true;
+                const parts = placement && placement.componentMaterials && placement.componentMaterials.overrides;
+                return Array.isArray(parts) && parts.some(function (row) { return row && row.appearanceId; });
+            });
+        }
+
+        function placementFinish(placement) {
+            const value = placement && placement.source && placement.source.appearance;
+            if (!value || !value.appearanceId || !libraryRuntime || !finishesRuntime) return null;
+            const library = currentLibrary();
+            if (!library) return { appearanceId: value.appearanceId, missing: true, label: value.appearanceId };
+            return libraryRuntime.resolveAppearance(library, value, currentLayout());
+        }
+
+        function finishTextureCache() {
+            if (!state.finishTextures && finishesRuntime) {
+                const capabilities = state.renderer && state.renderer.capabilities;
+                const anisotropy = capabilities && typeof capabilities.getMaxAnisotropy === 'function'
+                    ? Math.max(1, Math.min(8, capabilities.getMaxAnisotropy())) : 1;
+                state.finishTextures = finishesRuntime.createTextureCache(THREE, {
+                    anisotropy: anisotropy,
+                    onChange: function () { invalidate(); },
+                    onError: function (url) {
+                        warning('appearance_texture_missing',
+                            'A finish texture could not be loaded; its tint is shown instead.', url);
+                    },
+                });
+            }
+            return state.finishTextures;
+        }
+
+        function ensureEnvironmentLoader() {
+            if (!state.environmentLoader && scenesRuntime && state.renderer
+                    && typeof THREE.PMREMGenerator === 'function') {
+                state.environmentLoader = scenesRuntime.createEnvironmentLoader({
+                    THREE: THREE, renderer: state.renderer,
+                    RoomEnvironment: RoomEnvironmentType, HDRLoader: HDRLoaderType,
+                });
+            }
+            return state.environmentLoader;
+        }
+
+        // Library finishes need something to reflect. In the Classic scene they
+        // get a neutral room of their own, which leaves every other asset looking
+        // exactly as before.
+        function roomEnvironment() {
+            const loader = ensureEnvironmentLoader();
+            try {
+                return loader ? loader.room() : null;
+            } catch (error) {
+                reportError('finish_environment_failed', error);
+                return null;
+            }
+        }
+
+        // Finishes carry their own environment map. three.js applies a scene's
+        // environment intensity and rotation only to materials without one, so a
+        // scene can keep the fill on plain models gentle while finishes keep
+        // their reflections (twice the scene's setting; 0.7 in Classic).
+        function finishEnvironment() {
+            if (state.scene && state.scene.environment) return state.scene.environment;
+            return roomEnvironment();
+        }
+
+        function finishReflection() {
+            if (!(state.scene && state.scene.environment)) return 0.7;
+            const intensity = Number(state.viewportScene && state.viewportScene.environmentIntensity);
+            return Math.min(2, 2 * (Number.isFinite(intensity) ? Math.max(0, intensity) : 0.5));
+        }
+
+        function syncFinishEnvironment(material) {
+            const envMap = finishEnvironment();
+            if (material.envMap !== envMap) {
+                material.envMap = envMap;
+                material.needsUpdate = true;
+            }
+            material.envMapIntensity = finishReflection();
+            const rotation = material.envMapRotation;
+            if (rotation && typeof rotation.copy === 'function') {
+                if (state.scene && state.scene.environment && state.scene.environmentRotation) {
+                    rotation.copy(state.scene.environmentRotation);
+                } else if (typeof rotation.set === 'function') {
+                    rotation.set(0, 0, 0);
+                }
+            }
+        }
+
+        function createFinishMaterialFor(resolved, scale) {
+            const material = finishesRuntime.createFinishMaterial(THREE, resolved, {
+                textures: finishTextureCache(), scale: scale, envMap: finishEnvironment(), envMapIntensity: finishReflection(),
+            });
+            syncFinishEnvironment(material);
+            const fallback = material.userData && material.userData.fallback || [];
+            if (fallback.indexOf('appearance_missing') >= 0) {
+                warning('appearance_missing', 'A saved finish is not in the library; a neutral finish is shown.',
+                    resolved.appearanceId);
+            }
+            material.wireframe = state.visualSettings.wireframe;
+            return material;
+        }
+
+        function applyObjectFinish(object, material, mapping) {
+            const replaced = finishesRuntime.applyFinishToObject(THREE, object, material, mapping, {
+                geometryCache: state.finishGeometryCache,
+                skip: function (candidate) { return isFinishProtectedMaterial(candidate); },
+            });
+            replaced.forEach(function (old) {
+                (Array.isArray(old) ? old : [old]).forEach(function (item) {
+                    // Copies made for this placement only; their textures stay with the source.
+                    if (item && item !== material && typeof item.dispose === 'function') item.dispose();
+                });
+            });
+        }
+
+        // Library finishes on single parts. The part's own bounds choose the
+        // grain axis, so a shelf board's grain follows the board.
+        function partFinishContext(placement) {
+            return {
+                materialFor: function (override, mesh) {
+                    const library = currentLibrary();
+                    if (!library || !libraryRuntime || !finishesRuntime) return null;
+                    const resolved = libraryRuntime.resolveAppearance(library, override, currentLayout());
+                    if (!resolved) return null;
+                    const material = createFinishMaterialFor(resolved, placement.transform.scale);
+                    if (resolved.texture && mesh && mesh.geometry && mesh.matrixWorld) {
+                        const mapping = finishesRuntime.mappingFor(THREE, mesh, resolved);
+                        mesh.geometry = finishesRuntime.cachedFinishGeometry(THREE, state.finishGeometryCache,
+                            mesh.geometry, mesh.matrixWorld, mapping);
+                    }
+                    return material;
+                },
+            };
+        }
+
+        function eachMaterial(root, visit) {
+            if (!root || typeof root.traverse !== 'function') return;
+            root.traverse(function (child) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach(function (material) { if (material) visit(material, child); });
+            });
+        }
+
+        function refreshFinishEnvironments() {
+            eachMaterial(state.modelRoot, function (material) {
+                if (!material.userData || material.userData.facilityAppearanceFinish !== true) return;
+                syncFinishEnvironment(material);
+            });
+        }
+
+        function syncViewportSceneFromLayout() {
+            if (state.viewportScenePreview || !libraryRuntime) return false;
+            const saved = libraryRuntime.layoutScene(currentLayout());
+            const library = currentLibrary();
+            if (saved && !library && facilityLibrary && typeof facilityLibrary.load === 'function') {
+                facilityLibrary.load().then(function () { syncViewportSceneFromLayout(); }).catch(function () {});
+                return false;
+            }
+            return applyViewportScene(libraryRuntime.resolveScene(library, saved));
+        }
+
+        // Apply a resolved scene: lighting levels, image-based lighting,
+        // background and sun shadows. Equipment and the layout never change.
+        function applyViewportScene(resolved) {
+            const signature = JSON.stringify(resolved || null);
+            if (signature === state.viewportSceneSignature) return false;
+            state.viewportSceneSignature = signature;
+            state.viewportScene = resolved || null;
+            const request = ++state.viewportSceneRequest;
+            if (state.ambientLight) state.ambientLight.intensity = sceneRelativeSetting('ambient');
+            if (state.directionalLight) state.directionalLight.intensity = sceneRelativeSetting('directional');
+            if (state.renderer) state.renderer.toneMappingExposure = sceneRelativeSetting('exposure');
+            const finish = function (environment, equirect) {
+                if (request !== state.viewportSceneRequest || !state.scene) return;
+                state.sceneEnvironment = environment || null;
+                state.sceneEquirect = equirect || null;
+                state.scene.environment = environment || null;
+                if ('environmentIntensity' in state.scene) {
+                    const intensity = Number(resolved && resolved.environmentIntensity);
+                    state.scene.environmentIntensity = Number.isFinite(intensity) ? intensity : 1;
+                }
+                const rotation = (Number(resolved && resolved.environmentRotationDegrees) || 0) * Math.PI / 180;
+                if (state.scene.environmentRotation && typeof state.scene.environmentRotation.set === 'function') {
+                    state.scene.environmentRotation.set(0, rotation, 0);
+                }
+                if (state.scene.backgroundRotation && typeof state.scene.backgroundRotation.set === 'function') {
+                    state.scene.backgroundRotation.set(0, rotation, 0);
+                }
+                // Rebuild the background only when the scene changes it.
+                const backgroundKey = JSON.stringify([resolved ? resolved.background : 'theme',
+                    equirect ? equirect.uuid || 'equirect' : null]);
+                if (backgroundKey !== state.sceneBackgroundKey) {
+                    state.sceneBackgroundKey = backgroundKey;
+                    applySceneBackground();
+                }
+                applySceneShadows(Boolean(resolved && resolved.shadows));
+                refreshFinishEnvironments();
+                invalidate();
+            };
+            if (!resolved || !resolved.environment || !state.renderer) {
+                finish(null, null);
+                return true;
+            }
+            const loader = ensureEnvironmentLoader();
+            if (!loader) {
+                finish(null, null);
+                return true;
+            }
+            if (resolved.environment === 'room' || !resolved.environmentUrl) {
+                finish(roomEnvironment(), null);
+                return true;
+            }
+            state.pendingLoads += 1;
+            loader.load(resolved.environmentUrl).then(function (loaded) {
+                finish(loaded.environment, loaded.equirect);
+            }).catch(function () {
+                warning('scene_environment_unavailable',
+                    'The scene lighting file could not be loaded; neutral lighting is shown instead.', resolved.sceneId);
+                finish(roomEnvironment(), null);
+            }).finally(function () {
+                state.pendingLoads = Math.max(0, state.pendingLoads - 1);
+                invalidate();
+            });
+            return true;
+        }
+
+        function setShadowCasting(object, enabled) {
+            if (!object || typeof object.traverse !== 'function') return;
+            object.traverse(function (child) {
+                if (!child.isMesh) return;
+                child.castShadow = Boolean(enabled);
+                if (enabled) child.receiveShadow = true;
+            });
+        }
+
+        function fitShadowsToWorld() {
+            if (!state.shadowsActive || !scenesRuntime || !state.directionalLight) return false;
+            return scenesRuntime.fitSunShadow(THREE, state.directionalLight,
+                configuredEnvironmentBounds() || state.worldBounds);
+        }
+
+        function applySceneShadows(enabled) {
+            const renderer = state.renderer;
+            const light = state.directionalLight;
+            if (!renderer || !renderer.shadowMap || !light || !light.shadow) {
+                state.shadowsActive = false;
+                return false;
+            }
+            if (!state.sunDefaultPosition && light.position && typeof light.position.clone === 'function') {
+                state.sunDefaultPosition = light.position.clone();
+            }
+            if (Boolean(enabled) === Boolean(state.shadowsActive)) {
+                if (enabled) fitShadowsToWorld();
+                return true;
+            }
+            state.shadowsActive = Boolean(enabled);
+            renderer.shadowMap.enabled = state.shadowsActive;
+            if (THREE.PCFSoftShadowMap !== undefined) renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            light.castShadow = state.shadowsActive;
+            if (state.shadowsActive) {
+                fitShadowsToWorld();
+            } else if (state.sunDefaultPosition) {
+                light.position.copy(state.sunDefaultPosition);
+                if (light.target && light.target.position) {
+                    light.target.position.set(0, 0, 0);
+                    light.target.updateMatrixWorld();
+                }
+            }
+            state.renderGroups.forEach(function (record) { setShadowCasting(record.container, state.shadowsActive); });
+            // Shadow sampling is compiled into each material's program.
+            eachMaterial(state.modelRoot, function (material) { material.needsUpdate = true; });
+            return true;
+        }
+
+        function equipmentDecalRows() {
+            const extensions = currentLayout().extensions;
+            const value = extensions && extensions.facilityEquipmentDecals;
+            return value && Array.isArray(value.decals) ? value.decals : [];
+        }
+
+        function clearEquipmentDecals(keep) {
+            Array.from(state.equipmentDecalObjects.entries()).forEach(function (pair) {
+                const entry = pair[1];
+                if (keep && !keep(entry)) return;
+                entry.meshes.forEach(function (mesh) {
+                    if (mesh.parent) mesh.parent.remove(mesh);
+                    if (mesh.geometry) mesh.geometry.dispose();
+                });
+                if (entry.material) entry.material.dispose();
+                state.equipmentDecalObjects.delete(pair[0]);
+            });
+        }
+
+        function decalTexture(path) {
+            if (state.decalTextures.has(path)) return state.decalTextures.get(path);
+            const texture = new THREE.TextureLoader().load(path, function () { invalidate(); }, undefined, function () {
+                warning('equipment_decal_image_missing', 'An equipment decal image could not be loaded.', path);
+            });
+            if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+            mirrorTextureForDisplay(texture);
+            texture.userData = Object.assign({}, texture.userData, { facilitySharedTexture: true });
+            state.decalTextures.set(path, texture);
+            return texture;
+        }
+
+        function renderRecordFor(placementId) {
+            return Array.from(state.renderGroups.values()).find(function (record) {
+                return record.placementIds.indexOf(placementId) >= 0;
+            }) || null;
+        }
+
+        // Project each saved decal onto a world-space copy of its placement's
+        // current model. Runs again whenever that placement's model loads.
+        function renderEquipmentDecals(placementIds) {
+            if (!equipmentDecalsRuntime || !DecalGeometryType || !state.modelRoot
+                    || typeof THREE.TextureLoader !== 'function') return 0;
+            const only = Array.isArray(placementIds) ? new Set(placementIds) : null;
+            clearEquipmentDecals(only ? function (entry) { return only.has(entry.placementId); } : null);
+            let count = 0;
+            equipmentDecalRows().forEach(function (row) {
+                if (only && !only.has(row.placementId)) return;
+                const placement = state.placements.find(function (item) { return item.placementId === row.placementId; });
+                const record = placement && renderRecordFor(row.placementId);
+                if (!placement || !record || !record.prototypeObject) return;
+                const target = record.prototypeObject.clone(true);
+                applyPlacementTransform(target, placement);
+                const material = equipmentDecalsRuntime.decalMaterial(THREE, decalTexture(row.imagePath));
+                let meshes = [];
+                try {
+                    meshes = equipmentDecalsRuntime.buildDecalMeshes(THREE, DecalGeometryType, target, row, material);
+                } catch (error) {
+                    reportError('equipment_decal_failed', error);
+                }
+                if (!meshes.length) {
+                    material.dispose();
+                    return;
+                }
+                meshes.forEach(function (mesh) {
+                    mesh.visible = state.layerVisibility.assets !== false;
+                    state.modelRoot.add(mesh);
+                });
+                state.equipmentDecalObjects.set(row.decalId, { placementId: row.placementId, meshes: meshes, material: material });
+                count += 1;
+            });
+            invalidate();
+            return count;
+        }
+
+        // Where a decal dropped at a screen point would sit, in the anchor form
+        // the layout stores (the placement's own coordinates).
+        function decalAnchorAt(input, rotationDegrees) {
+            if (!equipmentDecalsRuntime) return null;
+            const hit = pick(input);
+            if (!hit || !hit.point || !hit.normal) return null;
+            const placement = state.placements.find(function (item) { return item.placementId === hit.placementId; });
+            if (!placement) return null;
+            return {
+                placementId: hit.placementId,
+                anchor: equipmentDecalsRuntime.anchorFromHit(THREE, placementMatrix(placement), hit.point, hit.normal,
+                    rotationDegrees),
+            };
+        }
+
+        function findRenderedObject(record, placementId) {
+            const children = record && record.container && record.container.children || [];
+            return children.find(function (child) {
+                return child && child.userData && child.userData.placementId === placementId;
+            }) || null;
+        }
+
+        // Live preview: temporary copies with the candidate finish replace the
+        // chosen placements on screen. Nothing is saved; clearing restores them.
+        function previewFinish(spec) {
+            clearFinishPreview();
+            const request = spec && typeof spec === 'object' ? spec : {};
+            const library = currentLibrary();
+            if (!library || !libraryRuntime || !finishesRuntime || !state.modelRoot) return false;
+            const resolved = libraryRuntime.resolveAppearance(library, request.appearance, currentLayout());
+            if (!resolved) return false;
+            const preview = { objects: [], hidden: [] };
+            (Array.isArray(request.placementIds) ? request.placementIds : []).forEach(function (placementId) {
+                const record = renderRecordFor(placementId);
+                const placement = state.placements.find(function (item) { return item.placementId === placementId; });
+                if (!record || !placement || !record.prototypeObject) return;
+                let object = null;
+                const rendered = record.instanced ? null : findRenderedObject(record, placementId);
+                if (rendered) {
+                    object = cloneRenderable(rendered);
+                    preview.hidden.push({ kind: 'object', object: rendered, visible: rendered.visible });
+                    rendered.visible = false;
+                } else {
+                    object = cloneRenderable(record.prototypeObject);
+                    const group = state.baseGroups.get(record.baseKey);
+                    if (group && group.finish) {
+                        applyObjectFinish(object, createFinishMaterialFor(group.finish, placement.transform.scale),
+                            finishesRuntime.mappingFor(THREE, record.prototypeObject, group.finish));
+                    }
+                    applyPlacementTransform(object, placement);
+                    record.pickObjects.forEach(function (mesh) {
+                        const ids = state.instanceLookup.get(mesh) || [];
+                        const index = ids.indexOf(placementId);
+                        if (index < 0 || typeof mesh.getMatrixAt !== 'function') return;
+                        const matrix = new THREE.Matrix4();
+                        mesh.getMatrixAt(index, matrix);
+                        preview.hidden.push({ kind: 'instance', mesh: mesh, index: index, matrix: matrix });
+                        mesh.setMatrixAt(index, new THREE.Matrix4().makeScale(0, 0, 0));
+                        if (mesh.instanceMatrix) mesh.instanceMatrix.needsUpdate = true;
+                    });
+                }
+                // Show the finish itself, not the selection glow.
+                eachMaterial(object, function (material) {
+                    const original = material.userData && material.userData.facilitySelectionOriginal;
+                    if (original && material.emissive && typeof material.emissive.setHex === 'function') {
+                        material.emissive.setHex(finite(original.emissive, 0));
+                        material.emissiveIntensity = original.emissiveIntensity;
+                    }
+                });
+                const material = createFinishMaterialFor(resolved, placement.transform.scale);
+                if (request.partKey && componentRuntime) {
+                    object.updateMatrixWorld(true);
+                    const rootInverse = new THREE.Matrix4().copy(object.matrixWorld).invert();
+                    const slot = componentRuntime.slots(object).find(function (item) {
+                        return item.key === request.partKey || item.legacyKey === request.partKey;
+                    });
+                    const sourceSlot = componentRuntime.slots(record.prototypeObject).find(function (item) {
+                        return item.key === request.partKey || item.legacyKey === request.partKey;
+                    });
+                    if (slot) {
+                        if (resolved.texture && sourceSlot) {
+                            const relative = new THREE.Matrix4().multiplyMatrices(rootInverse, slot.node.matrixWorld);
+                            slot.node.geometry = finishesRuntime.cachedFinishGeometry(THREE, state.finishGeometryCache,
+                                slot.node.geometry, relative, finishesRuntime.mappingFor(THREE, sourceSlot.node, resolved));
+                        }
+                        slot.node.material = material;
+                    }
+                } else {
+                    applyObjectFinish(object, material, finishesRuntime.mappingFor(THREE, record.prototypeObject, resolved));
+                }
+                object.userData.facilityFinishPreview = true;
+                // The original copy is hidden while previewing, so the preview
+                // stands in for it when picking (selection, part pick, decals).
+                object.userData.facilityPreviewPlacementId = placementId;
+                state.modelRoot.add(object);
+                preview.objects.push(object);
+            });
+            state.finishPreview = preview;
+            invalidate();
+            return preview.objects.length > 0;
+        }
+
+        function clearFinishPreview() {
+            const preview = state.finishPreview;
+            if (!preview) return false;
+            state.finishPreview = null;
+            preview.hidden.forEach(function (item) {
+                if (item.kind === 'object') {
+                    item.object.visible = item.visible;
+                } else if (item.mesh && typeof item.mesh.setMatrixAt === 'function') {
+                    item.mesh.setMatrixAt(item.index, item.matrix);
+                    if (item.mesh.instanceMatrix) item.mesh.instanceMatrix.needsUpdate = true;
+                }
+            });
+            const seenMaterials = new Set(), seenTextures = new Set();
+            preview.objects.forEach(function (object) {
+                if (object.parent) object.parent.remove(object);
+                eachMaterial(object, function (material) {
+                    if (material.userData && material.userData.facilityAppearanceFinish) {
+                        disposeMaterial(material, seenMaterials, seenTextures);
+                    } else if (!seenMaterials.has(material) && typeof material.dispose === 'function') {
+                        // A per-preview copy; its textures belong to the original.
+                        seenMaterials.add(material);
+                        material.dispose();
+                    }
+                });
+            });
+            invalidate();
+            return true;
+        }
+
+        function previewViewportScene(value) {
+            const library = currentLibrary();
+            if (!library || !libraryRuntime) return false;
+            state.viewportScenePreview = true;
+            applyViewportScene(libraryRuntime.resolveScene(library, value));
+            return true;
+        }
+
+        function clearViewportScenePreview() {
+            if (!state.viewportScenePreview) return false;
+            state.viewportScenePreview = false;
+            syncViewportSceneFromLayout();
+            return true;
+        }
+
+        function getViewportScene() {
+            return state.viewportScene ? JSON.parse(JSON.stringify(state.viewportScene)) : null;
+        }
+
+        function finishDiagnostics() {
+            let finishGroups = 0;
+            state.baseGroups.forEach(function (group) { if (group.finish) finishGroups += 1; });
+            return {
+                libraryLoaded: Boolean(currentLibrary()),
+                finishGroups: finishGroups,
+                projectedGeometries: state.finishGeometryCache.size,
+                textures: state.finishTextures ? state.finishTextures.stats() : { images: 0, ready: 0, failed: 0, uses: 0 },
+                previewObjects: state.finishPreview ? state.finishPreview.objects.length : 0,
+                sceneId: state.viewportScene ? state.viewportScene.sceneId : null,
+                sceneEnvironment: Boolean(state.scene && state.scene.environment),
+                shadows: Boolean(state.shadowsActive),
+                equipmentDecals: state.equipmentDecalObjects.size,
+            };
+        }
+
         async function getComponentMaterials(placementId) {
             const group=Array.from(state.baseGroups.values()).find(g=>g.placements.some(p=>p.placementId===placementId));
             if(!group)throw new Error('The selected model is not loaded.');
@@ -12781,7 +14068,7 @@
             const record=state.renderGroups.get(baseGroupKey(group));
             if(!record || !['overview','detail'].includes(record.representation))throw new Error('Load the CAD model before editing its components.');
             return {representation:record.representation,slots:componentRuntime.slots(record.prototypeObject).map(item=>({
-                key:item.key,label:item.label,color:'#'+item.material.color.getHexString(),
+                key:item.key,legacyKey:item.legacyKey,label:item.label,color:'#'+item.material.color.getHexString(),
                 roughness:finite(item.material.roughness,.6),metalness:finite(item.material.metalness,0)}))};
         }
 
@@ -12848,8 +14135,10 @@
             const height = Math.max(1, finite(rect.height, 1));
             const clientX = finite(source.clientX, finite(source.x, rect.left));
             const clientY = finite(source.clientY, finite(source.y, rect.top));
+            const screenX = ((clientX - finite(rect.left, 0)) / width) * 2 - 1;
             return {
-                x: ((clientX - finite(rect.left, 0)) / width) * 2 - 1,
+                // The displayed canvas is mirrored; the render is not.
+                x: state.displayMirror ? -screenX : screenX,
                 y: -((clientY - finite(rect.top, 0)) / height) * 2 + 1,
             };
         }
@@ -12860,7 +14149,29 @@
                 if (cursor.userData && cursor.userData.placementId) {
                     return cursor.userData.placementId;
                 }
+                if (cursor.userData && cursor.userData.facilityPreviewPlacementId) {
+                    return cursor.userData.facilityPreviewPlacementId;
+                }
                 cursor = cursor.parent;
+            }
+            return null;
+        }
+
+        // Instanced and merged copies have no per-part meshes, so the part
+        // under the current ray is found on a copy of the placement's model.
+        function partKeyAlongRay(placementId) {
+            const record = renderRecordFor(placementId);
+            const placement = state.placements.find(function (item) { return item.placementId === placementId; });
+            if (!record || !record.prototypeObject || !placement || !state.raycaster
+                    || typeof state.raycaster.intersectObject !== 'function') return null;
+            const probe = record.prototypeObject.clone(true);
+            applyPlacementTransform(probe, placement);
+            if (typeof probe.updateMatrixWorld === 'function') probe.updateMatrixWorld(true);
+            const hits = state.raycaster.intersectObject(probe, true) || [];
+            for (let index = 0; index < hits.length; index += 1) {
+                const key = hits[index].object && hits[index].object.userData
+                    && hits[index].object.userData.facilityPartKey;
+                if (key) return key;
             }
             return null;
         }
@@ -12879,7 +14190,9 @@
                 if (Number.isFinite(maximumDistance) && maximumDistance > 0) {
                     state.raycaster.far = maximumDistance;
                 }
-                hits = state.raycaster.intersectObjects(state.pickObjects, true) || [];
+                const previews = state.finishPreview ? state.finishPreview.objects : [];
+                hits = state.raycaster.intersectObjects(previews.length
+                    ? state.pickObjects.concat(previews) : state.pickObjects, true) || [];
             } finally {
                 state.raycaster.far = previousFar;
             }
@@ -12899,7 +14212,7 @@
                 }
                 if (!placementId) placementId = placementIdFromObject(hit.object);
                 if (!placementId) continue;
-                return {
+                const result = {
                     placementId: placementId,
                     instanceId: instanceId,
                     point: hit.point ? {
@@ -12908,6 +14221,23 @@
                         z: finite(hit.point.z, 0),
                     } : null,
                 };
+                // Surface normal and stable part key: decals sit on the surface
+                // under the cursor and part finishes target the part that was hit.
+                if (hit.face && hit.face.normal && typeof hit.face.normal.clone === 'function'
+                        && hit.object && hit.object.matrixWorld && typeof THREE.Matrix4 === 'function') {
+                    const world = new THREE.Matrix4().copy(hit.object.matrixWorld);
+                    if (instanceId !== null && typeof hit.object.getMatrixAt === 'function') {
+                        const instanceMatrix = new THREE.Matrix4();
+                        hit.object.getMatrixAt(instanceId, instanceMatrix);
+                        world.multiply(instanceMatrix);
+                    }
+                    const normal = hit.face.normal.clone().transformDirection(world);
+                    result.normal = { x: finite(normal.x, 0), y: finite(normal.y, 1), z: finite(normal.z, 0) };
+                }
+                const partKey = hit.object && hit.object.userData && hit.object.userData.facilityPartKey;
+                if (partKey && instanceId === null) result.partKey = partKey;
+                else if (input && input.parts === true) result.partKey = partKeyAlongRay(placementId);
+                return result;
             }
             return null;
         }
@@ -13129,7 +14459,8 @@
             if (!rect) return null;
             const width = Math.max(1, finite(rect.width, 1));
             const height = Math.max(1, finite(rect.height, 1));
-            const clientX = finite(rect.left, 0) + (point.x + 1) * width / 2;
+            const screenX = state.displayMirror ? -point.x : point.x;
+            const clientX = finite(rect.left, 0) + (screenX + 1) * width / 2;
             const clientY = finite(rect.top, 0) + (1 - point.y) * height / 2;
             return {
                 x: clientX,
@@ -13420,6 +14751,7 @@
                 placementTransformAudit: getPlacementTransformAudit(),
                 floorMarkingCount: state.floorMarkingObjects.length,
                 zoneMarkingCount: state.zoneObjects.length,
+                appearanceLibrary: finishDiagnostics(),
                 perimeterWallCount: state.wallObjects.length,
                 visiblePerimeterWallCount: state.wallObjects.filter(object => object.visible).length,
                 exteriorFinishObjectCount: state.wallFinishObjects.length,
@@ -13556,6 +14888,8 @@
                     } : null,
                 } : null,
                 cameraOrientation: cameraOrientationSnapshot(),
+                site: { areaIds: state.siteAreaObjects.filter(object => object.userData.facilitySiteArea)
+                    .map(object => object.userData.facilitySiteArea), groundLoaded: Boolean(state.siteGround) },
                 environment: state.environmentDiagnostics
                     ? Object.assign({}, state.environmentDiagnostics) : null,
                 modelRootTransform: objectTransform(state.modelRoot),
@@ -13593,6 +14927,12 @@
             setSelection: setSelection,
             getComponentMaterials: getComponentMaterials,
             highlightComponent: highlightComponent,
+            previewFinish: previewFinish,
+            clearFinishPreview: clearFinishPreview,
+            previewViewportScene: previewViewportScene,
+            clearViewportScenePreview: clearViewportScenePreview,
+            getViewportScene: getViewportScene,
+            decalAnchorAt: decalAnchorAt,
             setSelectionHandler: setSelectionHandler,
             setGhostPlacement: setGhostPlacement,
             setProposalPreview: setProposalPreview,
@@ -13699,6 +15039,7 @@
             setGridVisible: setGridVisible,
             setLayerVisibility: setLayerVisibility,
             getLayerVisibility: getLayerVisibility,
+            setWallPiecesHidden: setWallPiecesHidden,
             setEnvironmentSettings: setEnvironmentSettings,
             setVisualSettings: setVisualSettings,
             getVisualSettings: getVisualSettings,
@@ -13732,6 +15073,7 @@
         findDroneSpawn: findDroneSpawn,
         planWalkthroughRoute: planWalkthroughRoute,
         pointInPolygon: pointInPolygon,
+        mirrorModelFileGeometry: mirrorModelFileGeometry,
         resolveMultiLevelWalkthroughMovement: resolveMultiLevelWalkthroughMovement,
         resolveWalkthroughPostureChange: resolveWalkthroughPostureChange,
         resolveWalkthroughMovement: resolveWalkthroughMovement,

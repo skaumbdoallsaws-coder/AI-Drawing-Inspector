@@ -213,6 +213,12 @@ def create_facility_layout_router(
     from .decal_images import create_decal_image_router
     router.include_router(create_decal_image_router(
         service=service, principal_resolver=principal_resolver, feature_gate=feature_gate))
+    from .site_imagery import create_site_imagery_router
+    router.include_router(create_site_imagery_router(
+        service=service, principal_resolver=principal_resolver, feature_gate=feature_gate))
+    from .plan_pdf import create_plan_pdf_router
+    router.include_router(create_plan_pdf_router(
+        service=service, principal_resolver=principal_resolver, feature_gate=feature_gate))
 
     @router.get("/api/facility-layouts/{site_id}")
     async def list_layouts(

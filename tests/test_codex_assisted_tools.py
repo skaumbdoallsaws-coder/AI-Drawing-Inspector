@@ -21,7 +21,8 @@ def setup(tmp_path):
 
 def test_contract_has_no_commit_approval_or_shell_capability(setup):
     _, gateway, _ = setup
-    assert {s["name"] for s in edit_tool_specs()} == {"preview_facility_operations", "preview_facility_undo"}
+    assert {s["name"] for s in edit_tool_specs()} == {"preview_facility_operations", "preview_facility_undo",
+                                                      "preview_planned_design"}
     for spec in gateway.specs:
         Draft202012Validator.check_schema(spec["input_schema"])
 
@@ -163,3 +164,41 @@ def test_authoring_plan_reports_corner_origin_bounds_from_saved_document(setup):
         assert result["data"]["floorAuthority"] == "plan"
         assert result["data"]["planWorldBounds"] == {
             "minX": 0, "minZ": 0, "maxX": 82, "maxZ": 36.5, "floorY": layout["coordinateFrame"]["floorElevation"]}
+
+
+def test_a_planned_build_step_is_staged_whole_as_one_review(setup, monkeypatch):
+    host, gateway, saved = setup
+    from ai_inspector.codex_runtime import site_tools
+
+    def marking(number):
+        return {"op": "add_floor_marking", "floorMarking": {
+            "markingId": f"fm-stall-{number:03}", "markingType": "parking_box", "label": f"Stall {number}",
+            "semanticRole": "parking", "transform": {"position": {"x": 1 + number % 10 * 3, "y": 0.008, "z": 1 + number // 10 * 6},
+                                                     "rotationDegrees": 0},
+            "width": 2.7, "depth": 5.4, "fillColor": "#ffffff", "strokeColor": "#ffffff", "opacity": 1, "text": "",
+            "positionMode": "manual", "metadata": {}, "evidence": []}}
+    plan = {"available": True, "step": "markings", "operations": [marking(n) for n in range(60)], "summary": {}}
+    monkeypatch.setattr(site_tools, "read_site", lambda *args, **kwargs: dict(plan))
+    read = gateway._read_data("plan_floor_markings", {"stagingLanes": 6})
+    assert read["package"] == {"packageId": "markings-1", "operations": 60} and "operations" not in read
+    async def run():
+        unknown = await gateway.call("preview_planned_design", {"packageId": "markings-9"})
+        assert unknown["error"]["code"] == "codex_design_package_unknown"
+        staged = await gateway.call("preview_planned_design", {"packageId": "markings-1"})
+        assert staged["ok"], staged
+        assert staged["data"]["approvalRequired"] and gateway.proposal["proposalId"] == staged["data"]["proposalId"]
+    asyncio.run(run())  # 60 operations: more than one model-written batch may hold
+    assert host.service.get_layout(host.principal(), LOCAL_SITE_ID, LOCAL_LAYOUT_ID) == saved
+    # Opening the review and approving it rebuild the proposal from its stored request, under the package's limits.
+    principal, proposal_id = host.principal(), gateway.proposal["proposalId"]
+    preview = host.service.get_layout_proposal_preview(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, proposal_id)
+    binding = preview["alternative"]["transactionBinding"]
+    assert len(preview["alternative"]["operations"]) == 60
+    approval = host.service.approve_layout_proposal(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, proposal_id, binding,
+                                                    session_id="test-approver", idempotency_key="test-package",
+                                                    explicit_approval=True)
+    committed = host.service.apply_layout_proposal(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, approval["approvalToken"],
+                                                   binding, session_id="test-approver", idempotency_key="test-package")
+    added = {m["markingId"] for m in committed["layout"]["floorMarkings"]} - \
+        {m["markingId"] for m in saved["layout"]["floorMarkings"]}
+    assert len(added) == 60

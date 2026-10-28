@@ -13,6 +13,7 @@
         'table',
         'entity_reference',
         'actions',
+        'file',
     ]);
     const SOURCE_TYPES = new Set([
         'manufacturer',
@@ -138,6 +139,48 @@
         }
     }
 
+    // A link to a public page: its text, an arrow, and a chip with the site's own icon and domain. The icon is
+    // the favicon of the link's own origin, shown once it loads; the domain's first letter otherwise.
+    function externalLinkHtml(href, labelHtml) {
+        const attributes = ' href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer"';
+        const html = '<a class="agent-link"' + attributes + '>' + labelHtml + '</a>'
+            + '<span class="agent-link-arrow" aria-hidden="true">&#8599;</span>';
+        const domain = sourceDomain(href);
+        if (!domain) return html;
+        const url = new URL(href);
+        const icon = url.origin + '/favicon.ico';
+        // A host without its own icon (legacy-aem.haascnc.com) tries its parent domain once (haascnc.com), never a
+        // two-part public suffix such as co.jp.
+        const labels = url.hostname.split('.');
+        const parent = labels.slice(1);
+        const parentIcon = parent.length >= 2 && !(parent.length === 2 && parent[0].length <= 3 && parent[1].length === 2)
+            ? 'https://' + parent.join('.') + '/favicon.ico' : '';
+        return html + '<a class="agent-link-chip"' + attributes + ' tabindex="-1" title="' + escapeHtml(href) + '">'
+            + '<span class="agent-link-icon" data-initial="' + escapeHtml(domain[0].toUpperCase()) + '">'
+            + '<img src="' + escapeHtml(icon) + '" alt="" referrerpolicy="no-referrer"'
+            + (parentIcon ? ' data-next="' + escapeHtml(parentIcon) + '"' : '')
+            + ' onload="this.parentNode.classList.add(\'loaded\')"'
+            + ' onerror="if (this.dataset.next) { this.src = this.dataset.next; this.dataset.next = \'\'; }'
+            + ' else { this.remove(); }"></span>'
+            + '<span class="agent-link-site">' + escapeHtml(domain) + '</span></a>';
+    }
+
+    // A link's text when it has no title of its own: the page's name from its address
+    // (mori-seiki-cl-200a-cnc-lathe -> Mori seiki cl 200a cnc lathe), else the site's domain.
+    function linkLabel(title, url) {
+        const text = cleanText(title, 240);
+        if (text && text !== url) return text;
+        try {
+            const parsed = new URL(url);
+            const segment = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '');
+            const words = segment.replace(/\.[a-z0-9]{1,5}$/i, '').replace(/[-_+.]+/g, ' ').trim();
+            if (!/[a-z]/i.test(words)) return parsed.hostname.replace(/^www\./i, '');
+            return words[0].toUpperCase() + words.slice(1) + (/\.pdf$/i.test(segment) ? ' (PDF)' : '');
+        } catch (_) {
+            return text || url;
+        }
+    }
+
     function renderInline(input) {
         const value = String(input == null ? '' : input);
         let output = '';
@@ -155,11 +198,10 @@
                 const match = value.slice(index).match(/^\[([^\]]+)\]\(([^)]+)\)/);
                 if (match) {
                     const href = safeUrl(match[2]);
-                    if (href) {
-                        const external = /^https?:/i.test(href);
-                        output += '<a href="' + escapeHtml(href) + '"'
-                            + (external ? ' target="_blank" rel="noopener noreferrer"' : '')
-                            + '>' + renderInline(match[1]) + '</a>';
+                    if (href && /^https?:/i.test(href)) {
+                        output += externalLinkHtml(href, renderInline(match[1]));
+                    } else if (href) {
+                        output += '<a href="' + escapeHtml(href) + '">' + renderInline(match[1]) + '</a>';
                     } else {
                         output += renderInline(match[1]);
                     }
@@ -463,6 +505,15 @@
             const text = cleanText(raw.text, 50000);
             return text ? { type, text } : null;
         }
+        if (type === 'file') {
+            const url = cleanText(raw.url, 600);
+            const fileName = cleanText(raw.fileName || raw.title, 160);
+            if (!fileName || !/^\/api\/[A-Za-z0-9._~%\/-]+(\?[A-Za-z0-9._~%=&-]*)?$/.test(url) || url.includes('//')) {
+                return null;
+            }
+            return { type, fileName, url, detail: cleanText(raw.detail, 160),
+                mimeType: raw.mimeType === 'application/pdf' ? 'application/pdf' : '' };
+        }
         if (type === 'sources') {
             const sources = (Array.isArray(raw.sources) ? raw.sources : [])
                 .slice(0, 20)
@@ -543,12 +594,6 @@
         return node;
     }
 
-    function initials(source) {
-        const value = cleanText(source.publisher || source.domain || source.title || '?', 80);
-        return value.split(/\s+/).filter(Boolean).slice(0, 2)
-            .map(token => token[0].toUpperCase()).join('') || '?';
-    }
-
     function appendActionButtons(documentRef, parent, actions, options) {
         if (!actions.length) return;
         const wrap = element(documentRef, 'div', 'agent-rich-actions');
@@ -566,6 +611,23 @@
         parent.appendChild(wrap);
     }
 
+    // A file the app made (the layout PDF): a card that opens it from the app, as a chat file attachment does.
+    function renderFile(documentRef, block) {
+        const card = documentRef.createElement('a');
+        card.className = 'agent-file-card';
+        card.href = block.url;
+        card.target = '_blank';
+        card.rel = 'noopener';
+        card.title = 'Open ' + block.fileName;
+        card.appendChild(element(documentRef, 'span', 'agent-file-badge',
+            block.mimeType === 'application/pdf' ? 'PDF' : 'FILE'));
+        const body = element(documentRef, 'span', 'agent-file-body');
+        body.appendChild(element(documentRef, 'span', 'agent-file-name', block.fileName));
+        if (block.detail) body.appendChild(element(documentRef, 'span', 'agent-file-detail', block.detail));
+        card.appendChild(body);
+        return card;
+    }
+
     function renderSources(documentRef, block) {
         const section = element(documentRef, 'section', 'agent-rich-block agent-source-block');
         const heading = element(documentRef, 'div', 'agent-rich-block-title');
@@ -575,31 +637,10 @@
         const list = element(documentRef, 'div', 'agent-source-list');
         block.sources.forEach(source => {
             const card = element(documentRef, 'article', 'agent-source-card');
-            const identity = element(documentRef, 'div', 'agent-source-identity', initials(source));
-            if (source.accent) identity.style.setProperty('--source-accent', source.accent);
-            if (source.iconUrl) {
-                const image = documentRef.createElement('img');
-                image.src = source.iconUrl;
-                image.alt = '';
-                image.loading = 'lazy';
-                image.referrerPolicy = 'no-referrer';
-                image.hidden = true;
-                image.addEventListener('load', () => { image.hidden = false; });
-                image.addEventListener('error', () => image.remove());
-                identity.appendChild(image);
-            }
-            card.appendChild(identity);
             const body = element(documentRef, 'div', 'agent-source-body');
-            const overline = element(documentRef, 'div', 'agent-source-overline');
-            overline.appendChild(element(documentRef, 'span', '', source.publisher || source.domain));
-            overline.appendChild(element(documentRef, 'span', 'agent-source-type', source.sourceType.replace(/-/g, ' ')));
-            body.appendChild(overline);
-            const title = documentRef.createElement('a');
-            title.className = 'agent-source-title';
-            title.textContent = source.title;
-            title.href = source.url;
-            title.target = '_blank';
-            title.rel = 'noopener noreferrer';
+            // Drawn like every link in the chat: its text, an arrow, and a chip with the site's icon and domain.
+            const title = element(documentRef, 'div', 'agent-source-title');
+            title.innerHTML = externalLinkHtml(source.url, escapeHtml(linkLabel(source.title, source.url)));
             body.appendChild(title);
             const meta = [source.partNumber, source.price, source.availability].filter(Boolean);
             if (meta.length) body.appendChild(element(documentRef, 'div', 'agent-source-meta', meta.join(' | ')));
@@ -612,16 +653,16 @@
                 });
                 body.appendChild(specs);
             }
-            const links = [{ label: 'View source', url: source.url }, ...source.links].slice(0, 4);
-            const actions = element(documentRef, 'div', 'agent-source-links');
-            links.forEach(link => {
-                const anchor = element(documentRef, 'a', '', link.label);
-                anchor.href = link.url;
-                anchor.target = '_blank';
-                anchor.rel = 'noopener noreferrer';
-                actions.appendChild(anchor);
-            });
-            body.appendChild(actions);
+            const links = source.links.filter(link => link.url !== source.url).slice(0, 3);
+            if (links.length) {
+                const actions = element(documentRef, 'div', 'agent-source-links');
+                links.forEach(link => {
+                    const item = element(documentRef, 'span', 'agent-source-link');
+                    item.innerHTML = externalLinkHtml(link.url, escapeHtml(link.label));
+                    actions.appendChild(item);
+                });
+                body.appendChild(actions);
+            }
             card.appendChild(body);
             list.appendChild(card);
         });
@@ -1190,6 +1231,7 @@
             return node;
         }
         if (block.type === 'sources') return renderSources(documentRef, block);
+        if (block.type === 'file') return renderFile(documentRef, block);
         if (block.type === 'facts') return renderFacts(documentRef, block);
         if (block.type === 'visualization') return renderVisualization(documentRef, block, options);
         if (block.type === 'table') return renderTable(documentRef, block, options);
@@ -1222,6 +1264,7 @@
         escapeHtml,
         safeUrl,
         sourceDomain,
+        linkLabel,
         renderInline,
         renderMarkdownHtml,
         renderMarkdownInto,

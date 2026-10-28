@@ -67,27 +67,35 @@ def compile_perimeter_walls(settings: Mapping[str, Any], layout: Mapping[str, An
         raise ValueError("At most 128 perimeter openings are supported")
     normalized = []
     for opening in openings:
-        if not isinstance(opening, Mapping) or set(opening) != {"edge", "startMeters", "endMeters"}:
-            raise ValueError("An opening needs edge, startMeters and endMeters")
+        if not isinstance(opening, Mapping) or set(opening) - {"heightMeters"} != {"edge", "startMeters", "endMeters"}:
+            raise ValueError("An opening needs edge, startMeters and endMeters, and may have heightMeters")
         edge = opening["edge"]
         if isinstance(edge, bool) or not isinstance(edge, int) or not 0 <= edge < len(points):
             raise ValueError("Opening edge is outside the perimeter")
-        a, b = points[edge], points[(edge + 1) % len(points)]
-        length = math.dist(a, b)
+        length = math.dist(points[edge], points[(edge + 1) % len(points)])
         start = _number(opening["startMeters"], "startMeters", 0, length)
         end = _number(opening["endMeters"], "endMeters", 0, length)
         if end - start < 0.1:
             raise ValueError("An opening must be at least 0.1 m wide")
-        normalized.append({"edge": edge, "startMeters": start, "endMeters": end})
-        def along(distance: float) -> tuple[float, float]:
-            return (a[0] + (b[0] - a[0]) * distance / length,
-                    a[1] + (b[1] - a[1]) * distance / length)
-        ring = ring.difference(LineString([along(start), along(end)]).buffer(
-            thickness * 2, cap_style="flat"))
+        entry = {"edge": edge, "startMeters": start, "endMeters": end}
+        if "heightMeters" in opening:  # a door: the wall closes above its head
+            entry["heightMeters"] = _number(opening["heightMeters"], "Opening height", 0.5, height - 0.1)
+        normalized.append(entry)
     normalized.sort(key=lambda item: (item["edge"], item["startMeters"]))
     for left, right in zip(normalized, normalized[1:]):
         if left["edge"] == right["edge"] and left["endMeters"] > right["startMeters"]:
             raise ValueError("Openings on the same edge must not overlap")
+    # Cut in the stored (sorted) order: validation recompiles from the stored settings and must get
+    # the same panels to the last bit, whatever order the openings were given in.
+    for opening in normalized:
+        a, b = points[opening["edge"]], points[(opening["edge"] + 1) % len(points)]
+        length = math.dist(a, b)
+
+        def along(distance: float) -> tuple[float, float]:
+            return (a[0] + (b[0] - a[0]) * distance / length,
+                    a[1] + (b[1] - a[1]) * distance / length)
+        ring = ring.difference(LineString([along(opening["startMeters"]), along(opening["endMeters"])]).buffer(
+            thickness * 2, cap_style="flat"))
     if ring.is_empty:
         raise ValueError("The openings remove every wall")
     # Constrained triangulation preserves concavities, openings and the inner ring.

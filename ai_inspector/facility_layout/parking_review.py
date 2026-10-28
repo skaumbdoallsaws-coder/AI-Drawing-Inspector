@@ -9,6 +9,7 @@ from .spatial import oriented_box_polygon
 VERSION = "parking-completeness-v1"
 LIMITATIONS = [
     "Bay counts use explicit parking_box footprints; loose lines and vehicle placements are not counted as bays.",
+    "Footprints with the staging role mark material staging (for example in front of dock doors), not parking.",
     "A corridor touching a bay is not proof that a vehicle can enter or turn.",
     "Vehicle swept paths, clear widths, obstacles, grades and external road connections require separate verification.",
     "Accessibility, fire access and local parking requirements are not certified by this review.",
@@ -49,13 +50,18 @@ def _near_floor(y, zone):
     return abs(float(y) - float(zone["floorElevation"])) <= .1
 
 
+def _is_bay(mark):
+    # Any other role still counts: relabelling a bay must not take it out of the review.
+    return mark.get("markingType") == "parking_box" and mark.get("semanticRole") != "staging"
+
+
 def _records(layout, zone):
     area = _polygon(zone)
     bays, lanes, walks = [], [], []
     for mark in layout.get("floorMarkings", []):
         if not _near_floor(mark["transform"]["position"]["y"], zone):
             continue
-        is_bay = mark["markingType"] == "parking_box"
+        is_bay = _is_bay(mark)
         is_lane = mark["semanticRole"] == "forklift_lane" and mark["markingType"] == "keep_clear"
         if not (is_bay or is_lane):
             continue
@@ -157,8 +163,7 @@ def review_changed_parking(before, after):
             + len(d.get("placements", []))) for d in (before, after)) > 500000:
         return {"reviewVersion": VERSION, "status": "not_checked", "certified": False,
                 "reason": "Parking review exceeded its geometry scope. Review selected zones separately."}
-    parking_marks = [[mark for mark in d.get("floorMarkings", [])
-                      if mark.get("markingType") == "parking_box"] for d in (before, after)]
+    parking_marks = [[mark for mark in d.get("floorMarkings", []) if _is_bay(mark)] for d in (before, after)]
     selected = []
     for zone in after.get("zones", []):
         named = bool(re.search(r"\bparking\b|\bcar\s*park\b", zone.get("label", ""), re.I))

@@ -103,16 +103,23 @@ DOCUMENT_TYPE_REGISTRY: Dict[str, Dict[str, Any]] = {
         "workspace": "documentation",
         "label": "Inspection Sheet",
         "shortLabel": "Inspection Sheet",
-        "status": "planned",
-        "pageOrientation": "portrait",
-        "generationAction": "Generate Draft",
+        "status": "available",
+        "pageOrientation": "landscape",
+        "generationAction": "Build Sheet",
         "supports": {
-            "cadFigures": True,
+            "cadFigures": False,
+            "drawingFigures": True,
             "flowingText": False,
-            "bom": False,
+            "bom": True,
             "controlledPdf": False,
+            "fillablePdf": True,
+            "openFields": True,
             "docx": False,
         },
+        "releaseNotice": (
+            "A working form: values the app does not have are open (amber) fields. "
+            "A filled copy can be returned to record the results."
+        ),
     },
 }
 

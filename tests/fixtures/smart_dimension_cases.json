@@ -1,0 +1,596 @@
+{
+ "note": "Faces as the Assembly view's face report lists them (centre and exact surface, metres in the view's axes) and what Smart Dimension gives for them: tests/test_assembly_smart_dimension.js and tests/test_assembly_dimensions.py both check these (docs/assembly-smart-dimension-plan.md).",
+ "cases": [
+  {
+   "name": "two parallel flat faces",
+   "faces": [
+    {
+     "center": [
+      0.1,
+      0,
+      0.2
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "normal": [
+       0,
+       -1,
+       0
+      ]
+     }
+    },
+    {
+     "center": [
+      0.1,
+      0.25,
+      0.2
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0.3,
+       0.25,
+       0.1
+      ],
+      "normal": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "kind": "distance",
+    "method": "parallel",
+    "mm": "250.00",
+    "in": "9.84"
+   }
+  },
+  {
+   "name": "flat faces at 60 degrees",
+   "faces": [
+    {
+     "center": [
+      0.5,
+      0,
+      0
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "normal": [
+       0,
+       1,
+       0
+      ]
+     }
+    },
+    {
+     "center": [
+      0.25000000000000006,
+      0.4330127018922193,
+      0
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "normal": [
+       -0.8660254037844386,
+       0.5000000000000001,
+       0
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "kind": "angle",
+    "mm": "60.00\u00b0",
+    "in": "60.00\u00b0"
+   }
+  },
+  {
+   "name": "the same faces from their far halves: 120 degrees",
+   "faces": [
+    {
+     "center": [
+      -0.5,
+      0,
+      0
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "normal": [
+       0,
+       1,
+       0
+      ]
+     }
+    },
+    {
+     "center": [
+      0.25000000000000006,
+      0.4330127018922193,
+      0
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "normal": [
+       -0.8660254037844386,
+       0.5000000000000001,
+       0
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "kind": "angle",
+    "mm": "120.00\u00b0",
+    "in": "120.00\u00b0"
+   }
+  },
+  {
+   "name": "flat faces 0.03 degrees apart are parallel",
+   "faces": [
+    {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "normal": [
+       0,
+       1,
+       0
+      ]
+     }
+    },
+    {
+     "center": [
+      0,
+      0.2,
+      0
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0,
+       0.2,
+       0
+      ],
+      "normal": [
+       0.0005235987516737029,
+       0.9999998629221643,
+       0
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "kind": "distance",
+    "method": "parallel",
+    "mm": "200.00",
+    "in": "7.87"
+   }
+  },
+  {
+   "name": "a hole",
+   "faces": [
+    {
+     "center": [
+      0.016,
+      0.01,
+      0
+     ],
+     "geometry": {
+      "kind": "cylinder",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       1,
+       0
+      ],
+      "radius": 0.016
+     }
+    }
+   ],
+   "expect": {
+    "kind": "diameter",
+    "mm": "\u00d832.00",
+    "in": "\u00d81.26"
+   }
+  },
+  {
+   "name": "a ball",
+   "faces": [
+    {
+     "center": [
+      0,
+      1.05,
+      0
+     ],
+     "geometry": {
+      "kind": "sphere",
+      "center": [
+       0,
+       1,
+       0
+      ],
+      "radius": 0.05
+     }
+    }
+   ],
+   "expect": {
+    "kind": "diameter",
+    "sphere": true,
+    "mm": "S\u00d8100.00",
+    "in": "S\u00d83.94"
+   }
+  },
+  {
+   "name": "a flat face alone has no size",
+   "faces": [
+    {
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "normal": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "error": true
+   }
+  },
+  {
+   "name": "two parallel axes",
+   "faces": [
+    {
+     "center": [
+      0.01,
+      0,
+      0.3
+     ],
+     "geometry": {
+      "kind": "cylinder",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "radius": 0.01
+     }
+    },
+    {
+     "center": [
+      0.08,
+      0.08,
+      0.3
+     ],
+     "geometry": {
+      "kind": "cylinder",
+      "point": [
+       0.06,
+       0.08,
+       5
+      ],
+      "axis": [
+       0,
+       0,
+       -1
+      ],
+      "radius": 0.02
+     }
+    }
+   ],
+   "expect": {
+    "kind": "distance",
+    "method": "parallel",
+    "mm": "100.00",
+    "in": "3.94"
+   }
+  },
+  {
+   "name": "an axis parallel to a flat face",
+   "faces": [
+    {
+     "center": [
+      0.2,
+      0.06,
+      0
+     ],
+     "geometry": {
+      "kind": "cylinder",
+      "point": [
+       0,
+       0.05,
+       0
+      ],
+      "axis": [
+       1,
+       0,
+       0
+      ],
+      "radius": 0.01
+     }
+    },
+    {
+     "center": [
+      0,
+      0,
+      0.5
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "normal": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "kind": "distance",
+    "method": "parallel",
+    "mm": "50.00",
+    "in": "1.97"
+   }
+  },
+  {
+   "name": "an axis square to a flat face",
+   "faces": [
+    {
+     "center": [
+      0.01,
+      0.3,
+      0
+     ],
+     "geometry": {
+      "kind": "cylinder",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       1,
+       0
+      ],
+      "radius": 0.01
+     }
+    },
+    {
+     "center": [
+      0.4,
+      0,
+      0
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "normal": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "kind": "angle",
+    "mm": "90.00\u00b0",
+    "in": "90.00\u00b0"
+   }
+  },
+  {
+   "name": "axes at 30 degrees",
+   "faces": [
+    {
+     "center": [
+      0.2,
+      0.01,
+      0
+     ],
+     "geometry": {
+      "kind": "cylinder",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       1,
+       0,
+       0
+      ],
+      "radius": 0.01
+     }
+    },
+    {
+     "center": [
+      0.17320508075688776,
+      0.09999999999999999,
+      0.1
+     ],
+     "geometry": {
+      "kind": "cylinder",
+      "point": [
+       0,
+       0,
+       0.1
+      ],
+      "axis": [
+       0.8660254037844387,
+       0.49999999999999994,
+       0
+      ],
+      "radius": 0.01
+     }
+    }
+   ],
+   "expect": {
+    "kind": "angle",
+    "mm": "30.00\u00b0",
+    "in": "30.00\u00b0"
+   }
+  },
+  {
+   "name": "a ball's centre to a flat face",
+   "faces": [
+    {
+     "center": [
+      0,
+      0.32,
+      0
+     ],
+     "geometry": {
+      "kind": "sphere",
+      "center": [
+       0,
+       0.3,
+       0
+      ],
+      "radius": 0.02
+     }
+    },
+    {
+     "center": [
+      0.2,
+      0,
+      0
+     ],
+     "geometry": {
+      "kind": "plane",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "normal": [
+       0,
+       1,
+       0
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "kind": "distance",
+    "method": "perpendicular",
+    "mm": "300.00",
+    "in": "11.81"
+   }
+  },
+  {
+   "name": "a ball's centre to an axis",
+   "faces": [
+    {
+     "center": [
+      0,
+      0.32,
+      0.4
+     ],
+     "geometry": {
+      "kind": "sphere",
+      "center": [
+       0,
+       0.3,
+       0.4
+      ],
+      "radius": 0.02
+     }
+    },
+    {
+     "center": [
+      0,
+      0.01,
+      0
+     ],
+     "geometry": {
+      "kind": "cylinder",
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "radius": 0.01
+     }
+    }
+   ],
+   "expect": {
+    "kind": "distance",
+    "method": "perpendicular",
+    "mm": "300.00",
+    "in": "11.81"
+   }
+  }
+ ]
+}

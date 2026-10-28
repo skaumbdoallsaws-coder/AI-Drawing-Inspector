@@ -67,6 +67,7 @@ def extension_definitions():
     finish = obj({"color": COLOR, "jointColor": COLOR, "panelWidthMeters": number(.5, 10),
         "panelHeightMeters": number(.4, 5), "jointWidthMeters": number(.003, .05),
         "accentStrips": array(obj({**rectangle, "color": COLOR}), 64),
+        "bands": array(obj({"bottomMeters": number(0, 30), "heightMeters": number(.05, 30), "color": COLOR}), 16),
         "wallFaces": array(obj({"placementId": ref("placementId"), "assetDefinitionRevision": HEX_ID,
                                "face": {"enum": ["positive_z", "negative_z"]}, "color": COLOR}), 64),
         "fittedArtworks": array(fitted, 48),
@@ -79,7 +80,8 @@ def extension_definitions():
     wall_properties = {"boundarySource": {"enum": ["plan", "polygon"]},
         "heightMeters": number(.5, 30), "thicknessMeters": number(.05, 2),
         "openings": array(obj({"edge": perimeter_target["properties"]["edge"],
-                              "startMeters": number(0, 30000), "endMeters": number(0, 30000)}), 128),
+                              "startMeters": number(0, 30000), "endMeters": number(0, 30000),
+                              "heightMeters": number(0.5, 30)}, ["edge", "startMeters", "endMeters"]), 128),
         "exteriorFinish": finish, "interiorColor": COLOR}
     plan_walls = obj({**wall_properties, "boundarySource": {"const": "plan"}},
                      ["boundarySource", "heightMeters", "thicknessMeters"])
@@ -103,7 +105,13 @@ def extension_definitions():
             "surfaceId": text(120, pattern="^[A-Za-z0-9_-]{1,120}$"), "color": COLOR,
             "slopeAxis": {"enum": ["x", "z"]},
             **{key: number(-10000, 10000) for key in
-               ("minX", "maxX", "minZ", "maxZ", "startElevation", "endElevation")}}), 256, 1)}),
+               ("minX", "maxX", "minZ", "maxZ", "startElevation", "endElevation")}}), 256, 1),
+            # Images painted flat on the ground (a logo or a target on the yard), centred on a level surface.
+            "marks": array(obj({"markId": text(83, pattern="^gm-[a-z0-9-]{1,80}$"), "label": text(120),
+                                "imagePath": IMAGE, "uv": FRACTIONS, "x": number(-10000, 10000),
+                                "z": number(-10000, 10000), "widthMeters": number(.3, 60),
+                                "depthMeters": number(.3, 60), "rotationDegrees": number(-360, 360)}), 16)},
+            ["schemaVersion", "surfaces"]),
         "planSettings": obj({"widthMeters": number(.5, 10000), "depthMeters": number(.5, 10000),
                              "gridSpacingMeters": number(.05, 10000), "majorGridSpacingMeters": number(.05, 10000)}),
     }
@@ -175,6 +183,25 @@ def operation_batch_schema():
             schema["description"] = description
         variants.append(schema)
 
+    from .site_tools import schemas as site_schemas
+    site = site_schemas()
+    operation('set_site_context', {'siteContext':site['siteContext']}, description=
+        'Replace the authored property context only after inspection; preserve unrelated areas, entrances and edge assignments. '
+        'The existing georeference and imagery must remain unchanged. Location lookup/removal and image fetching are manual UI only. Review required.')
+    operation('set_building_pose', {'buildingPose':site['buildingPose']}, description=
+        'Move/turn the building in property-frame meters and true bearing, preserving every interior coordinate. Review required.')
+    operation('upsert_site_area', {'area':site['siteArea']}, description=
+        'Create or replace one outdoor polygon by stable areaId in the property frame, not the interior frame. '
+        'Only a drive or sidewalk may cross a setback, and only through an entrance on that edge, within its width. '
+        'Review required.')
+    operation('delete_site_area', {'areaId':site['siteAreaId']}, description='Delete only the explicitly requested outdoor area. Review required.')
+    operation('upsert_site_reference', {'reference':site['siteReference']}, description=
+        'Create or replace one reference point by referenceId (rp-1, rp-2, ...) in property-frame metres: a feature '
+        'a builder can find on site, with its source and accuracy in metres. measured is the same point measured '
+        'independently (a survey) for the fit check. Review required.')
+    operation('delete_site_reference', {'referenceId':site['siteReferenceId']}, description=
+        'Delete only the explicitly requested reference point. Review required.')
+
     entities = (("zone", "zoneId", "zone", "add_zone", "edit_zone", "delete_zone"),
         ("floorMarking", "markingId", "floorMarking", "add_floor_marking", "edit_floor_marking", "delete_floor_marking"),
         ("route", "routeId", "route", "add_route", "edit_route", "delete_route"),
@@ -198,8 +225,10 @@ def operation_batch_schema():
         "This is decorative paint, not an aisle/access corridor. Expanded entity count still controls review thresholds.")
     new_placement = entity_shape("placement", "placementId")
     new_placement["properties"]["componentMaterials"] = {"type": "null"}
-    # orientation replaces the quaternion; the gateway resolves it before validation.
+    # orientation replaces the quaternion, and attachTo or seatAt the position and turn;
+    # the gateway resolves them before validation.
     new_placement["properties"]["transform"]["required"].remove("quaternion")
+    new_placement["properties"]["transform"]["required"].remove("position")
     orientation = {"oneOf": [obj({"facing": {"enum": ["north", "east", "south", "west"]}}),
                              obj({"yawDegrees": number(-360, 360)})]}
     orientation_help = (
@@ -207,13 +236,43 @@ def operation_batch_schema():
         "facing turns the asset's reviewed front side (facilitySemantics.functionalSides.front) to that direction; "
         "assets without one fail, so use yawDegrees, which turns the unrotated model as a compass heading turns "
         "(90 turns its north side east), and say the orientation is unverified.")
+    workstation_help = (
+        " To put an item on a desk or worktop, give attachTo {supportPlacementId, surfaceId} with a surface from that "
+        "asset's supportSurfaces (inspect_facility_asset): the item is centred on it at its height, turned to face the "
+        "surface's user. To seat a chair at a desk whose facilitySemantics has a workstationSeat, give seatAt "
+        "{deskPlacementId}. With either, leave out orientation and give placement.transform as only {scale: 1}.")
     operation("place_asset", {"placementId": ref("placementId"), "placement": new_placement,
-              "orientation": orientation}, ["placement"],
-              "Give orientation or placement.transform.quaternion. " + orientation_help +
+              "orientation": orientation,
+              "attachTo": obj({"supportPlacementId": ref("placementId"), "surfaceId": text(120)}),
+              "seatAt": obj({"deskPlacementId": ref("placementId")})}, ["placement"],
+              "Give orientation or placement.transform.quaternion. " + orientation_help + workstation_help +
               " For component finishes, first save the new placement, inspect its visual slots, then preview set_component_materials.")
-    variants[-1]["allOf"] = [{"if": {"not": {"required": ["orientation"]}}, "then": {"properties": {
-        "placement": {"properties": {"transform": {"required": ["quaternion"]}}}}},
-        "else": {"properties": {"placement": {"properties": {"transform": {"not": {"required": ["quaternion"]}}}}}}}]
+
+    def transform_rule(rule):
+        return {"properties": {"placement": {"properties": {"transform": rule}}}}
+    computed = {"anyOf": [{"required": ["attachTo"]}, {"required": ["seatAt"]}]}
+    variants[-1]["allOf"] = [
+        {"if": computed,
+         "then": {"not": {"required": ["orientation"]},
+                  **transform_rule({"type": "object",
+                                    "not": {"anyOf": [{"required": ["position"]}, {"required": ["quaternion"]}]}})},
+         "else": transform_rule({"required": ["position"]})},
+        {"if": {"not": {"anyOf": [{"required": ["orientation"]}, computed]}}, "then": transform_rule({"required": ["quaternion"]})},
+        {"if": {"required": ["orientation"]}, "then": transform_rule({"not": {"required": ["quaternion"]}})},
+        {"not": {"required": ["attachTo", "seatAt"]}}]
+    # After place_asset's rules above, which attach to the last variant defined.
+    array_placement = entity_shape("placement", "placementId")
+    array_placement["properties"].pop("placementId", None)
+    array_placement["properties"]["componentMaterials"] = {"type": "null"}
+    operation("place_asset_array", {"arrayId": text(60, pattern="^[a-z0-9][a-z0-9-]{0,59}$"),
+              "placement": array_placement,
+              "step": obj({"x": number(-1000, 1000), "y": number(-1000, 1000), "z": number(-1000, 1000)}, ["x", "z"]),
+              "count": {"type": "integer", "minimum": 1, "maximum": 200}}, ["arrayId", "placement", "step", "count"],
+              "A straight row of count copies of one placement (rack bays, parked cars), each step metres on from the "
+              "last. Ids are pl-<arrayId>-001 onward; placing the same arrayId again replaces that row. Give "
+              "placement.transform with the first copy's position and its quaternion.")
+    operation("delete_asset_array", {"arrayId": text(60, pattern="^[a-z0-9][a-z0-9-]{0,59}$")}, ["arrayId"],
+              "Remove a whole row placed by place_asset_array.")
     operation("move_placement", {"placementId": ref("placementId"), "position": ref("vector3"),
                                 "movementKind": {"enum": ["user", "automatic"]}}, ["placementId", "position"])
     operation("rotate_placement", {"placementId": ref("placementId"), "quaternion": ref("quaternion"),
@@ -229,12 +288,27 @@ def operation_batch_schema():
     operation("replace_asset", {"placementId": ref("placementId"), "assetId": ref("stableId"),
         "assetDefinitionRevision": ref("revision"), "keepAppearance": {"type": "boolean"}},
         ["placementId", "assetId", "assetDefinitionRevision"])
-    operation("set_appearance", {"placementIds": array(ref("placementId"), 50, 1, uniqueItems=True), "color": nullable(COLOR)})
+    operation("set_appearance", {"placementIds": array(ref("placementId"), 50, 1, uniqueItems=True), "color": nullable(COLOR),
+              "appearance": nullable(ref("facilityAppearance"))}, ["placementIds"],
+              "Give exactly one of color (a plain color) or appearance (a finish from list_facility_library, plus only the "
+              "adjustments you need, such as grain or sizeMeters). Null in either resets to the asset's own finish. "
+              "Finishes are visual only and never change the asset's engineering material.")
+    variants[-1]["oneOf"] = [{"required": ["color"]}, {"required": ["appearance"]}]
     operation("set_component_materials", {"placementId": ref("placementId"),
         "materials": nullable(placement["componentMaterials"]), "visualSha256": HEX_ID}, ["placementId", "materials"],
-        "For nonnull materials supply the exact visualSha256 from inspect_facility_components. Preserve unrelated overrides.")
+        "For nonnull materials supply the exact visualSha256 from inspect_facility_components. Preserve unrelated overrides. "
+        "A part can take a plain finish (color, roughness, metalness) or a library finish (appearanceId).")
     variants[-1]["allOf"] = [{"if": {"properties": {"materials": {"not": {"type": "null"}}}},
                                "then": {"required": ["visualSha256"]}}]
+    from ai_inspector.facility_layout.appearance_library import load_library
+    adjustments = obj({"exposure": number(0, 5), "environmentIntensity": number(0, 5), "ambient": number(0, 5),
+                       "directional": number(0, 5), "shadows": {"type": "boolean"},
+                       "environmentRotationDegrees": number(-360, 360),
+                       "background": {"anyOf": [{"enum": ["theme", "environment"]}, COLOR]}}, [])
+    operation("set_scene", {"scene": nullable(obj({"version": {"const": 1},
+              "sceneId": {"enum": sorted(load_library()["scenes"])}, "adjustments": adjustments}, ["version", "sceneId"]))},
+              description="Choose the viewport scene saved with this layout: background, lighting, reflections and shadows. "
+                          "It never moves or changes equipment. Null restores the Classic scene.")
     operation("rename_layout", {"displayName": ref("label")})
     for name, key, definition, reset in (("set_floor_surfaces", "surfaces", "floorSurfaces", False),
             ("set_interior_walls", "walls", "interiorWalls", False), ("set_perimeter_walls", "wallSettings", "perimeterWalls", True),

@@ -127,3 +127,19 @@ def test_interior_paint_preserves_geometry_exterior_and_artwork():
 def test_invalid_interior_paint_is_rejected(color):
     with pytest.raises(ValueError,match='Interior wall color'):
         compile_perimeter_walls(settings(interiorColor=color),layout())
+
+
+def test_a_band_runs_level_round_the_walls_and_is_optional():
+    doc = layout()
+    value = settings(exteriorFinish=dict(color='#06B6D4'))
+    assert 'bands' not in compile_perimeter_walls(value, doc)['settings']['exteriorFinish']  # older finishes unchanged
+    value['exteriorFinish']['bands'] = [dict(bottomMeters=2, heightMeters=1, color='#FFFFFF')]
+    walls = apply_facility_layout_operations(doc, [dict(op='set_perimeter_walls', wallSettings=value)])['document']
+    validate_perimeter_walls(walls)
+    assert walls['extensions'][KEY]['settings']['exteriorFinish']['bands'] == [
+        dict(bottomMeters=2.0, heightMeters=1.0, color='#ffffff')]
+    for bad in (dict(bottomMeters=2.5, heightMeters=1, color='#ffffff'), dict(bottomMeters=0, heightMeters=1, color='white'),
+                dict(bottomMeters=0, heightMeters=1, color='#ffffff', edge=0)):
+        value['exteriorFinish']['bands'] = [bad]
+        with pytest.raises(ValueError):
+            compile_perimeter_walls(value, doc)

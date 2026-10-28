@@ -17,6 +17,7 @@ BLOCK_TYPES = frozenset({
     "table",
     "entity_reference",
     "actions",
+    "file",
 })
 SOURCE_TYPES = frozenset({
     "manufacturer",
@@ -373,6 +374,15 @@ def normalize_chat_content_block(raw: Any) -> Optional[Dict[str, Any]]:
             if facts
             else None
         )
+    if block_type == "file":
+        # A file the app made (the layout PDF), opened from the app itself: same-origin API paths only.
+        url = _text(raw.get("url"), 600)
+        name = _text(raw.get("fileName") or raw.get("title"), 160)
+        if not name or not re.fullmatch(r"/api/[A-Za-z0-9._~%/-]+(\?[A-Za-z0-9._~%=&-]*)?", url) or "//" in url:
+            return None
+        mime = _text(raw.get("mimeType"), 80)
+        return {"type": block_type, "fileName": name, "url": url,
+                "mimeType": mime if mime == "application/pdf" else "", "detail": _text(raw.get("detail"), 160)}
     if block_type == "visualization":
         spec = raw.get("spec") or raw.get("visualization") or raw
         if not isinstance(spec, Mapping):

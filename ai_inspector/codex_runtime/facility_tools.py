@@ -33,14 +33,17 @@ def tool_specs():
     from .engineering_schemas import tool_specs as engineering_tool_specs
     from .authoring_reads import tool_specs as authoring_tool_specs
     from .component_inventory import tool_specs as component_tool_specs
+    from .library_tools import tool_specs as library_tool_specs
     from ai_inspector.facility_layout.parking_review import tool_spec as parking_tool_spec
     from ai_inspector.facility_layout.workstation_review import tool_spec as workstation_tool_spec
     from .research_tools import tool_specs as research_tool_specs
+    from .site_tools import tool_specs as site_tool_specs
     return [{"name": "inspect_facility_context", "description":
              "Read the authorized saved layout summary and stable entity IDs. Call this before detailed inspection. No edits.",
              "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
             *[deepcopy(spec) for spec in facility_layout_read_tool_specs() if spec["name"] in READ_NAMES],
-            *engineering_tool_specs(), *authoring_tool_specs(), *component_tool_specs(), parking_tool_spec(), workstation_tool_spec(), *research_tool_specs()]
+            *engineering_tool_specs(), *authoring_tool_specs(), *component_tool_specs(), *library_tool_specs(),
+            parking_tool_spec(), workstation_tool_spec(), *research_tool_specs(), *site_tool_specs()]
 
 
 def read_bound_layout(runtime, principal, reference):
@@ -68,6 +71,7 @@ class FacilityReadGateway:
         self.status_sink = status_sink
         self.progress = None  # TurnProgress when the chat pane shows steps
         self.closed, self.calls = False, 0
+        self.packages = {}  # whole planned designs, staged by preview_planned_design (assisted_tools.py)
         self.credential_check = None
         self.receipts = []
         self.lock = asyncio.Lock()
@@ -84,8 +88,14 @@ class FacilityReadGateway:
             raise PilotError("codex_run_closed", "This inspection is no longer active.", 409)
         return read_bound_layout(self.runtime, self.principal, self.reference)
 
+    def take_image(self):
+        """The picture the last tool call produced, if any; handed out once."""
+        image, self.last_image = getattr(self, "last_image", None), None
+        return image
+
     async def call(self, name, arguments):
         async with self.lock:
+            self.last_image = None
             self.before_call(name)
             step = await self.progress.tool_started(name, arguments) if self.progress else None
             started = time.monotonic()
@@ -158,7 +168,85 @@ class FacilityReadGateway:
         provider = getattr(self.runtime, "asset_catalog_provider", None)
         return LayoutNames(layout, provider(self.principal, self.reference["siteId"]) if provider else [])
 
+    def _component_inventory(self, placement_id, representation):
+        """The saved placement's visual fingerprint and part keys, as Sage's component inspection reads them."""
+        resolver = self.runtime.service.component_inventory_resolver
+        if resolver is None:
+            raise PilotError('codex_visual_unavailable', 'Component inspection is not configured for this host.', 422)
+        return resolver(self.principal, self.reference, placement_id, representation)
+
+    def _layout_pdf(self):
+        """Build the bound layout's plan PDF once, as its link will (plan_pdf.create_plan_pdf_router), and keep a
+        file card for the reply."""
+        import re
+        from urllib.parse import quote
+        from ai_inspector.facility_layout.errors import FacilityLayoutError
+        from ai_inspector.facility_layout.plan_pdf import _fit_check, load_template, render_plan_pdf
+        service = self.runtime.service
+        site_id, layout_id = self.reference['siteId'], self.reference['layoutId']
+        saved = read_bound_layout(self.runtime, self.principal, self.reference)
+        cache = {}
+
+        def resolve(asset_id, revision):
+            if (asset_id, revision) not in cache:
+                try:
+                    cache[asset_id, revision] = service._resolve_asset_dependency(self.principal, site_id, asset_id,
+                                                                                   revision)[0]
+                except FacilityLayoutError:
+                    cache[asset_id, revision] = None
+            return cache[asset_id, revision]
+        content = render_plan_pdf(saved['layout'], resolve, revision=saved.get('revision') or '',
+                                  fit=_fit_check(service, self.principal, site_id, saved['layout']))
+        pages = len(re.findall(rb'/Type\s*/Page(?![a-zA-Z])', content))
+        titles = {sheet['title'].capitalize(): sheet['number'] for sheet in load_template()['sheets']}
+        sheets = [f'{number} {title.lower()}' for title, number in titles.items()][-pages:] if pages else []
+        name = re.sub(r'[\\/:*?"<>|]+', ' ', saved['layout'].get('displayName') or layout_id).strip()[:100] or 'Layout'
+        url = (f"/api/facility-layouts/{quote(site_id, safe='')}/{quote(layout_id, safe='')}/plan.pdf"
+               f"?revision={quote(str(saved.get('revision') or ''), safe='')}")
+        self.pdf = {'type': 'file', 'fileName': f'{name} - layout plan.pdf', 'url': url, 'mimeType': 'application/pdf',
+                    'detail': f"PDF - {pages} sheet{'s' if pages != 1 else ''} - 11 x 17 in - ready to print"}
+        return {'readOnly': True, 'available': True, 'fileName': self.pdf['fileName'], 'pages': pages,
+                'sheets': sheets, 'paper': '11 x 17 in (tabloid), landscape', 'bytes': len(content),
+                'revision': saved.get('revision'), 'shownInChat': 'as a file card the user clicks to open'}
+
     def _read_data(self, name, arguments):
+        from .site_tools import CATALOG_TOOLS, NAMES as SITE_NAMES, STEP_TOOLS, read_site
+        if name == 'prepare_layout_pdf':
+            return self._layout_pdf()
+        if name in SITE_NAMES:
+            from ai_inspector.facility_layout.site_imagery import site_photo_path
+            saved = read_bound_layout(self.runtime,self.principal,self.reference)
+            photo_path = lambda image: site_photo_path(self.runtime.service, self.principal,  # noqa: E731
+                                                       self.reference['siteId'], image['imageId'])
+            try:
+                catalog = ({asset['assetId']: asset for asset in
+                            self.runtime.asset_catalog_provider(self.principal, self.reference['siteId'])}
+                           if name in CATALOG_TOOLS else None)  # model sizes, and exact revisions for placements
+                inventory = self._component_inventory if name == 'plan_design_paint' else None
+                result = read_site(saved['layout'],name,arguments,photo_path,catalog,inventory)
+            except ValueError as exc:
+                from ai_inspector.facility_layout.site_steps import StepError
+                # A build step that cannot do what was asked says why; Sage tells the user and asks.
+                code = 'site_step_refused' if isinstance(exc, StepError) else 'site_arguments_invalid'
+                raise PilotError(code,str(exc),422) from exc
+            # A picture rides beside the JSON result, for runtimes that can show one (mcp_bridge.py).
+            self.last_image = result.pop('_image', None)
+            if name in STEP_TOOLS and result.get('available'):
+                # Each build step waits here as one package; Sage reads the summary, not the operations.
+                package = result.pop('operations')
+                package_id = f"{result['step']}-{len(self.packages) + 1}"
+                self.packages[package_id] = package
+                result['package'] = {'packageId': package_id, 'operations': len(package)}
+                result['staging'] = ('Stage this step with preview_planned_design and this packageId: one review. '
+                                     'Then stop: the user asks for the next step.')
+            if name == 'plan_design_paint' and result.get('available'):
+                package = result.pop('operations')
+                package_id = f'paint-{len(self.packages) + 1}'
+                self.packages[package_id] = package
+                result['package'] = {'packageId': package_id, 'operations': len(package)}
+                result['staging'] = ('Stage the paint at once with preview_planned_design and this packageId: '
+                                     'one review covers the walls, the yard target and every truck, pickup and rack.')
+            return dict(result,identity=deepcopy(self.reference),savedLayoutOnly=True,readOnly=True)
         from .engineering_tools import ENGINEERING_READ_NAMES, read_engineering_facts
         from .authoring_reads import READ_NAMES as AUTHORING_READ_NAMES, read_authoring
         from .research_tools import NAMES
@@ -177,6 +265,9 @@ class FacilityReadGateway:
         if name == "inspect_facility_components":
             from .component_inventory import inspect_components
             return inspect_components(self.runtime, self.principal, self.reference, arguments)
+        if name == "list_facility_library":
+            from .library_tools import list_library
+            return list_library(arguments)
         if name in AUTHORING_READ_NAMES:
             return read_authoring(self.runtime, self.principal, self.reference, name, arguments)
         if name in ENGINEERING_READ_NAMES:

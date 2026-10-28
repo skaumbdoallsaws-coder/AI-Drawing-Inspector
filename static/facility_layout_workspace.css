@@ -1836,6 +1836,11 @@
     user-select: none;
 }
 
+/* The rulers along the top and left give the coordinates: the grid's own numbers would repeat them. */
+.ip-flw-plan-view .ip-flw-plan-coordinate-label {
+    display: none;
+}
+
 .ip-flw-plan-ruler[hidden],
 .ip-flw-plan-ruler-corner[hidden],
 .ip-flw-plan-scale[hidden],
@@ -4500,4 +4505,521 @@ html[data-theme="dark"] .ip-flw-root {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
     }
+}
+
+/* Site tab (site context, SC1): the layout on its real site, true north up. */
+.ip-flw-site-view {
+    --ip-flw-site-danger: #b42318;
+    background: #1d2328;
+    cursor: grab;
+}
+
+html[data-theme="dark"] .ip-flw-site-view {
+    --ip-flw-site-danger: #ff9b8f;
+}
+
+.ip-flw-site-view.ip-flw-site-picking {
+    cursor: crosshair;
+}
+
+.ip-flw-site-canvas {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    /* A drag across the edge labels selected their text, and the next handle press then
+       started a native drag of that selection, cancelling the rotate/vertex gesture. */
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.ip-flw-site-building {
+    fill: color-mix(in srgb, var(--ip-flw-accent) 22%, transparent);
+    stroke: var(--ip-flw-accent);
+}
+
+.ip-flw-site-origin {
+    fill: none;
+    stroke: #ffffff;
+}
+
+.ip-flw-site-panel {
+    position: absolute;
+    z-index: 18;
+    top: 10px;
+    left: 10px;
+    width: 270px;
+    padding: 10px 12px 12px;
+    border: 1px solid var(--ip-flw-border-strong);
+    border-radius: 6px;
+    color: var(--ip-flw-text);
+    background: color-mix(in srgb, var(--ip-flw-panel) 96%, transparent);
+    box-shadow: 0 5px 16px rgb(0 0 0 / 24%);
+    font-size: 11px;
+    cursor: default;
+    max-height: calc(100% - 32px);
+    overflow-y: auto;
+}
+
+/* Each tab at least as wide as its label; the row wraps rather than clip one. */
+.ip-flw-site-sections { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 10px; }
+.ip-flw-site-sections button { flex: 1 0 auto; padding: 5px 6px; white-space: nowrap; }
+.ip-flw-site-panel-collapsed { width: auto; padding: 4px; overflow: visible; }
+.ip-flw-site-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.ip-flw-site-head-title { font-size: 12px; font-weight: 700; }
+.ip-flw-site-collapse { padding: 3px 8px; }
+.ip-flw-site-expand { padding: 5px 12px; font-weight: 700; white-space: nowrap; }
+.ip-flw-site-sections button[aria-pressed="true"] { border-color: #4cc9cd; background: #25474e; color: #fff; }
+.ip-flw-site-property { fill: #399e79; fill-opacity: .08; stroke: #6fe3ae; pointer-events: none; }
+.ip-flw-site-area { fill-opacity: .82; cursor: pointer; }
+.ip-flw-site-handle { fill: #f2d17f; stroke: #1e282c; cursor: grab; }
+.ip-flw-site-entrance { fill: #eac05c; stroke: #20252a; }
+.ip-flw-site-reference { fill: #ff5fa2; stroke: #20252a; }
+.ip-flw-site-reference-label { fill: #ffe3f0; stroke: #20252a; paint-order: stroke; font-weight: 700; pointer-events: none; }
+.ip-flw-site-edge-label { fill: #fff; stroke: #172025; stroke-width: 2px; paint-order: stroke; pointer-events: none; }
+.ip-flw-site-sketch { fill: none; stroke: #f0cb73; stroke-dasharray: 5 3; }
+.ip-flw-site-edge-row { display: grid; grid-template-columns: 1fr 74px; gap: 6px; align-items: center; margin: 7px 0; }
+.ip-flw-site-vertices { resize: vertical; min-height: 72px; font-family: monospace; }
+.ip-flw-site-panel textarea.ip-flw-site-input { width: 100%; box-sizing: border-box; }
+.ip-flw-site-label > .ip-flw-site-input { display: block; width: 100%; box-sizing: border-box; margin-top: 3px; }
+.ip-flw-site-finding { color: #f3c884; line-height: 1.5; margin: 7px 0; }
+
+.ip-flw-site-title {
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.ip-flw-site-label {
+    display: block;
+    margin: 8px 0 3px;
+    color: var(--ip-flw-muted);
+    font-size: 10px;
+}
+
+.ip-flw-site-row {
+    display: flex;
+    gap: 6px;
+}
+
+.ip-flw-site-input {
+    flex: 1;
+    min-width: 0;
+    min-height: 26px;
+    padding: 3px 6px;
+    border: 1px solid var(--ip-flw-border);
+    border-radius: 3px;
+    color: var(--ip-flw-text);
+    background: var(--ip-flw-panel);
+    font: inherit;
+}
+
+select.ip-flw-site-input {
+    width: 100%;
+}
+
+.ip-flw-site-button {
+    min-height: 26px;
+    margin: 6px 6px 0 0;
+    padding: 3px 9px;
+    border: 1px solid var(--ip-flw-border);
+    border-radius: 3px;
+    color: var(--ip-flw-text);
+    background: var(--ip-flw-panel-alt);
+    font: inherit;
+    cursor: pointer;
+}
+
+.ip-flw-site-row .ip-flw-site-button {
+    margin: 0;
+}
+
+.ip-flw-site-button:hover:not(:disabled) {
+    border-color: var(--ip-flw-accent);
+}
+
+.ip-flw-site-button:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.ip-flw-site-match {
+    display: block;
+    width: 100%;
+    text-align: left;
+}
+
+.ip-flw-site-danger {
+    color: var(--ip-flw-site-danger);
+}
+
+.ip-flw-site-place {
+    font-weight: 600;
+}
+
+.ip-flw-site-coordinates {
+    margin: 2px 0 6px;
+    color: var(--ip-flw-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.ip-flw-site-note,
+.ip-flw-site-hint,
+.ip-flw-site-status,
+.ip-flw-site-error {
+    margin: 8px 0 0;
+    line-height: 1.35;
+}
+
+.ip-flw-site-note {
+    color: var(--ip-flw-muted);
+}
+
+.ip-flw-site-progress {
+    position: absolute;
+    bottom: 58px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: min(440px, calc(100% - 32px));
+    padding: 12px 16px;
+    border: 1px solid #3d9dbd;
+    border-radius: 4px;
+    background: #17282f;
+    color: #f3f8fa;
+    pointer-events: none;
+    z-index: 5;
+    overflow-wrap: anywhere;
+}
+.ip-flw-site-progress[hidden] { display: none; }
+.ip-flw-site-progress-error { border-color: #dba675; background: #35251d; }
+
+.ip-flw-site-status {
+    color: var(--ip-flw-accent);
+}
+
+.ip-flw-site-error {
+    color: var(--ip-flw-site-danger);
+}
+
+.ip-flw-site-opacity {
+    width: 100%;
+    accent-color: var(--ip-flw-accent);
+}
+
+.ip-flw-site-north {
+    position: absolute;
+    z-index: 17;
+    top: 10px;
+    right: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 34px;
+    padding: 5px 0 3px;
+    border-radius: 17px;
+    color: #ffffff;
+    background: rgb(0 0 0 / 45%);
+    font-size: 11px;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+.ip-flw-site-north-arrow {
+    width: 0;
+    height: 0;
+    margin-bottom: 1px;
+    border-right: 6px solid transparent;
+    border-bottom: 12px solid #ffffff;
+    border-left: 6px solid transparent;
+}
+
+.ip-flw-site-scale {
+    position: absolute;
+    z-index: 17;
+    bottom: 12px;
+    left: 12px;
+    color: #ffffff;
+    font-size: 10px;
+    text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
+    pointer-events: none;
+}
+
+.ip-flw-site-scale[hidden] {
+    display: none;
+}
+
+.ip-flw-site-scale-bar {
+    height: 6px;
+    border: 2px solid #ffffff;
+    border-top: 0;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 60%);
+}
+
+.ip-flw-site-credit {
+    position: absolute;
+    z-index: 17;
+    right: 8px;
+    bottom: 6px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #ffffff;
+    background: rgb(0 0 0 / 45%);
+    font-size: 10px;
+    pointer-events: none;
+}
+
+.ip-flw-site-credit:empty {
+    display: none;
+}
+
+/* Site tab: the Measure tool (a view tool; nothing is saved). */
+.ip-flw-site-measure-toggle {
+    position: absolute;
+    z-index: 17;
+    top: 14px;
+    right: 56px;
+    min-height: 28px;
+    padding: 3px 11px;
+    border: 1px solid var(--ip-flw-border-strong);
+    border-radius: 14px;
+    color: #ffffff;
+    background: rgb(0 0 0 / 55%);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.ip-flw-site-measure-toggle[hidden] {
+    display: none;
+}
+
+.ip-flw-site-measure-toggle[aria-pressed="true"] {
+    border-color: #f5c84c;
+    color: #1d2328;
+    background: #f5c84c;
+}
+
+/* Roads from the US Census map, over the photo and under the lot and building. */
+.ip-flw-site-road {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+
+.ip-flw-site-route {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+
+.ip-flw-site-route-arrow {
+    pointer-events: none;
+}
+
+.ip-flw-site-route-label {
+    stroke: rgb(0 0 0 / 80%);
+    paint-order: stroke;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+.ip-flw-site-road-highway { stroke: #ff8c42; }
+.ip-flw-site-road-arterial { stroke: #ffd166; }
+.ip-flw-site-road-local { stroke: rgb(255 255 255 / 80%); }
+.ip-flw-site-road-ramp,
+.ip-flw-site-road-service,
+.ip-flw-site-road-alley,
+.ip-flw-site-road-private,
+.ip-flw-site-road-parking_aisle { stroke: rgb(207 216 220 / 75%); }
+.ip-flw-site-road-railroad { stroke: #f2f2f2; stroke-linecap: butt; }
+
+.ip-flw-site-road-label {
+    fill: #ffffff;
+    stroke: rgb(0 0 0 / 75%);
+    paint-order: stroke;
+    font-weight: 600;
+    pointer-events: none;
+}
+
+/* The globe flight to a new site: above the map and its controls, below the panel. */
+.ip-flw-site-globe {
+    position: absolute;
+    z-index: 17;
+    inset: 0;
+    overflow: hidden;
+    background-color: #02040a;
+    background-image:
+        radial-gradient(1px 1px at 23px 41px, rgb(255 255 255 / 85%), transparent),
+        radial-gradient(1px 1px at 117px 93px, rgb(255 255 255 / 55%), transparent),
+        radial-gradient(1.5px 1.5px at 171px 19px, rgb(255 255 255 / 90%), transparent),
+        radial-gradient(1px 1px at 61px 157px, rgb(255 255 255 / 45%), transparent),
+        radial-gradient(1px 1px at 197px 139px, rgb(255 255 255 / 70%), transparent),
+        radial-gradient(1px 1px at 141px 171px, rgb(255 255 255 / 40%), transparent);
+    background-size: 211px 181px;
+    cursor: default;
+    animation: ip-flw-site-globe-in 300ms ease-out;
+    transition: opacity 700ms ease;
+}
+
+.ip-flw-site-globe-leaving {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Two classes: MapLibre's own sheet, loaded later, makes its container position: relative. */
+.ip-flw-site-globe .ip-flw-site-globe-map {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.ip-flw-site-globe-skip {
+    position: absolute;
+    z-index: 1;
+    top: 14px;
+    right: 14px;
+    min-height: 28px;
+    padding: 3px 13px;
+    border: 1px solid rgb(255 255 255 / 45%);
+    border-radius: 14px;
+    color: #ffffff;
+    background: rgb(0 0 0 / 55%);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.ip-flw-site-globe-credit {
+    position: absolute;
+    z-index: 1;
+    right: 8px;
+    bottom: 6px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #ffffff;
+    background: rgb(0 0 0 / 45%);
+    font-size: 10px;
+}
+
+/* The fetch status stays readable over the globe. */
+.ip-flw-site-flying .ip-flw-site-progress {
+    z-index: 18;
+}
+
+@keyframes ip-flw-site-globe-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ip-flw-site-globe { animation: none; transition: none; }
+}
+
+.ip-flw-site-measure-hint {
+    position: absolute;
+    z-index: 17;
+    top: 50px;
+    right: 12px;
+    max-width: 300px;
+    padding: 4px 9px;
+    border-radius: 4px;
+    color: #ffffff;
+    background: rgb(0 0 0 / 60%);
+    font-size: 11px;
+    pointer-events: none;
+}
+
+.ip-flw-site-measure-hint[hidden] {
+    display: none;
+}
+
+.ip-flw-site-view.ip-flw-site-measuring {
+    cursor: crosshair;
+}
+
+.ip-flw-site-measure-layer {
+    pointer-events: none;
+}
+
+.ip-flw-site-measure-line {
+    stroke: #f5c84c;
+}
+
+.ip-flw-site-measure-point {
+    fill: #f5c84c;
+    stroke: #1d2328;
+}
+
+.ip-flw-site-measure-label {
+    fill: #ffffff;
+    stroke: #1d2328;
+    paint-order: stroke;
+    font-weight: 700;
+}
+
+/* Site tab: public reference layers and their checks. */
+.ip-flw-site-layer-row {
+    display: grid;
+    grid-template-columns: 18px 80px 1fr;
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+    font-size: 11px;
+}
+
+.ip-flw-site-layer-name {
+    font-weight: 600;
+}
+
+.ip-flw-site-layer-state {
+    color: var(--ip-flw-muted);
+    font-size: 10px;
+}
+
+.ip-flw-site-view.ip-flw-site-tracing {
+    cursor: crosshair;
+}
+
+.ip-flw-site-trace-box {
+    fill: rgb(0 229 255 / 10%);
+    stroke: #00e5ff;
+    pointer-events: none;
+}
+
+.ip-flw-site-view.ip-flw-site-picking-parcel {
+    cursor: copy;
+}
+
+.ip-flw-site-check-group {
+    margin: 8px 0 0;
+    padding: 6px 8px;
+    border: 1px solid var(--ip-flw-border);
+    border-radius: 4px;
+}
+
+.ip-flw-site-check-target {
+    margin-bottom: 3px;
+    font-weight: 700;
+}
+
+.ip-flw-site-check-item {
+    padding-left: 10px;
+    border-left: 3px solid var(--ip-flw-border);
+    line-height: 1.35;
+}
+
+.ip-flw-site-check-item.ip-flw-site-check-high {
+    border-left-color: #d92d20;
+}
+
+.ip-flw-site-check-item.ip-flw-site-check-moderate {
+    border-left-color: #f5a524;
+}
+
+.ip-flw-site-check-item.ip-flw-site-check-none {
+    border-left-color: #3fb950;
 }

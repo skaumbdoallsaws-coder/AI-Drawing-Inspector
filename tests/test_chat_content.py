@@ -459,3 +459,15 @@ def test_table_request_and_closed_table_contract() -> None:
     assert prose.startswith("## Department comparison")
     assert "across 2 supplied rows" in prose
     assert prose.endswith("Would you like the asset category breakdown?")
+
+
+def test_a_file_card_opens_an_app_file_and_nothing_else() -> None:
+    [card] = normalize_chat_content_blocks([{"type": "file", "fileName": "Bayport warehouse - layout plan.pdf",
+        "url": "/api/facility-layouts/site-local/fl-a/plan.pdf?revision=r-1", "mimeType": "application/pdf",
+        "detail": "PDF - 3 sheets"}])
+    assert card == {"type": "file", "fileName": "Bayport warehouse - layout plan.pdf",
+                    "url": "/api/facility-layouts/site-local/fl-a/plan.pdf?revision=r-1",
+                    "mimeType": "application/pdf", "detail": "PDF - 3 sheets"}
+    for url in ("https://example.com/a.pdf", "//example.com/a.pdf", "javascript:alert(1)", "/static/../a.pdf x",
+                "/generated/a.pdf", "/api//example.com/a.pdf"):
+        assert normalize_chat_content_blocks([{"type": "file", "fileName": "a.pdf", "url": url}]) == []

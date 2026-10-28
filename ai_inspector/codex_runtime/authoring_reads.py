@@ -37,6 +37,8 @@ def tool_specs():
                 "pageSize": {"type": "integer", "minimum": 1, "maximum": 25}}}},
         {"name": "inspect_facility_asset", "description":
             "Read an authorized catalog asset's exact geometry, coordinate frame, capabilities, connectors and revision. "
+            "supportSurfaces name the spots that hold items (place_asset attachTo); facilitySemantics.workstationSeat "
+            "marks where a desk's chair goes (place_asset seatAt). "
             "Search with search_industrial_assets first. This does not import files or infer machine component roles.",
          "input_schema": {"type": "object", "additionalProperties": False, "required": ["assetId"],
             "properties": {"assetId": identity,
@@ -77,7 +79,8 @@ def read_authoring(runtime, principal, reference, name, arguments):
             revision = candidates[0]["assetDefinitionRevision"]
         definition = runtime.service._resolve_asset_definition(principal, reference["siteId"], asset_id, revision)
         fields = ("assetId", "displayName", "category", "description", "tags", "geometry", "coordinateFrame",
-                  "connectors", "clearances", "capabilities", "facilitySemantics", "utilities", "mounting")
+                  "connectors", "clearances", "capabilities", "facilitySemantics", "utilities", "mounting",
+                  "supportSurfaces")
         selected = {k: deepcopy(definition[k]) for k in fields if k in definition}
         # Reviewed sides live on the catalog record, beside the revisioned definition.
         record = next((a for a in candidates if a.get("assetDefinitionRevision") == revision), None)

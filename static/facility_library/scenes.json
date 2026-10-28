@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "libraryVersion": "2026.10.25.2",
+  "notes": "A scene changes only the viewport: background, lighting, reflections and shadows. It never changes the layout.",
+  "groups": [
+    {
+      "groupId": "basic",
+      "label": "Basic scenes"
+    },
+    {
+      "groupId": "studio",
+      "label": "Studio scenes"
+    },
+    {
+      "groupId": "industrial",
+      "label": "Industrial scenes"
+    }
+  ],
+  "environments": [
+    {
+      "environmentId": "machine-shop",
+      "label": "Machine Shop 02",
+      "file": "environments/machine_shop_02_1k.hdr",
+      "bytes": 1695085,
+      "sha256": "51daf55cce4919262ddab7f224cff97f66daf341a5c96d31ef6a43b71ff18c99",
+      "source": {
+        "provider": "Poly Haven",
+        "assetId": "machine_shop_02",
+        "url": "https://polyhaven.com/a/machine_shop_02",
+        "author": "Sergej Majboroda",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://polyhaven.com/license",
+        "resolution": "1k",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "environmentId": "warehouse",
+      "label": "Empty Warehouse 01",
+      "file": "environments/empty_warehouse_01_1k.hdr",
+      "bytes": 1672140,
+      "sha256": "9b3d611cadc32c3a0c7e084ce5611c0650293881c4a041e7fa13748fe0dc6451",
+      "source": {
+        "provider": "Poly Haven",
+        "assetId": "empty_warehouse_01",
+        "url": "https://polyhaven.com/a/empty_warehouse_01",
+        "author": "Sergej Majboroda",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://polyhaven.com/license",
+        "resolution": "1k",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    },
+    {
+      "environmentId": "soft-studio",
+      "label": "Studio Small 08",
+      "file": "environments/studio_small_08_1k.hdr",
+      "bytes": 1508872,
+      "sha256": "f6a989f89432eb4eee3191364a9c1ceed195c4ec3544173a3c04fd96cb91d0ba",
+      "source": {
+        "provider": "Poly Haven",
+        "assetId": "studio_small_08",
+        "url": "https://polyhaven.com/a/studio_small_08",
+        "author": "Sergej Majboroda",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://polyhaven.com/license",
+        "resolution": "1k",
+        "retrieved": "2026-10-19",
+        "modifications": "None"
+      }
+    }
+  ],
+  "scenes": [
+    {
+      "sceneId": "classic",
+      "label": "Classic",
+      "group": "basic",
+      "description": "InspectorPro's standard viewport lighting. Only library finishes show reflections.",
+      "environment": null,
+      "environmentIntensity": 0,
+      "background": "theme",
+      "ambient": 1.55,
+      "directional": 2.0,
+      "exposure": 1.22,
+      "shadows": false,
+      "thumbnail": "thumbnails/scenes/classic.png"
+    },
+    {
+      "sceneId": "neutral-room",
+      "label": "Neutral room",
+      "group": "basic",
+      "description": "Soft, even studio light with neutral reflections.",
+      "environment": "room",
+      "environmentIntensity": 0.35,
+      "background": "theme",
+      "ambient": 0.15,
+      "directional": 2.4,
+      "exposure": 1.0,
+      "shadows": false,
+      "thumbnail": "thumbnails/scenes/neutral-room.png"
+    },
+    {
+      "sceneId": "presentation-light",
+      "label": "Presentation, light",
+      "group": "basic",
+      "description": "Light backdrop with soft shadows for screenshots.",
+      "environment": "room",
+      "environmentIntensity": 0.38,
+      "background": "#eef0f2",
+      "ambient": 0.15,
+      "directional": 2.4,
+      "exposure": 1.0,
+      "shadows": true,
+      "thumbnail": "thumbnails/scenes/presentation-light.png"
+    },
+    {
+      "sceneId": "presentation-dark",
+      "label": "Presentation, dark",
+      "group": "basic",
+      "description": "Dark backdrop with soft shadows for screenshots.",
+      "environment": "room",
+      "environmentIntensity": 0.35,
+      "background": "#1c2026",
+      "ambient": 0.15,
+      "directional": 2.6,
+      "exposure": 1.0,
+      "shadows": true,
+      "thumbnail": "thumbnails/scenes/presentation-dark.png"
+    },
+    {
+      "sceneId": "soft-studio",
+      "label": "Soft studio",
+      "group": "studio",
+      "description": "Photographic studio lighting from a CC0 HDRI.",
+      "environment": "soft-studio",
+      "environmentIntensity": 0.45,
+      "background": "theme",
+      "ambient": 0.2,
+      "directional": 2.2,
+      "exposure": 1.0,
+      "shadows": false,
+      "thumbnail": "thumbnails/scenes/soft-studio.png"
+    },
+    {
+      "sceneId": "machine-shop",
+      "label": "Machine shop",
+      "group": "industrial",
+      "description": "Industrial hall lighting and reflections from a CC0 HDRI.",
+      "environment": "machine-shop",
+      "environmentIntensity": 0.35,
+      "background": "theme",
+      "ambient": 0.15,
+      "directional": 2.4,
+      "exposure": 1.0,
+      "shadows": false,
+      "thumbnail": "thumbnails/scenes/machine-shop.png"
+    },
+    {
+      "sceneId": "warehouse",
+      "label": "Warehouse",
+      "group": "industrial",
+      "description": "Overhead warehouse lighting from a CC0 HDRI.",
+      "environment": "warehouse",
+      "environmentIntensity": 0.45,
+      "background": "theme",
+      "ambient": 0.15,
+      "directional": 2.4,
+      "exposure": 1.0,
+      "shadows": false,
+      "thumbnail": "thumbnails/scenes/warehouse.png"
+    }
+  ]
+}

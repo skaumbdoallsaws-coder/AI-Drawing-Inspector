@@ -16,7 +16,7 @@ UNDO_TYPE = "exact-undo-v1"
 # Navigation requires its separate coordinate-free Sage semantic contract.
 ALLOWED_OPERATIONS = frozenset({
     "rename_layout", "add_zone", "edit_zone", "delete_zone", "place_asset", "move_placement",
-    "rotate_placement", "set_appearance", "set_component_materials", "replace_asset",
+    "rotate_placement", "set_appearance", "set_component_materials", "set_scene", "replace_asset",
     "duplicate_placement", "delete_placement", "set_position_mode", "set_snap_relationship",
     "add_floor_marking", "add_floor_path", "edit_floor_marking", "delete_floor_marking", "set_interior_walls", "set_floor_surfaces",
     "set_decals", "set_perimeter_walls", "set_ground", "set_plan_settings", "add_aisle", "edit_aisle",
@@ -24,8 +24,10 @@ ALLOWED_OPERATIONS = frozenset({
     "add_utility_network_node", "edit_utility_network_node", "delete_utility_network_node",
     "add_utility_network_segment", "edit_utility_network_segment", "delete_utility_network_segment",
     "attach_process_binding", "edit_process_binding", "detach_process_binding",
-    "upsert_floor_surface", "delete_floor_surface", "upsert_interior_wall", "delete_interior_wall",
+    "upsert_floor_surface", "delete_floor_surface", "place_asset_array", "delete_asset_array", "upsert_interior_wall", "delete_interior_wall",
     "upsert_decal", "delete_decal", "edit_perimeter_walls", "upsert_wall_artwork", "delete_wall_artwork",
+    "set_site_context", "set_building_pose", "upsert_site_area", "delete_site_area",
+    "upsert_site_reference", "delete_site_reference",
 })
 
 
@@ -33,10 +35,11 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
-def guard_operations(operations):
-    if not isinstance(operations, list) or not 1 <= len(operations) <= 50:
-        raise FacilityValidationError("operation_proposal_invalid", "Propose between 1 and 50 operations.")
-    if len(json.dumps(operations, allow_nan=False).encode()) > 24000:
+def guard_operations(operations, max_operations=50, max_bytes=24000):
+    """Model-written batches stay small; a design package built by the server's planner may be larger."""
+    if not isinstance(operations, list) or not 1 <= len(operations) <= max_operations:
+        raise FacilityValidationError("operation_proposal_invalid", f"Propose between 1 and {max_operations} operations.")
+    if len(json.dumps(operations, allow_nan=False).encode()) > max_bytes:
         raise FacilityValidationError("operation_proposal_too_large", "Split the proposal into smaller batches.")
     for operation in operations:
         if not isinstance(operation, dict) or operation.get("op") not in ALLOWED_OPERATIONS:
@@ -138,22 +141,57 @@ def _review_changed_aisle_obstructions(prepared, affected):
         "Move the equipment out of the aisle, or reroute the aisle around it.")}
 
 
-def prepare(service, principal, site_id, layout_id, base_revision, request, *, undo=False, edit_mode="preview"):
+# Notes a planner cannot settle stay in the review text but do not hold back a build-step package.
+VERIFICATION_NOTES = frozenset({"parking_maneuvering_unverified"})
+
+
+def _finding_key(finding):
+    return (finding.get("code"), finding.get("areaId"), finding.get("edgeIndex"), finding.get("otherAreaId"))
+
+
+def _design_findings(review):
+    return [finding for item in (review or {}).get("reviews") or [] for finding in item.get("findings") or []]
+
+
+def prepare(service, principal, site_id, layout_id, base_revision, request, *, undo=False, edit_mode="preview",
+            limits=None, planned=False):
     component_proofs = []
     design_review = None
     workstation_review = None
     aisle_review = None
     obstruction_review = None
+    site_review = None
     if undo:
         prepared, dependencies, operations = prepare_undo(
             service, principal, site_id, layout_id, base_revision, request["receiptId"])
     else:
         operations = deepcopy(request["operations"])
-        guard_operations(operations)
+        guard_operations(operations, *(limits or ()))
         from .proposal_artifacts import validate_proposal_artwork
         current = service.get_layout(principal, site_id, layout_id)
         if current["revision"] != base_revision:
             raise FacilityConflictError("revision_conflict", "The layout changed before validating the proposal.")
+        from .site_context import KEY, normalize_site_context
+        for operation in operations:
+            if operation.get('op') != 'set_site_context':
+                continue
+            raw = current['layout'].get('extensions',{}).get(KEY)
+            if not raw or operation.get('siteContext') is None:
+                raise FacilityValidationError('site_location_manual_only','Place or remove the site through the manual Site tab.')
+            # Sage cannot carry reference overlays, check results or roads through its schema; keep the stored ones.
+            proposed = dict(operation['siteContext']) if isinstance(operation['siteContext'], dict) else operation['siteContext']
+            if isinstance(proposed, dict):
+                for key in ('overlays','layerChecks','roads','references'):
+                    if key in raw and key not in proposed:
+                        proposed[key] = raw[key]
+                operation['siteContext'] = proposed
+            try:
+                before = normalize_site_context(raw,current['layout'])
+                after = normalize_site_context(operation['siteContext'],current['layout'])
+            except ValueError as exc:
+                raise FacilityValidationError('invalid_site_context',str(exc)) from exc
+            if any(before.get(key) != after.get(key) for key in ('georeference','imagery','overlays','layerChecks','roads')):
+                raise FacilityValidationError('site_location_manual_only','Keep the existing georeference, imagery, roads and reference layers. Location and layer changes use the manual Site tab.')
         validate_proposal_artwork(service, principal, site_id, current["layout"], operations)
         from .proposal_components import validate_proposal_components
         component_proofs = validate_proposal_components(
@@ -170,6 +208,24 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
         workstation_review = review_changed_workstations(service, principal, site_id, current["layout"], prepared["document"])
         aisle_review = _review_changed_aisle_reach(prepared, affected)
         obstruction_review = _review_changed_aisle_obstructions(prepared, affected)
+        if any(op['op'] in {'set_site_context','set_building_pose','upsert_site_area','delete_site_area',
+                            'upsert_site_reference','delete_site_reference','set_plan_settings'} for op in operations):
+            from .site_context import analyze_site_context
+            site_review = analyze_site_context(prepared['document'])
+            # What this batch adds: a finding the saved layout already has (a placeholder building off the lot,
+            # say) is not this batch's doing.
+            try:
+                saved_findings = analyze_site_context(current['layout'])['findings'] if (
+                    current['layout'].get('extensions') or {}).get(KEY) else []
+            except (ValueError, KeyError):
+                saved_findings = []
+            known = {_finding_key(f) for f in saved_findings}
+            site_review['newFindingCount'] = sum(1 for f in site_review['findings'] if _finding_key(f) not in known)
+            site_review['newWarnings'] = [f['code'] for f in site_review['findings']
+                                          if f.get('severity') != 'info' and _finding_key(f) not in known][:40]
+            site_review['findingCount'] = len(site_review['findings'])
+            site_review['findingsTruncated'] = len(site_review['findings']) > 40
+            site_review['findings'] = site_review['findings'][:40]
     dependency_hash = fingerprint({"schemaVersion": 1, "dependencies": dependencies.to_dict(),
         "spatialEngineVersion": prepared["spatialDiagnostics"].get("spatialEngineVersion"),
         "routingEngineVersion": prepared["routingDiagnostics"].get("routingEngineVersion"),
@@ -182,6 +238,7 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
         "operationReceipt": deepcopy(prepared), "ghostPreview": {"layout": deepcopy(prepared["document"])},
         "transactionBinding": binding.to_dict(), "validation": {
             "noNewErrors": True,
+            **({"siteContext": site_review} if site_review is not None else {}),
             # Early in the payload: agents may see only the start of a large result.
             **({"aisleObstructions": obstruction_review} if obstruction_review is not None else {}),
             **({"aisleReach": aisle_review} if aisle_review is not None else {}),
@@ -191,8 +248,17 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
             **({"functionalDesign": design_review} if design_review is not None else {})}}
     from .direct_edit_policy import evaluate
     alternative["editMode"] = edit_mode
-    alternative["directApplyPolicy"] = evaluate(operations, prepared, undo=undo)
-    if design_review is not None:
+    alternative["directApplyPolicy"] = evaluate(operations, prepared, undo=undo, planned=planned)
+    site_warnings = (site_review or {}).get("newWarnings") or []
+    if planned and design_review is not None and all(
+            f.get("code") in VERIFICATION_NOTES for f in _design_findings(design_review)):
+        design_review_blocks = False  # the planner's car park: aisles, entrance and walk all present
+    else:
+        design_review_blocks = design_review is not None
+    if site_warnings:
+        alternative["directApplyPolicy"].update(eligible=False,
+            reason="Review the site findings before applying.")
+    elif design_review_blocks:
         alternative["directApplyPolicy"].update(eligible=False,
             reason="Review the parking access and circulation findings before applying.")
     elif obstruction_review is not None:
@@ -201,7 +267,8 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
     return alternative, binding, prepared, dependencies
 
 
-def create(service, principal, site_id, layout_id, base_revision, *, operations=None, undo_receipt_id=None, edit_mode="preview"):
+def create(service, principal, site_id, layout_id, base_revision, *, operations=None, undo_receipt_id=None, edit_mode="preview",
+           limits=None, planned=False):
     require_facility_action(principal, tenant_id=principal.tenant_id, site_id=site_id, action="proposal.create")
     service._require_capability("agent_preview")
     if edit_mode not in {"direct", "preview"}:
@@ -209,7 +276,7 @@ def create(service, principal, site_id, layout_id, base_revision, *, operations=
     undo = undo_receipt_id is not None
     request = {"receiptId": undo_receipt_id} if undo else {"operations": deepcopy(operations)}
     alternative, binding, prepared, _ = prepare(service, principal, site_id, layout_id, base_revision, request,
-        undo=undo, edit_mode=edit_mode)
+        undo=undo, edit_mode=edit_mode, limits=limits, planned=planned)
     if not prepared["changed"]:
         raise FacilityValidationError("operation_proposal_no_change", "The proposal makes no change to the saved layout.")
     # A preview is never permission to commit, even when another writer races it.
@@ -217,12 +284,14 @@ def create(service, principal, site_id, layout_id, base_revision, *, operations=
         raise FacilityConflictError("revision_conflict", "The layout changed while validating the proposal.")
     proposal_type = UNDO_TYPE if undo else PROPOSAL_TYPE
     proposal_id = deterministic_facility_proposal_id(layout_id=layout_id, base_revision=base_revision,
-        proposal_type=proposal_type, semantic_plan_hash=fingerprint({"request": request, "editMode": edit_mode}),
+        proposal_type=proposal_type, semantic_plan_hash=fingerprint({"request": request, "editMode": edit_mode,
+                                                                     **({"planned": True} if planned else {})}),
         dependency_fingerprint=binding.dependency_fingerprint)
     proposal = service.transaction_runtime.propose(tenant_id=principal.tenant_id, principal_id=principal.principal_id,
         proposal_id=proposal_id, binding=binding, payload={"tenantId": principal.tenant_id,
             "siteId": site_id, "layoutId": layout_id, "baseRevision": base_revision,
-            "proposalType": proposal_type, "request": request, "editMode": edit_mode},
+            "proposalType": proposal_type, "request": request, "editMode": edit_mode,
+            **({"limits": list(limits)} if limits else {}), **({"planned": True} if planned else {})},
         public_summary={**alternative["metrics"], "directApplyPolicy": alternative["directApplyPolicy"]})
     alternative.update(proposalId=proposal.proposal_id, createdAt=proposal.created_at, expiresAt=proposal.expires_at)
     return {"proposalId": proposal.proposal_id, "baseRevision": base_revision, "layoutRevision": base_revision,
@@ -233,5 +302,7 @@ def create(service, principal, site_id, layout_id, base_revision, *, operations=
 
 def regenerate(service, principal, site_id, layout_id, payload):
     service._require_capability("agent_preview")
+    # Opening the review and approving it rebuild the proposal; a planner package keeps the limits it was staged under.
     return prepare(service, principal, site_id, layout_id, payload["baseRevision"], payload["request"],
-        undo=payload["proposalType"] == UNDO_TYPE, edit_mode=payload.get("editMode", "preview"))
+        undo=payload["proposalType"] == UNDO_TYPE, edit_mode=payload.get("editMode", "preview"),
+        limits=payload.get("limits"), planned=bool(payload.get("planned")))

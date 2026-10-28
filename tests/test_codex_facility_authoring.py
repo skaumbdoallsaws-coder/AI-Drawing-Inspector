@@ -107,6 +107,21 @@ def test_harness_rejects_source_overlap_or_existing_output(tmp_path, relationshi
     assert source.is_dir()
 
 
+def test_fit_check_takes_an_asset_id_alone_when_it_has_one_revision(gym):
+    saved = gym.current()
+    revisions = {}
+    for item in gym.host.agent_runtime.asset_catalog_provider(gym.principal, gym.site_id):
+        revisions.setdefault(item["assetId"], set()).add(item["assetDefinitionRevision"])
+    asset_id = "asset-keyboard" if len(revisions.get("asset-keyboard", ())) == 1 else next(
+        key for key, value in sorted(revisions.items()) if len(value) == 1)
+    zone_id = saved["layout"]["zones"][0]["zoneId"]
+    result = asyncio.run(gym.gateway(saved["revision"]).call(
+        "analyze_facility_fit", {"assetId": asset_id, "zoneId": zone_id, "maximumResults": 2}))
+    assert result["ok"], result
+    assert result["data"]["assetDefinitionRevision"] == next(iter(revisions[asset_id]))
+    assert gym.current() == saved
+
+
 def test_harness_has_no_native_or_inference_entry_point():
     source = (Path(__file__).resolve().parents[1] / "tools/check_codex_facility_authoring.py").read_text()
     assert "import server" not in source

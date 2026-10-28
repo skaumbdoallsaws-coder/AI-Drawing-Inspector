@@ -6,7 +6,10 @@
     'use strict';
 
     function ensureFacilityTurnIdentity(payload, conversationId, newTurnId) {
-        if (!payload?.inspection_context?.attachments?.facility_layout) return payload;
+        // Facility Layout, Documentation, Assembly and 3D Model turns run on Codex, whose journal needs both identifiers.
+        const attachments = payload?.inspection_context?.attachments;
+        if (!attachments?.facility_layout
+            && !['documentation', 'assembly', '3dmodel'].includes(attachments?.session?.active_mode)) return payload;
         // Runtime identity is required even when server conversation memory is off.
         return { ...payload,
             conversation_id: payload.conversation_id || conversationId || payload.session_id,
@@ -54,6 +57,9 @@
             generation_context: 'Checking the brief and previous proposal',
             codex_connecting: 'Connecting the inspection runtime',
             codex_inspecting: 'Inspecting the saved layout',
+            codex_documentation: 'Reading the documentation',
+            codex_assembly: 'Reading the assembly',
+            codex_part: 'Reading the part',
             codex_researching: 'Researching public technical sources',
             generation_catalog: 'Inspecting available equipment',
             generation_search: 'Researching public sources',

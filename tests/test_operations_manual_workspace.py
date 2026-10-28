@@ -21,6 +21,7 @@ from ai_inspector.assembly_knowledge.library_registry import (
 from ai_inspector.documentation.registry import document_type_summaries
 from ai_inspector.operations_manual.artifacts import (
     attach_draft_render_artifacts,
+    carry_draft_render_artifacts,
     store_draft_render_artifact,
 )
 from ai_inspector.operations_manual.document import (
@@ -36,6 +37,8 @@ from ai_inspector.operations_manual.flow import (
 from ai_inspector.operations_manual.exports import (
     OperationsManualExportError,
     _block_frame,
+    _draw_block,
+    _edited_block,
     _insert_htmlbox_checked,
     _safety_symbol_semantics,
     build_prototype_docx_bytes,
@@ -776,6 +779,113 @@ def test_scene_edits_are_revisioned_presentation_overrides(tmp_path: Path) -> No
     assert composition["pageElementOverrides"][block["blockId"]]["text"] == (
         "Engineer-authored draft override."
     )
+
+
+def test_table_cells_list_items_and_captions_are_edited_on_the_page_and_exported(tmp_path: Path) -> None:
+    profile, catalog = _mmle()
+    baseline = build_operations_manual_document(profile, catalog, evidence_root=EVIDENCE_ROOT)
+    table_page, table = next((page, block) for page in baseline["pages"] for block in page["layoutBlocks"]
+                             if block["blockType"] in ("table", "key_value_table") and block.get("rows"))
+    list_page, listed = next((page, block) for page in baseline["pages"] for block in page["layoutBlocks"]
+                             if block["blockType"] in ("list", "figure_legend") and block.get("items"))
+    targets = server._operations_manual_editable_page_targets(baseline)
+    cell_id = f"{table['blockId']}.r0.c1"
+    item_id = f"{listed['blockId']}.i0"
+    assert cell_id in targets[table_page["pageId"]]["page_element"]
+    assert item_id in targets[list_page["pageId"]]["page_element"]
+    repository = DocumentationSceneRepository(tmp_path / "scenes")
+    revision = repository.read("MMLE-50D", catalog["sourceRevision"], baseline["manualPlanRevision"])["revision"]
+    for page, target_id, text in ((table_page, cell_id, "Edited cell 42 Nm"), (list_page, item_id, "Edited item")):
+        changed = repository.apply_command(
+            "MMLE-50D", catalog["sourceRevision"], baseline["manualPlanRevision"], base_revision=revision,
+            command={"operation": "update_text", "targetType": "page_element", "targetId": target_id,
+                     "pageId": page["pageId"], "text": text, "actor": "user"},
+            page_targets=targets)
+        revision = changed["revision"]
+    with pytest.raises(Exception, match="does not belong"):
+        repository.apply_command(
+            "MMLE-50D", catalog["sourceRevision"], baseline["manualPlanRevision"], base_revision=revision,
+            command={"operation": "update_text", "targetType": "page_element",
+                     "targetId": f"{table['blockId']}.r999.c0", "pageId": table_page["pageId"], "text": "x",
+                     "actor": "user"},
+            page_targets=targets)
+    rebuilt = build_operations_manual_document(
+        profile, catalog, evidence_root=EVIDENCE_ROOT, documentation_scene=changed["scene"],
+        documentation_scene_revision=changed["revision"])
+    pages = {page["pageId"]: page for page in rebuilt["pages"]}
+    edited_table = _edited_block(pages[table_page["pageId"]], table)
+    assert edited_table["rows"][0]["cells"][1] == "Edited cell 42 Nm"
+    assert table["rows"][0]["cells"][1] != "Edited cell 42 Nm", "the block itself is not changed"
+    assert _edited_block(pages[list_page["pageId"]], listed)["items"][0]["text"] == "Edited item"
+    import fitz
+
+    pdf = fitz.open()
+    sheet = pdf.new_page(width=960, height=540)
+    _draw_block(fitz, sheet, pages[table_page["pageId"]], table, rebuilt, tmp_path, "MMLE-50D")
+    assert "Edited cell 42 Nm" in sheet.get_text()
+
+
+def test_sage_reads_and_edits_page_text_through_the_page_routes(tmp_path: Path, monkeypatch) -> None:
+    from ai_inspector.codex_runtime.documentation_tools import document_page_text
+    from ai_inspector.codex_runtime.policy import PilotError
+
+    monkeypatch.setattr(server, "OPERATIONS_MANUAL_ROOT", tmp_path / "operations")
+    host = server._DocumentationAgentHost()
+    pages = host.document_pages("MMLE-50D", "operations_and_maintenance_manual")
+    page, table = next((page, block) for page in pages for block in page["layoutBlocks"]
+                       if block["blockType"] == "table" and block.get("rows"))
+    paragraph_page, paragraph = next((page, block) for page in pages for block in page["layoutBlocks"]
+                                     if block["blockType"] == "paragraph")
+    shown = document_page_text(page)
+    cell = next(block for block in shown["blocks"] if block["id"] == table["blockId"])["rows"][0][0]
+    assert cell["id"] == f"{table['blockId']}.r0.c0"
+    changed = host.edit_document_text("MMLE-50D", "operations_and_maintenance_manual", [
+        {"pageId": page["pageId"], "targetId": cell["id"], "text": "Sage cell"},
+        {"pageId": paragraph_page["pageId"], "targetId": paragraph["blockId"], "text": "Sage paragraph."}])
+    assert [row["targetId"] for row in changed] == [cell["id"], paragraph["blockId"]]
+    after = {row["pageId"]: row for row in host.document_pages("MMLE-50D", "operations_and_maintenance_manual")}
+    shown = document_page_text(after[page["pageId"]])
+    assert next(block for block in shown["blocks"] if block["id"] == table["blockId"])["rows"][0][0]["text"] == (
+        "Sage cell")
+    assert next(block for block in document_page_text(after[paragraph_page["pageId"]])["blocks"]
+                if block["id"] == paragraph["blockId"])["text"] == "Sage paragraph."
+    with pytest.raises(PilotError) as refused:
+        host.edit_document_text("MMLE-50D", "operations_and_maintenance_manual", [
+            {"pageId": page["pageId"], "targetId": "not-on-this-page", "text": "x"}])
+    assert refused.value.code == "document_text_edit_failed"
+
+
+def test_a_text_edit_keeps_the_figures_captured_and_a_figure_edit_does_not(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(server, "OPERATIONS_MANUAL_ROOT", tmp_path / "operations")
+    client = TestClient(server.app)
+    scene = client.get("/api/operations-manual/MMLE-50D/documentation-scene").json()
+    document = scene["document"]
+    figure_pages = [page for page in document["pages"] if page.get("renderRequest")]
+    for page in figure_pages:
+        store_draft_render_artifact(
+            server.OPERATIONS_MANUAL_ROOT, "MMLE-50D", document, page["pageId"], _png(),
+            source_revision=document["sourceRevision"], manual_plan_revision=document["manualPlanRevision"])
+    text_page, paragraph = next((page, block) for page in document["pages"] for block in page["layoutBlocks"]
+                                if block["blockType"] == "paragraph")
+    edited = client.post("/api/operations-manual/MMLE-50D/documentation-scene/commands", json={
+        "baseRevision": scene["revision"], "sourceRevision": document["sourceRevision"],
+        "manualPlanRevision": document["manualPlanRevision"], "operation": "update_text",
+        "pageId": text_page["pageId"], "targetType": "page_element", "targetId": paragraph["blockId"],
+        "text": "Edited text."})
+    assert edited.status_code == 200, edited.text
+    after = edited.json()["document"]
+    assert after["documentRevision"] != document["documentRevision"]
+    assert all(page["renderRequest"]["image"]["status"] == "ready"
+               for page in after["pages"] if page.get("renderRequest"))
+    assert all(page["renderRequest"]["image"]["documentRevision"] == after["documentRevision"]
+               for page in after["pages"] if page.get("renderRequest"))
+    # A figure whose request changed is not carried.
+    changed = copy.deepcopy(after)
+    changed["documentRevision"] = "f" * 64
+    changed["pages"][[page["pageId"] for page in changed["pages"]].index(figure_pages[0]["pageId"])][
+        "renderRequest"]["camera"] = {"moved": True}
+    kept = carry_draft_render_artifacts(server.OPERATIONS_MANUAL_ROOT, "MMLE-50D", after, changed)
+    assert kept == len(figure_pages) - 1
 
 
 def test_export_overrides_use_compiled_landscape_page_geometry() -> None:

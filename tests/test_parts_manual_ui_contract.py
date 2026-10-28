@@ -30,8 +30,11 @@ def test_assembly_viewer_defaults_to_reversible_neutral_gray_appearance() -> Non
 def test_assembly_ribbon_exposes_parts_manual_review_workflow() -> None:
     html = (ROOT / "static" / "index.html").read_text("utf-8")
 
-    assert "_ribbonIconBtn('partsManual', 'Parts Manual')" in html
-    assert "partsManualBtn.addEventListener('click', () => _openDocumentationWorkflow())" in html
+    # The Assembly ribbon's Parts Manual button was removed (2026-10-26); the Documentation workflow opens
+    # from the Workflows tab's type menu.
+    assert "_ribbonIconBtn('partsManual', 'Parts Manual')" not in html
+    assert "{ value: 'documentation',  label: 'Documentation'," in html
+    assert "openDocumentationWorkflow: () => _openDocumentationWorkflow()" in html
     assert "function _showPartsManualPanel()" in html
     assert "function _partsManualApplyIsolation(" in html
     assert "function _partsManualExplodeSection(" in html
@@ -240,7 +243,8 @@ def test_documentation_is_a_first_class_workflow_with_its_own_ribbon() -> None:
     assert "function _renderDocumentationWorkflowTab(" in html
     assert "function _renderDocumentationWorkflowRibbon(" in html
     assert "_renderDocumentationWorkflowRibbon(ribbon)" in html
-    assert "_showDocumentationWorkspace({ workflowMode: true, startBlank: true })" in html
+    # A document already shown for this assembly reopens; otherwise the workspace starts blank.
+    assert "_showDocumentationWorkspace({ workflowMode: true, startBlank: !restore, restore })" in html
     assert "+ (options.workflowMode ? ' workflow-mode' : '')" in html
     assert "documentation-canvas-stage" in html
     assert "function _documentationGenerateBaseline(" in html

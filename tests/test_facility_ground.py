@@ -81,3 +81,19 @@ def test_real_spatial_engine_rejects_wrong_level_and_accepts_yard():
     assert 'unsupported_mounting_surface' not in codes()
     doc['placements'][0]['transform']['position']['y']=0
     assert 'unsupported_mounting_surface' in codes()
+
+
+def test_marks_are_images_painted_flat_on_level_ground_and_optional():
+    target = dict(markId="gm-target", label=" Crosshair target ", imagePath="/generated/facility-wall-art/" + "a" * 64 + ".png",
+                  uv=[0, 0, 1, 1], x=5, z=5, widthMeters=12, depthMeters=12, rotationDegrees=0)
+    ground = {"schemaVersion": 1, "surfaces": [tile("yard", 0, 10)]}
+    assert "marks" not in normalize_ground(ground)  # ground stored before marks existed is unchanged
+    marked = normalize_ground(dict(ground, marks=[target]))
+    assert marked["marks"][0]["label"] == "Crosshair target" and marked["marks"][0]["x"] == 5.0
+    for change in (dict(x=50), dict(markId="target"), dict(imagePath="https://example.com/a.png"), dict(uv=[0, 0, 0, 1]),
+                   dict(widthMeters=100), dict(extra=1)):
+        with pytest.raises(ValueError):
+            normalize_ground(dict(ground, marks=[dict(target, **change)]))
+    ramp = {"schemaVersion": 1, "surfaces": [tile("ramp", 0, 10, 0, 1)]}
+    with pytest.raises(ValueError):  # a mark lies on level ground only
+        normalize_ground(dict(ramp, marks=[target]))

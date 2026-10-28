@@ -37,6 +37,11 @@ def _sides(front: str, **roles: str) -> dict[str, Any]:
 # Each model was viewed unrotated from all four sides in 3D on 2026-10-17.
 # An entry applies only to the exact revision that was viewed: a changed model
 # must be reviewed again rather than inherit a front that may no longer hold.
+# Entries are written in the model file's own axes (east = the file's +x,
+# north = its +z), as those views and the probe scripts report them. The
+# catalog converts them into the layout's model space (model_axes.py), where the
+# file's east side is the unrotated model's west side. Register new entries in
+# the file's axes as well.
 REGISTERED_ASSET_SEMANTICS: dict[str, tuple[str, dict[str, Any]]] = {
     # Seating: the seat faces the front.
     "asset-chair-black": (
@@ -54,11 +59,16 @@ REGISTERED_ASSET_SEMANTICS: dict[str, tuple[str, dict[str, Any]]] = {
         _sides("east", operator="east", rear="west")),
     # Corner cubicle (reviewed 2026-10-18): an L of panels and worktop along the
     # south and west sides, open to the north and east. Its footprint leaves the
-    # north-east quarter free, so the chair sits inside there facing the rear.
+    # north-east quarter free (x and z above -0.2 m), and its monitor, keyboard and
+    # mouse surfaces sit diagonally in the south-west corner. So the seat faces that
+    # corner (heading 225); at x = z = 0.25 m an office chair turned 45 degrees is as
+    # close to the worktop as its footprint allows (2026-10-20).
     # The two other cubicle models share the look but block their whole square.
     "asset-import-cubicle-corner-workstation": (
         "fb73cc329447cf13c40251ab781dd8e5f512c6143dc0cbb56ddb26b98618b372",
-        _sides("north", operator="north", rear="south")),
+        {**_sides("north", operator="north", rear="south"),
+         "workstationSeat": {"localPosition": {"x": 0.25, "z": 0.25}, "facingDegrees": 225,
+                             "evidenceStatus": "derived"}}),
     # Kitchen: appliance doors face the front; small appliances belong on a
     # worktop such as the kitchen assembly, not on the floor.
     "asset-breakroom-refrigerator": (
@@ -107,6 +117,14 @@ REGISTERED_ASSET_SEMANTICS: dict[str, tuple[str, dict[str, Any]]] = {
     "asset-vertical-band-saw": (
         "7f110adcd8591f9bfd83a016ad9a94b275a6a977c1736b81a06a9d11d1a17a66",
         _sides("east", operator="east")),
+    # Horizontal band saw (read from its CAD parts 2026-10-21): the blade and its
+    # cutting slot run along the long (x) axis, so bar stock crosses the bed along z.
+    # The cut sits near the bed's +z edge, so bars come in from the south and cut
+    # pieces leave north. The operator loads and clamps at the infeed side. To put the
+    # saw in line with stock racks, face its front (the infeed) toward the racks.
+    "asset-kalamazoo-h9aw-horizontal-band-saw": (
+        "8241a381234e3ec2f576c40c00e64581e6037aee3f374201ece6cdb427f70bfe",
+        _sides("south", operator="south", material_input="south", material_output="north")),
     "asset-industrial-oven": (
         "54abfa67a6a545f6ffacee883188bcf38c467517bb3034f5246cfcdb52f8cb32",
         _sides("north", loading="north")),

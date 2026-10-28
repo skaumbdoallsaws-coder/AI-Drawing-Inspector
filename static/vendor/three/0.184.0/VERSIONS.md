@@ -30,8 +30,16 @@ The core and every addon are the same version.
 | `examples/jsm/controls/PointerLockControls.js` | 5890 | `40d58db8018b85038939d4d8bff7112d4b8a0ad0367b37ae6f969eeee4310c25` |
 | `examples/jsm/loaders/STLLoader.js` | 10715 | `023ed97f848b633d8bcd53d4db3b996d29d0c644088700691297c552257d480b` |
 | `examples/jsm/renderers/CSS2DRenderer.js` | 7384 | `dc5f4c5075a3a330b7e679da943343dd86a0f2d745422194b5287e48d7204197` |
+| `examples/jsm/environments/RoomEnvironment.js` | 4960 | `55f466192cc84298755a424c5e040345006b2ee1455589b3b54126c2ea4123f4` |
+| `examples/jsm/loaders/HDRLoader.js` | 12444 | `fda66a24e0834b8fd166444d695589bf76dab1eb41f40cf1ba66a4fd4a9460ec` |
+| `examples/jsm/geometries/DecalGeometry.js` | 10100 | `6b2da6ea840926dfb0278841f96067c02964c73644c7f189720e89fe9baa2b10` |
 | `LICENSE` | 1081 | `8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc` |
 | `package.json` | 3574 | `8308e43d6d6dd4c636c2dfe2e724da07dcd9fe4349bba6afb56f2c5ba6625391` |
+
+The Facility appearance library (2026-10-19) added `RoomEnvironment.js`,
+`HDRLoader.js` and `DecalGeometry.js` from the same verified tarball:
+neutral reflections, Radiance `.hdr` scene lighting and projected equipment
+decals. `HDRLoader` reads uncompressed RGBE files only.
 
 No Draco, Meshopt, KTX2, Basis, or other decoder is included or approved by
 this manifest. Compression support requires a separate measured dependency

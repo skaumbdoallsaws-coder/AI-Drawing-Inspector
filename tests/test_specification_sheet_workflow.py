@@ -244,3 +244,69 @@ def test_documentation_type_selector_uses_supplied_theme_icons() -> None:
         for theme in ("light", "dark"):
             icon_path = asset_root / theme / icon_name
             assert icon_path.is_file(), f"Missing {theme} icon: {icon_path}"
+
+
+def test_viewport_edits_reach_the_pdf_and_docx(tmp_path: Path, monkeypatch) -> None:
+    """Text typed over a block, and a moved block, print in the exports as the viewport shows them."""
+    monkeypatch.setattr(server, "SPECIFICATION_SHEET_ROOT", tmp_path / "sheets")
+    client = TestClient(server.app)
+    generated = client.post("/api/specification-sheet/MMLE-50D/generate?rebaseline=true").json()
+    document = generated["document"]
+    page = document["pages"][0]
+    revision = generated["revision"]
+    for command in (
+        {"operation": "update_text", "targetId": "spec-title", "text": "MMLE-50D Shop Lift"},
+        {"operation": "update_text", "targetId": "spec-feature-2", "text": "Raises loads to bench height."},
+        {"operation": "translate", "targetId": "spec-tagline", "translation": [0.05, 0.0, 0.0]},
+    ):
+        response = client.post(
+            "/api/specification-sheet/MMLE-50D/documentation-scene/commands",
+            json={
+                "baseRevision": revision,
+                "sourceRevision": document["sourceRevision"],
+                "manualPlanRevision": document["manualPlanRevision"],
+                "pageId": page["pageId"],
+                "targetType": "page_element",
+                **command,
+            },
+        )
+        assert response.status_code == 200, response.text
+        revision = response.json()["revision"]
+        document = response.json()["document"]
+
+    captured = client.post(
+        f"/api/specification-sheet/MMLE-50D/document/{page['pageId']}/render",
+        data={
+            "documentRevision": document["documentRevision"],
+            "manualPlanRevision": document["manualPlanRevision"],
+            "sourceRevision": document["sourceRevision"],
+            "renderPipelineVersion": str(document["renderPipelineVersion"]),
+            "balloons": "[]",
+        },
+        files={"file": ("product.png", _product_capture(), "image/png")},
+    )
+    assert captured.status_code == 200, captured.text
+    result = client.post("/api/specification-sheet/MMLE-50D/pdf").json()
+    import fitz
+    from docx import Document
+
+    pdf = fitz.open(stream=client.get(result["pdf"]["url"]).content, filetype="pdf")
+    try:
+        text = pdf[0].get_text()
+        tagline = next(block for block in document["pages"][0]["layoutBlocks"]
+                       if block["blockId"] == "spec-tagline")
+        hits = [hit for hit in pdf[0].search_for(" ".join(tagline["text"].split()[:3]))
+                if 140 <= hit.y0 <= 160]
+    finally:
+        pdf.close()
+    assert "MMLE-50D Shop Lift" in text
+    assert "Raises loads to bench height." in text
+    assert hits and abs(hits[0].x0 - (36 + 0.05 * 612)) < 2
+
+    editable = Document(BytesIO(client.get(result["docx"]["url"]).content))
+    editable_text = "\n".join(
+        [paragraph.text for paragraph in editable.paragraphs]
+        + [cell.text for table in editable.tables for row in table.rows for cell in row.cells]
+    )
+    assert "MMLE-50D Shop Lift" in editable_text
+    assert "Raises loads to bench height." in editable_text

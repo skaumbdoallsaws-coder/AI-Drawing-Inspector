@@ -86,7 +86,7 @@ def run() -> int:
                 ).then(response => response.json())""",
                 ASSEMBLY_NUMBER,
             )
-            page.get_by_role("button", name="Parts Manual", exact=True).click()
+            page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
             manual = page.locator("#partsManualOverlay")
             manual.wait_for(state="visible", timeout=30_000)
             manual.get_by_role("button", name="Suggest Structure", exact=True).click()

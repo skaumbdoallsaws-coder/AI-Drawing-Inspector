@@ -52,7 +52,52 @@ def test_display_style_lifecycle_preserves_documentation_capture_authority() -> 
 def test_display_style_is_persistent_and_no_longer_has_a_second_wireframe_toggle() -> None:
     html = _html()
 
-    assert "assyDisplayStyle: 'shaded_edges'" in html
-    assert "_setViewerDisplayStyle('assembly', state.assyDisplayStyle || 'shaded_edges')" in html
+    assert "assyDisplayStyle: 'shaded'," in html and "threeDisplayStyle: 'shaded'," in html
+    assert "_setViewerDisplayStyle('assembly', state.assyDisplayStyle || 'shaded')" in html
     assert "select[data-viewer-display-style=\"${kind}\"]" in html
     assert "wireCb.id = 'assy-wireframe'" not in html
+
+
+def test_each_display_style_has_a_cube_and_the_toolbar_button_is_a_cube() -> None:
+    html = _html()
+
+    assert "function _displayStyleIconSvg(style)" in html
+    body = html[html.index("function _displayStyleIconSvg(style)"):]
+    body = body[:body.index("\n        }\n")]
+    for style in ("shaded_edges", "shaded", "hidden_lines_removed", "hidden_lines_visible", "wireframe", "xray"):
+        assert f"                {style}: " in body, style
+    assert "stroke-dasharray" in body and "currentColor" in body
+    assert "swatch.innerHTML = _displayStyleIconSvg(style.id);" in html
+    # The display style button shows the shaded-with-edges cube, not the coloured ball.
+    assert "if (kind === 'display') {\n                return _displayStyleIconSvg('shaded_edges');" in html
+    assert "ballGloss" not in html and ".display-style-swatch" not in html
+    # Each item lays the cube and its label out in a row (an inline icon collapsed to a thin bar).
+    menu_item = html[html.index("        .display-style-menu-item {"):]
+    assert menu_item[:menu_item.index("}")].count("display: flex;") == 1
+
+
+def test_a_finished_feature_rehydrate_stops_counting_as_pending_work() -> None:
+    html = _html()
+
+    # The desktop close handler refuses while the assembly row reports pending work.
+    assert "state._assyRehydratePromise || state.pendingExecutionReceipts.length)" in html
+    set_at = html.index("            state._assyRehydratePromise = rebuild;\n")
+    assert html.index("if (state._assyRehydratePromise === rebuild) state._assyRehydratePromise = null;") - set_at < 300
+
+
+def test_only_a_running_documentation_build_counts_as_pending_work() -> None:
+    html = _html()
+
+    observer = html[html.index("function _desktopInspectOtherWorkflows()"):][:4000]
+    documentation = observer[observer.index("documentation: row("):observer.index("training: row(")]
+    assert "state.partsManualDocumentationGeneration?.status === 'running'" in documentation
+    assert "state.partsManualDocumentationSageWork?.active" in documentation
+    assert "|| state.partsManualDocumentationGeneration\n" not in documentation
+
+
+def test_an_unframed_camera_is_never_saved_as_the_view_to_restore() -> None:
+    html = _html()
+
+    save = html[html.index("function _saveAssemblyCameraState()"):][:900]
+    assert save.index("if (state.assyCamera.position.distanceToSquared(state.assyControls.target) < 1e-12) return;") \
+        < save.index("state.assyCameraState = {")

@@ -117,8 +117,12 @@ def test_runtime_config_roundtrips_and_disables_general_tools():
         "inspect_facility_findings", "analyze_facility_spatial", "observe_navigation_context",
         "inspect_saved_process_bindings", "search_industrial_assets", "inspect_facility_region",
         "analyze_facility_fit", "inspect_pattern_provenance", "inspect_cell_layout_provenance",
-        "inspect_facility_authoring", "inspect_facility_asset", "inspect_facility_components", "review_facility_parking",
-        "review_facility_workstations", "search_public_sources", "read_public_source"}
+        "inspect_facility_authoring", "inspect_facility_asset", "inspect_facility_components", "list_facility_library",
+        "review_facility_parking", "review_facility_workstations", "search_public_sources", "read_public_source",
+        "inspect_site_context", "analyze_site_fit", "look_at_site_photo", "trace_site_feature",
+        "plan_warehouse_building", "plan_warehouse_zones", "plan_floor_markings", "plan_storage_layout",
+        "plan_site_docks", "plan_site_parking", "plan_warehouse_contents", "plan_design_paint",
+        "suggest_site_references", "check_site_references", "prepare_layout_pdf"}
 
 
 def test_gateway_reads_real_backend_and_never_changes_revision(host):
@@ -722,7 +726,15 @@ def test_edit_instructions_keep_answers_short_and_name_zone_types_that_reject_pl
                  "Do not add Gaps, Open items, Unverified or Site review sections",
                  "state the direction as fact",
                  # A room wall along the outer wall sealed the staff entrance (2026-10-18).
-                 "Never close an existing door or walkway with a wall"):
+                 "Never close an existing door or walkway with a wall",
+                 # A band saw for cutting bar stock went into Receiving (2026-10-18).
+                 "Place equipment where its step of the work happens",
+                 "machines that cut, form or assemble do not go there",
+                 # Forklift charging landed beside the toolroom, 21 m from the aisle (2026-10-18).
+                 "Forklift charging and parking belong on the production side",
+                 # Sage called z 8 of a z 4-26 zone "the north end" (2026-10-18), its third slip.
+                 "not raw coordinates or compass words",
+                 "larger z is north and larger x is east"):
         assert rule in text
     # Furniture placed in operator or service zones was rejected batch after batch.
     def names(phrase):

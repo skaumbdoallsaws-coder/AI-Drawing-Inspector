@@ -145,6 +145,37 @@ def _block_frame(
     return result
 
 
+def _edited_block(page: Mapping[str, Any], block: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The block as the user edited it on its page: a table cell's text ("<block>.r<row>.c<column>"), a list
+    item's text ("<block>.i<item>") or a figure's caption (the block's own text)."""
+    block_id = str(block.get("blockId") or "")
+    block_type = str(block.get("blockType") or "")
+    if block_type in {"table", "key_value_table"}:
+        rows = []
+        for row_index, row in enumerate(block.get("rows") or []):
+            if not isinstance(row, Mapping):
+                rows.append(row)
+                continue
+            cells = list(row.get("cells") or [])
+            for column in range(len(cells)):
+                override = _page_override(page, f"{block_id}.r{row_index}.c{column}")
+                if "text" in override:
+                    cells[column] = str(override.get("text") or "")
+            rows.append({**row, "cells": cells})
+        return {**block, "rows": rows}
+    if block_type in {"list", "figure_legend"}:
+        items = []
+        for item_index, item in enumerate(block.get("items") or []):
+            override = _page_override(page, f"{block_id}.i{item_index}") if isinstance(item, Mapping) else {}
+            items.append({**item, "text": str(override.get("text") or "")} if "text" in override else item)
+        return {**block, "items": items}
+    if block_type == "cad_figure":
+        override = _page_override(page, block_id)
+        if "text" in override:
+            return {**block, "caption": str(override.get("text") or "")}
+    return block
+
+
 def _block_text(page: Mapping[str, Any], block: Mapping[str, Any]) -> str:
     override = _page_override(page, str(block.get("blockId") or ""))
     if "text" in override:
@@ -547,6 +578,7 @@ def _draw_block(
 ) -> None:
     frame = _block_frame(descriptor, block, document)
     rect = fitz.Rect(frame["x"], frame["y"], frame["x"] + frame["width"], frame["y"] + frame["height"])
+    block = _edited_block(descriptor, block)
     block_type = str(block.get("blockType") or "")
     text = _block_text(descriptor, block)
     style = dict(block.get("style") or {})
@@ -1094,6 +1126,7 @@ def build_prototype_docx_bytes(
         for block in descriptor.get("layoutBlocks") or []:
             if not isinstance(block, Mapping):
                 continue
+            block = _edited_block(descriptor, block)
             block_type = str(block.get("blockType") or "")
             text = _block_text(descriptor, block)
             if block_type in {"heading", "continuation_heading"}:

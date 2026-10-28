@@ -658,6 +658,27 @@
             return result;
         }
 
+        async function siteRequest(action, requestOptions, milliseconds) {
+            const controller = new AbortController();
+            const external = requestOptions && requestOptions.signal;
+            const cancel = function () { controller.abort(); };
+            if (external) {
+                if (external.aborted) cancel();
+                else external.addEventListener('abort', cancel, { once: true });
+            }
+            let expired = false;
+            const timer = setTimeout(function () { expired = true; controller.abort(); }, milliseconds);
+            try {
+                return await action(Object.assign({}, requestOptions, { signal: controller.signal }));
+            } catch (error) {
+                if (expired) throw new Error('The site service took too long. Your site is unchanged. Please try again.');
+                throw error;
+            } finally {
+                clearTimeout(timer);
+                if (external) external.removeEventListener('abort', cancel);
+            }
+        }
+
         async function importDecalImage(file, requestOptions) {
             if (!file || !['image/png', 'image/jpeg'].includes(file.type) || file.size > 10 * 1024 * 1024) {
                 throw new TypeError('Choose a PNG or JPEG image smaller than 10 MB.');
@@ -1349,6 +1370,93 @@
                 return request('', 'GET');
             },
             importDecalImage: importDecalImage,
+            // Site context: the server fetches public USGS imagery and stores it per site.
+            fetchSiteParcel: function (payload, requestOptions) {
+                const value = object(payload, 'site parcel request');
+                return siteRequest(function (config) { return request('/site-parcel', 'POST', {
+                    latitude: Number(value.latitude), longitude: Number(value.longitude),
+                    originLatitude: Number(value.originLatitude), originLongitude: Number(value.originLongitude),
+                }, config); }, requestOptions, 45000);
+            },
+            traceSitePhoto: function (payload, requestOptions) {
+                const value = object(payload, 'site trace request');
+                const body = { layout: object(value.layout, 'layout') };
+                if (value.box) {
+                    const box = object(value.box, 'box');
+                    body.box = { minX: Number(box.minX), maxX: Number(box.maxX), minZ: Number(box.minZ), maxZ: Number(box.maxZ) };
+                } else {
+                    body.x = Number(value.x);
+                    body.z = Number(value.z);
+                }
+                return siteRequest(function (config) { return request('/site-trace', 'POST', body, config); },
+                    requestOptions, 60000);
+            },
+            fetchSiteRoads: function (payload, requestOptions) {
+                const value = object(payload, 'site roads request');
+                return siteRequest(function (config) { return request('/site-roads', 'POST', {
+                    geoBounds: object(value.geoBounds, 'geoBounds'),
+                }, config); }, requestOptions, 60000);
+            },
+            fetchSiteOverlay: function (payload, requestOptions) {
+                const value = object(payload, 'site layer request');
+                return siteRequest(function (config) { return request('/site-overlay', 'POST', {
+                    layer: String(value.layer), geoBounds: object(value.geoBounds, 'geoBounds'),
+                    widthPixels: Number(value.widthPixels), heightPixels: Number(value.heightPixels),
+                }, config); }, requestOptions, 120000);
+            },
+            checkSiteLayers: function (payload, requestOptions) {
+                return siteRequest(function (config) {
+                    return request('/site-layer-checks', 'POST', { layout: object(payload.layout, 'layout') }, config);
+                }, requestOptions, 180000);
+            },
+            analyzeSiteContext: function (payload, requestOptions) {
+                return siteRequest(function (config) {
+                    return request('/site-analysis', 'POST', { layout: object(payload.layout, 'layout') }, config);
+                }, requestOptions, 30000);
+            },
+            fetchSiteImagery: function (payload, requestOptions) {
+                const value = object(payload, 'site imagery request');
+                const body = {
+                    latitude: Number(value.latitude),
+                    longitude: Number(value.longitude),
+                    halfSizeMeters: Number(value.halfSizeMeters),
+                };
+                if (value.source) body.source = String(value.source);
+                return siteRequest(function (config) { return request('/site-imagery', 'POST', body, config); },
+                    requestOptions, 180000);
+            },
+            geocodeAddress: async function (address, requestOptions) {
+                return siteRequest(async function (config) {
+                const response = await fetchImpl(baseUrl + '/api/facility-site-geocode/' + encodedSite, {
+                    method: 'POST', cache: 'no-store', credentials: options.credentials || 'same-origin',
+                    headers: Object.assign({}, headers, {
+                        'Content-Type': 'application/json', 'X-InspectorPro-Session': sessionId,
+                    }),
+                    body: JSON.stringify({ address: String(address || '') }),
+                    signal: config.signal,
+                });
+                const result = await response.json().catch(function () { return {}; });
+                if (!response.ok) throw errorFromResponse(response, result);
+                return result;
+                }, requestOptions, 45000);
+            },
+            // The globe flight: the server starts fetching the tiles the dive will draw.
+            prefetchSiteGlobe: async function (payload, requestOptions) {
+                const value = object(payload, 'globe prefetch request');
+                return siteRequest(async function (config) {
+                const response = await fetchImpl(baseUrl + '/api/facility-site-globe/' + encodedSite + '/prefetch', {
+                    method: 'POST', cache: 'no-store', credentials: options.credentials || 'same-origin',
+                    headers: Object.assign({}, headers, {
+                        'Content-Type': 'application/json', 'X-InspectorPro-Session': sessionId,
+                    }),
+                    body: JSON.stringify({ latitude: Number(value.latitude), longitude: Number(value.longitude) }),
+                    signal: config.signal,
+                });
+                const result = await response.json().catch(function () { return {}; });
+                if (!response.ok) throw errorFromResponse(response, result);
+                return result;
+                }, requestOptions, 15000);
+            },
             createMotionPackage: function (payload, requestOptions) {
                 const value = object(payload, 'motion package payload');
                 return request('/motion-packages', 'POST', {

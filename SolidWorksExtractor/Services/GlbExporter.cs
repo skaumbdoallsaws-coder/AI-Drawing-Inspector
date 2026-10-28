@@ -88,6 +88,20 @@ namespace SolidWorksExtractor.Services
             // Mixed solid+sheet components stay single-sided (the solid faces
             // dominate visually).
             public bool IsSheetBody;
+            // The CAD faces of the mesh in the order their triangles were appended; each face's triangles
+            // are one unbroken run of the index buffer. Null where they were not recorded.
+            public List<FaceRun> Faces;
+        }
+
+        // One CAD face of a mesh: its run of triangles in the index buffer, the kind of surface it lies on,
+        // the feature that made it, and its radius in metres when it is a cylinder or a sphere (0 otherwise).
+        private class FaceRun
+        {
+            public int FirstTriangle;
+            public int TriangleCount;
+            public string Kind;
+            public string Feature;
+            public double Radius;
         }
 
         // Cross-method helper return shape for "enumerate every visible body on
@@ -672,6 +686,7 @@ namespace SolidWorksExtractor.Services
                 var positions = new List<float>();
                 var normals = new List<float>();
                 var indices = new List<uint>();
+                var faces = new List<FaceRun>();
                 uint indexOffset = 0;
                 int faceCount = 0;
 
@@ -714,6 +729,7 @@ namespace SolidWorksExtractor.Services
                             normals.Add(triNorms[v * 3 + 2]);
                         }
 
+                        faces.Add(DescribeFace(face, indices.Count / 3, vertexCount / 3));
                         for (uint i = 0; i < (uint)vertexCount; i++)
                             indices.Add(indexOffset + i);
                         indexOffset += (uint)vertexCount;
@@ -754,6 +770,7 @@ namespace SolidWorksExtractor.Services
                     Positions = positions.ToArray(),
                     Normals = normals.ToArray(),
                     Indices = indices.ToArray(),
+                    Faces = faces,
                     BoundsMin = boundsMin,
                     BoundsMax = boundsMax,
                     IsSheetBody = tagged.IsSheet
@@ -1789,6 +1806,7 @@ namespace SolidWorksExtractor.Services
             var allPositions = new List<float>();
             var allNormals = new List<float>();
             var allIndices = new List<uint>();
+            var faces = new List<FaceRun>();
             uint indexOffset = 0;
             bool sawSolid = false;
             bool sawSheet = false;
@@ -1854,6 +1872,7 @@ namespace SolidWorksExtractor.Services
                         }
                     }
 
+                    faces.Add(DescribeFace(face, allIndices.Count / 3, vertexCount / 3));
                     for (uint i = 0; i < (uint)vertexCount; i++)
                         allIndices.Add(indexOffset + i);
                     indexOffset += (uint)vertexCount;
@@ -1885,6 +1904,7 @@ namespace SolidWorksExtractor.Services
                 Positions = allPositions.ToArray(),
                 Normals = allNormals.ToArray(),
                 Indices = allIndices.ToArray(),
+                Faces = faces,
                 BoundsMin = new float[] { minX, minY, minZ },
                 BoundsMax = new float[] { maxX, maxY, maxZ },
                 IsSheetBody = sawSheet && !sawSolid
@@ -1972,6 +1992,7 @@ namespace SolidWorksExtractor.Services
                 Positions = positions,
                 Normals = normals,
                 Indices = localMesh.Indices,
+                Faces = localMesh.Faces,
                 BoundsMin = new float[] { minX, minY, minZ },
                 BoundsMax = new float[] { maxX, maxY, maxZ },
                 IsSheetBody = localMesh.IsSheetBody
@@ -2042,6 +2063,7 @@ namespace SolidWorksExtractor.Services
             var allPositions = new List<float>();
             var allNormals = new List<float>();
             var allIndices = new List<uint>();
+            var faces = new List<FaceRun>();
             uint indexOffset = 0;
             bool sawSolid = false;
             bool sawSheet = false;
@@ -2143,6 +2165,7 @@ namespace SolidWorksExtractor.Services
                         }
                     }
 
+                    faces.Add(DescribeFace(face, allIndices.Count / 3, vertexCount / 3));
                     // Sequential indices for this face's triangles
                     for (uint i = 0; i < (uint)vertexCount; i++)
                         allIndices.Add(indexOffset + i);
@@ -2182,6 +2205,7 @@ namespace SolidWorksExtractor.Services
                 Positions = allPositions.ToArray(),
                 Normals = allNormals.ToArray(),
                 Indices = allIndices.ToArray(),
+                Faces = faces,
                 BoundsMin = new float[] { minX, minY, minZ },
                 BoundsMax = new float[] { maxX, maxY, maxZ },
                 // Mark doubleSided only when every contributing body was a
@@ -2189,6 +2213,100 @@ namespace SolidWorksExtractor.Services
                 // (the solid hull dominates; double-siding it darkens shading).
                 IsSheetBody = sawSheet && !sawSolid
             };
+        }
+
+        /// <summary>
+        /// One face's run of triangles, with the kind of surface it lies on and the feature that made it.
+        /// </summary>
+        private static FaceRun DescribeFace(IFace2 face, int firstTriangle, int triangleCount)
+        {
+            var run = new FaceRun
+            {
+                FirstTriangle = firstTriangle,
+                TriangleCount = triangleCount,
+                Kind = "other",
+                Feature = ""
+            };
+            try
+            {
+                ISurface surface = (ISurface)face.GetSurface();
+                if (surface != null)
+                {
+                    if (surface.IsPlane()) run.Kind = "plane";
+                    else if (surface.IsCylinder())
+                    {
+                        run.Kind = "cylinder";
+                        // CylinderParams: origin xyz, axis xyz, radius.
+                        if (surface.CylinderParams is double[] p && p.Length >= 7) run.Radius = p[6];
+                    }
+                    else if (surface.IsCone()) run.Kind = "cone";
+                    else if (surface.IsSphere())
+                    {
+                        run.Kind = "sphere";
+                        // SphereParams: centre xyz, radius.
+                        if (surface.SphereParams is double[] p && p.Length >= 4) run.Radius = p[3];
+                    }
+                    else if (surface.IsTorus()) run.Kind = "torus";
+                }
+            }
+            catch { /* the kind stays other */ }
+            try
+            {
+                IFeature feature = (IFeature)face.GetFeature();
+                if (feature != null) run.Feature = feature.Name ?? "";
+            }
+            catch { /* no feature name */ }
+            if (double.IsNaN(run.Radius) || double.IsInfinity(run.Radius) || run.Radius < 0) run.Radius = 0;
+            return run;
+        }
+
+        /// <summary>
+        /// The mesh's CAD faces as primitive extras (docs/assembly-face-selection-plan.md, F0): the kinds and
+        /// features named once, then one row per face of [first triangle, triangle count, kind, feature,
+        /// radius]. Each face's triangles are one unbroken run, in the order they were appended.
+        /// </summary>
+        private void AppendFaceExtras(StringBuilder sb, MeshData mesh)
+        {
+            if (mesh.Faces == null || mesh.Faces.Count == 0) return;
+            var kinds = new List<string>();
+            var features = new List<string>();
+            var kindIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+            var featureIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+            var rows = new StringBuilder();
+            foreach (var face in mesh.Faces)
+            {
+                string kind = face.Kind ?? "other";
+                string feature = face.Feature ?? "";
+                if (!kindIndex.TryGetValue(kind, out int k))
+                {
+                    k = kinds.Count;
+                    kindIndex[kind] = k;
+                    kinds.Add(kind);
+                }
+                if (!featureIndex.TryGetValue(feature, out int f))
+                {
+                    f = features.Count;
+                    featureIndex[feature] = f;
+                    features.Add(feature);
+                }
+                if (rows.Length > 0) rows.Append(",");
+                rows.Append("[").Append(face.FirstTriangle).Append(",").Append(face.TriangleCount)
+                    .Append(",").Append(k).Append(",").Append(f).Append(",")
+                    .Append(face.Radius.ToString("G6", CultureInfo.InvariantCulture)).Append("]");
+            }
+            sb.Append(",\"extras\":{\"inspectorpro\":{\"faceVersion\":1,\"faceKinds\":[");
+            for (int i = 0; i < kinds.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                sb.Append("\"").Append(EscapeJson(kinds[i])).Append("\"");
+            }
+            sb.Append("],\"faceFeatures\":[");
+            for (int i = 0; i < features.Count; i++)
+            {
+                if (i > 0) sb.Append(",");
+                sb.Append("\"").Append(EscapeJson(features[i])).Append("\"");
+            }
+            sb.Append("],\"faces\":[").Append(rows.ToString()).Append("]}}");
         }
 
         private float[] ConvertToFloatArray(object obj)
@@ -2337,6 +2455,7 @@ namespace SolidWorksExtractor.Services
                 sb.Append(",\"NORMAL\":").Append(normAccessor).Append("}");
                 sb.Append(",\"indices\":").Append(idxAccessor);
                 sb.Append(",\"material\":").Append(i);
+                AppendFaceExtras(sb, meshes[i]);
                 sb.Append("}]}");
             }
             sb.Append("],");

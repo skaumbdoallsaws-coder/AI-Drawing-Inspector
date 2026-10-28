@@ -1897,8 +1897,10 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
 
     common_response = (
         "Results are server-loaded at the active layout revision, ordered by "
-        "stable ID, and bounded to 50 records. Continue only with the opaque "
-        "server cursor; never supply coordinates or screen rectangles."
+        "stable ID, and bounded to 50 records. For more, repeat the same "
+        "arguments with offset set to the returned nextOffset (or pass the "
+        "opaque nextCursor as cursor); never supply coordinates or screen "
+        "rectangles."
     )
     specs = [
         {
@@ -1929,6 +1931,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "maximum": MAXIMUM_READ_PAGE_SIZE,
                     },
                     "cursor": {"type": "string", "maxLength": 2048},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
                 },
             },
         },
@@ -1998,6 +2001,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "maximum": MAXIMUM_READ_PAGE_SIZE,
                     },
                     "cursor": {"type": "string", "maxLength": 2048},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
                 },
             },
         },
@@ -2026,6 +2030,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "maximum": MAXIMUM_READ_PAGE_SIZE,
                     },
                     "cursor": {"type": "string", "maxLength": 2048},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
                 },
             },
         },
@@ -2078,6 +2083,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "maximum": MAXIMUM_READ_PAGE_SIZE,
                     },
                     "cursor": {"type": "string", "maxLength": 2048},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
                 },
             },
         },
@@ -2105,6 +2111,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "maximum": MAXIMUM_READ_PAGE_SIZE,
                     },
                     "cursor": {"type": "string", "maxLength": 2048},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
                 },
             },
         },
@@ -2133,6 +2140,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "maximum": MAXIMUM_READ_PAGE_SIZE,
                     },
                     "cursor": {"type": "string", "maxLength": 2048},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
                 },
             },
         },
@@ -2196,6 +2204,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "maxItems": 6,
                         "uniqueItems": True,
                         "items": {
+                            "type": "string",
                             "enum": [
                                 "placement",
                                 "zone",
@@ -2268,6 +2277,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "maxItems": len(CELL_FEASIBILITY_STRATEGIES),
                         "uniqueItems": True,
                         "items": {
+                            "type": "string",
                             "enum": list(CELL_FEASIBILITY_STRATEGIES)
                         },
                     },
@@ -2282,7 +2292,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "minItems": 1,
                         "maxItems": 4,
                         "uniqueItems": True,
-                        "items": {"enum": [0, 90, 180, 270]},
+                        "items": {"type": "integer", "enum": [0, 90, 180, 270]},
                     },
                     "moduleGapMeters": {
                         "type": "number",
@@ -2338,7 +2348,7 @@ def facility_layout_read_tool_specs() -> list[dict[str, Any]]:
                         "minItems": 1,
                         "maxItems": 4,
                         "uniqueItems": True,
-                        "items": {"enum": [0, 90, 180, 270]},
+                        "items": {"type": "integer", "enum": [0, 90, 180, 270]},
                     },
                     "maximumResults": {
                         "type": "integer",

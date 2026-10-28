@@ -11,7 +11,7 @@ def normalize_exterior_finish(value, points, height, openings, layout):
     from .perimeter_walls import _number
 
     allowed = {'color', 'jointColor', 'panelWidthMeters', 'panelHeightMeters',
-               'jointWidthMeters', 'artworks', 'accentStrips', 'wallFaces', 'fittedArtworks'}
+               'jointWidthMeters', 'artworks', 'accentStrips', 'bands', 'wallFaces', 'fittedArtworks'}
     if not isinstance(value, Mapping) or set(value) - allowed:
         raise ValueError('Unsupported exterior finish')
     def color(item):
@@ -84,6 +84,18 @@ def normalize_exterior_finish(value, points, height, openings, layout):
         if not isinstance(entry, Mapping) or set(entry) != {'edge', 'startMeters', 'widthMeters', 'color'}:
             raise ValueError('Unsupported exterior accent strip')
         result['accentStrips'].append(dict(rectangle(entry), color=color(entry['color'])))
+    if 'bands' in value:  # optional, so finishes stored before bands existed recompile unchanged
+        # A band runs level round the whole perimeter, such as a coloured strip along the top; door
+        # openings interrupt it as they do the panels.
+        result['bands'] = []
+        for entry in rows('bands', 16):
+            if not isinstance(entry, Mapping) or set(entry) != {'bottomMeters', 'heightMeters', 'color'}:
+                raise ValueError('Unsupported exterior band')
+            bottom = _number(entry['bottomMeters'], 'bottomMeters', 0, height)
+            band_height = _number(entry['heightMeters'], 'heightMeters', .05, height)
+            if bottom + band_height > height + 1e-8:
+                raise ValueError('Exterior band extends above its wall')
+            result['bands'].append(dict(bottomMeters=bottom, heightMeters=band_height, color=color(entry['color'])))
     result['wallFaces'] = []
     placements = {p['placementId']: p for p in layout.get('placements', [])}
     targets = set()

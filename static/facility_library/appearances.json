@@ -1,0 +1,1103 @@
+{
+  "schemaVersion": 1,
+  "libraryVersion": "2026.10.25.2",
+  "notes": "Appearances are visual only. They never change mass, density, strength or an assigned engineering material.",
+  "categories": [
+    {
+      "categoryId": "metals",
+      "label": "Metals"
+    },
+    {
+      "categoryId": "plastics",
+      "label": "Plastics"
+    },
+    {
+      "categoryId": "wood",
+      "label": "Wood"
+    },
+    {
+      "categoryId": "rubber",
+      "label": "Rubber"
+    },
+    {
+      "categoryId": "glass",
+      "label": "Glass"
+    },
+    {
+      "categoryId": "fabric",
+      "label": "Fabric"
+    },
+    {
+      "categoryId": "paper",
+      "label": "Paper & Cardboard"
+    },
+    {
+      "categoryId": "paint",
+      "label": "Paint & Coatings"
+    },
+    {
+      "categoryId": "stone",
+      "label": "Concrete & Stone"
+    }
+  ],
+  "textureSets": [
+    {
+      "textureSetId": "wood-maple",
+      "label": "Light wood grain",
+      "tileMeters": 1.0,
+      "grain": "u",
+      "roughnessMean": 0.567,
+      "pixels": 1024,
+      "maps": {
+        "color": "textures/wood-maple/color.jpg",
+        "normal": "textures/wood-maple/normal.jpg",
+        "roughness": "textures/wood-maple/roughness.jpg"
+      },
+      "files": {
+        "textures/wood-maple/color.jpg": {
+          "bytes": 110686,
+          "sha256": "ac9ee8708d82ae08ff23ed3325357663d2df1b8d9a40194299d4ac49de60d56e"
+        },
+        "textures/wood-maple/normal.jpg": {
+          "bytes": 154393,
+          "sha256": "38cf9773b8c8211a319b559da61a14066dbd849a2bd039979792ef0e3f04a779"
+        },
+        "textures/wood-maple/roughness.jpg": {
+          "bytes": 27563,
+          "sha256": "a7afb5bb522a9804439b0cf8c4d99f907425fec97967197241e1cdf96069b679"
+        }
+      },
+      "source": {
+        "provider": "ambientCG",
+        "assetId": "Wood095",
+        "url": "https://ambientcg.com/view?id=Wood095",
+        "package": "Wood095_1K-JPG.zip",
+        "packageSha256": "04acff5a13e8ada6749b58ff5f6c49402692aadbfde87d65b06d35d70a9601d8",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.ambientcg.com/license/",
+        "retrieved": "2026-10-19",
+        "modifications": "Resized and re-encoded; tintable sets converted to a neutral detail map."
+      }
+    },
+    {
+      "textureSetId": "wood-oak",
+      "label": "Medium oak-like grain",
+      "tileMeters": 1.0,
+      "grain": "u",
+      "roughnessMean": 0.504,
+      "pixels": 1024,
+      "maps": {
+        "color": "textures/wood-oak/color.jpg",
+        "normal": "textures/wood-oak/normal.jpg",
+        "roughness": "textures/wood-oak/roughness.jpg"
+      },
+      "files": {
+        "textures/wood-oak/color.jpg": {
+          "bytes": 156087,
+          "sha256": "0fa2df981177ca6a04cbf34bd20e380fd00f85ce870082b4df7c4e114d8c2501"
+        },
+        "textures/wood-oak/normal.jpg": {
+          "bytes": 241526,
+          "sha256": "67b79c7c41cab8382fad869af8614b8cf268b4df39bcb5a43bb2548b3f47e344"
+        },
+        "textures/wood-oak/roughness.jpg": {
+          "bytes": 53200,
+          "sha256": "c29d936c5a0633de8958ecdd11109008815f6ca74c4bf1bfb63d8eb74784d59a"
+        }
+      },
+      "source": {
+        "provider": "ambientCG",
+        "assetId": "Wood049",
+        "url": "https://ambientcg.com/view?id=Wood049",
+        "package": "Wood049_1K-JPG.zip",
+        "packageSha256": "74ec51bcf5ddfc2e9af6205dc5cbcc90ad51c22117e013ff8b1c7258f8ecbc69",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.ambientcg.com/license/",
+        "retrieved": "2026-10-19",
+        "modifications": "Resized and re-encoded; tintable sets converted to a neutral detail map."
+      }
+    },
+    {
+      "textureSetId": "wood-walnut",
+      "label": "Dark walnut-like grain",
+      "tileMeters": 1.0,
+      "grain": "u",
+      "roughnessMean": 0.486,
+      "pixels": 1024,
+      "maps": {
+        "color": "textures/wood-walnut/color.jpg",
+        "normal": "textures/wood-walnut/normal.jpg",
+        "roughness": "textures/wood-walnut/roughness.jpg"
+      },
+      "files": {
+        "textures/wood-walnut/color.jpg": {
+          "bytes": 136008,
+          "sha256": "fcdcdf94cc835c069ec564dac4042bdc71be46fdc7f7949da46e491d48c92be2"
+        },
+        "textures/wood-walnut/normal.jpg": {
+          "bytes": 170946,
+          "sha256": "2a647ab2ba05e01749023d6303c84bb928916770836807601be1aa85f01fb50a"
+        },
+        "textures/wood-walnut/roughness.jpg": {
+          "bytes": 31721,
+          "sha256": "1548522973a7ab17f8f8d2a6d79cbdbbcf6660903d1f9681c3c58501d22ff42d"
+        }
+      },
+      "source": {
+        "provider": "ambientCG",
+        "assetId": "Wood027",
+        "url": "https://ambientcg.com/view?id=Wood027",
+        "package": "Wood027_1K-JPG.zip",
+        "packageSha256": "99e7a2ff0b4ead60e9350463b1551223ae5665930cae9f4b7be56d8a03768fbf",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.ambientcg.com/license/",
+        "retrieved": "2026-10-19",
+        "modifications": "Resized and re-encoded; tintable sets converted to a neutral detail map."
+      }
+    },
+    {
+      "textureSetId": "metal-brushed",
+      "label": "Brushed metal streaks",
+      "tileMeters": 0.4,
+      "grain": "u",
+      "roughnessMean": 0.469,
+      "pixels": 1024,
+      "maps": {
+        "detail": "textures/metal-brushed/detail.jpg",
+        "normal": "textures/metal-brushed/normal.jpg",
+        "roughness": "textures/metal-brushed/roughness.jpg"
+      },
+      "files": {
+        "textures/metal-brushed/detail.jpg": {
+          "bytes": 77028,
+          "sha256": "72507e15c6eca28bb56a07b1729992f0386c1dc0a556c1f0a6cdb70a170c1ad6"
+        },
+        "textures/metal-brushed/normal.jpg": {
+          "bytes": 80376,
+          "sha256": "bd591c261ac818690b9cca50eef8a1e1bd36bc50d94733a3fe40acea4bc4fb6a"
+        },
+        "textures/metal-brushed/roughness.jpg": {
+          "bytes": 38837,
+          "sha256": "4452e9980f5547703ff02ddc4c1fbbd5e6a038ab39cb7604c6a4c0f8a3f32763"
+        }
+      },
+      "source": {
+        "provider": "ambientCG",
+        "assetId": "Metal009",
+        "url": "https://ambientcg.com/view?id=Metal009",
+        "package": "Metal009_1K-JPG.zip",
+        "packageSha256": "1b1970219b40fe707e7194b28702f1a65b0d227bbea56da69dfbc8d8b5cfcb5e",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.ambientcg.com/license/",
+        "retrieved": "2026-10-19",
+        "modifications": "Resized and re-encoded; tintable sets converted to a neutral detail map."
+      }
+    },
+    {
+      "textureSetId": "fabric-woven",
+      "label": "Fine woven fabric",
+      "tileMeters": 0.12,
+      "grain": "u",
+      "roughnessMean": 0.728,
+      "pixels": 512,
+      "maps": {
+        "detail": "textures/fabric-woven/detail.jpg",
+        "normal": "textures/fabric-woven/normal.jpg",
+        "roughness": "textures/fabric-woven/roughness.jpg",
+        "ao": "textures/fabric-woven/ao.jpg"
+      },
+      "files": {
+        "textures/fabric-woven/detail.jpg": {
+          "bytes": 90845,
+          "sha256": "b2c8f140ff634f93fd0457271b14ff14ade328d7484d74256a661af02748017a"
+        },
+        "textures/fabric-woven/normal.jpg": {
+          "bytes": 142143,
+          "sha256": "65246594f227e376a9f282230950230c3961d0b00012c8f6f61959ad6a71eadd"
+        },
+        "textures/fabric-woven/roughness.jpg": {
+          "bytes": 18670,
+          "sha256": "088d615590f193f8708ce2a1dd5896fb00affc6e30881f7788f5fd60e3c03bf1"
+        },
+        "textures/fabric-woven/ao.jpg": {
+          "bytes": 22330,
+          "sha256": "b5cbc2380ff886fa5de4ca73ae5fc2fbed4380934221f14e90f041bd06463cd2"
+        }
+      },
+      "source": {
+        "provider": "ambientCG",
+        "assetId": "Fabric030",
+        "url": "https://ambientcg.com/view?id=Fabric030",
+        "package": "Fabric030_1K-JPG.zip",
+        "packageSha256": "82d4d00ccf901cf4707c5489005945ab8574933fc60437e26c6737f0436699e0",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.ambientcg.com/license/",
+        "retrieved": "2026-10-19",
+        "modifications": "Resized and re-encoded; tintable sets converted to a neutral detail map."
+      }
+    },
+    {
+      "textureSetId": "cardboard-kraft",
+      "label": "Corrugated cardboard",
+      "tileMeters": 0.25,
+      "grain": "u",
+      "roughnessMean": 0.684,
+      "pixels": 512,
+      "maps": {
+        "detail": "textures/cardboard-kraft/detail.jpg",
+        "normal": "textures/cardboard-kraft/normal.jpg",
+        "roughness": "textures/cardboard-kraft/roughness.jpg"
+      },
+      "files": {
+        "textures/cardboard-kraft/detail.jpg": {
+          "bytes": 24881,
+          "sha256": "4b48c6d8d638bd9f414fb9d9eb473e4214e5f595b5c6e659e64b18f6dba15c4a"
+        },
+        "textures/cardboard-kraft/normal.jpg": {
+          "bytes": 28024,
+          "sha256": "1f68676ef54b0b63ee2214ab047fc4c883e76bd32f8420d08f182cb1c41411c3"
+        },
+        "textures/cardboard-kraft/roughness.jpg": {
+          "bytes": 10118,
+          "sha256": "028953ecfed11629776a7eb0c30e6259d06494afc740960b18b8dab8b4a0397f"
+        }
+      },
+      "source": {
+        "provider": "ambientCG",
+        "assetId": "Cardboard002",
+        "url": "https://ambientcg.com/view?id=Cardboard002",
+        "package": "Cardboard002_1K-JPG.zip",
+        "packageSha256": "c9e666f77d36889873c5e9cfcdd470f153802ac3025cb0d3f765b64725184f2c",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.ambientcg.com/license/",
+        "retrieved": "2026-10-19",
+        "modifications": "Resized and re-encoded; tintable sets converted to a neutral detail map."
+      }
+    },
+    {
+      "textureSetId": "paper-matte",
+      "label": "Matte paper fibre",
+      "tileMeters": 0.3,
+      "grain": "u",
+      "roughnessMean": 0.631,
+      "pixels": 512,
+      "maps": {
+        "detail": "textures/paper-matte/detail.jpg",
+        "normal": "textures/paper-matte/normal.jpg",
+        "roughness": "textures/paper-matte/roughness.jpg"
+      },
+      "files": {
+        "textures/paper-matte/detail.jpg": {
+          "bytes": 11672,
+          "sha256": "654ed12625a71063816ebd8b3bfd07295b05a9f81ca8ecee6739d514785031c1"
+        },
+        "textures/paper-matte/normal.jpg": {
+          "bytes": 73982,
+          "sha256": "ab2a4b7bf1916d863360e9f46203986e81507e01bbd1132b8988a1ec56b0518a"
+        },
+        "textures/paper-matte/roughness.jpg": {
+          "bytes": 15148,
+          "sha256": "8ff37038a58ae51e9547e5c2d8a3138e32a9a3e822031789e539150cfd843143"
+        }
+      },
+      "source": {
+        "provider": "ambientCG",
+        "assetId": "Paper001",
+        "url": "https://ambientcg.com/view?id=Paper001",
+        "package": "Paper001_1K-JPG.zip",
+        "packageSha256": "5be094ffad8a6343ed96ec728e6eda3d84ae542cd2b16c32bc2ad67bb57a0013",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.ambientcg.com/license/",
+        "retrieved": "2026-10-19",
+        "modifications": "Resized and re-encoded; tintable sets converted to a neutral detail map."
+      }
+    },
+    {
+      "textureSetId": "concrete-smooth",
+      "label": "Smooth poured concrete",
+      "tileMeters": 2.0,
+      "grain": "u",
+      "roughnessMean": 0.728,
+      "pixels": 1024,
+      "maps": {
+        "color": "textures/concrete-smooth/color.jpg",
+        "normal": "textures/concrete-smooth/normal.jpg",
+        "roughness": "textures/concrete-smooth/roughness.jpg",
+        "ao": "textures/concrete-smooth/ao.jpg"
+      },
+      "files": {
+        "textures/concrete-smooth/color.jpg": {
+          "bytes": 122073,
+          "sha256": "a8d5c981c4dca100bc74c124cbaa45a3fc80362ad61f5bb0854579a221282f6b"
+        },
+        "textures/concrete-smooth/normal.jpg": {
+          "bytes": 269003,
+          "sha256": "11b07f90a5d83ff81cb1faa4645146e1102709c9d9493582ec252cd9fea4c699"
+        },
+        "textures/concrete-smooth/roughness.jpg": {
+          "bytes": 43052,
+          "sha256": "2dd73baa96368bd77b2c383ae17691506516d6af4f9cd2c18268cb71886286f3"
+        },
+        "textures/concrete-smooth/ao.jpg": {
+          "bytes": 51723,
+          "sha256": "84cc088e122a36d428d77c1e14204d1d0ab693956e2a235e795234db9afbe2e1"
+        }
+      },
+      "source": {
+        "provider": "ambientCG",
+        "assetId": "Concrete030",
+        "url": "https://ambientcg.com/view?id=Concrete030",
+        "package": "Concrete030_1K-JPG.zip",
+        "packageSha256": "9101871625bde3ccf3c57ca7af4372196d9ca9f678c786b8de698a576784d403",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.ambientcg.com/license/",
+        "retrieved": "2026-10-19",
+        "modifications": "Resized and re-encoded; tintable sets converted to a neutral detail map."
+      }
+    },
+    {
+      "textureSetId": "marble-white",
+      "label": "Veined white marble",
+      "tileMeters": 1.2,
+      "grain": "u",
+      "roughnessMean": 0.066,
+      "pixels": 1024,
+      "maps": {
+        "color": "textures/marble-white/color.jpg",
+        "normal": "textures/marble-white/normal.jpg",
+        "roughness": "textures/marble-white/roughness.jpg"
+      },
+      "files": {
+        "textures/marble-white/color.jpg": {
+          "bytes": 265746,
+          "sha256": "7d28d2434420325891255a6d739495567663940ebde6cdb3cf1459d0ae12d304"
+        },
+        "textures/marble-white/normal.jpg": {
+          "bytes": 6456,
+          "sha256": "91cab0aa6774ca8d275b53207c72dbfef07c607c3b158e3908577198f41b29df"
+        },
+        "textures/marble-white/roughness.jpg": {
+          "bytes": 36376,
+          "sha256": "79181387c37061937731a290892e78a0d8296a9fe7ae2b39dd9ae0a3cfd7b694"
+        }
+      },
+      "source": {
+        "provider": "ambientCG",
+        "assetId": "Marble012",
+        "url": "https://ambientcg.com/view?id=Marble012",
+        "package": "Marble012_1K-JPG.zip",
+        "packageSha256": "b04384c6d49ce73baeb70db7ea4abfe9948fc9b74b9fd92c3766970662bf2c43",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.ambientcg.com/license/",
+        "retrieved": "2026-10-19",
+        "modifications": "Resized and re-encoded; tintable sets converted to a neutral detail map."
+      }
+    },
+    {
+      "textureSetId": "rubber-speckled",
+      "label": "Speckled rubber matting",
+      "tileMeters": 0.75,
+      "grain": "u",
+      "roughnessMean": 0.59,
+      "pixels": 1024,
+      "maps": {
+        "color": "textures/rubber-speckled/color.jpg",
+        "normal": "textures/rubber-speckled/normal.jpg",
+        "roughness": "textures/rubber-speckled/roughness.jpg"
+      },
+      "files": {
+        "textures/rubber-speckled/color.jpg": {
+          "bytes": 263834,
+          "sha256": "3ebf5a20258d3d1df6e4537ec40fb7f344a970406b0c586ff8d7e437f32d210a"
+        },
+        "textures/rubber-speckled/normal.jpg": {
+          "bytes": 416298,
+          "sha256": "9d1ca2445018740bd1c37fd8a11542794ae68ac75864bfbd704c323ea152640b"
+        },
+        "textures/rubber-speckled/roughness.jpg": {
+          "bytes": 54426,
+          "sha256": "897c5d2225a4a710b76b268b7f72c29977f8021224d1341db23f4161dadfeedc"
+        }
+      },
+      "source": {
+        "provider": "ambientCG",
+        "assetId": "Rubber001",
+        "url": "https://ambientcg.com/view?id=Rubber001",
+        "package": "Rubber001_1K-JPG.zip",
+        "packageSha256": "9723fabed24f7befcdad24e953f44347a7b91e1d0c37a4fb5e31835e61c0902b",
+        "license": "CC0-1.0",
+        "licenseUrl": "https://docs.ambientcg.com/license/",
+        "retrieved": "2026-10-19",
+        "modifications": "Resized and re-encoded; tintable sets converted to a neutral detail map."
+      }
+    }
+  ],
+  "appearances": [
+    {
+      "appearanceId": "steel-brushed",
+      "label": "Brushed steel",
+      "category": "metals",
+      "model": "standard",
+      "color": "#b9bdc0",
+      "roughness": 0.42,
+      "metalness": 1.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "metal-brushed",
+        "sizeMeters": 0.4,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "part",
+        "strength": 1
+      },
+      "tags": [
+        "steel",
+        "stainless",
+        "brushed",
+        "metal"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/steel-brushed.png"
+    },
+    {
+      "appearanceId": "steel-polished",
+      "label": "Polished steel",
+      "category": "metals",
+      "model": "standard",
+      "color": "#c6c9cb",
+      "roughness": 0.12,
+      "metalness": 1.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "steel",
+        "chrome",
+        "polished",
+        "metal"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/steel-polished.png"
+    },
+    {
+      "appearanceId": "aluminum-brushed",
+      "label": "Brushed aluminum",
+      "category": "metals",
+      "model": "standard",
+      "color": "#d5d7d9",
+      "roughness": 0.38,
+      "metalness": 1.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "metal-brushed",
+        "sizeMeters": 0.4,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "part",
+        "strength": 1
+      },
+      "tags": [
+        "aluminum",
+        "aluminium",
+        "brushed",
+        "metal"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/aluminum-brushed.png"
+    },
+    {
+      "appearanceId": "aluminum-polished",
+      "label": "Polished aluminum",
+      "category": "metals",
+      "model": "standard",
+      "color": "#dcdfe1",
+      "roughness": 0.1,
+      "metalness": 1.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "aluminum",
+        "aluminium",
+        "polished",
+        "metal"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/aluminum-polished.png"
+    },
+    {
+      "appearanceId": "brass-brushed",
+      "label": "Brushed brass",
+      "category": "metals",
+      "model": "standard",
+      "color": "#c9a35e",
+      "roughness": 0.4,
+      "metalness": 1.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "metal-brushed",
+        "sizeMeters": 0.4,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "part",
+        "strength": 1
+      },
+      "tags": [
+        "brass",
+        "brushed",
+        "gold",
+        "metal"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/brass-brushed.png"
+    },
+    {
+      "appearanceId": "brass-polished",
+      "label": "Polished brass",
+      "category": "metals",
+      "model": "standard",
+      "color": "#d8b066",
+      "roughness": 0.12,
+      "metalness": 1.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "brass",
+        "polished",
+        "gold",
+        "metal"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/brass-polished.png"
+    },
+    {
+      "appearanceId": "plastic-matte",
+      "label": "Matte plastic",
+      "category": "plastics",
+      "model": "standard",
+      "color": "#3f4449",
+      "roughness": 0.78,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "plastic",
+        "matte",
+        "abs",
+        "housing"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/plastic-matte.png"
+    },
+    {
+      "appearanceId": "plastic-glossy",
+      "label": "Glossy plastic",
+      "category": "plastics",
+      "model": "physical",
+      "color": "#e9ebed",
+      "roughness": 0.2,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "plastic",
+        "glossy",
+        "shiny"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/plastic-glossy.png",
+      "clearcoat": 0.25,
+      "clearcoatRoughness": 0.2
+    },
+    {
+      "appearanceId": "plastic-translucent",
+      "label": "Translucent plastic",
+      "category": "plastics",
+      "model": "standard",
+      "color": "#dbe6ee",
+      "roughness": 0.3,
+      "metalness": 0.0,
+      "opacity": 0.55,
+      "texture": null,
+      "tags": [
+        "plastic",
+        "translucent",
+        "polycarbonate",
+        "guard"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/plastic-translucent.png"
+    },
+    {
+      "appearanceId": "wood-maple",
+      "label": "Maple (visual)",
+      "category": "wood",
+      "model": "standard",
+      "color": "#ffffff",
+      "roughness": 0.55,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "wood-maple",
+        "sizeMeters": 1.0,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "part",
+        "strength": 1
+      },
+      "tags": [
+        "maple",
+        "light wood",
+        "hardwood",
+        "furniture"
+      ],
+      "description": "Visual representation of a light hardwood; not a certified wood species.",
+      "thumbnail": "thumbnails/appearances/wood-maple.png"
+    },
+    {
+      "appearanceId": "wood-oak",
+      "label": "Oak (visual)",
+      "category": "wood",
+      "model": "standard",
+      "color": "#ffffff",
+      "roughness": 0.52,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "wood-oak",
+        "sizeMeters": 1.0,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "part",
+        "strength": 1
+      },
+      "tags": [
+        "oak",
+        "wood",
+        "hardwood",
+        "furniture",
+        "rack"
+      ],
+      "description": "Visual representation of an oak-like grain; not a certified wood species.",
+      "thumbnail": "thumbnails/appearances/wood-oak.png"
+    },
+    {
+      "appearanceId": "wood-walnut",
+      "label": "Walnut (visual)",
+      "category": "wood",
+      "model": "standard",
+      "color": "#ffffff",
+      "roughness": 0.48,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "wood-walnut",
+        "sizeMeters": 1.0,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "part",
+        "strength": 1
+      },
+      "tags": [
+        "walnut",
+        "dark wood",
+        "hardwood",
+        "furniture"
+      ],
+      "description": "Visual representation of a walnut-like grain; not a certified wood species.",
+      "thumbnail": "thumbnails/appearances/wood-walnut.png"
+    },
+    {
+      "appearanceId": "rubber-black",
+      "label": "Black rubber",
+      "category": "rubber",
+      "model": "standard",
+      "color": "#1d1e1f",
+      "roughness": 0.92,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "rubber",
+        "black",
+        "tire",
+        "seal"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/rubber-black.png"
+    },
+    {
+      "appearanceId": "rubber-speckled",
+      "label": "Speckled rubber matting",
+      "category": "rubber",
+      "model": "standard",
+      "color": "#ffffff",
+      "roughness": 0.85,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "rubber-speckled",
+        "sizeMeters": 0.75,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "length",
+        "strength": 1
+      },
+      "tags": [
+        "rubber",
+        "mat",
+        "flooring",
+        "gym"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/rubber-speckled.png"
+    },
+    {
+      "appearanceId": "glass-clear",
+      "label": "Clear glass",
+      "category": "glass",
+      "model": "physical",
+      "color": "#ffffff",
+      "roughness": 0.03,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "glass",
+        "clear",
+        "window",
+        "transparent"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/glass-clear.png",
+      "transmission": 1.0,
+      "ior": 1.5,
+      "thickness": 0.006
+    },
+    {
+      "appearanceId": "glass-frosted",
+      "label": "Frosted glass",
+      "category": "glass",
+      "model": "physical",
+      "color": "#f4f7f8",
+      "roughness": 0.42,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "glass",
+        "frosted",
+        "privacy",
+        "satin"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/glass-frosted.png",
+      "transmission": 1.0,
+      "ior": 1.5,
+      "thickness": 0.006
+    },
+    {
+      "appearanceId": "fabric-woven-gray",
+      "label": "Woven fabric, gray",
+      "category": "fabric",
+      "model": "standard",
+      "color": "#8e9296",
+      "roughness": 0.88,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "fabric-woven",
+        "sizeMeters": 0.12,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "length",
+        "strength": 1
+      },
+      "tags": [
+        "fabric",
+        "cloth",
+        "upholstery",
+        "woven"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/fabric-woven-gray.png"
+    },
+    {
+      "appearanceId": "fabric-woven-navy",
+      "label": "Woven fabric, navy",
+      "category": "fabric",
+      "model": "standard",
+      "color": "#33415e",
+      "roughness": 0.88,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "fabric-woven",
+        "sizeMeters": 0.12,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "length",
+        "strength": 1
+      },
+      "tags": [
+        "fabric",
+        "cloth",
+        "upholstery",
+        "woven",
+        "blue"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/fabric-woven-navy.png"
+    },
+    {
+      "appearanceId": "cardboard-kraft",
+      "label": "Kraft cardboard",
+      "category": "paper",
+      "model": "standard",
+      "color": "#b58f60",
+      "roughness": 0.82,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "cardboard-kraft",
+        "sizeMeters": 0.25,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "length",
+        "strength": 1
+      },
+      "tags": [
+        "cardboard",
+        "carton",
+        "box",
+        "kraft",
+        "packaging"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/cardboard-kraft.png"
+    },
+    {
+      "appearanceId": "paper-ivory-matte",
+      "label": "Matte ivory paper",
+      "category": "paper",
+      "model": "standard",
+      "color": "#ebe4d4",
+      "roughness": 0.86,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "paper-matte",
+        "sizeMeters": 0.3,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "length",
+        "strength": 1
+      },
+      "tags": [
+        "paper",
+        "ivory",
+        "matte",
+        "label"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/paper-ivory-matte.png"
+    },
+    {
+      "appearanceId": "paint-safety-yellow",
+      "label": "Safety yellow paint",
+      "category": "paint",
+      "model": "physical",
+      "color": "#f2c200",
+      "roughness": 0.45,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "paint",
+        "yellow",
+        "safety",
+        "guard",
+        "rail"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/paint-safety-yellow.png",
+      "clearcoat": 0.3,
+      "clearcoatRoughness": 0.35
+    },
+    {
+      "appearanceId": "paint-safety-orange",
+      "label": "Safety orange paint",
+      "category": "paint",
+      "model": "physical",
+      "color": "#f06a1f",
+      "roughness": 0.45,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "paint",
+        "orange",
+        "safety"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/paint-safety-orange.png",
+      "clearcoat": 0.3,
+      "clearcoatRoughness": 0.35
+    },
+    {
+      "appearanceId": "paint-machine-gray",
+      "label": "Machine gray enamel",
+      "category": "paint",
+      "model": "physical",
+      "color": "#cbd0cc",
+      "roughness": 0.38,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "paint",
+        "gray",
+        "grey",
+        "machine",
+        "enamel",
+        "RAL 7035"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/paint-machine-gray.png",
+      "clearcoat": 0.45,
+      "clearcoatRoughness": 0.25
+    },
+    {
+      "appearanceId": "paint-powder-blue",
+      "label": "Blue powder coat",
+      "category": "paint",
+      "model": "standard",
+      "color": "#1f5aa6",
+      "roughness": 0.55,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "paint",
+        "blue",
+        "powder coat",
+        "rack",
+        "shelving"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/paint-powder-blue.png"
+    },
+    {
+      "appearanceId": "paint-gloss-red",
+      "label": "Gloss red enamel",
+      "category": "paint",
+      "model": "physical",
+      "color": "#b3201f",
+      "roughness": 0.22,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "paint",
+        "red",
+        "gloss",
+        "fire",
+        "enamel"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/paint-gloss-red.png",
+      "clearcoat": 0.8,
+      "clearcoatRoughness": 0.1
+    },
+    {
+      "appearanceId": "paint-matte-black",
+      "label": "Matte black powder coat",
+      "category": "paint",
+      "model": "standard",
+      "color": "#1e2023",
+      "roughness": 0.78,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "paint",
+        "black",
+        "matte",
+        "powder coat"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/paint-matte-black.png"
+    },
+    {
+      "appearanceId": "paint-signal-green",
+      "label": "Signal green paint",
+      "category": "paint",
+      "model": "physical",
+      "color": "#2f8f4e",
+      "roughness": 0.45,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "paint",
+        "green",
+        "safety",
+        "first aid"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/paint-signal-green.png",
+      "clearcoat": 0.3,
+      "clearcoatRoughness": 0.35
+    },
+    {
+      "appearanceId": "concrete-smooth",
+      "label": "Smooth concrete",
+      "category": "stone",
+      "model": "standard",
+      "color": "#ffffff",
+      "roughness": 0.82,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "concrete-smooth",
+        "sizeMeters": 2.0,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "length",
+        "strength": 1
+      },
+      "tags": [
+        "concrete",
+        "cement",
+        "floor",
+        "wall"
+      ],
+      "description": "",
+      "thumbnail": "thumbnails/appearances/concrete-smooth.png"
+    },
+    {
+      "appearanceId": "marble-white",
+      "label": "White marble (visual)",
+      "category": "stone",
+      "model": "standard",
+      "color": "#ffffff",
+      "roughness": 0.14,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": {
+        "textureSetId": "marble-white",
+        "sizeMeters": 1.2,
+        "rotationDegrees": 0,
+        "mapping": "box",
+        "grain": "length",
+        "strength": 1
+      },
+      "tags": [
+        "marble",
+        "stone",
+        "countertop",
+        "polished"
+      ],
+      "description": "Visual representation of polished marble; not a stone specification.",
+      "thumbnail": "thumbnails/appearances/marble-white.png"
+    }
+  ]
+}

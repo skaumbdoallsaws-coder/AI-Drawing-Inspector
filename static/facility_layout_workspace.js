@@ -25,6 +25,8 @@
     const NAVIGATION_ACTIVITY_MAXIMUM_ACTORS = 64;
     const generationView = typeof module === 'object' && module.exports
         ? require('./facility_layout_generation_view.js') : root.InspectorProGenerationPlanningView;
+    const siteRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_site.js') : root.InspectorProFacilitySite;
     const ASSET_MIME = 'application/x-inspectorpro-facility-asset';
     const DEFAULT_GRID_SIZE = 0.5;
     const DEFAULT_DUPLICATE_OFFSET = Object.freeze({ x: 1, y: 0, z: 1 });
@@ -98,7 +100,7 @@
         Object.freeze({ value: 'utility', label: 'Utility corridor - no equipment' }),
         Object.freeze({ value: 'aisle', label: 'Aisle - no equipment' }),
     ]);
-    const VIEW_MODES = Object.freeze(['plan', '3d']);
+    const VIEW_MODES = Object.freeze(['plan', '3d', 'site']);
     const WALKTHROUGH_CONTEXT_MODES = Object.freeze([
         Object.freeze({ key: 'production', label: 'Production' }),
         Object.freeze({ key: 'maintenance', label: 'Maintenance' }),
@@ -1800,6 +1802,80 @@
         };
     }
 
+    // What the 3D camera fit depends on: the layout without its look. Painting models, wall finishes and
+    // scene lighting keep the user's view; moving, adding or resizing anything still fits again.
+    const FIT_IGNORED_KEYS = new Set(['componentMaterials', 'exteriorFinish', 'interiorColor', 'facilityScene']);
+
+    function fitFingerprintOf(layout) {
+        return JSON.stringify(layout, function (key, value) {
+            return FIT_IGNORED_KEYS.has(key) ? undefined : value;
+        });
+    }
+
+    // A review whose every operation only changes how things look: part colours, finishes, scene lighting, the
+    // walls' finish alone, and ground marks over unchanged paving (the paint step's wall look and yard target).
+    const APPEARANCE_OPERATIONS = new Set(['set_component_materials', 'set_appearance', 'set_scene']);
+
+    function appearanceOperation(operation, layout) {
+        if (!operation) return false;
+        if (APPEARANCE_OPERATIONS.has(operation.op)) return true;
+        if (operation.op === 'edit_perimeter_walls') {
+            const keys = Object.keys(operation.patch || {});
+            return keys.length === 1 && keys[0] === 'exteriorFinish';
+        }
+        if (operation.op === 'set_ground' && operation.ground) {
+            const saved = (((layout || {}).extensions || {}).facilityGround || {}).surfaces;
+            return Array.isArray(saved) && JSON.stringify(operation.ground.surfaces || []) === JSON.stringify(saved);
+        }
+        return false;
+    }
+
+    function appearanceOnlyAlternative(alternative, layout) {
+        const operations = alternative && Array.isArray(alternative.operations) ? alternative.operations : [];
+        return operations.length > 0 && operations.every(function (operation) {
+            return appearanceOperation(operation, layout);
+        });
+    }
+
+    // The view that shows a review best (the step-by-step build, 2026-10-24): the building's 2D plan for its size,
+    // walls, zones, markings and aisles; the site photo for drives, entrances and outdoor areas; 3D for models and
+    // paint. A new review only moves into or out of the Site view; Plan and 3D stay the user's choice.
+    const PLAN_SHAPE_OPERATIONS = new Set(['set_plan_settings', 'set_building_pose']);
+    const SITE_OPERATIONS = new Set(['set_site_context', 'upsert_site_area', 'delete_site_area',
+        'upsert_site_reference', 'delete_site_reference']);
+    const MODEL_OPERATIONS = new Set(['place_asset', 'place_asset_array']);
+
+    function reviewViewFor(alternative, layout) {
+        const operations = alternative && Array.isArray(alternative.operations) ? alternative.operations : [];
+        if (!operations.length) return null;
+        const names = operations.map(function (operation) { return operation && operation.op; });
+        if (names.some(function (name) { return PLAN_SHAPE_OPERATIONS.has(name); })) return 'plan';
+        if (names.some(function (name) { return SITE_OPERATIONS.has(name); })) return 'site';
+        if (appearanceOnlyAlternative(alternative, layout)) return '3d';
+        if (names.some(function (name) { return MODEL_OPERATIONS.has(name); })) return '3d';
+        return 'plan';
+    }
+
+    // A step applied directly (Apply Directly mode) moves the view as its review would have opened.
+    const PAINT_OPERATIONS = new Set(['set_component_materials', 'set_appearance', 'set_scene',
+        'edit_perimeter_walls', 'set_ground', 'upsert_wall_artwork', 'upsert_decal']);
+
+    // Reference points show only on the site photo. Every other outdoor change (truck court, car park, drives) shows in
+    // 3D too, so a step applied while 3D is open stays there (the user, 2026-10-24: stay in 3D once the building is in).
+    const SITE_PHOTO_OPERATIONS = new Set(['upsert_site_reference', 'delete_site_reference']);
+
+    function directApplyViewFor(names, current) {
+        if (!Array.isArray(names) || !names.length) return null;
+        if (names.some(function (name) { return PLAN_SHAPE_OPERATIONS.has(name); })) return 'plan';
+        if (names.some(function (name) { return SITE_OPERATIONS.has(name); })) {
+            const photoOnly = names.some(function (name) { return SITE_PHOTO_OPERATIONS.has(name); });
+            return current === '3d' && !photoOnly ? '3d' : 'site';
+        }
+        if (names.some(function (name) { return MODEL_OPERATIONS.has(name); })) return '3d';
+        if (names.every(function (name) { return PAINT_OPERATIONS.has(name); })) return '3d';
+        return 'plan';
+    }
+
     function activeLayoutAlternative(state) {
         const proposal = state && state.layoutProposal;
         if (!proposal || !Array.isArray(proposal.alternatives)
@@ -2135,7 +2211,7 @@
         return count + ' ' + (count === 1 ? singular : plural);
     }
 
-    function proposalPlainChangeSummary(review) {
+    function proposalPlainChangeSummary(review, alternative) {
         const source = review || {};
         const zones = source.zoneChanges || {};
         const routes = source.routeChanges || {};
@@ -2153,6 +2229,15 @@
         ].forEach(function (item) {
             if (item[0] > 0) parts.push(countPhrase(item[0], item[1], item[2]));
         });
+        const siteEdits = ((alternative || {}).operations || []).filter(function (operation) {
+            return ['set_site_context', 'set_building_pose', 'upsert_site_area',
+                'delete_site_area', 'upsert_site_reference', 'delete_site_reference'].includes(operation.op);
+        }).length;
+        if (siteEdits) parts.push(countPhrase(siteEdits, 'site edit', 'site edits'));
+        const repainted = ((alternative || {}).operations || []).filter(function (operation) {
+            return operation.op === 'set_component_materials' || operation.op === 'set_appearance';
+        }).length;
+        if (repainted) parts.push(countPhrase(repainted, 'repainted item', 'repainted items'));
         return parts.length
             ? 'Changes: ' + parts.join(', ') + '.'
             : 'No items, zones or aisles change.';
@@ -2210,6 +2295,9 @@
             problems.push(countPhrase(clearance, 'clearance conflict', 'clearance conflicts'));
         }
         if (warningCount > 0) problems.push(countPhrase(warningCount, 'warning', 'warnings'));
+        if (checks && checks.siteFindingCount > 0) {
+            problems.push(countPhrase(checks.siteFindingCount, 'site finding', 'site findings'));
+        }
         // Unverified items and unreported checks stay in the technical details.
         return {
             text: problems.length
@@ -2732,6 +2820,8 @@
         this.polygonPoints = [];
         this.suppressAdapterSelection = null;
         this.lastLayoutFingerprint = null;
+        this.lastLayoutFitFingerprint = null;
+        this.lastProposalRepaintOnly = false;
         this.lastThreeFitFingerprint = null;
         this.commandStates = {};
         this.unsubscribe = null;
@@ -2745,6 +2835,7 @@
         this.createdThreeAdapter = false;
         this.ownsController = !options.controller;
         this.lastProposalVisualFingerprint = 'none';
+        this.lastDirectApplyReceiptId = null;
         this.proposalFocusReturn = null;
         this.lastPointerWorld = { x: 0, y: 0, z: 0 };
         this.assetBrowserState = {
@@ -4914,6 +5005,47 @@
             && !(this.generationPlanningView && this.generationPlanningView.activeLayout())
             && typeof this.session.setSelectedAppearance === 'function'
             && this._selectedPlacementRecords().length > 0;
+    };
+
+    // Library edits (finishes, scenes, decals) need an editable draft but not
+    // a selection: a scene or a favorite can be browsed with nothing selected.
+    Workspace.prototype._canEditLibrary = function () {
+        return !this.destroyed && !this.suspended && this.state.loaded && !this.state.busy
+            && this.capabilities.manualAuthoring && !this.state.conflict
+            && !this.state.generatedDraft && !this.state.designProposalDraft
+            && !this.state.layoutProposal && !this.state.placementAlternatives
+            && !this.constructionPreview && !this.activityRequestPending
+            && !(this.generationPlanningView && this.generationPlanningView.activeLayout());
+    };
+
+    // What the Appearances, Scenes and Decals panel needs, without reaching
+    // into workspace internals. Read on every panel refresh; never mutate.
+    Workspace.prototype.appearanceLibraryContext = function () {
+        const self = this;
+        return {
+            session: this.session,
+            threeAdapter: this.threeAdapter || null,
+            document: this.document,
+            assetCatalog: this.assetCatalog || [],
+            layout: this.state && this.state.layout || null,
+            selection: Array.isArray(this.state && this.state.selection) ? this.state.selection.slice() : [],
+            canEdit: this._canEditLibrary(),
+            viewMode: this.viewMode,
+            dropTarget: this.threeView || null,
+            show3d: function () { if (self.viewMode !== '3d') self._setViewMode('3d'); },
+            openWallDecals: function (prefill) {
+                if (!decalsRuntime) throw new Error('Wall decals are unavailable.');
+                return decalsRuntime.openDialog(self, undefined, prefill);
+            },
+            isWallAsset: function (placementId) {
+                const placement = (self.state.layout && self.state.layout.placements || [])
+                    .find(function (row) { return row.placementId === placementId; });
+                const entry = placement && (self.assetCatalog || []).find(function (row) {
+                    return row.assetId === placement.assetId;
+                });
+                return Boolean(entry && wallsRuntime && wallsRuntime.isWallAsset(entry));
+            },
+        };
     };
 
     Workspace.prototype.closeAppearanceDialog = function () {
@@ -10337,6 +10469,7 @@
             ['saved-movement', 'Saved movement', ''],
             ['clear-all', 'Clear All', ''],
             ['save', 'Save', 'Ctrl+S'],
+            ['export-pdf', 'Export PDF', ''],
         ].forEach(function (spec) {
             this.toolbar.appendChild(this._button(spec[0], spec[1], spec[2]));
         }, this);
@@ -10364,6 +10497,22 @@
             'aria-controls': 'ip-flw-three-view',
         }, '3D');
         append(this.viewTabs, this.planTab, this.threeTab);
+        this.siteView = siteRuntime && this.session && typeof this.session.setSiteContext === 'function'
+            ? siteRuntime.create({ document: this.document, session: this.session,
+                onOpenWalls: () => { if (wallsRuntime.canEdit(this)) return wallsRuntime.openDialog(this); } }) : null;
+        this.siteTab = null;
+        if (this.siteView) {
+            this.siteTab = element(this.document, 'button', {
+                type: 'button',
+                className: 'ip-flw-view-tab',
+                role: 'tab',
+                'data-view': 'site',
+                'aria-controls': 'ip-flw-site-view',
+                title: 'The layout on its real site: aerial photo, true north up',
+            }, 'Site');
+            this.siteView.element.hidden = true;
+            this.viewTabs.appendChild(this.siteTab);
+        }
         if (this.capabilities.generationPlanning && generationView) {
             this.generationPlanningView = generationView.create(this, element);
             const planning = element(this.document, 'button', {type: 'button', title: 'Generation planning',
@@ -10712,6 +10861,7 @@
         append(this.viewportStack,
             this.planView,
             this.threeView,
+            this.siteView ? this.siteView.element : null,
             this._buildLayerPanel(),
             this.floorMarkingPalette,
             this.ghostOverlay,
@@ -13097,7 +13247,7 @@
             );
             this.proposalReview.hidden = false;
             this.proposalChangeText.textContent =
-                proposalPlainChangeSummary(review);
+                proposalPlainChangeSummary(review, alternative);
             const check = proposalPlainCheckSummary(alternative);
             this.proposalCheckText.textContent = check.text;
             this.proposalCheckText.setAttribute('data-check-status', check.status);
@@ -13985,10 +14135,7 @@
         if (this.toolMode !== 'polygon-zone') return;
         if (targetDataId(event.target, 'data-placement-id', this.planView)) return;
         const world = this._eventWorld(event);
-        const previous = this.polygonPoints[this.polygonPoints.length - 1];
-        if (!previous || previous.x !== world.x || previous.z !== world.z) {
-            this.polygonPoints.push(world);
-        }
+        siteRuntime.appendPolygonVertex(this.polygonPoints, world);
         this._setZonePreview(
             this.polygonPoints,
             { kind: 'polygon', closed: false }
@@ -14680,8 +14827,9 @@
             'data-heading-cardinal',
             orientation.cardinal
         );
-        const description = 'Facility orientation. North is positive Z and east is '
-            + 'positive X. The top of the view points '
+        const description = (value && value.reference === 'true-north'
+            ? 'Site orientation, true north. The top of the view points '
+            : 'Facility orientation. North is positive Z and east is positive X. The top of the view points ')
             + orientation.cardinal + ' at ' + degrees + ' degrees from north.';
         this.threeCompass.setAttribute('aria-label', description);
         this.threeCompass.setAttribute('title', description);
@@ -15784,6 +15932,14 @@
     };
 
     Workspace.prototype.executeCommand = function (command) {
+        // With the Appearances, Scenes and Decals panel available, the ribbon's
+        // appearance commands open it at the matching place; the original
+        // dialogs remain the fallback.
+        const library = typeof this.options.onOpenAppearanceLibrary === 'function'
+            ? this.options.onOpenAppearanceLibrary : null;
+        if (library && command === 'appearance') return Promise.resolve(library({ node: 'appearances', scope: 'object' }));
+        if (library && command === 'component-materials') return Promise.resolve(library({ node: 'appearances', scope: 'part' }));
+        if (library && command === 'decals') return Promise.resolve(library({ node: 'decals' }));
         if (command === 'decals') return Promise.resolve(decalsRuntime.openDialog(this));
         if (command === 'lettering') return Promise.resolve(decalsRuntime.openDialog(this, 'lettering'));
         if (command === 'component-materials') return componentMaterialsRuntime.open(this);
@@ -15907,6 +16063,10 @@
             this._setToolMode(command);
             return Promise.resolve(this.getState());
         }
+        if ((command === 'fit' || command === 'fit-layout') && this.viewMode === 'site' && this.siteView) {
+            this.siteView.fit();
+            return Promise.resolve(this.getState());
+        }
         if (command === 'fit') {
             if (typeof this.controller.fitFacility === 'function') {
                 this.controller.fitFacility();
@@ -15958,6 +16118,16 @@
             undo: function () { return this.session.undo(); },
             redo: function () { return this.session.redo(); },
             save: function () { return this.session.save(); },
+            // The saved layout's plan sheets (site plan, floor plan), drawn by the server, in a new tab.
+            'export-pdf': function () {
+                const layout = this.state.layout;
+                const view = this.document.defaultView;
+                if (view && typeof view.open === 'function') {
+                    view.open('/api/facility-layouts/' + encodeURIComponent(layout.association.siteId) + '/'
+                        + encodeURIComponent(layout.layoutId) + '/plan.pdf', '_blank', 'noopener');
+                }
+                return Promise.resolve(this.getState());
+            },
             lock: function () {
                 const placements = this.state.layout.placements.filter(function (item) {
                     return this.state.selection.includes(item.placementId);
@@ -15990,8 +16160,8 @@
     Workspace.prototype._handleViewTabKeyDown = function (event) {
         const key = String(event && event.key || '');
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(key)) return;
-        const tabs = [this.planTab, this.threeTab].filter(function (tab) {
-            return !tab.disabled;
+        const tabs = [this.planTab, this.threeTab, this.siteTab].filter(function (tab) {
+            return tab && !tab.disabled;
         });
         const current = tabs.indexOf(event.target);
         if (current < 0 || tabs.length < 2) return;
@@ -16008,6 +16178,7 @@
         if (!VIEW_MODES.includes(mode)) throw new TypeError('invalid view mode');
         if (this.walkCameraControl) this.walkCameraControl.close(false);
         if (mode === '3d' && !this.threeAdapter) mode = 'plan';
+        if (mode === 'site' && !this.siteView) mode = 'plan';
         if (mode !== '3d') {
             this._cancelRecordingCountdown();
             if (this.recordingController
@@ -16030,13 +16201,26 @@
         }
         this.viewMode = mode;
         const plan = mode === 'plan';
+        const three = mode === '3d';
+        const site = mode === 'site';
         this.planView.hidden = !plan;
-        this.threeView.hidden = plan;
+        this.threeView.hidden = !three;
         this.planTab.setAttribute('aria-selected', plan ? 'true' : 'false');
         this.planTab.setAttribute('tabindex', plan ? '0' : '-1');
-        this.threeTab.setAttribute('aria-selected', plan ? 'false' : 'true');
-        this.threeTab.setAttribute('tabindex', plan ? '-1' : '0');
+        this.threeTab.setAttribute('aria-selected', three ? 'true' : 'false');
+        this.threeTab.setAttribute('tabindex', three ? '0' : '-1');
         this.threeTab.disabled = !this.threeAdapter;
+        if (this.siteView) {
+            this.siteView.element.hidden = !site;
+            this.siteTab.setAttribute('aria-selected', site ? 'true' : 'false');
+            this.siteTab.setAttribute('tabindex', site ? '0' : '-1');
+            if (site) {
+                this.siteView.render(this.siteRepresentedLayout || (this.state && this.state.layout), { readOnly: this.sitePreviewReadOnly });
+                this.siteView.show();
+            } else {
+                this.siteView.hide();
+            }
+        }
         this.root.setAttribute('data-view-mode', mode);
         if (this.threeAdapter && typeof this.threeAdapter.invalidate === 'function'
                 && mode === '3d') {
@@ -16045,13 +16229,13 @@
         if (mode === '3d'
                 && this.lastLayoutFingerprint
                 && this.threeAdapter) {
-            const fitFingerprint = this.lastLayoutFingerprint;
+            const fitFingerprint = this.lastLayoutFitFingerprint;
             const ready = this.controller
                 && typeof this.controller.ready === 'function'
                 ? this.controller.ready() : Promise.resolve();
             Promise.resolve(ready).then(function () {
                 if (this.destroyed || this.viewMode !== '3d'
-                        || this.lastLayoutFingerprint !== fitFingerprint) return;
+                        || this.lastLayoutFitFingerprint !== fitFingerprint) return;
                 if (this.motionState.loaded
                         && this.motionState.vehiclePresentation === 'placed_asset'
                         && this.threeAdapter.motion
@@ -16072,6 +16256,12 @@
         this._renderStatus();
         this._syncSelectionToolbar();
         return mode;
+    };
+
+    Workspace.prototype._fitPlanToBuilding = function () {
+        if (this.destroyed || this.viewMode !== 'plan' || !this.topAdapter
+                || typeof this.topAdapter.fitBuilding !== 'function') return null;
+        return this.topAdapter.fitBuilding();
     };
 
     Workspace.prototype._setToolMode = function (mode) {
@@ -16819,6 +17009,10 @@
                 || Boolean(activeLayoutAlternative(this.state)) || Boolean(this.constructionPreview)
                 || Boolean(this.generationPlanningView && this.generationPlanningView.activeLayout())
                 || !this.savedMovementChoices().length,
+            // The PDF draws the saved layout, so unsaved changes must be saved first.
+            'export-pdf': !this.state.layout || !this.state.layout.layoutId
+                || !(this.state.layout.association && this.state.layout.association.siteId)
+                || this.state.dirty,
             'auto-arrange': !this.capabilities.fullLayoutProposals
                 || typeof this.session.requestLayoutProposal
                     !== 'function'
@@ -16829,10 +17023,13 @@
             duplicate: manualEditingBlocked || !hasMovable,
             delete: manualEditingBlocked || !hasSelection,
             lock: manualEditingBlocked || !hasMovable,
-            appearance: !this._canEditAppearance(),
+            appearance: typeof this.options.onOpenAppearanceLibrary === 'function'
+                ? !this._canEditLibrary() : !this._canEditAppearance(),
             decals: !decalsRuntime || !wallsRuntime.canEdit(this),
             lettering: !decalsRuntime || !wallsRuntime.canEdit(this),
-            'component-materials': !componentMaterialsRuntime || !wallsRuntime.canEdit(this) || this._selectedPlacementRecords().length !== 1,
+            'component-materials': typeof this.options.onOpenAppearanceLibrary === 'function'
+                ? !this._canEditLibrary()
+                : !componentMaterialsRuntime || !wallsRuntime.canEdit(this) || this._selectedPlacementRecords().length !== 1,
             'interior-walls': !interiorWallsRuntime || !wallsRuntime.canEdit(this),
             'floor-surfaces': !floorSurfacesRuntime || !wallsRuntime.canEdit(this),
             'replace-asset': !replaceAssetRuntime || !wallsRuntime.canEdit(this) || this._selectedPlacementRecords().length !== 1,
@@ -16989,7 +17186,7 @@
         else if (this.state.conflict) parts.push('Revision conflict');
         else parts.push(this.state.dirty ? 'Unsaved changes' : 'Saved');
         parts.push(this.state.selection.length + ' selected');
-        parts.push(this.viewMode === '3d' ? '3D view' : 'Plan view');
+        parts.push(this.viewMode === '3d' ? '3D view' : this.viewMode === 'site' ? 'Site view' : 'Plan view');
         parts.push(this.toolMode.replace(/-/g, ' '));
         if (this.lastError) parts.push('Error: ' + this.lastError.message);
         if (this.state.placementAlternatives) {
@@ -17069,10 +17266,33 @@
         const renderedLayout = generationLayout || (activeConstruction ? activeConstruction.candidateLayout : layoutAlternative
             ? layoutAlternative.ghostPreview.layout
             : this.state.layout);
+        this.siteRepresentedLayout = renderedLayout;
+        this.sitePreviewReadOnly = Boolean(generationLayout || activeConstruction || layoutAlternative);
+        if (this.siteView) this.siteView.render(renderedLayout, { readOnly: this.sitePreviewReadOnly });
         const layoutFingerprint = JSON.stringify(renderedLayout);
         if (layoutFingerprint !== this.lastLayoutFingerprint) {
             this.controller.setLayout(renderedLayout);
             this.lastLayoutFingerprint = layoutFingerprint;
+            this.lastLayoutFitFingerprint = fitFingerprintOf(renderedLayout);
+        }
+        const commit = this.state.lastApprovedOperationCommit;
+        if (commit && commit.directApply && commit.receiptId && commit.receiptId !== this.lastDirectApplyReceiptId) {
+            this.lastDirectApplyReceiptId = commit.receiptId;
+            const current = this.viewMode;
+            const view = directApplyViewFor(commit.operationNames, current);
+            const moves = Boolean(view && view !== current && (current === 'site' || view === 'site'));
+            // A building step that ends in the 2D plan shows the building large (the user, 2026-10-24: "zoom in the
+            // warehouse layout on the 2d plane so it takes much of the viewport display").
+            const fitsBuilding = view === 'plan' && (moves || current === 'plan');
+            if (moves || fitsBuilding) {
+                const self = this;
+                Promise.resolve().then(function () {
+                    if (self.destroyed || self.viewMode !== current) return;
+                    if (moves) self._setViewMode(view);
+                    // After the plan view has its size and its own refit for a new building outline.
+                    if (fitsBuilding) setTimeout(function () { self._fitPlanToBuilding(); }, 0);
+                });
+            }
         }
         const proposalVisualFingerprint = proposalPreview
             ? JSON.stringify(proposalPreview) : 'none';
@@ -17089,9 +17309,28 @@
                 }
             );
             this.lastProposalVisualFingerprint = proposalVisualFingerprint;
-            if ((proposalPreview || hadProposalVisual)
+            // A review fits the views to show what it adds, moves or removes. One that only repaints keeps
+            // the user's view, both when it opens and when it closes.
+            const repaintOnly = appearanceOnlyAlternative(layoutAlternative, this.state && this.state.layout);
+            const closedRepaint = !proposalPreview && this.lastProposalRepaintOnly;
+            if ((proposalPreview || hadProposalVisual) && !(proposalPreview ? repaintOnly : closedRepaint)
                     && typeof this.controller.fit === 'function') {
                 this.controller.fit();
+            }
+            this.lastProposalRepaintOnly = Boolean(proposalPreview) && repaintOnly;
+            if (proposalPreview && !hadProposalVisual) {
+                // A new review opens where it can be seen: a building step in the 2D plan, not the site photo.
+                const view = reviewViewFor(layoutAlternative, this.state && this.state.layout);
+                const current = this.viewMode;
+                if (view && view !== current && (current === 'site' || view === 'site')) {
+                    const self = this;
+                    Promise.resolve().then(function () {
+                        if (!self.destroyed && self.viewMode === current
+                                && self.lastProposalVisualFingerprint !== 'none') {
+                            self._setViewMode(view);
+                        }
+                    });
+                }
             }
         }
         const placementIds = new Set(renderedLayout.placements.map(function (item) {

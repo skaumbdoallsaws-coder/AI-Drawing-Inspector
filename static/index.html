@@ -1138,54 +1138,6 @@
             padding: 9px 10px;
             border-top: 1px solid var(--border);
         }
-        .manual-published-pdf-overlay {
-            position: fixed;
-            inset: 20px;
-            z-index: 1800;
-            display: grid;
-            grid-template-rows: 44px minmax(0, 1fr);
-            overflow: hidden;
-            border: 1px solid var(--border-strong);
-            border-radius: 6px;
-            background: var(--bg-panel);
-            box-shadow: 0 18px 54px rgba(0, 0, 0, 0.38);
-        }
-        .manual-published-pdf-toolbar {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 0 12px;
-            border-bottom: 1px solid var(--border);
-            background: var(--bg-panel);
-        }
-        .manual-published-pdf-toolbar strong {
-            min-width: 0;
-            flex: 1;
-            overflow: hidden;
-            color: var(--text-primary);
-            font-size: 12px;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        .manual-published-pdf-toolbar a,
-        .manual-published-pdf-toolbar button {
-            min-height: 28px;
-            padding: 0 10px;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            background: var(--bg-input);
-            color: var(--text-primary);
-            font: inherit;
-            text-decoration: none;
-            cursor: pointer;
-        }
-        .manual-published-pdf-frame {
-            width: 100%;
-            height: 100%;
-            border: 0;
-            background: #fff;
-        }
-
         /* CAD-grounded Documentation Workspace */
         body.documentation-workspace-active .left-panel,
         body.documentation-workspace-active .left-restore-strip {
@@ -1550,6 +1502,11 @@
         }
         .documentation-thumbnail-callouts .documentation-callout-quantity {
             font-size: 19px;
+            /* A white halo, so the label reads over the drawing's linework (the PDF masks it the same way). */
+            paint-order: stroke;
+            stroke: #fff;
+            stroke-width: 6px;
+            stroke-linejoin: round;
         }
         .documentation-page-item strong,
         .documentation-page-item span {
@@ -2536,14 +2493,23 @@
             font-weight: 800;
             text-align: left;
         }
+        /* Centred numbers need little side padding; ITEM and QTY then fit a narrow table without an ellipsis. */
         .documentation-page-bom th:first-child,
         .documentation-page-bom th:last-child,
         .documentation-page-bom td:first-child,
-        .documentation-page-bom td:last-child { text-align: center; }
+        .documentation-page-bom td:last-child { text-align: center; padding-left: 1px; padding-right: 1px; }
         .documentation-page-bom th:first-child,
         .documentation-page-bom td:first-child { border-left: 0.65px solid var(--doc-table-rule); }
         .documentation-page-bom th:last-child,
         .documentation-page-bom td:last-child { border-right: 0.65px solid var(--doc-table-rule); }
+        /* A part number or description edited on the page (press twice). */
+        .documentation-page-bom td.editable { cursor: text; }
+        .documentation-page-bom td.editable[contenteditable="true"] {
+            outline: 1.5px solid #168bd2;
+            outline-offset: -1px;
+            text-overflow: clip;
+            user-select: text;
+        }
         .documentation-page-cover .documentation-page-header {
             height: 150px !important;
             overflow: visible;
@@ -17008,17 +16974,33 @@
         .agent-file-card {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 6px;
             margin: 10px 0 4px;
-            padding: 12px 14px;
+            padding: 12px 6px 12px 12px;
             border: 1px solid var(--border);
             border-radius: 10px;
             background: color-mix(in srgb, var(--bg-panel) 88%, var(--bg-main) 12%);
+        }
+        .agent-file-card:hover { border-color: color-mix(in srgb, var(--border) 40%, #3b82f6 60%); }
+        .agent-file-open {
+            display: flex;
+            flex: 1;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
             color: inherit;
             text-decoration: none;
             cursor: pointer;
         }
-        .agent-file-card:hover { border-color: color-mix(in srgb, var(--border) 40%, #3b82f6 60%); }
+        .agent-file-download {
+            flex: 0 0 auto;
+            display: inline-flex;
+            padding: 6px;
+            border-radius: 6px;
+            color: inherit;
+            opacity: .7;
+        }
+        .agent-file-download:hover { opacity: 1; background: color-mix(in srgb, var(--border) 50%, transparent); }
         .agent-file-badge {
             flex: 0 0 auto;
             padding: 6px 7px;
@@ -17030,7 +17012,7 @@
             letter-spacing: .04em;
         }
         .agent-file-body { display: flex; flex-direction: column; min-width: 0; }
-        .agent-file-name { font-weight: 600; overflow-wrap: anywhere; }
+        .agent-file-name { font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
         .agent-file-detail { margin-top: 2px; font-size: 12px; opacity: .7; }
         .agent-source-card {
             display: grid;
@@ -21592,7 +21574,7 @@
     <script src="/static/ui_action_runtime.js"></script>
     <script src="/static/chat_stream_runtime.js?v=20261028-part-2"></script>
     <script src="/static/chat_memory_runtime.js"></script>
-    <script src="/static/chat_rich_content.js?v=20261025-link-chip-3"></script>
+    <script src="/static/chat_rich_content.js?v=20261029-file-download-1"></script>
     <script src="/static/vendor/floating-ui/floating-ui.core.umd.min.js"></script>
     <script src="/static/vendor/floating-ui/floating-ui.dom.umd.min.js"></script>
     <script src="/static/floating_surface.js"></script>
@@ -21613,13 +21595,13 @@
     <script src="/static/facility_layout_equipment_decals.js?v=20261019-library-1"></script>
     <script src="/static/facility_layout_replace_asset.js?v=20261013-authoring-1"></script>
     <script src="/static/facility_layout_decals.js?v=20261019-library-1"></script>
-    <script src="/static/facility_layout_editor.js?v=20261024-zone-labels-1"></script>
+    <script src="/static/facility_layout_editor.js?v=20261030-roof-layers-1"></script>
     <script src="/static/facility_layout_avatar.js?v=20260928-motion-operators-1"></script>
     <script src="/static/process_operator.js?v=20260927-1"></script>
     <script src="/static/walkthrough_camera_settings.js?v=20260927-1"></script>
     <script src="/static/facility_layout_site_globe.js?v=20261022-globe-4"></script>
     <script src="/static/facility_layout_site.js?v=20261024-site-labels-1"></script>
-    <script src="/static/facility_layout_three_adapter.js?v=20261024-drone-1"></script>
+    <script src="/static/facility_layout_three_adapter.js?v=20261030-roof-layers-1"></script>
     <script src="/static/facility_layout_recorder.js?v=20261021-site-1"></script>
     <script src="/static/facility_layout_structure.js?v=20260923-structure-tree"></script>
     <script src="/static/facility_layout_structure_tree.js?v=9c9992a02daa"></script>
@@ -21629,10 +21611,10 @@
     <script src="/static/facility_layout_sheets.js?v=20260929-open-layout-1"></script>
     <script src="/static/facility_layout_patterns.js?v=20260912-construction-contract"></script>
     <script src="/static/facility_layout_command_adapter.js?v=20260912-contract-v1-retry-fix"></script>
-    <script src="/static/facility_layout_session.js?v=20261023-trace-1"></script>
+    <script src="/static/facility_layout_session.js?v=20261030-emergency-1"></script>
     <script src="/static/facility_layout_transport.js?v=20261023-trace-1"></script>
     <script src="/static/facility_layout_generation_view.js?v=20260917-generation-research"></script>
-    <script src="/static/facility_layout_workspace.js?v=20261024-plan-fit-1"></script>
+    <script src="/static/facility_layout_workspace.js?v=20261030-roof-layers-1"></script>
     <script src="/static/facility_layout_app.js?v=20261023-trace-1"></script>
     <script src="/static/desktop_workflow_observation.js?v=20260915-workflow-coverage"></script>
     <script src="/static/desktop_runtime_bridge.js?v=20260915-workflow-coverage"></script>
@@ -28910,7 +28892,7 @@
             return new THREE.Vector3(1, 0.72, 1).normalize();
         }
 
-        function _partsManualFitMeshes(meshes, cameraPreset = 'isometric') {
+        function _partsManualFitMeshes(meshes, cameraPreset = 'isometric', options = {}) {
             if (!state.assyCamera || !state.assyControls || !meshes?.length) return false;
             if (state.assyLiveScene) state.assyLiveScene.updateWorldMatrix(true, true);
             const box = _partsManualBoxForMeshes(meshes);
@@ -28952,8 +28934,14 @@
                 const xs = projected.map(point => point.x).filter(Number.isFinite);
                 const ys = projected.map(point => point.y).filter(Number.isFinite);
                 if (xs.length !== corners.length || ys.length !== corners.length) break;
-                const widthOccupancy = (Math.max(...xs) - Math.min(...xs)) * 0.5;
-                const heightOccupancy = (Math.max(...ys) - Math.min(...ys)) * 0.5;
+                // contain: every corner inside the view, measured from its centre (a deep exploded group seen in
+                // perspective is not centred on its box); otherwise the span, as the manual's figures are framed.
+                const widthOccupancy = options.contain
+                    ? Math.max(Math.abs(Math.min(...xs)), Math.abs(Math.max(...xs)))
+                    : (Math.max(...xs) - Math.min(...xs)) * 0.5;
+                const heightOccupancy = options.contain
+                    ? Math.max(Math.abs(Math.min(...ys)), Math.abs(Math.max(...ys)))
+                    : (Math.max(...ys) - Math.min(...ys)) * 0.5;
                 const observedArea = Math.max(
                     widthOccupancy * heightOccupancy,
                     0.001
@@ -29051,7 +29039,10 @@
                         assignment.endCondition || PARTS_MANUAL_DEFAULT_END_CONDITION
                     ),
                     manualGroupId: null,
-                    occurrenceIds: itemGroups.map(group => group.occurrenceId),
+                    // One copy drawn of several: the balloon still names every copy's occurrences (its "2X").
+                    occurrenceIds: section.shownCopyCount > 1 && (assignment.occurrenceIds || []).length
+                        ? assignment.occurrenceIds.map(String)
+                        : itemGroups.map(group => group.occurrenceId),
                     targetMeshGroups: itemGroups.map(group => ({
                         occurrenceId: String(group.occurrenceId),
                         meshes: [...new Set(group.meshes.filter(mesh => mesh?.isMesh))],
@@ -29723,6 +29714,9 @@
                     _partsManualExplodeSection(payload, {
                         ...section,
                         pageId: page.pageId,
+                        // A section of identical copies (two casters) draws one copy (shownCopyCount).
+                        occurrenceIds: page.renderRequest?.occurrenceIds || section.occurrenceIds,
+                        shownCopyCount: Number(page.renderRequest?.shownCopyCount || 1),
                         documentationComposition: page.renderRequest?.composition || {},
                         calloutItems: page.renderRequest?.calloutItems || [],
                         occurrenceOrder: page.renderRequest?.occurrenceOrder || section.occurrenceOrder,
@@ -30624,6 +30618,30 @@
         // override; this is only the generated default. Mirrors
         // ai_inspector/parts_manual/version.py::PARTS_MANUAL_DEFAULT_END_CONDITION.
         const PARTS_MANUAL_DEFAULT_END_CONDITION = 'dot';
+        // pdf.py's QUANTITY_LABEL_EDGE_BASE, QUANTITY_LABEL_EDGE_PER_CHARACTER and QUANTITY_LABEL_TOP_CLEARANCE.
+        const PARTS_MANUAL_QUANTITY_LABEL_EDGE_BASE = 0.04;
+        const PARTS_MANUAL_QUANTITY_LABEL_EDGE_PER_CHARACTER = 0.011;
+        const PARTS_MANUAL_QUANTITY_LABEL_TOP = 0.06;
+
+        // A balloon's quantity label ("2X") goes on the side its leader does not leave from, so it never sits on
+        // the line; near the picture's side edge it goes above the balloon (below it at the top edge). pdf.py
+        // (quantity_label_side) uses the same rule.
+        function _partsManualQuantityLabelSide(route) {
+            const balloon = route?.balloon || {};
+            const path = Array.isArray(route?.leaderPath) ? route.leaderPath : [];
+            const toward = path.length ? path[path.length - 1] : (route?.target || {});
+            const x = Number(balloon.x || 0);
+            const dx = Number(toward.x || 0) - x;
+            const dy = Number(toward.y || 0) - Number(balloon.y || 0);
+            const edge = PARTS_MANUAL_QUANTITY_LABEL_EDGE_BASE
+                + PARTS_MANUAL_QUANTITY_LABEL_EDGE_PER_CHARACTER * String(route?.quantityLabel || '').trim().length;
+            const fits = { left: x >= edge, right: x <= 1 - edge };
+            const preferred = Math.abs(dx) > Math.abs(dy) * 0.25 ? (dx > 0 ? 'left' : 'right') : 'left';
+            if (fits[preferred]) return preferred;
+            const other = preferred === 'left' ? 'right' : 'left';
+            if (Math.abs(dy) >= Math.abs(dx) * 0.6 && fits[other]) return other;
+            return Number(balloon.y || 0) >= PARTS_MANUAL_QUANTITY_LABEL_TOP ? 'above' : 'below';
+        }
         const PARTS_MANUAL_REPEATED_PART_STRATEGIES = [
             'representative_with_count',
             'branched',
@@ -35997,49 +36015,17 @@
             throw new Error(`Unable to capture ${page?.title || 'the technical figure'}.`);
         }
 
-        function _partsManualOpenPublishedPdf(artifact) {
-            const rawUrl = String(artifact?.url || '');
-            if (!rawUrl) return false;
-            document.getElementById('manualPublishedPdfOverlay')?.remove();
-            const overlay = document.createElement('section');
-            overlay.id = 'manualPublishedPdfOverlay';
-            overlay.className = 'manual-published-pdf-overlay';
-            overlay.setAttribute('aria-label', 'Published illustrated parts manual');
-
-            const toolbar = document.createElement('div');
-            toolbar.className = 'manual-published-pdf-toolbar';
-            const title = document.createElement('strong');
-            title.textContent = `Published Illustrated Parts Manual | ${artifact.pageCount || 0} pages`;
-            const download = document.createElement('a');
-            download.href = new URL(rawUrl, window.location.href).href;
-            download.textContent = 'Download PDF';
-            download.target = '_blank';
-            download.rel = 'noopener';
-            const close = document.createElement('button');
-            close.type = 'button';
-            close.textContent = 'Close';
-            close.addEventListener('click', () => overlay.remove());
-            toolbar.appendChild(title);
-            toolbar.appendChild(download);
-            toolbar.appendChild(close);
-
-            const frame = document.createElement('iframe');
-            frame.className = 'manual-published-pdf-frame';
-            const inlineUrl = new URL(rawUrl, window.location.href);
-            inlineUrl.searchParams.set('inline', '1');
-            frame.src = inlineUrl.href;
-            frame.title = 'Published illustrated parts manual PDF';
-            overlay.appendChild(toolbar);
-            overlay.appendChild(frame);
-            document.body.appendChild(overlay);
-            return true;
+        function _partsManualKeptCapturePageIds(documentModel) {
+            // The figures that already have a current accepted capture when a build starts.
+            return new Set((documentModel?.pages || [])
+                .filter(page => page?.renderRequest?.image?.status === 'ready')
+                .map(page => String(page.pageId)));
         }
 
         async function _partsManualGenerateAndPublish(args = {}) {
             const assemblyNumber = assemblyContext?.assembly_number;
             const approvalMode = String(args.approval_mode || 'use_approved_structure');
             const layoutMode = String(args.layout_mode || 'preserve_current');
-            const openPdf = args.open_pdf !== false;
             const completedStages = [];
             const persistedChanges = {
                 manualPlanChanged: false,
@@ -36207,13 +36193,16 @@
                     `/api/parts-manual/${encodeURIComponent(assemblyNumber)}/documentation-scene`
                 );
                 _documentationAssertSageWork(sageWork);
+                // A figure keeps its accepted capture while its figure revision is unchanged
+                // (the server attaches it); only new or changed figures are captured again.
+                const keptPageIds = _partsManualKeptCapturePageIds(scenePayload.document);
                 _documentationUpdatePayload(scenePayload, { startBlank: true });
                 await _documentationRevealPagesSequentially(scenePayload, {
                     work: sageWork,
                     prepared: true,
                     progressStart: 0.12,
                     progressEnd: 0.55,
-                    forceFigureCapture: true,
+                    forceFigureCapture: false,
                 });
                 documentModel = scenePayload.document;
                 completedStages.push('compile_documentation_scene');
@@ -36273,15 +36262,16 @@
                             }
                         );
                     }
+                    const reused = keptPageIds.has(String(page.pageId));
                     passedCaptureCount += 1;
-                    persistedChanges.pageCapturesCreated += 1;
+                    if (!reused) persistedChanges.pageCapturesCreated += 1;
                     captureReceipts.push({
                         pageId: page.pageId,
                         pageNumber: page.pageNumber,
                         figureNumber: page.figureNumber || null,
                         title: page.title,
-                        attempts: 1,
-                        reused: false,
+                        attempts: reused ? 0 : 1,
+                        reused,
                         status: currentImage.status,
                         qualityStatus: currentImage.quality?.status || null,
                         calloutQualityStatus:
@@ -36292,7 +36282,7 @@
                     });
                     _documentationUpdateSageWork(
                         sageWork,
-                        `Verified fresh technical figure ${index + 1} of ${pages.length}: ${page.title}`,
+                        `${reused ? 'Kept unchanged' : 'Verified new'} technical figure ${index + 1} of ${pages.length}: ${page.title}`,
                         0.55 + (0.30 * (index + 1) / pages.length)
                     );
                 }
@@ -36355,7 +36345,6 @@
                 const artifact = published.artifact;
                 persistedChanges.pdfCreated = true;
                 completedStages.push('publish_pdf');
-                const opened = openPdf ? _partsManualOpenPublishedPdf(artifact) : false;
                 _documentationSetStatus(
                     `Published ${artifact.pageCount}-page illustrated parts manual.`,
                     'success'
@@ -36373,6 +36362,7 @@
                     manualSectionCount: (payload?.plan?.sections || []).length,
                     requiredCaptureCount: renderPages.length,
                     passedCaptureCount: renderPages.length,
+                    keptCaptureCount: captureReceipts.filter(receipt => receipt.reused).length,
                     captureReceipts,
                     manualPlanAudit: documentModel.publicationAudit,
                     calloutAudit: documentModel.calloutAudit,
@@ -36386,7 +36376,7 @@
                         pageCount: Number(artifact.pageCount || 0),
                         generatedAt: artifact.generatedAt || null,
                     },
-                    opened,
+                    assemblyNumber,
                     sourceCadChanged: false,
                 };
             } catch (error) {
@@ -36822,6 +36812,17 @@
             Object.values(page.documentationObjects || {}).forEach(value => {
                 const target = _documentationObjectTarget(value);
                 if (target) targets.push(target);
+            });
+            // A parts list's part number and description cells, edited on the page (part: not in the list of the
+            // page's targets). The server keeps them for the whole manual (part_text_target_id in document.py).
+            (page.bom || []).forEach(row => {
+                if (!row?.definitionId) return;
+                [['partNumber', 'part number'], ['description', 'description']].forEach(([field, label]) => {
+                    targets.push({
+                        targetType: 'page_element', targetId: `part.${row.definitionId}.${field}`, part: true,
+                        name: `Item ${row.item} ${label}`, detail: 'Parts list cell',
+                    });
+                });
             });
             if (!page.renderRequest) return targets;
             targets.push({
@@ -38639,6 +38640,7 @@
             const pageProgress = value => progressStart
                 + (progressEnd - progressStart) * value;
             const forceFigureCapture = Boolean(options.forceFigureCapture);
+            generation.keptCaptureCount = 0;
             _documentationRecordGenerationEvent('page_generation_started', {
                 totalPageCount: pages.length,
             });
@@ -38693,6 +38695,10 @@
                 _documentationRenderPageRail();
                 const shouldCaptureFigure = Boolean(page.renderRequest)
                     && (forceFigureCapture || page.renderRequest.image?.status !== 'ready');
+                if (page.renderRequest && !shouldCaptureFigure) {
+                    // Its figure revision is unchanged: the accepted capture stays.
+                    generation.keptCaptureCount += 1;
+                }
                 const captureIllustration = shouldCaptureFigure
                     ? async updateCaptureStage => {
                         _documentationAssertSageWork(work);
@@ -40303,13 +40309,18 @@
                 if (quantityLabel) {
                     const quantity = document.createElementNS(namespace, 'text');
                     quantity.setAttribute('class', 'documentation-callout-quantity');
-                    const leftSide = String(route.routeSide || '') === 'left';
+                    const side = _partsManualQuantityLabelSide(route);
+                    const offset = { left: -38, right: 38, above: 0, below: 0 }[side];
+                    quantity.setAttribute('x', String((Number(route.balloon.x) * 1000) + offset));
                     quantity.setAttribute(
-                        'x',
-                        String((Number(route.balloon.x) * 1000) + (leftSide ? 38 : -38))
+                        'y',
+                        String((Number(route.balloon.y) * 1000) + ({ above: -40, below: 40 }[side] || 0))
                     );
-                    quantity.setAttribute('y', String(Number(route.balloon.y) * 1000));
-                    quantity.setAttribute('text-anchor', leftSide ? 'start' : 'end');
+                    // Inline, because the callout stylesheet centres every label (a CSS rule beats the attribute).
+                    quantity.style.setProperty(
+                        'text-anchor',
+                        { left: 'end', right: 'start', above: 'middle', below: 'middle' }[side]
+                    );
                     quantity.textContent = quantityLabel;
                     svg.appendChild(quantity);
                 }
@@ -41313,6 +41324,7 @@
                 }
             };
             const onSidecarPointerDown = event => {
+                if (event.target?.closest?.('[contenteditable="true"]')) return;
                 const page = _documentationActivePage();
                 const targetId = page?.pageType === 'assembly_overview' ? 'group_index' : 'bom';
                 _documentationBeginPageElementDrag(event, targetId);
@@ -41833,7 +41845,7 @@
             };
         }
 
-        function _documentationBuildBom(rows) {
+        function _documentationBuildBom(rows, page = null) {
             const table = document.createElement('table');
             table.className = 'documentation-page-bom';
             const colgroup = document.createElement('colgroup');
@@ -41849,6 +41861,9 @@
             head.appendChild(heading);
             table.appendChild(head);
             const body = document.createElement('tbody');
+            // PART NUMBER and DESCRIPTION are edited on the page (press twice); ITEM and QTY are the balloon's
+            // number and the model's count.
+            const editableFields = { 1: 'partNumber', 2: 'description' };
             (rows || []).forEach(row => {
                 const line = document.createElement('tr');
                 [
@@ -41856,9 +41871,21 @@
                     row.displayPartNumber || 'Not specified',
                     row.description || '',
                     row.quantity,
-                ].forEach(value => {
+                ].forEach((value, column) => {
                     const cell = document.createElement('td');
                     cell.textContent = String(value ?? '');
+                    if (page && row.definitionId && editableFields[column]) {
+                        const targetId = `part.${row.definitionId}.${editableFields[column]}`;
+                        cell.classList.add('editable');
+                        cell.dataset.documentationEditTarget = targetId;
+                        // A figure page's table is pressed through its sidecar; a parts-list page has no press
+                        // handler of its own.
+                        if (page.pageType === 'manual_section_parts_list') {
+                            cell.addEventListener('click', () => {
+                                if (!cell.isContentEditable) _documentationTextPressed(targetId);
+                            });
+                        }
+                    }
                     line.appendChild(cell);
                 });
                 body.appendChild(line);
@@ -43181,7 +43208,7 @@
                         Number(regions.bom.height) || 0,
                         18 * ((page.bom || []).length + 1)
                     )}px`;
-                sidecar.appendChild(_documentationBuildBom(page.bom || []));
+                sidecar.appendChild(_documentationBuildBom(page.bom || [], page));
                 sidecar.style.display = 'block';
             } else if (page.pageType === 'assembly_overview' && regions.groupIndex) {
                 const groupIndexRect = _documentationPageElementRect(
@@ -43312,11 +43339,11 @@
                 staticContent.style.display = 'block';
             } else if (page.pageType === 'manual_section_parts_list' && regions.bom) {
                 _documentationSetPublicationRect(staticContent, regions.bom);
-                staticContent.appendChild(_documentationBuildBom(page.bom || []));
+                staticContent.appendChild(_documentationBuildBom(page.bom || [], page));
                 staticContent.style.display = 'block';
             } else if (page.pageType === 'parts_index' && regions.content) {
                 _documentationSetPublicationRect(staticContent, regions.content);
-                staticHeading('PART NUMBER INDEX');
+                staticHeading(page.continuedFrom ? 'PART NUMBER INDEX (CONTINUED)' : 'PART NUMBER INDEX');
                 (page.entries || []).forEach(entry => {
                     const row = document.createElement('div');
                     row.className = 'documentation-parts-index-row';
@@ -69579,6 +69606,7 @@
                 occurrenceIds: [...new Set((spec.occurrenceIds || spec.occurrence_ids || []).map(String))],
                 parts: [...new Set((spec.parts || []).map(String))],
                 groupParts: [...new Set((spec.groupParts || spec.group_parts || []).map(String))],
+                highlight: [...new Set((spec.highlight || []).map(String))],
                 explode: Boolean(spec.explode),
                 spacing: Math.min(3, Math.max(0.5, Number(spec.spacing) || 1)),
                 label: String(spec.label || '').slice(0, 120),
@@ -69611,12 +69639,16 @@
             if (!groups.length) return { ok: false, error: 'None of those parts is in the 3D view.' };
             _partsManualPrepareVisualization();
             const meshes = groups.flatMap(group => group.meshes);
-            state.assyGroupView = { ...view, exploded: false, meshes: new Set(meshes) };
+            const meshSet = new Set(meshes);
+            // The parts Sage highlighted among those shown (e.g. parts just moved into a section) glow.
+            const highlightMeshes = new Set(view.highlight.flatMap(partNumber => _assemblyMeshesForPartNumber(partNumber))
+                .filter(mesh => meshSet.has(mesh)));
+            state.assyGroupView = { ...view, exploded: false, meshes: meshSet, highlightMeshes };
             refresh();
             const name = view.label || (groups.length === 1 ? 'the part' : `${groups.length} parts`);
             const clusters = _partsManualDefinitionExplodeClusters(null, groups);
             if (!view.explode || clusters.length < 2) {
-                _partsManualFitMeshes(meshes, 'isometric');
+                _partsManualFitMeshes(meshes, 'isometric', { contain: true });
                 return { ok: true, message: `Showing ${name} on its own.`
                     + (view.explode ? ' One part definition: nothing to explode.' : '') };
             }
@@ -69650,7 +69682,7 @@
                 targets.forEach((target, mesh) => mesh.position.copy(target));
                 _partsManualRepairOccludedExplodeClusters(clusters, meshes, 'isometric', dimension);
                 if (state.assyLiveScene) state.assyLiveScene.updateWorldMatrix(true, true);
-                _partsManualFitMeshes(meshes, 'isometric');
+                _partsManualFitMeshes(meshes, 'isometric', { contain: true });
                 if (Object.keys(state.assy3DLabels || {}).length > 0) _update3DLabelPositions();
                 // Sage reads that the group is exploded (inspect_assembly's shownNow).
                 _assemblyReportGeometry(state.assySigns);
@@ -70147,6 +70179,8 @@
         const ASSEMBLY_NEUTRAL_HIGHLIGHT_COLOR = 0xffffff;
         const ASSEMBLY_NEUTRAL_HIGHLIGHT_INTENSITY = 0.10;
         const ASSEMBLY_ORIGINAL_HIGHLIGHT_INTENSITY = 0.45;
+        // Parts Sage highlights in a group it shows (show_assembly_parts highlight), in the selection colour.
+        const ASSEMBLY_GROUP_HIGHLIGHT_INTENSITY = 0.6;
 
         function _assemblyHighlightEmissiveColor(sourceColor) {
             return state.assyAppearanceMode === 'original'
@@ -71644,6 +71678,7 @@
             // Build mesh -> emissive color map for selected parts
             const selectedMeshes = new Set();
             const meshEmissiveColor = new Map();
+            const meshEmissiveIntensity = new Map();
             if (hasSelection && assemblyContext) {
                 const legend = assemblyContext.part_color_legend || [];
                 const partColorMap = {};
@@ -71655,8 +71690,15 @@
                         meshEmissiveColor.set(m, color);
                     });
                 });
-                // A group Sage showed on its own keeps its own look: no glow.
-                if (groupMeshes) groupMeshes.forEach(mesh => selectedMeshes.add(mesh));
+                // A group Sage showed on its own keeps its own look: no glow, except the parts it highlighted.
+                if (groupMeshes) {
+                    groupMeshes.forEach(mesh => selectedMeshes.add(mesh));
+                    const highlightColor = new THREE.Color(ASSEMBLY_FACE_SELECTED_COLOR);
+                    (state.assyGroupView.highlightMeshes || new Set()).forEach(mesh => {
+                        meshEmissiveColor.set(mesh, highlightColor);
+                        meshEmissiveIntensity.set(mesh, ASSEMBLY_GROUP_HIGHLIGHT_INTENSITY);
+                    });
+                }
                 if (hasManualOccurrenceSelection) {
                     const manualColor = _assemblyHighlightEmissiveColor('#4fc3f7');
                     manualOccurrenceIds.forEach(occurrenceId => {
@@ -71700,7 +71742,7 @@
                     _applyAssemblyMeshBaseMaterial(child, {
                         opacity: Number.isFinite(displayOverride?.opacity) ? displayOverride.opacity : null,
                         emissiveColor: meshEmissiveColor.get(child),
-                        emissiveIntensity: _assemblyHighlightEmissiveIntensity(),
+                        emissiveIntensity: meshEmissiveIntensity.get(child) ?? _assemblyHighlightEmissiveIntensity(),
                     });
                     return;
                     // Selected — full opacity + emissive glow
@@ -86456,6 +86498,7 @@
                     result.passedCaptureCount || result.acceptedCaptureCount || 0
                 );
                 const required = Number(result.requiredCaptureCount || 0);
+                const kept = Math.min(accepted, Number(result.keptCaptureCount || 0));
                 const sectionCount = Number(result.manualSectionCount || 0);
                 const coverage = Number(result.coveragePercent || 0);
                 const lines = [
@@ -86463,15 +86506,14 @@
                         ? '**Your illustrated Parts Manual has been published.**'
                         : '**Your illustrated Parts Manual is ready for review in Documentation.**',
                     '',
-                    `${published ? 'Published' : 'Generated'} **${pageCount} pages** and freshly captured **${accepted} of ${required} technical figures** from the current assembly.`,
+                    kept && kept === accepted
+                        ? `${published ? 'Published' : 'Generated'} **${pageCount} pages** and kept all **${kept} technical figures**, which had not changed.`
+                        : kept
+                        ? `${published ? 'Published' : 'Generated'} **${pageCount} pages**: captured **${accepted - kept} changed technical figure${accepted - kept === 1 ? '' : 's'}** from the current assembly and kept the other **${kept}**, which had not changed.`
+                        : `${published ? 'Published' : 'Generated'} **${pageCount} pages** and freshly captured **${accepted} of ${required} technical figures** from the current assembly.`,
                 ];
-                if (published && result.pdf?.url) {
-                    lines.push(
-                        '',
-                        '**Deliverable**',
-                        `[Published PDF](${String(result.pdf.url)})`
-                    );
-                } else if (!published) {
+                // A published manual's PDF is the file card under this message (_partsManualPdfFileBlock).
+                if (!published) {
                     lines.push(
                         '',
                         'Review or edit the pages in Documentation, then ask Sage to publish the illustrated Parts Manual when you want the PDF.'
@@ -86492,6 +86534,23 @@
                     'No source CAD geometry was changed.'
                 );
                 return lines.join('\n');
+            }
+
+            // A published parts manual is a file card under Sage's reply, as the layout PDF is: the card opens it
+            // in the app's browser and its button saves it. Nothing opens over the app.
+            function _partsManualPdfFileBlock(toolResults) {
+                if (!Array.isArray(toolResults)) return null;
+                const result = toolResults.find(item => item && item.name === 'generate_and_publish_parts_manual'
+                    && item.ok !== false && item.stage === 'published' && item.pdf?.url);
+                if (!result) return null;
+                const pageCount = Number(result.pdf.pageCount || 0);
+                return {
+                    type: 'file',
+                    fileName: `${String(result.assemblyNumber || 'Parts')} illustrated parts manual.pdf`,
+                    url: String(result.pdf.url),
+                    mimeType: 'application/pdf',
+                    detail: `${pageCount} page${pageCount === 1 ? '' : 's'}`,
+                };
             }
 
             function _specificationSheetSemanticToolStatusLine(toolResults) {
@@ -90093,7 +90152,7 @@
                         }
                         return _assemblyShowGroup({ occurrenceIds: args?.occurrence_ids, parts: args?.parts,
                             groupParts: args?.group_parts, explode: args?.explode, spacing: args?.spacing,
-                            label: args?.label });
+                            label: args?.label, highlight: args?.highlight });
                     }
                 },
                 isolate_parts: {
@@ -90610,7 +90669,8 @@
                         );
                         const planPayload = await _documentationGenerateBaseline({
                             silent: true,
-                            forceFigureCapture: true,
+                            // Unchanged figures keep their capture (figure revisions).
+                            forceFigureCapture: false,
                         });
                         const documentModel = state.partsManualDocumentation?.document;
                         if (!documentModel
@@ -90642,6 +90702,9 @@
                             ),
                             acceptedCaptureCount: figurePages.length,
                             requiredCaptureCount: figurePages.length,
+                            keptCaptureCount: Number(
+                                state.partsManualDocumentationGeneration?.keptCaptureCount || 0
+                            ),
                             manualPlanRevision: documentModel.manualPlanRevision,
                             documentationSceneRevision: documentModel.documentationSceneRevision,
                             documentRevision: documentModel.documentRevision,
@@ -91746,7 +91809,8 @@
                 run_facility_design_preview: 120000,
                 apply_facility_design_proposal_draft: 120000,
                 preview_facility_move: 30000,
-                present_codex_facility_preview: 120000,
+                // A direct edit checks and saves the whole layout; a plant of 1,500 items takes minutes.
+                present_codex_facility_preview: 600000,
                 build_facility_layout_preview: 300000,
                 generate_facility_departments_draft: 300000,
                 generate_full_factory_draft: 300000,
@@ -94292,7 +94356,15 @@
                                         else void _assemblyAppearanceRefresh();
                                     }
                                     const textChanged = sheetWork.documentTextChanges || [];
-                                    if ((sheetWork.specificationSheetChanges || []).length
+                                    if (((sheetWork.partsManualChanges || []).length
+                                        || textChanged.includes('illustrated_parts_manual'))
+                                        && document.getElementById('documentationWorkspace')
+                                        && !_documentationIsOperationsManual()
+                                        && !_documentationIsWorkInstructions()
+                                        && !_documentationIsSpecificationSheet()) {
+                                        // Sage moved parts between sections or changed a parts list: show the new pages.
+                                        void _documentationReloadWorkflow();
+                                    } else if ((sheetWork.specificationSheetChanges || []).length
                                         && _documentationIsSpecificationSheet()) {
                                         void _documentationReloadWorkflow();
                                     } else if ((textChanged.includes('operations_and_maintenance_manual')
@@ -94662,6 +94734,13 @@
                 // Only manipulate live DOM if origin agent is still visible
                 const originVisible = (currentAgent === originAgent);
                 if (originVisible) removeTypingIndicator();
+                const publishedManualFile = _partsManualPdfFileBlock(turnToolResults);
+                if (publishedManualFile && terminalResponseData && typeof terminalResponseData === 'object') {
+                    terminalResponseData.content_blocks = [
+                        ...(Array.isArray(terminalResponseData.content_blocks) ? terminalResponseData.content_blocks : []),
+                        publishedManualFile,
+                    ];
+                }
                 const assistantPresentation = _assistantTerminalPresentation(
                     terminalResponseData || (response && typeof response === 'object' ? response : {}),
                     originAgent,
@@ -95944,10 +96023,14 @@
                 if (agentContextDot) agentContextDot.style.background = agent.color || 'var(--accent)';
                 // Show the bar only when it names or controls something: a loaded part, a
                 // selection, a hidden or transparent part, or motion. Facility Layout has
-                // none of these, so its "No active viewport override" bar was clutter.
+                // none of these, so its "No active viewport override" bar was clutter. The
+                // Assembly tab and the Documentation workflows hide it too (user request).
                 const activeCounts = _agentContextSelectionCounts();
                 const activeOverrides = _agentContextOverrideCounts();
-                const showBar = !_trainIsFacilityLayoutMode() && !!(
+                const barHiddenHere = _trainIsFacilityLayoutMode()
+                    || state.activeTab === 'assembly'
+                    || (state.activeTab === 'training' && trainingState.type === 'documentation');
+                const showBar = !barHiddenHere && !!(
                     state.partNumber || state.partName
                     || activeCounts.parts || activeCounts.features || activeCounts.drawingDims
                     || activeOverrides.hidden || activeOverrides.transparent

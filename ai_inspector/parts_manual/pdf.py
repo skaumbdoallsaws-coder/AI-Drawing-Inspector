@@ -299,10 +299,16 @@ def _required_render_paths(
         ):
             invalid.append(f"{page_id}: technical callout QA did not pass")
         try:
+            # A figure's capture is stored under its own figure revision; one
+            # made before figure revisions under the document revision.
             result[page_id] = render_artifact_path(
                 root,
                 assembly_number,
-                str(document.get("documentRevision") or ""),
+                str(
+                    image.get("artifactRevision")
+                    or document.get("documentRevision")
+                    or ""
+                ),
                 page_id,
             )
         except PartsManualRenderArtifactError:
@@ -575,6 +581,34 @@ def _draw_image(
     return fitted
 
 
+# A balloon's quantity label ("2X") goes on the side its leader does not leave from, so it never sits on the line;
+# near the picture's side edge it goes above the balloon (below it at the top edge). The page view
+# (_partsManualQuantityLabelSide in index.html) uses the same rule.
+# The side room a label needs, as a share of the picture's width, sized for the page view's larger text (its labels
+# are about 1.5x the PDF's against the picture): a base plus a step per character.
+QUANTITY_LABEL_EDGE_BASE = 0.04
+QUANTITY_LABEL_EDGE_PER_CHARACTER = 0.011
+QUANTITY_LABEL_TOP_CLEARANCE = 0.06
+
+
+def quantity_label_side(row: Mapping[str, Any]) -> str:
+    balloon = row.get("balloon") or {}
+    path = row.get("leaderPath") or []
+    toward = path[-1] if path else (row.get("target") or {})
+    x = float(balloon.get("x") or 0)
+    dx = float(toward.get("x") or 0) - x
+    dy = float(toward.get("y") or 0) - float(balloon.get("y") or 0)
+    edge = QUANTITY_LABEL_EDGE_BASE + QUANTITY_LABEL_EDGE_PER_CHARACTER * len(str(row.get("quantityLabel") or "").strip())
+    fits = {"left": x >= edge, "right": x <= 1 - edge}
+    preferred = ("left" if dx > 0 else "right") if abs(dx) > abs(dy) * 0.25 else "left"
+    if fits[preferred]:
+        return preferred
+    other = "right" if preferred == "left" else "left"
+    if abs(dy) >= abs(dx) * 0.6 and fits[other]:
+        return other
+    return "above" if float(balloon.get("y") or 0) >= QUANTITY_LABEL_TOP_CLEARANCE else "below"
+
+
 def _draw_balloons(
     fitz: Any,
     page: Any,
@@ -688,19 +722,30 @@ def _draw_balloons(
         )
         quantity_label = str(row.get("quantityLabel") or "").strip()
         if quantity_label:
-            if str(row.get("routeSide") or "") == "left":
-                quantity_rect = fitz.Rect(bx + 12, by - 7, bx + 34, by + 5)
-                align = fitz.TEXT_ALIGN_LEFT
+            # Drawn at a point, never in a text box: a box too small for its text silently draws nothing.
+            label_width = fitz.get_text_length(quantity_label, fontname="hebo", fontsize=6.4)
+            side = quantity_label_side(row)
+            if side == "right":
+                origin = fitz.Point(bx + 12, by - 0.2)
+            elif side == "left":
+                origin = fitz.Point(bx - 12 - label_width, by - 0.2)
+            elif side == "above":
+                origin = fitz.Point(bx - label_width * 0.5, by - 13)
             else:
-                quantity_rect = fitz.Rect(bx - 34, by - 7, bx - 12, by + 5)
-                align = fitz.TEXT_ALIGN_RIGHT
-            page.insert_textbox(
-                quantity_rect,
+                origin = fitz.Point(bx - label_width * 0.5, by + 18)
+            # A white mask under the text, so the label reads over the drawing's linework.
+            page.draw_rect(
+                fitz.Rect(origin.x - 1.2, origin.y - 5.6, origin.x + label_width + 1.2, origin.y + 1.6),
+                color=None,
+                fill=(1, 1, 1),
+                width=0,
+            )
+            page.insert_text(
+                origin,
                 quantity_label,
                 fontsize=6.4,
                 fontname="hebo",
                 color=balloon_color,
-                align=align,
             )
 
 
@@ -763,7 +808,10 @@ def _draw_bom_table(
     )
     text_color = _hex_rgb(colors.get("text"), "#18212A")
     for index, header in enumerate(headers):
-        page.insert_textbox(
+        # Shrunk to fit, as the rows are: a header wider than its column would otherwise not be drawn at all.
+        _fit_text(
+            fitz,
+            page,
             fitz.Rect(x_positions[index] + 3, rect.y0 + 5, x_positions[index + 1] - 3, rect.y0 + 16),
             header,
             fontsize=6.5,
@@ -1275,7 +1323,8 @@ def build_manual_pdf_bytes(
             _draw_footer(fitz, page, document, descriptor)
         elif page_type == "parts_index":
             _draw_header(fitz, page, descriptor, document, root, assembly_number)
-            page.insert_textbox(fitz.Rect(48, 66, width - 48, 96), "PART NUMBER INDEX", fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
+            heading = "PART NUMBER INDEX (CONTINUED)" if descriptor.get("continuedFrom") else "PART NUMBER INDEX"
+            page.insert_textbox(fitz.Rect(48, 66, width - 48, 96), heading, fontsize=18, fontname="hebo", color=(0.05, 0.27, 0.44))
             y = 106.0
             for row_index, row in enumerate(descriptor.get("entries") or []):
                 refs = ", ".join(
@@ -1315,7 +1364,7 @@ def build_manual_pdf_bytes(
         page_type = descriptor.get("pageType")
         if page_type == "table_of_contents":
             toc.append([1, "Table of Contents", int(descriptor["pageNumber"])])
-        elif page_type in {"assembly_overview", "manual_section", "parts_index"}:
+        elif page_type in {"assembly_overview", "manual_section", "parts_index"} and not descriptor.get("continuedFrom"):
             label = str(descriptor.get("title") or "Manual Section")
             if descriptor.get("figureNumber"):
                 label = f"Figure {descriptor['figureNumber']} - {label}"
@@ -1359,8 +1408,11 @@ def store_manual_pdf(
         metadata_path,
         (json.dumps(descriptor, ensure_ascii=True, sort_keys=True, indent=2) + "\n").encode("ascii"),
     )
+    # Each publish rebuilds this revision's PDF, so its address carries the build's hash: a browser never shows an
+    # older build of the same revision.
     descriptor["url"] = (
         f"/api/parts-manual/{assembly_number}/documents/{document_revision}/pdf"
+        f"?v={descriptor['sha256'][:16]}"
     )
     return descriptor
 

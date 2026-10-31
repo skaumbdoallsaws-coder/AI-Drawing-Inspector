@@ -469,6 +469,23 @@ test('direct edit rechecks cancellation and context after approval before commit
     }
 });
 
+test('direct edit cancelled while its commit is on the way still installs the saved revision', async () => {
+    const f = fixture();
+    enableDirect(f);
+    const controller = new AbortController();
+    const apply = f.transport.applyLayoutProposal;
+    let options = 'unset';
+    f.transport.applyLayoutProposal = async (payload, requestOptions) => {
+        options = requestOptions;
+        controller.abort();
+        return apply(payload);
+    };
+    await f.session.fetchAndInstallOperationProposal(reference, { applyDirectly: true, signal: controller.signal });
+    assert.equal(options, undefined);
+    assert.equal(f.session.getState().layout.displayName, 'Approved');
+    assert.equal(f.session.getState().canUndo, true);
+});
+
 test('lost commit reply retries the same token and idempotency key, never a second approval', async () => {
     const f = fixture();
     enableDirect(f);

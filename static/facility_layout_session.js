@@ -17,6 +17,7 @@
         'set_plan_settings',
         'set_perimeter_walls',
         'set_decals',
+        'set_emergency_plan',
         'set_component_materials',
         'set_interior_walls',
         'set_floor_surfaces',
@@ -2772,13 +2773,15 @@
             check();
             const payload = { approvalToken: nonEmptyString(approval.approvalToken, 'approvalToken'),
                 binding: clone(selected.transactionBinding), idempotencyKey: key };
+            // Once sent, the server finishes the commit whatever the window does, so the commit is never
+            // cancelled: a cancelled one would leave this window on the old revision.
             let applied;
             try {
-                applied = await config.applyLayoutProposal(payload, transportOptions);
+                applied = await config.applyLayoutProposal(payload);
             } catch (error) {
                 // Retry only a lost transport response, using the SAME approved transaction.
                 if (error.status || error.code || (settings.signal && settings.signal.aborted)) throw error;
-                applied = await config.applyLayoutProposal(payload, transportOptions);
+                applied = await config.applyLayoutProposal(payload);
             }
             const receiptId = rememberReceipt(applied);
             const savedSelection = selectedIds.slice();

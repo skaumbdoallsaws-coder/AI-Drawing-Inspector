@@ -70,7 +70,8 @@ Use when the user asks to build, create, generate, draft, or prepare the actual
 illustrated parts manual but does not ask for PDF publication. This is not the
 read-only structure proposal. It opens the shared Documentation workspace,
 creates or reuses a validated semantic hierarchy, reveals the pages one at a
-time, and freshly captures every required HLR figure. Only `ok=true` with
+time, and captures every HLR figure that is new or changed since its last
+accepted capture; an unchanged figure keeps its capture. Only `ok=true` with
 `stage=review_ready` permits a claim that generation completed. Report page and
 section counts, coverage, accepted/required captures, and document revision;
 state plainly that no PDF has been published yet.
@@ -96,7 +97,9 @@ Derive arguments conservatively:
   it exists. Use `generate_baseline_if_missing` for a complete generation run.
   Neither mode discards existing authored composition.
 - `open_pdf=true` when the user asks to see/open the PDF or makes an explicit
-  publish request without saying not to open it.
+  publish request without saying not to open it. The published PDF never opens
+  by itself: it appears as a file card under the reply (the card opens it in the
+  app's browser, its button downloads it).
 
 Call the end-to-end tool once and wait. Do not interleave composition edits.
 The runtime preserves an existing publishable hierarchy, captures each required

@@ -40,6 +40,7 @@ from ai_inspector.assembly_knowledge.library_machines import ASSET_ID_RE
 from ai_inspector.facility_layout.appearance_library import library_summary
 from ai_inspector.documentation.agent_tools import DOCUMENTATION_AGENT_TOOL_SPECS
 from ai_inspector.documentation.registry import DOCUMENT_TYPE_REGISTRY
+from ai_inspector.parts_manual.document import part_text_target_id
 from ai_inspector.specification_sheet.slots import PROSE_SLOTS, numbers_in, unsupported_numbers
 from .facility_tools import argument_errors
 from .policy import PilotError
@@ -173,17 +174,19 @@ APPEARANCE_TOOLS = ("list_appearances", "list_part_faces", "set_assembly_appeara
                     "set_assembly_scene", "place_assembly_signs", "remove_assembly_signs")
 # The text on an operations manual's or work instructions' pages, read and changed as the user edits it there.
 DOCUMENT_TEXT_TOOLS = ("read_document_pages", "edit_document_text")
-TEXT_TYPES = ("operations_and_maintenance_manual", "work_instructions")
+TEXT_TYPES = ("operations_and_maintenance_manual", "work_instructions", "illustrated_parts_manual")
+# The parts manual's sections: parts moved between them on the server, during the turn.
+PARTS_MANUAL_TOOLS = ("move_parts_manual_parts",)
 NAMES = ("inspect_documentation_context", "inspect_documentation_type", "inspect_parts_manual_bom",
          "run_documentation_workflow") + INSPECTION_SHEET_TOOLS + SPECIFICATION_SHEET_TOOLS + LIBRARY_TOOLS \
-    + DOCUMENT_TEXT_TOOLS + APPEARANCE_TOOLS
+    + DOCUMENT_TEXT_TOOLS + PARTS_MANUAL_TOOLS + APPEARANCE_TOOLS
 # Smart Dimension on faces (docs/assembly-smart-dimension-plan.md): measured on the server, drawn by the view.
 DIMENSION_TOOLS = ("measure_assembly", "place_assembly_dimensions", "remove_assembly_dimensions")
 # A group of parts shown on its own in the Assembly tab's 3D view, exploded or not: run by the view after the reply.
 VIEW_TOOLS = ("show_assembly_parts",)
 # The Assembly tab's Sage: the loaded assembly, its parts list and its appearance.
 ASSEMBLY_NAMES = ("inspect_assembly", "inspect_parts_manual_bom") + LIBRARY_TOOLS + APPEARANCE_TOOLS \
-    + DIMENSION_TOOLS + VIEW_TOOLS
+    + DIMENSION_TOOLS + VIEW_TOOLS + PARTS_MANUAL_TOOLS
 LINE_ART = ("The Assembly view and the Specification Sheet's picture show finishes. The parts manual, operations "
             "manual and work instructions are line drawings without colour.")
 AXES = ("Metres, in the 3D view's axes: +Y is up, the machine's front faces +Z and its right side +X (the view's "
@@ -237,7 +240,9 @@ def _workflow_schema():
     for name, (_, kind) in WORKFLOWS.items():
         if kind != "edit":
             options.update(deepcopy(DOCUMENTATION_AGENT_TOOL_SPECS[name]["input_schema"].get("properties") or {}))
-    options["open_pdf"]["description"] = "Open the exported or published PDF in InspectorPro."
+    options["open_pdf"]["description"] = ("Open the exported PDF in InspectorPro (operations manual, specification "
+                                          "sheet, work instructions). A published parts manual never opens by itself: "
+                                          "the chat shows its PDF as a file card under your reply.")
     options["open_docx"]["description"] = "Open the editable DOCX (operations manual, specification sheet, work instructions)."
     return {"type": "object", "properties": {
         "workflow": {"type": "string", "enum": list(WORKFLOWS)},
@@ -536,11 +541,16 @@ def _view_tool_specs():
             "group alone is spread apart, each part moved out from the group's centre as a parts manual subassembly "
             "figure is; spacing scales the gaps (1 is the app's own). Without parts and subassemblies the whole "
             "machine shows again, assembled; with explode, the whole machine is exploded with the app's Exploded "
-            "View. To explode a group already shown, call this again with the same names and explode true.",
+            "View. To explode a group already shown, call this again with the same names and explode true. "
+            "manualSections shows sections of the parts manual (inspect_assembly's manualSections, by name or id) "
+            "with the parts the manual has in them now, after a move too. highlight lights some of the parts shown "
+            "in the selection colour, e.g. the parts just moved into a section.",
          "read_only": False,
          "input_schema": {"type": "object", "properties": {
              "parts": names,
              "subassemblies": dict(names, maxItems=20),
+             "manualSections": dict(names, maxItems=10),
+             "highlight": dict(names, maxItems=60),
              "explode": {"type": "boolean"},
              "spacing": {"type": "number", "minimum": 0.5, "maximum": 3}},
              "additionalProperties": False}},
@@ -566,6 +576,7 @@ def _assembly_tool_specs():
         *_appearance_tool_specs(),
         *_dimension_tool_specs(),
         *_view_tool_specs(),
+        *_parts_manual_tool_specs("assembly"),
     ]
 
 
@@ -645,8 +656,45 @@ def tool_specs(research=False, workspace="documentation"):
              "assetId": {"type": "string", "pattern": "^asset-[a-z0-9][a-z0-9-]{0,118}$"}},
              "required": ["assetId"], "additionalProperties": False}},
         *_document_text_tool_specs(),
+        *_parts_manual_tool_specs(),
         *_appearance_tool_specs(),
         *(research_tools.tool_specs() if research else []),
+    ]
+
+
+def _parts_manual_tool_specs(workspace="documentation"):
+    section_id = {"type": "string", "minLength": 9, "maxLength": 40, "pattern": "^section-[0-9a-f]{8,32}$"}
+    if workspace == "assembly":
+        where = ("inspect_assembly (manualSections). The parts the user selected in the 3D view are the parts of "
+                 "inspect_assembly's selectedFaces")
+        after = ("the PDF updates when the manual is next published from the Documentation tab, which recaptures "
+                 "only those figures and keeps the others. To show a section with the moved parts lit: "
+                 "show_assembly_parts with manualSections and highlight.")
+    else:
+        where = "inspect_documentation_type"
+        after = ("to update the PDF, queue generate_and_publish_parts_manual (approval_mode use_approved_structure); "
+                 "it recaptures only those figures and keeps the others.")
+    return [
+        {"name": "move_parts_manual_parts", "description":
+            "Parts manual: move parts to another section, or to a new section, when the user says they belong "
+            "there. Name the parts by their item numbers or part numbers in fromSectionId's parts list "
+            "(inspect_parts_manual_bom with that sectionId); every instance of each part moves. Section ids from "
+            + where + ". Done on the server in one change; refused with the reason when a section "
+            "would be left empty or the manual would fail its publication check (a section of one part). The parts "
+            "that stay keep their item numbers. The figures of the changed sections need a new capture: " + after,
+         "read_only": False,
+         "input_schema": {"type": "object", "properties": {"moves": {
+             "type": "array", "minItems": 1, "maxItems": 10, "items": {
+                 "type": "object", "properties": {
+                     "fromSectionId": section_id,
+                     "items": {"type": "array", "minItems": 1, "maxItems": 40,
+                               "items": {"type": "integer", "minimum": 1, "maximum": 999}},
+                     "partNumbers": {"type": "array", "minItems": 1, "maxItems": 40,
+                                     "items": {"type": "string", "minLength": 1, "maxLength": 80}},
+                     "toSectionId": section_id,
+                     "newSectionName": {"type": "string", "minLength": 3, "maxLength": 80}},
+                 "required": ["fromSectionId"], "additionalProperties": False}}},
+             "required": ["moves"], "additionalProperties": False}},
     ]
 
 
@@ -655,9 +703,10 @@ def _document_text_tool_specs():
     page_id = {"type": "string", "minLength": 1, "maxLength": 120, "pattern": "^[A-Za-z0-9_.:-]+$"}
     return [
         {"name": "read_document_pages", "description":
-            "Read the text on the pages of the loaded assembly's operations manual or work instructions: each page's "
-            "headings, paragraphs, notes, figure captions, table cells and list items, each with the id "
-            "edit_document_text takes. Up to 6 pages a call, from fromPage (1 by default). No edits.",
+            "Read the text on the pages of the loaded assembly's operations manual or work instructions (each page's "
+            "headings, paragraphs, notes, figure captions, table cells and list items) or parts manual (its parts "
+            "lists), each with the id edit_document_text takes. Up to 6 pages a call, from fromPage (1 by default). "
+            "No edits.",
          "input_schema": {"type": "object", "properties": {
              "documentType": text_type,
              "fromPage": {"type": "integer", "minimum": 1, "maximum": 400},
@@ -665,9 +714,10 @@ def _document_text_tool_specs():
              "required": ["documentType"], "additionalProperties": False}},
         {"name": "edit_document_text", "description":
             "Change text on the operations manual's or work instructions' pages, as the user does by double-clicking "
-            "it on the page: a heading, paragraph, note, figure caption, table cell or list item (page and target "
-            "ids from read_document_pages). Only when the user asks for a change. Written during your turn; the "
-            "workspace shows it after your reply.",
+            "it on the page: a heading, paragraph, note, figure caption, table cell or list item; or a part number or "
+            "description in the parts manual's parts lists (one edit changes that part in every list and the index, "
+            "and no figure is recaptured; ITEM and QTY are not edited). Page and target ids from read_document_pages. "
+            "Only when the user asks for a change. Written during your turn; the workspace shows it after your reply.",
          "read_only": False,
          "input_schema": {"type": "object", "properties": {
              "documentType": text_type,
@@ -713,6 +763,17 @@ def document_page_text(page):
         else:
             authored = block.get("text") or " ".join(str(line) for line in block.get("lines") or [])
             blocks.append({"id": block_id, "type": kind, "text": shown(block_id, authored, 600)})
+    # A parts manual's parts list (its rows already carry the manual's edits): part number and description cells.
+    parts = [row for row in page.get("bom") or [] if isinstance(row, dict) and row.get("definitionId")]
+    if parts:
+        blocks.append({"id": "parts_list", "type": "parts_list",
+                       "columns": ["ITEM", "PART NUMBER", "DESCRIPTION", "QTY"],
+                       "rows": [[{"text": str(row.get("item") or "")},
+                                 {"id": part_text_target_id(row["definitionId"], "partNumber"),
+                                  "text": _short(row.get("displayPartNumber") or "Not specified", 80)},
+                                 {"id": part_text_target_id(row["definitionId"], "description"),
+                                  "text": _short(row.get("description"), 200)},
+                                 {"text": str(row.get("quantity") or "")}] for row in parts]})
     return {"pageId": page.get("pageId"), "pageNumber": page.get("pageNumber"), "title": _short(page.get("title"), 120),
             "blocks": blocks}
 
@@ -762,6 +823,7 @@ class DocumentationGateway:
         self.provided = []  # field names recorded from the user's message
         self.sheet_changes = []  # what Sage changed on the specification sheet, for the chat and the workspace
         self.text_changes = []  # the document types whose page text Sage changed: the workspace reloads them
+        self.manual_changes = []  # parts Sage moved between parts-manual sections: the workspace reloads the manual
         self.appearance_changes = []  # assemblies whose finishes Sage set: the browser redraws them after the reply
         self.workspace = workspace
         self.states = {}  # the app's reads, once per turn: an operations manual read builds the whole document
@@ -867,7 +929,7 @@ class DocumentationGateway:
         if name in research_tools.NAMES:
             return self.research.run(name, arguments)
         if name in SPECIFICATION_SHEET_TOOLS or name in LIBRARY_TOOLS or name in APPEARANCE_TOOLS \
-                or name in DOCUMENT_TEXT_TOOLS \
+                or name in DOCUMENT_TEXT_TOOLS or name in PARTS_MANUAL_TOOLS \
                 or name in DIMENSION_TOOLS or name in VIEW_TOOLS or name == "inspect_assembly":
             return getattr(self, "_" + name)(arguments)
         raise PilotError("codex_tool_denied", "This tool is not available in Documentation.", 403)
@@ -1061,6 +1123,21 @@ class DocumentationGateway:
         if document_type not in self.text_changes:
             self.text_changes.append(document_type)
         return {"changed": changed, "note": "The workspace shows the change after your reply."}
+
+    # -- the parts manual's sections ------------------------------------------------------------------------------
+    def _move_parts_manual_parts(self, arguments):
+        assembly_number = self._require_assembly()
+        result = self.host.move_parts_manual_parts(assembly_number, arguments["moves"])
+        self.states.clear()
+        self.manual_changes.append({"assemblyNumber": assembly_number,
+                                    "sections": [row["name"] for row in result["changedSections"]]})
+        if self.workspace == "assembly":
+            return {**result, "note": "Moved. To show a section with the moved parts lit: show_assembly_parts with "
+                                      "manualSections and highlight. The PDF updates when the manual is next "
+                                      "published from the Documentation tab; only figuresToCapture are recaptured."}
+        return {**result, "note": "Moved. The workspace shows the new sections after your reply. To update the PDF, "
+                                  "queue generate_and_publish_parts_manual (approval_mode use_approved_structure); "
+                                  "it recaptures only figuresToCapture."}
 
     def _sheet(self):
         """The sheet as it stands now (slots, rows, type, units, gate, export state); read once per change."""
@@ -1287,6 +1364,7 @@ class DocumentationGateway:
         document = self.host.assembly_appearance(assembly_number)
         selected = self._selected_faces(assembly_number)
         groups = self._groups(assembly_number)
+        sections = self._manual_sections(assembly_number)
         return {"readOnly": True, **self._assembly(), "finishes": self._finishes_now(assembly_number),
                 "scene": (document.get("scene") or {}).get("sceneId") or "classic",
                 "signCount": len(document.get("signs") or []),
@@ -1296,14 +1374,25 @@ class DocumentationGateway:
                                                               if row.get("description") else {}),
                                      "partCount": len(row["occurrenceIds"])} for row in groups[:60]],
                 "shownNow": self._shown_now(assembly_number),
+                **({"manualSections": [{"sectionId": row["sectionId"], "name": row["name"],
+                                        "partCount": len(row["occurrenceIds"])} for row in sections[:60]]}
+                   if sections else {}),
                 "note": "Parts, where they sit and finishes: list_appearances. A part's faces and the user's "
                         "selected faces: list_part_faces. Signs, logos and scenes: list_signs_and_scenes. Sizes, "
                         "distances and angles, and the dimensions on the machine: measure_assembly. Part numbers "
                         "and quantities: inspect_parts_manual_bom. A group of parts on its own, exploded or not: "
-                        "show_assembly_parts."}
+                        "show_assembly_parts."
+                        + (" The parts manual's sections: manualSections; a section's parts list: "
+                           "inspect_parts_manual_bom with its sectionId; parts that belong in another section: "
+                           "move_parts_manual_parts." if sections else "")}
 
     def _groups(self, assembly_number):
         reader = getattr(self.host, "assembly_groups", None)
+        return list(reader(assembly_number) or []) if reader else []
+
+    def _manual_sections(self, assembly_number):
+        # The parts manual's sections as they stand now (read each time: a move changes them).
+        reader = getattr(self.host, "assembly_manual_sections", None)
         return list(reader(assembly_number) or []) if reader else []
 
     def _shown_now(self, assembly_number):
@@ -1341,6 +1430,24 @@ class DocumentationGateway:
                 occurrence_ids.extend(row["occurrenceIds"])
                 group_parts.extend(row["parts"])
             labels.append(found[0]["name"] if len(found) == 1 else wanted.strip())
+        sections = self._manual_sections(assembly_number) if arguments.get("manualSections") else []
+        for wanted in arguments.get("manualSections") or []:
+            key = wanted.strip().lower()
+            found = next((row for row in sections if key in (row["sectionId"].lower(), row["name"].lower())), None)
+            if found is None:
+                listed = ", ".join(repr(row["name"]) for row in sections[:12]) or "none (no parts manual yet)"
+                raise PilotError("show_unknown_manual_section", f"{wanted!r} is not a section of the parts manual of "
+                                 f"{assembly_number}. Sections: {listed}.", 422)
+            occurrence_ids.extend(found["occurrenceIds"])
+            group_parts.extend(found["parts"])
+            labels.append(found["name"])
+        highlight = list(dict.fromkeys(arguments.get("highlight") or []))
+        shown = set(names) | set(group_parts)
+        outside = [name for name in highlight if name not in shown]
+        if outside:
+            listed = ", ".join(map(repr, outside[:5]))
+            raise PilotError("show_highlight_not_shown", f"{listed} {'is' if len(outside) == 1 else 'are'} not among "
+                             "the parts shown: highlight lights parts of the group named in the same call.", 422)
         if len(names) == 1 and not labels:
             labels = [parts[names[0]]]
         # Loose parts show every instance; a subassembly exactly its own occurrences (by part when the view has no
@@ -1348,7 +1455,7 @@ class DocumentationGateway:
         args = {"parts": names, "occurrence_ids": list(dict.fromkeys(occurrence_ids)),
                 "group_parts": list(dict.fromkeys(group_parts)),
                 "explode": bool(arguments.get("explode")), "spacing": float(arguments.get("spacing") or 1),
-                "label": " and ".join(labels)[:120]}
+                "label": " and ".join(labels)[:120], **({"highlight": highlight} if highlight else {})}
         # One view per reply: a later call replaces an earlier one.
         self.queued = [call for call in self.queued if call["name"] != "show_assembly_parts"]
         self.queued.append({"name": "show_assembly_parts", "args": args})
@@ -1357,6 +1464,7 @@ class DocumentationGateway:
                 "shows": f"{count} part(s) on their own" if count else "the whole machine",
                 "exploded": args["explode"],
                 **({"subassemblies": labels} if arguments.get("subassemblies") else {}),
+                **({"highlighted": highlight} if highlight else {}),
                 "note": "The 3D view shows this after your reply. Say what it will show, not that it is shown; "
                         "the whole machine shows again when asked, or when the user picks parts themselves."}
 

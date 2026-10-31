@@ -315,9 +315,17 @@ from ai_inspector.parts_manual import (
     build_scoped_bom,
     compile_manual_structure_proposal,
     render_artifact_path,
+    render_artifact_url,
     manual_pdf_path,
     store_manual_pdf,
     store_render_artifact,
+)
+from ai_inspector.parts_manual.document import (
+    PART_TEXT_FIELDS,
+    PART_TEXT_PAGE_ID,
+    part_text_edits,
+    part_text_target_id,
+    with_part_text,
 )
 from ai_inspector.parts_manual.part_numbers import (
     PART_NUMBER_REGISTRY_FILENAME,
@@ -15922,6 +15930,22 @@ class PartsManualSectionUpdateBody(BaseModel):
     visualization: Optional[Dict[str, Any]] = None
 
 
+class PartsManualPartMove(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    occurrenceIds: List[str] = Field(min_length=1, max_length=500)
+    toSectionId: Optional[str] = Field(default=None, max_length=80)
+    newSectionName: Optional[str] = Field(default=None, min_length=1, max_length=120)
+
+
+class PartsManualSectionMoveBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    baseRevision: str
+    sourceRevision: str
+    moves: List[PartsManualPartMove] = Field(min_length=1, max_length=20)
+
+
 class PartsManualMutationBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -16702,6 +16726,21 @@ def _parts_manual_editable_page_targets(
                 if value
             ]
         targets[page_id] = page_targets
+    # A part's number and description, edited in any parts list, are kept on the index page (part_text_edits).
+    if PART_TEXT_PAGE_ID in targets:
+        definition_ids = dict.fromkeys(
+            str(row.get("definitionId") or "")
+            for page in document.get("pages") or []
+            if isinstance(page, Mapping)
+            for row in page.get("bom") or []
+            if isinstance(row, Mapping)
+        )
+        targets[PART_TEXT_PAGE_ID]["page_element"].extend(
+            part_text_target_id(definition_id, field)
+            for definition_id in definition_ids
+            if definition_id
+            for field in PART_TEXT_FIELDS
+        )
     return targets
 
 
@@ -16780,6 +16819,16 @@ def _parts_manual_prepare_callout_command(
 ) -> Dict[str, Any]:
     prepared = copy.deepcopy(dict(command))
     operation = str(prepared.get("operation") or "")
+    if (
+        str(prepared.get("targetType") or "") == "page_element"
+        and str(prepared.get("targetId") or "").startswith("part.")
+    ):
+        # A parts-list cell is pressed on its own page; its text is the whole manual's (kept on the index page), and
+        # Reset takes it back to the CAD value.
+        if operation not in {"update_text", "reset"}:
+            raise DocumentationSceneError("a parts-list cell takes text only")
+        prepared["pageId"] = PART_TEXT_PAGE_ID
+        return prepared
     if operation not in {
         "clear_callouts",
         "add_callout",
@@ -19228,6 +19277,79 @@ def parts_manual_section_create(assembly_number: str, body: PartsManualSectionCr
     return {"success": True, **result}
 
 
+def _parts_manual_figure_status(
+    assembly_data: Mapping[str, Any],
+    catalog: Mapping[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Which of the manual's figures have a current capture and which need one,
+    for the plan as it stands. None when the manual cannot be compiled."""
+    known_ids = [row["occurrenceId"] for row in catalog["occurrences"]]
+    try:
+        loaded = _parts_manual_repository().read(
+            catalog["assemblyNumber"],
+            catalog["sourceRevision"],
+            known_occurrence_ids=known_ids,
+        )
+        document, _loaded_scene = _parts_manual_build_document_with_scene(
+            assembly_data=assembly_data,
+            catalog=catalog,
+            loaded_plan=loaded,
+        )
+    except (PartsManualRepositoryError, PartsManualValidationError, DocumentationSceneError, ValueError):
+        return None
+    document = attach_render_artifacts(PARTS_MANUAL_ROOT, catalog["assemblyNumber"], document)
+    kept, needed = [], []
+    for page in document.get("pages") or []:
+        request = page.get("renderRequest")
+        if not isinstance(request, Mapping):
+            continue
+        row = {
+            "pageId": page.get("pageId"),
+            "pageNumber": page.get("pageNumber"),
+            "figureNumber": page.get("figureNumber"),
+            "title": page.get("title"),
+        }
+        ready = (request.get("image") or {}).get("status") == "ready"
+        (kept if ready else needed).append(row)
+    return {"documentRevision": document.get("documentRevision"), "kept": kept, "needCapture": needed}
+
+
+@app.post("/api/parts-manual/{assembly_number}/sections/move")
+def parts_manual_sections_move(assembly_number: str, body: PartsManualSectionMoveBody):
+    """Move parts between manual sections in one plan revision; the page edits
+    of the sections that did not change are carried over."""
+    try:
+        assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        if body.sourceRevision != catalog["sourceRevision"]:
+            raise PartsManualSourceConflictError(body.sourceRevision, catalog["sourceRevision"])
+        result = _parts_manual_repository().move_occurrences(
+            catalog["assemblyNumber"],
+            catalog["sourceRevision"],
+            base_revision=body.baseRevision,
+            catalog=catalog["occurrences"],
+            moves=[move.model_dump(exclude_none=True) for move in body.moves],
+        )
+    except (PartsManualRepositoryError, PartsManualValidationError) as error:
+        return _parts_manual_error_response(error, operation="move_parts")
+    try:
+        scene_carried = _documentation_scene_repository().rebind_manual_plan(
+            catalog["assemblyNumber"],
+            catalog["sourceRevision"],
+            result["previousRevision"],
+            result["revision"],
+        )
+    except DocumentationSceneError:
+        # The parts have moved; only the page edits could not be carried.
+        logger.exception("Could not carry the parts-manual page edits over a move")
+        scene_carried = False
+    return {
+        "success": True,
+        **result,
+        "sceneCarried": scene_carried,
+        "figures": _parts_manual_figure_status(assembly_data, catalog),
+    }
+
+
 @app.patch("/api/parts-manual/{assembly_number}/sections/{section_id}")
 def parts_manual_section_update(
     assembly_number: str,
@@ -19276,6 +19398,23 @@ def parts_manual_section_delete(
     return {"success": True, **result}
 
 
+def _parts_manual_part_text(
+    catalog: Mapping[str, Any], plan_revision: str
+) -> Dict[str, Dict[str, str]]:
+    """The manual's edited part numbers and descriptions (none while its page edits belong to another plan)."""
+    try:
+        loaded = _documentation_scene_repository().read(
+            str(catalog["assemblyNumber"]),
+            str(catalog["sourceRevision"]),
+            plan_revision,
+        )
+    except DocumentationSceneError:
+        return {}
+    if not loaded["sourceCurrent"] or not loaded["manualPlanCurrent"]:
+        return {}
+    return part_text_edits(loaded["scene"].get("pages"))
+
+
 @app.get("/api/parts-manual/{assembly_number}/sections/{section_id}/bom")
 def parts_manual_section_bom(assembly_number: str, section_id: str):
     try:
@@ -19297,10 +19436,13 @@ def parts_manual_section_bom(assembly_number: str, section_id: str):
         )
         if section is None:
             raise PartsManualNotFoundError("manual section not found")
-        bom = build_scoped_bom(
-            catalog["occurrences"],
-            section["occurrenceIds"],
-            item_assignments=section.get("itemAssignments") or [],
+        bom = with_part_text(
+            build_scoped_bom(
+                catalog["occurrences"],
+                section["occurrenceIds"],
+                item_assignments=section.get("itemAssignments") or [],
+            ),
+            _parts_manual_part_text(catalog, str(loaded["revision"])),
         )
     except (PartsManualRepositoryError, PartsManualValidationError, ValueError) as error:
         if isinstance(error, (PartsManualRepositoryError, PartsManualValidationError)):
@@ -19421,6 +19563,12 @@ def parts_manual_documentation_scene_command(
             documentation_scene=result["scene"],
             documentation_scene_revision=result["revision"],
         )
+        # Pages the edit did not touch keep their captures (figure revisions).
+        next_document = attach_render_artifacts(
+            PARTS_MANUAL_ROOT,
+            catalog["assemblyNumber"],
+            next_document,
+        )
     except (
         PartsManualRepositoryError,
         PartsManualValidationError,
@@ -19483,6 +19631,12 @@ def _parts_manual_documentation_history(
             plan_revision=loaded_plan["revision"],
             documentation_scene=result["scene"],
             documentation_scene_revision=result["revision"],
+        )
+        # Pages the edit did not touch keep their captures (figure revisions).
+        next_document = attach_render_artifacts(
+            PARTS_MANUAL_ROOT,
+            catalog["assemblyNumber"],
+            next_document,
         )
     except (
         PartsManualRepositoryError,
@@ -19627,10 +19781,7 @@ async def parts_manual_page_render(
             image_bytes,
             balloons=balloon_manifest,
         )
-        artifact["url"] = (
-            f"/api/parts-manual/{catalog['assemblyNumber']}/renders/"
-            f"{document['documentRevision']}/{page_id}"
-        )
+        artifact["url"] = render_artifact_url(catalog["assemblyNumber"], artifact)
     except (
         PartsManualRepositoryError,
         PartsManualValidationError,
@@ -19725,7 +19876,8 @@ def parts_manual_pdf_get(
         media_type="application/pdf",
         filename=path.name,
         content_disposition_type="inline" if inline else "attachment",
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        # Not immutable: publishing the same revision again rebuilds this file. Revalidate (ETag) instead.
+        headers={"Cache-Control": "no-cache"},
     )
 
 
@@ -40637,6 +40789,29 @@ class _DocumentationAgentHost:
                            "occurrenceIds": occurrence_ids, "parts": list(dict.fromkeys(parts))})
         return groups
 
+    @staticmethod
+    def assembly_manual_sections(assembly_number):
+        """The parts manual's sections as they stand now (after a move too), each with its part occurrences and
+        their part names (the viewer's part keys): show_assembly_parts shows one, the Assembly tab's Sage moves parts
+        between them."""
+        payload = parts_manual_get(assembly_number)
+        if isinstance(payload, JSONResponse):
+            return []
+        try:
+            _assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        except (PartsManualRepositoryError, ValueError):
+            return []
+        rows = {row["occurrenceId"]: row for row in catalog.get("occurrences") or [] if row.get("partNumber")}
+        sections = []
+        for section in sorted(payload["plan"].get("sections") or [], key=lambda row: row.get("pageOrder") or 0):
+            occurrence_ids = [value for value in section.get("occurrenceIds") or [] if value in rows]
+            if occurrence_ids:
+                sections.append({"sectionId": section["sectionId"], "name": str(section.get("name") or "")[:120],
+                                 "occurrenceIds": occurrence_ids,
+                                 "parts": list(dict.fromkeys(str(rows[value]["partNumber"])
+                                                             for value in occurrence_ids))})
+        return sections
+
     def assembly(self, assembly_number):
         try:
             assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
@@ -40820,6 +40995,81 @@ class _DocumentationAgentHost:
                                           "description": self._short(row.get("description"), 120),
                                           "quantity": row.get("quantity")} for row in bom]}
 
+    def move_parts_manual_parts(self, assembly_number, moves):
+        """Move parts (item numbers or part numbers of a section's parts list) to another section, or to a new one,
+        in one plan revision (parts_manual_sections_move). Returns the sections it changed and the figures that now
+        need a capture."""
+        from ai_inspector.codex_runtime.policy import PilotError
+        payload = parts_manual_get(assembly_number)
+        if isinstance(payload, JSONResponse):
+            raise PilotError("parts_manual_unavailable", self._error(payload)["message"], 409)
+        sections = {row["sectionId"]: row for row in payload["plan"].get("sections") or []}
+        listed = "; ".join(f"{row['sectionId']} {row.get('name')}" for row in sections.values())[:600]
+        _assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+        resolved, asked = [], []
+        for move in moves:
+            source = sections.get(move["fromSectionId"])
+            if source is None:
+                raise PilotError("parts_manual_section_unknown",
+                                 f"{move['fromSectionId']} is not a section of this manual. Sections: {listed}", 422)
+            target_id, new_name = move.get("toSectionId"), str(move.get("newSectionName") or "").strip()
+            if bool(target_id) == bool(new_name):
+                raise PilotError("parts_manual_move_target",
+                                 "Give each move either toSectionId (an existing section) or newSectionName.", 422)
+            if target_id and target_id not in sections:
+                raise PilotError("parts_manual_section_unknown",
+                                 f"{target_id} is not a section of this manual. Sections: {listed}", 422)
+            if target_id == move["fromSectionId"]:
+                raise PilotError("parts_manual_move_target", "The parts are already in that section.", 422)
+            bom = build_scoped_bom(catalog["occurrences"], source.get("occurrenceIds") or [],
+                                   item_assignments=source.get("itemAssignments") or [])
+            items = set(move.get("items") or [])
+            numbers = {str(value).strip().casefold(): str(value).strip() for value in move.get("partNumbers") or []}
+            if not items and not numbers:
+                raise PilotError("parts_manual_move_parts", "Name the parts by items or partNumbers.", 422)
+            rows = [row for row in bom if row["item"] in items
+                    or str(row.get("displayPartNumber") or "").casefold() in numbers]
+            found_items = {row["item"] for row in rows}
+            found_numbers = {str(row.get("displayPartNumber") or "").casefold() for row in rows}
+            missing = [str(value) for value in sorted(items - found_items)] + [
+                numbers[value] for value in sorted(set(numbers) - found_numbers)]
+            if missing:
+                shown = "; ".join(f"{row['item']} {row.get('displayPartNumber')} {self._short(row.get('description'), 40)}"
+                                  for row in bom)[:600]
+                raise PilotError("parts_manual_move_parts", f"Not in {source.get('name')}: {', '.join(missing)}. "
+                                 f"Its parts list: {shown}", 422)
+            resolved.append({"occurrenceIds": [value for row in rows for value in row["occurrenceIds"]],
+                             **({"toSectionId": target_id} if target_id else {"newSectionName": new_name})})
+            asked.append([row["definitionId"] for row in rows])
+        response = parts_manual_sections_move(assembly_number, PartsManualSectionMoveBody(
+            baseRevision=payload["revision"], sourceRevision=payload["sourceRevision"], moves=resolved))
+        if isinstance(response, JSONResponse):
+            try:
+                findings = json.loads(response.body).get("findings") or []
+            except (TypeError, ValueError):
+                findings = []
+            detail = "; ".join(self._short(row.get("message"), 200) for row in findings[:4] if isinstance(row, dict))
+            raise PilotError("parts_manual_move_refused",
+                             (self._error(response)["message"] if not detail else
+                              f"The move would fail the manual's publication check: {detail}"), 422)
+        after = {row["sectionId"]: row for row in response["plan"]["sections"]}
+        changed = []
+        for section_id in response["changedSectionIds"]:
+            section = after[section_id]
+            rows = build_scoped_bom(catalog["occurrences"], section["occurrenceIds"],
+                                    item_assignments=section.get("itemAssignments") or [])
+            changed.append({"sectionId": section_id, "name": section.get("name"),
+                            "new": section_id in response["createdSectionIds"],
+                            "parts": [{"item": row["item"], "partNumber": row.get("displayPartNumber"),
+                                       "description": self._short(row.get("description"), 80),
+                                       "quantity": row.get("quantity")} for row in rows][:40]})
+        figures = response.get("figures") or {}
+        return {"changedSections": changed, "auditStatus": response["publicationReadiness"]["status"],
+                "figuresKept": len(figures.get("kept") or []),
+                "figuresToCapture": [{"figure": row.get("figureNumber"), "page": row.get("pageNumber"),
+                                      "title": row.get("title")} for row in figures.get("needCapture") or []],
+                "pageEditsCarried": response.get("sceneCarried")}
+
 
     # The Specification Sheet (docs/specification-sheet-slots-plan.md): slots Sage reads and writes.
     def _specification_state(self, assembly_number, detail):
@@ -40916,13 +41166,16 @@ class _DocumentationAgentHost:
                                      "rows": [{"key": row["key"], "label": row["label"], "unit": row.get("unit")}
                                               for row in response["document"]["sheet"].get("rows") or []]}}
 
-    # The text on the operations manual's and work instructions' pages: the documentation-scene routes the page's own
-    # double-click edits use, so Sage's edits are the user's kind (pageElementOverrides) and the exports use them.
+    # The text on the operations manual's and work instructions' pages, and the parts manual's parts lists: the
+    # documentation-scene routes the page's own double-click edits use, so Sage's edits are the user's kind
+    # (pageElementOverrides) and the exports use them.
     _TEXT_ROUTES = {
         "operations_and_maintenance_manual": ("operations_manual_documentation_scene_get",
                                               "operations_manual_documentation_scene_command"),
         "work_instructions": ("work_instructions_documentation_scene_get",
                               "work_instructions_documentation_scene_command"),
+        "illustrated_parts_manual": ("parts_manual_documentation_scene_get",
+                                     "parts_manual_documentation_scene_command"),
     }
 
     def _text_scene(self, assembly_number, document_type):

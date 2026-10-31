@@ -289,6 +289,20 @@
         };
     }
 
+    // Overhead structure (roof beams, purlins) hangs clear above the floor, so the floor plan
+    // leaves it to 3D. Same rule as the spatial checks (OVERHEAD_MINIMUM_CLEARANCE in spatial.py).
+    const OVERHEAD_MINIMUM_CLEARANCE = 4.5;
+
+    function isOverheadPlacement(placement, definition) {
+        if (placement.snapRelationship) return false;
+        const geometry = definition.geometry || {};
+        const interval = geometry.heightInterval || {};
+        const minimum = geometry.aabb && geometry.aabb.minimum || {};
+        const position = placement.transform && placement.transform.position || {};
+        return finiteOr(position.y, 0) + finiteOr(interval.minimumY, finiteOr(minimum.y, 0))
+            >= OVERHEAD_MINIMUM_CLEARANCE;
+    }
+
     function collectTopPlanGeometry(layout, options) {
         assertLayout(layout);
         const geometry = {
@@ -312,6 +326,9 @@
                 ),
                 fillColor: zone.extensions && zone.extensions.style
                     && zone.extensions.style.fillColor,
+                // Helper strips (a column line, a barrier run) keep their name but show it only when selected.
+                labelHidden: Boolean(zone.extensions && zone.extensions.style
+                    && zone.extensions.style.labelHidden === true),
                 points: polygon,
             });
         });
@@ -348,12 +365,13 @@
             });
         });
         layout.placements.forEach(function (placement) {
-            const points = placementFootprint(placement, options);
-            const bounds = geometryBounds(points);
             const catalogEntry = resolveCatalogEntry(placement, options) || {};
             const definition = catalogEntry.definition
                 || catalogEntry.assetDefinition
                 || {};
+            if (isOverheadPlacement(placement, definition)) return;
+            const points = placementFootprint(placement, options);
+            const bounds = geometryBounds(points);
             geometry.placements.push({
                 placementId: placement.placementId,
                 assetId: placement.assetId,
@@ -2971,6 +2989,7 @@
                 return false;
             }
             if (this.selections.has(zone.zoneId)) return true;
+            if (zone.labelHidden) return false;
             if (!childZones.length) return true;
             return semanticLevel === 'overview'
                 ? !zone.parentZoneId : Boolean(zone.parentZoneId);

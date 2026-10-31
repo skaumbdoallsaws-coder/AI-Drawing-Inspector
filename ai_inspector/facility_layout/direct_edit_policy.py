@@ -7,6 +7,8 @@ DIRECT_OPERATIONS = frozenset({
     "upsert_floor_surface", "upsert_decal", "upsert_wall_artwork",
     # Setting-out reference points: marks on the site that move nothing (site findings still hold a batch back).
     "upsert_site_reference", "delete_site_reference",
+    # Emergency teams and meeting points: map data that moves nothing.
+    "set_emergency_plan",
 })
 MAX_DIRECT_OPERATIONS = 20
 MAX_DIRECT_ENTITIES = 20

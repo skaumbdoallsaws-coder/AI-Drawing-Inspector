@@ -87,3 +87,63 @@ def test_the_show_waits_for_a_library_machine_opening_after_the_reply(tmp_path):
     reader.queued.append({"name": "open_library_machine", "args": {"asset_id": "lathe"}})
     refused = call(reader, "show_assembly_parts", {"parts": ["frame"]})
     assert not refused["ok"] and refused["error"]["code"] == "assembly_view_after_open"
+
+
+SECTIONS = [
+    {"sectionId": "section-aaaaaaaa", "name": "Frame and Doors", "occurrenceIds": ["o-frame-1", "o-door-1"],
+     "parts": ["frame", "door"]},
+    {"sectionId": "section-bbbbbbbb", "name": "Spindle Guard", "occurrenceIds": ["o-spindle-1", "o-door-2"],
+     "parts": ["spindle", "door"]},
+]
+
+
+class ManualHost(GroupHost):
+    def __init__(self, root):
+        super().__init__(root)
+        self.moves = []
+
+    def assembly_manual_sections(self, number):
+        return [dict(row) for row in SECTIONS]
+
+    def move_parts_manual_parts(self, number, moves):
+        self.moves.append(moves)
+        return {"changedSections": [{"sectionId": "section-aaaaaaaa", "name": "Frame and Doors", "new": False,
+                                     "parts": []}],
+                "auditStatus": "PASS", "figuresKept": 3, "figuresToCapture": [], "pageEditsCarried": True}
+
+
+def manual_gateway(tmp_path):
+    return DocumentationGateway(ManualHost(tmp_path), PRINCIPAL, {"assemblyNumber": "tricycle", "documentType": None},
+                                turn_id="turn", workspace="assembly")
+
+
+def test_a_manual_section_is_shown_with_the_moved_parts_lit(tmp_path):
+    reader = manual_gateway(tmp_path)
+    data = call(reader, "inspect_assembly", {})["data"]
+    assert data["manualSections"] == [{"sectionId": "section-aaaaaaaa", "name": "Frame and Doors", "partCount": 2},
+                                      {"sectionId": "section-bbbbbbbb", "name": "Spindle Guard", "partCount": 2}]
+    shown = call(reader, "show_assembly_parts", {"manualSections": ["spindle guard"], "highlight": ["door"],
+                                                 "explode": True})
+    assert shown["ok"] and shown["data"]["highlighted"] == ["door"]
+    assert reader.queued == [{"name": "show_assembly_parts", "args": {
+        "parts": [], "occurrence_ids": ["o-spindle-1", "o-door-2"], "group_parts": ["spindle", "door"],
+        "explode": True, "spacing": 1.0, "label": "Spindle Guard", "highlight": ["door"]}}]
+    # By id too; a highlighted part must be among those shown, and an unknown section is refused with the list.
+    assert call(reader, "show_assembly_parts", {"manualSections": ["section-aaaaaaaa"]})["ok"]
+    assert reader.queued[0]["args"]["occurrence_ids"] == ["o-frame-1", "o-door-1"]
+    refused = call(reader, "show_assembly_parts", {"manualSections": ["Frame and Doors"], "highlight": ["spindle"]})
+    assert not refused["ok"] and refused["error"]["code"] == "show_highlight_not_shown"
+    refused = call(reader, "show_assembly_parts", {"manualSections": ["Gearbox"]})
+    assert not refused["ok"] and refused["error"]["code"] == "show_unknown_manual_section"
+    assert "Spindle Guard" in refused["error"]["message"]
+
+
+def test_the_assembly_tabs_sage_moves_parts_between_manual_sections(tmp_path):
+    reader = manual_gateway(tmp_path)
+    assert "move_parts_manual_parts" in {spec["name"] for spec in reader.specs}
+    moves = [{"fromSectionId": "section-bbbbbbbb", "partNumbers": ["door"], "toSectionId": "section-aaaaaaaa"}]
+    moved = call(reader, "move_parts_manual_parts", {"moves": moves})
+    assert moved["ok"] and reader.host.moves == [moves]
+    assert "show_assembly_parts" in moved["data"]["note"] and "Documentation tab" in moved["data"]["note"]
+    assert reader.manual_changes == [{"assemblyNumber": "tricycle", "sections": ["Frame and Doors"]}]
+    assert reader.queued == []

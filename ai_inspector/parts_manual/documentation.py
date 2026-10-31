@@ -1522,6 +1522,36 @@ class DocumentationSceneRepository:
                 "previousRevision": documentation_scene_revision(previous),
             }
 
+    def rebind_manual_plan(
+        self,
+        assembly_number: str,
+        source_revision: str,
+        previous_manual_plan_revision: str,
+        manual_plan_revision: str,
+    ) -> bool:
+        """Carry the page edits over a manual-plan change the app made itself
+        (parts moved between sections). Only a scene bound to the plan the
+        change started from is carried; its pages are keyed by section, so the
+        sections that did not change keep their edits. Returns whether the
+        scene was carried."""
+        with _WRITE_LOCK:
+            path = self._scene_path(assembly_number)
+            if not path.is_file():
+                return False
+            loaded = self.read(
+                assembly_number,
+                source_revision,
+                previous_manual_plan_revision,
+            )
+            if not loaded["sourceCurrent"] or not loaded["manualPlanCurrent"]:
+                return False
+            scene = loaded["scene"]
+            scene["manualPlanRevision"] = str(manual_plan_revision)
+            scene["updatedAt"] = _utc_now()
+            validate_documentation_scene(scene)
+            _write_atomic(path, canonical_documentation_bytes(scene))
+            return True
+
     @staticmethod
     def _assert_revision(scene: Mapping[str, Any], base_revision: str) -> None:
         revision = documentation_scene_revision(scene)

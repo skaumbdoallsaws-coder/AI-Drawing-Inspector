@@ -4,7 +4,7 @@ import hashlib
 
 from ai_inspector.chat_content import normalize_chat_content_block
 from ai_inspector.research.web import public_url, ResearchError
-from .generation_exploration import SEARCH_TOOL, READ_TOOL, DOCUMENT_TOOL
+from .generation_exploration import READ_TOOL, DOCUMENT_TOOL
 
 
 def generation_preview_summary(receipt):
@@ -63,7 +63,9 @@ def _equipment_sources(result):
 def generation_research_source_block(results):
     sources = {}
     for entry in results:
-        if not isinstance(entry, Mapping) or entry.get("tool") not in {SEARCH_TOOL, READ_TOOL, DOCUMENT_TOOL} or entry.get("status") != "succeeded":
+        # Only sources that were read are listed: a search only discovers candidates, most of them unrelated hits,
+        # and no value may come from a search result.
+        if not isinstance(entry, Mapping) or entry.get("tool") not in {READ_TOOL, DOCUMENT_TOOL} or entry.get("status") != "succeeded":
             continue
         result = entry.get("result")
         if not isinstance(result, Mapping):
@@ -99,8 +101,7 @@ def generation_research_source_block(results):
                 "retrievedAt": result.get("retrievedAt"), "description": citation.get("text", ""),
                 "sourceType": "technical-document" if fetched else "web",
                 "publisher": "", "inferIdentity": False,
-                "specifications": {"Retrieval": "Document read" if fetched else (
-                    "Read not confirmed" if entry["tool"] == READ_TOOL else "Search discovery only"),
+                "specifications": {"Retrieval": "Document read" if fetched else "Read not confirmed",
                     "Extract": "Truncated" if result.get("truncated") else "Bounded provider result",
                     "Authority": "Supporting", "Review": "Pending", "Use": "Not production approval"},
             }

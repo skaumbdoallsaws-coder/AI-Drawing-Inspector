@@ -265,14 +265,15 @@ def run() -> int:
                 ),
                 result.get("captureReceipts"),
             )
+            # The PDF is a file card under Sage's reply (built from assemblyNumber and pdf.url);
+            # nothing opens over the app.
             record(
-                "published_pdf_is_opened_in_app",
-                result.get("opened") is True
-                and page.locator("#manualPublishedPdfOverlay").count() == 1
-                and page.locator("#manualPublishedPdfOverlay iframe").count() == 1,
+                "published_pdf_is_left_for_the_chat_card",
+                result.get("assemblyNumber") == ASSEMBLY
+                and str((result.get("pdf") or {}).get("url") or "").startswith("/api/parts-manual/")
+                and "opened" not in result
+                and page.locator("#manualPublishedPdfOverlay, .manual-published-pdf-overlay").count() == 0,
             )
-
-            page.evaluate("() => document.getElementById('manualPublishedPdfOverlay')?.remove()")
             page.locator(
                 '#documentationPageList .documentation-page-item[title="Rear Wheel and Axle Assembly"]'
             ).click()

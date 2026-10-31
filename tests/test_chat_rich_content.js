@@ -193,7 +193,7 @@ test('retained research sources do not acquire inferred publishers or favicon UR
     assert.deepStrictEqual(twice.specifications, raw.specifications);
 });
 
-test('a file card links only to an app file and opens it outside the chat', () => {
+test('a file card links only to an app file, opens it outside the chat and has a download button', () => {
     const [card] = rich.normalizeBlocks([{ type: 'file', fileName: 'Bayport warehouse - layout plan.pdf',
         url: '/api/facility-layouts/site-local/fl-a/plan.pdf?revision=r-1', mimeType: 'application/pdf',
         detail: 'PDF - 3 sheets' }]);
@@ -208,8 +208,12 @@ test('a file card links only to an app file and opens it outside the chat', () =
         setAttribute(key, value) { this[key] = value; }, appendChild(child) { this.children.push(child); return child; } };
         made.push(item); return item; };
     const rendered = rich.renderBlock({ createElement: node, createTextNode: text => ({ text }) }, card);
-    const link = made.find(item => item.className === 'agent-file-card');
-    assert.ok(rendered && link && link.href === card.url && link.target === '_blank' && link.rel === 'noopener');
+    assert.ok(rendered && rendered.className === 'agent-file-card' && rendered.tagName === 'div');
+    const link = made.find(item => item.className === 'agent-file-open');
+    assert.ok(link && link.href === card.url && link.target === '_blank' && link.rel === 'noopener');
+    const save = made.find(item => item.className === 'agent-file-download');
+    assert.ok(save && save.href === card.url && save.download === card.fileName && !save.target);
+    assert.deepStrictEqual(rendered.children, [link, save]);
 });
 
 test('a link to a public page shows its text, an arrow and a chip with the site icon and domain', () => {

@@ -1214,6 +1214,92 @@ def test_semantic_aisle_reports_obstruction_and_unverified_clearance(
     assert result["metrics"]["aisleClearanceUnverifiedCount"] == 1
 
 
+_FLOOR_CHECK_CODES = {
+    "aisle_obstructed",
+    "exclusion_zone_violation",
+    "floor_load_unverified",
+    "placement_outside_floor",
+    "unsupported_mounting_surface",
+    "zone_containment_violation",
+}
+
+
+def _roof_beam_layout(golden: dict, beam_y: float) -> tuple[dict, list[dict]]:
+    """A 30 m beam spanning past the cell and the floor, over a forklift aisle."""
+    layout = deepcopy(golden["baseLayout"])
+    layout["placements"].append(
+        _placement("pl-beam", "asset-roof-beam", 10.0, 10.0, y=beam_y)
+    )
+    layout["routes"] = [{
+        "routeId": "rt-under-beam",
+        "label": "Under Beam Aisle",
+        "routeKind": "forklift",
+        "centerline": [
+            {"x": 0.0, "y": 0.0, "z": 10.0},
+            {"x": 20.0, "y": 0.0, "z": 10.0},
+        ],
+        "corridorWidth": 2.0,
+        "evidence": [],
+        "extensions": {"facilityAisle": {"aisleKind": "forklift"}},
+    }]
+    assets = [
+        *golden["assetDefinitions"],
+        _box_asset("asset-roof-beam", 30.0, 0.4, 0.5),
+        _box_asset("asset-tall-rack", 1.0, 1.0, 7.0),
+    ]
+    return layout, assets
+
+
+def _beam_codes(result: dict) -> set[str]:
+    return {
+        finding["code"]
+        for finding in result["findings"]
+        if "pl-beam" in finding["subjectRefs"]
+    }
+
+
+def test_overhead_placement_skips_floor_checks_but_keeps_collisions(
+    golden: dict,
+) -> None:
+    layout, assets = _roof_beam_layout(golden, 6.0)
+    result = diagnose_layout(
+        layout,
+        assets,
+        shell=golden["shell"],
+        policy_set=golden["policySet"],
+        evidence_authority=golden["authority"],
+    )
+    assert not _beam_codes(result) & _FLOOR_CHECK_CODES
+    assert result["zoneMembership"]["pl-beam"] == []
+    assert result["metrics"]["obstructedAisleCount"] == 0
+
+    layout["placements"].append(
+        _placement("pl-rack", "asset-tall-rack", 10.0, 10.0)
+    )
+    result = diagnose_layout(
+        layout,
+        assets,
+        shell=golden["shell"],
+        policy_set=golden["policySet"],
+        evidence_authority=golden["authority"],
+    )
+    assert "placement_collision" in _beam_codes(result)
+
+
+def test_placement_below_overhead_clearance_keeps_floor_checks(
+    golden: dict,
+) -> None:
+    layout, assets = _roof_beam_layout(golden, 3.0)
+    result = diagnose_layout(
+        layout,
+        assets,
+        shell=golden["shell"],
+        policy_set=golden["policySet"],
+        evidence_authority=golden["authority"],
+    )
+    assert {"aisle_obstructed", "zone_containment_violation"} <= _beam_codes(result)
+
+
 def _aisle_doorway_scene(
     minimum_x: float = 7.0,
     width: float = 3.0,

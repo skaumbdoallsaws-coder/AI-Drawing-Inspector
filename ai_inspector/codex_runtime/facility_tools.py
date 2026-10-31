@@ -72,6 +72,7 @@ class FacilityReadGateway:
         self.progress = None  # TurnProgress when the chat pane shows steps
         self.closed, self.calls = False, 0
         self.packages = {}  # whole planned designs, staged by preview_planned_design (assisted_tools.py)
+        self.pdf, self.pdfs = None, []  # the PDFs prepared this turn, shown as file cards under the reply
         self.credential_check = None
         self.receipts = []
         self.lock = asyncio.Lock()
@@ -175,17 +176,9 @@ class FacilityReadGateway:
             raise PilotError('codex_visual_unavailable', 'Component inspection is not configured for this host.', 422)
         return resolver(self.principal, self.reference, placement_id, representation)
 
-    def _layout_pdf(self):
-        """Build the bound layout's plan PDF once, as its link will (plan_pdf.create_plan_pdf_router), and keep a
-        file card for the reply."""
-        import re
-        from urllib.parse import quote
+    def _resolver(self):
         from ai_inspector.facility_layout.errors import FacilityLayoutError
-        from ai_inspector.facility_layout.plan_pdf import _fit_check, load_template, render_plan_pdf
-        service = self.runtime.service
-        site_id, layout_id = self.reference['siteId'], self.reference['layoutId']
-        saved = read_bound_layout(self.runtime, self.principal, self.reference)
-        cache = {}
+        service, site_id, cache = self.runtime.service, self.reference['siteId'], {}
 
         def resolve(asset_id, revision):
             if (asset_id, revision) not in cache:
@@ -195,6 +188,45 @@ class FacilityReadGateway:
                 except FacilityLayoutError:
                     cache[asset_id, revision] = None
             return cache[asset_id, revision]
+        return resolve
+
+    def _keep_pdf(self, card):
+        self.pdfs = [c for c in self.pdfs if c['url'] != card['url']] + [card]
+        self.pdf = card
+
+    def _map_pdf(self, kind):
+        """The evacuation or emergency map, built once as its link will build it, kept as a file card."""
+        import re
+        from urllib.parse import quote
+        from ai_inspector.facility_layout.emergency_pdf import EmergencyMapError, render_emergency_pdf
+        site_id, layout_id = self.reference['siteId'], self.reference['layoutId']
+        saved = read_bound_layout(self.runtime, self.principal, self.reference)
+        try:
+            content, info = render_emergency_pdf(saved['layout'], self._resolver(), kind=kind,
+                                                 revision=saved.get('revision') or '')
+        except EmergencyMapError as exc:
+            return {'readOnly': True, 'available': False, 'kind': kind, 'reason': str(exc)}
+        name = re.sub(r'[\\/:*?"<>|]+', ' ', saved['layout'].get('displayName') or layout_id).strip()[:100] or 'Layout'
+        title = 'evacuation map' if kind == 'evacuation' else 'emergency map'
+        url = (f"/api/facility-layouts/{quote(site_id, safe='')}/{quote(layout_id, safe='')}/plan.pdf"
+               f"?revision={quote(str(saved.get('revision') or ''), safe='')}&kind={kind}")
+        self._keep_pdf({'type': 'file', 'fileName': f'{name} - {title}.pdf', 'url': url,
+                        'mimeType': 'application/pdf', 'detail': 'PDF - 1 poster page - 11 x 17 in - ready to print'})
+        return dict(info, readOnly=True, available=True, fileName=self.pdf['fileName'], pages=1, bytes=len(content),
+                    revision=saved.get('revision'), shownInChat='as a file card the user clicks to open')
+
+    def _layout_pdf(self, kind='layout'):
+        """Build the bound layout's plan PDF once, as its link will (plan_pdf.create_plan_pdf_router), and keep a
+        file card for the reply."""
+        if kind != 'layout':
+            return self._map_pdf(kind)
+        import re
+        from urllib.parse import quote
+        from ai_inspector.facility_layout.plan_pdf import _fit_check, load_template, render_plan_pdf
+        service = self.runtime.service
+        site_id, layout_id = self.reference['siteId'], self.reference['layoutId']
+        saved = read_bound_layout(self.runtime, self.principal, self.reference)
+        resolve = self._resolver()
         content = render_plan_pdf(saved['layout'], resolve, revision=saved.get('revision') or '',
                                   fit=_fit_check(service, self.principal, site_id, saved['layout']))
         pages = len(re.findall(rb'/Type\s*/Page(?![a-zA-Z])', content))
@@ -203,8 +235,9 @@ class FacilityReadGateway:
         name = re.sub(r'[\\/:*?"<>|]+', ' ', saved['layout'].get('displayName') or layout_id).strip()[:100] or 'Layout'
         url = (f"/api/facility-layouts/{quote(site_id, safe='')}/{quote(layout_id, safe='')}/plan.pdf"
                f"?revision={quote(str(saved.get('revision') or ''), safe='')}")
-        self.pdf = {'type': 'file', 'fileName': f'{name} - layout plan.pdf', 'url': url, 'mimeType': 'application/pdf',
-                    'detail': f"PDF - {pages} sheet{'s' if pages != 1 else ''} - 11 x 17 in - ready to print"}
+        self._keep_pdf({'type': 'file', 'fileName': f'{name} - layout plan.pdf', 'url': url,
+                        'mimeType': 'application/pdf',
+                        'detail': f"PDF - {pages} sheet{'s' if pages != 1 else ''} - 11 x 17 in - ready to print"})
         return {'readOnly': True, 'available': True, 'fileName': self.pdf['fileName'], 'pages': pages,
                 'sheets': sheets, 'paper': '11 x 17 in (tabloid), landscape', 'bytes': len(content),
                 'revision': saved.get('revision'), 'shownInChat': 'as a file card the user clicks to open'}
@@ -212,7 +245,14 @@ class FacilityReadGateway:
     def _read_data(self, name, arguments):
         from .site_tools import CATALOG_TOOLS, NAMES as SITE_NAMES, STEP_TOOLS, read_site
         if name == 'prepare_layout_pdf':
-            return self._layout_pdf()
+            return self._layout_pdf(arguments.get('kind') or 'layout')
+        if name == 'suggest_emergency_teams':
+            from ai_inspector.facility_layout.emergency_plan import suggest_emergency_plan
+            saved = read_bound_layout(self.runtime, self.principal, self.reference)
+            result = suggest_emergency_plan(saved['layout'], self._resolver())
+            result['staging'] = ('Show the user the teams, zones and meeting points first. Stage the plan, with '
+                                 'the user\'s changes, as one set_emergency_plan operation.')
+            return dict(result, identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=True)
         if name in SITE_NAMES:
             from ai_inspector.facility_layout.site_imagery import site_photo_path
             saved = read_bound_layout(self.runtime,self.principal,self.reference)

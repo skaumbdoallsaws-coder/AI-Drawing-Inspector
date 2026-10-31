@@ -58,6 +58,11 @@ _CLEARANCE_FINDING_CODES = {
 _NON_PLACEMENT_ZONE_TYPES = frozenset(
     {"aisle", "exclusion", "operator", "safety", "service", "utility"}
 )
+# Overhead structure (roof beams, purlins, trays) is carried by the building, not the floor: a
+# placement whose lowest point is at least this high above the floor skips the floor checks
+# (zone containment, mounting surface, floor load, aisle obstruction). Collisions stay 3D, so
+# a beam that clips a tall rack is still reported.
+OVERHEAD_MINIMUM_CLEARANCE = 4.5
 _SHELL_OBSTACLE_KINDS = frozenset(
     {
         "column",
@@ -2068,6 +2073,30 @@ def _shell_obstacle_collisions(
     ], len(hits)
 
 
+def _overhead_placement_ids(
+    records_by_placement: Mapping[str, tuple[SpatialRecord, ...]],
+    shell: Mapping[str, Any] | None,
+    supported_ids: set[str],
+) -> set[str]:
+    """Placements hung clear above the floor (stacked or attached ones rest on something else)."""
+    frame = shell.get("coordinateFrame") if isinstance(shell, Mapping) else None
+    floor = _number(
+        frame.get("floorElevation", 0) if isinstance(frame, Mapping) else 0,
+        "coordinateFrame.floorElevation",
+    )
+    result = set()
+    for placement_id, records in records_by_placement.items():
+        physical = [record for record in records if record.record_kind == "physical"]
+        if (
+            placement_id not in supported_ids
+            and physical
+            and min(record.minimum_y for record in physical)
+            >= floor + OVERHEAD_MINIMUM_CLEARANCE - GEOMETRY_EPSILON
+        ):
+            result.add(placement_id)
+    return result
+
+
 def _placement_polygon(
     records: Sequence[SpatialRecord],
 ) -> tuple[Point2, ...]:
@@ -3590,9 +3619,17 @@ def diagnose_layout(
         if _prepared_surfaces is not None
         else _prepare_mounting_surfaces(shell)
     )
+    overhead_placements = _overhead_placement_ids(
+        records_by_placement,
+        shell,
+        stacked_upper_placements | attached_placements,
+    )
     zone_membership: dict[str, tuple[str, ...]] = {}
     for placement_id in sorted(records_by_placement):
         _check_cancel(cancel_check)
+        if placement_id in overhead_placements:
+            zone_membership[placement_id] = ()
+            continue
         placement = placements[placement_id]
         asset = _catalog_asset(
             catalog,
@@ -3657,7 +3694,15 @@ def diagnose_layout(
         )
     )
     aisle_findings, aisle_count, obstructed_aisle_count, aisle_unverified_count = (
-        _aisle_checks(layout, records_by_placement, shell)
+        _aisle_checks(
+            layout,
+            {
+                placement_id: records
+                for placement_id, records in records_by_placement.items()
+                if placement_id not in overhead_placements
+            },
+            shell,
+        )
     )
     findings.extend(aisle_findings)
     ordered = sort_findings(findings)

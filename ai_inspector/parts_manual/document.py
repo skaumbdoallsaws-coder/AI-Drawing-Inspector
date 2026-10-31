@@ -6,6 +6,7 @@ import copy
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from .catalog import build_scoped_bom
@@ -21,13 +22,17 @@ from .version import (
 
 PARTS_MANUAL_DOCUMENT_SCHEMA_VERSION = 4
 MANUAL_SECTION_BOM_ROWS_PER_PAGE = 20
+# The PDF draws index rows 22 pt apart from y 106 inside the index content area (y 66-564).
+PARTS_INDEX_ROWS_PER_PAGE = 20
 MANUAL_ILLUSTRATION_STYLE_SHADED_COLOR = "SHADED_COLOR"
 MANUAL_ILLUSTRATION_STYLE_HIDDEN_LINES_REMOVED = "HIDDEN_LINES_REMOVED"
 DEFAULT_MANUAL_ILLUSTRATION_STYLE = MANUAL_ILLUSTRATION_STYLE_HIDDEN_LINES_REMOVED
-# HLR images contain edge pixels rather than filled faces. A 1% image-area
-# floor rejects blank and single-stroke captures while retaining legitimate
-# slender assemblies whose framing is independently enforced by bbox area.
-MANUAL_HLR_MINIMUM_FOREGROUND_PIXEL_PERCENT = 1.0
+# HLR images contain edge pixels rather than filled faces. A 0.4% image-area
+# floor rejects blank and single-stroke captures (a 1 px stroke across the
+# frame is about 0.25%) while retaining legitimate sparse sections - a tube
+# handle with two small brackets is about 0.6% - whose framing is
+# independently enforced by bbox area.
+MANUAL_HLR_MINIMUM_FOREGROUND_PIXEL_PERCENT = 0.4
 MANUAL_HLR_FOREGROUND_PIXEL_POLICY = "hlr_linework_antiblank_floor"
 
 
@@ -40,6 +45,30 @@ def _stable_revision(value: Mapping[str, Any]) -> str:
         allow_nan=False,
     ).encode("ascii")
     return hashlib.sha256(payload).hexdigest()
+
+
+def figure_revision(
+    assembly_number: str,
+    source_revision: str,
+    render_request: Mapping[str, Any],
+) -> str:
+    """Revision of one figure: everything its capture depends on (the CAD, the
+    renderer and the page's render request with its composition). A capture is
+    kept while its figure revision is unchanged, so a change to one section
+    recaptures only the figures it touches."""
+    request = {
+        key: value
+        for key, value in render_request.items()
+        if key != "figureRevision"
+    }
+    return _stable_revision(
+        {
+            "assemblyNumber": str(assembly_number or "").lower(),
+            "sourceRevision": str(source_revision or ""),
+            "renderPipelineVersion": PARTS_MANUAL_RENDER_PIPELINE_VERSION,
+            "renderRequest": request,
+        }
+    )
 
 
 def _included_sections(plan: Mapping[str, Any]) -> List[Mapping[str, Any]]:
@@ -101,6 +130,90 @@ def _date_only(value: Any) -> Optional[str]:
         return parsed.astimezone(timezone.utc).date().isoformat()
     except ValueError:
         return None
+
+
+# A part's number and description are edited in a parts list (on the page or by Sage) once for the whole manual. The
+# edit is kept on the part number index page, never on a figure's page, so no figure's revision changes (nothing is
+# recaptured); its text replaces the CAD value in every parts list and in the index. An empty edit goes back to the
+# CAD value. ITEM and QTY are the balloon's number and the model's count, so they are not edited.
+PART_TEXT_PAGE_ID = "page-parts-index"
+PART_TEXT_FIELDS = {"partNumber": "displayPartNumber", "description": "description"}
+
+
+def part_text_target_id(definition_id: str, field: str) -> str:
+    return f"part.{definition_id}.{field}"
+
+
+def part_text_edits(scene_pages: Any) -> Dict[str, Dict[str, str]]:
+    """The edited part numbers and descriptions in a documentation scene's pages, by definition id."""
+    page = scene_pages.get(PART_TEXT_PAGE_ID) if isinstance(scene_pages, Mapping) else None
+    overrides = page.get("pageElementOverrides") if isinstance(page, Mapping) else None
+    edits: Dict[str, Dict[str, str]] = {}
+    for target_id, override in overrides.items() if isinstance(overrides, Mapping) else ():
+        prefix, _, rest = str(target_id).partition(".")
+        definition_id, _, field = rest.rpartition(".")
+        text = " ".join(str(override.get("text") or "").split()) if isinstance(override, Mapping) else ""
+        if prefix == "part" and definition_id and field in PART_TEXT_FIELDS and text:
+            edits.setdefault(definition_id, {})[PART_TEXT_FIELDS[field]] = text
+    return edits
+
+
+def with_part_text(
+    rows: Iterable[Mapping[str, Any]],
+    edits: Mapping[str, Mapping[str, str]],
+) -> List[Dict[str, Any]]:
+    """Parts-list rows with the manual's edited part numbers and descriptions."""
+    result = []
+    for source in rows:
+        row = copy.deepcopy(dict(source))
+        for field, text in (edits.get(str(row.get("definitionId") or "")) or {}).items():
+            row[field] = text
+            row["partNumberSource" if field == "displayPartNumber" else "descriptionSource"] = "documentation_edit"
+        result.append(row)
+    return result
+
+
+def _natural_key(value: str) -> List[Any]:
+    return [int(part) if part.isdigit() else part.casefold() for part in re.split(r"(\d+)", value)]
+
+
+def _shown_copy(
+    catalog_rows: Iterable[Mapping[str, Any]],
+    occurrence_ids: List[str],
+) -> tuple[List[str], int]:
+    """A section made only of copies of one subassembly (the two fixed casters) is drawn as one copy: the
+    occurrences of its first copy, and the number of copies. The parts list and the balloons' "2X" still count every
+    copy. Any other section is drawn whole (one copy)."""
+    rows = {str(row.get("occurrenceId")): row for row in catalog_rows if row.get("occurrenceId")}
+
+    def ancestry(occurrence_id: str) -> List[str]:
+        path = [occurrence_id]
+        while rows.get(path[-1], {}).get("parentOccurrenceId") and len(path) < 64:
+            path.append(str(rows[path[-1]]["parentOccurrenceId"]))
+        return path[::-1]
+
+    paths = [ancestry(value) for value in occurrence_ids if value in rows]
+    if len(paths) < 2 or len(paths) != len(occurrence_ids):
+        return occurrence_ids, 1
+    # The copies hang just below the deepest assembly every occurrence of the section shares.
+    depth = 0
+    while all(len(path) > depth + 1 for path in paths) and len({path[depth] for path in paths}) == 1:
+        depth += 1
+    copies: Dict[str, List[str]] = {}
+    for path in paths:
+        copies.setdefault(path[depth], []).append(path[-1])
+    if (
+        len(copies) < 2
+        or any(rows[key].get("kind") != "subassembly" for key in copies)
+        or len({str(rows[key].get("definitionId") or "") for key in copies}) != 1
+        or len({
+            tuple(sorted(str(rows[value].get("definitionId") or "") for value in members))
+            for members in copies.values()
+        }) != 1
+    ):
+        return occurrence_ids, 1
+    first = min(copies, key=lambda key: (_natural_key(str(rows[key].get("name") or "")), key))
+    return copies[first], len(copies)
 
 
 def _callout_items(bom: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -285,6 +398,7 @@ def build_manual_document(
         and isinstance(documentation_scene.get("pageMasters"), Mapping)
         else DEFAULT_PAGE_MASTERS
     )
+    part_text = part_text_edits(composition_pages)
     occurrence_ids = [
         str(row.get("occurrenceId"))
         for row in catalog_rows
@@ -573,6 +687,22 @@ def build_manual_document(
         section_id = str(section.get("sectionId"))
         visualization = _visualization(section)
         first_bom_chunk = record["bomChunks"][0]
+        shown_ids, copy_count = _shown_copy(catalog_rows, record["occurrenceIds"])
+        occurrence_order = section.get("occurrenceOrder") or record["occurrenceIds"]
+        if copy_count > 1:
+            occurrence_order = [value for value in occurrence_order if str(value) in set(shown_ids)]
+        render_request = _render_request(
+            scope_kind="manual_section",
+            occurrence_ids=shown_ids,
+            occurrence_order=occurrence_order,
+            process_operation_ids=section.get("processOperationIds") or [],
+            pose="exploded",
+            visualization=visualization,
+            callout_items=_callout_items(record["bom"]),
+        )
+        if copy_count > 1:
+            # The figure draws one copy; each balloon still names every copy's occurrences (its "2X").
+            render_request["shownCopyCount"] = copy_count
         pages.append(
             {
                 "pageId": f"page-{section_id}",
@@ -587,20 +717,12 @@ def build_manual_document(
                 "confidence": section.get("confidence"),
                 "evidence": list(section.get("evidence") or []),
                 "occurrenceIds": list(record["occurrenceIds"]),
-                "bom": first_bom_chunk,
+                "bom": with_part_text(first_bom_chunk, part_text),
                 "bomItemCount": len(record["bom"]),
                 "bomContinuationCount": len(record["bomChunks"]) - 1,
                 "pageLayout": _layout_mode(len(record["bom"])),
                 "visualization": visualization,
-                "renderRequest": _render_request(
-                    scope_kind="manual_section",
-                    occurrence_ids=record["occurrenceIds"],
-                    occurrence_order=section.get("occurrenceOrder") or record["occurrenceIds"],
-                    process_operation_ids=section.get("processOperationIds") or [],
-                    pose="exploded",
-                    visualization=visualization,
-                    callout_items=_callout_items(record["bom"]),
-                ),
+                "renderRequest": render_request,
             }
         )
         for continuation_index, bom_rows in enumerate(record["bomChunks"][1:], start=1):
@@ -613,12 +735,12 @@ def build_manual_document(
                     "sectionNumber": int(record["sectionNumber"]),
                     "figureNumber": str(record["figureNumber"]),
                     "title": f"{section.get('name') or 'Manual Section'} - Parts List",
-                    "bom": bom_rows,
+                    "bom": with_part_text(bom_rows, part_text),
                     "bomItemCount": len(record["bom"]),
                     "continuationIndex": continuation_index,
                 }
             )
-        for row in record["bom"]:
+        for row in with_part_text(record["bom"], part_text):
             display_part_number = str(row.get("displayPartNumber") or "Not specified")
             key = (
                 display_part_number
@@ -642,21 +764,30 @@ def build_manual_document(
                 }
             )
 
-    pages.append(
-        {
-            "pageId": "page-parts-index",
-            "pageNumber": parts_index_page_number,
-            "pageType": "parts_index",
-            "title": "Part Number Index",
-            "entries": sorted(
-                parts_index.values(),
-                key=lambda row: (
-                    str(row["partNumber"]).casefold(),
-                    str(row["description"]).casefold(),
-                ),
-            ),
-        }
+    index_entries = sorted(
+        parts_index.values(),
+        key=lambda row: (
+            str(row["partNumber"]).casefold(),
+            str(row["description"]).casefold(),
+        ),
     )
+    # The index continues on further pages, as a section's parts list does; one page holds
+    # PARTS_INDEX_ROWS_PER_PAGE rows.
+    index_chunks = [
+        index_entries[start:start + PARTS_INDEX_ROWS_PER_PAGE]
+        for start in range(0, len(index_entries), PARTS_INDEX_ROWS_PER_PAGE)
+    ] or [[]]
+    for chunk_index, chunk in enumerate(index_chunks):
+        pages.append(
+            {
+                "pageId": "page-parts-index" if chunk_index == 0 else f"page-parts-index-{chunk_index + 1}",
+                "pageNumber": parts_index_page_number + chunk_index,
+                "pageType": "parts_index",
+                "title": "Part Number Index" if chunk_index == 0 else "Part Number Index (continued)",
+                "entries": chunk,
+                **({"continuedFrom": "page-parts-index"} if chunk_index else {}),
+            }
+        )
     pages.sort(key=lambda row: int(row["pageNumber"]))
 
     layout_contract = publication_layout()
@@ -702,6 +833,11 @@ def build_manual_document(
         render_request = page.get("renderRequest")
         if isinstance(render_request, dict):
             render_request["composition"] = copy.deepcopy(composition)
+            render_request["figureRevision"] = figure_revision(
+                assembly_number,
+                str(plan.get("sourceRevision") or ""),
+                render_request,
+            )
 
     document: Dict[str, Any] = {
         "schemaVersion": PARTS_MANUAL_DOCUMENT_SCHEMA_VERSION,

@@ -33,13 +33,20 @@ from ai_inspector.parts_manual.artifacts import (
     _render_quality,
     _validate_balloons,
 )
+from ai_inspector.parts_manual.document import (
+    MANUAL_HLR_MINIMUM_FOREGROUND_PIXEL_PERCENT,
+    PART_TEXT_PAGE_ID,
+    part_text_target_id,
+)
 from ai_inspector.parts_manual.layout import page_layout, publication_layout
 from ai_inspector.parts_manual.pdf import (
+    _draw_balloons,
     _draw_bom_table,
     _draw_documentation_objects,
     _draw_wordmark,
     _page_element_rect,
     _validate_document,
+    quantity_label_side,
 )
 
 
@@ -262,6 +269,81 @@ def test_pdf_bom_compact_rows_keep_short_engineering_values_visible() -> None:
         text = page.get_text()
         assert "Not specified" in text
         assert "Bell" in text
+
+
+def test_pdf_bom_headers_fit_a_narrow_table() -> None:
+    with fitz.open() as pdf:
+        page = pdf.new_page(width=792, height=612)
+        # 170 pt: ITEM and QTY at full size are wider than their columns and used to be dropped.
+        _draw_bom_table(
+            fitz,
+            page,
+            fitz.Rect(594, 70, 764, 564),
+            [{"item": 1, "displayPartNumber": "1030134", "description": "Caster Wheel", "quantity": 2}],
+        )
+        words = {word[4] for word in page.get_text("words")}
+        assert {"ITEM", "PART", "NUMBER", "DESCRIPTION", "QTY"} <= words
+
+
+def test_quantity_label_goes_on_the_side_its_leader_does_not_leave_from() -> None:
+    def side(balloon, target, path=(), label="2X"):
+        return quantity_label_side({
+            "balloon": {"x": balloon[0], "y": balloon[1]},
+            "target": {"x": target[0], "y": target[1]},
+            "leaderPath": [{"x": x, "y": y} for x, y in path],
+            "quantityLabel": label,
+        })
+
+    assert side((0.2, 0.5), (0.6, 0.5)) == "left"
+    assert side((0.8, 0.5), (0.4, 0.52)) == "right"
+    assert side((0.5, 0.2), (0.5, 0.6)) == "left"
+    # The leader's last bend decides, not the target.
+    assert side((0.3, 0.2), (0.2, 0.7), path=[(0.2, 0.2)]) == "right"
+    # No room at the picture's edge: above a sideways leader, beside a steep one, below at the top edge.
+    assert side((0.05, 0.5), (0.4, 0.5)) == "above"
+    assert side((0.05, 0.2), (0.1, 0.6)) == "right"
+    assert side((0.05, 0.03), (0.4, 0.03)) == "below"
+    # The room needed grows with the label: 0.07 fits "2X" but not "16X".
+    assert side((0.07, 0.5), (0.4, 0.5), label="2X") == "left"
+    assert side((0.07, 0.5), (0.4, 0.5), label="16X") == "above"
+
+
+def test_pdf_quantity_labels_are_drawn_clear_of_their_leaders() -> None:
+    def row(item, balloon, target, label):
+        return {
+            "itemNumber": item,
+            "quantityLabel": label,
+            "target": {"x": target[0], "y": target[1]},
+            "balloon": {"x": balloon[0], "y": balloon[1]},
+            "leaderPath": [],
+        }
+
+    rows = [
+        row(1, (0.30, 0.20), (0.70, 0.20), "2X"),
+        row(2, (0.70, 0.40), (0.30, 0.42), "4X"),
+        row(3, (0.04, 0.60), (0.50, 0.60), "16X"),
+        row(4, (0.50, 0.02), (0.90, 0.02), "2X"),
+    ]
+    image_rect = fitz.Rect(30, 66, 538, 560)
+    with fitz.open() as pdf:
+        page = pdf.new_page(width=792, height=612)
+        _draw_balloons(fitz, page, image_rect, {"balloons": rows})
+        labels = [word for word in page.get_text("words") if word[4].endswith("X")]
+        assert sorted(word[4] for word in labels) == ["16X", "2X", "2X", "4X"]
+        for word in labels:
+            box = fitz.Rect(word[:4])
+            centre = fitz.Point((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2)
+            owner = min(rows, key=lambda r: centre.distance_to(fitz.Point(
+                image_rect.x0 + r["balloon"]["x"] * image_rect.width,
+                image_rect.y0 + r["balloon"]["y"] * image_rect.height)))
+            assert word[4] == owner["quantityLabel"]
+            start = fitz.Point(image_rect.x0 + owner["balloon"]["x"] * image_rect.width,
+                               image_rect.y0 + owner["balloon"]["y"] * image_rect.height)
+            end = fitz.Point(image_rect.x0 + owner["target"]["x"] * image_rect.width,
+                             image_rect.y0 + owner["target"]["y"] * image_rect.height)
+            for step in range(41):
+                point = start + (end - start) * (step / 40)
+                assert not box.contains(point), f"{word[4]} of balloon {owner['itemNumber']} sits on its leader"
 
 
 def test_pdf_wordmark_renders_pro_in_brand_blue() -> None:
@@ -621,6 +703,33 @@ def test_render_quality_accepts_legitimate_sparse_hlr_above_antiblank_floor() ->
     assert quality["foregroundPixelPercent"] > 1.0
     assert quality["foregroundPixelPolicy"] == "hlr_linework_antiblank_floor"
     assert 0.60 <= quality["foregroundOccupancy"] <= 0.80
+
+
+def test_hlr_antiblank_floor_keeps_sparse_sections_and_rejects_a_single_stroke() -> None:
+    expected = {
+        "background": "technical_white",
+        "illustrationStyle": "HIDDEN_LINES_REMOVED",
+        "minimumForegroundOccupancy": 0.60,
+        "maximumForegroundOccupancy": 0.90,
+        "minimumForegroundPixelPercent": MANUAL_HLR_MINIMUM_FOREGROUND_PIXEL_PERCENT,
+    }
+    # A tube handle and two small brackets far below it, drawn as 1-2 px edges.
+    sparse_section = Image.new("RGB", (512, 384), "white")
+    draw = ImageDraw.Draw(sparse_section)
+    draw.line((60, 70, 140, 40, 440, 40, 470, 90), fill=(40, 40, 40), width=2)
+    draw.line((60, 82, 140, 52, 440, 52, 470, 102), fill=(40, 40, 40), width=2)
+    for left, top in ((80, 300), (400, 330)):
+        draw.rectangle((left, top, left + 22, top + 26), outline=(40, 40, 40), width=1)
+        draw.line((left + 4, top + 8, left + 18, top + 8), fill=(40, 40, 40), width=1)
+
+    quality = _render_quality(sparse_section, expected)
+    assert quality["status"] == "PASS"
+    assert quality["foregroundPixelPercent"] < 1.0
+
+    stroke = Image.new("RGB", (512, 384), "white")
+    ImageDraw.Draw(stroke).line((30, 30, 480, 350), fill=(40, 40, 40), width=1)
+    with pytest.raises(PartsManualRenderArtifactError, match=r"too little visible geometry \(0\.2"):
+        _render_quality(stroke, expected)
 
 
 def test_render_quality_accepts_axis_constrained_hlr_without_weakening_ink_gate() -> None:
@@ -2155,12 +2264,230 @@ def test_manual_document_paginates_long_section_boms() -> None:
         plan_revision="b" * 64,
     )
 
-    assert document["pageCount"] == 7
+    assert document["pageCount"] == 8
     assert document["pages"][4]["pageType"] == "manual_section"
     assert len(document["pages"][4]["bom"]) == 20
     assert document["pages"][5]["pageType"] == "manual_section_parts_list"
     assert len(document["pages"][5]["bom"]) == 1
+    assert [len(page["entries"]) for page in document["pages"][6:]] == [20, 1]
     assert document["pages"][2]["entries"][1]["pageNumber"] == 5
+
+
+def _caster_fixture() -> tuple[list[dict], dict]:
+    """Two copies of one caster subassembly (bracket + wheel each, the second listed first) and a frame section of
+    a loose part and a part inside another subassembly."""
+    def part(occurrence_id, definition_id, number, description, parent=None):
+        return {"occurrenceId": occurrence_id, "definitionId": definition_id, "kind": "part", "suppressed": False,
+                "partNumber": number, "displayPartNumber": number, "description": description,
+                "configuration": "Default",
+                "parentOccurrenceId": parent}
+
+    def assembly(occurrence_id, definition_id, name):
+        return {"occurrenceId": occurrence_id, "definitionId": definition_id, "kind": "subassembly",
+                "suppressed": False, "name": name, "partNumber": "", "description": name,
+                "configuration": "Default", "parentOccurrenceId": None}
+
+    rows = [
+        assembly("occ-caster-b", "item-caster", "Caster-2"),
+        part("occ-bracket-b", "item-bracket", "BR-1", "Caster Bracket", "occ-caster-b"),
+        part("occ-wheel-b", "item-wheel", "WH-1", "Caster Wheel", "occ-caster-b"),
+        assembly("occ-caster-a", "item-caster", "Caster-1"),
+        part("occ-bracket-a", "item-bracket", "BR-1", "Caster Bracket", "occ-caster-a"),
+        part("occ-wheel-a", "item-wheel", "WH-1", "Caster Wheel", "occ-caster-a"),
+        part("occ-frame", "item-frame", "FR-1", "Frame Weldment"),
+        assembly("occ-handle-asm", "item-handle-asm", "Handle-1"),
+        part("occ-handle", "item-handle", "HA-1", "Push Handle", "occ-handle-asm"),
+    ]
+
+    def section(section_id, name, occurrence_ids, order):
+        return {"sectionId": section_id, "name": name, "parentSectionId": None, "occurrenceIds": occurrence_ids,
+                "source": "manual", "confidence": None, "evidence": [], "includeInManual": True,
+                "pageOrder": order}
+
+    plan = {
+        "assemblyNumber": "manual-fixture",
+        "sourceRevision": "a" * 64,
+        "title": "Fixture Manual",
+        "sections": [
+            section("section-casters1", "Fixed Caster Assembly",
+                    ["occ-bracket-b", "occ-wheel-b", "occ-bracket-a", "occ-wheel-a"], 1),
+            section("section-frame001", "Frame", ["occ-frame", "occ-handle"], 2),
+        ],
+    }
+    return rows, plan
+
+
+def test_a_section_of_identical_copies_is_drawn_as_one_copy() -> None:
+    rows, plan = _caster_fixture()
+    document = build_manual_document(plan, rows, _assembly_profile(), plan_revision="b" * 64)
+    casters = next(page for page in document["pages"] if page.get("sectionId") == "section-casters1")
+    request = casters["renderRequest"]
+    # The first copy by name (Caster-1), although Caster-2 comes first in the catalog.
+    assert request["occurrenceIds"] == ["occ-bracket-a", "occ-wheel-a"]
+    assert request["occurrenceOrder"] == ["occ-bracket-a", "occ-wheel-a"]
+    assert request["shownCopyCount"] == 2
+    # The parts list and the balloons still count both copies (their "2X").
+    assert [(row["displayPartNumber"], row["quantity"]) for row in casters["bom"]] == [("BR-1", 2), ("WH-1", 2)]
+    assert sorted(request["calloutItems"][0]["occurrenceIds"]) == ["occ-bracket-a", "occ-bracket-b"]
+    assert casters["occurrenceIds"] == plan["sections"][0]["occurrenceIds"]
+    # A loose part beside a subassembly is not a set of copies: drawn whole.
+    frame = next(page for page in document["pages"] if page.get("sectionId") == "section-frame001")
+    assert frame["renderRequest"]["occurrenceIds"] == ["occ-frame", "occ-handle"]
+    assert "shownCopyCount" not in frame["renderRequest"]
+
+
+def test_parts_list_text_edits_reach_every_list_and_the_index_but_no_figure() -> None:
+    rows, plan = _caster_fixture()
+    profile = _assembly_profile()
+    baseline = build_manual_document(plan, rows, profile, plan_revision="b" * 64)
+    scene = {"pages": {PART_TEXT_PAGE_ID: {"pageElementOverrides": {
+        part_text_target_id("item-wheel", "description"): {"text": "  Polyurethane   Caster Wheel "},
+        part_text_target_id("item-frame", "partNumber"): {"text": "FR-9"},
+        # An empty edit goes back to the CAD value.
+        part_text_target_id("item-bracket", "description"): {"text": ""},
+    }}}}
+    edited = build_manual_document(plan, rows, profile, plan_revision="b" * 64, documentation_scene=scene)
+
+    def section_page(document, section_id):
+        return next(page for page in document["pages"] if page.get("sectionId") == section_id)
+
+    casters = section_page(edited, "section-casters1")
+    wheel = next(row for row in casters["bom"] if row["definitionId"] == "item-wheel")
+    bracket = next(row for row in casters["bom"] if row["definitionId"] == "item-bracket")
+    assert wheel["description"] == "Polyurethane Caster Wheel"
+    assert wheel["descriptionSource"] == "documentation_edit"
+    assert bracket["description"] == "Caster Bracket"
+    frame = section_page(edited, "section-frame001")
+    assert next(row for row in frame["bom"] if row["definitionId"] == "item-frame")["displayPartNumber"] == "FR-9"
+    index = [entry for page in edited["pages"] if page["pageType"] == "parts_index" for entry in page["entries"]]
+    assert {"partNumber": "FR-9", "description": "Frame Weldment"}.items() <= next(
+        entry for entry in index if entry["partNumber"] == "FR-9").items()
+    assert any(entry["description"] == "Polyurethane Caster Wheel" for entry in index)
+    assert not any(entry["partNumber"] == "FR-1" for entry in index)
+    # The figures keep their revisions (and captures): balloons carry the CAD text.
+    for section_id in ("section-casters1", "section-frame001"):
+        assert section_page(edited, section_id)["renderRequest"]["figureRevision"] == section_page(
+            baseline, section_id)["renderRequest"]["figureRevision"]
+    assert next(row for row in casters["renderRequest"]["calloutItems"]
+                if row["definitionId"] == "item-wheel")["description"] == "Caster Wheel"
+
+
+def test_parts_list_cells_are_edited_through_the_page_routes(tmp_path: Path, monkeypatch) -> None:
+    profile = _assembly_profile()
+    monkeypatch.setattr(server, "assembly_profiles", {"manual-fixture": profile})
+    monkeypatch.setattr(server, "assembly_part_lookup", {})
+    monkeypatch.setattr(server, "PARTS_MANUAL_ROOT", tmp_path)
+    client = TestClient(server.app)
+    initial = client.get("/api/parts-manual/manual-fixture").json()
+    created = client.post("/api/parts-manual/manual-fixture/sections", json={
+        "baseRevision": initial["revision"], "sourceRevision": initial["sourceRevision"],
+        "name": "Workholding Station", "occurrenceIds": [row["occurrenceId"] for row in initial["occurrences"]],
+    }).json()
+    section_id = created["section"]["sectionId"]
+    scene = client.get("/api/parts-manual/manual-fixture/documentation-scene").json()
+    page = next(row for row in scene["document"]["pages"] if row.get("sectionId") == section_id)
+    workbench = next(row for row in page["bom"] if row["displayPartNumber"] == "WB-100")
+    target_id = part_text_target_id(workbench["definitionId"], "description")
+    assert target_id in scene["editableTargets"][PART_TEXT_PAGE_ID]["page_element"]
+
+    def edit(base_revision, text, target=target_id):
+        return client.post("/api/parts-manual/manual-fixture/documentation-scene/commands", json={
+            "baseRevision": base_revision, "sourceRevision": initial["sourceRevision"],
+            "manualPlanRevision": created["revision"], "operation": "update_text",
+            # Pressed on the section's own page; kept for the whole manual on the index page.
+            "pageId": f"page-{section_id}", "targetType": "page_element", "targetId": target,
+            "text": text, "actor": "user"})
+
+    response = edit(scene["revision"], "Steel Assembly Workbench")
+    assert response.status_code == 200, response.text
+    edited = response.json()
+    assert edited["command"]["pageId"] == PART_TEXT_PAGE_ID
+    edited_page = next(row for row in edited["document"]["pages"] if row.get("sectionId") == section_id)
+    assert next(row for row in edited_page["bom"]
+                if row["displayPartNumber"] == "WB-100")["description"] == "Steel Assembly Workbench"
+    assert edited_page["renderRequest"]["figureRevision"] == page["renderRequest"]["figureRevision"]
+    index = next(row for row in edited["document"]["pages"] if row["pageType"] == "parts_index")
+    assert any(entry["description"] == "Steel Assembly Workbench" for entry in index["entries"])
+    section_bom = client.get(f"/api/parts-manual/manual-fixture/sections/{section_id}/bom").json()
+    assert next(row for row in section_bom["bom"]
+                if row["displayPartNumber"] == "WB-100")["description"] == "Steel Assembly Workbench"
+    assert edit(edited["revision"], "x", target="part.item-unknown.description").status_code >= 400
+    nudged = client.post("/api/parts-manual/manual-fixture/documentation-scene/commands", json={
+        "baseRevision": edited["revision"], "sourceRevision": initial["sourceRevision"],
+        "manualPlanRevision": created["revision"], "operation": "translate", "pageId": f"page-{section_id}",
+        "targetType": "page_element", "targetId": target_id, "translation": [0.01, 0.0, 0.0], "actor": "user"})
+    assert nudged.status_code >= 400
+    reset = client.post("/api/parts-manual/manual-fixture/documentation-scene/commands", json={
+        "baseRevision": edited["revision"], "sourceRevision": initial["sourceRevision"],
+        "manualPlanRevision": created["revision"], "operation": "reset", "pageId": f"page-{section_id}",
+        "targetType": "page_element", "targetId": target_id, "actor": "user"})
+    assert reset.status_code == 200, reset.text
+    reset_page = next(row for row in reset.json()["document"]["pages"] if row.get("sectionId") == section_id)
+    assert next(row for row in reset_page["bom"]
+                if row["displayPartNumber"] == "WB-100")["description"] == "Assembly Workbench"
+    # Undoing the reset brings the edit back.
+    undone = client.post("/api/parts-manual/manual-fixture/documentation-scene/undo", json={
+        "baseRevision": reset.json()["revision"], "sourceRevision": initial["sourceRevision"],
+        "manualPlanRevision": created["revision"]}).json()
+    undone_page = next(row for row in undone["document"]["pages"] if row.get("sectionId") == section_id)
+    assert next(row for row in undone_page["bom"]
+                if row["displayPartNumber"] == "WB-100")["description"] == "Steel Assembly Workbench"
+
+
+def test_manual_document_continues_a_long_part_number_index() -> None:
+    occurrences = [
+        {
+            "occurrenceId": f"occ-{index:024x}",
+            "definitionId": f"item-{index:024x}",
+            "kind": "part",
+            "suppressed": False,
+            "partNumber": f"PN-{index:03d}",
+            "description": f"Part {index:03d}",
+            "configuration": "Default",
+        }
+        for index in range(45)
+    ]
+    plan = {
+        "assemblyNumber": "manual-fixture",
+        "sourceRevision": "a" * 64,
+        "title": "Fixture Manual",
+        "sections": [
+            {
+                "sectionId": "section-12345678",
+                "name": "Large Group",
+                "parentSectionId": None,
+                "occurrenceIds": [row["occurrenceId"] for row in occurrences],
+                "source": "manual",
+                "confidence": None,
+                "evidence": [],
+                "includeInManual": True,
+                "pageOrder": 1,
+                "itemAssignments": [
+                    {"definitionId": row["definitionId"], "itemNumber": index + 1}
+                    for index, row in enumerate(occurrences)
+                ],
+            }
+        ],
+    }
+    document = build_manual_document(
+        plan,
+        occurrences,
+        _assembly_profile(),
+        plan_revision="b" * 64,
+    )
+
+    index_pages = [page for page in document["pages"] if page["pageType"] == "parts_index"]
+    assert [len(page["entries"]) for page in index_pages] == [20, 20, 5]
+    assert [page["pageNumber"] for page in index_pages] == [8, 9, 10]
+    assert document["pageCount"] == 10
+    assert index_pages[0]["pageId"] == "page-parts-index"
+    assert "continuedFrom" not in index_pages[0]
+    assert all(page["continuedFrom"] == "page-parts-index" for page in index_pages[1:])
+    assert [entry["description"] for page in index_pages for entry in page["entries"]] == [
+        row["description"] for row in occurrences
+    ]
+    contents = document["pages"][2]["entries"]
+    assert [entry["pageNumber"] for entry in contents if entry["title"] == "Part Number Index"] == [8]
 
 
 def test_repository_persists_sections_and_stable_item_assignments(tmp_path: Path) -> None:
@@ -2497,7 +2824,8 @@ def test_sage_parts_manual_generation_opens_review_workflow_without_publishing()
     ).read_text(encoding="utf-8")
     assert "function _partsManualSemanticToolStatusLine" in source
     assert "**Your illustrated Parts Manual has been published.**" in source
-    assert "[Published PDF]" in source
+    # The published PDF is a chat file card, not a markdown link.
+    assert "function _partsManualPdfFileBlock(toolResults)" in source
     assert server._safe_parts_manual_route(
         "Generate a parts manual for this assembly."
     )["intents"][0]["kind"] == "generate_parts_manual"
@@ -2969,12 +3297,16 @@ def test_parts_manual_http_vertical_slice(tmp_path: Path, monkeypatch) -> None:
     assert artifact["renderPipelineVersion"] == PARTS_MANUAL_RENDER_PIPELINE_VERSION
     assert artifact["widthPx"] == 2400
     assert artifact["heightPx"] == 1800
+    # Stored under the figure's own revision, not the whole document's.
+    figure_revision = section_page["renderRequest"]["figureRevision"]
+    assert artifact["figureRevision"] == figure_revision
+    assert artifact["artifactRevision"] == figure_revision
 
     metadata_path = (
         tmp_path
         / "manual-fixture"
         / "renders"
-        / document["documentRevision"]
+        / figure_revision
         / f"page-{section_id}.json"
     )
     with open(_native_atomic_path(metadata_path), "r", encoding="ascii") as handle:
@@ -3059,8 +3391,12 @@ def test_parts_manual_http_vertical_slice(tmp_path: Path, monkeypatch) -> None:
     pdf_artifact = pdf_response.json()["artifact"]
     assert pdf_artifact["pageCount"] == 6
     assert pdf_artifact["qualityStatus"] == "PASS"
+    # The address carries the build's hash and the file is revalidated, never cached as immutable: publishing the
+    # same revision again rebuilds it.
+    assert pdf_artifact["url"].endswith(f"/pdf?v={pdf_artifact['sha256'][:16]}")
     pdf_file_response = client.get(pdf_artifact["url"])
     assert pdf_file_response.status_code == 200
+    assert pdf_file_response.headers["cache-control"] == "no-cache"
     assert pdf_file_response.content.startswith(b"%PDF")
     with fitz.open(stream=pdf_file_response.content, filetype="pdf") as pdf:
         assert pdf.page_count == 6
@@ -3081,3 +3417,286 @@ def test_parts_manual_http_vertical_slice(tmp_path: Path, monkeypatch) -> None:
     )
     assert delete_response.status_code == 200, delete_response.text
     assert delete_response.json()["plan"]["sections"] == []
+
+
+def _move_fixture_profile() -> dict:
+    """Six parts in two functional sections, for moving parts between them."""
+    def part(name, key, x):
+        return {
+            "name": name,
+            "type": "Part",
+            "level": 1,
+            "activeConfiguration": "Default",
+            "partDataKey": key,
+            "referencedFileName": key.replace(".sldprt", ".SLDPRT"),
+            "transform": {"translation": [x, 0.0, 0.0]},
+        }
+
+    identities = {
+        "workbench.sldprt": ("WB-100", "Assembly Workbench"),
+        "fixture.sldprt": ("FX-200", "Locating Fixture"),
+        "bracket.sldprt": ("BR-300", "Mounting Bracket"),
+        "clamp.sldprt": ("CL-400", "Toggle Clamp"),
+    }
+    return {
+        "identity": {
+            "assemblyNumber": "manual-fixture",
+            "description": "Manual Fixture Assembly",
+            "revision": "A",
+        },
+        "statistics": {"totalComponents": 6, "uniquePartCount": 4, "totalMates": 0},
+        "components": [
+            part("Workbench-1", "workbench.sldprt", 0.0),
+            part("Workbench-2", "workbench.sldprt", 1.0),
+            part("Fixture-1", "fixture.sldprt", 0.5),
+            part("Bracket-1", "bracket.sldprt", 1.5),
+            part("Clamp-1", "clamp.sldprt", 2.0),
+            part("Clamp-2", "clamp.sldprt", 2.5),
+        ],
+        "partDataCache": {
+            key: {
+                "identity": {
+                    "partNumber": number,
+                    "description": description,
+                    "customProperties": {"PartNo": number},
+                }
+            }
+            for key, (number, description) in identities.items()
+        },
+        "partColorMapping": {key: "#445566" for key in identities},
+        "mates": [],
+        "mateRelationships": [],
+        "explodeSteps": [],
+    }
+
+
+def _capture_figures(client, document: dict, pages: list) -> None:
+    for page in pages:
+        response = client.post(
+            f"/api/parts-manual/manual-fixture/document/{page['pageId']}/render",
+            data={
+                "documentRevision": document["documentRevision"],
+                "manualPlanRevision": document["manualPlanRevision"],
+                "sourceRevision": document["sourceRevision"],
+                "renderPipelineVersion": PARTS_MANUAL_RENDER_PIPELINE_VERSION,
+                "balloons": _balloons_for_page(page),
+            },
+            files={"file": (f"{page['pageId']}.png", _png(), "image/png")},
+        )
+        assert response.status_code == 200, response.text
+
+
+def test_moving_parts_between_sections_recaptures_only_the_figures_it_changes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(server, "assembly_profiles", {"manual-fixture": _move_fixture_profile()})
+    monkeypatch.setattr(server, "assembly_part_lookup", {})
+    monkeypatch.setattr(server, "PARTS_MANUAL_ROOT", tmp_path)
+    client = TestClient(server.app)
+
+    initial = client.get("/api/parts-manual/manual-fixture").json()
+    by_number = {}
+    for row in initial["occurrences"]:
+        by_number.setdefault(row["partNumber"], []).append(row["occurrenceId"])
+    station_ids = by_number["WB-100"] + by_number["FX-200"] + by_number["BR-300"]
+    created = client.post(
+        "/api/parts-manual/manual-fixture/sections",
+        json={
+            "baseRevision": initial["revision"],
+            "sourceRevision": initial["sourceRevision"],
+            "name": "Workholding Station",
+            "occurrenceIds": station_ids,
+        },
+    ).json()
+    station_id = created["section"]["sectionId"]
+    created = client.post(
+        "/api/parts-manual/manual-fixture/sections",
+        json={
+            "baseRevision": created["revision"],
+            "sourceRevision": initial["sourceRevision"],
+            "name": "Clamp Assembly",
+            "occurrenceIds": by_number["CL-400"],
+        },
+    ).json()
+    clamp_id = created["section"]["sectionId"]
+    station_items_before = {
+        row["definitionId"]: row["itemNumber"]
+        for row in created["plan"]["sections"][0]["itemAssignments"]
+    }
+
+    # A saved figure edit binds the page edits to this plan revision.
+    scene = client.get("/api/parts-manual/manual-fixture/documentation-scene").json()
+    edited = client.post(
+        "/api/parts-manual/manual-fixture/documentation-scene/commands",
+        json={
+            "baseRevision": scene["revision"],
+            "sourceRevision": initial["sourceRevision"],
+            "manualPlanRevision": created["revision"],
+            "operation": "translate",
+            "pageId": f"page-{clamp_id}",
+            "targetType": "occurrence",
+            "targetId": by_number["CL-400"][0],
+            "translation": [0.0, 0.1, 0.0],
+            "actor": "user",
+        },
+    )
+    assert edited.status_code == 200, edited.text
+    document = client.get("/api/parts-manual/manual-fixture/document").json()["document"]
+    _capture_figures(client, document, [page for page in document["pages"] if page.get("renderRequest")])
+    before = client.get("/api/parts-manual/manual-fixture/document").json()["document"]
+    assert all(
+        page["renderRequest"]["image"]["status"] == "ready"
+        for page in before["pages"]
+        if page.get("renderRequest")
+    )
+    cover_before = next(page for page in before["pages"] if page["pageId"] == "page-cover")
+
+    moved = client.post(
+        "/api/parts-manual/manual-fixture/sections/move",
+        json={
+            "baseRevision": created["revision"],
+            "sourceRevision": initial["sourceRevision"],
+            "moves": [{"occurrenceIds": by_number["BR-300"], "toSectionId": clamp_id}],
+        },
+    )
+    assert moved.status_code == 200, moved.text
+    result = moved.json()
+    assert sorted(result["changedSectionIds"]) == sorted([station_id, clamp_id])
+    assert result["sceneCarried"] is True
+    assert result["publicationReadiness"]["status"] == "PASS"
+    sections = {row["sectionId"]: row for row in result["plan"]["sections"]}
+    assert set(by_number["BR-300"]) <= set(sections[clamp_id]["occurrenceIds"])
+    assert not set(by_number["BR-300"]) & set(sections[station_id]["occurrenceIds"])
+    # The parts that stayed keep their item numbers; the moved part takes the
+    # first free number where it joined.
+    station_items_after = {
+        row["definitionId"]: row["itemNumber"]
+        for row in sections[station_id]["itemAssignments"]
+    }
+    assert all(station_items_before[key] == value for key, value in station_items_after.items())
+    assert sorted(row["itemNumber"] for row in sections[clamp_id]["itemAssignments"]) == [1, 2]
+    # The cover shows the whole machine, unchanged: its capture is kept. The
+    # overview and the two sections changed and need a new capture.
+    figures = result["figures"]
+    assert [row["pageId"] for row in figures["kept"]] == ["page-cover"]
+    assert sorted(row["pageId"] for row in figures["needCapture"]) == sorted(
+        ["page-assembly-overview", f"page-{station_id}", f"page-{clamp_id}"]
+    )
+
+    after = client.get("/api/parts-manual/manual-fixture/document")
+    assert after.status_code == 200, after.text
+    after = after.json()["document"]
+    cover = next(page for page in after["pages"] if page["pageId"] == "page-cover")
+    assert cover["renderRequest"]["figureRevision"] == cover_before["renderRequest"]["figureRevision"]
+    assert cover["renderRequest"]["image"]["status"] == "ready"
+    assert cover["renderRequest"]["image"]["documentRevision"] == after["documentRevision"]
+    assert cover["renderRequest"]["image"]["capturedDocumentRevision"] == cover_before[
+        "renderRequest"]["image"]["capturedDocumentRevision"]
+    assert client.get(cover["renderRequest"]["image"]["url"]).status_code == 200
+    clamp_page = next(page for page in after["pages"] if page["pageId"] == f"page-{clamp_id}")
+    assert clamp_page["renderRequest"]["composition"]["occurrenceOverrides"][by_number["CL-400"][0]] == {
+        "translation": [0.0, 0.1, 0.0]
+    }
+
+    # Capturing the changed figures makes the manual publishable again.
+    _capture_figures(
+        client,
+        after,
+        [page for page in after["pages"] if page.get("renderRequest")
+         and page["renderRequest"]["image"].get("status") != "ready"],
+    )
+    final = client.get("/api/parts-manual/manual-fixture/document").json()["document"]
+    pdf = client.post(
+        "/api/parts-manual/manual-fixture/pdf",
+        json={
+            "documentRevision": final["documentRevision"],
+            "manualPlanRevision": final["manualPlanRevision"],
+            "sourceRevision": final["sourceRevision"],
+        },
+    )
+    assert pdf.status_code == 200, pdf.text
+
+    revision = result["revision"]
+
+    def move(moves, base=revision):
+        return client.post(
+            "/api/parts-manual/manual-fixture/sections/move",
+            json={"baseRevision": base, "sourceRevision": initial["sourceRevision"], "moves": moves},
+        )
+
+    # Workholding Station would keep one ordinary part: the audit would fail.
+    refused = move([{"occurrenceIds": by_number["WB-100"], "toSectionId": clamp_id}])
+    assert refused.status_code == 422, refused.text
+    assert any(row["code"] == "manual_publication_single_part_section" for row in refused.json()["findings"])
+    emptied = move([{"occurrenceIds": by_number["WB-100"] + by_number["FX-200"], "toSectionId": clamp_id}])
+    assert emptied.status_code == 400, emptied.text
+    assert "no parts" in emptied.json()["message"]
+    assert move([{"occurrenceIds": by_number["BR-300"], "toSectionId": station_id}],
+                base=created["revision"]).status_code == 409
+    assert move([{"occurrenceIds": by_number["CL-400"], "toSectionId": clamp_id}]).status_code == 400
+    # Two clamps to a new section: Clamp Assembly keeps the bracket alone.
+    split = move([{"occurrenceIds": by_number["CL-400"], "newSectionName": "Clamping Assembly"}])
+    assert split.status_code == 422, split.text
+    # The bracket and the clamps to a new section, the old one left empty.
+    assert move([{"occurrenceIds": by_number["CL-400"] + by_number["BR-300"],
+                  "newSectionName": "Clamping Assembly"}]).status_code == 400
+    # Into a new section with two of the station's parts and the bracket.
+    created_section = move([{"occurrenceIds": by_number["WB-100"][:1] + by_number["BR-300"],
+                             "newSectionName": "Bench Support Assembly"}])
+    assert created_section.status_code == 200, created_section.text
+    body = created_section.json()
+    assert len(body["createdSectionIds"]) == 1
+    names = [row["name"] for row in body["plan"]["sections"]]
+    assert names == ["Workholding Station", "Clamp Assembly", "Bench Support Assembly"]
+
+
+def test_sage_host_moves_parts_by_item_or_part_number(tmp_path: Path, monkeypatch) -> None:
+    from ai_inspector.codex_runtime.policy import PilotError
+
+    monkeypatch.setattr(server, "assembly_profiles", {"manual-fixture": _move_fixture_profile()})
+    monkeypatch.setattr(server, "assembly_part_lookup", {})
+    monkeypatch.setattr(server, "PARTS_MANUAL_ROOT", tmp_path)
+    client = TestClient(server.app)
+    initial = client.get("/api/parts-manual/manual-fixture").json()
+    by_number = {}
+    for row in initial["occurrences"]:
+        by_number.setdefault(row["partNumber"], []).append(row["occurrenceId"])
+    created = client.post("/api/parts-manual/manual-fixture/sections", json={
+        "baseRevision": initial["revision"], "sourceRevision": initial["sourceRevision"],
+        "name": "Workholding Station",
+        "occurrenceIds": by_number["WB-100"] + by_number["FX-200"] + by_number["BR-300"]}).json()
+    station_id = created["section"]["sectionId"]
+    created = client.post("/api/parts-manual/manual-fixture/sections", json={
+        "baseRevision": created["revision"], "sourceRevision": initial["sourceRevision"],
+        "name": "Clamp Assembly", "occurrenceIds": by_number["CL-400"]}).json()
+    clamp_id = created["section"]["sectionId"]
+    host = server._DocumentationAgentHost()
+
+    bom = host.bom("manual-fixture", station_id)["rows"]
+    bracket = next(row["item"] for row in bom if row["partNumber"] == "BR-300")
+    result = host.move_parts_manual_parts("manual-fixture", [
+        {"fromSectionId": station_id, "items": [bracket], "toSectionId": clamp_id}])
+    assert result["auditStatus"] == "PASS"
+    changed = {row["name"]: row for row in result["changedSections"]}
+    assert set(changed) == {"Workholding Station", "Clamp Assembly"}
+    assert [row["partNumber"] for row in changed["Clamp Assembly"]["parts"]] == ["CL-400", "BR-300"]
+    assert {row["title"] for row in result["figuresToCapture"]} >= {"Workholding Station", "Clamp Assembly"}
+
+    # By part number, back again; a part that is not in the section is refused with its parts list.
+    back = host.move_parts_manual_parts("manual-fixture", [
+        {"fromSectionId": clamp_id, "partNumbers": ["br-300"], "toSectionId": station_id}])
+    assert {row["name"] for row in back["changedSections"]} == {"Workholding Station", "Clamp Assembly"}
+    # The Assembly tab shows the sections as they stand after the move (show_assembly_parts manualSections).
+    shown = {row["name"]: row["parts"] for row in host.assembly_manual_sections("manual-fixture")}
+    assert shown["Clamp Assembly"] == ["CL-400"] and "BR-300" in shown["Workholding Station"]
+    with pytest.raises(PilotError) as missing:
+        host.move_parts_manual_parts("manual-fixture", [
+            {"fromSectionId": clamp_id, "partNumbers": ["WB-100"], "toSectionId": station_id}])
+    assert "Not in Clamp Assembly: WB-100" in str(missing.value) and "CL-400" in str(missing.value)
+    with pytest.raises(PilotError) as single:
+        host.move_parts_manual_parts("manual-fixture", [
+            {"fromSectionId": station_id, "partNumbers": ["WB-100", "FX-200"], "toSectionId": clamp_id}])
+    assert "publication check" in str(single.value)
+    with pytest.raises(PilotError):
+        host.move_parts_manual_parts("manual-fixture", [
+            {"fromSectionId": station_id, "items": [1], "toSectionId": station_id}])

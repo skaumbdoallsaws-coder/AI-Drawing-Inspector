@@ -2032,8 +2032,8 @@ class FakeAdapter {
         return { mounted: this.mounted && !this.suspended };
     }
 
-    emitSelection(id) {
-        if (this.selectionHandler) this.selectionHandler(id);
+    emitSelection(id, event) {
+        if (this.selectionHandler) this.selectionHandler(id, this, event);
     }
 
     dispose() {
@@ -5935,6 +5935,19 @@ async function main() {
             data.three.emitSelection('pl-a');
             assert.deepStrictEqual(data.session.getState().selection, ['pl-a']);
             assert.ok(data.controller.catalogs.length > 0);
+            data.workspace.destroy();
+        });
+
+    await check('a Ctrl or Cmd click in 3D adds to the selection and a second one removes it',
+        async () => {
+            const data = fixture();
+            data.three.emitSelection('pl-a', { ctrlKey: false });
+            data.three.emitSelection('pl-b', { ctrlKey: true });
+            assert.deepStrictEqual(data.session.getState().selection, ['pl-a', 'pl-b']);
+            data.three.emitSelection('pl-a', { metaKey: true });
+            assert.deepStrictEqual(data.session.getState().selection, ['pl-b']);
+            data.three.emitSelection('pl-a', {});
+            assert.deepStrictEqual(data.session.getState().selection, ['pl-a']);
             data.workspace.destroy();
         });
 

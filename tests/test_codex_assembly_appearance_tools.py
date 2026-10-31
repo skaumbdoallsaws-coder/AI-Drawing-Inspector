@@ -61,7 +61,8 @@ def test_the_assembly_tab_has_only_the_assembly_library_and_appearance_tools_typ
         assert untyped_nodes(typed) == [] and spec["input_schema"]["additionalProperties"] is False, spec["name"]
     assert [spec["name"] for spec in specs if not spec.get("read_only", True)] == [
         "open_library_machine", "set_assembly_appearance", "set_assembly_scene", "place_assembly_signs",
-        "remove_assembly_signs", "place_assembly_dimensions", "remove_assembly_dimensions", "show_assembly_parts"]
+        "remove_assembly_signs", "place_assembly_dimensions", "remove_assembly_dimensions", "show_assembly_parts",
+        "move_parts_manual_parts"]
     assert "3D view" in next(spec for spec in specs if spec["name"] == "open_library_machine")["description"]
     documentation = [spec["name"] for spec in tool_specs()]
     assert "list_appearances" in documentation and "set_assembly_appearance" in documentation

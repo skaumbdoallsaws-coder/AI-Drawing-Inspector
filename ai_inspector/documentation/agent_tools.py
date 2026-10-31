@@ -172,8 +172,9 @@ PARTS_MANUAL_DRAFT = {
         "for review without publishing a PDF. Use when the user explicitly asks to build, "
         "create, generate, draft, or prepare a parts manual but does not ask to publish or "
         "export it. The application creates or reuses the validated semantic hierarchy, "
-        "reveals every page progressively, and freshly recaptures every required Hidden "
-        "Lines Removed figure before returning review_ready. This is different from the "
+        "reveals every page progressively, and captures every Hidden Lines Removed figure "
+        "that is new or changed since its last accepted capture (an unchanged figure keeps "
+        "its capture) before returning review_ready. This is different from the "
         "read-only structure proposal tool and never changes source CAD geometry."
     ),
     "args": {},
@@ -192,7 +193,8 @@ PARTS_MANUAL_PUBLICATION = {
         "result. Deterministic application code preserves an existing publishable "
         "manual structure, optionally approves only complete trusted proposal "
         "candidates, compiles the Documentation scene, captures every required "
-        "Hidden Lines Removed figure, validates revision-bound plan/render/callout "
+        "Hidden Lines Removed figure that is new or changed (an unchanged figure keeps "
+        "its accepted capture), validates revision-bound plan/render/callout "
         "evidence, and publishes the PDF. It never changes source CAD geometry and "
         "never replaces an existing publishable manual hierarchy. A successful "
         "stage=published result with a PDF artifact is required before claiming "

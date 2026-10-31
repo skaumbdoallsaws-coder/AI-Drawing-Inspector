@@ -29,6 +29,7 @@ UPDATE = ("Updating", "Updated", "update")
 EXPORT = ("Exporting", "Exported", "export")
 PLACE = ("Placing", "Placed", "place")
 REMOVE = ("Removing", "Removed", "remove")
+MOVE = ("Moving", "Moved", "move")
 
 SIMPLE = {
     "inspect_facility_context": (READ, "the layout overview"),
@@ -46,6 +47,7 @@ SIMPLE = {
     "plan_design_paint": (CHECK, "the colours for the walls, trucks, cars and racks"),
     "suggest_site_references": (CHECK, "reference points for setting out the building"),
     "prepare_layout_pdf": (CHECK, "the printable layout sheets"),
+    "suggest_emergency_teams": (CHECK, "emergency teams and meeting points"),
     "check_site_references": (CHECK, "how well the photo, map and reference points agree"),
     "preview_planned_design": (STAGE, "the planned changes for review"),
     "inspect_facility_findings": (READ, "layout findings"),
@@ -317,6 +319,10 @@ def _step(name, args, names, edit_mode):
         return READ, "the section's parts list" if args.get("sectionId") else "the parts list"
     if name == "run_documentation_workflow":
         return QUEUE, WORKFLOW_STEPS.get(args.get("workflow"), "a documentation workflow")
+    if name == "move_parts_manual_parts":
+        moves = args.get("moves") or []
+        new = any(move.get("newSectionName") for move in moves if isinstance(move, dict))
+        return MOVE, "parts to " + ("a new manual section" if new else "another manual section")
     if name == "provide_inspection_sheet_values":
         count = len(args.get("values") or [])
         return RECORD, f"{count} value{'' if count == 1 else 's'} for the inspection sheet"

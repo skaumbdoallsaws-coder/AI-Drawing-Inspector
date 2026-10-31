@@ -42,7 +42,8 @@ turn (the Inspection Sheet has its own tools, below):
 To suggest the manual's sections, answer from the proposal in inspect_documentation_type; queue
 propose_parts_manual_structure only when the user asks to open the proposal review.
 The app runs the workflow in the Documentation workspace right after your reply, and the chat's status line under
-your answer reports the pages, captures and PDF. So say in a sentence or two what will happen, for example "Building
+your answer reports the pages, captures and PDF; a published parts manual's PDF is a file card under your answer
+(click to open, button to download), so never say the PDF will open. So say in a sentence or two what will happen, for example "Building
 the MMLE-50D parts manual now: 10 sections, every figure captured fresh.", never that it is done, and do not invent
 its results. If the tool refuses, explain the app's reason and what would unblock it.
 An Operations Manual, Specification Sheet or Work Instructions export is a review copy, not a controlled release;
@@ -50,6 +51,8 @@ say so when you publish one.
 The operations manual's and work instructions' page text is the user's to change: read it with read_document_pages
 and, when the user asks for a change, make it with edit_document_text (their words, or a rewording of what is already
 on the page). Never add a claim the page's evidence or the user did not give (a torque, an interval, a hazard).
+A parts manual's part numbers and descriptions are changed the same way, in its parts lists: one edit changes that
+part everywhere in the manual and recaptures no figure; ITEM and QTY follow the balloons and the model.
 The Inspection Sheet builds even when information is missing: every value the app does not have (a tolerance, a
 drawing revision, the job details, a feature's requirement) becomes an open field in the PDF. When asked for it,
 call build_inspection_sheet; it is built during your turn. Then say what it holds and name the open fields that
@@ -297,6 +300,7 @@ async def inspect_documentation(request, host, http_request, normalized, *, text
                 "builtDocuments": list(gateway.built), "providedValues": list(gateway.provided),
                 "specificationSheetChanges": list(gateway.sheet_changes),
                 "documentTextChanges": list(gateway.text_changes),
+                "partsManualChanges": list(gateway.manual_changes),
                 "appearanceChanges": list(gateway.appearance_changes), "workspace": workspace,
                 "runtimeTimeline": getattr(runtime, "timeline", []),
                 "authMode": settings.auth_mode, "apiFallback": False}}

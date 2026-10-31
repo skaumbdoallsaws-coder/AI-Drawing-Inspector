@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from .catalog import build_scoped_bom
+from .quality import audit_manual_plan, is_publishable_section_name
 from .schema import (
     PARTS_MANUAL_SCHEMA_VERSION,
     PartsManualValidationError,
@@ -559,6 +560,193 @@ class PartsManualRepository:
                 "plan": copy.deepcopy(plan),
                 "section": copy.deepcopy(section),
                 "revision": manual_plan_revision(plan),
+            }
+
+    def move_occurrences(
+        self,
+        assembly_number: str,
+        source_revision: str,
+        *,
+        base_revision: str,
+        catalog: Iterable[Mapping[str, Any]],
+        moves: Iterable[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        """Move part occurrences to another manual section in one validated write.
+
+        Each move is {"occurrenceIds": [...], "toSectionId": id} or, for a new
+        section, {"occurrenceIds": [...], "newSectionName": name}. The parts
+        leave every section other than the target and its ancestors; an
+        ancestor that holds all of the target's parts gets them too. Item
+        numbers are kept: a part keeps no number in the section it left and
+        takes the first free number in the one it joined. Refused when a
+        section would be left empty, or when a plan that passed the publication
+        audit would fail it.
+        """
+        catalog_rows = list(catalog)
+        known_ids = {str(row.get("occurrenceId")) for row in catalog_rows if row.get("occurrenceId")}
+        part_ids = {
+            str(row.get("occurrenceId"))
+            for row in catalog_rows
+            if row.get("occurrenceId") and row.get("kind") == "part" and not row.get("suppressed")
+        }
+        requested = [dict(row) for row in moves if isinstance(row, Mapping)]
+        if not requested:
+            raise PartsManualRepositoryError("name at least one part to move")
+        with _WRITE_LOCK:
+            loaded = self.read(assembly_number, source_revision, known_occurrence_ids=known_ids)
+            plan = loaded["plan"]
+            self._assert_revision(plan, base_revision)
+            self._assert_source(plan, source_revision)
+            audit_before = audit_manual_plan(plan, catalog_rows)
+            sections = plan["sections"]
+            by_id = {str(row.get("sectionId")): row for row in sections}
+            before = {
+                section_id: list(row.get("occurrenceIds") or [])
+                for section_id, row in by_id.items()
+            }
+            now = _utc_now()
+            created: List[str] = []
+            moved: List[Dict[str, Any]] = []
+            for move in requested:
+                occurrence_ids = list(
+                    dict.fromkeys(str(value) for value in move.get("occurrenceIds") or [] if value)
+                )
+                if not occurrence_ids:
+                    raise PartsManualRepositoryError("a move names no parts")
+                not_parts = [value for value in occurrence_ids if value not in part_ids]
+                if not_parts:
+                    raise PartsManualRepositoryError(
+                        "not serviceable parts of this assembly: " + ", ".join(not_parts[:5])
+                    )
+                target_id = str(move.get("toSectionId") or "")
+                new_name = re.sub(r"\s+", " ", str(move.get("newSectionName") or "")).strip()
+                if bool(target_id) == bool(new_name):
+                    raise PartsManualRepositoryError(
+                        "move parts either to an existing section or to a new one"
+                    )
+                if new_name:
+                    if not is_publishable_section_name(new_name):
+                        raise PartsManualRepositoryError(
+                            f"'{new_name}' is not a customer-facing section name"
+                        )
+                    if any(
+                        str(row.get("name") or "").casefold() == new_name.casefold()
+                        for row in sections
+                    ):
+                        raise PartsManualRepositoryError(
+                            f"a section named '{new_name}' already exists; move the parts to it"
+                        )
+                    target_id = f"section-{secrets.token_hex(6)}"
+                    section = {
+                        "sectionId": target_id,
+                        "name": new_name,
+                        "parentSectionId": None,
+                        "occurrenceIds": [],
+                        "source": "manual",
+                        "confidence": None,
+                        "evidence": [],
+                        "includeInManual": True,
+                        "pageOrder": len(sections) + 1,
+                        "itemAssignments": [],
+                        "visualization": default_section_visualization(),
+                        "allowSinglePartPage": False,
+                        "processOperationIds": [],
+                        "occurrenceOrder": [],
+                        "createdAt": now,
+                        "updatedAt": now,
+                    }
+                    sections.append(section)
+                    by_id[target_id] = section
+                    before[target_id] = []
+                    created.append(target_id)
+                target = by_id.get(target_id)
+                if target is None:
+                    raise PartsManualNotFoundError("manual section not found")
+                ancestors: List[str] = []
+                cursor = target.get("parentSectionId")
+                while cursor and str(cursor) in by_id and str(cursor) not in ancestors:
+                    ancestors.append(str(cursor))
+                    cursor = by_id[str(cursor)].get("parentSectionId")
+                target_parts = set(target.get("occurrenceIds") or [])
+                moving = set(occurrence_ids)
+                left: List[str] = []
+                for section in sections:
+                    section_id = str(section.get("sectionId"))
+                    if section_id == target_id or section_id in ancestors:
+                        continue
+                    current = list(section.get("occurrenceIds") or [])
+                    kept = [value for value in current if value not in moving]
+                    if len(kept) != len(current):
+                        section["occurrenceIds"] = kept
+                        left.append(section_id)
+                target["occurrenceIds"] = list(target.get("occurrenceIds") or []) + [
+                    value for value in occurrence_ids if value not in target_parts
+                ]
+                for ancestor_id in ancestors:
+                    ancestor = by_id[ancestor_id]
+                    holds = set(ancestor.get("occurrenceIds") or [])
+                    if target_parts and target_parts <= holds:
+                        ancestor["occurrenceIds"] = list(ancestor.get("occurrenceIds") or []) + [
+                            value for value in occurrence_ids if value not in holds
+                        ]
+                plan["excludedOccurrences"] = [
+                    row
+                    for row in plan.get("excludedOccurrences") or []
+                    if not (isinstance(row, Mapping) and str(row.get("occurrenceId")) in moving)
+                ]
+                moved.append(
+                    {
+                        "occurrenceIds": occurrence_ids,
+                        "fromSectionIds": left,
+                        "toSectionId": target_id,
+                        "alreadyThere": [value for value in occurrence_ids if value in target_parts],
+                    }
+                )
+
+            changed = [
+                section_id
+                for section_id, row in by_id.items()
+                if list(row.get("occurrenceIds") or []) != before.get(section_id)
+            ]
+            if not changed:
+                raise PartsManualRepositoryError("the parts are already in that section")
+            emptied = [by_id[section_id] for section_id in changed if not by_id[section_id]["occurrenceIds"]]
+            if emptied:
+                names = ", ".join(f"'{row.get('name')}'" for row in emptied)
+                raise PartsManualRepositoryError(
+                    f"the move would leave {names} with no parts; move other parts into it or delete it"
+                )
+            for section_id in changed:
+                section = by_id[section_id]
+                occurrence_ids = list(section["occurrenceIds"])
+                previous_order = [
+                    str(value)
+                    for value in section.get("occurrenceOrder") or []
+                    if str(value) in set(occurrence_ids)
+                ]
+                section["occurrenceOrder"] = previous_order + [
+                    value for value in occurrence_ids if value not in set(previous_order)
+                ]
+                section["itemAssignments"] = self._item_assignments(
+                    catalog_rows,
+                    occurrence_ids,
+                    section.get("itemAssignments") or [],
+                )
+                section["updatedAt"] = now
+            plan["updatedAt"] = now
+            require_valid_manual_plan(plan, known_occurrence_ids=known_ids)
+            audit_after = audit_manual_plan(plan, catalog_rows)
+            if audit_before["status"] == "PASS" and audit_after["status"] != "PASS":
+                raise PartsManualValidationError(list(audit_after["findings"]))
+            _write_atomic(self._plan_path(assembly_number), canonical_manual_bytes(plan))
+            return {
+                "plan": copy.deepcopy(plan),
+                "revision": manual_plan_revision(plan),
+                "previousRevision": str(base_revision),
+                "changedSectionIds": changed,
+                "createdSectionIds": created,
+                "moves": moved,
+                "publicationReadiness": audit_after,
             }
 
     def delete_section(

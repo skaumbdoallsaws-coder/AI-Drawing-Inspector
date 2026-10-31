@@ -122,7 +122,7 @@ def test_runtime_config_roundtrips_and_disables_general_tools():
         "inspect_site_context", "analyze_site_fit", "look_at_site_photo", "trace_site_feature",
         "plan_warehouse_building", "plan_warehouse_zones", "plan_floor_markings", "plan_storage_layout",
         "plan_site_docks", "plan_site_parking", "plan_warehouse_contents", "plan_design_paint",
-        "suggest_site_references", "check_site_references", "prepare_layout_pdf"}
+        "suggest_site_references", "check_site_references", "prepare_layout_pdf", "suggest_emergency_teams"}
 
 
 def test_gateway_reads_real_backend_and_never_changes_revision(host):
@@ -711,6 +711,58 @@ def test_pilot_lifecycle_journals_results_without_replaying(host, tmp_path, monk
     with Journal(settings.root).db() as db:
         assert db.execute("SELECT status FROM turns").fetchone()[0] == {
             "success": "completed", "cancel": "interrupted", "timeout": "failed", "no_evidence": "completed"}[outcome]
+
+
+def test_viewport_selection_keeps_valid_ids_of_what_the_user_selected():
+    from ai_inspector.codex_runtime.pilot import EDIT_INSTRUCTIONS, MAX_SELECTION_IDS, viewport_selection
+    live = {"selection": {"placementIds": ["pl-1", "pl 2", 7, "pl-3"], "zoneIds": [], "routeIds": ["rt-1"],
+                          "utilityNetworkIds": ["un-1"]}}
+    assert viewport_selection({"facility_layout_live_state": live}) == {"placementIds": ["pl-1", "pl-3"],
+                                                                       "routeIds": ["rt-1"]}
+    assert viewport_selection({}) == {} and viewport_selection({"facility_layout_live_state": {"selection": []}}) == {}
+    many = {"selection": {"placementIds": [f"pl-{index}" for index in range(MAX_SELECTION_IDS + 5)]}}
+    assert len(viewport_selection({"facility_layout_live_state": many})["placementIds"]) == MAX_SELECTION_IDS
+    assert "viewportSelection" in EDIT_INSTRUCTIONS
+
+
+@pytest.mark.parametrize("memory", ["", "server memory context"])
+def test_facility_turn_carries_the_viewport_selection(host, tmp_path, monkeypatch, memory):
+    from ai_inspector.codex_runtime import pilot
+    monkeypatch.setenv(LIVE_FLAG, "1")
+    monkeypatch.setenv("INSPECTORPRO_CODEX_API_KEY", "synthetic-never-sent")
+    seen = {}
+
+    @asynccontextmanager
+    async def bridge(reader):
+        try:
+            yield "http://127.0.0.1:9/mcp", "test-capability"
+        finally:
+            reader.closed = True
+
+    class Transport:
+        def __init__(self, *_):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def inspect(self, **kwargs):
+            seen["message"] = kwargs["message"]
+            return "Done."
+
+    monkeypatch.setattr(pilot, "serve_gateway", bridge)
+    request = SimpleNamespace(agent_session_id="session", session_id=None, client_turn_id="turn",
+        conversation_id="conversation", message="Make the selected guard panels black")
+    context = {"facility_layout_ref": gateway(host).reference,
+               "facility_layout_live_state": {"selection": {"placementIds": ["pl-guard-1", "pl-guard-2"]}}}
+    settings = PilotSettings(Path("unused"), tmp_path / "pilot", "test-model")
+    asyncio.run(inspect_facility(request, host, None, context, settings=settings, transport_factory=Transport,
+                                 memory_context=memory))
+    assert request.message in seen["message"] and "viewportSelection" in seen["message"]
+    assert '"placementIds": ["pl-guard-1", "pl-guard-2"]' in seen["message"]
 
 
 def test_edit_instructions_keep_answers_short_and_name_zone_types_that_reject_placements():

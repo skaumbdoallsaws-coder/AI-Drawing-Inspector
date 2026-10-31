@@ -309,6 +309,17 @@ def operation_batch_schema():
               "sceneId": {"enum": sorted(load_library()["scenes"])}, "adjustments": adjustments}, ["version", "sceneId"]))},
               description="Choose the viewport scene saved with this layout: background, lighting, reflections and shadows. "
                           "It never moves or changes equipment. Null restores the Classic scene.")
+    zone_ids = array(ref("zoneId"), 200, uniqueItems=True)
+    meeting = obj({"label": text(120), "placementId": ref("placementId"), "position": POINT}, ["label"])
+    meeting["oneOf"] = [{"required": ["placementId"]}, {"required": ["position"]}]
+    team = obj({"teamId": text(40, pattern="^[a-z0-9][a-z0-9-]{0,39}$"), "name": text(80), "color": COLOR,
+                "zoneIds": array(ref("zoneId"), 200, 1, uniqueItems=True), "meetingPoint": meeting})
+    operation("set_emergency_plan", {"emergencyPlan": nullable(obj({"version": {"const": 1}, "teams": array(team, 8),
+              "shelterZoneIds": zone_ids, "restroomZoneIds": zone_ids, "phone": text(40, 3)}, ["version", "teams"]))},
+              description="Replace the layout's emergency teams (the zones each team works in, its colour and its "
+                          "meeting point outside: an assembly-point placement or a position), shelter and restroom "
+                          "zones, and the site phone number (only when the user gives it). The evacuation and emergency "
+                          "maps draw from it. It moves nothing. Null removes it.")
     operation("rename_layout", {"displayName": ref("label")})
     for name, key, definition, reset in (("set_floor_surfaces", "surfaces", "floorSurfaces", False),
             ("set_interior_walls", "walls", "interiorWalls", False), ("set_perimeter_walls", "wallSettings", "perimeterWalls", True),

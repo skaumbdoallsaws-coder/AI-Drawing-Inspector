@@ -347,6 +347,19 @@ check('unknown asset bounds use one deterministic fallback footprint', () => {
     ]);
 });
 
+check('plan geometry leaves overhead structure to 3D', () => {
+    const beam = placement('pl-beam', 'asset-unknown', 4, 7);
+    beam.transform.position.y = 10;
+    const low = placement('pl-shelf', 'asset-unknown', 8, 7);
+    low.transform.position.y = 4;
+    const stacked = placement('pl-stacked', 'asset-unknown', 12, 7);
+    stacked.transform.position.y = 6;
+    stacked.snapRelationship = { family: 'vertical_stack', stackId: 'st-1', level: 3 };
+    const ids = facility.collectTopPlanGeometry(layout([beam, low, stacked]), {})
+        .placements.map((item) => item.placementId);
+    assert.deepStrictEqual(ids, ['pl-shelf', 'pl-stacked']);
+});
+
 check('authored shell bounds keep sparse layouts in a stable world frame', () => {
     const sparse = layout([placement('pl-machine', 'asset-machine', 0, 0)]);
     assert.deepStrictEqual(
@@ -720,6 +733,13 @@ check('top plan renders zones routes and placements with stable IDs', () => {
     assert.strictEqual(zoneLabel.length, 1);
     assert.strictEqual(zoneLabel[0].nodeName, 'g');
     assert.strictEqual(zoneLabel[0].children[1].textContent, 'Cell');
+    const quiet = JSON.parse(JSON.stringify(markedLayout));
+    const strip = quiet.zones.find((zone) => zone.zoneId === 'zn-cell');
+    strip.extensions = Object.assign({}, strip.extensions, { style: { labelHidden: true } });
+    adapter.setLayout(quiet);
+    assert.strictEqual(host.findByAttribute('data-zone-id', 'zn-cell').length, 1);
+    assert.strictEqual(host.findByAttribute('data-zone-label-for', 'zn-cell').length, 0);
+    adapter.setLayout(markedLayout);
     assert.strictEqual(host.findByAttribute('data-route-id', 'rt-material').length, 1);
     const floorMarking = host.findByAttribute(
         'data-floor-marking-id',

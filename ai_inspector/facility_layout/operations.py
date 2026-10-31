@@ -2318,6 +2318,21 @@ def _op_set_decals(document, operation, _index, _base_revision):
     return [], []
 
 
+def _op_set_emergency_plan(document, operation, _index, _base_revision):
+    from .emergency_plan import KEY, normalize_emergency_plan
+    if set(operation) != {"op", "emergencyPlan"}:
+        _fail("invalid_emergency_plan", "Expected emergencyPlan (or null to remove it)")
+    extensions = document.setdefault("extensions", {})
+    if operation["emergencyPlan"] is None:
+        extensions.pop(KEY, None)
+        return [], []
+    try:
+        extensions[KEY] = normalize_emergency_plan(operation["emergencyPlan"], document)
+    except ValueError as exc:
+        _fail("invalid_emergency_plan", str(exc))
+    return [], []
+
+
 def _op_edit_decal_row(document, operation, index, base_revision):
     from .decals import KEY
     value = _mapping(document.get("extensions", {}).get(KEY, {"version": 1, "artworks": []}), KEY)
@@ -2688,6 +2703,7 @@ _HANDLERS: Dict[str, _Handler] = {
     "set_plan_settings": _op_set_plan_settings,
     "set_perimeter_walls": _op_set_perimeter_walls,
     "set_decals": _op_set_decals,
+    "set_emergency_plan": _op_set_emergency_plan,
     "edit_perimeter_walls": _op_edit_perimeter_walls,
     "upsert_wall_artwork": _op_edit_wall_artwork_row,
     "delete_wall_artwork": _op_edit_wall_artwork_row,

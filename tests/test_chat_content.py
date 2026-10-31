@@ -36,13 +36,15 @@ def test_generation_source_cards_are_receipt_derived_deduplicated_and_unreviewed
     before = deepcopy(observed)
     block = generation_research_source_block(observed)
     sources = block["sources"]
-    assert [source["url"] for source in sources] == ["https://www.skf.com/a", "https://example.com/b", "https://example.com/manual.pdf"]
+    # The search's hits are discovery only: just what was read is listed.
+    assert [source["url"] for source in sources] == ["https://www.skf.com/a", "https://example.com/manual.pdf"]
+    assert generation_research_source_block([first]) is None
     assert sources[0]["title"] == "Later title" and sources[0]["description"] == ""
     assert sources[0]["retrievedAt"] == second["result"]["retrievedAt"]
     assert sources[0]["sourceType"] == "technical-document"
     assert sources[0]["specifications"]["Retrieval"] == "Document read"
-    assert sources[2]["sourceType"] == "web"
-    assert sources[2]["specifications"]["Retrieval"] == "Read not confirmed"
+    assert sources[1]["sourceType"] == "web"
+    assert sources[1]["specifications"]["Retrieval"] == "Read not confirmed"
     assert generation_research_source_block([second, first])["sources"][0] == sources[0]
     assert all(source["publisher"] == "" and source["inferIdentity"] is False and source["iconUrl"] is None for source in sources)
     assert all(source["specifications"]["Review"] == "Pending" for source in sources)
@@ -78,7 +80,7 @@ def test_generation_cards_ignore_failed_absent_unsafe_and_model_only_sources():
 def test_generation_source_cards_are_bounded_and_stable():
     from ai_inspector.facility_layout.generation_presentation import generation_research_source_block
     result = {"sources": [{"url": f"https://example.com/{index}", "title": "T" * 1000} for index in range(25)]}
-    results = [{"tool": "search_generation_sources", "status": "succeeded", "result": result}]
+    results = [{"tool": "read_generation_source", "status": "succeeded", "result": result}]
     block = generation_research_source_block(results)
     assert len(block["sources"]) == 20 and "first 20" in block["title"]
     assert all(len(source["title"]) == 240 for source in block["sources"])

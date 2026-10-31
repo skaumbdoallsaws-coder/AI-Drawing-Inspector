@@ -2948,14 +2948,17 @@ test('instances repeated exact revisions with stable placement identity and xyzw
         }
     );
     let selectedFromPointer = null;
-    data.adapter.setSelectionHandler(placementId => {
+    let pointerEvent = null;
+    data.adapter.setSelectionHandler((placementId, adapter, event) => {
         selectedFromPointer = placementId;
+        pointerEvent = event;
     });
     FakeRenderer.instances.at(-1).domElement.dispatch(
         'pointerup',
-        { clientX: 400, clientY: 300 }
+        { clientX: 400, clientY: 300, ctrlKey: true }
     );
     assert.strictEqual(selectedFromPointer, 'pl-z');
+    assert.strictEqual(pointerEvent.ctrlKey, true);
     data.adapter.dispose();
 });
 
@@ -3943,6 +3946,8 @@ test('3D layer visibility hides presentation objects without changing scene data
         ground: true,
         surfaces: true,
         site: true,
+        overhead: true,
+        roofSheeting: false,
     });
     const after = data.adapter.getDiagnostics();
     assert.strictEqual(after.placementCount, 1);
@@ -3981,6 +3986,28 @@ test('perimeter walls and tagged wall assets have an independent presentation la
     assert.equal(data.adapter.getDiagnostics().visiblePerimeterWallCount, 1);
     await data.adapter.setScene({ layout: {placements:[]}, assetCatalog: [] });
     assert.equal(data.adapter.getDiagnostics().perimeterWallCount, 0);
+    data.adapter.dispose();
+});
+
+test('overhead and roof sheeting assets have their own layers, sheeting hidden at first', async () => {
+    const data = fixture();
+    data.adapter.mount(data.host);
+    const beam = asset('asset-beam', REV_A); beam.tags = ['roof', 'overhead'];
+    const deck = asset('asset-deck', REV_A); deck.tags = ['overhead', 'roof-sheeting'];
+    const layout = { placements: [
+        placement('pl-machine', 'asset-machine', REV_A, 0, 0, 0),
+        placement('pl-beam', 'asset-beam', REV_A, 2, 10, 2),
+        placement('pl-deck', 'asset-deck', REV_A, 4, 11, 4),
+    ] };
+    await data.adapter.setScene({ layout, assetCatalog: [asset('asset-machine', REV_A), beam, deck] });
+    assert.deepStrictEqual(data.adapter.getDiagnostics().layerPlacementCounts,
+        { assets: [1, 1], overhead: [1, 1], roofSheeting: [0, 1] });
+    data.adapter.setLayerVisibility({ overhead: false, roofSheeting: true });
+    assert.deepStrictEqual(data.adapter.getDiagnostics().layerPlacementCounts,
+        { assets: [1, 1], overhead: [0, 1], roofSheeting: [1, 1] });
+    data.adapter.setLayerVisibility({ assets: true });  // a partial update keeps the other layers
+    assert.deepStrictEqual(data.adapter.getDiagnostics().layerPlacementCounts,
+        { assets: [1, 1], overhead: [0, 1], roofSheeting: [1, 1] });
     data.adapter.dispose();
 });
 
@@ -5380,6 +5407,58 @@ test('3D direction arrows use procedural floor-paint geometry', async () => {
     assert.strictEqual(marking.children[0].material.options.depthWrite, true);
     assert.strictEqual(marking.children[0].material.options.toneMapped, false);
     assert.ok(Math.abs(marking.position.y - 0.003) < 0.00001);
+    data.adapter.dispose();
+});
+
+test('3D draws a large layout\'s floor markings merged, one mesh per paint', async () => {
+    const THREE = createThree();
+    const matrixOf = object => new FakeMatrix4().compose(object.position, object.quaternion, object.scale);
+    class Group extends FakeGroup { updateMatrix() { this.matrix = matrixOf(this); } }
+    class Mesh extends FakeMesh { updateMatrix() { this.matrix = matrixOf(this); } }
+    class Plane extends FakePlaneGeometry {
+        clone() { const copy = new Plane(this.width, this.height); copy.rotationX = this.rotationX; return copy; }
+        applyMatrix4(matrix) { this.applied = matrix; return this; }
+    }
+    Object.assign(THREE, { Group, Mesh, PlaneGeometry: Plane });
+    const data = fixture({ THREE, mergeGeometries(geometries) {
+        const geometry = new FakeGeometry();
+        geometry.parts = geometries;
+        geometry.computeBoundingBox = () => {};
+        geometry.computeBoundingSphere = () => {};
+        return geometry;
+    } });
+    data.adapter.mount(data.host);
+    const markings = [];
+    for (let index = 0; index < 45; index += 1) {
+        markings.push({
+            markingId: 'fm-stall-' + String(index).padStart(2, '0'),
+            markingType: 'parking_box',
+            semanticRole: 'parking',
+            transform: { position: { x: index * 3, y: 0, z: 0 } },
+            width: 2.75,
+            depth: 5.5,
+            fillColor: '#eaf0f2',
+            opacity: 1,
+        });
+    }
+    await data.adapter.setScene({ layout: { placements: [], floorMarkings: markings }, assetCatalog: [] });
+    data.scheduler.flush();
+    const scene = FakeRenderer.instances.at(-1).lastRender.scene;
+    const batches = [];
+    const single = [];
+    scene.traverse(object => {
+        if (object.userData.facilityFloorMarkingBatch === true) batches.push(object);
+        if (object.userData.facilityFloorMarking === true) single.push(object);
+    });
+    assert.strictEqual(data.adapter.getDiagnostics().floorMarkingCount, 45);
+    assert.strictEqual(single.length, 0);
+    // A box is a faint fill and four border strips (no canvas here, so no label): two paints, two meshes.
+    assert.strictEqual(batches.length, 2);
+    assert.deepStrictEqual(batches.map(batch => batch.userData.pieceCount).sort((a, b) => a - b), [45, 180]);
+    assert.deepStrictEqual(batches.map(batch => batch.renderOrder).sort(), [6, 7]);
+    assert(batches.every(batch => batch.geometry.parts.every(part => part.applied)));
+    data.adapter.setLayerVisibility({ markings: false });
+    assert(batches.every(batch => batch.visible === false));
     data.adapter.dispose();
 });
 

@@ -74,6 +74,9 @@
         markings: true,
         assets: true,
         walls: true,
+        // 3D only (the plan leaves overhead parts out); sheeting starts hidden.
+        overhead: true,
+        roofSheeting: false,
     });
     const TOOL_MODES = Object.freeze([
         'select',
@@ -324,8 +327,8 @@
             ? fallback : DEFAULT_LAYER_VISIBILITY;
         const output = {};
         Object.keys(DEFAULT_LAYER_VISIBILITY).forEach(function (key) {
-            output[key] = typeof source[key] === 'boolean'
-                ? source[key] : base[key] !== false;
+            output[key] = typeof source[key] === 'boolean' ? source[key]
+                : (typeof base[key] === 'boolean' ? base[key] : DEFAULT_LAYER_VISIBILITY[key]);
         });
         return output;
     }
@@ -3950,6 +3953,8 @@
             ['markings', 'Floor markings'],
             ['assets', 'Assets'],
             ['walls', 'Walls'],
+            ['overhead', 'Roof frame and services (3D)'],
+            ['roofSheeting', 'Roof sheeting (3D)'],
         ].forEach(function (spec) {
             const id = 'ip-flw-layer-' + spec[0];
             const row = element(this.document, 'div', {
@@ -13372,9 +13377,14 @@
         }, this);
     };
 
-    Workspace.prototype._handleAdapterSelection = function (placementId) {
+    Workspace.prototype._handleAdapterSelection = function (placementId, adapter, event) {
         if (this.suppressAdapterSelection === placementId) {
             this.suppressAdapterSelection = null;
+            return;
+        }
+        // A 3D click with Ctrl (Cmd) adds or removes the item, as in the plan view and the Structure tree.
+        if (event && (event.ctrlKey || event.metaKey)) {
+            this.handleViewSelection(placementId, event);
             return;
         }
         this.session.select(placementId);

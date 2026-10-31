@@ -198,7 +198,7 @@ class PlanData:
         }
 
     def _placements(self, layout: Mapping[str, Any], resolve_asset: AssetResolver | None) -> list[dict[str, Any]]:
-        from .spatial import placement_spatial_records
+        from .spatial import OVERHEAD_MINIMUM_CLEARANCE, placement_spatial_records
         items = []
         for placement in layout.get("placements") or []:
             asset_id = str(placement.get("assetId") or "")
@@ -207,9 +207,14 @@ class PlanData:
             polygons: list[list[Point]] = []
             if definition:
                 try:
-                    polygons = [list(record.polygon) for record in placement_spatial_records(placement, definition)]
+                    records = placement_spatial_records(placement, definition)
                 except (ValueError, TypeError, KeyError):
-                    polygons = []
+                    records = ()
+                # The floor plan shows the floor; overhead structure (roof beams) is left to 3D.
+                if (records and not placement.get("snapRelationship")
+                        and min(record.minimum_y for record in records) >= OVERHEAD_MINIMUM_CLEARANCE):
+                    continue
+                polygons = [list(record.polygon) for record in records]
             position = (placement.get("transform") or {}).get("position") or {}
             items.append({"kind": _asset_kind(asset_id, definition), "polygons": polygons,
                           "at": (float(position.get("x") or 0), float(position.get("z") or 0)),
@@ -910,6 +915,8 @@ def draw_floor_sheet(sheet: Sheet, frames: Frames, data: PlanData) -> dict[str, 
         x0, z0, x1, z1 = _box(points)
         if (x1 - x0) * view.k < 50 or (z1 - z0) * view.k < 24:
             continue
+        if ((zone.get("extensions") or {}).get("style") or {}).get("labelHidden") is True:
+            continue  # a helper strip (column line, barrier run), named only for selection
         name = str(zone.get("label") or zone.get("zoneType") or "").upper()
         area = area_label(abs(_area(points)))
         half = max(text_width(name, sheet.sizes["label"], "bold"), text_width(area, sheet.sizes["smallLabel"])) / 2 + 2
@@ -1434,6 +1441,11 @@ def create_plan_pdf_router(*, service, principal_resolver, feature_gate=None):
 
     @router.get("/api/facility-layouts/{site_id}/{layout_id}/plan.pdf")
     async def plan_pdf(site_id: str, layout_id: str, request: Request):
+        from .emergency_pdf import KINDS as MAP_KINDS, EmergencyMapError, render_emergency_pdf
+        kind = request.query_params.get("kind") or "layout"
+        if kind != "layout" and kind not in MAP_KINDS:
+            return JSONResponse(status_code=400, content={"error": {
+                "code": "unsupported_pdf_kind", "message": "kind is layout, evacuation or emergency."}})
         try:
             principal = principal_resolver(request)
 
@@ -1449,12 +1461,19 @@ def create_plan_pdf_router(*, service, principal_resolver, feature_gate=None):
                         except FacilityLayoutError:
                             cache[key] = None
                     return cache[key]
+                if kind != "layout":  # the evacuation or emergency map, one poster page
+                    return render_emergency_pdf(current["layout"], resolve, kind=kind,
+                                                revision=current.get("revision") or "")[0]
                 return render_plan_pdf(current["layout"], resolve, revision=current.get("revision") or "",
                                        fit=_fit_check(service, principal, site_id, current["layout"]))
             content = await run_in_threadpool(build)
         except FacilityLayoutError as exc:
             return JSONResponse(status_code=exc.status_code, content={"error": exc.to_dict()})
-        filename = (re.sub(r"[^A-Za-z0-9._-]+", "-", layout_id).strip("-")[:80] or "layout") + "-plan.pdf"
+        except EmergencyMapError as exc:
+            return JSONResponse(status_code=409, content={"error": {"code": "emergency_map_unavailable",
+                                                                    "message": str(exc)}})
+        suffix = {"layout": "plan", "evacuation": "evacuation-map", "emergency": "emergency-map"}[kind]
+        filename = (re.sub(r"[^A-Za-z0-9._-]+", "-", layout_id).strip("-")[:80] or "layout") + f"-{suffix}.pdf"
         return Response(content=content, media_type="application/pdf", headers={
             "Content-Disposition": f'inline; filename="{filename}"', "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff"})

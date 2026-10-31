@@ -103,6 +103,11 @@ def _write_atomic(path: Path, payload: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def _figure_revision(request: Mapping[str, Any]) -> str:
+    value = str(request.get("figureRevision") or "").strip().lower()
+    return value if _SHA256_RE.fullmatch(value) else ""
+
+
 def _page_for_render(document: Mapping[str, Any], page_id: str) -> Mapping[str, Any]:
     page = next(
         (
@@ -1068,7 +1073,10 @@ def _render_quality(image: Image.Image, expected: Mapping[str, Any]) -> Dict[str
         expected.get("foregroundPixelPolicy") or "minimum_foreground_pixel_percent"
     )
     if not points or foreground_fraction * 100 < minimum_pixel_percent:
-        raise PartsManualRenderArtifactError("technical illustration is blank or contains too little visible geometry")
+        raise PartsManualRenderArtifactError(
+            "technical illustration is blank or contains too little visible geometry "
+            f"({foreground_fraction * 100:.2f}% line pixels; minimum {minimum_pixel_percent:.2f}%)"
+        )
     illustration_style = str(expected.get("illustrationStyle") or "SHADED_COLOR").upper()
     colored_fraction = colored_foreground_pixels / max(1, foreground_pixels)
     if illustration_style == "HIDDEN_LINES_REMOVED" and colored_fraction > 0.02:
@@ -1356,10 +1364,14 @@ def store_render_artifact(
     }
 
     document_revision = str(document.get("documentRevision") or "")
+    # Stored under the figure's own revision, so the capture outlives changes
+    # to other pages of the document.
+    figure_revision = _figure_revision(request)
+    artifact_revision = figure_revision or document_revision
     image_path, metadata_path = _artifact_paths(
         root,
         assembly_number,
-        document_revision,
+        artifact_revision,
         page_id,
     )
     digest = hashlib.sha256(png_bytes).hexdigest()
@@ -1375,6 +1387,8 @@ def store_render_artifact(
         "quality": quality,
         "balloons": balloon_manifest,
         "documentRevision": document_revision,
+        "figureRevision": figure_revision or None,
+        "artifactRevision": artifact_revision,
         "manualPlanRevision": str(document.get("manualPlanRevision") or ""),
         "sourceRevision": str(document.get("sourceRevision") or ""),
         "capturedAt": _utc_now(),
@@ -1392,41 +1406,63 @@ def _load_descriptor(
     assembly_number: str,
     document: Mapping[str, Any],
     page_id: str,
+    request: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any] | None:
     document_revision = str(document.get("documentRevision") or "")
-    image_path, metadata_path = _artifact_paths(root, assembly_number, document_revision, page_id)
-    native_image_path = _native_atomic_path(image_path)
-    native_metadata_path = _native_atomic_path(metadata_path)
-    if not os.path.isfile(native_image_path) or not os.path.isfile(native_metadata_path):
-        return None
-    try:
-        with open(native_metadata_path, "r", encoding="ascii") as handle:
-            descriptor = json.load(handle)
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    expected = {
-        "status": "ready",
-        "renderPipelineVersion": PARTS_MANUAL_RENDER_PIPELINE_VERSION,
-        "pageId": page_id,
-        "documentRevision": document_revision,
-        "manualPlanRevision": str(document.get("manualPlanRevision") or ""),
-        "sourceRevision": str(document.get("sourceRevision") or ""),
-    }
-    if not isinstance(descriptor, dict) or any(descriptor.get(key) != value for key, value in expected.items()):
-        return None
-    if (descriptor.get("quality") or {}).get("status") != "PASS":
-        return None
-    try:
-        if os.stat(native_image_path).st_size != int(descriptor.get("byteLength") or -1):
-            return None
-    except OSError:
-        return None
-    descriptor = copy.deepcopy(descriptor)
-    descriptor["url"] = (
-        f"/api/parts-manual/{assembly_number}/renders/"
-        f"{document_revision}/{page_id}"
+    manual_plan_revision = str(document.get("manualPlanRevision") or "")
+    figure_revision = _figure_revision(request or {})
+    # A capture of the same figure revision is the same figure, whatever else
+    # in the document changed. Captures made before figure revisions existed
+    # are only valid for their own document revision.
+    lookups = []
+    if figure_revision:
+        lookups.append((figure_revision, {"figureRevision": figure_revision}))
+    lookups.append(
+        (
+            document_revision,
+            {
+                "documentRevision": document_revision,
+                "manualPlanRevision": manual_plan_revision,
+            },
+        )
     )
-    return descriptor
+    for artifact_revision, binding in lookups:
+        image_path, metadata_path = _artifact_paths(
+            root, assembly_number, artifact_revision, page_id
+        )
+        native_image_path = _native_atomic_path(image_path)
+        native_metadata_path = _native_atomic_path(metadata_path)
+        if not os.path.isfile(native_image_path) or not os.path.isfile(native_metadata_path):
+            continue
+        try:
+            with open(native_metadata_path, "r", encoding="ascii") as handle:
+                descriptor = json.load(handle)
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        expected = {
+            "status": "ready",
+            "renderPipelineVersion": PARTS_MANUAL_RENDER_PIPELINE_VERSION,
+            "pageId": page_id,
+            "sourceRevision": str(document.get("sourceRevision") or ""),
+            **binding,
+        }
+        if not isinstance(descriptor, dict) or any(descriptor.get(key) != value for key, value in expected.items()):
+            continue
+        if (descriptor.get("quality") or {}).get("status") != "PASS":
+            continue
+        try:
+            if os.stat(native_image_path).st_size != int(descriptor.get("byteLength") or -1):
+                continue
+        except OSError:
+            continue
+        descriptor = copy.deepcopy(descriptor)
+        descriptor["capturedDocumentRevision"] = descriptor.get("documentRevision")
+        descriptor["documentRevision"] = document_revision
+        descriptor["manualPlanRevision"] = manual_plan_revision
+        descriptor["artifactRevision"] = artifact_revision
+        descriptor["url"] = render_artifact_url(assembly_number, descriptor)
+        return descriptor
+    return None
 
 
 def attach_render_artifacts(
@@ -1439,7 +1475,13 @@ def attach_render_artifacts(
         request = page.get("renderRequest") if isinstance(page, dict) else None
         if not isinstance(request, dict):
             continue
-        descriptor = _load_descriptor(root, assembly_number, result, str(page.get("pageId") or ""))
+        descriptor = _load_descriptor(
+            root,
+            assembly_number,
+            result,
+            str(page.get("pageId") or ""),
+            request,
+        )
         if descriptor is not None:
             image_request = request.get("image")
             image_request = dict(image_request) if isinstance(image_request, Mapping) else {}
@@ -1449,6 +1491,19 @@ def attach_render_artifacts(
             # the initial publication pass.
             request["image"] = {**image_request, **descriptor}
     return result
+
+
+def render_artifact_url(assembly_number: str, descriptor: Mapping[str, Any]) -> str:
+    """The capture's URL. A recapture of the same figure is written to the same
+    path, so the image hash keeps a cached older capture from showing."""
+    revision = str(
+        descriptor.get("artifactRevision") or descriptor.get("documentRevision") or ""
+    )
+    return (
+        f"/api/parts-manual/{assembly_number}/renders/"
+        f"{revision}/{descriptor.get('pageId')}"
+        f"?v={str(descriptor.get('sha256') or '')[:16]}"
+    )
 
 
 def render_artifact_path(

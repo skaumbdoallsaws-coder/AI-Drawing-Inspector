@@ -11,7 +11,7 @@ STEP_TOOLS = {'plan_warehouse_building': 'building', 'plan_warehouse_zones': 'zo
               'plan_site_parking': 'parking', 'plan_warehouse_contents': 'contents'}
 NAMES = frozenset({'inspect_site_context', 'analyze_site_fit', 'look_at_site_photo', 'trace_site_feature',
                    'plan_design_paint', 'suggest_site_references', 'check_site_references', 'prepare_layout_pdf',
-                   *STEP_TOOLS})
+                   'suggest_emergency_teams', *STEP_TOOLS})
 CATALOG_TOOLS = frozenset({'plan_storage_layout', 'plan_warehouse_contents'})  # model sizes and revisions
 PHOTO_NAMES = frozenset({'look_at_site_photo', 'trace_site_feature'})
 
@@ -148,10 +148,24 @@ def tool_specs():
         'and how far each can be trusted. No edits.',
         'input_schema':obj({'maxPoints':{'type':'integer','minimum':1,'maximum':8}},[])},
         {'name':'prepare_layout_pdf','description':
-        'Prepare the printable 2D layout as a PDF from the saved layout, 11 x 17 in: for a layout placed on a site '
-        'the site plan (C-101) and the setting-out plan (C-102, with its reference points and fit check), and '
-        'always the floor plan (A-101). It is built once here to check it, and the chat shows it as a file the '
-        'user opens in the app. Tell the user which sheets it has; unsaved edits are not in it. No edits.',
+        'Prepare a printable PDF from the saved layout, 11 x 17 in. Up to three per layout, one call each. kind '
+        'layout (the default): for a layout placed on a site the site plan (C-101) and the setting-out plan '
+        '(C-102, with its reference points and fit check), and always the floor plan (A-101). kind evacuation: one '
+        'poster page with each emergency team\'s area in its colour, a star at every exit and each team\'s meeting '
+        'point; it needs the teams (suggest_emergency_teams, then set_emergency_plan). kind emergency: one poster '
+        'page, the floor plan in black with a symbol at every fire extinguisher, first aid kit, AED, eyewash, spill '
+        'kit, electrical panel, fire riser, PPE vending machine and exit, the restrooms and shelters the plan names, '
+        'and the assembly areas. Each is built once here to check it, and the chat shows it as a file the user '
+        'opens in the app. Tell the user what it shows, with the counts and the longest straight-line distance from '
+        'the floor to an exit as numbers to check, never as code compliance; unsaved edits are not in it. No edits.',
+        'input_schema':obj({'kind':{'enum':['layout','evacuation','emergency']}},[])},
+        {'name':'suggest_emergency_teams','description':
+        'Suggest emergency teams for the evacuation map from the saved layout: production, warehouse and office '
+        'teams from the zone names, each with the zones it works in, a colour and a meeting point in a parking lot '
+        '(at an assembly-point sign there when there is one; the largest team to the largest lot), and the '
+        'restroom zones. Shelters are never suggested: which rooms can shelter people in severe weather is the '
+        'user\'s call. Show the user the teams and meeting points, apply their changes, and stage the result as one '
+        'set_emergency_plan operation. No edits.',
         'input_schema':obj({},[])},
         {'name':'check_site_references','description':
         'Check how well the sources agree. At the mapped road intersections and rail crossing near the building, '

@@ -611,20 +611,33 @@
         parent.appendChild(wrap);
     }
 
-    // A file the app made (the layout PDF): a card that opens it from the app, as a chat file attachment does.
+    // A file the app made (the layout PDF, a published manual): a card that opens it from the app, as a chat file
+    // attachment does (the desktop app opens it in its browser pane), and a button that saves it.
     function renderFile(documentRef, block) {
-        const card = documentRef.createElement('a');
-        card.className = 'agent-file-card';
-        card.href = block.url;
-        card.target = '_blank';
-        card.rel = 'noopener';
-        card.title = 'Open ' + block.fileName;
-        card.appendChild(element(documentRef, 'span', 'agent-file-badge',
+        const card = element(documentRef, 'div', 'agent-file-card');
+        const open = documentRef.createElement('a');
+        open.className = 'agent-file-open';
+        open.href = block.url;
+        open.target = '_blank';
+        open.rel = 'noopener';
+        open.title = 'Open ' + block.fileName;
+        open.appendChild(element(documentRef, 'span', 'agent-file-badge',
             block.mimeType === 'application/pdf' ? 'PDF' : 'FILE'));
         const body = element(documentRef, 'span', 'agent-file-body');
         body.appendChild(element(documentRef, 'span', 'agent-file-name', block.fileName));
         if (block.detail) body.appendChild(element(documentRef, 'span', 'agent-file-detail', block.detail));
-        card.appendChild(body);
+        open.appendChild(body);
+        card.appendChild(open);
+        const save = documentRef.createElement('a');
+        save.className = 'agent-file-download';
+        save.href = block.url;
+        save.download = block.fileName;
+        save.title = 'Download ' + block.fileName;
+        save.setAttribute('aria-label', 'Download ' + block.fileName);
+        save.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" '
+            + 'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+            + '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
+        card.appendChild(save);
         return card;
     }
 

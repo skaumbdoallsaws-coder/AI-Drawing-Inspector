@@ -27,7 +27,7 @@ ALLOWED_OPERATIONS = frozenset({
     "upsert_floor_surface", "delete_floor_surface", "place_asset_array", "delete_asset_array", "upsert_interior_wall", "delete_interior_wall",
     "upsert_decal", "delete_decal", "edit_perimeter_walls", "upsert_wall_artwork", "delete_wall_artwork",
     "set_site_context", "set_building_pose", "upsert_site_area", "delete_site_area",
-    "upsert_site_reference", "delete_site_reference",
+    "upsert_site_reference", "delete_site_reference", "set_emergency_plan",
 })
 
 

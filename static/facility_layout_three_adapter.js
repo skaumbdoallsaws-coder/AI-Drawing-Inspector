@@ -76,11 +76,17 @@
         ground: true,
         surfaces: true,
         site: true,
+        // Assets tagged 'overhead' (roof frame, lights, sprinklers, trays) and 'roof-sheeting'; the
+        // sheeting starts hidden so the default view still looks into the building.
+        overhead: true,
+        roofSheeting: false,
     });
     // Zone limits on the 3D floor: the plan's zone outline color, and the line
     // width in metres.
     const ZONE_LIMIT_COLOR = '#4d7c8a';
     const ZONE_LIMIT_WIDTH = 0.1;
+    // From this many floor markings on, their paint is drawn merged (batchFloorMarkings).
+    const FLOOR_MARKING_BATCH_MINIMUM = 40;
     const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1 =
         'facility-motion-package-v1';
     const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V2 =
@@ -454,10 +460,21 @@
             ? fallback : DEFAULT_LAYER_VISIBILITY;
         const output = {};
         Object.keys(DEFAULT_LAYER_VISIBILITY).forEach(function (key) {
-            output[key] = typeof source[key] === 'boolean'
-                ? source[key] : base[key] !== false;
+            output[key] = typeof source[key] === 'boolean' ? source[key]
+                : (typeof base[key] === 'boolean' ? base[key] : DEFAULT_LAYER_VISIBILITY[key]);
         });
         return output;
+    }
+
+    // The layer a placed model's group shows on: walls, roof sheeting, overhead structure and
+    // services (by catalog tag, as walls are), or everything else.
+    function assetVisibilityLayer(entry) {
+        if (wallsRuntime.isWallAsset(entry)) return 'walls';
+        const source = entry && (entry.source || entry) || {};
+        const definition = source.definition || source.assetDefinition || source;
+        const tags = [].concat(entry && entry.tags || [], definition.tags || []);
+        if (tags.includes('roof-sheeting')) return 'roofSheeting';
+        return tags.includes('overhead') ? 'overhead' : 'assets';
     }
 
     function stringValue(value, fallback) {
@@ -2364,6 +2381,8 @@
             themeCleanup: null,
             modelRoot: null,
             floorMarkingObjects: [],
+            floorMarkingCount: 0,
+            floorMarkingTextures: new Map(),
             zoneObjects: [],
             wallObjects: [],
             floorSurfaceObjects: [],
@@ -6730,7 +6749,8 @@
                 }
                 const result = pick(event);
                 if (result && state.selectionHandler) {
-                    state.selectionHandler(result.placementId, api);
+                    // The event carries Ctrl/Cmd, which adds to the selection.
+                    state.selectionHandler(result.placementId, api, event);
                 }
             };
             addListener(
@@ -9860,6 +9880,8 @@
             state.renderGroups.clear();
             disposeObjectGraphs(state.floorMarkingObjects);
             state.floorMarkingObjects = [];
+            state.floorMarkingCount = 0;
+            state.floorMarkingTextures = new Map();
             disposeObjectGraphs(state.zoneObjects);
             state.zoneObjects = [];
             disposeObjectGraphs(state.routeObjects);
@@ -9920,6 +9942,10 @@
             const documentRef = options.document || (root && root.document);
             if (!documentRef || typeof documentRef.createElement !== 'function'
                     || typeof THREE.CanvasTexture !== 'function') return null;
+            // Markings that look alike share one texture.
+            const key = JSON.stringify(['paint', marking.markingType || 'solid_line', marking.fillColor || '',
+                marking.strokeColor || '', marking.text || '']);
+            if (state.floorMarkingTextures.has(key)) return state.floorMarkingTextures.get(key);
             const canvas = documentRef.createElement('canvas');
             canvas.width = 1024;
             canvas.height = 1024;
@@ -10000,9 +10026,11 @@
             } else {
                 context.fillRect(0, 0, 512, 512);
             }
-            return mirrorTextureForDisplay(configureFloorMarkingTexture(
+            const texture = mirrorTextureForDisplay(configureFloorMarkingTexture(
                 new THREE.CanvasTexture(canvas)
             ), 'v');
+            state.floorMarkingTextures.set(key, texture);
+            return texture;
         }
 
         function floorMarkingTextTexture(marking, value) {
@@ -10011,21 +10039,27 @@
             if (!label || !documentRef
                     || typeof documentRef.createElement !== 'function'
                     || typeof THREE.CanvasTexture !== 'function') return null;
+            // One texture per label and colour (a car park's PARKING boxes share one), at 1024 x 256: about
+            // 450 pixels a metre on a 2.25 m stall label, a quarter of the memory of 2048 x 512.
+            const key = JSON.stringify(['text', label, marking.strokeColor || '#111827']);
+            if (state.floorMarkingTextures.has(key)) return state.floorMarkingTextures.get(key);
             const canvas = documentRef.createElement('canvas');
-            canvas.width = 2048;
-            canvas.height = 512;
+            canvas.width = 1024;
+            canvas.height = 256;
             const context = typeof canvas.getContext === 'function'
                 ? canvas.getContext('2d') : null;
             if (!context) return null;
             context.clearRect(0, 0, canvas.width, canvas.height);
             context.fillStyle = marking.strokeColor || '#111827';
-            context.font = '800 300px Segoe UI, Arial, sans-serif';
+            context.font = '800 150px Segoe UI, Arial, sans-serif';
             context.textAlign = 'center';
             context.textBaseline = 'middle';
-            context.fillText(label, 1024, 256, 1960);
-            return mirrorTextureForDisplay(configureFloorMarkingTexture(
+            context.fillText(label, 512, 128, 980);
+            const texture = mirrorTextureForDisplay(configureFloorMarkingTexture(
                 new THREE.CanvasTexture(canvas)
             ), 'v');
+            state.floorMarkingTextures.set(key, texture);
+            return texture;
         }
 
         // Writing and pictures must still read correctly on the mirrored canvas,
@@ -10311,6 +10345,60 @@
             );
         }
 
+        // A large layout's paint is drawn as one mesh per colour and per label texture: hundreds of markings of
+        // several planes each otherwise cost thousands of draw calls a frame (Factory 02: 1,156 markings, about
+        // 3,900 calls). Markings are never picked in 3D, so nothing needs them one by one; a small layout keeps
+        // one object per marking.
+        function batchFloorMarkings(objects) {
+            const buckets = new Map(), output = [];
+            objects.forEach(function (object) {
+                object.updateMatrix();
+                object.children.forEach(function (mesh) {
+                    const material = mesh.material, geometry = mesh.geometry;
+                    mesh.updateMatrix();
+                    const key = JSON.stringify([material.map ? material.map.uuid : null, material.color.getHex(),
+                        material.opacity, material.transparent, material.depthWrite, material.side, !!geometry.index,
+                        Object.keys(geometry.attributes).sort()]);
+                    if (!buckets.has(key)) buckets.set(key, { material: material, meshes: [] });
+                    buckets.get(key).meshes.push({ mesh: mesh, object: object });
+                });
+            });
+            try {
+                buckets.forEach(function (bucket) {
+                    const copies = bucket.meshes.map(function (entry) {
+                        return entry.mesh.geometry.clone().applyMatrix4(
+                            new THREE.Matrix4().multiplyMatrices(entry.object.matrix, entry.mesh.matrix));
+                    });
+                    const geometry = options.mergeGeometries(copies, false);
+                    copies.forEach(function (copy) { if (copy !== geometry) copy.dispose(); });
+                    if (!geometry) throw new Error('floor marking geometries did not merge');
+                    geometry.computeBoundingBox();
+                    geometry.computeBoundingSphere();
+                    const mesh = new THREE.Mesh(geometry, bucket.material);
+                    const material = bucket.material;
+                    // Paint first, then see-through fills, then the writing on top.
+                    mesh.renderOrder = material.map ? 8 : (material.transparent ? 7 : 6);
+                    mesh.name = 'FacilityFloorMarkings:' + output.length;
+                    mesh.userData = { facilityFloorMarkingBatch: true, pieceCount: bucket.meshes.length };
+                    mesh.visible = state.layerVisibility.markings !== false;
+                    output.push(mesh);
+                });
+            } catch (error) {
+                output.forEach(function (mesh) { mesh.geometry.dispose(); });
+                reportError('floor_marking_batch_failed', error);
+                return null;
+            }
+            const kept = new Set(output.map(function (batch) { return batch.material; }));
+            objects.forEach(function (object) {
+                object.children.forEach(function (mesh) {
+                    mesh.geometry.dispose();
+                    // Textures are shared through the cache and stay with the batches.
+                    if (!kept.has(mesh.material)) mesh.material.dispose();
+                });
+            });
+            return output;
+        }
+
         function renderFloorMarkings() {
             if (!state.modelRoot || typeof THREE.Mesh !== 'function') return 0;
             const layout = state.currentInput && state.currentInput.layout || {};
@@ -10321,6 +10409,7 @@
                     String(right && right.markingId || '')
                 );
             });
+            const built = [];
             markings.forEach(function (marking, index) {
                 if (!marking || !marking.transform
                         || !marking.transform.position) return;
@@ -10359,10 +10448,17 @@
                     semanticRole: marking.semanticRole,
                 });
                 object.visible = state.layerVisibility.markings !== false;
+                built.push(object);
+            });
+            state.floorMarkingCount = built.length;
+            const batches = built.length >= FLOOR_MARKING_BATCH_MINIMUM
+                && typeof options.mergeGeometries === 'function'
+                ? batchFloorMarkings(built) : null;
+            (batches || built).forEach(function (object) {
                 state.modelRoot.add(object);
                 state.floorMarkingObjects.push(object);
             });
-            return state.floorMarkingObjects.length;
+            return state.floorMarkingCount;
         }
 
         function facilityAisleExtension(route) {
@@ -11632,7 +11728,7 @@
                 });
             }
 
-            const visibilityLayer = wallsRuntime.isWallAsset(group.catalog) ? 'walls' : 'assets';
+            const visibilityLayer = assetVisibilityLayer(group.catalog);
             let renderedLightCount = 0;
             if (typeof container.traverse === 'function') {
                 container.traverse(object => { if (object.isLight) renderedLightCount++; });
@@ -14749,7 +14845,7 @@
                 contextLost: state.contextLost,
                 placementCount: state.placements.length,
                 placementTransformAudit: getPlacementTransformAudit(),
-                floorMarkingCount: state.floorMarkingObjects.length,
+                floorMarkingCount: state.floorMarkingCount,
                 zoneMarkingCount: state.zoneObjects.length,
                 appearanceLibrary: finishDiagnostics(),
                 perimeterWallCount: state.wallObjects.length,
@@ -14770,6 +14866,13 @@
                 visibleLegacyWallPlacementCount: Array.from(state.renderGroups.values())
                     .filter(record => record.visibilityLayer === 'walls' && record.container.visible)
                     .reduce((count, record) => count + record.placementIds.length, 0),
+                // Placements per model layer: [shown, total].
+                layerPlacementCounts: Array.from(state.renderGroups.values()).reduce(function (counts, record) {
+                    const row = counts[record.visibilityLayer] || (counts[record.visibilityLayer] = [0, 0]);
+                    if (record.container.visible) row[0] += record.placementIds.length;
+                    row[1] += record.placementIds.length;
+                    return counts;
+                }, {}),
                 routeCount: state.routeObjects.length,
                 assetGroupCount: state.baseGroups.size,
                 representationGroups: groups,

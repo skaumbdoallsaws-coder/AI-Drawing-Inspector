@@ -5,6 +5,7 @@ from .artifacts import (
     PartsManualRenderArtifactError,
     attach_render_artifacts,
     render_artifact_path,
+    render_artifact_url,
     store_render_artifact,
 )
 from .document import (
@@ -110,6 +111,7 @@ __all__ = [
     "manual_pdf_path",
     "is_publishable_section_name",
     "render_artifact_path",
+    "render_artifact_url",
     "store_render_artifact",
     "store_manual_pdf",
     "replay_documentation_commands",

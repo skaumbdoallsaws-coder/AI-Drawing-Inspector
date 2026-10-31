@@ -192,15 +192,38 @@ def test_assembly_ribbon_exposes_parts_manual_review_workflow() -> None:
     assert "freshCapturePassed" in html
     assert "forceFigureCapture: true" in html
     assert "currentImage.renderPipelineVersion === documentModel.renderPipelineVersion" in html
-    assert "reused: false" in html
+    # Unchanged parts-manual figures keep their capture; only new or changed ones are captured.
+    assert "const keptPageIds = _partsManualKeptCapturePageIds(scenePayload.document);" in html
+    assert "attempts: reused ? 0 : 1," in html
+    assert "keptCaptureCount: captureReceipts.filter(receipt => receipt.reused).length," in html
     assert "async function _partsManualCapturePageWithRetries(" in html
     assert "PARTS_MANUAL_TRUSTED_PROPOSAL_MIN_CONFIDENCE = 0.80" in html
     assert "stage: 'awaiting_review'" in html
     assert "stage: 'published'" in html
     assert "captureReceipts" in html
     assert "sizeBytes: Number(artifact.byteLength || 0)" in html
-    assert "function _partsManualOpenPublishedPdf(" in html
-    assert "manual-published-pdf-overlay" in html
+    # A published manual is a file card under Sage's reply; nothing opens over the app.
+    assert "_partsManualOpenPublishedPdf" not in html
+    assert "manual-published-pdf-overlay" not in html
+    assert "function _partsManualPdfFileBlock(toolResults)" in html
+    # Parts-list part numbers and descriptions are pressed twice to edit, on figure and parts-list pages alike.
+    assert "function _documentationBuildBom(rows, page = null)" in html
+    assert html.count("_documentationBuildBom(page.bom || [], page)") == 2
+    assert "const targetId = `part.${row.definitionId}.${editableFields[column]}`;" in html
+    assert "targetType: 'page_element', targetId: `part.${row.definitionId}.${field}`, part: true," in html
+    assert "if (!cell.isContentEditable) _documentationTextPressed(targetId);" in html
+    assert "if (event.target?.closest?.('[contenteditable=\"true\"]')) return;" in html
+    assert "|| textChanged.includes('illustrated_parts_manual'))" in html
+    # A section of identical copies draws one copy; its balloons still name every copy (their "2X").
+    assert "occurrenceIds: page.renderRequest?.occurrenceIds || section.occurrenceIds," in html
+    assert "occurrenceIds: section.shownCopyCount > 1 && (assignment.occurrenceIds || []).length" in html
+    # Balloon quantity labels follow pdf.py's quantity_label_side, set inline so the stylesheet cannot centre them.
+    assert "function _partsManualQuantityLabelSide(route)" in html
+    assert "const side = _partsManualQuantityLabelSide(route);" in html
+    assert "quantity.style.setProperty(" in html
+    assert "String(route.routeSide || '') === 'left'" not in html
+    assert "const publishedManualFile = _partsManualPdfFileBlock(turnToolResults);" in html
+    assert "`[Published PDF](" not in html
     assert "generate_and_publish_parts_manual: 1800000" in html
 
 
@@ -521,3 +544,15 @@ def test_direct_manipulation_does_not_recompose_the_exploded_view() -> None:
         "async function _partsManualCaptureAndStorePage(", 1
     )[1].split("const DOCUMENTATION_ICON_ROOT", 1)[0]
     assert "_partsManualViewDocumentPage(payload, page);" in capture
+
+
+def test_sage_context_bar_is_hidden_on_the_assembly_tab_and_in_documentation() -> None:
+    html = (ROOT / "static" / "index.html").read_text("utf-8")
+    bar = html.split("function refreshAgentContextBar() {", 1)[1].split("agentContextShell.hidden", 1)[0]
+
+    # The "<mode> | <part> / No active viewport override" bar above the Sage avatars is clutter
+    # in Facility Layout, the Assembly tab and every Documentation workflow.
+    assert "_trainIsFacilityLayoutMode()" in bar
+    assert "state.activeTab === 'assembly'" in bar
+    assert "state.activeTab === 'training' && trainingState.type === 'documentation'" in bar
+    assert "const showBar = !barHiddenHere && !!(" in bar

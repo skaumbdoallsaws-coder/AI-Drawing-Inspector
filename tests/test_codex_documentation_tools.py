@@ -391,6 +391,41 @@ def test_page_text_is_read_with_the_users_edits_and_changed_through_the_host():
     assert not refused["ok"] and len(host.edits) == 1
 
 
+def test_parts_manual_parts_lists_are_read_and_changed_through_the_host():
+    page = {"pageId": "page-section-1", "pageNumber": 5, "title": "Fixed Caster Assembly", "pageType": "manual_section",
+            "bom": [{"item": 1, "definitionId": "item-wheel", "displayPartNumber": "1030134",
+                     "description": "Caster Wheel", "quantity": 2},
+                    {"item": 2, "definitionId": "item-axle", "displayPartNumber": "", "description": "Axle",
+                     "quantity": 2}]}
+
+    class PartsHost(Host):
+        def __init__(self):
+            super().__init__()
+            self.edits = []
+
+        def document_pages(self, number, document_type):
+            return [page]
+
+        def edit_document_text(self, number, document_type, edits):
+            self.edits.append((document_type, edits))
+            return [{"pageId": row["pageId"], "targetId": row["targetId"]} for row in edits]
+
+    host = PartsHost()
+    reader = gateway(host)
+    read = call(reader, "read_document_pages", {"documentType": "illustrated_parts_manual"})
+    assert read["ok"], read
+    (block,) = read["data"]["pages"][0]["blocks"]
+    assert block["columns"] == ["ITEM", "PART NUMBER", "DESCRIPTION", "QTY"]
+    assert block["rows"][0] == [{"text": "1"}, {"id": "part.item-wheel.partNumber", "text": "1030134"},
+                                {"id": "part.item-wheel.description", "text": "Caster Wheel"}, {"text": "2"}]
+    assert block["rows"][1][1] == {"id": "part.item-axle.partNumber", "text": "Not specified"}
+    edits = [{"pageId": "page-section-1", "targetId": "part.item-wheel.description", "text": "Polyurethane Wheel"}]
+    edited = call(reader, "edit_document_text", {"documentType": "illustrated_parts_manual", "edits": edits})
+    assert edited["ok"], edited
+    assert host.edits == [("illustrated_parts_manual", edits)]
+    assert reader.text_changes == ["illustrated_parts_manual"]
+
+
 def test_binding_comes_from_the_chat_request_not_tool_arguments():
     request = SimpleNamespace(inspection_context={"attachments": {"documentation": {
         "active_document_type": "work_instructions"}}}, context=None)
@@ -527,3 +562,37 @@ def test_a_turn_returns_the_queued_workflow_with_a_receipt_and_replays(tmp_path,
 def test_a_value_counts_as_said_only_as_a_whole_token(value, expected):
     message = "Piston: general tolerance +/- 0.05 mm, revision C, lot LOT-0425, bore Ø30.02"
     assert said(value, message) is expected
+
+
+def test_sage_moves_parts_manual_parts_on_the_server_and_the_workspace_reloads():
+    class ManualHost(Host):
+        def __init__(self):
+            super().__init__(parts_state(publishable=True))
+            self.moves = []
+
+        def move_parts_manual_parts(self, number, moves):
+            self.moves.append((number, moves))
+            return {"changedSections": [{"sectionId": "section-aaaaaaaa", "name": "Rear Wheel and Axle Assembly",
+                                         "new": False, "parts": []},
+                                        {"sectionId": "section-bbbbbbbb", "name": "Frame and Seat Assembly",
+                                         "new": False, "parts": []}],
+                    "auditStatus": "PASS", "figuresKept": 1,
+                    "figuresToCapture": [{"figure": "1-1", "page": 4, "title": "Complete Tricycle Assembly"}],
+                    "pageEditsCarried": False}
+
+    host = ManualHost()
+    reader = gateway(host)
+    moves = [{"fromSectionId": "section-aaaaaaaa", "items": [3], "toSectionId": "section-bbbbbbbb"}]
+    moved = call(reader, "move_parts_manual_parts", {"moves": moves})
+    assert moved["ok"], moved
+    assert host.moves == [("tricycle", moves)]
+    assert moved["data"]["figuresKept"] == 1 and "use_approved_structure" in moved["data"]["note"]
+    assert reader.manual_changes == [{"assemblyNumber": "tricycle",
+                                      "sections": ["Rear Wheel and Axle Assembly", "Frame and Seat Assembly"]}]
+    assert reader.queued == []
+    from ai_inspector.codex_runtime.progress import describe
+    assert describe("move_parts_manual_parts", {"moves": moves})["done"] == "Moved parts to another manual section"
+    refused = call(reader, "move_parts_manual_parts", {"moves": [{"fromSectionId": "Rear Wheel", "items": [3],
+                                                                  "toSectionId": "section-bbbbbbbb"}]})
+    assert not refused["ok"] and refused["error"]["code"] == "codex_tool_arguments_invalid"
+    assert len(host.moves) == 1

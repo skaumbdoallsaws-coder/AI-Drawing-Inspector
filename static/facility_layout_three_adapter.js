@@ -12446,12 +12446,15 @@
         }
 
         // Changes that leave every model group intact skip the full rebuild:
-        // plain-color appearances, the viewport scene and equipment decals.
+        // plain-color appearances, the viewport scene, equipment decals and
+        // the site (its photo, areas and roads are synced with the environment;
+        // a big plant placed on a site reloaded every model, under the globe's fly-in).
         // Library finishes regroup models (see regroupFinishes).
         function appearanceOnlyKey(layout) {
             const extensions = Object.assign({}, layout.extensions || {});
             delete extensions.facilityScene;
             delete extensions.facilityEquipmentDecals;
+            delete extensions.facilitySiteContext;
             return JSON.stringify(Object.assign({}, layout, {
                 extensions: extensions,
                 placements: (layout.placements || []).map(function (placement) {
@@ -12489,6 +12492,7 @@
                 applySelection();
                 syncViewportSceneFromLayout();
                 renderEquipmentDecals();
+                syncEnvironment();
                 return getDiagnostics();
             }
             if (regroupFinishes(value)) return getDiagnostics();

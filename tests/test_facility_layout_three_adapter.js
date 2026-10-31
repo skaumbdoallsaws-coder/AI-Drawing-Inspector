@@ -6566,6 +6566,18 @@ test('colors, scenes and library finishes update without reloading models; geome
     await data.adapter.setScene(scened);
     assert.strictEqual(data.resolverCalls(), afterFirstBuild, 'no model reload for colors or scenes');
     assert.strictEqual(data.adapter.getViewportScene().sceneId, 'presentation-light');
+    const sited = JSON.parse(JSON.stringify(scened));
+    sited.layout.extensions.facilitySiteContext = { version: 1, buildingPose: { x: -10, z: -5, bearingDegrees: 30 },
+        georeference: { originLatitude: 39.5389, originLongitude: -119.43108 }, imagery: [] };
+    await data.adapter.setScene(sited);
+    await settleAsync();
+    assert.strictEqual(data.resolverCalls(), afterFirstBuild, 'placing the layout on a site reuses the models');
+    assert.strictEqual(data.adapter.getDiagnostics().cameraOrientation.reference, 'true-north',
+        'the site is in the scene input (true north from its bearing)');
+    await data.adapter.setScene(scened);
+    await settleAsync();
+    assert.strictEqual(data.resolverCalls(), afterFirstBuild, 'removing the site reuses the models too');
+    assert.notStrictEqual((data.adapter.getDiagnostics().cameraOrientation || {}).reference, 'true-north');
     const finished = JSON.parse(JSON.stringify(scened));
     finished.layout.placements[1].appearance = { appearanceId: 'brass-brushed' };
     await data.adapter.setScene(finished);

@@ -131,6 +131,11 @@ def _asset_kind(asset_id: str, definition: Mapping[str, Any] | None) -> str:
     return "equipment"
 
 
+def parked_car(definition: Mapping[str, Any] | None) -> bool:
+    """A parked car (catalog tag 'car'). The printed plans leave them off: a plan shows the stalls, not who parked."""
+    return "car" in {str(tag).strip().lower() for tag in (definition or {}).get("tags") or ()}
+
+
 # --- the layout, read once ---------------------------------------------------------------------------------
 class PlanData:
     """Everything the sheets draw, in layout metres."""
@@ -204,6 +209,8 @@ class PlanData:
             asset_id = str(placement.get("assetId") or "")
             revision = str(placement.get("assetDefinitionRevision") or "")
             definition = resolve_asset(asset_id, revision) if resolve_asset else None
+            if parked_car(definition):
+                continue
             polygons: list[list[Point]] = []
             if definition:
                 try:

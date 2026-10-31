@@ -17,7 +17,8 @@ from typing import Any, Mapping, Sequence
 from .emergency_plan import (SYMBOLS, centroid, farthest_from, indoor_zones, meeting_point_at, plan_from_layout,
                              safety_items, zone_points)
 from .pdf_canvas import Document, Page, text_width
-from .plan_pdf import FOOT, PT_PER_INCH, AssetResolver, View, _logo, _wrap, length_label, load_template
+from .plan_pdf import (FOOT, PT_PER_INCH, AssetResolver, View, _logo, _wrap, length_label, load_template,
+                       parked_car)
 
 KINDS = ("evacuation", "emergency")
 NOTE = ("Generated from the saved layout. Check exits, routes and equipment on site; the facility's emergency "
@@ -134,7 +135,7 @@ class MapData:
         for placement in layout.get("placements") or []:
             definition = resolve_asset(str(placement.get("assetId") or ""),
                                        str(placement.get("assetDefinitionRevision") or "")) if resolve_asset else None
-            if not definition or placement.get("placementId") in safety_ids:
+            if not definition or placement.get("placementId") in safety_ids or parked_car(definition):
                 continue
             try:
                 records = placement_spatial_records(placement, definition)

@@ -42,6 +42,7 @@ ASSETS = {
     "asset-sign": definition("asset-sign", ["assembly-point", "sign"]),
     "asset-wall": definition("asset-wall", ["wall"], (20.0, 2.0, 0.1)),
     "asset-machine": definition("asset-machine", [], (1.5, 1.0, 1.0)),
+    "asset-car": definition("asset-car", ["car", "vehicle", "employee parking"], (0.9, 0.7, 2.2)),
 }
 
 
@@ -157,6 +158,16 @@ def test_the_evacuation_map_needs_teams_then_draws_them():
     assert info["exits"] == 2 and [t["name"] for t in info["teams"]] == ["Red Team - Production",
                                                                          "Blue Team - Warehouse"]
     assert info["farthestFromExit"]["meters"] > 0
+
+
+def test_parked_cars_are_left_off_the_printed_plans():
+    from ai_inspector.facility_layout.emergency_pdf import MapData
+    from ai_inspector.facility_layout.plan_pdf import PlanData
+    empty, parked = hall(), hall()
+    parked["placements"].append(placed("pl-car", "asset-car", 60, 10))
+    assert len(MapData(parked, resolve).items) == len(MapData(empty, resolve).items) >= 1  # the machine stays
+    labels = [item["label"] for item in PlanData(parked, resolve).items]
+    assert "asset-car" not in labels and "asset-machine" in labels
 
 
 def test_the_emergency_map_counts_each_symbol_and_lists_only_those_present():

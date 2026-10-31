@@ -82468,7 +82468,13 @@
                 if (!_chatRegistry || !_currentConversationId) return;
                 const conv = _chatRegistry.conversations[_currentConversationId];
                 if (!conv || (conv.title && conv.title !== 'New Chat')) return;
-                if (state.partNumber) {
+                // In Facility Layout the chat is about the open layout, not the last part number loaded elsewhere.
+                const facilityApp = _trainIsFacilityLayoutMode() ? _trainFacilityLayoutAuthoringApp : null;
+                const facilityLayout = facilityApp && facilityApp.workspace && facilityApp.workspace.state
+                    ? facilityApp.workspace.state.layout : null;
+                if (facilityLayout && facilityLayout.displayName) {
+                    conv.title = facilityLayout.displayName + ' Chat';
+                } else if (state.partNumber) {
                     conv.title = state.partNumber + ' Chat';
                 } else if (text) {
                     conv.title = text.substring(0, 40) + (text.length > 40 ? '...' : '');

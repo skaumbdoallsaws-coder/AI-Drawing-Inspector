@@ -28912,10 +28912,16 @@
             const limitingFov = Math.max(0.1, Math.min(verticalFov, horizontalFov));
             const targetAreaOccupancy = 0.70;
             const maximumAxisOccupancy = 0.90;
+            // contain measures each part's own box: an exploded group's box has empty corners far outside the parts.
+            const bounds = options.contain
+                ? meshes.map(mesh => new THREE.Box3().expandByObject(mesh)).filter(meshBox => !meshBox.isEmpty())
+                : [box];
             const corners = [];
-            [box.min.x, box.max.x].forEach(x => {
-                [box.min.y, box.max.y].forEach(y => {
-                    [box.min.z, box.max.z].forEach(z => corners.push(new THREE.Vector3(x, y, z)));
+            bounds.forEach(bound => {
+                [bound.min.x, bound.max.x].forEach(x => {
+                    [bound.min.y, bound.max.y].forEach(y => {
+                        [bound.min.z, bound.max.z].forEach(z => corners.push(new THREE.Vector3(x, y, z)));
+                    });
                 });
             });
             let distance = Math.max(
@@ -28934,14 +28940,16 @@
                 const xs = projected.map(point => point.x).filter(Number.isFinite);
                 const ys = projected.map(point => point.y).filter(Number.isFinite);
                 if (xs.length !== corners.length || ys.length !== corners.length) break;
-                // contain: every corner inside the view, measured from its centre (a deep exploded group seen in
-                // perspective is not centred on its box); otherwise the span, as the manual's figures are framed.
-                const widthOccupancy = options.contain
-                    ? Math.max(Math.abs(Math.min(...xs)), Math.abs(Math.max(...xs)))
-                    : (Math.max(...xs) - Math.min(...xs)) * 0.5;
-                const heightOccupancy = options.contain
-                    ? Math.max(Math.abs(Math.min(...ys)), Math.abs(Math.max(...ys)))
-                    : (Math.max(...ys) - Math.min(...ys)) * 0.5;
+                // contain: every corner inside the view. A deep exploded group seen in perspective is not centred on
+                // its box, so the view is centred on the parts as seen (measured from the box's centre, the fit came
+                // out loose); otherwise the box's centre, as the manual's figures are framed.
+                if (options.contain) {
+                    const middle = new THREE.Vector3((Math.min(...xs) + Math.max(...xs)) / 2,
+                        (Math.min(...ys) + Math.max(...ys)) / 2, center.clone().project(camera).z);
+                    center.copy(middle.unproject(camera));
+                }
+                const widthOccupancy = (Math.max(...xs) - Math.min(...xs)) * 0.5;
+                const heightOccupancy = (Math.max(...ys) - Math.min(...ys)) * 0.5;
                 const observedArea = Math.max(
                     widthOccupancy * heightOccupancy,
                     0.001
@@ -28958,6 +28966,7 @@
             camera.near = Math.max(0.0001, distance - radius * 2.5);
             camera.far = Math.max(camera.near + 10, distance + radius * 8);
             camera.updateProjectionMatrix();
+            controls.target.copy(center);
             camera.lookAt(center);
             camera.updateMatrixWorld(true);
             _syncOrbitFromCamera(controls, camera);
@@ -69690,13 +69699,75 @@
             if (options.animate === false) {
                 finish();
             } else {
+                // Two steps: the section on its own, still assembled, as the camera eases onto it; then it explodes
+                // as the camera eases out to fit it. The exploded layout and its camera are worked out first, so the
+                // explode ends where finish() would leave it.
+                const camera = state.assyCamera;
+                const controls = state.assyControls;
+                const pose = () => ({ position: camera.position.clone(), target: controls.target.clone(),
+                    near: camera.near, far: camera.far });
+                if (state._assyCameraAnimId) {
+                    cancelAnimationFrame(state._assyCameraAnimId);
+                    state._assyCameraAnimId = null;
+                }
+                const startPose = pose();
+                _partsManualFitMeshes(meshes, 'isometric', { contain: true });
+                const assembledPose = pose();
+                const from = new Map(meshes.map(mesh => [mesh, mesh.position.clone()]));
+                targets.forEach((target, mesh) => mesh.position.copy(target));
+                _partsManualRepairOccludedExplodeClusters(clusters, meshes, 'isometric', dimension);
+                if (state.assyLiveScene) state.assyLiveScene.updateWorldMatrix(true, true);
+                _partsManualFitMeshes(meshes, 'isometric', { contain: true });
+                const explodedPose = pose();
+                const to = new Map(meshes.map(mesh => [mesh, mesh.position.clone()]));
+                from.forEach((position, mesh) => mesh.position.copy(position));
+                if (state.assyLiveScene) state.assyLiveScene.updateWorldMatrix(true, true);
+                const ease = t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+                const placeCamera = (a, b, t) => {
+                    const target = a.target.clone().lerp(b.target, t);
+                    const offsetA = a.position.clone().sub(a.target);
+                    const offsetB = b.position.clone().sub(b.target);
+                    let direction = offsetA.clone().normalize().lerp(offsetB.clone().normalize(), t);
+                    if (direction.lengthSq() < 1e-8) direction = offsetB.clone();
+                    camera.position.copy(target).add(direction.normalize()
+                        .multiplyScalar(THREE.MathUtils.lerp(offsetA.length(), offsetB.length(), t)));
+                    camera.near = t >= 1 ? b.near : Math.min(a.near, b.near);
+                    camera.far = t >= 1 ? b.far : Math.max(a.far, b.far);
+                    camera.updateProjectionMatrix();
+                    controls.target.copy(target);
+                    camera.lookAt(target);
+                    _syncOrbitFromCamera(controls, camera);
+                };
+                placeCamera(startPose, startPose, 1);
+                const settle = 900;
+                const hold = 700;
+                const spread = 1200;
                 const startedAt = performance.now();
                 const animate = now => {
-                    const progress = Math.min((now - startedAt) / 650, 1);
-                    const eased = 1 - Math.pow(1 - progress, 3);
-                    targets.forEach((target, mesh) => mesh.position.copy(starts.get(mesh)).lerp(target, eased));
-                    if (progress < 1) state.partsManualAnimationId = requestAnimationFrame(animate);
-                    else finish();
+                    if (state.assyGroupView !== groupView) {
+                        state.partsManualAnimationId = null;
+                        return;
+                    }
+                    const elapsed = now - startedAt;
+                    const spreadProgress = Math.min(Math.max((elapsed - settle - hold) / spread, 0), 1);
+                    if (elapsed < settle) {
+                        placeCamera(startPose, assembledPose, ease(elapsed / settle));
+                    } else {
+                        const eased = ease(spreadProgress);
+                        from.forEach((position, mesh) => mesh.position.copy(position).lerp(to.get(mesh), eased));
+                        placeCamera(assembledPose, explodedPose, eased);
+                    }
+                    if (spreadProgress < 1) {
+                        state.partsManualAnimationId = requestAnimationFrame(animate);
+                        return;
+                    }
+                    state.partsManualAnimationId = null;
+                    if (state.assyLiveScene) state.assyLiveScene.updateWorldMatrix(true, true);
+                    controls._needsUpdate = true;
+                    controls.update();
+                    if (Object.keys(state.assy3DLabels || {}).length > 0) _update3DLabelPositions();
+                    // Sage reads that the group is exploded (inspect_assembly's shownNow).
+                    _assemblyReportGeometry(state.assySigns);
                 };
                 state.partsManualAnimationId = requestAnimationFrame(animate);
             }
@@ -82468,8 +82539,10 @@
                 if (!_chatRegistry || !_currentConversationId) return;
                 const conv = _chatRegistry.conversations[_currentConversationId];
                 if (!conv || (conv.title && conv.title !== 'New Chat')) return;
-                // In Facility Layout the chat is about the open layout, not the last part number loaded elsewhere.
-                const facilityApp = _trainIsFacilityLayoutMode() ? _trainFacilityLayoutAuthoringApp : null;
+                // In Facility Layout (the Workflows tab open on it) the chat is about the open layout, not the last
+                // part number loaded elsewhere. The Workflows type stays Facility Layout while another tab is open.
+                const facilityApp = state.activeTab === 'training' && _trainIsFacilityLayoutMode()
+                    ? _trainFacilityLayoutAuthoringApp : null;
                 const facilityLayout = facilityApp && facilityApp.workspace && facilityApp.workspace.state
                     ? facilityApp.workspace.state.layout : null;
                 if (facilityLayout && facilityLayout.displayName) {

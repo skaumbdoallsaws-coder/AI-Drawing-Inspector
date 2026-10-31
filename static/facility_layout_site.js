@@ -53,7 +53,8 @@
 
     const SVG = 'http://www.w3.org/2000/svg';
     const SITE_KEY = 'facilitySiteContext';
-    const AREA_SIZES = [[150, '300 m square'], [250, '500 m square'], [500, '1 km square']];
+    // 2 km fits a very large plant with its neighbours (the server's limit; 4000 photo pixels at 0.5 m).
+    const AREA_SIZES = [[150, '300 m square'], [250, '500 m square'], [500, '1 km square'], [1000, '2 km square']];
     const PHOTO_SOURCES = [['standard', 'Standard: USGS NAIP, nationwide'],
         ['mngeo_metro', 'High resolution: Twin Cities metro, 2025']];
     const LAYER_ROWS = [['flood', 'Flood zones', 'FEMA flood map'], ['wetlands', 'Wetlands', 'USFWS wetlands'],

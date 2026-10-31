@@ -345,6 +345,11 @@ function applyFakeOperations(base, operations) {
                 operation.facilityNavigation
             );
             break;
+        case 'set_site_context':
+            document.extensions = document.extensions || {};
+            if (operation.siteContext === null) delete document.extensions.facilitySiteContext;
+            else document.extensions.facilitySiteContext = clone(operation.siteContext);
+            break;
         case 'clear_layout_contents':
             document.zones = [];
             document.floorMarkings = [];
@@ -1163,6 +1168,26 @@ async function main() {
             assert.deepStrictEqual(after.layout, before);
             assert.strictEqual(after.history.length, 0);
             assert.strictEqual(after.dirty, false);
+        });
+
+    await check('an edit back to the saved layout is kept after an earlier edit (remove a site, place it again)',
+        async () => {
+            const site = { georeference: { originLatitude: 39.5389, originLongitude: -119.43108 } };
+            const saved = Object.assign(layout(), { extensions: { facilitySiteContext: site } });
+            const authority = fakeAuthority(saved);
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.setSiteContext(null);
+            await session.setSiteContext(site);
+            const state = session.getState();
+            assert.deepStrictEqual(state.layout.extensions.facilitySiteContext, site);
+            assert.deepStrictEqual(state.operations.map(operation => operation.siteContext), [null, site]);
+            await session.undo();
+            assert.strictEqual(session.getState().layout.extensions.facilitySiteContext, undefined);
+            await session.redo();
+            await session.save();
+            assert.deepStrictEqual(authority.layout.extensions.facilitySiteContext, site);
+            assert.strictEqual(session.getState().dirty, false);
         });
 
     await check('authoritative no-op does not create dirty history', async () => {

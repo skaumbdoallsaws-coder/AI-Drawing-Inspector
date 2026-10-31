@@ -2055,7 +2055,9 @@
                     error.code = 'facility_command_stale';
                     throw error;
                 }
-                if (result.receipt.changed === false) {
+                // changed compares with the saved layout, so it is a no-op only with no earlier edit in the draft:
+                // after one, an edit back to the saved layout (a site removed, then placed again) is still an edit.
+                if (result.receipt.changed === false && cursor === 0) {
                     draftLayout = result.layout;
                     draftRevision = result.revision
                         || canonicalHash(result.layout);

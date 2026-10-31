@@ -9706,8 +9706,10 @@
                     && typeof state.renderer.capabilities.getMaxAnisotropy === 'function') {
                 texture.anisotropy = Math.min(8, state.renderer.capabilities.getMaxAnisotropy());
             }
+            // A backdrop: drawn first (renderOrder) and writing no depth, so ground the plan sinks below the
+            // photo (a dock-height truck yard) and what stands on it show over it instead of being buried.
             const material = new THREE.MeshBasicMaterial({
-                map: texture, side: THREE.DoubleSide, toneMapped: false,
+                map: texture, side: THREE.DoubleSide, toneMapped: false, depthWrite: false,
             });
             const ground = new THREE.Mesh(geometry, material);
             ground.name = 'InspectorProFacilitySiteGround';

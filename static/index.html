@@ -20672,8 +20672,8 @@
         }
     };
     </script>
-    <link rel="stylesheet" href="/static/facility_layout_workspace.css?v=20261024-rulers-1">
-    <link rel="stylesheet" href="/static/facility_layout_library_panel.css?v=20261025-library-2">
+    <link rel="stylesheet" href="/static/facility_layout_workspace.css?v=20261101-sage-overlay-1">
+    <link rel="stylesheet" href="/static/facility_layout_library_panel.css?v=20261101-cc3-2">
     <link rel="stylesheet" href="/static/walkthrough_camera_settings.css?v=20260927-1">
     <link rel="stylesheet" href="/static/facility_layout_sheets.css?v=20260929-open-layout-1">
     <script type="importmap">
@@ -21586,36 +21586,39 @@
     <script src="/static/facility_layout_walls.js?v=20261024-door-heads-1"></script>
     <script src="/static/facility_layout_lettering.js?v=20261013-authoring-1"></script>
     <script src="/static/facility_layout_authoring_dialog.js?v=20261013-authoring-1"></script>
-    <script src="/static/facility_layout_component_materials.js?v=20261019-library-1"></script>
+    <script src="/static/facility_layout_component_materials.js?v=20261101-stack-1"></script>
     <script src="/static/facility_layout_interior_walls.js?v=20261013-authoring-1"></script>
     <script src="/static/facility_layout_floor_surfaces.js?v=20261013-authoring-1"></script>
-    <script src="/static/facility_layout_library.js?v=20261025-library-2"></script>
-    <script src="/static/facility_layout_finishes.js?v=20261019-library-1"></script>
+    <script src="/static/facility_layout_library.js?v=20261101-l8-1"></script>
+    <script src="/static/facility_layout_finishes.js?v=20261101-l8-1"></script>
     <script src="/static/facility_layout_scenes.js?v=20261019-library-1"></script>
     <script src="/static/facility_layout_equipment_decals.js?v=20261019-library-1"></script>
     <script src="/static/facility_layout_replace_asset.js?v=20261013-authoring-1"></script>
     <script src="/static/facility_layout_decals.js?v=20261019-library-1"></script>
-    <script src="/static/facility_layout_editor.js?v=20261030-roof-layers-1"></script>
+    <script src="/static/facility_layout_editor.js?v=20261101-cc3-2"></script>
     <script src="/static/facility_layout_avatar.js?v=20260928-motion-operators-1"></script>
     <script src="/static/process_operator.js?v=20260927-1"></script>
     <script src="/static/walkthrough_camera_settings.js?v=20260927-1"></script>
     <script src="/static/facility_layout_site_globe.js?v=20261022-globe-4"></script>
     <script src="/static/facility_layout_site.js?v=20261031-site-2km-1"></script>
-    <script src="/static/facility_layout_three_adapter.js?v=20261031-site-fastpath-1"></script>
+    <script src="/static/facility_layout_light_pools.js?v=20261101-l8-1"></script>
+    <script src="/static/facility_layout_light_areas.js?v=20261031-lights-7"></script>
+    <script src="/static/facility_layout_light_coverage.js?v=20261101-cc3-1"></script>
+    <script src="/static/facility_layout_three_adapter.js?v=20261101-cc3-1"></script>
     <script src="/static/facility_layout_recorder.js?v=20261021-site-1"></script>
     <script src="/static/facility_layout_structure.js?v=20260923-structure-tree"></script>
     <script src="/static/facility_layout_structure_tree.js?v=9c9992a02daa"></script>
-    <script src="/static/facility_layout_library_panel.js?v=20261019-library-1"></script>
+    <script src="/static/facility_layout_library_panel.js?v=20261101-cc3-2"></script>
     <script src="/static/assembly_smart_dimension.js?v=20261026-smart-dimension-2"></script>
-    <script src="/static/assembly_library_panel.js?v=20261028-part-1"></script>
+    <script src="/static/assembly_library_panel.js?v=20261031-lights-1"></script>
     <script src="/static/facility_layout_sheets.js?v=20260929-open-layout-1"></script>
     <script src="/static/facility_layout_patterns.js?v=20260912-construction-contract"></script>
     <script src="/static/facility_layout_command_adapter.js?v=20260912-contract-v1-retry-fix"></script>
-    <script src="/static/facility_layout_session.js?v=20261031-edit-back-1"></script>
-    <script src="/static/facility_layout_transport.js?v=20261023-trace-1"></script>
+    <script src="/static/facility_layout_session.js?v=20261101-checks-1"></script>
+    <script src="/static/facility_layout_transport.js?v=20261101-cc3-1"></script>
     <script src="/static/facility_layout_generation_view.js?v=20260917-generation-research"></script>
-    <script src="/static/facility_layout_workspace.js?v=20261030-roof-layers-1"></script>
-    <script src="/static/facility_layout_app.js?v=20261023-trace-1"></script>
+    <script src="/static/facility_layout_workspace.js?v=20261101-sage-overlay-1"></script>
+    <script src="/static/facility_layout_app.js?v=20261101-cc3-1"></script>
     <script src="/static/desktop_workflow_observation.js?v=20260915-workflow-coverage"></script>
     <script src="/static/desktop_runtime_bridge.js?v=20260915-workflow-coverage"></script>
     <script>
@@ -46656,6 +46659,19 @@
             _documentationSyncWorkflowRibbon();
         }
 
+        // Sage's check_lighting_coverage (docs/facility-lighting-plan.md, "Sage shows the overlay"): its done step
+        // names the area and the revision Sage read, and the facility view shows the same estimate on the floor,
+        // as the Scenes pane would, while it holds that revision with no unsaved edits.
+        function _trainFacilityShowFromStep(step) {
+            const coverage = step && step.state === 'done' && step.show && step.show.lightingCoverage;
+            if (!coverage || typeof coverage !== 'object') return;
+            const workspace = _trainFacilityLayoutAuthoringApp && _trainFacilityLayoutAuthoringApp.workspace;
+            if (!workspace || typeof workspace.showSageLightCoverage !== 'function') return;
+            workspace.showSageLightCoverage(coverage).catch(function (error) {
+                console.warn('The lighting estimate Sage checked could not be shown.', error);
+            });
+        }
+
         function _trainFacilityCommandStates() {
             const workspace = _trainFacilityLayoutAuthoringApp
                 && _trainFacilityLayoutAuthoringApp.workspace;
@@ -57082,7 +57098,7 @@
         // panel. The panel mounts the first time its rail icon opens it and
         // follows whichever facility layout app is current.
         // The library's manifests change with tools/facility_library/build_manifests.py VERSION.
-        const FACILITY_LIBRARY_VERSION = '2026.10.25.2';
+        const FACILITY_LIBRARY_VERSION = '2026.11.01.1';
         let _facilityLibraryStoreInstance = null;
         let _facilityLibraryPanelInstance = null;
         let _facilityLibraryWorkspaceApp = null;
@@ -58611,6 +58627,10 @@
                 import('three/addons/environments/RoomEnvironment.js').catch(() => ({})),
                 import('three/addons/loaders/HDRLoader.js').catch(() => ({})),
                 import('three/addons/geometries/DecalGeometry.js').catch(() => ({})),
+                // The optional glow halo in the Evening scene (lighting L6).
+                import('three/addons/postprocessing/UnrealBloomPass.js').catch(() => ({})),
+                import('three/addons/postprocessing/Pass.js').catch(() => ({})),
+                import('three/addons/shaders/CopyShader.js').catch(() => ({})),
             ]).then(([
                 THREE,
                 controlsModule,
@@ -58620,6 +58640,9 @@
                 roomModule,
                 hdrModule,
                 decalModule,
+                bloomModule,
+                passModule,
+                copyShaderModule,
             ]) => ({
                 THREE,
                 OrbitControls: controlsModule.OrbitControls,
@@ -58629,6 +58652,9 @@
                 RoomEnvironment: roomModule.RoomEnvironment || null,
                 HDRLoader: hdrModule.HDRLoader || null,
                 DecalGeometry: decalModule.DecalGeometry || null,
+                UnrealBloomPass: bloomModule.UnrealBloomPass || null,
+                FullScreenQuad: passModule.FullScreenQuad || null,
+                CopyShader: copyShaderModule.CopyShader || null,
             })).catch(error => {
                 _trainFacilityThreeRuntimePromise = null;
                 throw error;
@@ -58831,6 +58857,9 @@
                             RoomEnvironment: facilityThree.RoomEnvironment,
                             HDRLoader: facilityThree.HDRLoader,
                             DecalGeometry: facilityThree.DecalGeometry,
+                            UnrealBloomPass: facilityThree.UnrealBloomPass,
+                            FullScreenQuad: facilityThree.FullScreenQuad,
+                            CopyShader: facilityThree.CopyShader,
                             facilityLibrary: _facilityLibraryStore(),
                             placementFootprint:
                                 window.InspectorProFacilityLayout
@@ -93897,6 +93926,7 @@
                                         preambleText = '';
                                     }
                                     workingState.step(event.step);
+                                    _trainFacilityShowFromStep(event.step);
                                     break;
                                 case 'text_delta': {
                                     const delta = String(event.text || '');

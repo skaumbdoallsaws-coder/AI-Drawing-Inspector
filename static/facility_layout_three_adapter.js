@@ -27,6 +27,22 @@
         || (typeof require === 'function' ? require('./facility_layout_scenes.js') : null);
     const equipmentDecalsRuntime = root.InspectorProFacilityEquipmentDecals
         || (typeof require === 'function' ? require('./facility_layout_equipment_decals.js') : null);
+    const lightPoolsRuntime = root.InspectorProFacilityLightPools
+        || (typeof require === 'function' ? require('./facility_layout_light_pools.js') : null);
+    const lightCoverageRuntime = root.InspectorProFacilityLightCoverage
+        || (typeof require === 'function' ? require('./facility_layout_light_coverage.js') : null);
+    const lightAreasRuntime = root.InspectorProFacilityLightAreas
+        || (typeof require === 'function' ? require('./facility_layout_light_areas.js') : null);
+    // Floor light pools (L3): linear brightness at a pool's centre (times the lamp's glow color), and how far above
+    // the floor they lie, over paint and floor finishes.
+    const LIGHT_POOL_STRENGTH = 0.08;
+    const LIGHT_POOL_LIFT = 0.02;
+    // Outdoor light beams (L8): at most this many cones per layout (lamps beyond keep their pools), and a cone's
+    // opacity at the lamp, fading toward the ground and its edge.
+    const LIGHT_BEAM_CAP = 64;
+    const LIGHT_BEAM_STRENGTH = 0.14;
+    // A blinking light's redraw is timed a little after its change, so the frame lands past the edge (L4).
+    const LIGHT_PATTERN_SLACK_MS = 8;
 
     const cameraPreferences = root.InspectorProWalkthroughCamera
         || (typeof require === 'function' ? require('./walkthrough_camera_settings.js') : null);
@@ -63,6 +79,14 @@
         wireframe: false,
         background: 'auto',
     });
+    // Glow halo (lighting L6, the scene's adjustments.glowHalo): three's UnrealBloomPass, fed only the pixels where a
+    // glow is drawn (GLOW_STENCIL), so bright paint, floor markings and highlights get none. The frame is already
+    // tone-mapped and in sRGB, so the threshold is on brightness as shown: a lit lamp of any color passes it (a red one
+    // is about 0.45), a lamp switched off or in the dark step of a blink stays under it.
+    const BLOOM = Object.freeze({ strength: 1, radius: 0.5, threshold: 0.35, softness: 0.15 });
+    const GLOW_STENCIL = 1;
+    // A click selects (as in SOLIDWORKS): pressed and released on the view, the pointer moved at most this far.
+    const CLICK_SLOP_PIXELS = 5;
     const DEFAULT_LAYER_VISIBILITY = Object.freeze({
         zones: true,
         cells: true,
@@ -2138,6 +2162,10 @@
         const RoomEnvironmentType = options.RoomEnvironment || null;
         const HDRLoaderType = options.HDRLoader || null;
         const DecalGeometryType = options.DecalGeometry || null;
+        // The glow halo's three.js addons (UnrealBloomPass.js, Pass.js, CopyShader.js); without them there is none.
+        const BloomPassType = options.UnrealBloomPass || null;
+        const FullScreenQuadType = options.FullScreenQuad || null;
+        const CopyShaderSource = options.CopyShader || null;
         const placementFootprintResolver = options.placementFootprint || null;
         const documentObject = options.document || (root && root.document);
         const ResizeObserverType = options.ResizeObserver
@@ -2152,6 +2180,11 @@
             || (root && root.AbortController);
         const logger = options.logger || (root && root.console) || {};
         const preserveAssetColors = options.preserveAssetColors === true;
+        // The blinking lights' shared clock, in ms (docs/facility-lighting-plan.md, L4).
+        const lightClock = typeof options.now === 'function' ? options.now : function () {
+            const clock = root && root.performance;
+            return clock && typeof clock.now === 'function' ? clock.now() : Date.now();
+        };
         const requestedAssetColor = Number(options.neutralAssetColor);
         const neutralAssetColor = Number.isFinite(requestedAssetColor)
             ? Math.max(0, Math.min(0xffffff, Math.floor(requestedAssetColor)))
@@ -2399,6 +2432,7 @@
             resizeHandler: null,
             contextLostHandler: null,
             contextRestoredHandler: null,
+            lightPatternsVisibilityHandler: null,
             controlChangeHandler: null,
             controlStartHandler: null,
             controlEndHandler: null,
@@ -2411,6 +2445,9 @@
             walkthroughBlurHandler: null,
             walkthroughVisibilityHandler: null,
             pointerHandler: null,
+            pointerDownHandler: null,
+            pointerCancelHandler: null,
+            pointerPress: null,
             selectionHandler: null,
             walkthroughStateHandler: null,
             droneStateHandler: null,
@@ -2596,6 +2633,23 @@
             // Library finishes, viewport scene and equipment decals.
             finishTextures: null,
             finishGeometryCache: new Map(),
+            // Floor light pools: one mesh (or null, no lamps) per render group, under one root.
+            lightPools: { root: null, meshes: new Map(), material: null, texture: null, beams: null, groundKey: '' },
+            // Lighting coverage estimate (CC3): the workspace's prepared bands and outlines, and their objects.
+            lightCoverage: { view: null, root: null },
+            // Glow halo (L6): GPU resources only while it is drawn; failed: why it cannot be, for this view;
+            // stencil: whether the view's canvas has the stencil the halo needs (asked once per renderer).
+            bloom: { pass: null, frame: null, glow: null, copy: null, mask: null, add: null, quad: null, size: null,
+                width: 0, height: 0, checked: false, frames: 0, failed: null, stencil: null },
+            lightPatterns: {
+                timer: null, due: null, clock: 0, drawn: false, next: Infinity, frustum: null, inView: false, redraws: 0,
+            },
+            // General lights by area (L7): the scene's areas resolved against the layout; a new version makes the
+            // lamp tables refill. masks: a glow material's on/off table; pools: a pool mesh's pools.
+            // fresh: geometries given lamp numbers during the frame being drawn (the GPU has them from the next one).
+            lightAreas: {
+                resolved: null, signature: 'null', version: 0, masks: new WeakMap(), pools: new WeakMap(), fresh: new Set(),
+            },
             environmentLoader: null,
             viewportScene: null,
             viewportSceneRequest: 0,
@@ -6445,8 +6499,14 @@
             try {
                 updateWalkthroughContextFocus(timestamp);
                 notifyCameraOrientation(false);
+                beginLightPatternFrame();
+                state.lightAreas.fresh.clear();
+                if (state.lightCoverage.view) syncLightCoverage();
                 state.renderer.render(state.scene, state.camera);
+                if (bloomWanted()) drawBloom();
+                else if (state.bloom.pass) disposeBloom();
                 state.renderedFrames += 1;
+                scheduleLightPatterns();
                 return true;
             } catch (error) {
                 reportError('render_failed', error);
@@ -6699,6 +6759,8 @@
                 if (event && typeof event.preventDefault === 'function') {
                     event.preventDefault();
                 }
+                // The halo's buffers go with the context; it makes new ones when it is drawn again.
+                disposeBloom();
                 enterDegraded('webgl_context_lost', true);
             };
             state.contextRestoredHandler = function () {
@@ -6727,7 +6789,28 @@
                 state.contextRestoredHandler,
                 false
             );
+            // Blinking lights (L4): a frame drawn while the window was hidden set no timer; draw one when it shows.
+            state.lightPatternsVisibilityHandler = function () {
+                if (documentObject && !documentObject.hidden && state.lightPatterns.inView) invalidate();
+            };
+            addListener(documentObject, 'visibilitychange', state.lightPatternsVisibilityHandler, false);
+            // A pick selects only on a click: a press and a release on the view, primary button, pointer still. A
+            // drag that turns or pans the view selects nothing, and nor does a release whose press was not on the
+            // view (the main session, 2026-11-01: after desktop Sage turns a roof joist or a sprinkler line that
+            // nobody clicked was selected, and Sage then refused the next request because of it).
+            state.pointerDownHandler = function (event) {
+                state.pointerPress = event && (event.button === undefined || event.button === 0) ? {
+                    pointerId: event.pointerId,
+                    x: finite(event.clientX, 0),
+                    y: finite(event.clientY, 0),
+                } : null;
+            };
+            state.pointerCancelHandler = function () {
+                state.pointerPress = null;
+            };
             state.pointerHandler = function (event) {
+                const press = state.pointerPress;
+                state.pointerPress = null;
                 if (state.drone.active) return;
                 if (state.walkthrough.active) {
                     if (state.walkthrough.locked
@@ -6747,6 +6830,7 @@
                     }
                     return;
                 }
+                if (!wasClick(press, event)) return;
                 const result = pick(event);
                 if (result && state.selectionHandler) {
                     // The event carries Ctrl/Cmd, which adds to the selection.
@@ -6759,6 +6843,8 @@
                 state.pointerHandler,
                 false
             );
+            addListener(state.canvas, 'pointerdown', state.pointerDownHandler, false);
+            addListener(state.canvas, 'pointercancel', state.pointerCancelHandler, false);
 
             if (typeof OrbitControls === 'function') {
                 state.controls = new OrbitControls(state.camera, state.canvas);
@@ -9643,6 +9729,8 @@
                 axesVisible:false, groundSurfaceCount:rows.length, minimumElevation:bounds.minimum.y,
                 maximumElevation:bounds.maximum.y, width:bounds.maximum.x-bounds.minimum.x,
                 depth:bounds.maximum.z-bounds.minimum.z};
+            // An outdoor lamp's pool and beam end on the ground (L8).
+            if (lightPoolsWanted()) syncLightPools();
             invalidate();
             return true;
         }
@@ -9853,6 +9941,7 @@
                 state.modelRoot.remove(record.container);
             }
             disposeObjectGraphs([record.container, record.prototypeObject]);
+            dropLightPools(record);
             record.pickObjects.forEach(function (object) {
                 state.instanceLookup.delete(object);
                 if (object && object.uuid) state.instanceLookup.delete(object.uuid);
@@ -11005,12 +11094,16 @@
                 state.contextRestoredHandler,
                 false
             );
+            removeListener(documentObject, 'visibilitychange', state.lightPatternsVisibilityHandler, false);
+            state.lightPatternsVisibilityHandler = null;
             removeListener(
                 state.canvas,
                 'pointerup',
                 state.pointerHandler,
                 false
             );
+            removeListener(state.canvas, 'pointerdown', state.pointerDownHandler, false);
+            removeListener(state.canvas, 'pointercancel', state.pointerCancelHandler, false);
             removeListener(
                 state.controls,
                 'change',
@@ -11089,6 +11182,9 @@
             state.walkthroughBlurHandler = null;
             state.walkthroughVisibilityHandler = null;
             state.pointerHandler = null;
+            state.pointerDownHandler = null;
+            state.pointerCancelHandler = null;
+            state.pointerPress = null;
             state.resizeHandler = null;
 
             clearModel();
@@ -11112,6 +11208,11 @@
             if (state.renderer && state.renderer.shadowMap) state.renderer.shadowMap.enabled = false;
             if (state.finishTextures) state.finishTextures.dispose();
             state.finishTextures = null;
+            disposeLightPools();
+            disposeBloom();
+            state.bloom.failed = null;
+            state.bloom.stencil = null;
+            stopLightPatterns();
             state.decalTextures.forEach(function (texture) { texture.dispose(); });
             state.decalTextures.clear();
             if (typeof state.themeCleanup === 'function') {
@@ -11228,6 +11329,8 @@
                         : new THREE.WebGLRenderer({
                             antialias: true,
                             alpha: true,
+                            // The glow halo (L6) spreads only from pixels a glow marked in the stencil.
+                            stencil: true,
                             powerPreference: 'high-performance',
                         });
                 };
@@ -11321,6 +11424,7 @@
             if (state.frameId !== null && cancelFrame) cancelFrame(state.frameId);
             state.frameId = null;
             state.needsRender = false;
+            stopLightPatterns();
             if (state.resizeObserver) state.resizeObserver.disconnect();
             state.resizeObserverActive = false;
             notifyStatus('suspended', null);
@@ -11579,6 +11683,9 @@
                         }
                     });
                 }
+                // A copy may come from a prototype that is off screen when the lights switch changes
+                // (activity actors, finish previews), so it takes the switch's current state.
+                syncLights(clone);
                 return clone;
             }
             return prototype;
@@ -11613,15 +11720,17 @@
 
             const repeated = group.placements.length > 1;
             const finish = group.finish && finishesRuntime ? group.finish : null;
-            // The group shares its part finishes, so they go onto one copy of the prototype and every
-            // instance carries them. With a library finish as well, parts must win over it, which the
-            // per-placement copies below already do.
-            const sharedParts = repeated && !finish && componentRuntime && group.componentKey
-                ? group.placements[0].source && group.placements[0].source.componentMaterials : null;
+            // The group shares its part finishes (its own, and the model's defaults for its parts), so they
+            // go onto one copy of the prototype and every instance carries them. With a library finish as
+            // well, parts must win over it, which the per-placement copies below already do.
+            const withParts = Boolean(group.componentKey) || Boolean(componentRuntime
+                && typeof componentRuntime.defaults === 'function' && componentRuntime.defaults(prototype.object).length);
+            const sharedParts = repeated && !finish && componentRuntime && withParts;
             let prototypeObject = prototype.object;
             if (sharedParts) {
                 prototypeObject = cloneRenderable(prototype.object);
-                componentRuntime.apply(prototypeObject, sharedParts, representation, partFinishContext(group.placements[0]));
+                componentRuntime.apply(prototypeObject, group.placements[0].source && group.placements[0].source.componentMaterials,
+                    representation, partFinishContext(group.placements[0]));
             }
             let prototypeMeshes = collectPrototypeMeshes(prototypeObject);
             const sourcePrototypeMeshCount = prototypeMeshes.length;
@@ -11638,7 +11747,7 @@
                 && typeof THREE.InstancedMesh === 'function';
             // Part finishes instance when the whole group shares them; a library finish
             // alone still instances, since the whole group shares it.
-            const useInstancing = repeated && eligible && (!group.componentKey || Boolean(sharedParts));
+            const useInstancing = repeated && eligible && (!withParts || Boolean(sharedParts));
             const finishMapping = finish ? finishesRuntime.mappingFor(THREE, prototype.object, finish) : null;
             if (useInstancing && !finish) prototypeMeshes = batchStaticPrototypeMeshes(prototypeMeshes);
             const groupFinishMaterial = finish && useInstancing
@@ -11765,6 +11874,8 @@
             state.renderGroups.set(record.baseKey, record);
             state.pickObjects = state.pickObjects.concat(pickObjects);
             if (state.shadowsActive) setShadowCasting(container, true);
+            syncLights(container);
+            if (lightPoolsWanted()) syncLightPools();
             renderEquipmentDecals(record.placementIds);
             if (state.drone.active) applyCurrentDroneRecordWindow(record);
             else applySelection();
@@ -11917,7 +12028,21 @@
                 object,
                 canonicalMatrix
             ));
+            // Parts that come with a library finish (a light's lens that comes lit) need the library.
+            if (componentRuntime && typeof componentRuntime.recordDefaults === 'function'
+                    && componentRuntime.recordDefaults(canonicalObject).length && facilityLibrary
+                    && typeof facilityLibrary.get === 'function' && !facilityLibrary.get()
+                    && typeof facilityLibrary.load === 'function') {
+                try {
+                    await facilityLibrary.load();
+                } catch (error) {
+                    warning('appearance_library_unavailable',
+                        'The appearance library could not be loaded; neutral finishes are shown.', null);
+                }
+            }
             applyAssetMaterialPolicy(canonicalObject);
+            recordAuthoredGlows(canonicalObject);
+            syncLights(canonicalObject);
             return {
                 object: canonicalObject,
                 instancingEligible: !resolved
@@ -13300,6 +13425,7 @@
             if (state.proposalRoot) {
                 state.proposalRoot.visible = next.assets !== false;
             }
+            syncLightPools();
             applyGroundLayers();
             invalidate();
             return Object.assign({}, state.layerVisibility);
@@ -13525,6 +13651,7 @@
             }
             if (material.userData.facilityHighlightKind === highlightKind) return;
             material.userData.facilityHighlightKind = highlightKind;
+            markGlowStencil(material);
             const original = material.userData.facilitySelectionOriginal;
             if (material.emissive && typeof material.emissive.setHex === 'function') {
                 material.emissive.setHex(
@@ -13736,11 +13863,777 @@
             }
         }
 
+        // ---- Lights (docs/facility-lighting-plan.md, L2) -------------------------------------------------
+        // A glow is a Lights finish (userData.facilityGlow, drawn outside tone mapping) or a glow authored in a
+        // model: an authored-finish or artwork material with an emissive color (a lamp lens, an exit sign, a
+        // display), recorded as userData.facilityAuthoredGlow when the model is prepared. The scene's lights
+        // switch (adjustments.lights false) turns every glow off, so the plain surface underneath shows, and back
+        // on, without rebuilding anything.
+        function lightsOn() {
+            return !(state.viewportScene && state.viewportScene.lights === false);
+        }
+
+        function recordAuthoredGlows(object) {
+            eachMaterial(object, function (material) {
+                const data = material.userData || {};
+                if (data.facilityAuthoredGlow || data.facilityGlow || !isAuthoredSurfaceMaterial(material)) return;
+                const emissive = material.emissive;
+                const intensity = finite(material.emissiveIntensity, 1);
+                if (!emissive || intensity <= 0 || Math.max(emissive.r, emissive.g, emissive.b) <= 0) return;
+                material.userData = Object.assign(data, {
+                    facilityAuthoredGlow: { rgb: [emissive.r, emissive.g, emissive.b], intensity: intensity },
+                });
+            });
+        }
+
+        function setMaterialLight(material, on, mesh) {
+            const data = material && material.userData;
+            const glow = data && (data.facilityGlow || data.facilityAuthoredGlow);
+            if (!glow || !material.emissive) return false;
+            markGlowStencil(material);
+            const color = new THREE.Color(0x000000);
+            if (on && Array.isArray(glow.rgb)) color.setRGB(glow.rgb[0], glow.rgb[1], glow.rgb[2]);
+            else if (on) color.set(glow.color);
+            const intensity = on ? finite(glow.intensity, 1) : 0;
+            // A highlighted object keeps its highlight; the switch shows when it is deselected.
+            if (data.facilitySelectionOriginal) {
+                data.facilitySelectionOriginal.emissive = color.getHex();
+                data.facilitySelectionOriginal.emissiveIntensity = intensity;
+            }
+            if (!data.facilityHighlightKind) {
+                material.emissive.copy(color);
+                material.emissiveIntensity = intensity;
+            }
+            // A Lights finish leaves tone mapping only while it glows; switched off it is plain plastic.
+            if (data.facilityGlow && material.toneMapped !== !on) {
+                material.toneMapped = !on;
+                material.needsUpdate = true;
+            }
+            // A blinking light sets its own brightness each time it is drawn (L4).
+            if (data.facilityGlow && finishesRuntime && finishesRuntime.glowMoves(data.facilityGlow)) {
+                material.onBeforeRender = drawPatternedGlow;
+            } else if (lightAreasActive()) {
+                // A steady glow may be general lighting, which the scene switches by area (L7).
+                addLampTable(material, mesh);
+            }
+            return true;
+        }
+
+        // The glow halo (L6) spreads only from glowing pixels: a glow marks the stencil wherever it is drawn, except
+        // while it shows a selection highlight. three sets the stencil state per draw, so no program changes.
+        function markGlowStencil(material) {
+            const data = material.userData || {};
+            const mark = Boolean(data.facilityGlow || data.facilityAuthoredGlow) && !data.facilityHighlightKind;
+            if (Boolean(material.stencilWrite) === mark || THREE.ReplaceStencilOp === undefined) return;
+            material.stencilWrite = mark;
+            material.stencilRef = GLOW_STENCIL;
+            material.stencilFunc = THREE.AlwaysStencilFunc;
+            material.stencilZPass = THREE.ReplaceStencilOp;
+        }
+
+        function syncLights(root) {
+            const on = lightsOn();
+            let glows = 0;
+            eachMaterial(root, function (material, mesh) { if (setMaterialLight(material, on, mesh)) glows += 1; });
+            return glows;
+        }
+
+        // ---- Blinking lights (docs/facility-lighting-plan.md, L4) ----------------------------------------------
+        // A Lights finish may blink, strobe or turn like a rotating beacon (emission.pattern). three.js calls
+        // drawPatternedGlow just before it draws an object with one, so only lamps actually drawn (in view, on a
+        // shown layer, lights on) set their brightness and keep the view redrawing. Rendering stays on demand:
+        // after each frame one timer is set for the next change of any lamp drawn, so a 1 s blink redraws twice a
+        // second and a turning beacon four times. No timer while none is in view, while the window is hidden, or
+        // when the viewer prefers reduced motion (then every pattern shows steady).
+        function drawPatternedGlow(renderer, scene, camera, geometry, object) {
+            const material = this;
+            const data = material && material.userData;
+            const glow = data && data.facilityGlow;
+            if (!glow || data.facilityHighlightKind || !lightsOn()) return;
+            const patterns = state.lightPatterns;
+            const still = Boolean(state.motion.prefersReducedMotion);
+            const seconds = patterns.clock / 1000;
+            material.emissiveIntensity = finite(glow.intensity, 1) * (still ? 1 : finishesRuntime.glowLevel(glow, seconds));
+            if (still || !glowCopyInView(object, camera)) return;
+            patterns.drawn = true;
+            patterns.next = Math.min(patterns.next, finishesRuntime.nextGlowChange(glow, seconds));
+        }
+
+        // three.js culls an instanced batch as a whole, and a batch of beacons can span the hall: check the copies.
+        function glowCopyInView(object, camera) {
+            if (!object || !object.isInstancedMesh || !camera || typeof object.getMatrixAt !== 'function') return true;
+            const patterns = state.lightPatterns;
+            if (!patterns.frustum) {
+                patterns.frustum = new THREE.Frustum().setFromProjectionMatrix(
+                    new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+            }
+            const geometry = object.geometry;
+            if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+            const matrix = new THREE.Matrix4();
+            const sphere = new THREE.Sphere();
+            for (let index = 0; index < object.count; index += 1) {
+                object.getMatrixAt(index, matrix);
+                matrix.premultiply(object.matrixWorld);
+                if (patterns.frustum.intersectsSphere(sphere.copy(geometry.boundingSphere).applyMatrix4(matrix))) return true;
+            }
+            return false;
+        }
+
+        function beginLightPatternFrame() {
+            const patterns = state.lightPatterns;
+            patterns.clock = lightClock();
+            patterns.drawn = false;
+            patterns.next = Infinity;
+            patterns.frustum = null;
+        }
+
+        function scheduleLightPatterns() {
+            const patterns = state.lightPatterns;
+            patterns.inView = patterns.drawn;
+            const timerHost = options.window || root;
+            const hidden = Boolean(documentObject && documentObject.hidden);
+            if (!patterns.drawn || hidden || !Number.isFinite(patterns.next)
+                    || !timerHost || typeof timerHost.setTimeout !== 'function') {
+                stopLightPatterns();
+                return false;
+            }
+            if (patterns.timer !== null && patterns.due === patterns.next) return true;
+            stopLightPatterns();
+            const delay = Math.max(0, patterns.next * 1000 - lightClock()) + LIGHT_PATTERN_SLACK_MS;
+            patterns.due = patterns.next;
+            patterns.timer = timerHost.setTimeout(function () {
+                patterns.timer = null;
+                patterns.due = null;
+                patterns.redraws += 1;
+                invalidate();
+            }, delay);
+            return true;
+        }
+
+        function stopLightPatterns() {
+            const patterns = state.lightPatterns;
+            const timerHost = options.window || root;
+            if (patterns.timer !== null && timerHost && typeof timerHost.clearTimeout === 'function') {
+                timerHost.clearTimeout(patterns.timer);
+            }
+            patterns.timer = null;
+            patterns.due = null;
+        }
+
+        // ---- Floor light pools (docs/facility-lighting-plan.md, L3) -------------------------------------------
+        // In a scene that asks for them (lightPools in the scene manifest: Evening) and with the lights on, every lit
+        // lamp hung at least 3 m up and facing down throws a soft additive pool on the floor (y 0) below it. One mesh
+        // per render group, built the first time it is needed and dropped with the group. The pools follow the
+        // group's layer, are never picked and light nothing else. An outdoor lamp (a Lights finish with a beam
+        // angle, L8) throws its pool on the ground where its aim lands instead, and shows a beam (syncLightBeams).
+        function lightPoolsWanted() {
+            return Boolean(lightPoolsRuntime && lightsOn() && state.viewportScene && state.viewportScene.lightPools);
+        }
+
+        function buildLightPools(record) {
+            if (!record.container || typeof record.container.traverse !== 'function') return null;
+            record.container.updateMatrixWorld(true);
+            const toRoot = new THREE.Matrix4();
+            if (state.modelRoot && state.modelRoot.matrixWorld) toRoot.copy(state.modelRoot.matrixWorld).invert();
+            const pools = [];
+            record.container.traverse(function (object) {
+                if (!object.isMesh || !object.geometry || !object.material || Array.isArray(object.material)) return;
+                const data = object.material.userData || {};
+                const glow = data.facilityGlow || data.facilityAuthoredGlow;
+                // A blinking lamp throws no pool: a steady pool under it would not blink with it (L4).
+                if (!glow || finishesRuntime.glowMoves(glow)) return;
+                const color = new THREE.Color();
+                if (Array.isArray(glow.rgb)) color.setRGB(glow.rgb[0], glow.rgb[1], glow.rgb[2]);
+                else color.set(glow.color);
+                const beam = Number(glow.beamAngleDegrees) > 0
+                    ? { angleDegrees: Number(glow.beamAngleDegrees), groundAt: groundHeightAt } : null;
+                Array.prototype.push.apply(pools, lightPoolsRuntime.poolsOf(THREE, object, toRoot, color, 0, beam));
+            });
+            if (!pools.length) return null;
+            const shared = state.lightPools;
+            if (!shared.material) {
+                shared.texture = lightPoolsRuntime.poolTexture(THREE);
+                shared.material = new THREE.MeshBasicMaterial({
+                    map: shared.texture, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending,
+                    depthWrite: false, toneMapped: false, fog: false,
+                    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+                });
+                shared.material.color.setScalar(LIGHT_POOL_STRENGTH);
+                shared.material.userData.facilityLightPools = true;
+            }
+            const mesh = new THREE.Mesh(lightPoolsRuntime.poolGeometry(THREE, pools, LIGHT_POOL_LIFT), shared.material);
+            mesh.name = 'FacilityLightPools:' + record.baseKey;
+            mesh.renderOrder = 2;
+            mesh.raycast = function () {};
+            mesh.userData.facilityLightPools = { pools: pools.length, placementIds: record.placementIds.slice() };
+            state.lightAreas.pools.set(mesh, pools);
+            return mesh;
+        }
+
+        function dropLightPools(record) {
+            const pools = state.lightPools;
+            const mesh = pools.meshes.get(record);
+            pools.meshes.delete(record);
+            if (!mesh) return;
+            if (mesh.parent) mesh.parent.remove(mesh);
+            mesh.geometry.dispose();
+        }
+
+        // The ground's height under a point of the layout (L8): a ground surface there (a sunken truck yard, a
+        // ramp), else the floor.
+        function groundHeightAt(x, z, nearY) {
+            const layout = currentLayout();
+            const rows = groundRuntime && groundRuntime.surfaces(layout);
+            const hit = rows && rows.length ? groundRuntime.sample(rows, { x: x, z: z }, nearY) : null;
+            return hit ? hit.y : finite(layout.coordinateFrame && layout.coordinateFrame.floorElevation, 0);
+        }
+
+        // Shows the pools when wanted (building any missing), hides them otherwise; a group's pools follow its layer.
+        // An outdoor lamp's pool lies on the ground, so a change of the ground builds them again.
+        function syncLightPools() {
+            const pools = state.lightPools;
+            pools.meshes.forEach(function (mesh, record) {
+                if (state.renderGroups.get(record.baseKey) !== record) dropLightPools(record);
+            });
+            const layout = currentLayout();
+            const groundKey = JSON.stringify([groundRuntime ? groundRuntime.surfaces(layout) || null : null,
+                layout.coordinateFrame ? layout.coordinateFrame.floorElevation : null]);
+            if (groundKey !== pools.groundKey) {
+                Array.from(pools.meshes.keys()).forEach(dropLightPools);
+                pools.groundKey = groundKey;
+            }
+            const wanted = lightPoolsWanted() && Boolean(state.modelRoot);
+            if (pools.root) pools.root.visible = wanted;
+            if (!wanted) return 0;
+            if (!pools.root) {
+                pools.root = createContainer();
+                pools.root.name = 'FacilityLightPools';
+            }
+            if (pools.root.parent !== state.modelRoot) state.modelRoot.add(pools.root);
+            state.renderGroups.forEach(function (record) {
+                if (!record || !record.container) return;
+                if (!pools.meshes.has(record)) {
+                    const mesh = buildLightPools(record);
+                    pools.meshes.set(record, mesh);
+                    if (mesh) pools.root.add(mesh);
+                }
+                const mesh = pools.meshes.get(record);
+                if (mesh) mesh.visible = record.container.visible !== false;
+            });
+            maskLightPools();
+            invalidate();
+            return countLightPools();
+        }
+
+        // ---- Lighting coverage (docs/facility-lighting-plan.md, CC3) --------------------------------------------
+        // The workspace's estimate of one area, drawn on the floor (one mesh per lux band, then the dark spot
+        // outlines) until it is cleared. Kept across a remount; not pickable; never saved.
+        function setLightCoverage(view) {
+            disposeLightCoverage();
+            state.lightCoverage.view = view && Array.isArray(view.parts) ? view : null;
+            syncLightCoverage();
+            invalidate();
+            return true;
+        }
+
+        function syncLightCoverage() {
+            const coverage = state.lightCoverage;
+            if (!coverage.view || !state.modelRoot || !lightCoverageRuntime || !THREE.BufferGeometry) return;
+            if (!coverage.root) coverage.root = lightCoverageRuntime.sceneObjects(THREE, coverage.view, createContainer());
+            if (coverage.root.parent !== state.modelRoot) state.modelRoot.add(coverage.root);
+        }
+
+        function disposeLightCoverage() {
+            const root = state.lightCoverage.root;
+            state.lightCoverage.root = null;
+            if (!root) return;
+            if (root.parent) root.parent.remove(root);
+            (root.children || []).forEach(function (object) {
+                if (object.geometry && typeof object.geometry.dispose === 'function') object.geometry.dispose();
+                if (object.material && typeof object.material.dispose === 'function') object.material.dispose();
+            });
+        }
+
+        // ---- General lights by area (docs/facility-lighting-plan.md, L7) ---------------------------------------
+        // The scene may switch the general lighting on only inside some areas, or everywhere except inside them
+        // (adjustments.lightAreas: floor areas or plan rectangles). General lighting is the lamps that throw floor
+        // pools: a steady glow facing down, hung at least 3 m up; exit signs, beacons and displays stay on. Each
+        // steady glow material gets a small on/off table, one texel per part per copy, that its shader reads, so a
+        // batch of light rows stays one draw call. A table refills when its lamp is drawn after the areas, the
+        // layout or the copies changed; switching areas rebuilds nothing. Pools under lamps that are off are blanked.
+        function lightAreasActive() {
+            return Boolean(lightAreasRuntime && lightPoolsRuntime && state.lightAreas.resolved);
+        }
+
+        // Resolve the scene's areas against the layout's floor areas; when they change, the tables refill.
+        function syncLightAreas() {
+            if (!lightAreasRuntime || !lightPoolsRuntime) return false;
+            const value = state.viewportScene && state.viewportScene.lightAreas || null;
+            const resolved = lightAreasRuntime.resolveAreas(value, currentLayout());
+            const signature = JSON.stringify(resolved);
+            if (signature === state.lightAreas.signature) return false;
+            const wasActive = lightAreasActive();
+            state.lightAreas.signature = signature;
+            state.lightAreas.resolved = resolved;
+            state.lightAreas.version += 1;
+            // The first scene with areas adds the tables; later ones only refill them.
+            if (resolved && !wasActive && state.modelRoot) syncLights(state.modelRoot);
+            maskLightPools();
+            invalidate();
+            return true;
+        }
+
+        // The lamp numbers a glow geometry's shader reads (one per vertex), added once per geometry that has lamps.
+        function lampPartsFor(geometry, duringFrame) {
+            const parts = lightPoolsRuntime.lampPartsOf(geometry);
+            if (parts && parts.lamps && geometry.attributes && !geometry.attributes.facilityLamp
+                    && typeof geometry.setAttribute === 'function') {
+                geometry.setAttribute('facilityLamp', new THREE.BufferAttribute(parts.vertexPart, 1));
+                if (duringFrame) state.lightAreas.fresh.add(geometry);
+            }
+            return parts;
+        }
+
+        function createLampTable(width, height) {
+            const table = new THREE.DataTexture(new Uint8Array(width * height).fill(255), width, height,
+                THREE.RedFormat, THREE.UnsignedByteType);
+            table.magFilter = THREE.NearestFilter;
+            table.minFilter = THREE.NearestFilter;
+            table.generateMipmaps = false;
+            table.unpackAlignment = 1;  // rows of one byte per texel are not padded to 4
+            table.needsUpdate = true;
+            return table;
+        }
+
+        function addLampTable(material, mesh) {
+            if (mesh && mesh.geometry) lampPartsFor(mesh.geometry);
+            const masks = state.lightAreas.masks;
+            if (masks.has(material) || typeof material.addEventListener !== 'function') return;
+            const mask = {
+                key: null, lamps: { on: 0, off: 0 },
+                uniforms: {
+                    facilityLampTable: { value: createLampTable(1, 1) }, facilityLampParts: { value: 1 },
+                    facilityLampWidth: { value: 1 }, facilityLampMaskOn: { value: 0 },
+                },
+            };
+            masks.set(material, mask);
+            material.onBeforeCompile = function (shader) {
+                Object.assign(shader.uniforms, mask.uniforms);
+                mask.patched = lightAreasRuntime.patchGlowShader(shader,
+                    lightAreasRuntime.toneMappingName(THREE, state.renderer && state.renderer.toneMapping));
+            };
+            material.customProgramCacheKey = function () {
+                return 'facility-lamp-table:' + (state.renderer ? state.renderer.toneMapping : '');
+            };
+            material.onBeforeRender = drawLampTable;
+            material.addEventListener('dispose', function () { mask.uniforms.facilityLampTable.value.dispose(); });
+            material.needsUpdate = true;
+        }
+
+        // Before three.js draws an object with a lamp table: the table is used only while the scene has areas, the
+        // lights are on and the object is not highlighted (a highlight shows whole), and it refills when stale.
+        function drawLampTable(renderer, scene, camera, geometry, object) {
+            const material = this;
+            const mask = state.lightAreas.masks.get(material);
+            if (!mask) return;
+            const data = material.userData || {};
+            mask.uniforms.facilityLampMaskOn.value = 0;
+            if (!lightAreasActive() || !lightsOn() || data.facilityHighlightKind || !geometry) return;
+            const parts = lampPartsFor(geometry, true);
+            if (!parts || !parts.lamps) return;
+            if (state.lightAreas.fresh.has(geometry)) {
+                // Lamp numbers added during a frame reach the GPU with the next one: draw this one whole, ask for it.
+                invalidate();
+                return;
+            }
+            const instances = object.isInstancedMesh && object.instanceMatrix
+                ? object.instanceMatrix.version + ':' + object.count : '-';
+            const key = state.lightAreas.version + '|' + instances + '|' + object.matrixWorld.elements.join(',')
+                + '|' + (state.modelRoot ? state.modelRoot.matrixWorld.elements.join(',') : '');
+            if (mask.key !== key) {
+                mask.key = key;
+                fillLampTable(mask, object, parts);
+            }
+            mask.uniforms.facilityLampMaskOn.value = 1;
+        }
+
+        // Which lamps of an object are off: a lamp part on a copy that hangs 3 m up facing down (general lighting)
+        // and whose centre the areas leave dark. Positions are in the layout's plan coordinates (the model root's).
+        function lampStates(object, parts) {
+            const copies = object.isInstancedMesh ? Math.max(0, object.count || 0) : 1;
+            const off = new Uint8Array(parts.parts.length * Math.max(1, copies));
+            const areas = state.lightAreas.resolved;
+            const toRoot = new THREE.Matrix4();
+            if (state.modelRoot && state.modelRoot.matrixWorld) toRoot.copy(state.modelRoot.matrixWorld).invert();
+            const base = new THREE.Matrix4().multiplyMatrices(toRoot, object.matrixWorld);
+            const instance = new THREE.Matrix4();
+            const matrix = new THREE.Matrix4();
+            const point = new THREE.Vector3();
+            const down = new THREE.Vector3();
+            let on = 0;
+            let dark = 0;
+            for (let copy = 0; copy < copies; copy += 1) {
+                if (object.isInstancedMesh) {
+                    object.getMatrixAt(copy, instance);
+                    matrix.multiplyMatrices(base, instance);
+                } else {
+                    matrix.copy(base);
+                }
+                if (Math.abs(matrix.determinant()) < 1e-12) continue;  // a hidden, zero-scale copy
+                down.set(0, -1, 0).transformDirection(matrix);
+                if (down.y > lightPoolsRuntime.FACING_DOWN) continue;  // tipped over: not lighting the floor
+                parts.parts.forEach(function (part, index) {
+                    if (!part.lamp) return;
+                    point.set(part.x, part.y, part.z).applyMatrix4(matrix);
+                    if (point.y < lightPoolsRuntime.MIN_HEIGHT) return;  // the floor is y 0, as for the pools
+                    if (lightAreasRuntime.lit(areas, point.x, point.z)) {
+                        on += 1;
+                        return;
+                    }
+                    off[copy * parts.parts.length + index] = 1;
+                    dark += 1;
+                });
+            }
+            return { copies: copies, off: off, on: on, dark: dark };
+        }
+
+        function fillLampTable(mask, object, parts) {
+            const states = lampStates(object, parts);
+            const size = lightAreasRuntime.tableSize(parts.parts.length, states.copies);
+            let table = mask.uniforms.facilityLampTable.value;
+            if (table.image.width !== size.width || table.image.height !== size.height) {
+                table.dispose();
+                table = createLampTable(size.width, size.height);
+                mask.uniforms.facilityLampTable.value = table;
+            }
+            mask.uniforms.facilityLampParts.value = parts.parts.length;
+            mask.uniforms.facilityLampWidth.value = size.width;
+            const texels = table.image.data;
+            texels.fill(255);
+            states.off.forEach(function (value, index) { if (value) texels[index] = 0; });
+            table.needsUpdate = true;
+            mask.lamps = { on: states.on, off: states.dark };
+        }
+
+        // A pool whose lamp the areas leave dark is blanked (its color set to black adds nothing).
+        function maskLightPools() {
+            const areas = state.lightAreas.resolved;
+            state.lightPools.meshes.forEach(function (mesh) {
+                const list = mesh && state.lightAreas.pools.get(mesh);
+                const color = mesh && mesh.geometry && mesh.geometry.attributes.color;
+                const info = mesh && mesh.userData.facilityLightPools;
+                if (!list || !color || !info || info.areasVersion === state.lightAreas.version) return;
+                let dark = 0;
+                list.forEach(function (pool, index) {
+                    // A lamp is in an area when its centre is; an outdoor lamp's pool may lie away from it (L8).
+                    const at = pool.lamp || pool;
+                    const on = !lightAreasRuntime || lightAreasRuntime.lit(areas, at.x, at.z);
+                    if (!on) dark += 1;
+                    for (let corner = 0; corner < 4; corner += 1) {
+                        color.setXYZ(index * 4 + corner, on ? pool.color.r : 0, on ? pool.color.g : 0, on ? pool.color.b : 0);
+                    }
+                });
+                color.needsUpdate = true;
+                info.areasVersion = state.lightAreas.version;
+                info.dark = dark;
+            });
+            syncLightBeams();
+        }
+
+        // ---- Outdoor light beams (docs/facility-lighting-plan.md, L8) ------------------------------------------
+        // A lamp whose Lights finish has a beam angle shows a soft see-through cone from the lamp along its aim down
+        // to the ground, where its pool lies: additive, writing no depth, fading toward the ground and its edge. All
+        // cones are one instanced mesh among the pools, so they show when the pools do (Evening, lights on). A cone
+        // follows its lamp's layer and L7's areas (decided at the lamp, as for its pool). At most LIGHT_BEAM_CAP per
+        // layout; lamps beyond the cap keep their pools. Never picked; it lights nothing.
+        function syncLightBeams() {
+            const shared = state.lightPools;
+            if (!shared.root || typeof THREE.InstancedMesh !== 'function' || typeof THREE.ShaderMaterial !== 'function'
+                    || typeof lightPoolsRuntime.beamGeometry !== 'function') return 0;
+            const beams = [];
+            let total = 0;
+            shared.meshes.forEach(function (mesh) {
+                if (!mesh || !mesh.visible) return;
+                (state.lightAreas.pools.get(mesh) || []).forEach(function (pool) {
+                    if (!pool.aim) return;
+                    total += 1;
+                    if (beams.length < LIGHT_BEAM_CAP) beams.push(pool);
+                });
+            });
+            let beam = shared.beams;
+            if (!beams.length && !beam) return 0;
+            if (!beam) {
+                beam = shared.beams = { geometry: lightPoolsRuntime.beamGeometry(THREE), material: null, mesh: null };
+                beam.material = new THREE.ShaderMaterial({
+                    name: 'FacilityLightBeams',
+                    uniforms: { facilityBeamStrength: { value: LIGHT_BEAM_STRENGTH } },
+                    vertexShader: lightPoolsRuntime.BEAM_VERTEX_SHADER,
+                    fragmentShader: lightPoolsRuntime.BEAM_FRAGMENT_SHADER,
+                    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+                    toneMapped: false, fog: false,
+                });
+                beam.material.userData.facilityLightBeams = true;
+                beam.mesh = new THREE.InstancedMesh(beam.geometry, beam.material, LIGHT_BEAM_CAP);
+                beam.mesh.name = 'FacilityLightBeams';
+                beam.mesh.frustumCulled = false;
+                beam.mesh.renderOrder = 3;
+                beam.mesh.raycast = function () {};
+            }
+            if (beam.mesh.parent !== shared.root) shared.root.add(beam.mesh);
+            const areas = state.lightAreas.resolved;
+            const matrix = new THREE.Matrix4();
+            const turn = new THREE.Quaternion();
+            const down = new THREE.Vector3(0, -1, 0);
+            const aim = new THREE.Vector3();
+            const lamp = new THREE.Vector3();
+            const size = new THREE.Vector3();
+            const color = new THREE.Color();
+            let lit = 0;
+            beams.forEach(function (pool, index) {
+                turn.setFromUnitVectors(down, aim.set(pool.aim.x, pool.aim.y, pool.aim.z));
+                lamp.set(pool.lamp.x, pool.lamp.y, pool.lamp.z);
+                size.set(pool.radius, pool.length, pool.radius);
+                beam.mesh.setMatrixAt(index, matrix.compose(lamp, turn, size));
+                const on = !lightAreasRuntime || lightAreasRuntime.lit(areas, pool.lamp.x, pool.lamp.z);
+                if (on) lit += 1;
+                beam.mesh.setColorAt(index, on ? color.copy(pool.color) : color.setRGB(0, 0, 0));
+            });
+            beam.mesh.count = beams.length;
+            beam.mesh.instanceMatrix.needsUpdate = true;
+            if (beam.mesh.instanceColor) beam.mesh.instanceColor.needsUpdate = true;
+            beam.mesh.visible = beams.length > 0;
+            beam.mesh.boundingBox = null;  // three keeps an instanced mesh's bounds until told they changed
+            beam.mesh.boundingSphere = null;
+            beam.mesh.userData.facilityLightBeams = { beams: beams.length, lit: lit, beyondCap: total - beams.length };
+            invalidate();
+            return lit;
+        }
+
+        function countLightBeams() {
+            const pools = state.lightPools;
+            const mesh = pools.beams && pools.beams.mesh;
+            if (!mesh || !mesh.visible || !pools.root || !pools.root.visible || !pools.root.parent) return 0;
+            return mesh.userData.facilityLightBeams.lit;
+        }
+
+        function lightAreasDiagnostics() {
+            const areas = state.lightAreas.resolved;
+            const result = {
+                mode: areas ? areas.mode : null,
+                areas: areas ? areas.shapes.map(function (shape) {
+                    return shape.kind === 'floor' ? shape.surfaceId : 'rectangle';
+                }) : [],
+                missing: areas ? areas.missing.slice() : [],
+                tables: 0, patched: 0, lamps: { on: 0, off: 0 }, pools: { on: 0, off: 0 },
+            };
+            eachMaterial(state.modelRoot, function (material, mesh) {
+                const mask = state.lightAreas.masks.get(material);
+                if (!mask) return;
+                result.tables += 1;
+                if (mask.patched) result.patched += 1;
+                const parts = areas && mesh && mesh.geometry && lightPoolsRuntime.lampPartsOf(mesh.geometry);
+                if (!parts || !parts.lamps) return;
+                const states = lampStates(mesh, parts);  // counted now, whether or not drawn since
+                result.lamps.on += states.on;
+                result.lamps.off += states.dark;
+            });
+            if (state.lightPools.root && state.lightPools.root.visible) {
+                state.lightPools.meshes.forEach(function (mesh) {
+                    const info = mesh && mesh.visible && mesh.userData.facilityLightPools;
+                    if (!info) return;
+                    result.pools.off += info.dark || 0;
+                    result.pools.on += info.pools - (info.dark || 0);
+                });
+            }
+            return result;
+        }
+
+        function countLightPools() {
+            const pools = state.lightPools;
+            if (!pools.root || !pools.root.visible || !pools.root.parent) return 0;
+            let count = 0;
+            pools.meshes.forEach(function (mesh) { if (mesh && mesh.visible) count += mesh.userData.facilityLightPools.pools; });
+            return count;
+        }
+
+        function disposeLightPools() {
+            const pools = state.lightPools;
+            Array.from(pools.meshes.keys()).forEach(dropLightPools);
+            if (pools.root && pools.root.parent) pools.root.parent.remove(pools.root);
+            pools.root = null;
+            if (pools.material) pools.material.dispose();
+            if (pools.texture) pools.texture.dispose();
+            pools.material = null;
+            pools.texture = null;
+            if (pools.beams) {
+                if (pools.beams.mesh.parent) pools.beams.mesh.parent.remove(pools.beams.mesh);
+                if (typeof pools.beams.mesh.dispose === 'function') pools.beams.mesh.dispose();
+                pools.beams.geometry.dispose();
+                pools.beams.material.dispose();
+                pools.beams = null;
+            }
+            pools.groundKey = '';
+        }
+
+        // Glow halo (lighting L6): a scene adjustment (glowHalo), off by default, drawn only in a scene with floor
+        // pools (Evening) and with the lights on. The frame is drawn as always, keeping its antialiasing and
+        // per-material tone mapping, and every glow marks the stencil where it shows (markGlowStencil). Then:
+        // the frame is copied; everything a glow did not mark is painted black and copied again; three's
+        // UnrealBloomPass spreads that copy into a soft halo; the frame is drawn back and the halo added around the
+        // glows. (EffectComposer would draw the scene off screen and tone-map everything at the end.)
+        function bloomAvailable() {
+            return Boolean(BloomPassType && FullScreenQuadType && CopyShaderSource && state.renderer
+                && typeof state.renderer.copyFramebufferToTexture === 'function'
+                && typeof state.renderer.getDrawingBufferSize === 'function'
+                && typeof THREE.WebGLRenderTarget === 'function' && typeof THREE.ShaderMaterial === 'function'
+                && typeof THREE.Vector2 === 'function' && THREE.UniformsUtils && THREE.NotEqualStencilFunc !== undefined
+                && canvasHasStencil());
+        }
+
+        // A renderer made elsewhere (a pool, a test) may have no stencil: then there is no halo, rather than one
+        // around every bright thing.
+        function canvasHasStencil() {
+            const bloom = state.bloom;
+            if (bloom.stencil === null) {
+                const gl = typeof state.renderer.getContext === 'function' ? state.renderer.getContext() : null;
+                const attributes = gl && typeof gl.getContextAttributes === 'function' ? gl.getContextAttributes() : null;
+                bloom.stencil = Boolean(attributes && attributes.stencil);
+            }
+            return bloom.stencil;
+        }
+
+        function bloomWanted() {
+            const scene = state.viewportScene;
+            return Boolean(scene && scene.glowHalo === true && scene.lightPools) && lightsOn() && !state.bloom.failed
+                && bloomAvailable();
+        }
+
+        function bloomQuadMaterial(name, fragmentShader, extra) {
+            return new THREE.ShaderMaterial(Object.assign({
+                name: name,
+                uniforms: THREE.UniformsUtils.clone(CopyShaderSource.uniforms),
+                vertexShader: CopyShaderSource.vertexShader,
+                fragmentShader: fragmentShader,
+                depthTest: false,
+                depthWrite: false,
+            }, extra || {}));
+        }
+
+        function prepareBloom(width, height) {
+            const bloom = state.bloom;
+            if (!bloom.pass) {
+                bloom.pass = new BloomPassType(new THREE.Vector2(width, height), BLOOM.strength, BLOOM.radius,
+                    BLOOM.threshold);
+                bloom.pass.highPassUniforms.smoothWidth.value = BLOOM.softness;
+                bloom.frame = new THREE.WebGLRenderTarget(width, height, { depthBuffer: false });
+                bloom.glow = new THREE.WebGLRenderTarget(width, height, { depthBuffer: false });
+                bloom.frame.texture.generateMipmaps = false;
+                bloom.glow.texture.generateMipmaps = false;
+                const outsideGlows = {
+                    stencilWrite: true, stencilRef: GLOW_STENCIL, stencilFunc: THREE.NotEqualStencilFunc,
+                    stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp,
+                };
+                bloom.copy = bloomQuadMaterial('FacilityBloomCopy', CopyShaderSource.fragmentShader);
+                bloom.mask = bloomQuadMaterial('FacilityBloomMask',
+                    'void main() { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); }', outsideGlows);
+                bloom.add = bloomQuadMaterial('FacilityBloomAdd', CopyShaderSource.fragmentShader, Object.assign({
+                    transparent: true, blending: THREE.AdditiveBlending, premultipliedAlpha: true,
+                }, outsideGlows));
+                bloom.quad = new FullScreenQuadType(bloom.copy);
+            } else if (bloom.width === width && bloom.height === height) {
+                return;
+            } else {
+                bloom.pass.setSize(width, height);
+                bloom.frame.setSize(width, height);
+                bloom.glow.setSize(width, height);
+            }
+            bloom.width = width;
+            bloom.height = height;
+            bloom.checked = false;
+            // Allocate the targets on the GPU, so the frame can be copied into them.
+            state.renderer.setRenderTarget(bloom.frame);
+            state.renderer.setRenderTarget(bloom.glow);
+            state.renderer.setRenderTarget(null);
+        }
+
+        function drawBloomQuad(material, texture) {
+            const bloom = state.bloom;
+            if (texture) material.uniforms.tDiffuse.value = texture;
+            bloom.quad.material = material;
+            bloom.quad.render(state.renderer);
+        }
+
+        function drawBloom() {
+            const renderer = state.renderer;
+            const bloom = state.bloom;
+            // three resets its draw counts at each render call; the halo's passes add to the draw counts of the frame.
+            const info = renderer.info || null;
+            const autoReset = info ? info.autoReset : undefined;
+            const autoClear = renderer.autoClear;
+            if (info) info.autoReset = false;
+            // The quads draw over the frame and read its stencil: nothing may clear the canvas in between.
+            renderer.autoClear = false;
+            try {
+                const size = renderer.getDrawingBufferSize(bloom.size || (bloom.size = new THREE.Vector2()));
+                prepareBloom(Math.max(1, Math.floor(size.x)), Math.max(1, Math.floor(size.y)));
+                // The first copies after (re)sizing are checked: a failed copy would show as a black view.
+                const gl = !bloom.checked && typeof renderer.getContext === 'function' ? renderer.getContext() : null;
+                // WebGL keeps one flag per kind of error; clear any left by earlier calls.
+                for (let i = 0; gl && i < 8 && gl.getError() !== gl.NO_ERROR; i += 1) { /* cleared */ }
+                renderer.copyFramebufferToTexture(bloom.frame.texture);
+                drawBloomQuad(bloom.mask, null);
+                renderer.copyFramebufferToTexture(bloom.glow.texture);
+                if (gl) {
+                    const code = gl.getError();
+                    if (code !== gl.NO_ERROR) throw new Error('The frame could not be copied (WebGL error ' + code + ').');
+                    bloom.checked = true;
+                }
+                bloom.pass.render(renderer, null, bloom.glow, 0, false);
+                renderer.setRenderTarget(null);
+                drawBloomQuad(bloom.copy, bloom.frame.texture);
+                drawBloomQuad(bloom.add, bloom.glow.texture);
+                bloom.frames += 1;
+            } catch (error) {
+                bloom.failed = String(error && error.message || error);
+                disposeBloom();
+                warning('bloom_unavailable', 'The glow halo cannot be drawn here; the view is shown without it.',
+                    bloom.failed);
+                if (info) info.autoReset = autoReset;
+                renderer.autoClear = autoClear;
+                renderer.setRenderTarget(null);
+                renderer.render(state.scene, state.camera);
+            } finally {
+                if (info) info.autoReset = autoReset;
+                renderer.autoClear = autoClear;
+            }
+        }
+
+        function disposeBloom() {
+            const bloom = state.bloom;
+            ['pass', 'frame', 'glow', 'copy', 'mask', 'add', 'quad'].forEach(function (key) {
+                if (bloom[key]) bloom[key].dispose();
+                bloom[key] = null;
+            });
+            bloom.width = 0;
+            bloom.height = 0;
+            bloom.checked = false;
+        }
+
+        function bloomDiagnostics() {
+            const bloom = state.bloom;
+            return {
+                scene: Boolean(state.viewportScene && state.viewportScene.glowHalo === true),
+                available: bloomAvailable(), drawn: bloomWanted(),
+                size: bloom.pass ? [bloom.width, bloom.height] : null, frames: bloom.frames, failed: bloom.failed,
+            };
+        }
+
         function createFinishMaterialFor(resolved, scale) {
             const material = finishesRuntime.createFinishMaterial(THREE, resolved, {
                 textures: finishTextureCache(), scale: scale, envMap: finishEnvironment(), envMapIntensity: finishReflection(),
             });
             syncFinishEnvironment(material);
+            setMaterialLight(material, lightsOn());
             const fallback = material.userData && material.userData.fallback || [];
             if (fallback.indexOf('appearance_missing') >= 0) {
                 warning('appearance_missing', 'A saved finish is not in the library; a neutral finish is shown.',
@@ -13806,7 +14699,9 @@
                 facilityLibrary.load().then(function () { syncViewportSceneFromLayout(); }).catch(function () {});
                 return false;
             }
-            return applyViewportScene(libraryRuntime.resolveScene(library, saved));
+            const changed = applyViewportScene(libraryRuntime.resolveScene(library, saved));
+            syncLightAreas();
+            return changed;
         }
 
         // Apply a resolved scene: lighting levels, image-based lighting,
@@ -13815,7 +14710,11 @@
             const signature = JSON.stringify(resolved || null);
             if (signature === state.viewportSceneSignature) return false;
             state.viewportSceneSignature = signature;
+            const lightsWereOn = lightsOn();
             state.viewportScene = resolved || null;
+            if (lightsOn() !== lightsWereOn && state.modelRoot) syncLights(state.modelRoot);
+            syncLightAreas();
+            syncLightPools();
             const request = ++state.viewportSceneRequest;
             if (state.ambientLight) state.ambientLight.intensity = sceneRelativeSetting('ambient');
             if (state.directionalLight) state.directionalLight.intensity = sceneRelativeSetting('directional');
@@ -14081,6 +14980,9 @@
                             slot.node.geometry = finishesRuntime.cachedFinishGeometry(THREE, state.finishGeometryCache,
                                 slot.node.geometry, relative, finishesRuntime.mappingFor(THREE, sourceSlot.node, resolved));
                         }
+                        if (typeof componentRuntime.keepDepthOffset === 'function') {
+                            componentRuntime.keepDepthOffset(slot.material, material);
+                        }
                         slot.node.material = material;
                     }
                 } else {
@@ -14158,6 +15060,17 @@
                 sceneId: state.viewportScene ? state.viewportScene.sceneId : null,
                 sceneEnvironment: Boolean(state.scene && state.scene.environment),
                 shadows: Boolean(state.shadowsActive),
+                lights: lightsOn(),
+                lightPools: countLightPools(),
+                lightBeams: countLightBeams(),
+                lightPatterns: {
+                    inView: state.lightPatterns.inView,
+                    timer: state.lightPatterns.timer !== null,
+                    redraws: state.lightPatterns.redraws,
+                    reducedMotion: Boolean(state.motion.prefersReducedMotion),
+                },
+                lightAreas: lightAreasDiagnostics(),
+                bloom: bloomDiagnostics(),
                 equipmentDecals: state.equipmentDecalObjects.size,
             };
         }
@@ -14276,6 +15189,18 @@
                 if (key) return key;
             }
             return null;
+        }
+
+        // A release ends a click when its press was on the view with the same pointer and the primary button, and
+        // the pointer moved at most CLICK_SLOP_PIXELS between them.
+        function wasClick(press, event) {
+            if (!press || !event) return false;
+            if (event.button !== undefined && event.button !== 0) return false;
+            if (press.pointerId !== undefined && event.pointerId !== undefined
+                    && press.pointerId !== event.pointerId) return false;
+            const dx = finite(event.clientX, press.x) - press.x;
+            const dy = finite(event.clientY, press.y) - press.y;
+            return dx * dx + dy * dy <= CLICK_SLOP_PIXELS * CLICK_SLOP_PIXELS;
         }
 
         function pick(input) {
@@ -15017,6 +15942,8 @@
         }
 
         function dispose() {
+            disposeLightCoverage();
+            state.lightCoverage.view = null;
             if (!state.mounted && !state.renderer && !state.canvas) {
                 state.disposed = true;
                 notifyStatus('disposed', null);
@@ -15036,6 +15963,7 @@
             setSelection: setSelection,
             getComponentMaterials: getComponentMaterials,
             highlightComponent: highlightComponent,
+            setLightCoverage: setLightCoverage,
             previewFinish: previewFinish,
             clearFinishPreview: clearFinishPreview,
             previewViewportScene: previewViewportScene,

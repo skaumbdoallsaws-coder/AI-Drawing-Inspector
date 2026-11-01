@@ -118,7 +118,9 @@ def test_runtime_config_roundtrips_and_disables_general_tools():
         "inspect_saved_process_bindings", "search_industrial_assets", "inspect_facility_region",
         "analyze_facility_fit", "inspect_pattern_provenance", "inspect_cell_layout_provenance",
         "inspect_facility_authoring", "inspect_facility_asset", "inspect_facility_components", "list_facility_library",
-        "review_facility_parking", "review_facility_workstations", "search_public_sources", "read_public_source",
+        "review_facility_parking", "review_facility_workstations", "suggest_facility_light_positions",
+        "check_lighting_coverage",
+        "search_public_sources", "read_public_source",
         "inspect_site_context", "analyze_site_fit", "look_at_site_photo", "trace_site_feature",
         "plan_warehouse_building", "plan_warehouse_zones", "plan_floor_markings", "plan_storage_layout",
         "plan_site_docks", "plan_site_parking", "plan_warehouse_contents", "plan_design_paint",
@@ -763,6 +765,16 @@ def test_facility_turn_carries_the_viewport_selection(host, tmp_path, monkeypatc
                                  memory_context=memory))
     assert request.message in seen["message"] and "viewportSelection" in seen["message"]
     assert '"placementIds": ["pl-guard-1", "pl-guard-2"]' in seen["message"]
+    if not memory:
+        assert "not a limit on items the request names" in seen["message"]
+
+
+def test_a_request_that_names_its_items_is_not_refused_over_the_selection():
+    # The main session, 2026-11-01: with a stray item selected, "Robot cell R03 is down for maintenance: make its
+    # stack light show red and blink." was refused ("The selected item is ..., not R03's stack light").
+    from ai_inspector.codex_runtime.pilot import EDIT_INSTRUCTIONS
+    assert "A request that names its items" in EDIT_INSTRUCTIONS
+    assert "Never refuse, ask or stop because the selection holds something else." in EDIT_INSTRUCTIONS
 
 
 def test_edit_instructions_keep_answers_short_and_name_zone_types_that_reject_placements():

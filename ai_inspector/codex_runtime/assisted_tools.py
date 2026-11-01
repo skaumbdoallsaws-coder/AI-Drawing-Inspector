@@ -104,6 +104,12 @@ class FacilityEditGateway(FacilityReadGateway):
             # Turns first, so an item can sit on a desk placed and turned earlier in the batch.
             operations = resolve_orientation_intents(operations, catalog=catalog, layout=layout)
             operations = resolve_placement_intents(operations, catalog=catalog, layout=layout)
+        if any(isinstance(item, dict) and item.get("op") == "set_scene" and isinstance(item.get("scene"), dict)
+               and "sceneId" in item["scene"] for item in operations or []):
+            from ai_inspector.facility_layout.operations import keep_current_scene
+            from .facility_tools import read_bound_layout
+            operations = keep_current_scene(
+                operations, read_bound_layout(self.runtime, self.principal, self.reference)["layout"])
         result = create(self.runtime.service, self.principal, self.reference["siteId"], self.reference["layoutId"],
             self.reference["revision"], operations=operations, undo_receipt_id=arguments.get("receiptId"),
             edit_mode=self.edit_mode)

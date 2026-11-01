@@ -1521,8 +1521,9 @@ class DocumentationGateway:
         assembly_number = self._require_assembly()
         finishes = [{key: row[key] for key in ("appearanceId", "label", "category", "color", "roughness",
                                                "metalness", "textured")}
+                    # Lights glow only in the Facility 3D view, so the Assembly lists leave them out.
                     for row in library_summary("appearances", query=arguments.get("query") or "",
-                                               category=arguments.get("category") or None, limit=60)]
+                                               category=arguments.get("category") or None, limit=60, glow=False)]
         parts = self.host.assembly_parts(assembly_number)
         geometry = self._geometry(assembly_number)
         measured = geometry.get("parts") or {}

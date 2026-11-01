@@ -241,12 +241,19 @@ def operation_batch_schema():
         "asset's supportSurfaces (inspect_facility_asset): the item is centred on it at its height, turned to face the "
         "surface's user. To seat a chair at a desk whose facilitySemantics has a workstationSeat, give seatAt "
         "{deskPlacementId}. With either, leave out orientation and give placement.transform as only {scale: 1}.")
+    from ai_inspector.facility_layout.light_positions import USER_POSITION
     operation("place_asset", {"placementId": ref("placementId"), "placement": new_placement,
               "orientation": orientation,
               "attachTo": obj({"supportPlacementId": ref("placementId"), "surfaceId": text(120)}),
               "seatAt": obj({"deskPlacementId": ref("placementId")})}, ["placement"],
               "Give orientation or placement.transform.quaternion. " + orientation_help + workstation_help +
-              " For component finishes, first save the new placement, inspect its visual slots, then preview set_component_materials.")
+              " For part finishes on a new placement (a lens finish, a stack light lamp), read its parts with "
+              "inspect_facility_components {assetId}, give this place_asset a placementId, and put "
+              "set_component_materials for that placementId after it in the same preview."
+              " Light fittings (pole light, wall light, rotating beacon) come lit, and a stack light comes with its "
+              "green lamp on (steady): no finish step. With no position from the user, put a pole or wall "
+              "light where suggest_facility_light_positions says, with its transform and snapRelationship as given. "
+              + USER_POSITION)
 
     def transform_rule(rule):
         return {"properties": {"placement": {"properties": {"transform": rule}}}}
@@ -291,23 +298,55 @@ def operation_batch_schema():
     operation("set_appearance", {"placementIds": array(ref("placementId"), 50, 1, uniqueItems=True), "color": nullable(COLOR),
               "appearance": nullable(ref("facilityAppearance"))}, ["placementIds"],
               "Give exactly one of color (a plain color) or appearance (a finish from list_facility_library, plus only the "
-              "adjustments you need, such as grain or sizeMeters). Null in either resets to the asset's own finish. "
+              "adjustments you need, such as grain or sizeMeters, or on a Lights finish pattern and periodSeconds). Null "
+              "in either resets to the asset's own finish. "
               "Finishes are visual only and never change the asset's engineering material.")
     variants[-1]["oneOf"] = [{"required": ["color"]}, {"required": ["appearance"]}]
     operation("set_component_materials", {"placementId": ref("placementId"),
         "materials": nullable(placement["componentMaterials"]), "visualSha256": HEX_ID}, ["placementId", "materials"],
-        "For nonnull materials supply the exact visualSha256 from inspect_facility_components. Preserve unrelated overrides. "
-        "A part can take a plain finish (color, roughness, metalness) or a library finish (appearanceId).")
+        "For nonnull materials supply the exact visualSha256 from inspect_facility_components: by placementId for a "
+        "saved placement, or by assetId for one this preview places earlier with place_asset. Preserve unrelated "
+        "overrides. "
+        "A part can take a plain finish (color, roughness, metalness) or a library finish (appearanceId). On a Lights "
+        "finish, color recolors the lamp (its glow, and its unlit lens at half brightness), and pattern (steady, blink, "
+        "strobe or rotate) with periodSeconds (0.5-10 s per cycle; none for steady) sets how it shows, whatever the "
+        "finish's own pattern. Example, a stack light whose red lamp should blink: {key: <the red lamp's key>, "
+        "appearanceId: 'light-stack-red', pattern: 'blink', periodSeconds: 1}. Pick the finish of the color you want "
+        "and add the pattern; do not borrow a blinking finish of another color.")
     variants[-1]["allOf"] = [{"if": {"properties": {"materials": {"not": {"type": "null"}}}},
                                "then": {"required": ["visualSha256"]}}]
     from ai_inspector.facility_layout.appearance_library import load_library
+    light_area = {"anyOf": [obj({"surfaceId": text(79, pattern="^fs-[a-z0-9-]{1,76}$")}),
+                            obj({"rectangle": obj({key: number(-10000, 10000)
+                                                   for key in ("minX", "minZ", "maxX", "maxZ")})})]}
     adjustments = obj({"exposure": number(0, 5), "environmentIntensity": number(0, 5), "ambient": number(0, 5),
-                       "directional": number(0, 5), "shadows": {"type": "boolean"},
+                       "directional": number(0, 5), "shadows": {"type": "boolean"}, "lights": {"type": "boolean"},
+                       "lightAreas": obj({"mode": {"enum": ["only", "except"]}, "areas": array(light_area, 64)}),
+                       "glowHalo": {"type": "boolean"},
                        "environmentRotationDegrees": number(-360, 360),
                        "background": {"anyOf": [{"enum": ["theme", "environment"]}, COLOR]}}, [])
     operation("set_scene", {"scene": nullable(obj({"version": {"const": 1},
-              "sceneId": {"enum": sorted(load_library()["scenes"])}, "adjustments": adjustments}, ["version", "sceneId"]))},
+              "sceneId": {"enum": sorted(load_library()["scenes"])}, "adjustments": adjustments}, ["version"]))},
               description="Choose the viewport scene saved with this layout: background, lighting, reflections and shadows. "
+                          "adjustments.lights is the lights switch, on by default; switched off, lamps, beacons and "
+                          "signs with a Lights finish or a glow of their own show unlit. The evening scene darkens the "
+                          "view so lit lamps carry the picture. adjustments.lightAreas switches the general lighting "
+                          "(lamps hung 3 m or more up, facing down) by area: mode only = on only inside the areas, "
+                          "except = on everywhere except inside them. An area is a floor area {surfaceId} (ids and "
+                          "names from inspect_facility_authoring, floor_surfaces) or a plan rectangle {rectangle: "
+                          "{minX, minZ, maxX, maxZ}} in metres. Exit signs, beacons and stack lights stay on. Example: "
+                          "'lights on in shipping and receiving only, evening scene' is sceneId evening with "
+                          "lightAreas {mode: only, areas: [the receiving and the shipping or dispatch floor areas]}. "
+                          "adjustments.glowHalo adds a soft halo around lit lamps, signs and beacons; it shows only "
+                          "in a scene with floor light pools (lightPools in list_facility_library: evening) and with "
+                          "the lights on. It is off by default and costs frame rate, so turn it on only when asked "
+                          "(for example 'evening scene with a glow around the lights'). "
+                          "Leave sceneId out to keep the layout's current scene and change only the adjustments "
+                          "you give; its other saved adjustments stay, so 'turn the lights off' gives only "
+                          "version and adjustments.lights. Give sceneId to switch scenes: that scene with the "
+                          "adjustments given replaces the saved one. Naming the scene the layout already has is not "
+                          "a switch: its other saved adjustments stay. To start a scene afresh, give null and then "
+                          "the scene in one batch. "
                           "It never moves or changes equipment. Null restores the Classic scene.")
     zone_ids = array(ref("zoneId"), 200, uniqueItems=True)
     meeting = obj({"label": text(120), "placementId": ref("placementId"), "position": POINT}, ["label"])

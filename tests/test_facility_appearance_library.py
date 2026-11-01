@@ -11,6 +11,7 @@ from ai_inspector.facility_layout.canonical import layout_revision
 from ai_inspector.facility_layout.component_materials import normalize_component_materials
 from ai_inspector.facility_layout.errors import FacilityLayoutError
 from ai_inspector.facility_layout.operations import apply_facility_layout_operations
+from ai_inspector.facility_layout.plan_settings import default_plan_settings
 from ai_inspector.facility_layout.validate import validate_layout
 
 IMAGE = "/api/facility-decal-images/site-a/" + "b" * 64 + ".png"
@@ -36,8 +37,9 @@ def set_appearance(ids, appearance):
 
 def test_manifests_are_complete_and_every_file_matches_its_recorded_hash():
     library = load_library()
-    assert set(library["categories"]) == {"metals", "plastics", "wood", "rubber", "glass", "fabric", "paper", "paint", "stone"}
-    assert 20 <= len(library["appearances"]) <= 30
+    assert set(library["categories"]) == {"metals", "plastics", "wood", "rubber", "glass", "fabric", "paper", "paint", "stone",
+                                          "lights"}
+    assert 20 <= sum(row["category"] != "lights" for row in library["appearances"].values()) <= 30
     for row in library["appearances"].values():
         assert row["category"] in library["categories"]
         assert row["texture"] is None or row["texture"]["textureSetId"] in library["textureSets"]
@@ -97,6 +99,136 @@ def test_agent_summary_filters_without_paths_or_provenance():
     assert all("thumbnail" not in row and "source" not in row for row in metals)
     assert [row["appearanceId"] for row in library_summary("appearances", query="kraft")] == ["cardboard-kraft"]
     assert any(row["sceneId"] == "machine-shop" for row in library_summary("scenes"))
+
+
+def test_lights_glow_in_the_facility_view_and_stay_out_of_the_assembly_lists():
+    from ai_inspector.assembly_knowledge.assembly_appearance import AssemblyAppearanceError, finish
+    from ai_inspector.codex_runtime.library_tools import list_library, tool_specs
+    library = load_library()
+    lights = {key for key, row in library["appearances"].items() if row["category"] == "lights"}
+    assert lights == {"light-cool-white-led", "light-warm-white", "light-exit-green", "light-beacon-amber", "light-alarm-red",
+                      "light-signal-blue", "light-stack-red", "light-stack-amber", "light-stack-green",
+                      "light-pole-led", "light-wall-led", "light-dock-led"}
+    for row in library["appearances"].values():
+        # Only the Lights glow; each keeps an unlit color (the plastic when switched off) and a rendered thumbnail.
+        assert bool(row.get("emission")) == (row["category"] == "lights"), row["appearanceId"]
+        if row.get("emission"):
+            assert row["texture"] is None and row["emission"]["color"] != row["color"] and row["emission"]["intensity"] == 1
+            assert (LIBRARY_ROOT / row["thumbnail"]).is_file()
+    # Sage lists them with their glow color and is told what a color override does on one.
+    assert "set_component_materials" in tool_specs()[0]["description"] and "glow" in tool_specs()[0]["description"]
+    listed = list_library({"kind": "appearances", "category": "lights"})
+    assert {row["appearanceId"] for row in listed["items"]} == lights
+    assert all(row["emission"]["color"].startswith("#") for row in listed["items"])
+    # The beacon turns, the alarm strobes and the signal blinks, once a second; Sage sees the pattern and is told.
+    patterns = {row["appearanceId"]: (row["emission"].get("pattern", "steady"), row["emission"].get("periodSeconds"))
+                for row in listed["items"]}
+    assert {key: value for key, value in patterns.items() if value[0] != "steady"} == {
+        "light-beacon-amber": ("rotate", 1), "light-alarm-red": ("strobe", 1), "light-signal-blue": ("blink", 1)}
+    assert all(value[1] is None for value in patterns.values() if value[0] == "steady")
+    # The outdoor ones have a beam angle (L8): the evening scene shows a beam and a pool where it lands.
+    beams = {row["appearanceId"]: row["emission"].get("beamAngleDegrees") for row in listed["items"]}
+    assert {key: value for key, value in beams.items() if value} == {
+        "light-pole-led": 110, "light-wall-led": 100, "light-dock-led": 70}
+    assert "emission.beamAngleDegrees" in tool_specs()[0]["description"]
+    from ai_inspector.facility_layout.appearance_library import _valid_emission
+    assert _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 10})
+    assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 170})
+    assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": "wide"})
+    assert "emission.pattern" in tool_specs()[0]["description"]
+    assert "Lights finish: the light's color, lit and unlit" in listed["adjustments"]
+    assert all("emission" not in row for row in library_summary("appearances", category="metals"))
+    assert {row["appearanceId"] for row in library_summary("appearances", glow=True)} == lights
+    assert library_summary("appearances", query="stack", glow=False) == []
+    # A lamp's lens takes one like any part finish, with the glow color overridden.
+    doc = apply(layout(), {"op": "set_component_materials", "placementId": "pl-0", "materials": {"representation": "detail",
+        "overrides": [{"key": "p:row/lens#0", "appearanceId": "light-cool-white-led", "color": "#fff4e0"}]}})
+    validate_layout(doc)
+    # The Assembly view draws no glow, so its finishes refuse one.
+    with pytest.raises(AssemblyAppearanceError, match="Lights finish"):
+        finish({"appearanceId": "light-stack-green"})
+    assert finish({"appearanceId": "paint-machine-gray"})["appearanceId"] == "paint-machine-gray"
+
+
+@pytest.mark.parametrize("emission", [{"color": "green", "intensity": 1}, {"color": "#00ff00"},
+                                      {"color": "#00ff00", "intensity": 0}, {"color": "#00ff00", "intensity": True},
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "blink"}, "#00ff00",
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "pulse", "periodSeconds": 1},
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "blink", "periodSeconds": 0.2},
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "blink", "periodSeconds": True},
+                                      {"color": "#00ff00", "intensity": 1, "periodSeconds": 1},
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "steady", "periodSeconds": 1}])
+def test_a_malformed_emission_stops_the_library_from_loading(tmp_path, emission):
+    for name in ("appearances", "scenes", "decals"):
+        (tmp_path / f"{name}.json").write_bytes((LIBRARY_ROOT / f"{name}.json").read_bytes())
+    doc = json.loads((tmp_path / "appearances.json").read_text(encoding="utf-8"))
+    next(row for row in doc["appearances"] if row["appearanceId"] == "light-exit-green")["emission"] = emission
+    (tmp_path / "appearances.json").write_bytes(json.dumps(doc).encode("utf-8"))
+    with pytest.raises(ValueError, match="invalid emission"):
+        load_library(str(tmp_path))
+
+
+@pytest.mark.parametrize("emission", [{"color": "#00ff00", "intensity": 1, "pattern": "steady"},
+                                      {"color": "#00ff00", "intensity": 2, "pattern": "strobe", "periodSeconds": 0.5}])
+def test_a_light_may_carry_a_pattern_with_its_period(tmp_path, emission):
+    for name in ("appearances", "scenes", "decals"):
+        (tmp_path / f"{name}.json").write_bytes((LIBRARY_ROOT / f"{name}.json").read_bytes())
+    doc = json.loads((tmp_path / "appearances.json").read_text(encoding="utf-8"))
+    next(row for row in doc["appearances"] if row["appearanceId"] == "light-exit-green")["emission"] = emission
+    (tmp_path / "appearances.json").write_bytes(json.dumps(doc).encode("utf-8"))
+    assert load_library(str(tmp_path))["appearances"]["light-exit-green"]["emission"] == emission
+
+
+def test_a_use_of_a_light_finish_sets_its_own_pattern_and_sage_is_told_how():
+    # The R03 case (main session, 2026-11-01): a stack light's red lamp should blink. The part takes the red finish
+    # with its own pattern, instead of borrowing the blinking blue finish and recoloring it.
+    red = {"key": "p:stack/red%20lamp#0", "appearanceId": "light-stack-red", "pattern": "blink", "periodSeconds": 1}
+    doc = apply(layout(), {"op": "set_component_materials", "placementId": "pl-0",
+                           "materials": {"representation": "overview", "overrides": [red]}})
+    assert doc["placements"][0]["componentMaterials"]["overrides"] == [red]
+    validate_layout(doc)
+    # The same on a whole fitting, steady on a blinking finish, and in a custom finish.
+    doc = apply(doc, set_appearance(["pl-1"], {"appearanceId": "light-beacon-amber", "pattern": "steady"}),
+                custom({"appearanceId": "custom-red-strobe", "label": "Red strobe", "baseAppearanceId": "light-stack-red",
+                        "pattern": "strobe", "periodSeconds": 0.5}),
+                set_appearance(["pl-2"], {"appearanceId": "custom-red-strobe"}))
+    assert doc["placements"][1]["appearance"] == {"appearanceId": "light-beacon-amber", "pattern": "steady"}
+    assert doc["extensions"]["facilityAppearances"]["custom"][0]["pattern"] == "strobe"
+    validate_layout(doc)
+    # The schema Sage writes against takes it, and the tool text gives the example.
+    from jsonschema import Draft202012Validator
+    from ai_inspector.codex_runtime.edit_schemas import operation_batch_schema
+    from ai_inspector.codex_runtime.library_tools import list_library, tool_specs
+    schema = operation_batch_schema()
+    operation = {"op": "set_component_materials", "placementId": "pl-0", "visualSha256": "a" * 64,
+                 "materials": {"representation": "overview", "overrides": [red]}}
+    assert not list(Draft202012Validator(schema).iter_errors({"operations": [operation]}))
+    operation["materials"]["overrides"] = [dict(red, pattern="pulse")]
+    assert list(Draft202012Validator(schema).iter_errors({"operations": [operation]}))
+    variant = next(v for v in schema["properties"]["operations"]["items"]["oneOf"]
+                   if v["properties"]["op"].get("const") == "set_component_materials")
+    assert "light-stack-red" in variant["description"] and "pattern: 'blink'" in variant["description"]
+    assert "add pattern and periodSeconds" in tool_specs()[0]["description"]
+    assert "pattern steady|blink|strobe|rotate" in list_library({"kind": "appearances"})["adjustments"]
+
+
+@pytest.mark.parametrize("override, message", [
+    ({"appearanceId": "light-stack-red", "periodSeconds": 1}, "goes with a pattern"),
+    ({"appearanceId": "light-stack-red", "pattern": "steady", "periodSeconds": 1}, "no periodSeconds"),
+    ({"appearanceId": "light-stack-red", "pattern": "blink"}, "needs periodSeconds"),
+    ({"appearanceId": "light-stack-red", "pattern": "pulse", "periodSeconds": 1}, "pattern must be"),
+    ({"appearanceId": "light-stack-red", "pattern": "blink", "periodSeconds": 0.2}, "between 0.5 and 10"),
+    ({"appearanceId": "paint-machine-gray", "pattern": "blink", "periodSeconds": 1}, "only on a Lights finish"),
+])
+def test_a_pattern_needs_a_light_and_its_period(override, message):
+    with pytest.raises(FacilityLayoutError, match=message):
+        apply(layout(), {"op": "set_component_materials", "placementId": "pl-0", "materials": {
+            "representation": "overview", "overrides": [dict(override, key="p:stack/red#0")]}})
+    with pytest.raises(FacilityLayoutError, match=message):
+        apply(layout(), set_appearance(["pl-0"], override))
+    with pytest.raises(FacilityLayoutError, match=message):
+        apply(layout(), custom(dict({k: v for k, v in override.items() if k != "appearanceId"},
+                                    appearanceId="custom-x", label="x", baseAppearanceId=override["appearanceId"])))
 
 
 # Placement appearances ----------------------------------------------------------------
@@ -196,6 +328,167 @@ def test_scene_is_saved_with_the_layout_and_removed_by_null():
     assert doc["placements"] == layout()["placements"]
     validate_layout(doc)
     assert "facilityScene" not in apply(doc, {"op": "set_scene", "scene": None})["extensions"]
+    # The lights switch is saved with the scene, and Sage can set it.
+    dark = apply(layout(), {"op": "set_scene", "scene": {"version": 1, "sceneId": "machine-shop", "adjustments": {"lights": False}}})
+    assert dark["extensions"]["facilityScene"]["adjustments"] == {"lights": False}
+    validate_layout(dark)
+    from jsonschema import Draft202012Validator
+    from ai_inspector.codex_runtime.edit_schemas import operation_batch_schema
+    errors = Draft202012Validator(operation_batch_schema()).iter_errors({"operations": [
+        {"op": "set_scene", "scene": {"version": 1, "sceneId": "machine-shop", "adjustments": {"lights": False}}}]})
+    assert not list(errors)
+
+
+def test_a_scene_change_without_a_scene_id_keeps_the_saved_scene():
+    # Sage, 2026-10-31: "Turn the lights off" while in Evening came back as Classic. It stays Evening now.
+    evening = apply(layout(), {"op": "set_scene", "scene": {"version": 1, "sceneId": "evening",
+                                                            "adjustments": {"exposure": 0.9, "lights": True}}})
+    dark = apply(evening, {"op": "set_scene", "scene": {"version": 1, "adjustments": {"lights": False}}})
+    assert dark["extensions"]["facilityScene"] == {"version": 1, "sceneId": "evening",
+                                                   "adjustments": {"exposure": 0.9, "lights": False}}
+    validate_layout(dark)
+    assert apply(dark, {"op": "set_scene", "scene": {"version": 1}})["extensions"] == dark["extensions"]
+    # With no saved scene the change applies to Classic; a sceneId still replaces the scene and its adjustments.
+    assert apply(layout(), {"op": "set_scene", "scene": {"version": 1, "adjustments": {"lights": False}}})[
+        "extensions"]["facilityScene"] == {"version": 1, "sceneId": "classic", "adjustments": {"lights": False}}
+    assert apply(dark, {"op": "set_scene", "scene": {"version": 1, "sceneId": "warehouse"}})["extensions"][
+        "facilityScene"] == {"version": 1, "sceneId": "warehouse"}
+    with pytest.raises(FacilityLayoutError):
+        apply(evening, {"op": "set_scene", "scene": {"version": 1, "adjustments": {"lights": "off"}}})
+    from jsonschema import Draft202012Validator
+    from ai_inspector.codex_runtime.edit_schemas import operation_batch_schema
+    assert not list(Draft202012Validator(operation_batch_schema()).iter_errors({"operations": [
+        {"op": "set_scene", "scene": {"version": 1, "adjustments": {"lights": False}}}]}))
+
+
+def test_sage_naming_the_current_scene_keeps_its_saved_adjustments(monkeypatch):
+    # The main session, 2026-11-01: "Switch this layout to the evening scene with a glow halo around the lights" on an
+    # Evening layout with light areas came back without them, as a sceneId replaces the scene. For Sage, naming the
+    # scene the layout already has is not a switch.
+    from ai_inspector.facility_layout.operations import keep_current_scene
+    areas = {"mode": "only", "areas": [{"rectangle": {"minX": 0, "minZ": 0, "maxX": 10, "maxZ": 10}}]}
+    evening = apply(layout(), {"op": "set_scene", "scene": {"version": 1, "sceneId": "evening",
+                                                            "adjustments": {"lightAreas": areas}}})
+    halo = {"op": "set_scene", "scene": {"version": 1, "sceneId": "evening", "adjustments": {"glowHalo": True}}}
+    [kept] = keep_current_scene([halo], evening)
+    assert kept == {"op": "set_scene", "scene": {"version": 1, "adjustments": {"glowHalo": True}}}
+    assert apply(evening, kept)["extensions"]["facilityScene"] == {
+        "version": 1, "sceneId": "evening", "adjustments": {"lightAreas": areas, "glowHalo": True}}
+    # Another scene is a switch, null and then the scene starts it afresh, and with no saved scene nothing changes.
+    warehouse = {"op": "set_scene", "scene": {"version": 1, "sceneId": "warehouse"}}
+    assert keep_current_scene([warehouse], evening) == [warehouse]
+    afresh = [{"op": "set_scene", "scene": None}, halo]
+    assert keep_current_scene(afresh, evening) == afresh
+    assert keep_current_scene([halo], layout()) == [halo]
+    # Only Sage's previews come here: the operation itself (the Scenes pane) still replaces the scene.
+    assert apply(evening, halo)["extensions"]["facilityScene"] == {
+        "version": 1, "sceneId": "evening", "adjustments": {"glowHalo": True}}
+    # Sage's gateway applies it before staging, and the tool text says so.
+    from types import SimpleNamespace
+    from ai_inspector.codex_runtime import assisted_tools, facility_tools
+    from ai_inspector.codex_runtime.edit_schemas import operation_batch_schema
+    seen = {}
+
+    def staged(*_args, operations, **_kwargs):
+        seen["operations"] = operations
+        raise RuntimeError("staged")
+
+    monkeypatch.setattr(facility_tools, "read_bound_layout", lambda *_: {"layout": evening})
+    monkeypatch.setattr(assisted_tools, "create", staged)
+    gateway = object.__new__(assisted_tools.FacilityEditGateway)
+    gateway.runtime, gateway.principal = SimpleNamespace(service=None), None
+    gateway.reference = {"siteId": "site", "layoutId": "layout", "revision": "r1"}
+    gateway.edit_mode = "direct"
+    with pytest.raises(RuntimeError, match="staged"):
+        gateway._read_data("preview_facility_operations", {"operations": [halo]})
+    assert seen["operations"] == [kept]
+    variant = next(v for v in operation_batch_schema()["properties"]["operations"]["items"]["oneOf"]
+                   if v["properties"]["op"].get("const") == "set_scene")
+    assert "Naming the scene the layout already has is not a switch" in variant["description"]
+
+
+def test_the_glow_halo_is_saved_with_the_scene_and_sage_can_turn_it_on():
+    # Lighting L6: off unless the scene says so; the view draws it only in a scene with floor light pools.
+    halo = apply(layout(), {"op": "set_scene", "scene": {"version": 1, "sceneId": "evening",
+                                                         "adjustments": {"glowHalo": True}}})
+    assert halo["extensions"]["facilityScene"] == {"version": 1, "sceneId": "evening", "adjustments": {"glowHalo": True}}
+    validate_layout(halo)
+    # "Turn the glow off" keeps Evening and its other adjustments.
+    plain = apply(halo, {"op": "set_scene", "scene": {"version": 1, "adjustments": {"glowHalo": False}}})
+    assert plain["extensions"]["facilityScene"] == {"version": 1, "sceneId": "evening",
+                                                    "adjustments": {"glowHalo": False}}
+    from jsonschema import Draft202012Validator
+    from ai_inspector.codex_runtime.edit_schemas import operation_batch_schema
+    schema = operation_batch_schema()
+    assert not list(Draft202012Validator(schema).iter_errors({"operations": [
+        {"op": "set_scene", "scene": {"version": 1, "sceneId": "evening", "adjustments": {"glowHalo": True}}}]}))
+    assert list(Draft202012Validator(schema).iter_errors({"operations": [
+        {"op": "set_scene", "scene": {"version": 1, "adjustments": {"glowHalo": "on"}}}]}))
+    set_scene = next(v for v in schema["properties"]["operations"]["items"]["oneOf"]
+                     if v["properties"]["op"].get("const") == "set_scene")
+    assert "glowHalo" in set_scene["description"] and "evening" in set_scene["description"]
+    # Sage's scene list says which scenes have floor pools, and so can show the halo.
+    scenes = {row["sceneId"]: row for row in library_summary("scenes")}
+    assert scenes["evening"]["lightPools"] is True
+    assert all("lightPools" not in row for key, row in scenes.items() if key != "evening")
+
+
+# General lights per area (L7) --------------------------------------------------------
+
+def floors(*ids):
+    doc = layout()
+    doc.setdefault("extensions", {})["facilityPlan"] = default_plan_settings()
+    return apply(doc, *({"op": "upsert_floor_surface", "surface": {"surfaceId": surface, "label": surface[3:].title(),
+        "boundary": [{"x": x, "z": 20}, {"x": x + 4, "z": 20}, {"x": x + 4, "z": 24}, {"x": x, "z": 24}],
+        "elevation": 0, "material": "concrete", "color": "#8A8F94", "roughness": 0.8}}
+        for x, surface in zip(range(0, 40, 5), ids)))
+
+
+def test_light_areas_are_saved_with_the_scene_and_name_floor_areas_of_this_layout():
+    doc = floors("fs-receiving", "fs-gym")
+    areas = {"mode": "only", "areas": [{"surfaceId": "fs-receiving"},
+                                       {"rectangle": {"minX": 10.12345, "minZ": 2, "maxX": 14, "maxZ": 3.5}}]}
+    lit = apply(doc, {"op": "set_scene", "scene": {"version": 1, "sceneId": "evening",
+                                                   "adjustments": {"lightAreas": areas}}})
+    saved = lit["extensions"]["facilityScene"]["adjustments"]["lightAreas"]
+    assert saved == {"mode": "only", "areas": [{"surfaceId": "fs-receiving"},
+                                               {"rectangle": {"minX": 10.123, "minZ": 2, "maxX": 14, "maxZ": 3.5}}]}
+    validate_layout(lit)
+    with pytest.raises(FacilityLayoutError, match="Unknown floor area 'fs-office'"):
+        apply(doc, {"op": "set_scene", "scene": {"version": 1, "adjustments": {"lightAreas": {
+            "mode": "except", "areas": [{"surfaceId": "fs-office"}]}}}})
+    # A floor area deleted later lights nothing, and a lights-only change keeps the saved areas.
+    gone = apply(lit, {"op": "delete_floor_surface", "surfaceId": "fs-receiving"})
+    dark = apply(gone, {"op": "set_scene", "scene": {"version": 1, "adjustments": {"lights": False}}})
+    assert dark["extensions"]["facilityScene"] == {"version": 1, "sceneId": "evening",
+                                                   "adjustments": {"lightAreas": saved, "lights": False}}
+    # Everywhere except nothing: general lights on everywhere again, still in Evening.
+    again = apply(dark, {"op": "set_scene", "scene": {"version": 1, "adjustments": {"lightAreas": {
+        "mode": "except", "areas": []}}}})
+    assert again["extensions"]["facilityScene"]["adjustments"] == {"lightAreas": {"mode": "except", "areas": []},
+                                                                   "lights": False}
+    from jsonschema import Draft202012Validator
+    from ai_inspector.codex_runtime.edit_schemas import operation_batch_schema
+    assert not list(Draft202012Validator(operation_batch_schema()).iter_errors({"operations": [
+        {"op": "set_scene", "scene": {"version": 1, "adjustments": {"lightAreas": areas}}}]}))
+
+
+@pytest.mark.parametrize("light_areas", [
+    {"mode": "on", "areas": []},
+    {"mode": "only"},
+    {"mode": "only", "areas": {"surfaceId": "fs-gym"}},
+    {"mode": "only", "areas": [{"surfaceId": "gym"}]},
+    {"mode": "only", "areas": [{"surfaceId": "fs-gym", "rectangle": {"minX": 0, "minZ": 0, "maxX": 1, "maxZ": 1}}]},
+    {"mode": "only", "areas": [{"rectangle": {"minX": 0, "minZ": 0, "maxX": 1}}]},
+    {"mode": "only", "areas": [{"rectangle": {"minX": 0, "minZ": 0, "maxX": 0.05, "maxZ": 1}}]},
+    {"mode": "only", "areas": [{"rectangle": {"minX": 0, "minZ": 0, "maxX": "1", "maxZ": 1}}]},
+    {"mode": "only", "areas": [{"surfaceId": "fs-gym"}, {"surfaceId": "fs-gym"}]},
+    {"mode": "only", "areas": [{"rectangle": {"minX": i, "minZ": 0, "maxX": i + 1, "maxZ": 1}} for i in range(65)]},
+])
+def test_invalid_light_areas_are_rejected(light_areas):
+    with pytest.raises(FacilityLayoutError):
+        apply(floors("fs-gym"), {"op": "set_scene", "scene": {"version": 1, "sceneId": "evening",
+                                                              "adjustments": {"lightAreas": light_areas}}})
 
 
 @pytest.mark.parametrize("scene", [
@@ -204,6 +497,10 @@ def test_scene_is_saved_with_the_layout_and_removed_by_null():
     {"version": 1, "sceneId": "classic", "adjustments": {"exposure": 9}},
     {"version": 1, "sceneId": "classic", "adjustments": {"fog": 1}},
     {"version": 1, "sceneId": "classic", "adjustments": {"shadows": "yes"}},
+    {"version": 1, "sceneId": "classic", "adjustments": {"lights": "off"}},
+    {"version": 1, "sceneId": "classic", "adjustments": {"lights": 0}},
+    {"version": 1, "sceneId": "evening", "adjustments": {"glowHalo": "on"}},
+    {"version": 1, "sceneId": "evening", "adjustments": {"glowHalo": 1}},
 ])
 def test_invalid_scenes_are_rejected(scene):
     with pytest.raises(FacilityLayoutError):

@@ -685,6 +685,25 @@ class FacilityLayoutService:
             evidence_authority=authority,
         )
 
+    def effective_shell(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        document: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """DOCUMENT's shell as the spatial checks see it (its own features plus the layout's perimeter and interior
+        walls and ground), with no asset reads: where the lighting estimate finds the building's walls."""
+        shell_ref = document["sourceShellRef"]
+        shell = _published_authority_dependency(
+            self.shell_repository,
+            principal,
+            site_id=site_id,
+            authority_id=shell_ref["shellId"],
+            revision=shell_ref["shellRevision"],
+            kind="shell",
+        )
+        return shell_with_plan_boundary(shell.document, document)
+
     def _diagnose_spatial(
         self,
         principal: FacilityPrincipal,
@@ -2955,6 +2974,7 @@ class FacilityLayoutService:
         operations: list[Mapping[str, Any]],
         *,
         required_action: str | None = "layout.edit",
+        baseline_out: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], FacilityDependencySnapshot]:
         if required_action is not None:
             require_facility_action(
@@ -2991,6 +3011,10 @@ class FacilityLayoutService:
             site_id,
             current["layout"],
         )
+        if baseline_out is not None:
+            # The saved layout's diagnostics, for a caller that reports what
+            # the change adds (operation_proposals).
+            baseline_out.update(spatial=baseline_spatial, routing=baseline_routing)
         operation_result = apply_facility_layout_operations(
             current["layout"],
             operations,
@@ -3249,6 +3273,38 @@ class FacilityLayoutService:
             "baseRevision": base_revision,
             "spatialDiagnostics": draft_spatial,
         }
+
+    def layout_with_operations(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        base_revision: str,
+        operations: list[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """The saved layout with the view's unsaved operations applied, for a read-only check such as the lighting
+        coverage estimate. Nothing is stored."""
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="layout.read",
+        )
+        current = self.layout_repository.get_layout(principal, site_id, layout_id)
+        if current["revision"] != base_revision:
+            raise FacilityConflictError(
+                "revision_conflict",
+                "Facility Layout revision conflict.",
+                details={"currentRevision": current["revision"]},
+            )
+        pending = list(operations or [])
+        if not pending:
+            return current["layout"]
+        return apply_facility_layout_operations(
+            current["layout"],
+            pending,
+            base_revision=base_revision,
+        )["document"]
 
     def diagnose_spatial(
         self,

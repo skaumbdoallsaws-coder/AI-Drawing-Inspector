@@ -2525,6 +2525,32 @@ async function main() {
             assert.strictEqual(state.conflict, null);
         });
 
+    await check('a preview reports what its change adds, not the layout-wide checks',
+        async () => {
+            const initial = layout();
+            const proposalReceipt = fullLayoutProposalReceipt(initial, 'rev-1');
+            const validation = proposalReceipt.alternatives[0].validation;
+            // The layout already has a blocked aisle and 4 warnings; the change adds 1 warning.
+            validation.spatial.metrics.warningCount = 4;
+            validation.introduced = {
+                spatial: { errorCount: 0, warningCount: 1, placementCollisions: 0,
+                    shellObstacleCollisions: 0, clearanceConflicts: 0, obstructedAisleCount: 0 },
+                routing: { errorCount: 0, blockedCount: 0 },
+            };
+            validation.siteContext = { findingCount: 7, newFindingCount: 2, findings: [] };
+            const authority = fakeAuthority(initial, {
+                createLayoutProposals: async () => clone(proposalReceipt),
+            });
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            await session.requestLayoutProposal(fullLayoutRequest());
+            assert.deepStrictEqual(session.getState().layoutProposal.alternatives[0].validationSummary, {
+                noNewErrors: true, errorCount: 0, warningCount: 1, placementCollisions: 0,
+                shellObstacleCollisions: 0, clearanceConflicts: 0, obstructedAisleCount: 0,
+                blockedRouteCount: 0, routingErrorCount: 0, siteFindingCount: 2,
+            });
+        });
+
     await check('full-layout alternatives are read-only and cycle without dirtying',
         async () => {
             const cancelled = [];

@@ -1607,6 +1607,18 @@
                     operations: operationBatch(value.operations || []),
                 }, requestOptions);
             },
+            // The lighting coverage estimate of one area (lighting plan CC3): read only.
+            lightingCoverage: function (payload, requestOptions) {
+                const value = payload || {};
+                if (!value.area || typeof value.area !== 'object' || Array.isArray(value.area)) {
+                    throw new TypeError('A lighting coverage area is required.');
+                }
+                return request('/lighting/coverage', 'POST', {
+                    baseRevision: nonEmptyString(value.baseRevision, 'baseRevision'),
+                    operations: operationBatch(value.operations || []),
+                    area: clone(value.area),
+                }, requestOptions);
+            },
             placementCandidates: function (payload, requestOptions) {
                 const value = payload || {};
                 return request(

@@ -305,6 +305,7 @@
             nodes.push({ kind: 'root', id: 'appearances', label: 'Appearances', depth: 0, parent: true });
             if (library && state.expanded.has('appearances')) {
                 library.categories.forEach(function (category) {
+                    if (!assemblyRows(library, { kind: 'appearance', category: category.categoryId, layout: null }).length) return;
                     nodes.push({ kind: 'category', id: category.categoryId, label: category.label, depth: 1 });
                 });
             }
@@ -362,6 +363,13 @@
             });
         }
 
+        // Lights glow only in the Facility 3D view; the Assembly view draws no glow, so this pane leaves them out.
+        function assemblyRows(library, options) {
+            return libraryApi.search(library, options).filter(function (row) {
+                return !(row.kind === 'appearance' && row.emission);
+            });
+        }
+
         // ---- Grid ---------------------------------------------------------------
         function itemsForNode() {
             const library = lib();
@@ -370,14 +378,14 @@
                 return ['appearance', 'scene', 'decal'].filter(function (kind) {
                     return sections.has(kind === 'appearance' ? 'appearances' : kind + 's');
                 }).reduce(function (rows, kind) {
-                    return rows.concat(libraryApi.search(library, { kind: kind, query: state.query, layout: null }));
+                    return rows.concat(assemblyRows(library, { kind: kind, query: state.query, layout: null }));
                 }, []);
             }
             const node = state.node;
             if (node.kind === 'machine') return machineRows();
             if (node.kind === 'logos') return logos();
-            if (node.kind === 'root' && node.id === 'appearances') return libraryApi.search(library, { kind: 'appearance', layout: null });
-            if (node.kind === 'category') return libraryApi.search(library, { kind: 'appearance', category: node.id, layout: null });
+            if (node.kind === 'root' && node.id === 'appearances') return assemblyRows(library, { kind: 'appearance', layout: null });
+            if (node.kind === 'category') return assemblyRows(library, { kind: 'appearance', category: node.id, layout: null });
             if (node.kind === 'root' && node.id === 'scenes') return libraryApi.search(library, { kind: 'scene' });
             if (node.kind === 'scene-group') return libraryApi.search(library, { kind: 'scene', group: node.id });
             if (node.kind === 'root' && node.id === 'decals') return libraryApi.search(library, { kind: 'decal' });

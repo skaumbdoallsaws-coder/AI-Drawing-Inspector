@@ -75,6 +75,13 @@ def test_sage_lists_finishes_and_parts_and_sets_them_on_the_server(tmp_path):
     assert listed["ok"] and {row["appearanceId"] for row in listed["data"]["finishes"]} == {
         "glass-clear", "glass-frosted"}
     assert listed["data"]["parts"][1] == {"part": "door", "name": "Door"}
+    # Lights glow only in the Facility 3D view: the Assembly list leaves them out, and a set refuses one.
+    everything = call(reader, "list_appearances", {})["data"]["finishes"]
+    assert everything and not any(row["category"] == "lights" for row in everything)
+    assert call(reader, "list_appearances", {"query": "stack light"})["data"]["finishes"] == []
+    refused = call(reader, "set_assembly_appearance", {"assignments": [
+        {"target": "whole", "appearanceId": "light-stack-green"}]})
+    assert not refused["ok"] and "Lights finish" in str(refused), refused
     assert listed["data"]["now"] == {"whole": None, "parts": {}} and "line drawings" in listed["data"]["note"]
     result = call(reader, "set_assembly_appearance", {"assignments": [
         {"target": "whole", "appearanceId": "paint-machine-gray"},

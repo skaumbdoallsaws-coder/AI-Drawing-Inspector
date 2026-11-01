@@ -99,13 +99,13 @@ def test_staged_aisle_that_stops_at_department_edges_is_named(context):
     assert "aisleReach" not in reaching["alternative"]["validation"]
 
 
-def _workbench_at(host, z):
+def _workbench_at(host, z, *, x=20, placement_id="pl-bench"):
     asset = next(item for item in host.ensure_bootstrap()["assetCatalog"]
         if item["assetId"] == "asset-workbench")
     return {"op": "place_asset", "placement": {
-        "placementId": "pl-bench", "assetId": asset["assetId"],
+        "placementId": placement_id, "assetId": asset["assetId"],
         "assetDefinitionRevision": asset["assetDefinitionRevision"],
-        "transform": {"position": {"x": 20, "y": 0, "z": z},
+        "transform": {"position": {"x": x, "y": 0, "z": z},
             "quaternion": {"x": 0, "y": 0, "z": 0, "w": 1}, "scale": 1},
         "positionMode": "manual", "snapRelationship": None, "metadata": {}}}
 
@@ -136,6 +136,30 @@ def asset_host(tmp_path):
         yield host
     finally:
         host.close()
+
+
+def test_the_checks_count_only_what_the_change_adds(asset_host):
+    """validation.introduced (the review card's "Checks:" line): findings the proposed layout has and the saved one
+    did not. validation.spatial and .routing still count the whole layout."""
+    context = asset_host.service, asset_host.principal()
+    saved = propose(context, operations=_zones_and_spine_aisle(2, 38) + [_workbench_at(asset_host, 5)])
+    receipt = apply(context, saved, approve(context, saved))["receipt"]
+    nothing = {"spatial": {"errorCount": 0, "warningCount": 0, "placementCollisions": 0, "shellObstacleCollisions": 0,
+                           "clearanceConflicts": 0, "obstructedAisleCount": 0},
+               "routing": {"errorCount": 0, "blockedCount": 0}}
+    clear = propose(context, operations=[_workbench_at(asset_host, 8.8, x=14, placement_id="pl-bench-2")])
+    validation = clear["alternative"]["validation"]
+    assert validation["spatial"]["metrics"]["obstructedAisleCount"] == 1, "the bench already in the spine"
+    assert validation["spatial"]["metrics"]["warningCount"] >= 1
+    assert validation["introduced"] == nothing
+    blocking = propose(context, operations=[_workbench_at(asset_host, 5, x=14, placement_id="pl-bench-2")])
+    validation = blocking["alternative"]["validation"]
+    assert validation["spatial"]["metrics"]["obstructedAisleCount"] == 1, "the same aisle"
+    assert validation["introduced"] == dict(nothing, spatial=dict(nothing["spatial"], warningCount=1,
+                                                                  obstructedAisleCount=1))
+    # Undo takes the blocked aisle away: it adds nothing.
+    undo = propose(context, undo_receipt_id=receipt["receiptId"])["alternative"]["validation"]
+    assert undo["spatial"]["metrics"]["obstructedAisleCount"] == 0 and undo["introduced"] == nothing
 
 
 def _place_review_assets(host):

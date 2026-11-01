@@ -142,19 +142,23 @@ def review_parking(layout, zone_ids, requested_spaces=None):
     return result
 
 
-def _scope_snapshot(layout, zone):
+def _scope_snapshot(layout, zone, exempt=frozenset()):
     from shapely.geometry import Point
     area, bays, lanes, walks = _records(layout, zone)
     # Finishes do not change parking function; placement motion does.
     placements = [(p["placementId"], p["assetId"], p["assetDefinitionRevision"], p["transform"])
-        for p in layout.get("placements", []) if area.covers(Point(
+        for p in layout.get("placements", []) if p["placementId"] not in exempt and area.covers(Point(
             p["transform"]["position"]["x"], p["transform"]["position"]["z"]))
         and _near_floor(p["transform"]["position"]["y"], zone)]
     return (zone["label"], zone["boundary"], zone["floorElevation"],
             sorted((key, shape.wkb_hex) for key, shape in [*bays, *lanes, *walks]), sorted(placements))
 
 
-def review_changed_parking(before, after):
+def review_changed_parking(before, after, excuse=None):
+    """The parking review of the zones a change touches, or None. EXCUSE(zones), when given, is asked once, with the
+    zones that changed, which placements to leave out of their comparison (new pole lights on spots the light helper
+    clears: operation_proposals, light_positions.cleared_pole_spots); a zone whose only change is those is not
+    reviewed."""
     if routing.Polygon is None:
         return {"reviewVersion": VERSION, "status": "not_checked", "certified": False,
                 "reason": "Parking geometry review is unavailable."}
@@ -175,5 +179,9 @@ def review_changed_parking(before, after):
                 for candidate, marks in zip((old, zone), parking_marks) for mark in marks):
             continue
         if old is None or _scope_snapshot(before, old) != _scope_snapshot(after, zone):
-            selected.append(zone["zoneId"])
-    return review_parking(after, selected) if selected else None
+            selected.append((zone, old))
+    excused = excuse([zone for zone, _ in selected]) if selected and excuse else None
+    if excused:
+        selected = [(zone, old) for zone, old in selected
+                    if old is None or _scope_snapshot(before, old, excused) != _scope_snapshot(after, zone, excused)]
+    return review_parking(after, [zone["zoneId"] for zone, _ in selected]) if selected else None

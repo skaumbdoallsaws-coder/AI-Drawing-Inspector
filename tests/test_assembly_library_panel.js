@@ -162,6 +162,23 @@ test('the tree has the machine, the three libraries and logos, and the new machi
     assert(find(host, node => node.className === 'ip-flib-empty') === null);
 });
 
+test('Lights finishes glow only in the Facility 3D view, so the machine pane leaves them out', async () => {
+    const { host } = harness();
+    await settle();
+    nodeNamed(host, 'Appearances').click();
+    await settle();
+    assert(nodeNamed(host, 'Paint & Coatings') && nodeNamed(host, 'Metals'), 'the finish groups are listed');
+    assert.strictEqual(nodeNamed(host, 'Lights'), null, 'no Lights group');
+    assert(tileFor(host, 'appearance', 'paint-safety-orange'));
+    assert.strictEqual(tileFor(host, 'appearance', 'light-stack-red'), null, 'no glow finish under Appearances');
+    const search = find(host, node => node.className === 'ip-flib-search');
+    search.value = 'light';
+    search.dispatch('input');
+    await settle();
+    assert(tileFor(host, 'appearance', 'wood-maple'), 'search still finds the other finishes ("light" maple)');
+    assert.strictEqual(tileFor(host, 'appearance', 'light-cool-white-led'), null, 'nor in search');
+});
+
 test('a finish goes on the selected parts or the whole machine, with a colour, and comes off again', async () => {
     const { host, calls, settings } = harness();
     await settle();

@@ -42,6 +42,8 @@ def test_steps_name_zones_items_and_changes_in_plain_words():
         == "Checking where 1400 mm Wood Desk fits in Offices"
     assert running("inspect_facility_asset", {"assetId": "asset-desk"}) == "Looking up 1400 mm Wood Desk"
     assert running("inspect_facility_components", {"placementId": "pl-chair"}) == "Reading the parts of Visitor chair"
+    # An item about to be placed: its catalog name.
+    assert running("inspect_facility_components", {"assetId": "asset-desk"}) == "Reading the parts of 1400 mm Wood Desk"
     assert running("inspect_facility_authoring", {"view": "placements", "query": "desk"}) \
         == 'Reading placed equipment matching "desk"'
     assert running("inspect_facility_authoring", {"view": "placements", "offset": 25, "pageSize": 25}) \
@@ -130,6 +132,38 @@ def test_failed_steps_name_the_reason_when_it_helps(code, reason):
 
     asyncio.run(exercise())
     assert steps[-1] == ("tool", "failed", "Couldn't stage 1 new item" + reason)
+
+
+def test_a_coverage_check_tells_the_view_what_to_show_and_other_steps_do_not():
+    """docs/facility-lighting-plan.md, "Sage shows the overlay": the done step of check_lighting_coverage carries
+    the area Sage checked and the layout revision it read; the chat page hands it to the facility view."""
+    sent = []
+
+    async def sink(step):
+        sent.append(step)
+    identity = {"siteId": "site-local", "layoutId": "fl-a", "revision": "r" * 64}
+    area = {"zoneId": "zn-yard-all", "darkBelowLux": 5}
+
+    async def exercise():
+        progress = TurnProgress(sink)
+        progress.RUNTIME_WAIT_SECONDS = 0
+        started = await progress.tool_started("check_lighting_coverage", area)
+        await progress.tool_finished(started, {"ok": True, "data": {"identity": identity, "estimatedLux": {}}})
+        started = await progress.tool_started("check_lighting_coverage", {"lot": True})
+        await progress.tool_finished(started, {"ok": False, "error": {"code": "lighting_coverage_unavailable"}})
+        started = await progress.tool_started("inspect_facility_context", {})
+        await progress.tool_finished(started, {"ok": True, "data": {"identity": identity}})
+
+    asyncio.run(exercise())
+    done = [step for step in sent if step["state"] != "running"]
+    assert done[0]["show"] == {"lightingCoverage": dict(identity, area=area)}
+    assert done[0]["show"]["lightingCoverage"]["area"] is not area, "a copy"
+    assert [step["state"] for step in done] == ["done", "failed", "done"]
+    assert "show" not in done[1] and "show" not in done[2]
+    page = (Path(__file__).resolve().parents[1] / "static" / "index.html").read_bytes().decode("utf-8")
+    assert "workingState.step(event.step);\n                                    _trainFacilityShowFromStep(event.step);" \
+        in page.replace("\r\n", "\n")
+    assert "workspace.showSageLightCoverage(coverage)" in page
 
 
 def test_answers_without_remarks_are_unchanged_and_a_silent_runtime_costs_little():

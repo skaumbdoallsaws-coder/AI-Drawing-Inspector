@@ -87,6 +87,7 @@ def test_every_published_tool_schema_is_typed_valid_and_accepts_the_same_calls()
     typed = Draft202012Validator({"$defs": schema.get("$defs", {}), **typed_items})
     samples = [
         {"op": "set_scene", "scene": {"version": 1, "sceneId": "presentation-light"}},
+        {"op": "set_scene", "scene": {"version": 1, "adjustments": {"lights": False}}},
         {"op": "set_scene", "scene": None},
         {"op": "set_scene", "scene": {"version": 1, "sceneId": "not-a-scene"}},
         {"op": "set_appearance", "placementIds": ["pl-a"], "appearance": {"appearanceId": "wood-oak"}},

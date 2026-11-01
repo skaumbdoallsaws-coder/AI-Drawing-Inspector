@@ -319,8 +319,81 @@
             material.envMap = settings.envMap;
             material.envMapIntensity = Number.isFinite(settings.envMapIntensity) ? settings.envMapIntensity : 0.7;
         }
+        applyEmission(material, resolved.emission);
         material.needsUpdate = true;
         return material;
+    }
+
+    // ---- Light patterns (docs/facility-lighting-plan.md, L4) -------------------------------------------------
+    // A light may blink, strobe (one short flash) or turn like a rotating beacon: emission.pattern, one cycle every
+    // emission.periodSeconds. Every lamp runs on one shared clock, so lamps with the same pattern change together,
+    // and each pattern is a few fixed brightness steps, so a view only has to redraw when a step changes.
+    const GLOW_PATTERNS = ['steady', 'blink', 'strobe', 'rotate'];
+    const STROBE_FLASH = 0.1;
+    // A rotating beacon in 8 steps per turn: the beam sweeps past the viewer, then the dome glows dimly.
+    const ROTATE_LEVELS = [1, 0.55, 0.2, 0.2, 0.2, 0.2, 0.2, 0.55];
+
+    function glowCycle(glow) {
+        const pattern = glow && glow.pattern;
+        const period = Number(glow && glow.periodSeconds);
+        if (GLOW_PATTERNS.indexOf(pattern) <= 0 || !Number.isFinite(period) || period <= 0) return null;
+        return { pattern: pattern, period: period };
+    }
+
+    function glowMoves(glow) {
+        return Boolean(glowCycle(glow));
+    }
+
+    // Brightness of a glow, 0 to 1, at a time on the shared clock (seconds).
+    function glowLevel(glow, seconds) {
+        const cycle = glowCycle(glow);
+        if (!cycle) return 1;
+        const turns = seconds / cycle.period;
+        const phase = turns - Math.floor(turns);
+        if (cycle.pattern === 'blink') return phase < 0.5 ? 1 : 0;
+        if (cycle.pattern === 'strobe') return phase < STROBE_FLASH ? 1 : 0;
+        return ROTATE_LEVELS[Math.min(ROTATE_LEVELS.length - 1, Math.floor(phase * ROTATE_LEVELS.length))];
+    }
+
+    // When the glow next changes brightness, in seconds on the shared clock after `seconds`; Infinity if never.
+    function nextGlowChange(glow, seconds) {
+        const cycle = glowCycle(glow);
+        if (!cycle) return Infinity;
+        const marks = cycle.pattern === 'blink' ? [0.5, 1] : cycle.pattern === 'strobe' ? [STROBE_FLASH, 1]
+            : ROTATE_LEVELS.map(function (level, index) { return (index + 1) / ROTATE_LEVELS.length; });
+        const start = Math.floor(seconds / cycle.period) * cycle.period;
+        const level = glowLevel(glow, seconds);
+        for (let turn = 0; turn < 2; turn += 1) {
+            for (let index = 0; index < marks.length; index += 1) {
+                const at = start + (turn + marks[index]) * cycle.period;
+                if (at > seconds && glowLevel(glow, at + 1e-6) !== level) return at;
+            }
+        }
+        return Infinity;
+    }
+
+    // A light finish glows: its emission is drawn on top of the lit color and kept out of tone mapping, so a
+    // lens reads as switched on in every scene, bright or dark. No light falls on other surfaces.
+    // userData.facilityGlow records the glow (and its pattern, if it blinks) so the lights can be switched and
+    // blinked without rebuilding the material.
+    function applyEmission(material, emission) {
+        if (!emission || typeof emission.color !== 'string' || !material.emissive) return false;
+        const intensity = Number(emission.intensity);
+        material.emissive.set(emission.color);
+        material.emissiveIntensity = Number.isFinite(intensity) && intensity > 0 ? intensity : 1;
+        material.toneMapped = false;
+        const glow = { color: emission.color, intensity: material.emissiveIntensity };
+        const cycle = glowCycle(emission);
+        if (cycle) Object.assign(glow, { pattern: cycle.pattern, periodSeconds: cycle.period });
+        // An outdoor light (L8): in the evening scene its lamps show a beam down to the ground and a pool there.
+        const beam = Number(emission.beamAngleDegrees);
+        if (Number.isFinite(beam) && beam > 0) glow.beamAngleDegrees = beam;
+        material.userData.facilityGlow = glow;
+        return true;
+    }
+
+    function isGlowMaterial(material) {
+        return Boolean(material && material.userData && material.userData.facilityGlow);
     }
 
     function isFinishMaterial(material) {
@@ -423,6 +496,11 @@
         createTextureCache: createTextureCache,
         createFinishMaterial: createFinishMaterial,
         isFinishMaterial: isFinishMaterial,
+        isGlowMaterial: isGlowMaterial,
+        GLOW_PATTERNS: GLOW_PATTERNS,
+        glowMoves: glowMoves,
+        glowLevel: glowLevel,
+        nextGlowChange: nextGlowChange,
         isLibraryTexture: isLibraryTexture,
         mappingFor: mappingFor,
         partAxis: partAxis,

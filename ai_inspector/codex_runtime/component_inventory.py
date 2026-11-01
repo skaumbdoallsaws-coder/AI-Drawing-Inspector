@@ -26,10 +26,17 @@ def tool_specs():
         "(modelColor etc.), which the view usually replaces with a neutral finish. "
         "Use the returned stable p:... keys and visualSha256 for set_component_materials; never invent seat/frame roles "
         "if names are ambiguous. Keys follow the model's node names (legacyKey is the older traversal-order key). "
-        "To leave a part unchanged, leave it out of set_component_materials. "
+        "To leave a part unchanged, leave it out of set_component_materials. A part with defaultFinish comes with "
+        "that library finish from its model (a light's lens comes lit); it keeps it unless you give the part a "
+        "finish of its own. Parts with the same finishGroup (a stack light's three lamps) show the group's default "
+        "only while none of them has a finish of its own: a finish on the amber or red lamp turns the green off. "
+        "Give placementId for a saved item, or assetId for an item you are about to place: then give its place_asset "
+        "a placementId and put set_component_materials for that placementId, with these keys and visualSha256, after "
+        "it in the same preview, so it is placed with its part finishes in one proposal. "
         "Does not inspect arbitrary paths or change the model.",
-        "input_schema": {"type": "object", "additionalProperties": False, "required": ["placementId"],
+        "input_schema": {"type": "object", "additionalProperties": False, "required": [],
             "properties": {"placementId": {"type": "string", "minLength": 1, "maxLength": 128},
+                "assetId": {"type": "string", "minLength": 1, "maxLength": 128},
                 "representation": {"enum": ["overview", "detail"]},
                 "query": {"type": "string", "maxLength": 120},
                 "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
@@ -104,6 +111,13 @@ def material_slots(document):
                 extras = material.get("extras") if isinstance(material.get("extras"), dict) else {}
                 if extras.get("facilityAuthoredFinish") is True:
                     slot["authoredFinish"] = True
+                # The model names a library finish for this part (a light's lens that comes lit); the view
+                # applies it under the placement's own part finishes (static/facility_layout_component_materials.js).
+                if isinstance(extras.get("facilityDefaultFinish"), str) and extras["facilityDefaultFinish"]:
+                    slot["defaultFinish"] = extras["facilityDefaultFinish"][:120]
+                # A default in a finish group (a stack light's lamps) shows only while no part of it has its own.
+                if isinstance(extras.get("facilityFinishGroup"), str) and extras["facilityFinishGroup"]:
+                    slot["finishGroup"] = extras["facilityFinishGroup"][:120]
                 if extras.get("facilityArtwork") is True and pbr.get("baseColorTexture") is not None:
                     slot["printedArtwork"] = True
                 slots.append(slot)
@@ -186,16 +200,22 @@ def _slot_origins(document):
     return origins
 
 
-def resolve_component_inventory(runtime, principal, reference, placement_id, representation, *, project_root=None):
-    """Unpaged authority for one exact saved occurrence; no model-selected path."""
+def resolve_component_inventory(runtime, principal, reference, placement_id, representation, *, project_root=None,
+                                asset=None):
+    """Unpaged authority for one exact saved occurrence, or, with ASSET (assetId, revision) and no placement, for that
+    exact catalog asset's visual (a placement the same preview makes); no model-selected path."""
     from .facility_tools import read_bound_layout
     saved = read_bound_layout(runtime, principal, reference)
-    placement = next((p for p in saved["layout"]["placements"] if p["placementId"] == placement_id), None)
-    if placement is None:
-        raise PilotError("codex_placement_unavailable", "The placement does not exist in this saved layout.", 404)
+    if asset is None:
+        placement = next((p for p in saved["layout"]["placements"] if p["placementId"] == placement_id), None)
+        if placement is None:
+            raise PilotError("codex_placement_unavailable", "The placement does not exist in this saved layout.", 404)
+        asset_id, revision = placement["assetId"], placement["assetDefinitionRevision"]
+    else:
+        placement, (asset_id, revision) = None, asset
     entries = runtime.asset_catalog_provider(principal, reference["siteId"])
-    entry = next((a for a in entries if a.get("assetId") == placement["assetId"]
-                  and a.get("assetDefinitionRevision") == placement["assetDefinitionRevision"]), None)
+    entry = next((a for a in entries if a.get("assetId") == asset_id
+                  and a.get("assetDefinitionRevision") == revision), None)
     if representation not in ("overview", "detail"):
         raise PilotError("codex_visual_unavailable", "Choose an overview or detail visual.", 422)
     visual = (entry or {}).get(representation) or (entry or {}).get("representations", {}).get(representation)
@@ -212,8 +232,8 @@ def resolve_component_inventory(runtime, principal, reference, placement_id, rep
     except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError, RecursionError) as exc:
         raise PilotError("codex_component_inspection_failed", "This visual could not be inspected safely; use the manual Component Materials tool.", 422) from exc
     read_bound_layout(runtime, principal, reference)
-    return {"identity": dict(reference), "placementId": placement["placementId"], "assetId": placement["assetId"],
-            "assetDefinitionRevision": placement["assetDefinitionRevision"], "representation": representation,
+    return {"identity": dict(reference), "placementId": placement["placementId"] if placement else None,
+            "assetId": asset_id, "assetDefinitionRevision": revision, "representation": representation,
             "visualSha256": sha256(data).hexdigest(), "componentRolesVerified": False, "slots": slots,
             "readOnly": True}
 
@@ -221,14 +241,37 @@ def resolve_component_inventory(runtime, principal, reference, placement_id, rep
 def inspect_components(runtime, principal, reference, arguments):
     from .facility_tools import read_bound_layout
     saved = read_bound_layout(runtime, principal, reference)
-    placement = next((p for p in saved["layout"]["placements"] if p["placementId"] == arguments["placementId"]), None)
-    if placement is None:
-        raise PilotError("codex_placement_unavailable", "The placement does not exist in this saved layout.", 404)
-    representation = arguments.get("representation", placement.get("componentMaterials", {}).get("representation", "overview"))
+    placement_id, asset_id = arguments.get("placementId"), arguments.get("assetId")
+    if placement_id and asset_id and not any(p["placementId"] == placement_id for p in saved["layout"]["placements"]):
+        # The placementId Sage will give the item it is about to place, beside its assetId (2026-11-01: the desktop's
+        # beacon turn failed this step once, then read by assetId alone): read the asset's parts for it.
+        placement_id = None
+    if bool(placement_id) == bool(asset_id):
+        raise PilotError("codex_component_target_required",
+                         "Give placementId for a saved item or assetId for an item you are about to place.", 422)
     resolver = runtime.service.component_inventory_resolver
     if resolver is None:
         raise PilotError("codex_visual_unavailable", "Component inspection is not configured for this host.", 422)
-    inventory = resolver(principal, reference, placement["placementId"], representation)
+    if asset_id:
+        # The parts of an item not placed yet: the catalog's current revision, as place_asset will pin it.
+        entry = next((a for a in runtime.asset_catalog_provider(principal, reference["siteId"])
+                      if a.get("assetId") == asset_id), None)
+        if entry is None:
+            raise PilotError("codex_asset_unavailable", "The asset is not in the library.", 404)
+        placement, representation = {}, arguments.get("representation", "overview")
+        inventory = resolver(principal, reference, None, representation,
+                             asset=(entry["assetId"], entry["assetDefinitionRevision"]))
+        inventory["forNewPlacement"] = (
+            "Part keys of this asset's current revision for a placement you are about to make: give its place_asset "
+            "a placementId, and in the same preview put set_component_materials for that placementId (these keys and "
+            "this visualSha256) after it.")
+    else:
+        placement = next((p for p in saved["layout"]["placements"] if p["placementId"] == placement_id), None)
+        if placement is None:
+            raise PilotError("codex_placement_unavailable", "The placement does not exist in this saved layout.", 404)
+        representation = arguments.get("representation",
+                                       placement.get("componentMaterials", {}).get("representation", "overview"))
+        inventory = resolver(principal, reference, placement["placementId"], representation)
     slots = inventory["slots"]
     config = placement.get("componentMaterials") or {}
     same = config.get("representation") == representation
@@ -238,7 +281,9 @@ def inspect_components(runtime, principal, reference, arguments):
         saved_override = overrides.get(slot["key"]) or (overrides.get(slot.get("legacyKey")) if same else None)
         if saved_override:
             slot["savedOverride"] = saved_override
-        slot["shown"] = shown_finish(slot, placement, saved["layout"])
+    finished = {slot["finishGroup"] for slot in slots if slot.get("finishGroup") and slot.get("savedOverride")}
+    for slot in slots:
+        slot["shown"] = shown_finish(slot, placement, saved["layout"], finished)
     query = arguments.get("query", "").casefold()
     matches = [slot for slot in slots if query in (slot["label"]+" "+slot["key"]).casefold()]
     offset, size = arguments.get("offset", 0), arguments.get("pageSize", 20)
@@ -260,13 +305,16 @@ def _finish(value, layout, kind):
             "source": f"{kind}: {(custom or base)['label']}"}
 
 
-def shown_finish(slot, placement, layout):
-    """What the 3D view shows for one part, in the renderer's order of precedence."""
+def shown_finish(slot, placement, layout, finished_groups=frozenset()):
+    """What the 3D view shows for one part, in the renderer's order of precedence. FINISHED_GROUPS: the finish groups
+    in which a part has a finish of its own, so their defaults are off."""
     override = slot.get("savedOverride")
     if override and override.get("appearanceId"):
         return _finish(override, layout, "part override")
     if override:
         return {**{key: override[key] for key in ("color", "roughness", "metalness")}, "source": "part override"}
+    if slot.get("defaultFinish") and slot.get("finishGroup") not in finished_groups:
+        return _finish({"appearanceId": slot["defaultFinish"]}, layout, "the model's default finish")
     if slot.get("printedArtwork"):
         return {"source": "printed artwork (an image); object finishes and colors leave it as it is"}
     appearance = placement.get("appearance") or {}

@@ -47404,10 +47404,13 @@ async def serve_index():
     return FileResponse("static/index.html", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
-# Mount generated assets directory (training previews, etc.)
+# Mount generated assets directory (training previews, etc.). Model files there are rewritten in place (a re-export
+# keeps the URL), so they go out no-cache with an ETag: the browser asks again and gets 304 or the new bytes.
+from ai_inspector.revalidated_static import RevalidatedStaticFiles  # noqa: E402
+
 _generated_dir = Path("generated")
 _generated_dir.mkdir(exist_ok=True)
-app.mount("/generated", StaticFiles(directory="generated"), name="generated")
+app.mount("/generated", RevalidatedStaticFiles(directory="generated"), name="generated")
 
 # Mount static files directory (must be after specific routes)
 app.mount("/static", StaticFiles(directory="static"), name="static")

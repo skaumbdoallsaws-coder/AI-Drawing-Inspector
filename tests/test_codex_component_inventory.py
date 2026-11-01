@@ -97,6 +97,13 @@ def test_slots_flag_the_finishes_the_view_keeps():
     assert not any("printedArtwork" in s for s in slots)  # artwork needs an image to print
     doc["materials"][1]["pbrMetallicRoughness"]["baseColorTexture"] = {"index": 0}
     assert material_slots(doc)[0]["printedArtwork"] is True
+    # A model can name a library finish for a part (a light's lens that comes lit).
+    doc["materials"][0]["extras"]["facilityDefaultFinish"] = "light-pole-led"
+    assert [s.get("defaultFinish") for s in material_slots(doc)] == [None, "light-pole-led", "light-pole-led",
+                                                                     "light-pole-led"]
+    # Parts can share a finish group (a stack light's lamps).
+    doc["materials"][0]["extras"]["facilityFinishGroup"] = "stack lamps"
+    assert [s.get("finishGroup") for s in material_slots(doc)] == [None, "stack lamps", "stack lamps", "stack lamps"]
 
 
 def test_shown_color_follows_the_renderer_precedence():
@@ -122,11 +129,23 @@ def test_shown_color_follows_the_renderer_precedence():
     custom = shown(plain, {"appearance": {"appearanceId": "custom-smoked-oak", "roughness": 0.3}})
     assert (custom["color"], custom["roughness"], custom["metalness"]) == ("#8a7b6a", 0.3, oak["metalness"])
     assert custom["source"] == "object finish: Smoked oak"
+    # A model's default (a stack light's green lamp) shows unless a part of its finish group has a finish of its own.
+    green = {**plain, "defaultFinish": "light-stack-green", "finishGroup": "stack lamps"}
+    assert shown(green, {})["source"] == "the model's default finish: Stack light green"
+    assert shown_finish(green, {}, layout, {"stack lamps"})["source"].startswith("the view's neutral finish")
+    assert shown_finish({**green, "finishGroup": None}, {}, layout, {"stack lamps"})["source"].startswith("the model's")
     override = {"key": "p:Leg#0", "color": "#123456", "roughness": .2, "metalness": .9}
     assert shown({**artwork, "savedOverride": override}, painted)["color"] == "#123456"
     finish = shown({**plain, "savedOverride": {"key": "p:Leg#0", "appearanceId": "wood-oak"}}, painted)
     assert finish["color"] == oak["color"] and finish["source"].startswith("part override")
     assert "color" not in shown(plain, {"appearance": {"appearanceId": "custom-gone"}})
+    # The model's default finish for a part beats an object finish; the part's own override beats it.
+    lit = {**authored, "defaultFinish": "light-pole-led"}
+    pole = library["light-pole-led"]
+    for placement in ({}, painted):
+        assert (shown(lit, placement)["color"], shown(lit, placement)["source"]) == (
+            pole["color"], "the model's default finish: " + pole["label"])
+    assert shown({**lit, "savedOverride": {"key": "p:Leg#0", "appearanceId": "wood-oak"}}, {})["color"] == oak["color"]
 
 
 def test_inspection_reports_the_overrides_the_view_applies(monkeypatch):

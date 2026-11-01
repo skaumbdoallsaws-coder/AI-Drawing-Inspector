@@ -5790,6 +5790,50 @@ async function main() {
         data.workspace.destroy();
     });
 
+    await check('the Scenes pane draws a light area on the plan: one rectangle, then back to 3D', async () => {
+        const data = fixture();
+        const context = data.workspace.appearanceLibraryContext();
+        data.workspace._setViewMode('3d');
+        const drawn = [];
+        const draw = () => context.drawLightArea(value => drawn.push(value));
+        assert.strictEqual(draw(), true);
+        assert.strictEqual(data.workspace.viewMode, 'plan');
+        data.workspace.planView.dispatch('pointerdown', { world: { x: 1, y: 0, z: 1 } });
+        data.workspace.planView.dispatch('pointermove', { world: { x: 5.5, y: 0, z: 4 } });
+        assert.deepStrictEqual(data.top.transientZonePreviews.at(-1), {
+            points: [{ x: 1, z: 1 }, { x: 5.5, z: 1 }, { x: 5.5, z: 4 }, { x: 1, z: 4 }],
+            options: { kind: 'rectangle', closed: true },
+        });
+        data.workspace.planView.dispatch('pointerup', { world: { x: 5.5, y: 0, z: 4 } });
+        assert.deepStrictEqual(drawn, [{ minX: 1, minZ: 1, maxX: 5.5, maxZ: 4 }], 'plan metres, on the grid');
+        assert.strictEqual(data.workspace.viewMode, '3d', 'back to 3D');
+        assert.deepStrictEqual(data.top.transientZonePreviews.at(-1), { points: [], options: {} });
+        await data.workspace.whenIdle();
+        assert.strictEqual(data.session.calls.filter(call => call[0] === 'createRectangleZone').length, 0, 'no zone made');
+        // A click without a drag (snapped to the same grid point) waits for a real rectangle; Esc goes back to 3D.
+        draw();
+        data.workspace.planView.dispatch('pointerdown', { world: { x: 2, y: 0, z: 2 } });
+        data.workspace.planView.dispatch('pointerup', { world: { x: 2.05, y: 0, z: 2 } });
+        assert.strictEqual(drawn.length, 1);
+        assert.strictEqual(data.workspace.viewMode, 'plan');
+        data.root.dispatch('keydown', { key: 'Escape', target: data.root });
+        assert.deepStrictEqual(drawn.slice(1), [null]);
+        assert.strictEqual(data.workspace.viewMode, '3d');
+        // Picking a tool or another view ends it and leaves that choice alone.
+        await data.workspace.executeCommand('pan');
+        draw();
+        assert.strictEqual(data.workspace.toolMode, 'select', 'drawing starts from Select');
+        await data.workspace.executeCommand('rectangle-zone');
+        assert.deepStrictEqual(drawn.slice(2), [null]);
+        assert.strictEqual(data.workspace.toolMode, 'rectangle-zone');
+        assert.strictEqual(data.workspace.viewMode, 'plan');
+        draw();
+        data.workspace._setViewMode('3d');
+        assert.deepStrictEqual(drawn.slice(3), [null]);
+        assert.strictEqual(data.workspace.viewMode, '3d');
+        data.workspace.destroy();
+    });
+
     await check('rectangle and polygon zone tools commit one gesture each', async () => {
         const data = fixture();
         await data.workspace.executeCommand('rectangle-zone');
@@ -7321,6 +7365,122 @@ async function main() {
             assert.strictEqual(FakeElement.listenerCount, baseline);
             data.session.select('pl-a');
             assert.strictEqual(controller.disposeCount, 1);
+        });
+
+    await check('lighting coverage shows in the plan and 3D with its legend and goes when the layout changes',
+        async () => {
+            const data = fixture();
+            const views = [];
+            data.top.setLightCoverage = value => { views.push(['plan', value]); return true; };
+            data.three.setLightCoverage = value => { views.push(['3d', value]); return true; };
+            const values = Buffer.alloc(4);
+            values.writeUInt16LE(5, 0);
+            values.writeUInt16LE(65535, 2);
+            const reply = { summary: { label: 'Estimate, not a lighting design. No code-compliance claims.',
+                area: { label: 'the car parks and truck yards', sizeSquareMeters: 1 },
+                estimatedLux: { minimum: 0.5, mean: 0.5, maximum: 0.5 }, darkSpots: { listed: [] } },
+            grid: { originX: 0, originZ: 0, cellMeters: 1, cols: 2, rows: 1, encoding: 'uint16le-tenths',
+                values: values.toString('base64') }, spots: [] };
+            let release = null;
+            data.session.lightingCoverage = () => {
+                const sent = { baseRevision: data.session.state.baseRevision,
+                    operations: clone(data.session.state.operations) };
+                return new Promise(resolve => { release = () => resolve(Object.assign({ result: reply }, sent)); });
+            };
+            const textOf = node => String(node.textContent || '') + node.children.map(textOf).join('');
+            const shown = data.workspace._showLightCoverage({ lot: true }, 'lot');
+            release();
+            const pane = await shown;
+            assert.strictEqual(pane.choice, 'lot');
+            assert.deepStrictEqual(views.map(view => view[0]), ['plan', '3d']);
+            assert.deepStrictEqual([views[0][1].minX, views[0][1].maxX, views[0][1].maxZ], [0, 2, 1]);
+            assert.strictEqual(views[1][1].parts.length, 1, 'one band; the cell outside the area is left out');
+            const legend = data.workspace.lightCoverageLegend;
+            assert.strictEqual(legend.hidden, false);
+            assert.ok(textOf(legend).includes('Estimated lux: The car parks and truck yards'), textOf(legend));
+            assert.ok(textOf(legend).includes('Estimate, not a lighting design. No code-compliance claims.'));
+            assert.strictEqual(data.workspace.appearanceLibraryContext().lightCoverage.token, pane.token);
+            // An unsaved edit drops it, in both views.
+            data.session.state.operations = [{ op: 'rename_layout', name: 'B' }];
+            data.session._notify();
+            assert.deepStrictEqual(views.slice(2), [['plan', null], ['3d', null]]);
+            assert.strictEqual(legend.hidden, true);
+            assert.strictEqual(data.workspace.appearanceLibraryContext().lightCoverage, null);
+            // A reply for a layout that changed meanwhile is not drawn.
+            const stale = data.workspace._showLightCoverage({ lot: true }, 'lot');
+            data.session.state.operations = [];
+            data.session._notify();
+            release();
+            await assert.rejects(stale, /The layout changed during the estimate/);
+            // Hide drops a reply still on its way.
+            const dropped = data.workspace._showLightCoverage({ lot: true }, 'lot');
+            assert.strictEqual(data.workspace._hideLightCoverage(), false, 'nothing on show yet');
+            release();
+            assert.strictEqual(await dropped, null);
+            assert.strictEqual(views.length, 4, 'nothing more drawn');
+            data.workspace.destroy();
+        });
+
+    await check('Sage\'s coverage check shows the same estimate for the layout it read, and the legend hides it',
+        async () => {
+            const data = fixture();
+            const views = [];
+            data.top.setLightCoverage = value => { views.push(['plan', value]); return true; };
+            data.three.setLightCoverage = value => { views.push(['3d', value]); return true; };
+            const values = Buffer.alloc(2);
+            values.writeUInt16LE(80, 0);
+            const reply = { summary: { label: 'Estimate, not a lighting design. No code-compliance claims.',
+                area: { label: 'Truck Yard', sizeSquareMeters: 1 },
+                estimatedLux: { minimum: 8, mean: 8, maximum: 8 }, darkSpots: { listed: [] } },
+            grid: { originX: 0, originZ: 0, cellMeters: 1, cols: 1, rows: 1, encoding: 'uint16le-tenths',
+                values: values.toString('base64') }, spots: [] };
+            const asked = [];
+            data.session.lightingCoverage = area => {
+                asked.push(clone(area));
+                return Promise.resolve({ baseRevision: data.session.state.baseRevision,
+                    operations: clone(data.session.state.operations), result: reply });
+            };
+            let notified = 0;
+            const stop = data.workspace.subscribeStructure(() => { notified += 1; });
+            const read = { siteId: 'site-a', layoutId: 'fl-workspace', revision: 'rev-1',
+                area: { zoneId: 'zn-yard', darkBelowLux: 5 } };
+            // Not the layout this view holds: another revision, another layout, another site, or unsaved edits.
+            for (const other of [{ revision: 'rev-0' }, { layoutId: 'fl-other' }, { siteId: 'site-b' }]) {
+                assert.strictEqual(await data.workspace.showSageLightCoverage(Object.assign({}, read, other)), null);
+            }
+            data.session.state.dirty = true;
+            data.session._notify();
+            assert.strictEqual(await data.workspace.showSageLightCoverage(read), null);
+            data.session.state.dirty = false;
+            data.session._notify();
+            assert.deepStrictEqual([asked.length, views.length], [0, 0]);
+            notified = 0;
+            const pane = await data.workspace.showSageLightCoverage(read);
+            assert.deepStrictEqual(asked, [{ zoneId: 'zn-yard', darkBelowLux: 5 }], 'the area and level Sage used');
+            assert.strictEqual(pane.choice, 'zone:zn-yard', 'the Scenes pane shows it as its own');
+            assert.deepStrictEqual(views.map(view => view[0]), ['plan', '3d']);
+            assert.strictEqual(data.workspace.appearanceLibraryContext().lightCoverage.token, pane.token);
+            assert.ok(notified >= 1, 'the Scenes pane is told');
+            const legend = data.workspace.lightCoverageLegend;
+            const find = (node, test) => test(node) ? node
+                : node.children.reduce((found, child) => found || find(child, test), null);
+            const hide = find(legend, node => node.getAttribute && node.getAttribute('data-light-coverage') === 'hide');
+            assert.ok(hide && hide.nodeName === 'BUTTON' && hide.textContent === 'Hide');
+            notified = 0;
+            hide.dispatch('click');
+            assert.deepStrictEqual(views.slice(2), [['plan', null], ['3d', null]]);
+            assert.strictEqual(legend.hidden, true);
+            assert.strictEqual(data.workspace.appearanceLibraryContext().lightCoverage, null);
+            assert.ok(notified >= 1, 'the Scenes pane follows');
+            // A rectangle (Sage only) has no choice in the pane; the lot and a floor area do.
+            const choices = [];
+            for (const area of [{ rectangle: { minX: 0, minZ: 0, maxX: 2, maxZ: 2 } }, { lot: true },
+                { floorAreaId: 'fs-a' }]) {
+                choices.push((await data.workspace.showSageLightCoverage(Object.assign({}, read, { area }))).choice);
+            }
+            assert.deepStrictEqual(choices, [null, 'lot', 'floor:fs-a']);
+            stop();
+            data.workspace.destroy();
         });
 
     process.stdout.write(`${checks}/${checks} facility layout workspace checks passed\n`);

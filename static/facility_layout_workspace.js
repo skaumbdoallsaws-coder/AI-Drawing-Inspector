@@ -20,6 +20,10 @@
         ? require('./facility_layout_interior_walls.js') : root.InspectorProFacilityInteriorWalls;
     const floorSurfacesRuntime = typeof module === 'object' && module.exports
         ? require('./facility_layout_floor_surfaces.js') : root.InspectorProFacilityFloorSurfaces;
+    const groundRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_ground.js') : root.InspectorProFacilityGround;
+    const lightCoverageRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_light_coverage.js') : root.InspectorProFacilityLightCoverage;
     const replaceAssetRuntime = typeof module === 'object' && module.exports
         ? require('./facility_layout_replace_asset.js') : root.InspectorProFacilityReplaceAsset;
     const NAVIGATION_ACTIVITY_MAXIMUM_ACTORS = 64;
@@ -2818,6 +2822,7 @@
         this.useAuthoritativePlacementCandidates =
             options.useAuthoritativePlacementCandidates === true;
         this.pointerGesture = null;
+        this.lightAreaDraw = null;
         this.pointerCaptureId = null;
         this.pointerFallbackCleanup = null;
         this.polygonPoints = [];
@@ -2833,6 +2838,9 @@
         // _syncController, which generation previews call directly without
         // notifying the session.
         this.structureListeners = [];
+        // The lighting coverage estimate on show (CC3) and the number of the latest request for one.
+        this.lightCoverage = null;
+        this.lightCoverageRequest = 0;
         this.marqueeCleanup = null;
         this.createdTopAdapter = false;
         this.createdThreeAdapter = false;
@@ -5038,6 +5046,10 @@
             viewMode: this.viewMode,
             dropTarget: this.threeView || null,
             show3d: function () { if (self.viewMode !== '3d') self._setViewMode('3d'); },
+            drawLightArea: function (done) { return self._drawLightArea(done); },
+            lightCoverage: this.lightCoverage ? this.lightCoverage.pane : null,
+            showLightCoverage: function (area, choice) { return self._showLightCoverage(area, choice); },
+            hideLightCoverage: function () { return self._hideLightCoverage(); },
             openWallDecals: function (prefill) {
                 if (!decalsRuntime) throw new Error('Wall decals are unavailable.');
                 return decalsRuntime.openDialog(self, undefined, prefill);
@@ -10861,6 +10873,12 @@
             hidden: true,
             'aria-hidden': 'true',
         });
+        this.lightCoverageLegend = element(this.document, 'div', {
+            className: 'ip-flw-coverage-legend',
+            hidden: true,
+            role: 'note',
+            'aria-label': 'Lighting coverage legend',
+        });
         this._buildFloorMarkingPalette();
         const motionPanel = this._buildMotionPanel();
         append(this.viewportStack,
@@ -10871,7 +10889,8 @@
             this.floorMarkingPalette,
             this.ghostOverlay,
             this.advisoryLiveRegion,
-            this.gestureOverlay
+            this.gestureOverlay,
+            this.lightCoverageLegend
         );
         if (motionPanel.getAttribute('data-motion-docked') === 'true') {
             this.options.motionPanelHost.appendChild(motionPanel);
@@ -11788,6 +11807,7 @@
         this._listen(this.viewportStack, 'dragover', this._handleDragOver.bind(this));
         this._listen(this.viewportStack, 'drop', this._handleDrop.bind(this));
         this._listen(this.viewportStack, 'dragleave', this._handleDragLeave.bind(this));
+        this._listen(this.lightCoverageLegend, 'click', this._handleLightCoverageLegendClick.bind(this));
         this._listen(
             this.candidateControls,
             'click',
@@ -13603,6 +13623,14 @@
             return;
         }
         const world = this._eventWorld(event);
+        if (this.lightAreaDraw && finite(event && event.button, 0) === 0) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            this.pointerGesture = { kind: 'light-area', start: world, last: world };
+            this._setZonePreview(this._rectangleZonePreviewPoints(world, world), { kind: 'rectangle', closed: true });
+            this._showGesture('Light area: ' + world.x.toFixed(2) + ', ' + world.z.toFixed(2));
+            this._beginPointerCapture(event);
+            return;
+        }
         if (this.toolMode === 'motion-path' && this.navigationState.open) {
             const waypointValue = targetDataId(
                 event.target,
@@ -13907,6 +13935,11 @@
                     delta
                 );
             }
+        } else if (this.pointerGesture.kind === 'light-area') {
+            this._setZonePreview(this._rectangleZonePreviewPoints(this.pointerGesture.start, world),
+                { kind: 'rectangle', closed: true });
+            this._showGesture('Light area ' + Math.abs(world.x - this.pointerGesture.start.x).toFixed(2)
+                + ' x ' + Math.abs(world.z - this.pointerGesture.start.z).toFixed(2) + ' m');
         } else if (this.pointerGesture.kind === 'rectangle-zone') {
             this._setZonePreview(
                 this._rectangleZonePreviewPoints(
@@ -13969,6 +14002,20 @@
         if (!gesture) return;
         if (gesture.kind === 'pan') return;
         const end = this._eventWorld(event);
+        if (gesture.kind === 'light-area') {
+            this._setZonePreview([], {});
+            const metres = function (value) { return Math.round(value * 1000) / 1000; };
+            const rectangle = {
+                minX: metres(Math.min(gesture.start.x, end.x)), minZ: metres(Math.min(gesture.start.z, end.z)),
+                maxX: metres(Math.max(gesture.start.x, end.x)), maxZ: metres(Math.max(gesture.start.z, end.z)),
+            };
+            if (rectangle.maxX - rectangle.minX < 0.1 || rectangle.maxZ - rectangle.minZ < 0.1) {
+                this._showGesture('Drag a rectangle at least 0.1 m each way. Esc cancels.');
+                return;
+            }
+            this._endLightAreaDraw(rectangle, true);
+            return;
+        }
         if (gesture.kind === 'navigation-waypoint') {
             this.navigationState.message = (
                 'Waypoint updated locally. Apply path to create one unsaved gesture.'
@@ -14126,6 +14173,142 @@
         this.topAdapter.zoomAt(event, factor);
         const world = this._tryEventWorld(event);
         if (world) this._setCoordinates(world);
+    };
+
+    // "Draw an area on the plan" from the Scenes pane (general lights per area, L7): the plan opens for one dragged
+    // rectangle, which goes back to the pane in plan metres, then the 3D view returns. Esc returns to 3D without one;
+    // picking a tool or another view just ends it.
+    Workspace.prototype._drawLightArea = function (done) {
+        if (typeof done !== 'function' || this.destroyed || !this.planView) return false;
+        this._endLightAreaDraw(null, false);
+        if (this.toolMode !== 'select') this._setToolMode('select');
+        this._setViewMode('plan');
+        if (this.viewMode !== 'plan') return false;
+        this.lightAreaDraw = { done: done };
+        this._showGesture('Drag a rectangle for the light area. Esc cancels.');
+        if (typeof this.planView.focus === 'function') this.planView.focus();
+        return true;
+    };
+
+    // ---- Lighting coverage (docs/facility-lighting-plan.md, CC3) --------------------------------------------------
+    // The Scenes pane asks for the estimate of one area. The plan and the 3D view draw it, with its legend and caption
+    // on the viewport, until it is hidden, the layout changes (another revision or other unsaved edits) or the
+    // workspace closes. It is never saved.
+    function lightCoverageKey(baseRevision, operations) {
+        return JSON.stringify([baseRevision || '', operations || []]);
+    }
+
+    Workspace.prototype._showLightCoverage = async function (area, choice) {
+        if (this.destroyed || !lightCoverageRuntime || !this.session
+                || typeof this.session.lightingCoverage !== 'function') {
+            throw new Error('The lighting estimate is not available here.');
+        }
+        const request = this.lightCoverageRequest + 1;
+        this.lightCoverageRequest = request;
+        const reply = await this.session.lightingCoverage(area);
+        if (this.destroyed || request !== this.lightCoverageRequest) return null;
+        const key = lightCoverageKey(reply.baseRevision, reply.operations);
+        if (!this.state || key !== lightCoverageKey(this.state.baseRevision, this.state.operations)) {
+            throw new Error('The layout changed during the estimate. Show it again.');
+        }
+        const prepared = lightCoverageRuntime.prepare(reply.result, {
+            document: this.document, layout: this.state.layout, groundRuntime: groundRuntime,
+        });
+        const summary = prepared.summary;
+        this.lightCoverage = { key: key, pane: { token: request, choice: choice || null, caption: prepared.caption,
+            summary: summary, spots: prepared.spots, areaLabel: summary.area && summary.area.label || 'the area' } };
+        if (this.topAdapter && typeof this.topAdapter.setLightCoverage === 'function') {
+            this.topAdapter.setLightCoverage(prepared.plan);
+        }
+        if (this.threeAdapter && typeof this.threeAdapter.setLightCoverage === 'function') {
+            this.threeAdapter.setLightCoverage(prepared.scene);
+        }
+        this._renderLightCoverageLegend();
+        return this.lightCoverage.pane;
+    };
+
+    Workspace.prototype._hideLightCoverage = function () {
+        this.lightCoverageRequest += 1;    // a reply still on its way is dropped
+        if (!this.lightCoverage) return false;
+        this.lightCoverage = null;
+        if (this.topAdapter && typeof this.topAdapter.setLightCoverage === 'function') {
+            this.topAdapter.setLightCoverage(null);
+        }
+        if (this.threeAdapter && typeof this.threeAdapter.setLightCoverage === 'function') {
+            this.threeAdapter.setLightCoverage(null);
+        }
+        this._renderLightCoverageLegend();
+        return true;
+    };
+
+    // Sage's check_lighting_coverage (docs/facility-lighting-plan.md, "Sage shows the overlay"): the same estimate,
+    // drawn as the Scenes pane draws it, when this view holds the layout Sage read (its site, layout and revision,
+    // with no unsaved edits); otherwise nothing. It stays until Hide (the pane's or the legend's) or an edit.
+    Workspace.prototype.showSageLightCoverage = async function (request) {
+        const value = request && typeof request === 'object' ? request : {};
+        const state = this.state;
+        const layout = state && state.layout;
+        if (this.destroyed || !layout || state.dirty || (state.operations || []).length
+                || value.revision !== state.baseRevision || value.layoutId !== layout.layoutId
+                || value.siteId !== (layout.association && layout.association.siteId)) {
+            return null;
+        }
+        const area = value.area && typeof value.area === 'object' ? value.area : {};
+        const choice = area.lot === true ? 'lot'
+            : typeof area.floorAreaId === 'string' ? 'floor:' + area.floorAreaId
+                : typeof area.zoneId === 'string' ? 'zone:' + area.zoneId : null;
+        const shown = await this._showLightCoverage(area, choice);
+        if (shown) this._notifyStructure();     // the Scenes pane's block follows, with its Hide
+        return shown;
+    };
+
+    // The legend's Hide does what the Scenes pane's does; the pane's block follows.
+    Workspace.prototype._handleLightCoverageLegendClick = function (event) {
+        const target = event && event.target;
+        if (!target || typeof target.getAttribute !== 'function'
+                || target.getAttribute('data-light-coverage') !== 'hide') return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (this._hideLightCoverage()) this._notifyStructure();
+    };
+
+    // The legend and caption on the viewport, for the plan and the 3D view alike.
+    Workspace.prototype._renderLightCoverageLegend = function () {
+        const legend = this.lightCoverageLegend;
+        if (!legend) return;
+        clearElement(legend);
+        const shown = this.lightCoverage && lightCoverageRuntime ? this.lightCoverage.pane : null;
+        legend.hidden = !shown;
+        if (!shown) return;
+        const doc = this.document;
+        const label = String(shown.areaLabel);
+        legend.appendChild(append(element(doc, 'div', { className: 'ip-flw-coverage-head' }),
+            element(doc, 'div', { className: 'ip-flw-coverage-title' },
+                'Estimated lux: ' + label.charAt(0).toUpperCase() + label.slice(1)),
+            element(doc, 'button', { type: 'button', className: 'ip-flw-coverage-hide', 'data-light-coverage': 'hide',
+                title: 'Hide the lighting estimate' }, 'Hide')));
+        const bands = element(doc, 'div', { className: 'ip-flw-coverage-bands' });
+        lightCoverageRuntime.BANDS.forEach(function (band, index, all) {
+            const cell = element(doc, 'span', { className: 'ip-flw-coverage-band', title: band.label + ' lux' });
+            append(cell, element(doc, 'i', { style: 'background:' + band.color }),
+                element(doc, 'b', {}, index === all.length - 1 ? band.from + '+' : String(band.from)));
+            bands.appendChild(cell);
+        });
+        legend.appendChild(bands);
+        if (shown.spots.length) {
+            legend.appendChild(element(doc, 'div', {}, 'White outlines: dark spots, numbered as listed in Scenes.'));
+        }
+        legend.appendChild(element(doc, 'div', { className: 'ip-flw-coverage-caption' }, shown.caption));
+    };
+
+    Workspace.prototype._endLightAreaDraw = function (rectangle, backTo3d) {
+        const draw = this.lightAreaDraw;
+        if (!draw) return false;
+        this.lightAreaDraw = null;
+        if (this.pointerGesture && this.pointerGesture.kind === 'light-area') this._cancelPointerGesture();
+        else this._hideGesture();
+        if (backTo3d && this.threeAdapter && this.viewMode !== '3d') this._setViewMode('3d');
+        draw.done(rectangle || null);
+        return true;
     };
 
     Workspace.prototype._cancelPointerGesture = function () {
@@ -16189,6 +16372,7 @@
         if (this.walkCameraControl) this.walkCameraControl.close(false);
         if (mode === '3d' && !this.threeAdapter) mode = 'plan';
         if (mode === 'site' && !this.siteView) mode = 'plan';
+        if (this.lightAreaDraw && mode !== 'plan') this._endLightAreaDraw(null, false);
         if (mode !== '3d') {
             this._cancelRecordingCountdown();
             if (this.recordingController
@@ -16276,6 +16460,7 @@
 
     Workspace.prototype._setToolMode = function (mode) {
         if (!TOOL_MODES.includes(mode)) throw new TypeError('invalid tool mode');
+        if (this.lightAreaDraw) this._endLightAreaDraw(null, false);
         this.toolMode = mode;
         if (mode !== 'floor-marking' && this.floorMarkingPalette) {
             this.floorMarkingState.open = false;
@@ -17385,6 +17570,10 @@
     Workspace.prototype._handleSessionState = function (state) {
         if (this.destroyed) return;
         const nextState = state || this.session.getState();
+        if (this.lightCoverage && this.lightCoverage.key
+                !== lightCoverageKey(nextState.baseRevision, nextState.operations)) {
+            this._hideLightCoverage();
+        }
         const previousBaseRevision = this.state && this.state.baseRevision;
         const previousSessionError = this.state && this.state.lastError;
         if (this.motionPresentation && this.motionLayoutFingerprint
@@ -17565,6 +17754,10 @@
         } else if (key === 'escape') {
             if (typeof event.preventDefault === 'function') {
                 event.preventDefault();
+            }
+            if (this.lightAreaDraw) {
+                this._endLightAreaDraw(null, true);
+                return;
             }
             if (this.navigationState.open) {
                 this.closeNavigationDialog(true);
@@ -17821,6 +18014,8 @@
         this.closeAppearanceDialog();
         if (this.destroyed) return false;
         this.destroyed = true;
+        this.lightAreaDraw = null;
+        this._hideLightCoverage();
         if (this.walkCameraControl) this.walkCameraControl.dispose();
         this.walkCameraControl = null;
         this.clearMotionPlayback('workspace_destroyed');

@@ -1061,6 +1061,47 @@ def _op_set_custom_appearances(document, operation, _index, _base_revision):
     return [], []
 
 
+def _scene_with_saved(scene, saved):
+    """A scene without a sceneId changes only the adjustments it gives (Sage, 2026-10-31: "turn the lights off"
+    while in Evening must stay Evening). It keeps the layout's current scene, Classic when none is saved, and its
+    other saved adjustments. With a sceneId the scene and its adjustments are replaced, as the Scenes pane does."""
+    if not isinstance(scene, dict) or "sceneId" in scene:
+        return scene
+    saved = saved if isinstance(saved, dict) else {}
+    merged = {**scene, "sceneId": saved.get("sceneId") or "classic"}
+    given = scene.get("adjustments")
+    if given is None or isinstance(given, dict):
+        merged.pop("adjustments", None)
+        adjustments = {**(saved.get("adjustments") or {}), **(given or {})}
+        if adjustments:
+            merged["adjustments"] = adjustments
+    return merged
+
+
+def keep_current_scene(operations, layout):
+    """For Sage: a set_scene naming the scene the layout already has is not a switch. Its sceneId is dropped, so the
+    scene's other saved adjustments stay (the main session, 2026-11-01: "Switch this layout to the evening scene with
+    a glow halo around the lights" on an Evening layout dropped its light areas). The scene is followed through the
+    batch, so null and then the scene still starts it afresh. The Scenes pane sends whole scenes and never comes here:
+    it clears an adjustment by leaving it out."""
+    from .appearance_library import SCENE_KEY
+    saved = ((layout or {}).get("extensions") or {}).get(SCENE_KEY)
+    current = saved.get("sceneId") if isinstance(saved, dict) else None
+    result = []
+    for item in operations or []:
+        scene = item.get("scene") if isinstance(item, dict) and item.get("op") == "set_scene" else False
+        if scene is None:
+            current = None
+        elif isinstance(scene, dict) and "sceneId" in scene:
+            if scene["sceneId"] == current:
+                item = dict(item, scene={key: value for key, value in scene.items() if key != "sceneId"})
+            current = scene["sceneId"]
+        elif isinstance(scene, dict):
+            current = current or "classic"
+        result.append(item)
+    return result
+
+
 def _op_set_scene(document, operation, _index, _base_revision):
     from .appearance_library import SCENE_KEY, normalize_scene
     if set(operation) != {"op", "scene"}:
@@ -1070,9 +1111,21 @@ def _op_set_scene(document, operation, _index, _base_revision):
         extensions.pop(SCENE_KEY, None)
         return [], []
     try:
-        extensions[SCENE_KEY] = normalize_scene(operation["scene"])
+        scene = normalize_scene(_scene_with_saved(operation["scene"], extensions.get(SCENE_KEY)))
     except ValueError as exc:
         _fail("invalid_scene", str(exc))
+    # A light area given here names a floor area of this layout (L7). One deleted later just lights nothing, so a
+    # change that leaves the saved areas alone keeps them.
+    given = operation["scene"].get("adjustments") if isinstance(operation["scene"], dict) else None
+    areas = (((scene.get("adjustments") or {}).get("lightAreas") or {}).get("areas") or []) \
+        if isinstance(given, dict) and "lightAreas" in given else []
+    floors = {row.get("surfaceId") for row in ((extensions.get("facilityFloorSurfaces") or {}).get("surfaces") or [])
+              if isinstance(row, dict)}
+    unknown = [area["surfaceId"] for area in areas if "surfaceId" in area and area["surfaceId"] not in floors]
+    if unknown:
+        _fail("invalid_scene", f"Unknown floor area '{unknown[0]}'; list the floor areas with "
+                               "inspect_facility_authoring (floor_surfaces)")
+    extensions[SCENE_KEY] = scene
     return [], []
 
 

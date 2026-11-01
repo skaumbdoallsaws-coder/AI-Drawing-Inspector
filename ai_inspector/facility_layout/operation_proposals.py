@@ -46,7 +46,7 @@ def guard_operations(operations, max_operations=50, max_bytes=24000):
             raise FacilityValidationError("operation_proposal_denied", "This operation is not authorized for assisted editing.")
 
 
-def prepare_undo(service, principal, site_id, layout_id, base_revision, receipt_id):
+def prepare_undo(service, principal, site_id, layout_id, base_revision, receipt_id, baseline_out=None):
     current = service.get_layout(principal, site_id, layout_id)
     receipt = service.get_layout_receipt(principal, site_id, layout_id, receipt_id)
     if current["revision"] != base_revision or receipt["revision"] != base_revision:
@@ -70,10 +70,12 @@ def prepare_undo(service, principal, site_id, layout_id, base_revision, receipt_
     # against that geometry instead of restoring an obsolete layout fingerprint.
     target, routing, rebound_ids = service._revalidate_route_layout_sources(
         principal, site_id, target, inherited_routes=target["routes"])
-    service._require_no_new_spatial_errors(
-        service._diagnose_spatial(principal, site_id, current["layout"]), spatial,
-        operations=[], baseline_layout=current["layout"])
-    service._require_no_new_routing_errors(service._diagnose_routing(principal, site_id, current["layout"]), routing)
+    baseline_spatial = service._diagnose_spatial(principal, site_id, current["layout"])
+    service._require_no_new_spatial_errors(baseline_spatial, spatial, operations=[], baseline_layout=current["layout"])
+    baseline_routing = service._diagnose_routing(principal, site_id, current["layout"])
+    service._require_no_new_routing_errors(baseline_routing, routing)
+    if baseline_out is not None:
+        baseline_out.update(spatial=baseline_spatial, routing=baseline_routing)
     operations = [{"op": "restore_approved_revision", "receiptId": receipt_id}]
     diff = build_exact_layout_diff(current["layout"], target)
     prepared.update(document=target, affectedIds=rebound_ids,
@@ -82,6 +84,42 @@ def prepare_undo(service, principal, site_id, layout_id, base_revision, receipt_
             operations=operations, after=target, canonical_diff=diff),
         spatialDiagnostics=spatial, routingDiagnostics=routing)
     return prepared, dependencies, operations
+
+
+def _introduced_problems(service, baseline, prepared):
+    """What the change adds to the checks: the proposed layout's findings that the saved layout (BASELINE) did not
+    have, by the no-new-errors rule's keys (code and subjects) plus the severity, counted as validation.spatial and
+    validation.routing count the whole layout. The review card's "Checks:" line reads these, so a problem the layout
+    already had is not shown as the change's own result. None when the saved layout's diagnostics are missing."""
+    if not isinstance(baseline.get("spatial"), dict) or not isinstance(baseline.get("routing"), dict):
+        return None
+
+    def new(diagnostics, before, key):
+        known = {(item.get("severity"),) + key(item) for item in before.get("findings", []) if isinstance(item, dict)}
+        return [item for item in diagnostics.get("findings", [])
+                if isinstance(item, dict) and (item.get("severity"),) + key(item) not in known]
+    spatial = new(prepared["spatialDiagnostics"], baseline["spatial"], service._spatial_error_key)
+    routing = new(prepared["routingDiagnostics"], baseline["routing"], service._routing_error_key)
+    routes = {route.get("routeId") for route in prepared["document"].get("routes", [])}
+    return {
+        "spatial": {
+            "errorCount": sum(item.get("severity") == "error" for item in spatial),
+            "warningCount": sum(item.get("severity") == "warning" for item in spatial),
+            "placementCollisions": sum(item.get("code") == "placement_collision" for item in spatial),
+            "shellObstacleCollisions": sum(item.get("code") == "shell_obstacle_collision" for item in spatial),
+            "clearanceConflicts": sum(str(item.get("code") or "").endswith("_clearance_violation")
+                                      or item.get("code") in {"door_swing_obstructed", "egress_obstructed"}
+                                      for item in spatial),
+            # Aisles with an obstruction the saved layout did not have (one already blocked counts again).
+            "obstructedAisleCount": len({subject for item in spatial
+                                         if item.get("code") in {"aisle_obstructed", "aisle_shell_obstructed"}
+                                         for subject in item.get("subjectRefs") or [] if subject in routes}),
+        },
+        "routing": {
+            "errorCount": sum(item.get("severity") == "error" for item in routing),
+            "blockedCount": sum(item.get("severity") == "blocked" for item in routing),
+        },
+    }
 
 
 def _review_changed_aisle_reach(prepared, affected):
@@ -153,17 +191,39 @@ def _design_findings(review):
     return [finding for item in (review or {}).get("reviews") or [] for finding in item.get("findings") or []]
 
 
+def _cleared_pole_lights(service, principal, site_id, before, prepared, zones):
+    """New pole lights in ZONES (the parking zones a change touches) standing on spots the light helper clears (3c):
+    the server's own check of each spot, by the helper's rules, on the layout as proposed
+    (light_positions.cleared_pole_spots). {placementId: where}."""
+    from shapely.geometry import Point, Polygon
+    areas = [Polygon([(p["x"], p["z"]) for p in zone["boundary"]]) for zone in zones
+             if len(zone.get("boundary") or []) >= 3]
+    old = {placement["placementId"] for placement in before.get("placements", [])}
+    new = [placement["placementId"] for placement in prepared["document"].get("placements", [])
+           if placement["placementId"] not in old and any(area.covers(Point(
+               placement["transform"]["position"]["x"], placement["transform"]["position"]["z"])) for area in areas)]
+    if not new:
+        return {}
+    from .light_positions import cleared_pole_spots
+    definitions = service._spatial_context(principal, site_id, prepared["document"]).asset_definitions
+    catalog = {key: {"assetId": key[0], "assetDefinitionRevision": key[1], "definition": document}
+               for key, document in definitions.items()}
+    return cleared_pole_spots(prepared["document"], catalog, new)
+
+
 def prepare(service, principal, site_id, layout_id, base_revision, request, *, undo=False, edit_mode="preview",
             limits=None, planned=False):
     component_proofs = []
     design_review = None
+    cleared_lights = {}
     workstation_review = None
     aisle_review = None
     obstruction_review = None
     site_review = None
+    baseline = {}
     if undo:
         prepared, dependencies, operations = prepare_undo(
-            service, principal, site_id, layout_id, base_revision, request["receiptId"])
+            service, principal, site_id, layout_id, base_revision, request["receiptId"], baseline_out=baseline)
     else:
         operations = deepcopy(request["operations"])
         guard_operations(operations, *(limits or ()))
@@ -197,13 +257,18 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
         component_proofs = validate_proposal_components(
             service, principal, site_id, layout_id, base_revision, operations)
         prepared, dependencies = service._prepare_operations(
-            principal, site_id, layout_id, base_revision, operations, required_action=None)
+            principal, site_id, layout_id, base_revision, operations, required_action=None, baseline_out=baseline)
         affected = set(prepared["affectedIds"]) | set(prepared["createdIds"])
         service._validate_current_proposal_asset_revisions(principal, site_id, {"assetSet": [
             {"assetId": placement["assetId"], "assetDefinitionRevision": placement["assetDefinitionRevision"]}
             for placement in prepared["document"]["placements"] if placement["placementId"] in affected]})
         from .parking_review import review_changed_parking
-        design_review = review_changed_parking(current["layout"], prepared["document"])
+
+        def excuse(zones):
+            # A new pole light on a spot the light helper clears is not a parking change to review (3c).
+            cleared_lights.update(_cleared_pole_lights(service, principal, site_id, current["layout"], prepared, zones))
+            return set(cleared_lights)
+        design_review = review_changed_parking(current["layout"], prepared["document"], excuse)
         from .workstation_review import review_changed_workstations
         workstation_review = review_changed_workstations(service, principal, site_id, current["layout"], prepared["document"])
         aisle_review = _review_changed_aisle_reach(prepared, affected)
@@ -232,12 +297,15 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
         **({"componentVisuals": component_proofs} if component_proofs else {})})
     binding = facility_layout_binding(tenant_id=principal.tenant_id, site_id=site_id, layout_id=layout_id,
         base_revision=base_revision, diff_hash=prepared["diffHash"], dependency_fingerprint=dependency_hash)
+    introduced = _introduced_problems(service, baseline, prepared)
     alternative = {"alternativeId": "exact-" + fingerprint(request)[:24],
         "strategy": UNDO_TYPE if undo else PROPOSAL_TYPE, "operations": operations,
         "metrics": {"operationCount": len(operations), "affectedCount": len(prepared["affectedIds"])},
         "operationReceipt": deepcopy(prepared), "ghostPreview": {"layout": deepcopy(prepared["document"])},
         "transactionBinding": binding.to_dict(), "validation": {
             "noNewErrors": True,
+            # What the change adds; spatial and routing below are the whole layout.
+            **({"introduced": introduced} if introduced is not None else {}),
             **({"siteContext": site_review} if site_review is not None else {}),
             # Early in the payload: agents may see only the start of a large result.
             **({"aisleObstructions": obstruction_review} if obstruction_review is not None else {}),
@@ -245,7 +313,9 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
             "spatial": service._diagnostic_receipt_summary(prepared["spatialDiagnostics"]),
             "routing": service._diagnostic_receipt_summary(prepared["routingDiagnostics"]),
             **({"workstationReview": workstation_review} if workstation_review is not None else {}),
-            **({"functionalDesign": design_review} if design_review is not None else {})}}
+            **({"functionalDesign": design_review} if design_review is not None else {}),
+            **({"clearedLightSpots": [{"placementId": placement_id, "where": where} for placement_id, where
+                                      in sorted(cleared_lights.items())]} if cleared_lights else {})}}
     from .direct_edit_policy import evaluate
     alternative["editMode"] = edit_mode
     alternative["directApplyPolicy"] = evaluate(operations, prepared, undo=undo, planned=planned)

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "libraryVersion": "2026.10.25.2",
+  "libraryVersion": "2026.11.01.1",
   "notes": "Appearances are visual only. They never change mass, density, strength or an assigned engineering material.",
   "categories": [
     {
@@ -38,6 +38,10 @@
     {
       "categoryId": "stone",
       "label": "Concrete & Stone"
+    },
+    {
+      "categoryId": "lights",
+      "label": "Lights"
     }
   ],
   "textureSets": [
@@ -1098,6 +1102,355 @@
       ],
       "description": "Visual representation of polished marble; not a stone specification.",
       "thumbnail": "thumbnails/appearances/marble-white.png"
+    },
+    {
+      "appearanceId": "light-cool-white-led",
+      "label": "Cool-white LED",
+      "category": "lights",
+      "model": "standard",
+      "color": "#dfe4e8",
+      "roughness": 0.35,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "lamp",
+        "led",
+        "cool white",
+        "high bay",
+        "lens",
+        "glow"
+      ],
+      "description": "Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a lighting or signage specification.",
+      "thumbnail": "thumbnails/appearances/light-cool-white-led.png",
+      "emission": {
+        "color": "#eef4ff",
+        "intensity": 1
+      },
+      "estimate": {
+        "lumens": 20000,
+        "beamAngleDegrees": 120,
+        "basis": "typical, for estimates"
+      }
+    },
+    {
+      "appearanceId": "light-warm-white",
+      "label": "Warm-white light",
+      "category": "lights",
+      "model": "standard",
+      "color": "#e6e0d6",
+      "roughness": 0.35,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "lamp",
+        "warm white",
+        "office",
+        "lens",
+        "glow"
+      ],
+      "description": "Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a lighting or signage specification.",
+      "thumbnail": "thumbnails/appearances/light-warm-white.png",
+      "emission": {
+        "color": "#ffd29a",
+        "intensity": 1
+      },
+      "estimate": {
+        "lumens": 4000,
+        "beamAngleDegrees": 110,
+        "basis": "typical, for estimates"
+      }
+    },
+    {
+      "appearanceId": "light-exit-green",
+      "label": "Exit sign green",
+      "category": "lights",
+      "model": "standard",
+      "color": "#2a7a48",
+      "roughness": 0.3,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "exit",
+        "sign",
+        "emergency",
+        "green",
+        "glow"
+      ],
+      "description": "Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a lighting or signage specification.",
+      "thumbnail": "thumbnails/appearances/light-exit-green.png",
+      "emission": {
+        "color": "#2bea74",
+        "intensity": 1
+      }
+    },
+    {
+      "appearanceId": "light-beacon-amber",
+      "label": "Beacon amber",
+      "category": "lights",
+      "model": "standard",
+      "color": "#b5740c",
+      "roughness": 0.3,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "beacon",
+        "amber",
+        "warning",
+        "forklift",
+        "dock",
+        "rotating",
+        "glow"
+      ],
+      "description": "Turns like a rotating beacon, once a second (steady with reduced motion). Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a lighting or signage specification.",
+      "thumbnail": "thumbnails/appearances/light-beacon-amber.png",
+      "emission": {
+        "color": "#ffab1f",
+        "intensity": 1,
+        "pattern": "rotate",
+        "periodSeconds": 1
+      }
+    },
+    {
+      "appearanceId": "light-alarm-red",
+      "label": "Alarm red",
+      "category": "lights",
+      "model": "standard",
+      "color": "#8f1d18",
+      "roughness": 0.3,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "alarm",
+        "red",
+        "beacon",
+        "fault",
+        "strobe",
+        "glow"
+      ],
+      "description": "Strobes: one short flash a second (steady with reduced motion). Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a lighting or signage specification.",
+      "thumbnail": "thumbnails/appearances/light-alarm-red.png",
+      "emission": {
+        "color": "#ff2b1c",
+        "intensity": 1,
+        "pattern": "strobe",
+        "periodSeconds": 1
+      }
+    },
+    {
+      "appearanceId": "light-signal-blue",
+      "label": "Signal blue",
+      "category": "lights",
+      "model": "standard",
+      "color": "#1e4f9a",
+      "roughness": 0.3,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "signal",
+        "blue",
+        "indicator",
+        "blinking",
+        "glow"
+      ],
+      "description": "Blinks once a second (steady with reduced motion). Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a lighting or signage specification.",
+      "thumbnail": "thumbnails/appearances/light-signal-blue.png",
+      "emission": {
+        "color": "#3a86ff",
+        "intensity": 1,
+        "pattern": "blink",
+        "periodSeconds": 1
+      }
+    },
+    {
+      "appearanceId": "light-stack-red",
+      "label": "Stack light red",
+      "category": "lights",
+      "model": "standard",
+      "color": "#7d1913",
+      "roughness": 0.3,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "stack light",
+        "andon",
+        "red",
+        "stop",
+        "fault",
+        "glow"
+      ],
+      "description": "Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a lighting or signage specification.",
+      "thumbnail": "thumbnails/appearances/light-stack-red.png",
+      "emission": {
+        "color": "#ff3a24",
+        "intensity": 1
+      }
+    },
+    {
+      "appearanceId": "light-stack-amber",
+      "label": "Stack light amber",
+      "category": "lights",
+      "model": "standard",
+      "color": "#a96d06",
+      "roughness": 0.3,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "stack light",
+        "andon",
+        "amber",
+        "warning",
+        "glow"
+      ],
+      "description": "Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a lighting or signage specification.",
+      "thumbnail": "thumbnails/appearances/light-stack-amber.png",
+      "emission": {
+        "color": "#ffb52a",
+        "intensity": 1
+      }
+    },
+    {
+      "appearanceId": "light-stack-green",
+      "label": "Stack light green",
+      "category": "lights",
+      "model": "standard",
+      "color": "#1d6b37",
+      "roughness": 0.3,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "stack light",
+        "andon",
+        "green",
+        "running",
+        "glow"
+      ],
+      "description": "Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a lighting or signage specification.",
+      "thumbnail": "thumbnails/appearances/light-stack-green.png",
+      "emission": {
+        "color": "#3cf27a",
+        "intensity": 1
+      }
+    },
+    {
+      "appearanceId": "light-pole-led",
+      "label": "Pole light LED",
+      "category": "lights",
+      "model": "standard",
+      "color": "#dfe4e8",
+      "roughness": 0.35,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "lamp",
+        "led",
+        "pole light",
+        "street light",
+        "car park",
+        "parking",
+        "yard",
+        "outdoor",
+        "beam",
+        "glow"
+      ],
+      "description": "Beam 110 degrees, for a car park or yard pole light. Glows like a switched-on outdoor lamp in every scene; in the evening scene it also shows a soft beam down to the ground and a pool of light where it lands. Visual only: it lights no other surface and is not a lighting design.",
+      "thumbnail": "thumbnails/appearances/light-pole-led.png",
+      "emission": {
+        "color": "#fff1dc",
+        "intensity": 1,
+        "beamAngleDegrees": 110
+      },
+      "estimate": {
+        "lumens": 12000,
+        "beamAngleDegrees": 110,
+        "basis": "typical, for estimates"
+      }
+    },
+    {
+      "appearanceId": "light-wall-led",
+      "label": "Wall light LED",
+      "category": "lights",
+      "model": "standard",
+      "color": "#dfe4e8",
+      "roughness": 0.35,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "lamp",
+        "led",
+        "wall light",
+        "wall pack",
+        "outdoor",
+        "beam",
+        "glow"
+      ],
+      "description": "Beam 100 degrees, for a wall light along an outside wall. Glows like a switched-on outdoor lamp in every scene; in the evening scene it also shows a soft beam down to the ground and a pool of light where it lands. Visual only: it lights no other surface and is not a lighting design.",
+      "thumbnail": "thumbnails/appearances/light-wall-led.png",
+      "emission": {
+        "color": "#fff1dc",
+        "intensity": 1,
+        "beamAngleDegrees": 100
+      },
+      "estimate": {
+        "lumens": 4000,
+        "beamAngleDegrees": 100,
+        "basis": "typical, for estimates"
+      }
+    },
+    {
+      "appearanceId": "light-dock-led",
+      "label": "Dock light LED",
+      "category": "lights",
+      "model": "standard",
+      "color": "#dfe4e8",
+      "roughness": 0.35,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "lamp",
+        "led",
+        "dock light",
+        "loading dock",
+        "truck yard",
+        "outdoor",
+        "beam",
+        "glow"
+      ],
+      "description": "Beam 70 degrees, for a light over a dock door. Glows like a switched-on outdoor lamp in every scene; in the evening scene it also shows a soft beam down to the ground and a pool of light where it lands. Visual only: it lights no other surface and is not a lighting design.",
+      "thumbnail": "thumbnails/appearances/light-dock-led.png",
+      "emission": {
+        "color": "#ffe2b8",
+        "intensity": 1,
+        "beamAngleDegrees": 70
+      },
+      "estimate": {
+        "lumens": 3000,
+        "beamAngleDegrees": 70,
+        "basis": "typical, for estimates"
+      }
     }
   ]
 }

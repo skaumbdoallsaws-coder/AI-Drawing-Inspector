@@ -11,7 +11,7 @@
 
     const BASE_URL = '/static/facility_library/';
     const OVERRIDE_FIELDS = Object.freeze(['color', 'roughness', 'metalness', 'opacity', 'textureStrength',
-        'sizeMeters', 'rotationDegrees', 'offsetMeters', 'mapping', 'grain']);
+        'sizeMeters', 'rotationDegrees', 'offsetMeters', 'mapping', 'grain', 'pattern', 'periodSeconds']);
     const PREFERENCES_KEY = 'inspectorpro.facilityLibrary.v1';
     const MAX_RECENTS = 12;
     const clone = value => JSON.parse(JSON.stringify(value));
@@ -117,11 +117,37 @@
         return result;
     }
 
+    function halfBrightness(color) {
+        const value = parseInt(String(color).slice(1), 16);
+        return '#' + [16, 8, 0].map(function (shift) {
+            return ('0' + Math.round(((value >> shift) & 255) / 2).toString(16)).slice(-2);
+        }).join('');
+    }
+
     function mergeFinish(base, overrides, textureSet) {
         const result = clone(base);
-        ['color', 'roughness', 'metalness', 'opacity'].forEach(function (key) {
+        ['roughness', 'metalness', 'opacity'].forEach(function (key) {
             if (overrides[key] !== undefined) result[key] = overrides[key];
         });
+        // On a light (a finish with an emission) the color recolors the light: the glow takes it, and the unlit lens
+        // the same color at half brightness, so a blink's dark step or a switched-off lamp keeps its color.
+        if (overrides.color !== undefined) {
+            if (result.emission) {
+                result.emission.color = overrides.color;
+                result.color = halfBrightness(overrides.color);
+            } else {
+                result.color = overrides.color;
+            }
+        }
+        // A light's pattern may be chosen per use, e.g. a red stack lamp that blinks.
+        if (result.emission && overrides.pattern !== undefined) {
+            delete result.emission.pattern;
+            delete result.emission.periodSeconds;
+            if (overrides.pattern !== 'steady') {
+                result.emission.pattern = overrides.pattern;
+                result.emission.periodSeconds = overrides.periodSeconds;
+            }
+        }
         if (result.texture && textureSet) {
             const texture = result.texture;
             if (overrides.sizeMeters !== undefined) texture.sizeMeters = overrides.sizeMeters;
@@ -173,9 +199,12 @@
             offset: resolved.texture.offsetMeters, mapping: resolved.texture.mapping, grain: resolved.texture.grain,
             strength: resolved.texture.strength, scale: Number(scale || 1).toFixed(4),
         } : null;
+        const emission = resolved.emission ? [resolved.emission.color, resolved.emission.intensity]
+            .concat(resolved.emission.pattern ? [resolved.emission.pattern, resolved.emission.periodSeconds] : [])
+            .concat(resolved.emission.beamAngleDegrees ? [resolved.emission.beamAngleDegrees] : []) : null;
         return JSON.stringify([resolved.appearanceId, resolved.missing === true, resolved.model, resolved.color,
             resolved.roughness, resolved.metalness, resolved.opacity, resolved.transmission || 0, resolved.ior || 0,
-            resolved.thickness || 0, resolved.clearcoat || 0, resolved.clearcoatRoughness || 0, texture]);
+            resolved.thickness || 0, resolved.clearcoat || 0, resolved.clearcoatRoughness || 0, texture, emission]);
     }
 
     function layoutScene(layout) {
@@ -194,10 +223,15 @@
         const result = clone(preset);
         const adjustments = saved && saved.adjustments && typeof saved.adjustments === 'object' ? saved.adjustments : {};
         ['exposure', 'environmentIntensity', 'ambient', 'directional', 'background', 'shadows',
-            'environmentRotationDegrees'].forEach(function (key) {
-            if (adjustments[key] !== undefined) result[key] = adjustments[key];
+            'environmentRotationDegrees', 'lights', 'lightAreas', 'glowHalo'].forEach(function (key) {
+            if (adjustments[key] !== undefined) result[key] = clone(adjustments[key]);
         });
         result.environmentRotationDegrees = result.environmentRotationDegrees || 0;
+        // Lamps, beacons and signs glow unless the scene switches the lights off. lightAreas, when set, switches the
+        // general lighting by area (docs/facility-lighting-plan.md, L7).
+        result.lights = result.lights !== false;
+        // The glow halo (L6) is off unless the scene turns it on; the view draws it only where there are pools.
+        result.glowHalo = result.glowHalo === true;
         const environment = library && result.environment && result.environment !== 'room'
             ? library.environments.get(result.environment) : null;
         result.environmentUrl = environment ? environment.url : null;

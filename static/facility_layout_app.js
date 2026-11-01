@@ -169,6 +169,7 @@
                 geocodeAddress: transport.geocodeAddress,
                 prefetchSiteGlobe: transport.prefetchSiteGlobe,
                 placementCandidates: transport.placementCandidates,
+                lightingCoverage: transport.lightingCoverage,
                 placementCandidatePreview:
                     transport.placementCandidatePreview,
                 createLayoutProposals: transport.createLayoutProposals,

@@ -23,7 +23,10 @@
 
     const DRAG_TYPE = 'application/x-inspectorpro-library';
     const PREVIEW_DELAY_MS = 90;
-    const SCENE_ADJUSTMENTS = ['exposure', 'environmentIntensity', 'background', 'shadows', 'environmentRotationDegrees'];
+    const SCENE_ADJUSTMENTS = ['exposure', 'environmentIntensity', 'ambient', 'directional', 'background', 'shadows',
+        'environmentRotationDegrees', 'lights', 'lightAreas', 'glowHalo'];
+    const LIGHT_AREA_MODES = ['only', 'except'];
+    const MAX_LIGHT_AREAS = 64;
     const GRAINS = [['part', 'Along each part'], ['length', 'Along object length'], ['width', 'Along object width'],
         ['height', 'Vertical']];
     const MAPPINGS = [['box', 'Box (flat faces)'], ['cylindrical', 'Cylindrical (round parts)'], ['uv', 'Model UVs if present']];
@@ -119,7 +122,13 @@
             placing: null,
             saving: false,
             editorKey: null,
+            coverageArea: '',
+            coverageBusy: false,
+            coverageError: '',
         };
+
+        // The Scenes pane's lighting coverage block while it is on show (CC3).
+        let coverageBox = null;
 
         // ---- DOM skeleton -------------------------------------------------------
         const panel = element(doc, 'section', { className: 'ip-flib', 'aria-label': 'Appearances, scenes and decals' });
@@ -350,7 +359,7 @@
                     box.setAttribute('data-environment', item.environment ? (item.environment === 'room' ? 'room' : 'hdr') : 'none');
                     return;
                 }
-                box.style.setProperty('--ip-flib-color', item.color || '#9aa2a9');
+                box.style.setProperty('--ip-flib-color', item.emission && item.emission.color || item.color || '#9aa2a9');
                 box.setAttribute('data-metal', item.metalness >= 0.5 ? 'true' : 'false');
                 const maps = item.texture && item.texture.maps;
                 const textureSet = !maps && item.texture && library() && library().textureSets.get(item.texture.textureSetId);
@@ -459,6 +468,7 @@
             state.saving = false;
             if (item.kind === 'decal') state.draft = { widthMeters: item.widthMeters || 0.3, rotationDegrees: 0 };
             if (item.kind === 'placed-decal') state.draft = { widthMeters: item.row.widthMeters, rotationDegrees: item.row.anchor.rotationDegrees };
+            if (item.kind === 'scene') state.draft = savedSceneDraft(item);
             setStatus('');
             renderGrid();
             renderEditor(true);
@@ -475,14 +485,32 @@
             return value;
         }
 
+        // Re-editing the scene the layout already uses starts from its saved adjustments (the lights switch
+        // included), so the editor shows them and Apply keeps them unless they are changed here.
+        function savedSceneDraft(item) {
+            const ctx = context();
+            const saved = ctx ? libraryApi.layoutScene(ctx.layout) : null;
+            return saved && saved.sceneId === item.id && saved.adjustments
+                ? JSON.parse(JSON.stringify(saved.adjustments)) : {};
+        }
+
         function sceneValue(item) {
             const value = { version: 1, sceneId: item.id };
             const adjustments = {};
             SCENE_ADJUSTMENTS.forEach(function (key) {
                 if (state.draft[key] !== undefined) adjustments[key] = state.draft[key];
             });
+            if (adjustments.lightAreas) adjustments.lightAreas = presentLightAreas(adjustments.lightAreas);
             if (Object.keys(adjustments).length) value.adjustments = adjustments;
             return value;
+        }
+
+        // A floor area removed from the layout since lights nothing; Apply drops it (L7).
+        function presentLightAreas(value) {
+            const known = new Set(floorAreas().map(function (floor) { return floor.surfaceId; }));
+            return { mode: value.mode, areas: (value.areas || []).filter(function (area) {
+                return !area.surfaceId || known.has(area.surfaceId);
+            }).map(function (area) { return JSON.parse(JSON.stringify(area)); }) };
         }
 
         function cancelPreviews() {
@@ -700,9 +728,13 @@
                 editor.append(partRow);
             }
             const fields = element(doc, 'div', { className: 'ip-flib-fields' });
-            const color = element(doc, 'input', { type: 'color', value: draftValue(item, 'color', '#ffffff'), 'aria-label': 'Color' });
+            // On a light the color is its glow (the library keeps the unlit plastic).
+            const glow = item.emission && item.emission.color;
+            const color = element(doc, 'input', { type: 'color',
+                value: state.draft.color !== undefined ? state.draft.color : glow || draftValue(item, 'color', '#ffffff'),
+                'aria-label': glow ? 'Glow color' : 'Color' });
             bindDraft(color, 'color', function (control) { return control.value.toLowerCase(); });
-            field(fields, item.texture ? 'Tint' : 'Color', color);
+            field(fields, glow ? 'Glow color' : item.texture ? 'Tint' : 'Color', color);
             const roughness = range(0, 1, 0.01, draftValue(item, 'roughness', 0.6), 'Roughness');
             bindDraft(roughness, 'roughness', function (control) { return round(control.value, 2); });
             field(fields, 'Roughness', roughness);
@@ -754,6 +786,7 @@
             editor.append(element(doc, 'p', { className: 'ip-flib-source' }, source
                 ? 'Texture: ' + source.source.provider + ' ' + source.source.assetId + ', ' + source.source.license
                     + '. Visual only; engineering material and mass are unchanged.'
+                : glow ? 'Glows in the 3D view like a switched-on lamp; it lights no other surface. Visual only.'
                 : 'Visual only; engineering material and mass are unchanged.'));
         }
 
@@ -810,6 +843,18 @@
             shadows.checked = Boolean(draftValue(item, 'shadows', false));
             shadows.addEventListener('change', function () { state.draft.shadows = shadows.checked; schedulePreview(); });
             field(fields, 'Sun shadows', shadows, 'Shadows cost frame rate on very large layouts.');
+            const lights = element(doc, 'input', { type: 'checkbox', 'aria-label': 'Lights on' });
+            lights.checked = draftValue(item, 'lights', true) !== false;
+            lights.addEventListener('change', function () { state.draft.lights = lights.checked; schedulePreview(); });
+            field(fields, 'Lights on', lights, 'Off: lamps, beacons and signs show unlit.');
+            if (item.lightPools) {
+                // Glow halo (lighting L6): saved with the scene, off by default, drawn with the lights on.
+                const halo = element(doc, 'input', { type: 'checkbox', 'aria-label': 'Glow halo' });
+                halo.checked = draftValue(item, 'glowHalo', false) === true;
+                halo.addEventListener('change', function () { state.draft.glowHalo = halo.checked; schedulePreview(); });
+                field(fields, 'Glow halo', halo, 'A soft halo around lit lamps, signs and beacons. Costs frame rate.');
+            }
+            renderLightAreas(fields, item, ctx);
             editor.append(fields);
             const actions = element(doc, 'div', { className: 'ip-flib-actions' });
             actions.append(
@@ -822,6 +867,219 @@
                 ? 'Lighting: ' + environment.source.provider + ' ' + environment.label + ' by ' + environment.source.author + ', '
                     + environment.source.license + '.'
                 : item.environment === 'room' ? 'Lighting: built-in neutral room.' : 'Lighting: InspectorPro standard.'));
+            coverageBox = element(doc, 'div', { className: 'ip-flib-coverage', role: 'group', 'aria-label': 'Lighting coverage' });
+            editor.append(coverageBox);
+            fillCoverage(coverageBox, ctx);
+        }
+
+        // Lighting coverage (docs/facility-lighting-plan.md, CC3): an estimate of one area from this layout's lights
+        // and its saved scene, drawn on the floor in the plan and the 3D view until hidden. Never saved.
+        function coverageChoices() {
+            const value = layout();
+            const choices = [['lot', 'Car parks and truck yards']];
+            floorAreas().forEach(function (floor) {
+                choices.push(['floor:' + floor.surfaceId, 'Floor area: ' + (floor.label || floor.surfaceId)]);
+            });
+            (value && Array.isArray(value.zones) ? value.zones : []).forEach(function (zone) {
+                if (zone && zone.zoneId) choices.push(['zone:' + zone.zoneId, 'Zone: ' + (zone.label || zone.zoneId)]);
+            });
+            return choices;
+        }
+
+        function coverageArea(choice) {
+            if (choice === 'lot') return { lot: true };
+            if (choice.indexOf('floor:') === 0) return { floorAreaId: choice.slice(6) };
+            return { zoneId: choice.slice(5) };
+        }
+
+        function count(value) { return Math.round(Number(value) || 0).toLocaleString('en-US'); }
+
+        function fillCoverage(box, ctx) {
+            const shown = ctx && ctx.lightCoverage || null;
+            box.textContent = '';
+            box.setAttribute('data-token', shown ? String(shown.token) : '');
+            box.append(element(doc, 'strong', {}, 'Lighting coverage'));
+            const choices = coverageChoices();
+            const wanted = shown && shown.choice || state.coverageArea;
+            const current = choices.some(function (choice) { return choice[0] === wanted; }) ? wanted : choices[0][0];
+            const area = select(choices, current, 'Area to check');
+            area.addEventListener('change', function () { state.coverageArea = area.value; });
+            const row = element(doc, 'span', { className: 'ip-flib-inline' });
+            row.append(area, button(state.coverageBusy ? 'Estimating...' : 'Show', function () { showCoverage(area.value); },
+                { className: 'ip-flib-primary', disabled: !ctx || typeof ctx.showLightCoverage !== 'function'
+                    || state.coverageBusy ? true : null }));
+            if (shown) row.append(button('Hide', hideCoverage));
+            box.append(row);
+            if (state.coverageError) {
+                box.append(element(doc, 'p', { className: 'ip-flib-coverage-error', role: 'alert' }, state.coverageError));
+            }
+            box.append(element(doc, 'p', { className: 'ip-flib-field-note' }, 'From each lamp\'s height, typical output '
+                + 'and beam, with this layout\'s saved scene. Drawn on the floor in the plan and the 3D view; not saved.'));
+            if (!shown) return;
+            const summary = shown.summary || {};
+            const where = summary.area || {};
+            const lux = summary.estimatedLux || {};
+            const lamps = summary.lamps || {};
+            const dark = summary.darkSpots || {};
+            const label = String(where.label || 'the area');
+            box.append(element(doc, 'p', { className: 'ip-flib-coverage-caption' }, shown.caption));
+            box.append(element(doc, 'p', {}, label.charAt(0).toUpperCase() + label.slice(1) + ', ' + count(where.sizeSquareMeters)
+                + ' sq m: estimated ' + lux.minimum + ' to ' + lux.maximum + ' lux, mean ' + lux.mean + '.'));
+            const off = (lamps.offBySwitch || 0) + (lamps.offByArea || 0);
+            box.append(element(doc, 'p', { className: 'ip-flib-field-note' }, (lamps.lightingThisArea || 0) + ' of '
+                + (lamps.on || 0) + ' lamps that are on light it' + (off ? '; ' + off + ' off by the scene.' : '.')));
+            if (dark.note) {
+                box.append(element(doc, 'p', {}, dark.note));
+                return;
+            }
+            box.append(element(doc, 'p', {}, dark.count ? 'Dark spots, below ' + dark.belowLux + ' lux (' + dark.basis + '): '
+                + (dark.count > shown.spots.length ? 'the ' + shown.spots.length + ' largest of ' + dark.count : dark.count)
+                + ', outlined and numbered on the floor.' : 'No dark spots below ' + dark.belowLux + ' lux (' + dark.basis + ').'));
+            if (!shown.spots.length) return;
+            const list = element(doc, 'ol', { className: 'ip-flib-coverage-spots' });
+            shown.spots.forEach(function (spot) {
+                const near = (spot.nearestLamps || []).map(function (lamp) {
+                    return lamp.label + ' (' + lamp.distanceMeters + ' m)';
+                });
+                list.append(element(doc, 'li', {}, count(spot.sizeSquareMeters) + ' sq m around ' + spot.centre.x + ', '
+                    + spot.centre.z + ': mean ' + spot.meanLux + ' lux, lowest ' + spot.minimumLux + '.'
+                    + (near.length ? ' Nearest: ' + near.join(', ') + '.' : '')));
+            });
+            box.append(list);
+        }
+
+        async function showCoverage(choice) {
+            const ctx = context();
+            if (!ctx || typeof ctx.showLightCoverage !== 'function' || state.coverageBusy) return;
+            state.coverageArea = choice;
+            state.coverageBusy = true;
+            state.coverageError = '';
+            setStatus('Estimating the lighting...', 'info');
+            if (coverageBox) fillCoverage(coverageBox, ctx);
+            try {
+                const shown = await ctx.showLightCoverage(coverageArea(choice), choice);
+                setStatus(shown ? 'Shown in the plan and the 3D view.' : '', 'info');
+            } catch (error) {
+                // Said in the block, by the button: the status line can be one line high with the scene editor open.
+                state.coverageError = error && error.message ? error.message : 'The lighting estimate failed.';
+                setStatus('', 'info');
+            } finally {
+                state.coverageBusy = false;
+                if (coverageBox) fillCoverage(coverageBox, context());
+            }
+        }
+
+        function hideCoverage() {
+            const ctx = context();
+            if (ctx && typeof ctx.hideLightCoverage === 'function') ctx.hideLightCoverage();
+            state.coverageError = '';
+            setStatus('', 'info');
+            if (coverageBox) fillCoverage(coverageBox, context());
+        }
+
+        // The workspace drops the estimate when the layout changes; the block follows.
+        function syncCoverage(ctx) {
+            if (!coverageBox || state.coverageBusy
+                    || (typeof editor.contains === 'function' && !editor.contains(coverageBox))) return;
+            const token = ctx && ctx.lightCoverage ? String(ctx.lightCoverage.token) : '';
+            if (coverageBox.getAttribute('data-token') !== token) fillCoverage(coverageBox, ctx);
+        }
+
+        // General lights per area (docs/facility-lighting-plan.md, L7): everywhere, only in some areas, or everywhere
+        // except in them. The areas are the layout's floor areas, ticked, and rectangles drawn on the plan.
+        function renderLightAreas(fields, item, ctx) {
+            const saved = draftValue(item, 'lightAreas', null);
+            const mode = saved && LIGHT_AREA_MODES.indexOf(saved.mode) >= 0 ? saved.mode : 'everywhere';
+            const choice = select([['everywhere', 'Everywhere'], ['only', 'Only in'], ['except', 'Everywhere except']],
+                mode, 'General lights');
+            field(fields, 'General lights', choice, 'Lamps hung 3 m or higher. Exit signs and beacons stay on.');
+            const box = element(doc, 'div', { className: 'ip-flib-areas', role: 'group', 'aria-label': 'Light areas' });
+            fields.append(box);
+            let kept = saved && Array.isArray(saved.areas) ? saved.areas : [];
+            choice.addEventListener('change', function () {
+                const current = state.draft.lightAreas;
+                if (current) kept = current.areas;
+                if (choice.value === 'everywhere') delete state.draft.lightAreas;
+                else state.draft.lightAreas = { mode: choice.value, areas: kept.slice() };
+                renderAreaChoices(box, ctx);
+                schedulePreview();
+            });
+            renderAreaChoices(box, ctx);
+        }
+
+        function floorAreas() {
+            const rows = layout() && layout().extensions && layout().extensions.facilityFloorSurfaces;
+            return (rows && Array.isArray(rows.surfaces) ? rows.surfaces : []).filter(function (row) {
+                return row && typeof row.surfaceId === 'string';
+            });
+        }
+
+        function metres(value) { return String(round(value, 1)); }
+
+        function renderAreaChoices(box, ctx) {
+            box.textContent = '';
+            const value = state.draft.lightAreas;
+            box.hidden = !value;
+            if (!value) return;
+            const full = value.areas.length >= MAX_LIGHT_AREAS;
+            const changed = function () { renderAreaChoices(box, ctx); schedulePreview(); };
+            const floors = floorAreas();
+            const known = new Set(floors.map(function (floor) { return floor.surfaceId; }));
+            const list = element(doc, 'div', { className: 'ip-flib-area-list' });
+            floors.forEach(function (floor) {
+                const ticked = value.areas.some(function (area) { return area.surfaceId === floor.surfaceId; });
+                const tick = element(doc, 'input', { type: 'checkbox', 'aria-label': floor.label || floor.surfaceId,
+                    disabled: full && !ticked ? true : null });
+                tick.checked = ticked;
+                tick.addEventListener('change', function () {
+                    value.areas = value.areas.filter(function (area) { return area.surfaceId !== floor.surfaceId; });
+                    if (tick.checked) value.areas.push({ surfaceId: floor.surfaceId });
+                    changed();
+                });
+                const row = element(doc, 'label', { className: 'ip-flib-area' });
+                row.append(tick, element(doc, 'span', { title: floor.label || floor.surfaceId }, floor.label || floor.surfaceId));
+                list.append(row);
+            });
+            if (floors.length) box.append(list);
+            else box.append(element(doc, 'p', { className: 'ip-flib-field-note' }, 'This layout has no floor areas; draw one.'));
+            value.areas.forEach(function (area) {
+                if (area.surfaceId && !known.has(area.surfaceId)) {
+                    box.append(element(doc, 'p', { className: 'ip-flib-field-note' }, area.surfaceId
+                        + ' was removed from the layout: it lights nothing and is dropped on Apply.'));
+                }
+                if (!area.rectangle) return;
+                const box2 = area.rectangle;
+                const row = element(doc, 'div', { className: 'ip-flib-area ip-flib-area-drawn' });
+                row.append(element(doc, 'span', {}, 'Drawn ' + metres(box2.maxX - box2.minX) + ' x '
+                    + metres(box2.maxZ - box2.minZ) + ' m at ' + metres((box2.minX + box2.maxX) / 2) + ', '
+                    + metres((box2.minZ + box2.maxZ) / 2)), button('Remove', function () {
+                    value.areas = value.areas.filter(function (other) { return other !== area; });
+                    changed();
+                }));
+                box.append(row);
+            });
+            box.append(button('Draw an area on the plan', function () { drawLightArea(ctx); },
+                { disabled: !ctx.canEdit || full || typeof ctx.drawLightArea !== 'function' ? true : null }));
+        }
+
+        // The plan opens for one dragged rectangle; the 3D view (and the preview) come back with it.
+        function drawLightArea(ctx) {
+            const item = selectedItem();
+            const key = item && itemKey(item);
+            const layoutId = layout() && layout().layoutId;
+            const started = ctx.drawLightArea(function (rectangle) {
+                const now = selectedItem();
+                const value = state.draft.lightAreas;
+                if (!rectangle || !value || !now || itemKey(now) !== key || (layout() && layout().layoutId) !== layoutId) {
+                    setStatus(rectangle ? '' : 'No area drawn.');
+                    return;
+                }
+                if (value.areas.length < MAX_LIGHT_AREAS) value.areas.push({ rectangle: rectangle });
+                setStatus('Area added. Apply saves it with the scene.');
+                renderEditor(true);
+                schedulePreview();
+            });
+            setStatus(started ? 'Drag a rectangle on the plan. Esc cancels.' : 'The plan is not available.', started ? 'info' : 'error');
         }
 
         function renderDecalEditor(item, ctx, ids) {
@@ -950,6 +1208,7 @@
             state.draft = {};
             const item = selectedItem();
             if (item && item.kind === 'decal') state.draft = { widthMeters: item.widthMeters || 0.3, rotationDegrees: 0 };
+            if (item && item.kind === 'scene') state.draft = savedSceneDraft(item);
             stopPlacing();
             setStatus('Changes discarded.');
             renderEditor(true);
@@ -1263,6 +1522,7 @@
             const layoutValue = ctx && ctx.layout;
             const signature = JSON.stringify([ids, layoutValue && layoutValue.layoutId,
                 layoutValue && libraryApi.layoutUsage(library(), layoutValue), Boolean(ctx && ctx.canEdit), Boolean(library())]);
+            syncCoverage(ctx);
             if (signature === lastSignature) return;
             lastSignature = signature;
             renderHead();

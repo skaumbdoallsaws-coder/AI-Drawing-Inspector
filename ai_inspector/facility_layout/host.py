@@ -963,10 +963,10 @@ class LocalFacilityLayoutHost:
     def principal() -> FacilityPrincipal:
         return local_facility_principal(site_id=LOCAL_SITE_ID)
 
-    def _resolve_component_inventory(self, principal, reference, placement_id, representation):
+    def _resolve_component_inventory(self, principal, reference, placement_id, representation, *, asset=None):
         from ai_inspector.codex_runtime.component_inventory import resolve_component_inventory
         return resolve_component_inventory(self.agent_runtime, principal, reference,
-            placement_id, representation, project_root=self._component_visual_root)
+            placement_id, representation, project_root=self._component_visual_root, asset=asset)
 
     def _load_facility_planning_package(
         self,
@@ -1963,6 +1963,42 @@ class LocalFacilityLayoutHost:
             principal = self.principal()
         self.ensure_bootstrap()
         return principal
+
+    def _lighting_coverage(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+        body: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        from .appearance_library import load_library
+        from .light_coverage import check_lighting_coverage, view_payload
+        operations = body.get("operations", [])
+        area = body.get("area")
+        try:
+            if not isinstance(operations, list) or not isinstance(area, Mapping):
+                raise ValueError("Send baseRevision, operations (a list) and area (an object).")
+            document = self.service.layout_with_operations(
+                principal,
+                site_id,
+                layout_id,
+                str(body.get("baseRevision") or ""),
+                operations,
+            )
+            catalog = self._agent_asset_catalog(principal, site_id)
+            shell = self.service.effective_shell(principal, site_id, document)
+            summary, result = check_lighting_coverage(document, catalog, load_library(), dict(area), shell=shell)
+        except FacilityLayoutError as error:
+            raise HTTPException(
+                status_code=error.status_code,
+                detail={"error": error.to_dict()},
+            ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={"error": {"code": "lighting_coverage_unavailable", "message": str(error)}},
+            ) from error
+        return view_payload(summary, result)
 
     def _require_request_action(
         self,
@@ -3983,6 +4019,19 @@ class LocalFacilityLayoutHost:
                 FacilityLayoutError,
             ) as error:
                 raise self._generation_error(error) from error
+
+        # The lighting coverage estimate (docs/facility-lighting-plan.md, CC3): read only, for the layout as the
+        # view holds it (the saved revision and the view's unsaved operations); nothing is saved.
+        @router.post("/api/facility-layouts/{site_id}/{layout_id}/lighting/coverage")
+        async def lighting_coverage(
+            request: Request,
+            site_id: str,
+            layout_id: str,
+            body: dict[str, Any],
+        ):
+            principal = self._require_request_action(request, "layout.read")
+            import asyncio
+            return await asyncio.to_thread(self._lighting_coverage, principal, site_id, layout_id, body)
 
         router.include_router(
             create_facility_layout_router(

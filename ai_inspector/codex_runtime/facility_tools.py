@@ -34,6 +34,8 @@ def tool_specs():
     from .authoring_reads import tool_specs as authoring_tool_specs
     from .component_inventory import tool_specs as component_tool_specs
     from .library_tools import tool_specs as library_tool_specs
+    from ai_inspector.facility_layout.light_coverage import tool_spec as light_coverage_tool_spec
+    from ai_inspector.facility_layout.light_positions import tool_spec as light_positions_tool_spec
     from ai_inspector.facility_layout.parking_review import tool_spec as parking_tool_spec
     from ai_inspector.facility_layout.workstation_review import tool_spec as workstation_tool_spec
     from .research_tools import tool_specs as research_tool_specs
@@ -43,7 +45,9 @@ def tool_specs():
              "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
             *[deepcopy(spec) for spec in facility_layout_read_tool_specs() if spec["name"] in READ_NAMES],
             *engineering_tool_specs(), *authoring_tool_specs(), *component_tool_specs(), *library_tool_specs(),
-            parking_tool_spec(), workstation_tool_spec(), *research_tool_specs(), *site_tool_specs()]
+            parking_tool_spec(), workstation_tool_spec(), light_positions_tool_spec(), light_coverage_tool_spec(),
+            *research_tool_specs(),
+            *site_tool_specs()]
 
 
 def read_bound_layout(runtime, principal, reference):
@@ -297,6 +301,27 @@ class FacilityReadGateway:
             saved = read_bound_layout(self.runtime, self.principal, self.reference)
             return dict(review_parking(saved["layout"], arguments["zoneIds"], arguments.get("requestedSpaces")),
                         identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=True)
+        if name == "suggest_facility_light_positions":
+            from ai_inspector.facility_layout.light_positions import suggest_light_positions
+            saved = read_bound_layout(self.runtime, self.principal, self.reference)
+            catalog = {asset["assetId"]: asset for asset in
+                       self.runtime.asset_catalog_provider(self.principal, self.reference["siteId"])}
+            try:
+                result = suggest_light_positions(saved["layout"], catalog, arguments)
+            except ValueError as exc:
+                raise PilotError("light_positions_unavailable", str(exc), 422) from exc
+            return dict(result, identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=True)
+        if name == "check_lighting_coverage":
+            from ai_inspector.facility_layout.appearance_library import load_library
+            from ai_inspector.facility_layout.light_coverage import check_lighting_coverage
+            saved = read_bound_layout(self.runtime, self.principal, self.reference)
+            catalog = self.runtime.asset_catalog_provider(self.principal, self.reference["siteId"])
+            try:
+                shell = self.runtime.service.effective_shell(self.principal, self.reference["siteId"], saved["layout"])
+                summary, _ = check_lighting_coverage(saved["layout"], catalog, load_library(), arguments, shell=shell)
+            except ValueError as exc:
+                raise PilotError("lighting_coverage_unavailable", str(exc), 422) from exc
+            return dict(summary, identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=True)
         if name == "review_facility_workstations":
             from ai_inspector.facility_layout.workstation_review import review_document
             saved = read_bound_layout(self.runtime, self.principal, self.reference)

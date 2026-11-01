@@ -2346,6 +2346,44 @@ check('top plan isolates invalid manual segments and keeps actor visibility inde
     adapter.dispose();
 });
 
+check('top plan draws the lighting coverage over the floor and its markings, under the equipment, its dark spots on top', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(layout());
+    assert.strictEqual(host.findByAttribute('data-layer', 'light-coverage').length, 0);
+    assert.strictEqual(adapter.setLightCoverage({ image: 'data:image/png;base64,AAAA', opacity: 0.8,
+        minX: 0, minZ: 0, maxX: 20, maxZ: 10, spots: [{ number: 1, x: 5.5, z: 4.5,
+            rings: [[{ x: 2, z: 2 }, { x: 9, z: 2 }, { x: 9, z: 7 }, { x: 2, z: 7 }]] }] }), true);
+    const svg = host.findByAttribute('data-layer', 'light-coverage')[0].parentNode;
+    const order = svg.children.map(layer => layer.getAttribute('data-layer'));
+    assert.ok(order.indexOf('zones') < order.indexOf('light-coverage'), order.join());
+    assert.ok(order.indexOf('floor-markings') < order.indexOf('light-coverage'), order.join());
+    assert.ok(order.indexOf('light-coverage') < order.indexOf('placements'), order.join());
+    assert.strictEqual(order[order.length - 1], 'light-coverage-spots', 'the outlines over everything');
+    assert.strictEqual(host.findByAttribute('data-layer', 'light-coverage')[0].getAttribute('pointer-events'), 'none');
+    const image = host.findByAttribute('data-light-coverage', 'grid')[0];
+    const projection = adapter.projection;
+    assert.strictEqual(Number(image.getAttribute('x')), projection.offsetX + (0 - projection.minX) * projection.scale);
+    assert.strictEqual(Number(image.getAttribute('y')), projection.offsetY + (projection.maxZ - 10) * projection.scale);
+    assert.strictEqual(Number(image.getAttribute('width')), 20 * projection.scale);
+    assert.strictEqual(Number(image.getAttribute('height')), 10 * projection.scale);
+    assert.strictEqual(image.getAttribute('opacity'), '0.8');
+    const outlines = host.findByAttribute('data-light-coverage-spot', '1');
+    assert.deepStrictEqual(outlines.map(path => path.getAttribute('stroke')), ['#000000', '#ffffff']);
+    assert.ok(/^M[0-9. ]+(L[0-9. ]+){3}Z$/.test(outlines[1].getAttribute('d')), outlines[1].getAttribute('d'));
+    assert.strictEqual(host.findByAttribute('data-light-coverage-label', '1')[0].textContent, '1');
+    adapter.setLightCoverage(null);
+    assert.strictEqual(host.findByAttribute('data-layer', 'light-coverage').length, 0);
+    assert.strictEqual(host.findByAttribute('data-layer', 'light-coverage-spots').length, 0);
+    adapter.dispose();
+});
+
 Promise.all(pendingChecks).then(() => {
     process.stdout.write(
         `${checks}/${checks} facility layout editor checks passed\n`

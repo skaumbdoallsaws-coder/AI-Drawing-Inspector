@@ -23,19 +23,58 @@
         });
         return result;
     }
-    // Precedence: a part override beats the placement's finish, which beats the
-    // asset's own material. `finishes.materialFor(override, mesh)` builds library
-    // finishes; without it, appearance overrides are skipped rather than guessed.
+    // A finished part keeps the depth offset of the material it replaces. Authored
+    // surfaces draw pulled slightly forward; a part that lost the offset sank behind
+    // its neighbours (a lamp lens 1.5 cm under its housing vanished from below).
+    function keepDepthOffset(from,to){
+        if(!from||!to||!from.polygonOffset)return to;
+        to.polygonOffset=true;to.polygonOffsetFactor=from.polygonOffsetFactor;to.polygonOffsetUnits=from.polygonOffsetUnits;
+        return to;
+    }
+    // A model can name a library finish for one of its parts: its material's glTF
+    // extras.facilityDefaultFinish (a light's lens that comes lit). Record them on a
+    // freshly loaded model, before any finish replaces a material; copies keep them.
+    // Parts can share extras.facilityFinishGroup (a stack light's three lamps, one of
+    // which shows the cell's state): a default in a group shows only while no part of
+    // that group has a finish of its own.
+    function recordDefaults(object){
+        const parts=[],groups=[];
+        slots(object).forEach(item=>{
+            const data=item.material.userData||{};
+            const id=data.facilityDefaultFinish,group=typeof data.facilityFinishGroup==='string'&&data.facilityFinishGroup?data.facilityFinishGroup:null;
+            if(!item.key.startsWith('p:'))return;
+            if(group&&!groups.some(v=>v.key===item.key))groups.push({key:item.key,legacyKey:item.legacyKey,group});
+            if(typeof id==='string'&&id&&!parts.some(v=>v.key===item.key))parts.push(group?{key:item.key,appearanceId:id,group}:{key:item.key,appearanceId:id});
+        });
+        object.userData=object.userData||{};
+        object.userData.facilityDefaultParts=parts;
+        object.userData.facilityFinishGroups=groups;
+        return parts;
+    }
+    function defaults(object){
+        const parts=object&&object.userData&&object.userData.facilityDefaultParts;
+        return Array.isArray(parts)?parts:[];
+    }
+    // Precedence: a part override beats the model's default for that part, which
+    // beats the placement's finish, which beats the asset's own material.
+    // `finishes.materialFor(override, mesh)` builds library finishes; without it,
+    // appearance overrides are skipped rather than guessed.
     function apply(object,config,representation,finishes){
-        if(!config||!Array.isArray(config.overrides))return [];
-        const sameRepresentation=config.representation===representation;
-        const byKey=new Map(config.overrides.filter(v=>sameRepresentation||!/^m\d/.test(v.key)).map(v=>[v.key,v]));
+        const own=config&&Array.isArray(config.overrides)?config.overrides:[];
+        const parts=defaults(object);
+        if(!own.length&&!parts.length)return [];
+        const sameRepresentation=Boolean(config)&&config.representation===representation;
+        const byKey=new Map(own.filter(v=>sameRepresentation||!/^m\d/.test(v.key)).map(v=>[v.key,v]));
+        const groups=Array.isArray(object.userData&&object.userData.facilityFinishGroups)?object.userData.facilityFinishGroups:[];
+        const set=new Set(groups.filter(v=>byKey.has(v.key)||(sameRepresentation&&byKey.has(v.legacyKey))).map(v=>v.group));
+        const byDefault=new Map(parts.filter(v=>!v.group||!set.has(v.group)).map(v=>[v.key,v]));
         const applied=[];
         slots(object).forEach(item=>{
-            const v=byKey.get(item.key)||(sameRepresentation?byKey.get(item.legacyKey):null);if(!v)return;
+            const v=byKey.get(item.key)||(sameRepresentation?byKey.get(item.legacyKey):null)||byDefault.get(item.key);if(!v)return;
             if(v.appearanceId){
                 const material=finishes&&finishes.materialFor(v,item.node);
                 if(!material)return;
+                keepDepthOffset(item.material,material);
                 material.userData=material.userData||{};material.userData.facilityComponentOverride=true;
                 if(Array.isArray(item.node.material)){const list=item.node.material.slice();list[item.slot]=material;item.node.material=list;}
                 else item.node.material=material;
@@ -135,5 +174,5 @@
             ui.message('');ui.disable(false);show();
         }catch(e){ui.message(e.message);ui.disable(true);}
     }
-    return {slots,apply,open,encodeName,nodePaths,annotatePartKeys};
+    return {slots,apply,recordDefaults,defaults,keepDepthOffset,open,encodeName,nodePaths,annotatePartKeys};
 }));

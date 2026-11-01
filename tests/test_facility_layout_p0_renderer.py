@@ -45,6 +45,15 @@ def test_vendored_three_manifest_matches_every_pinned_file():
         "examples/jsm/controls/PointerLockControls.js",
         "examples/jsm/loaders/STLLoader.js",
         "examples/jsm/renderers/CSS2DRenderer.js",
+        # Appearance library (2026-10-19).
+        "examples/jsm/environments/RoomEnvironment.js",
+        "examples/jsm/loaders/HDRLoader.js",
+        "examples/jsm/geometries/DecalGeometry.js",
+        # Lighting L6, the glow halo (2026-10-31).
+        "examples/jsm/postprocessing/UnrealBloomPass.js",
+        "examples/jsm/postprocessing/Pass.js",
+        "examples/jsm/shaders/CopyShader.js",
+        "examples/jsm/shaders/LuminosityHighPassShader.js",
         "LICENSE",
         "package.json",
     }

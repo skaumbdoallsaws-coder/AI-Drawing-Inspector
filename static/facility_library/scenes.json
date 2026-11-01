@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "libraryVersion": "2026.10.25.2",
+  "libraryVersion": "2026.11.01.1",
   "notes": "A scene changes only the viewport: background, lighting, reflections and shadows. It never changes the layout.",
   "groups": [
     {
@@ -170,6 +170,21 @@
       "exposure": 1.0,
       "shadows": false,
       "thumbnail": "thumbnails/scenes/warehouse.png"
+    },
+    {
+      "sceneId": "evening",
+      "label": "Evening / night shift",
+      "group": "industrial",
+      "description": "Night-shift look: sun and sky turned far down, so lit lamps, beacons and signs carry the picture.",
+      "environment": "machine-shop",
+      "environmentIntensity": 0.06,
+      "background": "#0b0f16",
+      "ambient": 0.04,
+      "directional": 0.25,
+      "exposure": 1.0,
+      "shadows": false,
+      "lightPools": true,
+      "thumbnail": "thumbnails/scenes/evening.png"
     }
   ]
 }

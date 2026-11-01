@@ -8,6 +8,8 @@ Display only: nothing here reaches the model or changes a tool result.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
+from copy import deepcopy
 import re
 
 READ = ("Reading", "Read", "read")
@@ -48,6 +50,8 @@ SIMPLE = {
     "suggest_site_references": (CHECK, "reference points for setting out the building"),
     "prepare_layout_pdf": (CHECK, "the printable layout sheets"),
     "suggest_emergency_teams": (CHECK, "emergency teams and meeting points"),
+    "suggest_facility_light_positions": (CHECK, "clear spots for the light"),
+    "check_lighting_coverage": (CHECK, "the lighting coverage"),
     "check_site_references": (CHECK, "how well the photo, map and reference points agree"),
     "preview_planned_design": (STAGE, "the planned changes for review"),
     "inspect_facility_findings": (READ, "layout findings"),
@@ -297,7 +301,7 @@ def _step(name, args, names, edit_mode):
     if name == "inspect_facility_asset":
         return LOOK_UP, names.asset(args.get("assetId")) or "a library item"
     if name == "inspect_facility_components":
-        item = names.placement(args.get("placementId"))
+        item = names.placement(args.get("placementId")) or names.asset(args.get("assetId"))
         return READ, f"the parts of {item}" if item else "an item's parts"
     if name == "review_facility_parking":
         return REVIEW, "parking" + _scope(args.get("zoneIds"), names)
@@ -397,6 +401,24 @@ def _remark(text, limit=300):
     return text if len(text) <= limit else text[:limit - 3].rstrip() + "..."
 
 
+COVERAGE_KEYS = ("floorAreaId", "zoneId", "rectangle", "lot", "darkBelowLux")
+
+
+def view_show(name, arguments, data):
+    """What the facility view shows when a step is done (docs/facility-lighting-plan.md, "Sage shows the overlay"):
+    after check_lighting_coverage, the same estimate on the floor, for the site, layout and revision Sage read. The
+    chat page hands it to the view, which shows it only while it holds that revision with no unsaved edits."""
+    if name != "check_lighting_coverage" or not isinstance(arguments, Mapping) or not isinstance(data, Mapping):
+        return None
+    identity = data.get("identity")
+    if not isinstance(identity, Mapping) or not all(isinstance(identity.get(key), str)
+                                                    for key in ("siteId", "layoutId", "revision")):
+        return None
+    return {"lightingCoverage": {"siteId": identity["siteId"], "layoutId": identity["layoutId"],
+                                 "revision": identity["revision"],
+                                 "area": {key: deepcopy(arguments[key]) for key in COVERAGE_KEYS if key in arguments}}}
+
+
 class TurnProgress:
     """One turn's steps for the chat pane.
 
@@ -444,12 +466,16 @@ class TurnProgress:
         labels = describe(name, arguments, self.names, self.edit_mode)
         step = self._next_id()
         await self.step_sink({"id": step, "kind": "tool", "state": "running", "label": labels["running"]})
-        return step, labels
+        return step, labels, name, arguments
 
     async def tool_finished(self, started, result):
-        step, labels = started
+        step, labels, name, arguments = started
         if result.get("ok"):
-            await self.step_sink({"id": step, "kind": "tool", "state": "done", "label": labels["done"]})
+            done = {"id": step, "kind": "tool", "state": "done", "label": labels["done"]}
+            show = view_show(name, arguments, result.get("data"))
+            if show:
+                done["show"] = show
+            await self.step_sink(done)
             return
         reason = failure_reason((result.get("error") or {}).get("code"))
         await self.step_sink({"id": step, "kind": "tool", "state": "failed",

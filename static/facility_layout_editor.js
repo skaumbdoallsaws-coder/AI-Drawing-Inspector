@@ -1553,6 +1553,7 @@
         this.transientFloorMarkingPreview = null;
         this.transientAislePreview = null;
         this.transientPatternPreview = null;
+        this.lightCoverage = null;
         this.navigationAuthoringPreview = null;
         this.navigationPathsVisible = true;
         this.navigationMarker = null;
@@ -2568,6 +2569,8 @@
         }, this);
         this.svg.appendChild(markingLayer);
 
+        this._appendLightCoverage();
+
         const newProposalIds = new Set(
             this.proposalPreview
                 ? this.proposalPreview.newPlacementIds : []
@@ -3132,6 +3135,7 @@
         this._appendNavigationOverlay();
         this._appendMotionOverlay();
         this._appendActivityOverlay();
+        this._appendLightCoverageSpots();
         this.renderProjection = Object.freeze(Object.assign(
             {},
             this.projection
@@ -4058,6 +4062,75 @@
         }
         this._render();
         return true;
+    };
+
+    // The lighting coverage estimate (docs/facility-lighting-plan.md, CC3), or null: {image (a data URL, one pixel
+    // per 1 m cell, north up), opacity, minX, minZ, maxX, maxZ, spots: [{number, x, z, rings: [[{x, z}]]}]}. It is
+    // the workspace's; the plan only draws it.
+    TopPlanAdapter.prototype.setLightCoverage = function (coverage) {
+        if (this.disposed) return false;
+        this.lightCoverage = coverage || null;
+        if (!this.suspended) this._render();
+        return true;
+    };
+
+    // Over the floor and what is drawn on it (zones, routes, markings: a car park's paint covers the whole lot) and
+    // over walls where they cross the area; under the equipment that stands on the floor.
+    TopPlanAdapter.prototype._appendLightCoverage = function () {
+        const coverage = this.lightCoverage;
+        if (!coverage || !coverage.image || !this.projection) return;
+        const layer = svgElement(this.document, 'g');
+        setAttributes(layer, { 'data-layer': 'light-coverage', 'pointer-events': 'none', 'aria-hidden': 'true' });
+        const corner = projectTopPlanPoint({ x: coverage.minX, z: coverage.maxZ }, this.projection);
+        const image = svgElement(this.document, 'image');
+        setAttributes(image, {
+            href: coverage.image,
+            x: corner.x,
+            y: corner.y,
+            width: (coverage.maxX - coverage.minX) * this.projection.scale,
+            height: (coverage.maxZ - coverage.minZ) * this.projection.scale,
+            preserveAspectRatio: 'none',
+            opacity: String(coverage.opacity),
+            'image-rendering': 'optimizeSpeed',
+            style: 'image-rendering: pixelated',
+            'data-light-coverage': 'grid',
+        });
+        layer.appendChild(image);
+        this.svg.appendChild(layer);
+    };
+
+    // The listed dark spots, outlined (white on a dark casing, so they read on any band) and numbered as listed.
+    TopPlanAdapter.prototype._appendLightCoverageSpots = function () {
+        const coverage = this.lightCoverage;
+        if (!coverage || !Array.isArray(coverage.spots) || !coverage.spots.length || !this.projection) return;
+        const projection = this.projection;
+        const layer = svgElement(this.document, 'g');
+        setAttributes(layer, { 'data-layer': 'light-coverage-spots', 'pointer-events': 'none', 'aria-hidden': 'true' });
+        coverage.spots.forEach(function (spot) {
+            const path = spot.rings.map(function (ring) {
+                return 'M' + ring.map(function (point) {
+                    const at = projectTopPlanPoint(point, projection);
+                    return at.x.toFixed(1) + ' ' + at.y.toFixed(1);
+                }).join('L') + 'Z';
+            }).join('');
+            if (path) {
+                [['#000000', '4', '0.55'], ['#ffffff', '2', '1']].forEach(function (stroke) {
+                    const outline = svgElement(this.document, 'path');
+                    setAttributes(outline, { d: path, fill: 'none', stroke: stroke[0], 'stroke-width': stroke[1],
+                        'stroke-opacity': stroke[2], 'stroke-linejoin': 'round', 'vector-effect': 'non-scaling-stroke',
+                        'data-light-coverage-spot': String(spot.number) });
+                    layer.appendChild(outline);
+                }, this);
+            }
+            const at = projectTopPlanPoint(spot, projection);
+            const label = svgElement(this.document, 'text');
+            setAttributes(label, { x: at.x, y: at.y, 'text-anchor': 'middle', 'dominant-baseline': 'central',
+                'font-size': '12', 'font-weight': '700', fill: '#ffffff', stroke: '#1c1202', 'stroke-width': '3',
+                'paint-order': 'stroke', 'data-light-coverage-label': String(spot.number) });
+            label.textContent = String(spot.number);
+            layer.appendChild(label);
+        }, this);
+        this.svg.appendChild(layer);
     };
 
     TopPlanAdapter.prototype.setTransientPatternPreview = function (preview) {

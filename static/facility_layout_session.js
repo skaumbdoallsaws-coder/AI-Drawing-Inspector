@@ -115,10 +115,20 @@
 
     // The counts the server's checks reported for a proposal, so the review card
     // can say what they found. The full validation payload stays on the server.
+    // They are what the change adds (validation.introduced: findings the saved
+    // layout did not have). validation.spatial and .routing count the whole
+    // layout, problems it already had included; they are read only when the
+    // server did not say what the change adds.
     function proposalValidationSummary(validation) {
         if (!validation || typeof validation !== 'object') return null;
-        const spatial = validation.spatial && validation.spatial.metrics || {};
-        const routing = validation.routing && validation.routing.metrics || {};
+        const introduced = validation.introduced && typeof validation.introduced === 'object'
+            ? validation.introduced : null;
+        const spatial = (introduced
+            ? introduced.spatial
+            : validation.spatial && validation.spatial.metrics) || {};
+        const routing = (introduced
+            ? introduced.routing
+            : validation.routing && validation.routing.metrics) || {};
         function count(source, key) {
             const value = Number(source[key]);
             return Number.isFinite(value) ? value : null;
@@ -135,7 +145,8 @@
             blockedRouteCount: count(routing, 'blockedCount'),
             routingErrorCount: count(routing, 'errorCount'),
             ...(validation.siteContext ? {
-                siteFindingCount: count(validation.siteContext, 'findingCount')
+                siteFindingCount: count(validation.siteContext, 'newFindingCount')
+                    ?? count(validation.siteContext, 'findingCount')
                     ?? (validation.siteContext.findings || []).length,
             } : {}),
         };
@@ -2386,6 +2397,23 @@
             lastError = null;
             notify();
             return getState();
+        }
+
+        // The lighting coverage estimate of one area (docs/facility-lighting-plan.md, CC3) for the saved revision
+        // and the unsaved operations. Read only: it neither waits for nor marks the session busy. The reply carries
+        // what was sent, so the caller can tell whether the layout changed meanwhile.
+        async function lightingCoverage(area, requestOptions) {
+            requireLoaded();
+            if (typeof config.lightingCoverage !== 'function') {
+                throw new Error('lightingCoverage transport is not configured');
+            }
+            const sent = { baseRevision: baseRevision, operations: currentOperations() };
+            const result = await config.lightingCoverage({
+                baseRevision: sent.baseRevision,
+                operations: sent.operations,
+                area: clone(object(area, 'lighting coverage area')),
+            }, requestOptions);
+            return { baseRevision: sent.baseRevision, operations: sent.operations, result: result };
         }
 
         async function requestPlacementAlternatives(request) {
@@ -5480,6 +5508,7 @@
             commitGhostPlacement: commitGhostPlacement,
             installPlacementAlternatives: installPlacementAlternatives,
             requestPlacementAlternatives: requestPlacementAlternatives,
+            lightingCoverage: lightingCoverage,
             cyclePlacementAlternative: cyclePlacementAlternative,
             dismissPlacementAlternatives: dismissPlacementAlternatives,
             acceptPlacementAlternative: acceptPlacementAlternative,

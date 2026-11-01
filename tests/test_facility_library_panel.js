@@ -148,6 +148,7 @@ function harness(options) {
         },
     };
     const wallOpens = [];
+    const draws = [];
     const workspace = {
         session,
         subscribeStructure(fn) { listeners.add(fn); return () => listeners.delete(fn); },
@@ -155,12 +156,13 @@ function harness(options) {
             return { session, threeAdapter: adapter, document: doc, assetCatalog: settings.assetCatalog || [], layout: state.layout,
                 selection: state.selection.slice(), canEdit: state.canEdit, viewMode: '3d', dropTarget,
                 show3d() {}, openWallDecals(prefill) { wallOpens.push(prefill); },
-                isWallAsset: id => id === 'pl-wall' };
+                drawLightArea(done) { draws.push(done); return true; },
+                isWallAsset: id => id === 'pl-wall', ...(settings.context ? settings.context() : {}) };
         },
     };
     const panel = panelApi.createLibraryPanel({ document: doc, host, store, preferences });
     panel.bind(workspace);
-    return { doc, host, panel, calls, state, preferences, dropTarget, wallOpens, notify() { listeners.forEach(fn => fn()); } };
+    return { doc, host, panel, calls, state, preferences, dropTarget, wallOpens, draws, notify() { listeners.forEach(fn => fn()); } };
 }
 
 async function settle(ms) {
@@ -175,8 +177,8 @@ test('the tree arranges favorites, recents, layout use and the three libraries l
     const h = harness();
     const labels = findAll(h.host, node => node.className === 'ip-flib-node-label').map(node => node.textContent);
     assert.deepStrictEqual(labels.slice(0, 4), ['Favorites', 'Recent', 'In this layout', 'Appearances']);
-    ['Metals', 'Plastics', 'Wood', 'Rubber', 'Glass', 'Fabric', 'Paper & Cardboard', 'Paint & Coatings', 'Concrete & Stone']
-        .forEach(label => assert.ok(labels.includes(label), label));
+    ['Metals', 'Plastics', 'Wood', 'Rubber', 'Glass', 'Fabric', 'Paper & Cardboard', 'Paint & Coatings', 'Concrete & Stone',
+        'Lights'].forEach(label => assert.ok(labels.includes(label), label));
     assert.ok(labels.includes('Scenes') && labels.includes('Decals'));
     const names = findAll(h.host, node => node.className === 'ip-flib-name').map(node => node.textContent);
     assert.ok(names.includes('Brushed steel') && names.every(name => !/Oak/.test(name)), 'Metals is the first folder');
@@ -205,6 +207,31 @@ test('selecting a finish previews it on the selection and Apply saves only the c
     buttonNamed(h.host, 'Reset').dispatch('click');
     await settle();
     assert.deepStrictEqual(h.calls.filter(call => call[0] === 'setPlacementsAppearance').at(-1).slice(1), [['pl-a', 'pl-b'], null]);
+});
+
+test('a light shows its glow color, and changing it previews and saves as the color override', async () => {
+    const h = harness({ selection: ['pl-a'] });
+    assert.ok(h.panel.select('appearance', 'light-exit-green'));
+    await settle(120);
+    const labels = findAll(h.host, node => node.className === 'ip-flib-field-label').map(node => node.textContent);
+    assert.ok(labels.includes('Glow color') && !labels.includes('Color') && !labels.includes('Tint'), labels.join());
+    const glow = find(h.host, node => node.tagName === 'INPUT' && node.getAttribute('aria-label') === 'Glow color');
+    assert.strictEqual(glow.value, '#2bea74', 'the field starts at the glow, not the switched-off plastic');
+    assert.ok(findAll(h.host, node => node.className === 'ip-flib-source')
+        .some(node => /lights no other surface/.test(node.textContent)));
+    glow.value = '#33FF88';
+    glow.dispatch('input');
+    await settle(120);
+    assert.deepStrictEqual(h.calls.filter(call => call[0] === 'previewFinish').at(-1)[1],
+        { placementIds: ['pl-a'], appearance: { appearanceId: 'light-exit-green', color: '#33ff88' } });
+    buttonNamed(h.host, 'Apply').dispatch('click');
+    await settle();
+    assert.deepStrictEqual(h.calls.find(call => call[0] === 'setPlacementsAppearance').slice(1),
+        [['pl-a'], { appearanceId: 'light-exit-green', color: '#33ff88' }]);
+    assert.ok(h.panel.select('appearance', 'paint-machine-gray'));
+    await settle(120);
+    assert.ok(find(h.host, node => node.tagName === 'INPUT' && node.getAttribute('aria-label') === 'Color'),
+        'other finishes keep their plain color field');
 });
 
 test('one-part scope lists real parts and replaces only that part, including its legacy key', async () => {
@@ -266,6 +293,114 @@ test('scenes preview in the viewport and save with the layout; Reset returns to 
     assert.deepStrictEqual(h.calls.filter(call => call[0] === 'setViewportScene').at(-1), ['setViewportScene', null]);
 });
 
+test('the Lights on switch previews and saves with the scene, and re-editing the saved scene starts from it', async () => {
+    const saved = { version: 1, sceneId: 'machine-shop', adjustments: { lights: false, ambient: 0.4 } };
+    const h = harness({ layout: { layoutId: 'fl', placements: [], extensions: { facilityScene: saved } }, selection: [] });
+    h.panel.select('scene', 'warehouse');
+    await settle(120);
+    const lightsBox = () => find(h.host, node => node.tagName === 'INPUT' && node.getAttribute('aria-label') === 'Lights on');
+    assert.strictEqual(lightsBox().checked, true, 'another scene starts with the lights on');
+    lightsBox().checked = false;
+    lightsBox().dispatch('change');
+    await settle(120);
+    assert.deepStrictEqual(h.calls.filter(call => call[0] === 'previewViewportScene').at(-1)[1],
+        { version: 1, sceneId: 'warehouse', adjustments: { lights: false } });
+    buttonNamed(h.host, 'Apply').dispatch('click');
+    await settle();
+    assert.deepStrictEqual(h.calls.find(call => call[0] === 'setViewportScene')[1],
+        { version: 1, sceneId: 'warehouse', adjustments: { lights: false } });
+    // The scene the layout already uses opens with its own settings, so Apply keeps them.
+    h.panel.select('scene', 'machine-shop');
+    await settle(120);
+    assert.strictEqual(lightsBox().checked, false, 'the saved switch shows');
+    h.panel.setDraft({ exposure: 1.1 });
+    buttonNamed(h.host, 'Apply').dispatch('click');
+    await settle();
+    assert.deepStrictEqual(h.calls.filter(call => call[0] === 'setViewportScene').at(-1)[1],
+        { version: 1, sceneId: 'machine-shop', adjustments: { exposure: 1.1, ambient: 0.4, lights: false } });
+});
+
+test('the Glow halo box shows for Evening only, previews and saves with the scene, and reopens as saved', async () => {
+    const h = harness({ layout: { layoutId: 'fl', placements: [], extensions: { facilityScene: { version: 1, sceneId: 'warehouse' } } },
+        selection: [] });
+    const haloBox = () => find(h.host, node => node.tagName === 'INPUT' && node.getAttribute('aria-label') === 'Glow halo');
+    h.panel.select('scene', 'machine-shop');
+    await settle(120);
+    assert.strictEqual(haloBox(), null, 'not for a scene without floor light pools');
+    h.panel.select('scene', 'evening');
+    await settle(120);
+    assert.strictEqual(haloBox().checked, false, 'off by default');
+    haloBox().checked = true;
+    haloBox().dispatch('change');
+    await settle(120);
+    assert.deepStrictEqual(h.calls.filter(call => call[0] === 'previewViewportScene').at(-1)[1],
+        { version: 1, sceneId: 'evening', adjustments: { glowHalo: true } });
+    buttonNamed(h.host, 'Apply').dispatch('click');
+    await settle();
+    assert.deepStrictEqual(h.calls.filter(call => call[0] === 'setViewportScene').at(-1)[1],
+        { version: 1, sceneId: 'evening', adjustments: { glowHalo: true } });
+    const reopened = harness({ layout: { layoutId: 'fl', placements: [], extensions: { facilityScene:
+        { version: 1, sceneId: 'evening', adjustments: { glowHalo: true } } } }, selection: [] });
+    reopened.panel.select('scene', 'evening');
+    await settle(120);
+    assert.strictEqual(find(reopened.host, node => node.tagName === 'INPUT'
+        && node.getAttribute('aria-label') === 'Glow halo').checked, true, 'the saved halo shows');
+});
+
+test('general lights per area: floor areas to tick, rectangles drawn on the plan, removed areas dropped on Apply', async () => {
+    const floor = (surfaceId, label) => ({ surfaceId, label, boundary: [], elevation: 0, material: 'concrete',
+        color: '#8a8f94', roughness: 0.8 });
+    const saved = { version: 1, sceneId: 'evening', adjustments: { lightAreas: { mode: 'only', areas: [
+        { surfaceId: 'fs-receiving' }, { surfaceId: 'fs-gone' }, { rectangle: { minX: 0, minZ: 0, maxX: 10, maxZ: 4 } }] } } };
+    const h = harness({ layout: { layoutId: 'fl', placements: [], extensions: { facilityScene: saved,
+        facilityFloorSurfaces: { version: 1, surfaces: [floor('fs-receiving', '01 Receiving'), floor('fs-dispatch', '06 Dispatch')] } } },
+        selection: [] });
+    h.panel.select('scene', 'evening');
+    await settle(120);
+    const general = () => find(h.host, node => node.tagName === 'SELECT' && node.getAttribute('aria-label') === 'General lights');
+    const shown = () => find(general(), node => node.tagName === 'OPTION' && node.getAttribute('selected') !== null).getAttribute('value');
+    const tick = label => find(h.host, node => node.tagName === 'INPUT' && node.getAttribute('aria-label') === label);
+    const preview = () => h.calls.filter(call => call[0] === 'previewViewportScene').at(-1)[1];
+    const choose = async value => { general().value = value; general().dispatch('change'); await settle(120); };
+    assert.strictEqual(shown(), 'only', 'the saved areas show');
+    assert.strictEqual(tick('01 Receiving').checked, true);
+    assert.strictEqual(tick('06 Dispatch').checked, false);
+    assert.ok(h.host.textContent.includes('fs-gone was removed from the layout: it lights nothing and is dropped on Apply.'));
+    assert.ok(h.host.textContent.includes('Drawn 10 x 4 m at 5, 2'));
+    tick('06 Dispatch').checked = true;
+    tick('06 Dispatch').dispatch('change');
+    await settle(120);
+    assert.deepStrictEqual(preview().adjustments.lightAreas, { mode: 'only', areas: [{ surfaceId: 'fs-receiving' },
+        { rectangle: { minX: 0, minZ: 0, maxX: 10, maxZ: 4 } }, { surfaceId: 'fs-dispatch' }] }, 'previewed, the removed area left out');
+    // Draw an area on the plan: the workspace hands back one rectangle.
+    buttonNamed(h.host, 'Draw an area on the plan').dispatch('click');
+    assert.strictEqual(h.draws.length, 1);
+    h.draws[0]({ minX: 20, minZ: 1, maxX: 26, maxZ: 3 });
+    await settle(120);
+    assert.deepStrictEqual(preview().adjustments.lightAreas.areas.at(-1), { rectangle: { minX: 20, minZ: 1, maxX: 26, maxZ: 3 } });
+    assert.ok(h.host.textContent.includes('Drawn 6 x 2 m at 23, 2'));
+    buttonNamed(h.host, 'Remove').dispatch('click');
+    await settle(120);
+    assert.ok(!h.host.textContent.includes('Drawn 10 x 4 m'), 'the first drawn area is removed');
+    buttonNamed(h.host, 'Draw an area on the plan').dispatch('click');
+    h.draws[1](null);
+    await settle(120);
+    assert.strictEqual(preview().adjustments.lightAreas.areas.length, 3, 'Esc on the plan adds nothing');
+    await choose('except');
+    buttonNamed(h.host, 'Apply').dispatch('click');
+    await settle();
+    assert.deepStrictEqual(h.calls.filter(call => call[0] === 'setViewportScene').at(-1)[1], { version: 1, sceneId: 'evening',
+        adjustments: { lightAreas: { mode: 'except', areas: [{ surfaceId: 'fs-receiving' }, { surfaceId: 'fs-dispatch' },
+            { rectangle: { minX: 20, minZ: 1, maxX: 26, maxZ: 3 } }] } } });
+    // Everywhere saves no areas; picking "Only in" again brings them back.
+    await choose('everywhere');
+    assert.strictEqual(preview().adjustments, undefined);
+    assert.strictEqual(tick('01 Receiving'), null, 'no area list');
+    await choose('only');
+    assert.strictEqual(preview().adjustments.lightAreas.areas.length, 3);
+    assert.strictEqual(tick('06 Dispatch').checked, true);
+});
+
 test('dropping a sign on equipment saves an equipment decal; on a wall it opens wall decals', async () => {
     const h = harness({ hit: { placementId: 'pl-a', point: { x: 0, y: 1, z: 0 }, normal: { x: 0, y: 0, z: 1 } } });
     const drag = { types: [panelApi.DRAG_TYPE], getData: () => JSON.stringify({ kind: 'decal', id: 'iso7010-w014' }) };
@@ -323,6 +458,76 @@ test('favorites, custom finishes and read-only states behave as described', asyn
     const locked = harness({ canEdit: false });
     locked.panel.select('appearance', 'wood-oak');
     assert.ok(buttonNamed(locked.host, 'Apply').disabled, 'Apply waits for an editable draft');
+});
+
+test('lighting coverage: pick an area and Show; the totals and dark spots list; Hide, a failure and a dropped estimate', async () => {
+    const floor = (surfaceId, label) => ({ surfaceId, label, boundary: [], elevation: 0, material: 'concrete',
+        color: '#8a8f94', roughness: 0.8 });
+    let shown = null;
+    let failure = null;
+    const asked = [];
+    const caption = 'Estimate, not a lighting design. No code-compliance claims.';
+    const h = harness({ selection: [], layout: { layoutId: 'fl', placements: [],
+        zones: [{ zoneId: 'zn-park', label: 'Visitor car park', boundary: [] }],
+        extensions: { facilityFloorSurfaces: { version: 1, surfaces: [floor('fs-receiving', '01 Receiving')] } } },
+        context: () => ({ lightCoverage: shown,
+            async showLightCoverage(area, choice) {
+                asked.push([area, choice]);
+                if (failure) throw new Error(failure);
+                shown = { token: asked.length, choice, caption, summary: {
+                    area: { label: 'Visitor car park', sizeSquareMeters: 600.4 },
+                    estimatedLux: { minimum: 0, mean: 29.7, maximum: 174.6 },
+                    lamps: { on: 830, lightingThisArea: 12, offBySwitch: 0, offByArea: 0 },
+                    darkSpots: { belowLux: 14.9, basis: "half the area's mean", count: 3 } },
+                spots: [{ number: 1, centre: { x: 12.5, z: -40.5 }, sizeSquareMeters: 320, meanLux: 3.1, minimumLux: 0,
+                    nearestLamps: [{ label: 'Pole 7', distanceMeters: 14.2 }, { label: 'Pole 8', distanceMeters: 19 }] },
+                { number: 2, centre: { x: 3.5, z: 1.5 }, sizeSquareMeters: 12, meanLux: 9, minimumLux: 6.5, nearestLamps: [] }] };
+                return shown;
+            },
+            hideLightCoverage() { shown = null; return true; } }) });
+    h.panel.select('scene', 'evening');
+    await settle(120);
+    const area = () => find(h.host, node => node.tagName === 'SELECT' && node.getAttribute('aria-label') === 'Area to check');
+    assert.deepStrictEqual(findAll(area(), node => node.tagName === 'OPTION').map(node => [node.getAttribute('value'),
+        node.textContent]), [['lot', 'Car parks and truck yards'], ['floor:fs-receiving', 'Floor area: 01 Receiving'],
+        ['zone:zn-park', 'Zone: Visitor car park']]);
+    area().value = 'zone:zn-park';
+    area().dispatch('change');
+    buttonNamed(h.host, 'Show').dispatch('click');
+    await settle();
+    assert.deepStrictEqual(asked, [[{ zoneId: 'zn-park' }, 'zone:zn-park']]);
+    const text = h.host.textContent;
+    assert.ok(text.includes(caption));
+    assert.ok(text.includes('Visitor car park, 600 sq m: estimated 0 to 174.6 lux, mean 29.7.'), text);
+    assert.ok(text.includes('12 of 830 lamps that are on light it.'));
+    assert.ok(text.includes("Dark spots, below 14.9 lux (half the area's mean): the 2 largest of 3, outlined and numbered on the floor."));
+    assert.deepStrictEqual(findAll(h.host, node => node.tagName === 'LI').map(node => node.textContent), [
+        '320 sq m around 12.5, -40.5: mean 3.1 lux, lowest 0. Nearest: Pole 7 (14.2 m), Pole 8 (19 m).',
+        '12 sq m around 3.5, 1.5: mean 9 lux, lowest 6.5.']);
+    buttonNamed(h.host, 'Hide').dispatch('click');
+    await settle();
+    assert.strictEqual(buttonNamed(h.host, 'Hide'), null);
+    assert.strictEqual(findAll(h.host, node => node.tagName === 'LI').length, 0);
+    // A failure says why; nothing is shown.
+    failure = 'This layout has no car park or truck yard zone; check one zone, floor area or rectangle instead.';
+    area().value = 'lot';
+    area().dispatch('change');
+    buttonNamed(h.host, 'Show').dispatch('click');
+    await settle();
+    assert.deepStrictEqual(asked.at(-1), [{ lot: true }, 'lot']);
+    const said = find(h.host, node => node.className === 'ip-flib-coverage-error');
+    assert.deepStrictEqual([said.textContent, said.getAttribute('role')], [failure, 'alert'], 'said in the block');
+    assert.strictEqual(buttonNamed(h.host, 'Hide'), null);
+    // Shown again, then dropped by the workspace (the layout changed): the block follows on the next refresh.
+    failure = null;
+    buttonNamed(h.host, 'Show').dispatch('click');
+    await settle();
+    assert.ok(buttonNamed(h.host, 'Hide'));
+    assert.strictEqual(find(h.host, node => node.className === 'ip-flib-coverage-error'), null, 'the failure goes');
+    shown = null;
+    h.notify();
+    await settle();
+    assert.strictEqual(buttonNamed(h.host, 'Hide'), null, 'the block follows the workspace');
 });
 
 (async () => {

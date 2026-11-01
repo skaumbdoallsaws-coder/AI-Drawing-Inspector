@@ -2953,12 +2953,31 @@ test('instances repeated exact revisions with stable placement identity and xyzw
         selectedFromPointer = placementId;
         pointerEvent = event;
     });
-    FakeRenderer.instances.at(-1).domElement.dispatch(
+    const canvas = FakeRenderer.instances.at(-1).domElement;
+    canvas.dispatch('pointerdown', { clientX: 400, clientY: 300 });
+    canvas.dispatch(
         'pointerup',
         { clientX: 400, clientY: 300, ctrlKey: true }
     );
     assert.strictEqual(selectedFromPointer, 'pl-z');
     assert.strictEqual(pointerEvent.ctrlKey, true);
+    // Only a click selects (the main session, 2026-11-01: a roof joist nobody clicked was selected after Sage turns).
+    const release = (press, up) => {
+        selectedFromPointer = null;
+        if (press) canvas.dispatch('pointerdown', press);
+        canvas.dispatch('pointerup', up);
+        return selectedFromPointer;
+    };
+    const at = (x, y, more) => Object.assign({ clientX: x, clientY: y, button: 0, pointerId: 1 }, more || {});
+    assert.strictEqual(release(null, at(400, 300)), null, 'a release whose press was not on the view (the chat pane)');
+    assert.strictEqual(release(at(300, 300), at(400, 300)), null, 'a drag that turned the view');
+    assert.strictEqual(release(at(400, 300, { button: 2 }), at(400, 300, { button: 2 })), null, 'the right button (pan)');
+    assert.strictEqual(release(at(400, 300), at(400, 300, { pointerId: 2 })), null, 'another pointer');
+    canvas.dispatch('pointerdown', at(400, 300));
+    canvas.dispatch('pointercancel', at(400, 300));
+    assert.strictEqual(release(null, at(400, 300)), null, 'a cancelled press');
+    assert.strictEqual(release(at(400, 300), at(403, 304)), 'pl-z', 'a click: the pointer moved 5 px at most');
+    assert.strictEqual(release(null, at(403, 304)), null, 'one press makes one click');
     data.adapter.dispose();
 });
 
@@ -5780,7 +5799,7 @@ test('twenty remounts leave exactly one canvas, observer, and render request', (
     assert.strictEqual(diagnostics.lifecycle.teardownCount, 19);
     assert.strictEqual(diagnostics.lifecycle.canvasCount, 1);
     assert.strictEqual(diagnostics.lifecycle.observerActive, true);
-    assert.strictEqual(diagnostics.lifecycle.listenerCount, 16);
+    assert.strictEqual(diagnostics.lifecycle.listenerCount, 19, 'the 18 of the view and one for blinking lights');
     data.adapter.dispose();
     assert.strictEqual(FakeResizeObserver.activeCount, 0);
     assert.strictEqual(data.scheduler.pendingCount, 0);
@@ -6819,6 +6838,1130 @@ test('object finishes replace authored asset colors but keep printed artwork', a
     assert.ok(seen.finish >= 1 && seen.authoredKept === 0, 'instanced copies take the finish too');
     assert.ok(seen.artwork >= 1);
     data.adapter.dispose();
+});
+
+// Shaped like the Factory 02 light rows: a plain housing and an authored, glowing lens (part p:row/lens#0).
+async function lampRowFixture(extra) {
+    const THREE = await libraryThree();
+    return libraryFixture(Object.assign({
+        assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage !== 'overview') return null;
+            const object = new THREE.Group();
+            const housing = new THREE.Mesh(new THREE.BoxGeometry(2, 0.2, 0.4), new THREE.MeshStandardMaterial({ color: 0x5b6168 }));
+            const lensMaterial = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, emissive: 0xfff7e6 });
+            lensMaterial.userData = { facilityAuthoredFinish: true, facilityMaterialRole: 'lens' };
+            const lens = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.02, 0.36), lensMaterial);
+            housing.userData.facilityPartKey = 'p:row/housing#0';
+            lens.userData.facilityPartKey = 'p:row/lens#0';
+            object.add(housing, lens);
+            return object;
+        },
+    }, extra || {}));
+}
+
+// FIX 3a: a light fitting whose model names its lens finish (glTF material extras facilityDefaultFinish), so it
+// comes lit with no part finish of its own.
+test('a light whose model names a default lens finish comes lit, glows, and throws its beam in Evening', async () => {
+    const THREE = await libraryThree();
+    const store = libraryStore();
+    let loads = 0;
+    const lazy = { get: () => (loads ? store.get() : null), load: () => { loads += 1; return Promise.resolve(store.get()); } };
+    const LENS = 'p:pole-light/led%20lens#0';
+    const data = await libraryFixture({ facilityLibrary: lazy, assetResolver: request => {
+        if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+        if (request.stage !== 'overview') return null;
+        const object = new THREE.Group();
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.15, 0.36), new THREE.MeshStandardMaterial({ color: 0x5b6168 }));
+        const lensMaterial = new THREE.MeshStandardMaterial({ color: 0xdfe4e8 });
+        lensMaterial.userData = { facilityAuthoredFinish: true, facilityMaterialRole: 'led lens', facilityDefaultFinish: 'light-pole-led' };
+        const lens = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.02, 0.36), lensMaterial);
+        head.userData.facilityPartKey = 'p:pole-light/led%20head#0';
+        lens.userData.facilityPartKey = LENS;
+        object.add(head, lens);
+        return object;
+    } });
+    const pole = (id, x, own) => Object.assign(placement(id, 'pole-light', REV_A, x, 8, 0), own ? {
+        componentMaterials: { representation: 'overview', overrides: [{ key: LENS, appearanceId: own }] } } : {});
+    const show = async (list, sceneId) => {
+        await data.adapter.setScene({ layout: { placements: list,
+            extensions: sceneId ? { facilityScene: { version: 1, sceneId } } : {} }, assetCatalog: [asset('pole-light', REV_A)] });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    const glowing = () => {
+        const found = [];
+        renderedScene().traverse(o => { if (o.isMesh && o.material && o.material.userData && o.material.userData.facilityGlow) found.push(o); });
+        return found;
+    };
+    // No scene and no finish anywhere in the layout: the lens's default loads the library and lights it.
+    await show([pole('one', 0)]);
+    assert.strictEqual(loads, 1, 'the library loads for the lens');
+    assert.strictEqual(glowing().length, 1, 'the lens glows');
+    assert.ok(glowing()[0].material.userData.facilityComponentOverride);
+    // Evening: three plain lights share one instanced batch, each with a pool and a beam (as a part finish gives,
+    // L8); a light whose lens has its own finish (cool white LED, no beam angle) keeps it: a pool, no beam.
+    await show([pole('a', 0), pole('b', 10), pole('c', 20), pole('own', -20, 'light-cool-white-led')], 'evening');
+    const info = data.adapter.getDiagnostics().appearanceLibrary;
+    assert.strictEqual(info.lightPools, 4);
+    assert.strictEqual(info.lightBeams, 3, 'the cool white LED of its own has no beam angle');
+    const batch = glowing().filter(o => o.isInstancedMesh);
+    assert.strictEqual(batch.length, 1);
+    assert.strictEqual(batch[0].count, 3, 'the three default lenses are one batch');
+    const single = glowing().filter(o => !o.isInstancedMesh);
+    assert.strictEqual(single.length, 1);
+    assert.strictEqual(single[0].material.userData.facilityGlow.color, store.get().appearances.get('light-cool-white-led').emission.color);
+    assert.strictEqual(loads, 1);
+});
+
+// Blinking lights (L4): a fake clock and timers, and a renderer that, like three.js, calls a material's
+// onBeforeRender for each object it draws: visible and inside the camera's view.
+function blinkFixture(extra) {
+    const clock = { now: 100, timers: new Map(), nextId: 1 };
+    const win = new FakeEventTarget();
+    win.setTimeout = (callback, delay) => {
+        const id = clock.nextId;
+        clock.nextId += 1;
+        clock.timers.set(id, { callback, at: clock.now + delay });
+        return id;
+    };
+    win.clearTimeout = id => { clock.timers.delete(id); };
+    return lampRowFixture(Object.assign({ window: win, now: () => clock.now }, extra || {})).then(data => {
+        data.clock = clock;
+        return data;
+    });
+}
+
+async function drawLikeThree(data) {
+    const THREE = await libraryThree();
+    const renderer = FakeRenderer.instances.at(-1);
+    const record = renderer.render.bind(renderer);
+    renderer.render = (scene, camera) => {
+        record(scene, camera);
+        scene.updateMatrixWorld(true);
+        camera.updateMatrixWorld(true);
+        const frustum = new THREE.Frustum().setFromProjectionMatrix(
+            new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+        scene.traverseVisible(object => {
+            if (!object.isMesh || !object.geometry || !object.geometry.attributes.position) return;
+            if (object.frustumCulled && !frustum.intersectsObject(object)) return;
+            [].concat(object.material).forEach(material => material.onBeforeRender(renderer, scene, camera, object.geometry, object, null));
+        });
+    };
+    const camera = renderer.lastRender.camera;
+    // Stand 8 m south of a point, a little above it, and look at it, or the other way.
+    data.aim = (point, away) => {
+        camera.aspect = 1.5;
+        camera.position.set(point.x, point.y + 2, point.z - 8);
+        camera.lookAt(point.x, point.y, away ? point.z - 40 : point.z);
+        camera.updateProjectionMatrix();
+        camera.updateMatrixWorld(true);
+        data.adapter.invalidate();
+        data.scheduler.flush();
+    };
+    data.lookUp = point => {
+        camera.position.set(point.x, point.y + 1, point.z);
+        camera.lookAt(point.x, point.y + 50, point.z + 1);
+        camera.updateMatrixWorld(true);
+        data.adapter.invalidate();
+        data.scheduler.flush();
+    };
+    // The next timer comes due: the clock moves to it and it runs, then the frame it asked for is drawn.
+    data.fire = () => {
+        const [id, timer] = Array.from(data.clock.timers.entries()).sort((a, b) => a[1].at - b[1].at)[0];
+        data.clock.timers.delete(id);
+        data.clock.now = timer.at;
+        timer.callback();
+        data.scheduler.flush();
+    };
+    data.patterns = () => data.adapter.getDiagnostics().appearanceLibrary.lightPatterns;
+    data.lens = pattern => {
+        let found = null;
+        renderedScene().traverse(o => {
+            const glow = o.isMesh && o.material && o.material.userData && o.material.userData.facilityGlow;
+            if (glow && (glow.pattern || 'steady') === pattern) found = o;
+        });
+        return found;
+    };
+    data.centre = object => new THREE.Box3().setFromObject(object).getCenter(new THREE.Vector3());
+    return renderer;
+}
+
+function lampPlacement(id, x, appearance, assetId) {
+    return Object.assign(finishPlacement(id, assetId || 'light-row', x, null), appearance
+        ? { componentMaterials: { representation: 'overview', overrides: [Object.assign({ key: 'p:row/lens#0' }, appearance)] } }
+        : {});
+}
+
+function sceneMeshes() {
+    const found = [];
+    renderedScene().traverse(o => { if (o.isMesh && o.material && !Array.isArray(o.material)) found.push(o); });
+    return found;
+}
+
+test('a Lights finish makes a lamp part glow, instanced or not; authored glows stay and selection gives the glow back', async () => {
+    const data = await lampRowFixture();
+    const lamp = lampPlacement;
+    const meshes = sceneMeshes;
+    const glows = mesh => Boolean(mesh.material.userData && mesh.material.userData.facilityGlow);
+    await data.adapter.setScene({ layout: { placements: [lamp('plain', 0, null)] }, assetCatalog: [asset('light-row', REV_A)] });
+    await settleAsync();
+    data.scheduler.flush();
+    const authored = meshes().find(o => o.material.userData && o.material.userData.facilityMaterialRole === 'lens');
+    assert.ok(authored, 'the authored lens is drawn with its own material');
+    assert.strictEqual(authored.material.emissive.getHexString(), 'fff7e6', 'an authored lens keeps its glow');
+
+    await data.adapter.setScene({ layout: { placements: [
+        lamp('row-1', 0, { appearanceId: 'light-cool-white-led' }),
+        lamp('row-2', 3, { appearanceId: 'light-cool-white-led' }),
+        lamp('beacon', 6, { appearanceId: 'light-beacon-amber', color: '#ff9900' }),
+    ] }, assetCatalog: [asset('light-row', REV_A)] });
+    await settleAsync();
+    data.scheduler.flush();
+    const lit = meshes().filter(glows);
+    assert.strictEqual(lit.length, 2, 'only the lenses glow: one batch for both rows, one for the beacon');
+    const rows = lit.find(o => o.isInstancedMesh);
+    assert.ok(rows && rows.count === 2, 'the two rows share one instanced lens batch');
+    assert.strictEqual(rows.material.emissive.getHexString(), 'eef4ff');
+    assert.strictEqual(rows.material.toneMapped, false, 'not tone-mapped down, so it reads as on in any scene');
+    const beacon = lit.find(o => !o.isInstancedMesh);
+    assert.ok(beacon, 'a single lamp glows too');
+    assert.strictEqual(beacon.material.emissive.getHexString(), 'ff9900', 'its color override is the glow');
+    [rows, beacon].forEach(mesh => assert.ok(mesh.material.polygonOffset && mesh.material.polygonOffsetFactor === -1
+        && mesh.material.polygonOffsetUnits === -1, 'the finished lens keeps the depth offset of the authored lens'));
+    data.adapter.setSelection(['beacon', 'row-1']);
+    assert.notStrictEqual(beacon.material.emissive.getHexString(), 'ff9900', 'selected, it shows the selection');
+    data.adapter.setSelection([]);
+    assert.strictEqual(beacon.material.emissive.getHexString(), 'ff9900', 'deselecting gives the glow back');
+    assert.strictEqual(beacon.material.emissiveIntensity, 1);
+    assert.strictEqual(rows.material.emissive.getHexString(), 'eef4ff', 'instanced rows keep their glow throughout');
+    data.adapter.dispose();
+});
+
+test('the scene lights switch turns every glow off and on without a reload; selection and later models follow it', async () => {
+    const data = await lampRowFixture();
+    const scene = lights => Object.assign({ version: 1, sceneId: 'machine-shop' }, lights === undefined ? {} : { adjustments: { lights } });
+    const placements = [
+        lampPlacement('row-1', 0, { appearanceId: 'light-cool-white-led' }),
+        lampPlacement('row-2', 3, { appearanceId: 'light-cool-white-led' }),
+        lampPlacement('plain-1', 6, null), lampPlacement('plain-2', 9, null),
+        lampPlacement('beacon', 12, { appearanceId: 'light-beacon-amber' }),
+    ];
+    const catalog = [asset('light-row', REV_A), asset('light-row-b', REV_A)];
+    const show = async (lights, extra) => {
+        await data.adapter.setScene({ layout: { placements: placements.concat(extra || []),
+            extensions: { facilityScene: scene(lights) } }, assetCatalog: catalog });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    const lenses = () => sceneMeshes().filter(o => o.material.userData.facilityGlow || o.material.userData.facilityAuthoredGlow);
+    const state = () => lenses().map(o => [o.isInstancedMesh ? 'batch' : 'single',
+        o.material.userData.facilityGlow ? 'finish' : 'authored', o.material.emissive.getHexString(),
+        o.material.emissiveIntensity, o.material.toneMapped]).sort();
+    await show();
+    assert.deepStrictEqual(state(), [
+        ['batch', 'authored', 'fff7e6', 1, true], ['batch', 'finish', 'eef4ff', 1, false], ['single', 'finish', 'ffab1f', 1, false]],
+        'on by default: the rows own lenses, the Lights finish on two rows (one batch) and the beacon');
+    assert.strictEqual(data.adapter.getDiagnostics().appearanceLibrary.lights, true);
+    const loads = data.resolverCalls();
+    await show(false);
+    assert.deepStrictEqual(state(), [
+        ['batch', 'authored', '000000', 0, true], ['batch', 'finish', '000000', 0, true], ['single', 'finish', '000000', 0, true]],
+        'off: nothing glows, and a Lights finish is tone-mapped like any plastic');
+    assert.strictEqual(data.resolverCalls(), loads, 'switching loads no model again');
+    assert.strictEqual(data.adapter.getDiagnostics().appearanceLibrary.lights, false);
+    // A model that arrives while the lights are off starts unlit, its Lights finish too.
+    const late = [lampPlacement('late', 15, null, 'light-row-b'),
+        lampPlacement('late-lit', 18, { appearanceId: 'light-exit-green' }, 'light-row-b')];
+    await show(false, late);
+    assert.strictEqual(lenses().length, 5);
+    assert.ok(lenses().every(o => o.material.emissive.getHex() === 0), 'late models start unlit');
+    // Switched while selected: the highlight stays, and deselecting shows the new state.
+    data.adapter.setSelection(['beacon']);
+    const beacon = lenses().find(o => o.material.userData.facilityGlow && o.material.userData.facilityGlow.color === '#ffab1f');
+    const highlight = beacon.material.emissive.getHexString();
+    assert.notStrictEqual(highlight, '000000');
+    await show(true, late);
+    assert.ok(lenses().includes(beacon), 'a scene change rebuilds nothing');
+    assert.strictEqual(beacon.material.emissive.getHexString(), highlight, 'the selection highlight stays');
+    data.adapter.setSelection([]);
+    assert.strictEqual(beacon.material.emissive.getHexString(), 'ffab1f', 'deselected, it glows: the switch landed');
+    assert.strictEqual(beacon.material.toneMapped, false);
+    assert.ok(lenses().every(o => o.material.emissive.getHex() !== 0), 'every glow is back on');
+    // A scene preview switches too, and clearing it returns to the saved scene.
+    data.adapter.previewViewportScene(scene(false));
+    assert.ok(lenses().every(o => o.material.emissive.getHex() === 0), 'the preview turns them off');
+    data.adapter.clearViewportScenePreview();
+    assert.ok(lenses().every(o => o.material.emissive.getHex() !== 0), 'and clearing it turns them back on');
+    data.adapter.dispose();
+});
+
+test('an activity actor copied after the lights were switched off starts unlit', async () => {
+    const THREE = await libraryThree();
+    // One placement of a model with an authored amber beacon: drawn on its own, so its prototype stays off screen.
+    const data = await libraryFixture({
+        assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage !== 'overview') return null;
+            const object = prototype(THREE, request.assetId);
+            const beacon = new THREE.MeshStandardMaterial({ color: 0x996600, emissive: 0xffab1f });
+            beacon.userData = { facilityAuthoredFinish: true, facilityMaterialRole: 'beacon' };
+            object.add(new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), beacon));
+            return object;
+        },
+    });
+    const parked = { x: 0, y: Math.sin(Math.PI / 4), z: 0, w: Math.cos(Math.PI / 4) };
+    const show = async lights => {
+        await data.adapter.setScene({ layout: {
+            placements: [placement('actor-placement', 'activity-asset', REV_A, 40, 0, 40, parked)], routes: [], floorMarkings: [],
+            extensions: { facilityScene: Object.assign({ version: 1, sceneId: 'machine-shop' },
+                lights === false ? { adjustments: { lights: false } } : {}) } },
+            assetCatalog: [asset('activity-asset', REV_A)] });
+        await settleAsync();
+        while (data.scheduler.pendingCount) data.scheduler.flush();
+    };
+    const beacons = root => {
+        const found = [];
+        root.traverse(o => { if (o.isMesh && o.material && o.material.userData.facilityMaterialRole === 'beacon') found.push(o.material); });
+        return found;
+    };
+    await show(true);
+    assert.deepStrictEqual(beacons(renderedScene()).map(m => m.emissive.getHexString()), ['ffab1f'], 'loaded with the lights on');
+    await show(false);
+    assert.deepStrictEqual(beacons(renderedScene()).map(m => m.emissive.getHexString()), ['000000'], 'switched off');
+    // The actor is copied from the prototype, which was prepared while the lights were on.
+    await data.adapter.activity.load(activityPayload(), REV_B);
+    data.scheduler.flush(1000);
+    let actor = null;
+    renderedScene().traverse(o => { if (o.userData.facilityActivityActorId === 'actor-fixture') actor = o; });
+    assert.ok(actor, 'the actor is on screen');
+    assert.deepStrictEqual(beacons(actor).map(m => m.emissive.getHexString()), ['000000'], 'the actor copy follows the switch');
+    data.adapter.dispose();
+});
+
+test('a finish preview copied after the lights were switched off starts unlit', async () => {
+    // Two plain rows draw as one batch; the preview copies their prototype, prepared while the lights were on.
+    const rows = await lampRowFixture();
+    const show = async lights => {
+        await rows.adapter.setScene({ layout: { placements: [lampPlacement('plain-1', 0, null), lampPlacement('plain-2', 3, null)],
+            extensions: { facilityScene: Object.assign({ version: 1, sceneId: 'machine-shop' },
+                lights === false ? { adjustments: { lights: false } } : {}) } }, assetCatalog: [asset('light-row', REV_A)] });
+        await settleAsync();
+        rows.scheduler.flush();
+    };
+    await show(true);
+    await show(false);
+    assert.ok(rows.adapter.previewFinish({ placementIds: ['plain-1'], partKey: 'p:row/housing#0',
+        appearance: { appearanceId: 'paint-safety-yellow' } }));
+    const copies = [];
+    renderedScene().traverse(o => { if (o.userData.facilityPreviewPlacementId === 'plain-1') copies.push(o); });
+    assert.strictEqual(copies.length, 1, 'the preview copy is on screen');
+    const lens = [];
+    copies[0].traverse(o => { if (o.isMesh && o.material.userData.facilityAuthoredGlow) lens.push(o.material.emissive.getHexString()); });
+    assert.deepStrictEqual(lens, ['000000'], 'the preview copy follows the switch');
+    rows.adapter.dispose();
+});
+
+test('the lighting coverage estimate lies on the floor until it is cleared and is never picked', async () => {
+    const data = await libraryFixture();
+    await data.adapter.setScene({ layout: { placements: [] }, assetCatalog: [] });
+    await settleAsync();
+    const coverage = require('../static/facility_layout_light_coverage.js');
+    const grid = coverage.decode({ grid: { originX: 0, originZ: 0, cellMeters: 1, cols: 2, rows: 1,
+        encoding: 'uint16le-tenths', values: Buffer.from([5, 0, 0x2c, 0x01]).toString('base64') } });
+    const spots = coverage.spotsOf({ spots: [{ number: 1, centre: { x: 0.5, z: 0.5 }, outline: [[0, 0, 1, 0, 1, 1, 0, 1]] }] });
+    assert.strictEqual(data.adapter.setLightCoverage(coverage.sceneView(grid, spots, () => 0)), true);
+    data.scheduler.flush();
+    const found = () => {
+        const list = [];
+        renderedScene().traverse(object => { if (object.userData && object.userData.facilityLightCoverage) list.push(object); });
+        return list;
+    };
+    const objects = found();
+    assert.deepStrictEqual(objects.map(object => object.name), ['FacilityLightCoverage:band-0',
+        'FacilityLightCoverage:band-4', 'FacilityLightCoverage:dark-spots'], '0.5 and 30 lux, and the outline');
+    assert.ok(objects.every(object => object.parent.name === 'FacilityLightCoverage'
+        && object.parent.parent.name === 'InspectorProFacilityModelRoot'));
+    const hits = [];
+    objects.forEach(object => object.raycast({}, hits));
+    assert.strictEqual(hits.length, 0, 'never picked');
+    let disposed = 0;
+    objects.forEach(object => object.geometry.addEventListener('dispose', () => { disposed += 1; }));
+    assert.strictEqual(data.adapter.setLightCoverage(null), true);
+    data.scheduler.flush();
+    assert.strictEqual(found().length, 0);
+    assert.strictEqual(disposed, 3, 'its geometry goes with it');
+});
+
+test('floor light pools show under lit high lamps in Evening only, follow the layer and go with their rows', async () => {
+    const THREE = await libraryThree();
+    const data = await lampRowFixture();
+    const scene = (sceneId, lights) => Object.assign({ version: 1, sceneId }, lights === false ? { adjustments: { lights: false } } : {});
+    // Two rows hung 9.9 m up (one batch) and one lamp at 1.2 m.
+    const rows = [placement('row-1', 'light-row', REV_A, 0, 9.9, 1), placement('row-2', 'light-row', REV_A, 3, 9.9, 1),
+        placement('low', 'light-row-b', REV_A, 6, 1.2, 1)];
+    const catalog = [asset('light-row', REV_A), asset('light-row-b', REV_A)];
+    const show = async (value, placements) => {
+        await data.adapter.setScene({ layout: { placements: placements || rows, extensions: { facilityScene: value } },
+            assetCatalog: catalog });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    const pools = () => data.adapter.getDiagnostics().appearanceLibrary.lightPools;
+    const poolMeshes = () => {
+        const found = [];
+        renderedScene().traverse(o => { if (o.isMesh && o.userData.facilityLightPools) found.push(o); });
+        return found;
+    };
+    await show(scene('machine-shop'));
+    assert.strictEqual(pools(), 0, 'not outside Evening');
+    const loads = data.resolverCalls();
+    await show(scene('evening'));
+    assert.strictEqual(pools(), 2, 'one pool per high lamp; the low lamp throws none');
+    assert.strictEqual(data.resolverCalls(), loads, 'no model loads again');
+    const meshes = poolMeshes();
+    assert.strictEqual(meshes.length, 1, 'one mesh for the batch of rows');
+    const mesh = meshes[0];
+    const position = mesh.geometry.attributes.position;
+    const centres = [0, 4].map(v => {
+        const xs = [0, 1, 2, 3].map(k => position.getX(v + k));
+        const zs = [0, 1, 2, 3].map(k => position.getZ(v + k));
+        return [Math.round((Math.min(...xs) + Math.max(...xs)) * 50) / 100, Math.round((Math.min(...zs) + Math.max(...zs)) * 50) / 100,
+            (Math.max(...xs) - Math.min(...xs)) / 2, position.getY(v)];
+    }).sort((a, b) => a[0] - b[0]);
+    assert.deepStrictEqual(centres.map(c => [c[0], c[1]]), [[0, 1], [3, 1]], 'right under each row');
+    centres.forEach(c => {
+        assert.ok(c[2] > 4.9 && c[2] < 5.05, 'about half the hanging height wide: ' + c[2]);
+        assert.ok(Math.abs(c[3] - 0.02) < 1e-6, 'just above the floor');
+    });
+    assert.strictEqual(mesh.material.blending, THREE.AdditiveBlending);
+    assert.strictEqual(mesh.material.depthWrite, false);
+    const hits = [];
+    mesh.raycast({}, hits);
+    assert.strictEqual(hits.length, 0, 'never picked');
+    await show(scene('evening', false));
+    assert.strictEqual(pools(), 0, 'lights off: no pools');
+    assert.ok(poolMeshes().every(o => !o.visible || !o.parent.visible), 'hidden');
+    await show(scene('evening'));
+    assert.strictEqual(pools(), 2, 'back on, without building them again');
+    assert.strictEqual(poolMeshes()[0], mesh);
+    data.adapter.setLayerVisibility({ assets: false });
+    assert.strictEqual(pools(), 0, 'the rows hidden with their layer hide their pools');
+    data.adapter.setLayerVisibility({ assets: true });
+    assert.strictEqual(pools(), 2);
+    // A row that goes takes its pool along; nothing stale stays behind.
+    await show(scene('evening'), [rows[0], rows[2]]);
+    assert.strictEqual(pools(), 1);
+    assert.strictEqual(poolMeshes().reduce((n, o) => n + o.userData.facilityLightPools.pools, 0), 1);
+    await show(scene('machine-shop'), [rows[0], rows[2]]);
+    assert.strictEqual(pools(), 0, 'switching scene hides them');
+    let freed = 0;
+    mesh.material.addEventListener('dispose', () => { freed += 1; });
+    mesh.material.map.addEventListener('dispose', () => { freed += 1; });
+    data.adapter.dispose();
+    assert.strictEqual(freed, 2, 'the shared material and texture are freed with the adapter');
+});
+
+// Outdoor lights (L8): a pole light's lens with an outdoor Lights finish (a beam angle) shows, in Evening, a soft cone
+// from the lamp down to the ground and a pool where its aim lands: on the car park, or down in a sunken truck yard.
+test('outdoor lights show a soft beam to the ground and a pool where it lands, in Evening only, capped at 64', async () => {
+    const THREE = await libraryThree();
+    const data = await lampRowFixture();
+    const pole = (id, x, z, appearanceId, y) => Object.assign(placement(id, 'light-row', REV_A, x, y === undefined ? 8 : y, z), {
+        componentMaterials: { representation: 'overview', overrides: [{ key: 'p:row/lens#0', appearanceId: appearanceId || 'light-pole-led' }] } });
+    const surface = (surfaceId, minX, maxX, y) => ({ surfaceId, minX, maxX, minZ: -60, maxZ: 60, startElevation: y, endElevation: y,
+        slopeAxis: 'x', color: '#55595e' });
+    const ground = { schemaVersion: 1, surfaces: [surface('car-park', -60, 20, 0), surface('truck-yard', 20, 60, -1.35)] };
+    // A pole in the car park, one in the yard, a high-bay lens (no beam angle) and a pole only 2 m high.
+    const placements = [pole('park', 0, 0), pole('yard', 40, 0), pole('bay', -30, 30, 'light-cool-white-led'), pole('short', -30, -30, null, 2)];
+    const show = async (adjustments, list, sceneId) => {
+        await data.adapter.setScene({ layout: { placements: list || placements, extensions: { facilityGround: ground,
+            facilityScene: Object.assign({ version: 1, sceneId: sceneId || 'evening' }, adjustments ? { adjustments } : {}) } },
+            assetCatalog: [asset('light-row', REV_A)] });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    const info = () => data.adapter.getDiagnostics().appearanceLibrary;
+    const beamMesh = () => {
+        let found = null;
+        renderedScene().traverse(o => { if (o.name === 'FacilityLightBeams') found = o; });
+        return found;
+    };
+    const ends = mesh => Array.from({ length: mesh.count }, (_, index) => {
+        const matrix = new THREE.Matrix4();
+        mesh.getMatrixAt(index, matrix);
+        const color = new THREE.Color();
+        mesh.getColorAt(index, color);
+        const centre = new THREE.Vector3(0, -1, 0).applyMatrix4(matrix);
+        return { index, lamp: new THREE.Vector3().applyMatrix4(matrix), centre, color,
+            radius: new THREE.Vector3(1, -1, 0).applyMatrix4(matrix).distanceTo(centre) };
+    }).sort((a, b) => a.lamp.x - b.lamp.x);
+    await show(null, null, 'machine-shop');
+    assert.strictEqual(info().lightBeams, 0, 'not outside Evening');
+    await show();
+    assert.strictEqual(info().lightPools, 3, 'both poles and the high-bay lamp; the short pole throws none');
+    assert.strictEqual(info().lightBeams, 2, 'a beam only from a lamp with a beam angle');
+    const beams = beamMesh();
+    assert.strictEqual(beams.count, 2);
+    assert.strictEqual(beams.material.blending, THREE.AdditiveBlending);
+    assert.strictEqual(beams.material.depthWrite, false);
+    assert.strictEqual(beams.material.transparent, true);
+    const glow = new THREE.Color('#fff1dc');
+    // Straight down from each lamp to the ground under it: the car park at 0, the yard 1.35 m down.
+    ends(beams).forEach((end, k) => {
+        const [x, groundY] = [[0, 0], [40, -1.35]][k];
+        assert.ok(Math.abs(end.lamp.x - x) < 1e-3 && Math.abs(end.centre.x - x) < 1e-3 && Math.abs(end.centre.z) < 1e-3,
+            'aimed straight down');
+        assert.ok(end.lamp.y > 7.5 && end.lamp.y < 8.5, 'from the lamp: ' + end.lamp.y);
+        assert.ok(Math.abs(end.centre.y - groundY) < 1e-3, 'to the ground: ' + end.centre.y);
+        const width = (end.lamp.y - groundY) * Math.tan(55 * Math.PI / 180);
+        assert.ok(Math.abs(end.radius - width) < 1e-3, 'as wide as the 110 degree beam: ' + end.radius + ' vs ' + width);
+        assert.ok(Math.abs(end.color.r - glow.r) < 1e-6 && Math.abs(end.color.b - glow.b) < 1e-6, 'in the glow color');
+    });
+    // The pools lie on the ground under them; the high-bay lamp's floor pool stays the L3 one.
+    const quads = [];
+    renderedScene().traverse(o => {
+        if (!o.isMesh || !o.userData.facilityLightPools) return;
+        const position = o.geometry.attributes.position;
+        for (let v = 0; v < position.count; v += 4) {
+            quads.push([Math.round((position.getX(v) + position.getX(v + 2)) * 50) / 100, Math.round(position.getY(v) * 100) / 100,
+                Math.abs(position.getX(v + 2) - position.getX(v)) / 2]);
+        }
+    });
+    quads.sort((a, b) => a[0] - b[0]);
+    assert.deepStrictEqual(quads.map(q => q.slice(0, 2)), [[-30, 0.02], [0, 0.02], [40, -1.33]]);
+    assert.ok(quads[0][2] > 3.9 && quads[0][2] < 4.1, 'half the hanging height: ' + quads[0][2]);
+    assert.ok(Math.abs(quads[2][2] - ends(beams)[1].radius) < 1e-3, 'the pool fills the end of the beam');
+    const hits = [];
+    beams.raycast({}, hits);
+    assert.strictEqual(hits.length, 0, 'never picked');
+    await show({ lights: false });
+    assert.strictEqual(info().lightBeams, 0, 'lights off: no beams');
+    assert.ok(!beams.visible || !beams.parent.visible, 'hidden');
+    await show();
+    assert.strictEqual(info().lightBeams, 2);
+    assert.strictEqual(beamMesh(), beams, 'one mesh for every beam, kept');
+    data.adapter.setLayerVisibility({ assets: false });
+    assert.strictEqual(info().lightBeams, 0, 'hidden with their layer');
+    data.adapter.setLayerVisibility({ assets: true });
+    assert.strictEqual(info().lightBeams, 2);
+    // General lighting by area (L7): the yard pole is outside the lit area, so its beam goes dark with its lamp.
+    await show({ lightAreas: { mode: 'only', areas: [{ rectangle: { minX: -10, minZ: -10, maxX: 10, maxZ: 10 } }] } });
+    assert.strictEqual(info().lightBeams, 1);
+    const [park, yard] = ends(beams);
+    assert.ok(park.color.r > 0.5 && yard.color.r === 0 && yard.color.g === 0 && yard.color.b === 0, 'the yard beam adds nothing');
+    // At most 64 beams per layout; the lamps beyond keep their pools.
+    const many = Array.from({ length: 70 }, (_, i) => pole('p' + i, -55 + (i % 10) * 7, -50 + Math.floor(i / 10) * 14));
+    await show(null, many);
+    assert.strictEqual(info().lightPools, 70);
+    assert.strictEqual(info().lightBeams, 64);
+    assert.strictEqual(beamMesh().count, 64);
+    assert.strictEqual(beamMesh().userData.facilityLightBeams.beyondCap, 6);
+    let freed = 0;
+    beams.material.addEventListener('dispose', () => { freed += 1; });
+    beams.geometry.addEventListener('dispose', () => { freed += 1; });
+    data.adapter.dispose();
+    assert.strictEqual(freed, 2, 'the beam material and geometry are freed with the adapter');
+});
+
+// Glow halo (L6): a renderer that can copy its frame, and stand-ins for three's bloom pass and full-screen quad.
+// All three write to one log, so a test sees what is drawn, in order.
+class BloomRenderer extends FakeRenderer {
+    constructor(log, gl) {
+        super();
+        this.log = log;
+        this.gl = gl || null;
+        this.info.autoReset = true;
+        this.autoClear = true;
+        this.copies = [];
+    }
+
+    render(scene, camera) {
+        super.render(scene, camera);
+        this.log.push('scene');
+    }
+
+    getDrawingBufferSize(target) {
+        const ratio = this.pixelRatio || 1;
+        return target.set(Math.floor(this.size.width * ratio), Math.floor(this.size.height * ratio));
+    }
+
+    copyFramebufferToTexture(texture) {
+        this.log.push('copy');
+        this.copies.push(texture);
+        if (this.gl) this.gl.copied();
+    }
+
+    getContext() {
+        return this.gl;
+    }
+}
+
+class FakeBloomPass {
+    constructor(resolution, strength, radius, threshold) {
+        this.args = [resolution.x, resolution.y, strength, radius, threshold];
+        this.highPassUniforms = { smoothWidth: { value: 0.01 } };
+        this.sizes = [];
+        this.disposed = false;
+        FakeBloomPass.instances.push(this);
+    }
+
+    setSize(width, height) {
+        this.sizes.push([width, height]);
+    }
+
+    render(renderer, writeBuffer, readBuffer, deltaTime, maskActive) {
+        renderer.log.push('bloom');
+        this.call = [writeBuffer, readBuffer, deltaTime, maskActive];
+        this.autoReset = renderer.info.autoReset;
+    }
+
+    dispose() {
+        this.disposed = true;
+    }
+}
+FakeBloomPass.instances = [];
+
+// Like three's: one quad, whose material is swapped between draws.
+class FakeFullScreenQuad {
+    constructor(material) {
+        this.material = material;
+        this.disposed = false;
+        this.drawn = [];
+        FakeFullScreenQuad.instances.push(this);
+    }
+
+    render(renderer) {
+        renderer.log.push('quad:' + this.material.name);
+        this.drawn.push({ name: this.material.name, target: renderer.renderTarget, autoClear: renderer.autoClear,
+            texture: this.material.uniforms.tDiffuse.value });
+    }
+
+    dispose() {
+        this.disposed = true;
+    }
+}
+FakeFullScreenQuad.instances = [];
+
+const FAKE_COPY_SHADER = {
+    uniforms: { tDiffuse: { value: null }, opacity: { value: 1 } },
+    vertexShader: 'void main() {}',
+    fragmentShader: 'void main() {}',
+};
+const HALO_FRAME = ['scene', 'copy', 'quad:FacilityBloomMask', 'copy', 'bloom', 'quad:FacilityBloomCopy',
+    'quad:FacilityBloomAdd'];
+
+// A WebGL context that counts error checks; after a copy it reports `error` (0: none). Its canvas has a stencil
+// unless `stencil` is false.
+function fakeGl(error, stencil) {
+    return {
+        NO_ERROR: 0, checks: 0, pending: 0,
+        copied() { this.pending = error; },
+        getError() { this.checks += 1; const code = this.pending; this.pending = 0; return code; },
+        getContextAttributes() { return { stencil: stencil !== false }; },
+    };
+}
+
+async function bloomFixture(gl, extra) {
+    const log = [];
+    FakeBloomPass.instances.length = 0;
+    FakeFullScreenQuad.instances.length = 0;
+    const data = await lampRowFixture(Object.assign({
+        UnrealBloomPass: FakeBloomPass, FullScreenQuad: FakeFullScreenQuad, CopyShader: FAKE_COPY_SHADER,
+        rendererFactory: () => new BloomRenderer(log, gl),
+    }, extra || {}));
+    data.log = log;
+    data.bloom = () => data.adapter.getDiagnostics().appearanceLibrary.bloom;
+    data.show = async (sceneId, adjustments) => {
+        const scene = Object.assign({ version: 1, sceneId }, adjustments ? { adjustments } : {});
+        await data.adapter.setScene({ layout: { placements: [placement('row-1', 'light-row', REV_A, 0, 9.9, 1)],
+            extensions: { facilityScene: scene } }, assetCatalog: [asset('light-row', REV_A)] });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    data.frame = () => {
+        data.log.length = 0;
+        data.adapter.invalidate();
+        data.scheduler.flush();
+        return data.log.slice();
+    };
+    // The materials drawn last frame: the lamp row's lens (a glow) and the rest.
+    data.materials = () => {
+        const found = { lens: null, others: [] };
+        FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+            if (!object.isMesh || !object.material || Array.isArray(object.material)) return;
+            if ((object.material.userData || {}).facilityAuthoredGlow) found.lens = object.material;
+            else found.others.push(object.material);
+        });
+        return found;
+    };
+    return data;
+}
+
+test('the glow halo is a scene adjustment drawn around the glows in Evening with the lights on, and frees its buffers', async () => {
+    const THREE = await libraryThree();
+    const gl = fakeGl(0);
+    const data = await bloomFixture(gl);
+    await data.show('evening');
+    assert.deepStrictEqual(data.bloom(), { scene: false, available: true, drawn: false, size: null, frames: 0,
+        failed: null }, 'off by default');
+    assert.strictEqual(FakeBloomPass.instances.length, 0, 'nothing is made while it is off');
+    // Every glow marks the stencil where it is drawn; other materials do not.
+    const { lens, others } = data.materials();
+    assert.deepStrictEqual([lens.stencilWrite, lens.stencilRef, lens.stencilFunc, lens.stencilZPass],
+        [true, 1, THREE.AlwaysStencilFunc, THREE.ReplaceStencilOp]);
+    assert.ok(others.length > 0 && others.every(m => m.stencilWrite === false), 'the housing, floor and pools do not');
+    await data.show('evening', { glowHalo: true });
+    assert.strictEqual(FakeBloomPass.instances.length, 1);
+    const renderer = FakeRenderer.instances.at(-1);
+    const pass = FakeBloomPass.instances[0];
+    const glow = pass.call[1];
+    const frame = renderer.copies.find(texture => texture !== glow.texture);
+    assert.deepStrictEqual(pass.args, [800, 600, 1, 0.5, 0.35], 'drawing-buffer size; strength, radius, threshold');
+    assert.strictEqual(pass.highPassUniforms.smoothWidth.value, 0.15);
+    assert.deepStrictEqual(pass.call, [null, glow, 0, false], 'the halo spreads from the copy of the glows');
+    assert.deepStrictEqual(renderer.copies.slice(-2), [frame, glow.texture], 'the frame, then the glows alone');
+    assert.deepStrictEqual([glow.width, glow.height, glow.depthBuffer], [800, 600, false]);
+    const quad = FakeFullScreenQuad.instances[0];
+    const drawn = quad.drawn.slice(-3);
+    assert.deepStrictEqual(drawn.map(d => [d.name, d.target, d.autoClear]), [['FacilityBloomMask', null, false],
+        ['FacilityBloomCopy', null, false], ['FacilityBloomAdd', null, false]], 'all on screen, none clearing it');
+    assert.deepStrictEqual([drawn[1].texture, drawn[2].texture], [frame, glow.texture],
+        'the frame drawn back, then the halo added');
+    assert.strictEqual(renderer.autoClear, true, 'restored after the halo');
+    assert.deepStrictEqual([pass.autoReset, renderer.info.autoReset], [false, true],
+        'its passes add to the draw counts of the frame');
+    assert.strictEqual(gl.checks, 2, 'the first copies are checked');
+    assert.deepStrictEqual(data.frame(), HALO_FRAME,
+        'the frame, its copy, black outside the glows, their copy, the halo, the frame back, the halo added');
+    assert.strictEqual(gl.checks, 2, 'later copies are not');
+    // The black and the halo only where no glow marked the stencil; the frame drawn back everywhere.
+    const shaders = new Map(quad.drawn.map(d => [d.name, null]));
+    quad.drawn.length = 0;
+    const seen = new Map();
+    const render = quad.render.bind(quad);
+    quad.render = r => { seen.set(quad.material.name, quad.material); render(r); };
+    data.frame();
+    assert.deepStrictEqual([...seen.keys()], [...shaders.keys()]);
+    const outside = m => [m.stencilWrite, m.stencilRef, m.stencilFunc, m.stencilZPass];
+    assert.deepStrictEqual(outside(seen.get('FacilityBloomMask')),
+        [true, 1, THREE.NotEqualStencilFunc, THREE.KeepStencilOp]);
+    assert.deepStrictEqual(outside(seen.get('FacilityBloomAdd')),
+        [true, 1, THREE.NotEqualStencilFunc, THREE.KeepStencilOp]);
+    assert.deepStrictEqual([seen.get('FacilityBloomAdd').blending, seen.get('FacilityBloomAdd').premultipliedAlpha],
+        [THREE.AdditiveBlending, true]);
+    assert.strictEqual(seen.get('FacilityBloomCopy').stencilWrite, false);
+    for (const material of seen.values()) assert.deepStrictEqual([material.depthTest, material.depthWrite], [false, false]);
+    const frames = data.bloom().frames;
+    assert.ok(frames >= 2);
+    assert.deepStrictEqual(data.bloom(), { scene: true, available: true, drawn: true, size: [800, 600], frames,
+        failed: null });
+    // A selected glow shows its highlight without a halo; deselected, it marks the stencil again.
+    data.adapter.setSelection(['row-1']);
+    data.scheduler.flush();
+    assert.strictEqual(lens.stencilWrite, false, 'selected: no halo from the highlight');
+    data.adapter.setSelection([]);
+    data.scheduler.flush();
+    assert.strictEqual(lens.stencilWrite, true);
+    // A recorded frame has the halo too.
+    data.log.length = 0;
+    assert.strictEqual(data.adapter.renderRecordingFrame(), renderer.domElement);
+    assert.deepStrictEqual(data.log, HALO_FRAME);
+    // A new size resizes the buffers, and its first copies are checked again; the same size changes nothing.
+    data.host.clientWidth = 1000;
+    data.host.clientHeight = 400;
+    FakeResizeObserver.instances.at(-1).callback([]);
+    data.scheduler.flush();
+    assert.deepStrictEqual(pass.sizes, [[1000, 400]]);
+    assert.deepStrictEqual([glow.width, glow.height], [1000, 400]);
+    assert.strictEqual(gl.checks, 4);
+    data.frame();
+    assert.deepStrictEqual(pass.sizes, [[1000, 400]]);
+    // Lights off, a scene without floor pools or the halo off: the frame alone, and the halo's buffers are freed.
+    const freed = [];
+    glow.addEventListener('dispose', () => freed.push('glow'));
+    for (const [name, material] of seen) material.addEventListener('dispose', () => freed.push(name));
+    await data.show('evening', { glowHalo: true, lights: false });
+    assert.strictEqual(data.bloom().drawn, false);
+    assert.deepStrictEqual([pass.disposed, quad.disposed, freed.sort()], [true, true,
+        ['FacilityBloomAdd', 'FacilityBloomCopy', 'FacilityBloomMask', 'glow']]);
+    assert.deepStrictEqual(data.frame(), ['scene'], 'lights off: no halo');
+    await data.show('evening', { glowHalo: true });
+    assert.strictEqual(FakeBloomPass.instances.length, 2, 'made again when it is drawn again');
+    await data.show('machine-shop', { glowHalo: true });
+    assert.strictEqual(FakeBloomPass.instances[1].disposed, true);
+    assert.deepStrictEqual(data.frame(), ['scene'], 'only in a scene with floor light pools');
+    assert.strictEqual(data.bloom().scene, true);
+    await data.show('evening', { glowHalo: true });
+    await data.show('evening');
+    assert.strictEqual(FakeBloomPass.instances[2].disposed, true);
+    assert.deepStrictEqual(data.frame(), ['scene'], 'halo off');
+    // The Scenes pane previews it, and dropping the preview takes it away again.
+    data.adapter.previewViewportScene({ version: 1, sceneId: 'evening', adjustments: { glowHalo: true } });
+    assert.deepStrictEqual(data.frame(), HALO_FRAME, 'previewed');
+    data.adapter.clearViewportScenePreview();
+    assert.deepStrictEqual(data.frame(), ['scene']);
+    await data.show('evening', { glowHalo: true });
+    const last = FakeBloomPass.instances.at(-1);
+    assert.strictEqual(last.disposed, false);
+    data.adapter.dispose();
+    assert.strictEqual(last.disposed, true, 'freed with the adapter');
+});
+
+test('without the addons or a stencil, or when the frame cannot be copied, the view shows without the halo', async () => {
+    const plain = await lampRowFixture();
+    await plain.adapter.setScene({ layout: { placements: [placement('row-1', 'light-row', REV_A, 0, 9.9, 1)],
+        extensions: { facilityScene: { version: 1, sceneId: 'evening', adjustments: { glowHalo: true } } } },
+        assetCatalog: [asset('light-row', REV_A)] });
+    await settleAsync();
+    plain.scheduler.flush();
+    assert.deepStrictEqual(plain.adapter.getDiagnostics().appearanceLibrary.bloom, { scene: true, available: false,
+        drawn: false, size: null, frames: 0, failed: null }, 'no addons: no halo');
+    plain.adapter.dispose();
+
+    // A canvas without a stencil cannot tell the glows from bright paint: no halo, rather than one around everything.
+    const flat = await bloomFixture(fakeGl(0, false));
+    await flat.show('evening', { glowHalo: true });
+    assert.deepStrictEqual(flat.bloom(), { scene: true, available: false, drawn: false, size: null, frames: 0,
+        failed: null });
+    assert.deepStrictEqual(flat.frame(), ['scene']);
+    assert.strictEqual(FakeBloomPass.instances.length, 0);
+    assert.strictEqual(flat.adapter.getDiagnostics().warnings.filter(w => w.code === 'bloom_unavailable').length, 0);
+    flat.adapter.dispose();
+
+    const data = await bloomFixture(fakeGl(1282));
+    await data.show('evening');
+    data.log.length = 0;
+    await data.show('evening', { glowHalo: true });
+    assert.deepStrictEqual(data.log.filter(kind => kind !== 'scene'), ['copy', 'quad:FacilityBloomMask', 'copy'],
+        'the copies, then no halo');
+    assert.strictEqual(data.log[data.log.lastIndexOf('copy') + 1], 'scene', 'the frame is drawn again, without the halo');
+    const renderer = FakeRenderer.instances.at(-1);
+    assert.strictEqual(renderer.autoClear, true, 'and clears the canvas as usual');
+    const bloom = data.bloom();
+    assert.match(bloom.failed, /WebGL error 1282/);
+    assert.deepStrictEqual([bloom.drawn, bloom.size, bloom.frames], [false, null, 0]);
+    assert.strictEqual(FakeBloomPass.instances[0].disposed, true);
+    assert.deepStrictEqual(data.frame(), ['scene'], 'and stays off for this view');
+    assert.deepStrictEqual(data.frame(), ['scene']);
+    const warnings = data.adapter.getDiagnostics().warnings.filter(w => w.code === 'bloom_unavailable');
+    assert.strictEqual(warnings.length, 1);
+    assert.strictEqual(FakeBloomPass.instances.length, 1);
+    data.adapter.dispose();
+});
+
+test('a red stack lamp set to blink is red when lit and dark red between, never the blue of a borrowed finish', async () => {
+    const data = await blinkFixture();
+    const placements = [lampPlacement('red', 0, { appearanceId: 'light-stack-red', pattern: 'blink', periodSeconds: 1 }),
+        lampPlacement('borrowed', 4, { appearanceId: 'light-signal-blue', color: '#ff3a24' })];
+    await data.adapter.setScene({ layout: { placements, extensions: {} }, assetCatalog: [asset('light-row', REV_A)] });
+    await settleAsync();
+    data.scheduler.flush();
+    await drawLikeThree(data);
+    const lenses = sceneMeshes().filter(mesh => mesh.material.userData && mesh.material.userData.facilityGlow);
+    assert.strictEqual(lenses.length, 2);
+    for (const lens of lenses) {
+        const glow = lens.material.userData.facilityGlow;
+        assert.deepStrictEqual([glow.pattern, glow.periodSeconds], ['blink', 1], 'both blink once a second');
+        assert.strictEqual(lens.material.onBeforeRender.name, 'drawPatternedGlow');
+        assert.strictEqual(lens.material.emissive.getHexString(), 'ff3a24', 'lit: red');
+        const unlit = lens.material.color;
+        assert.ok(unlit.r > 4 * unlit.b && unlit.r > 4 * unlit.g, 'between flashes: dark red, ' + unlit.getHexString());
+    }
+    // The dark step shows the unlit color alone.
+    const at = data.centre(lenses[0]);
+    data.aim(at);
+    data.fire();
+    assert.deepStrictEqual(lenses.map(lens => lens.material.emissiveIntensity), [0, 0]);
+    data.adapter.dispose();
+});
+
+test('a blinking light redraws only when it changes, and only while it is in view and the window shows', async () => {
+    const data = await blinkFixture();
+    const placements = [lampPlacement('blue', 0, { appearanceId: 'light-signal-blue' }),
+        lampPlacement('green', 4, { appearanceId: 'light-stack-green' })];
+    const show = async scene => {
+        await data.adapter.setScene({ layout: { placements, extensions: scene ? { facilityScene: scene } : {} },
+            assetCatalog: [asset('light-row', REV_A)] });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    await show(null);
+    const renderer = await drawLikeThree(data);
+    let blue = data.lens('blink');
+    const green = data.lens('steady');
+    assert.ok(blue && green);
+    assert.strictEqual(blue.material.onBeforeRender.name, 'drawPatternedGlow', 'the blinking lens draws through the hook');
+    assert.ok(!Object.prototype.hasOwnProperty.call(green.material, 'onBeforeRender'), 'a steady lens is left alone');
+    const at = data.centre(blue);
+    const timers = data.clock.timers;
+    data.aim(at);
+    // 0.1 s on the shared clock: a 1 s blink is on for the first half of each second.
+    assert.strictEqual(blue.material.emissiveIntensity, 1);
+    assert.strictEqual(green.material.emissiveIntensity, 1);
+    assert.deepStrictEqual(data.patterns(), { inView: true, timer: true, redraws: 0, reducedMotion: false });
+    assert.strictEqual(timers.size, 1, 'one timer');
+    assert.strictEqual(Array.from(timers.values())[0].at, 508, 'set for the next change at 0.5 s, just after it');
+    const frames = renderer.renderCount;
+    data.fire();
+    assert.strictEqual(blue.material.emissiveIntensity, 0, 'off for the second half');
+    assert.strictEqual(green.material.emissiveIntensity, 1, 'the steady lamp stays on');
+    assert.strictEqual(renderer.renderCount, frames + 1, 'one frame per change');
+    assert.strictEqual(Array.from(timers.values())[0].at, 1008);
+    data.fire();
+    assert.strictEqual(blue.material.emissiveIntensity, 1);
+    assert.strictEqual(data.patterns().redraws, 2);
+    // Turned away, the next frame sets no timer: the view is idle until something else redraws it.
+    data.aim(at, true);
+    assert.strictEqual(timers.size, 0);
+    assert.strictEqual(data.patterns().inView, false);
+    data.aim(at);
+    assert.strictEqual(timers.size, 1, 'back in view, blinking again');
+    // A frame drawn while the window is hidden sets no timer; when the window shows again, one frame sets it.
+    data.documentObject.hidden = true;
+    data.adapter.invalidate();
+    data.scheduler.flush();
+    assert.strictEqual(timers.size, 0);
+    data.documentObject.hidden = false;
+    data.documentObject.dispatch('visibilitychange');
+    data.scheduler.flush();
+    assert.strictEqual(timers.size, 1);
+    // Lights off: the lamp is dark and nothing redraws; on again, it blinks.
+    await show({ version: 1, sceneId: 'machine-shop', adjustments: { lights: false } });
+    data.aim(at);
+    blue = data.lens('blink');
+    assert.strictEqual(blue.material.emissiveIntensity, 0);
+    assert.strictEqual(timers.size, 0);
+    await show({ version: 1, sceneId: 'machine-shop' });
+    data.aim(at);
+    assert.strictEqual(data.lens('blink').material.emissiveIntensity, 1);
+    assert.strictEqual(timers.size, 1);
+    data.adapter.dispose();
+    assert.strictEqual(timers.size, 0, 'no timer outlives the view');
+});
+
+test('blinking lights show steady under reduced motion; a batch idles once none of its copies is in view; no pools', async () => {
+    const still = await blinkFixture({ prefersReducedMotion: true });
+    still.clock.now = 600;
+    await still.adapter.setScene({ layout: { placements: [lampPlacement('blue', 0, { appearanceId: 'light-signal-blue' })] },
+        assetCatalog: [asset('light-row', REV_A)] });
+    await settleAsync();
+    still.scheduler.flush();
+    await drawLikeThree(still);
+    still.aim(still.centre(still.lens('blink')));
+    assert.strictEqual(still.lens('blink').material.emissiveIntensity, 1, 'steady, though a blink would be off at 0.6 s');
+    assert.strictEqual(still.clock.timers.size, 0);
+    assert.deepStrictEqual(still.patterns(), { inView: false, timer: false, redraws: 0, reducedMotion: true });
+    still.adapter.dispose();
+
+    // Two beacons 80 m apart in one instanced batch: three.js culls the batch as a whole, the timer goes by copy.
+    const data = await blinkFixture();
+    const beacon = (id, x, y) => Object.assign(placement(id, 'light-row', REV_A, x, y, 1), { componentMaterials: {
+        representation: 'overview', overrides: [{ key: 'p:row/lens#0', appearanceId: 'light-beacon-amber' }] } });
+    await data.adapter.setScene({ layout: { placements: [beacon('west', -40, 0), beacon('east', 40, 0)] },
+        assetCatalog: [asset('light-row', REV_A)] });
+    await settleAsync();
+    data.scheduler.flush();
+    await drawLikeThree(data);
+    const batch = data.lens('rotate');
+    assert.ok(batch.isInstancedMesh && batch.count === 2, 'one batch for both beacons');
+    const west = data.centre(batch);
+    west.x -= 40;
+    data.aim(west);
+    assert.strictEqual(data.clock.timers.size, 1, 'one beacon in view');
+    assert.strictEqual(batch.material.emissiveIntensity, 1, 'the beam faces the viewer at the start of a turn');
+    data.fire();
+    assert.strictEqual(batch.material.emissiveIntensity, 0.55, 'an eighth of a turn later it is sweeping away');
+    data.lookUp(data.centre(batch));
+    assert.strictEqual(data.clock.timers.size, 0, 'standing between them, looking up: neither is in view');
+    assert.strictEqual(data.patterns().inView, false);
+    data.adapter.dispose();
+
+    // In Evening a blinking lamp hung high throws no pool; a steady one beside it does.
+    const pools = await blinkFixture();
+    const high = (id, x, appearanceId) => Object.assign(placement(id, 'light-row', REV_A, x, 9.9, 1), { componentMaterials: {
+        representation: 'overview', overrides: [{ key: 'p:row/lens#0', appearanceId }] } });
+    await pools.adapter.setScene({ layout: { placements: [high('blue', 0, 'light-signal-blue'), high('green', 4, 'light-stack-green')],
+        extensions: { facilityScene: { version: 1, sceneId: 'evening' } } }, assetCatalog: [asset('light-row', REV_A)] });
+    await settleAsync();
+    pools.scheduler.flush();
+    assert.strictEqual(pools.adapter.getDiagnostics().appearanceLibrary.lightPools, 1);
+    pools.adapter.dispose();
+});
+
+// General lights by area (L7): rows of three lenses 4 m apart (one mesh per row), and a glowing exit sign box.
+async function areaLampFixture() {
+    const THREE = await libraryThree();
+    const lensRow = () => {
+        const positions = [];
+        [-4, 0, 4].forEach(x => {
+            const lens = new THREE.CylinderGeometry(0.17, 0.17, 0.015, 16).translate(x, 0, 0).toNonIndexed();
+            positions.push(...lens.attributes.position.array);
+        });
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.computeVertexNormals();
+        return geometry;
+    };
+    const glow = (role, emissive) => {
+        const material = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, emissive });
+        material.userData = { facilityAuthoredFinish: true, facilityMaterialRole: role };
+        return material;
+    };
+    return libraryFixture({
+        assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage !== 'overview') return null;
+            const object = new THREE.Group();
+            const mesh = request.assetId === 'exit-sign'
+                ? new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.21, 0.02), glow('sign', 0x22cc55))
+                : new THREE.Mesh(lensRow(), glow('lens', 0xfff7e6));
+            mesh.userData.facilityPartKey = request.assetId === 'exit-sign' ? 'p:sign/face#0' : 'p:row/lens#0';
+            object.add(mesh);
+            return object;
+        },
+    });
+}
+
+test('general lights follow the scene areas lamp by lamp; signs, beacons and highlights stay whole; pools follow', async () => {
+    const THREE = await libraryThree();
+    const data = await areaLampFixture();
+    const floor = (surfaceId, maxX) => ({ surfaceId, label: surfaceId, elevation: 0, material: 'solid', color: '#8a8f94',
+        roughness: 0.8, boundary: [{ x: 0, z: 0 }, { x: maxX, z: 0 }, { x: maxX, z: 30 }, { x: 0, z: 30 }] });
+    const areas = mode => ({ mode, areas: [{ surfaceId: 'fs-west' }, { rectangle: { minX: 13, minZ: 14, maxX: 15, maxZ: 16 } }] });
+    // All hung 9.9 m up with lamps at x 6, 10 and 14: two rows in one batch (z 5 and 15) and a lone row (z 25); an exit
+    // sign 3.5 m up; a row only 1.2 m up (no general lighting); a beacon row outside every area (z 35).
+    const placements = [placement('row-1', 'light-row', REV_A, 10, 9.9, 5), placement('row-2', 'light-row', REV_A, 10, 9.9, 15),
+        placement('solo', 'light-row-b', REV_A, 10, 9.9, 25), placement('sign', 'exit-sign', REV_A, 7, 3.5, 5),
+        placement('low', 'light-row-d', REV_A, 10, 1.2, 5),
+        Object.assign(placement('beacon', 'light-row-c', REV_A, 10, 9.9, 35), { componentMaterials: { representation: 'overview',
+            overrides: [{ key: 'p:row/lens#0', appearanceId: 'light-beacon-amber' }] } })];
+    const catalog = ['light-row', 'light-row-b', 'light-row-c', 'light-row-d', 'exit-sign'].map(id => asset(id, REV_A));
+    const show = async (lightAreas, westEdge, extra) => {
+        await data.adapter.setScene({ layout: { placements, extensions: {
+            facilityScene: { version: 1, sceneId: 'evening', adjustments: Object.assign(lightAreas ? { lightAreas } : {}, extra || {}) },
+            facilityFloorSurfaces: { version: 1, surfaces: [floor('fs-west', westEdge || 8)] } } }, assetCatalog: catalog });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    const info = () => data.adapter.getDiagnostics().appearanceLibrary.lightAreas;
+    const counts = () => ({ lamps: info().lamps, pools: info().pools });
+    await show(null);
+    assert.deepStrictEqual(info(), { mode: null, areas: [], missing: [], tables: 0, patched: 0, lamps: { on: 0, off: 0 },
+        pools: { on: 9, off: 0 } }, 'no areas: no tables; 9 lamps throw pools (not the sign, the low row or the beacon)');
+
+    await show(areas('only'));
+    // row-1: 6 on, 10 and 14 off; row-2: 6 on, 10 off, 14 on (the rectangle); solo: 6 on, 10 and 14 off.
+    assert.deepStrictEqual(info(), { mode: 'only', areas: ['fs-west', 'rectangle'], missing: [], tables: 4, patched: 0,
+        lamps: { on: 4, off: 5 }, pools: { on: 4, off: 5 } }, 'tables on the batch, the lone and low rows and the sign; none on the beacon; '
+        + 'the low row is no general lighting: its lamps stay on and are not counted');
+    const renderer = await drawLikeThree(data);
+    const camera = renderer.lastRender.camera;
+    const look = () => {
+        camera.aspect = 1.5;
+        camera.position.set(10, 40, -40);
+        camera.lookAt(10, 9.9, 20);
+        camera.updateProjectionMatrix();
+        camera.updateMatrixWorld(true);
+        data.adapter.invalidate();
+        data.scheduler.flush();
+    };
+    look();
+    const find = role => sceneMeshes().filter(o => o.material.userData && o.material.userData.facilityMaterialRole === role);
+    const batch = find('lens').find(o => o.isInstancedMesh);
+    const solo = find('lens').find(o => !o.isInstancedMesh);
+    const sign = find('sign')[0];
+    assert.ok(batch && batch.count === 2 && solo && sign);
+    const compile = material => {
+        const shader = { vertexShader: THREE.ShaderLib.physical.vertexShader, fragmentShader: THREE.ShaderLib.physical.fragmentShader,
+            uniforms: THREE.UniformsUtils.clone(THREE.ShaderLib.physical.uniforms) };
+        material.onBeforeCompile(shader, renderer);
+        return shader;
+    };
+    const shader = compile(batch.material);
+    assert.ok(shader.vertexShader.includes('texelFetch( facilityLampTable') && shader.fragmentShader.includes(
+        'return ACESFilmicToneMapping( color );'), 'the shader reads the table; off lamps are tone-mapped like plastic');
+    assert.ok(batch.material.customProgramCacheKey().startsWith('facility-lamp-table:'), 'its own program');
+    assert.strictEqual(info().patched, 1, 'counted once its shader is patched');
+    const table = shader.uniforms;
+    // The batch as drawn now: a layout change (a floor area redrawn) rebuilds it.
+    const current = () => compile(find('lens').find(o => o.isInstancedMesh).material).uniforms;
+    const texels = () => Array.from(current().facilityLampTable.value.image.data);
+    assert.strictEqual(table.facilityLampParts.value, 3);
+    assert.strictEqual(table.facilityLampWidth.value, 6);
+    assert.strictEqual(table.facilityLampMaskOn.value, 1);
+    // The table runs copy by copy, lens by lens in the order the lenses come in the mesh.
+    const parts = require('../static/facility_layout_light_pools.js').lampPartsOf(batch.geometry).parts;
+    const worldX = copy => parts.map(part => {
+        const matrix = new THREE.Matrix4();
+        batch.getMatrixAt(copy, matrix);
+        matrix.premultiply(batch.matrixWorld);
+        return Math.round(new THREE.Vector3(part.x, part.y, part.z).applyMatrix4(matrix).x);
+    });
+    assert.deepStrictEqual([worldX(0), worldX(1)], [[14, 10, 6], [14, 10, 6]], 'the model is turned to face the layout');
+    assert.deepStrictEqual(texels(), [0, 0, 255, 255, 0, 255], 'row-1: only x 6; row-2: x 6 and x 14 (the rectangle)');
+    assert.strictEqual(table.facilityLampTable.value.unpackAlignment, 1, 'rows of single bytes upload unpadded');
+    assert.deepStrictEqual(Array.from(new Set(batch.geometry.attributes.facilityLamp.array)).sort(), [0, 1, 2],
+        'each vertex knows its lens');
+    const soloTable = compile(solo.material).uniforms;
+    assert.deepStrictEqual(Array.from(soloTable.facilityLampTable.value.image.data), [0, 0, 255]);
+    assert.strictEqual(compile(sign.material).uniforms.facilityLampMaskOn.value, 0, 'the sign is no lamp: whole, lit');
+    assert.strictEqual(sign.geometry.attributes.facilityLamp, undefined);
+    const beacon = sceneMeshes().find(o => o.material.userData && o.material.userData.facilityGlow
+        && o.material.userData.facilityGlow.pattern === 'rotate');
+    assert.ok(beacon && beacon.material.onBeforeRender.name === 'drawPatternedGlow', 'the beacon blinks on, untouched');
+    // Each pool follows its lamp: black adds nothing.
+    const poolMesh = sceneMeshes().find(o => o.userData.facilityLightPools && o.userData.facilityLightPools.pools === 6);
+    const poolAt = (x, z) => {
+        const position = poolMesh.geometry.attributes.position;
+        for (let v = 0; v < position.count; v += 4) {
+            const cx = (position.getX(v) + position.getX(v + 2)) / 2;
+            const cz = (position.getZ(v) + position.getZ(v + 2)) / 2;
+            if (Math.abs(cx - x) < 0.01 && Math.abs(cz - z) < 0.01) return poolMesh.geometry.attributes.color.getX(v);
+        }
+        return null;
+    };
+    assert.ok(poolAt(6, 5) > 0.5 && poolAt(14, 15) > 0.5, 'lit pools keep their color');
+    assert.strictEqual(poolAt(10, 5), 0);
+    assert.strictEqual(poolAt(14, 5), 0);
+
+    // A selected lamp shows its highlight whole; deselected, its area rule is back.
+    data.adapter.setSelection(['solo']);
+    data.adapter.invalidate();
+    data.scheduler.flush();
+    assert.strictEqual(soloTable.facilityLampMaskOn.value, 0);
+    data.adapter.setSelection([]);
+    data.adapter.invalidate();
+    data.scheduler.flush();
+    assert.strictEqual(soloTable.facilityLampMaskOn.value, 1);
+
+    await show(areas('except'));
+    look();
+    assert.deepStrictEqual(counts(), { lamps: { on: 5, off: 4 }, pools: { on: 5, off: 4 } }, 'except: the other way round');
+    assert.deepStrictEqual(texels(), [255, 255, 0, 0, 255, 0]);
+    await show(areas('only'));
+    look();
+    assert.deepStrictEqual(texels(), [0, 0, 255, 255, 0, 255]);
+    await show(areas('only'), 12);
+    look();
+    assert.deepStrictEqual(counts(), { lamps: { on: 7, off: 2 }, pools: { on: 7, off: 2 } },
+        'the floor area redrawn to x 12 now holds the lamps at x 10 too');
+    assert.deepStrictEqual(texels(), [0, 255, 255, 255, 255, 255]);
+    await show({ mode: 'only', areas: [{ surfaceId: 'fs-gone' }] });
+    assert.deepStrictEqual(info().missing, ['fs-gone']);
+    assert.deepStrictEqual(counts(), { lamps: { on: 0, off: 9 }, pools: { on: 0, off: 9 } }, 'a deleted floor area lights nothing');
+    await show(areas('only'), 8, { lights: false });
+    look();
+    assert.strictEqual(current().facilityLampMaskOn.value, 0, 'lights off: every glow is off anyway');
+    assert.deepStrictEqual(info().pools, { on: 0, off: 0 }, 'and no pools show');
+    await show(null);
+    look();
+    assert.strictEqual(current().facilityLampMaskOn.value, 0, 'no areas: the table is not used');
+    assert.deepStrictEqual(counts(), { lamps: { on: 0, off: 0 }, pools: { on: 9, off: 0 } }, 'every pool back on');
+    let freed = 0;
+    current().facilityLampTable.value.addEventListener('dispose', () => { freed += 1; });
+    data.adapter.dispose();
+    assert.strictEqual(freed, 1, 'a table is freed with its material');
 });
 
 test('a previewed object stays pickable, and instanced copies report a part only when asked', async () => {

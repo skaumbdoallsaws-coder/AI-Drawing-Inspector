@@ -20,6 +20,22 @@ custom finish for that placement only.
 Precedence when rendering: a part (component) override beats the placement
 appearance, which beats the asset's own finish. Selection highlights are never
 saved.
+
+Lights: a library appearance may carry ``emission`` (``{"color", "intensity"}``),
+the glow the Facility 3D view draws on top of its unlit ``color``. A ``color``
+override on such a finish recolors the light: the glow takes the color and the
+unlit lens the same color at half brightness, so a blinking lamp's dark step and
+a switched-off lamp keep its color. Only the Facility view draws a glow, so the
+Assembly tools leave these finishes out. An emission may also carry
+``"pattern"`` (steady, blink, strobe or rotate) with ``"periodSeconds"`` (0.5 to
+10 s per cycle): the Facility view then blinks it, steady under reduced motion.
+A use of a Lights finish (a placement, a part or a custom finish) may set its own
+``pattern`` and ``periodSeconds`` the same way, e.g. a red stack lamp that blinks.
+An outdoor light's emission may carry ``"beamAngleDegrees"`` (10 to 160): in the
+evening scene the Facility view then draws a soft beam from the lamp down to the
+ground and a pool of light where its aim lands (docs/facility-lighting-plan.md, L8).
+A general or outdoor Lights finish may carry ``estimate`` (``{"lumens", "beamAngleDegrees", "basis"}``): a
+typical output and beam angle, for the lighting coverage estimate only (light_coverage.py, CC).
 """
 from collections.abc import Mapping
 from functools import lru_cache
@@ -41,11 +57,48 @@ GRAINS = ("part", "length", "width", "height")
 OVERRIDE_FIELDS = frozenset({
     "color", "roughness", "metalness", "opacity", "textureStrength",
     "sizeMeters", "rotationDegrees", "offsetMeters", "mapping", "grain",
+    "pattern", "periodSeconds",
 })
+# Overrides that only a Lights finish (one with an emission) takes.
+LIGHT_OVERRIDES = ("pattern", "periodSeconds")
 SCENE_ADJUSTMENTS = frozenset({
     "exposure", "environmentIntensity", "ambient", "directional",
-    "background", "shadows", "environmentRotationDegrees",
+    "background", "shadows", "environmentRotationDegrees", "lights", "lightAreas", "glowHalo",
 })
+# General lights by area (docs/facility-lighting-plan.md, L7): on only inside the areas, or everywhere except.
+LIGHT_AREA_MODES = ("only", "except")
+MAX_LIGHT_AREAS = 64
+FLOOR_AREA_ID = re.compile(r"fs-[a-z0-9-]{1,76}")
+RECTANGLE_KEYS = ("minX", "minZ", "maxX", "maxZ")
+
+
+GLOW_PATTERNS = ("steady", "blink", "strobe", "rotate")
+
+
+def _finite_number(value):
+    return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+
+
+def _valid_emission(emission):
+    """A glow: color and intensity, optionally a pattern with its period, and an outdoor light's beam angle
+    (docs/facility-lighting-plan.md)."""
+    if not isinstance(emission, Mapping) or not (
+            {"color", "intensity"} <= set(emission)
+            <= {"color", "intensity", "pattern", "periodSeconds", "beamAngleDegrees"}):
+        return False
+    if "beamAngleDegrees" in emission and not (
+            _finite_number(emission["beamAngleDegrees"]) and 10 <= emission["beamAngleDegrees"] <= 160):
+        return False
+    if not (isinstance(emission["color"], str) and COLOR.fullmatch(emission["color"])):
+        return False
+    if not (_finite_number(emission["intensity"]) and 0 < emission["intensity"] <= 4):
+        return False
+    pattern = emission.get("pattern", "steady")
+    if pattern not in GLOW_PATTERNS:
+        return False
+    if pattern == "steady":
+        return "periodSeconds" not in emission
+    return _finite_number(emission.get("periodSeconds")) and 0.5 <= emission["periodSeconds"] <= 10
 
 
 @lru_cache(maxsize=4)
@@ -64,6 +117,11 @@ def load_library(root: str = str(LIBRARY_ROOT)) -> dict:
         texture = row.get("texture")
         if texture and texture["textureSetId"] not in texture_sets:
             raise ValueError(f"Appearance {row['appearanceId']} uses a missing texture set")
+        emission = row.get("emission")
+        if emission is not None and not _valid_emission(emission):
+            raise ValueError(f"Appearance {row['appearanceId']} has an invalid emission")
+        if "estimate" in row and not (emission and _valid_estimate(row["estimate"])):
+            raise ValueError(f"Appearance {row['appearanceId']} has an invalid estimate")
     return {
         "libraryVersion": documents["appearances"].get("libraryVersion"),
         "appearances": appearances,
@@ -74,6 +132,14 @@ def load_library(root: str = str(LIBRARY_ROOT)) -> dict:
         "decals": {row["decalId"]: row for row in documents["decals"]["decals"]},
         "documents": documents,
     }
+
+
+def _valid_estimate(estimate):
+    """A light's typical output (1 to 200000 lm) and beam angle (10 to 170 degrees), for estimates only."""
+    return (isinstance(estimate, Mapping) and set(estimate) == {"lumens", "beamAngleDegrees", "basis"}
+            and _finite_number(estimate["lumens"]) and 1 <= estimate["lumens"] <= 200000
+            and _finite_number(estimate["beamAngleDegrees"]) and 10 <= estimate["beamAngleDegrees"] <= 170
+            and estimate["basis"] == "typical, for estimates")
 
 
 def _number(value, name, low, high, places=4):
@@ -116,7 +182,26 @@ def normalize_overrides(value: Mapping) -> dict:
             if item not in GRAINS:
                 raise ValueError("grain must follow part, length, width or height")
             result[key] = item
+        elif key == "pattern":
+            if item not in GLOW_PATTERNS:
+                raise ValueError("pattern must be steady, blink, strobe or rotate")
+            result[key] = item
+        elif key == "periodSeconds":
+            result[key] = _number(item, key, 0.5, 10, 3)
+    # As in the library: a steady light has no period; blink, strobe and rotate need one.
+    if "periodSeconds" in result and "pattern" not in result:
+        raise ValueError("periodSeconds goes with a pattern (blink, strobe or rotate)")
+    if result.get("pattern") == "steady" and "periodSeconds" in result:
+        raise ValueError("A steady light has no periodSeconds")
+    if result.get("pattern", "steady") != "steady" and "periodSeconds" not in result:
+        raise ValueError(f"A {result['pattern']} light needs periodSeconds (0.5 to 10 s per cycle)")
     return result
+
+
+def _lights_only(overrides, base_row):
+    """pattern and periodSeconds belong to a light: refuse them on a finish without a glow."""
+    if any(key in overrides for key in LIGHT_OVERRIDES) and not (base_row and base_row.get("emission")):
+        raise ValueError("pattern and periodSeconds go only on a Lights finish (one that glows)")
 
 
 def custom_appearances(layout) -> dict:
@@ -152,7 +237,14 @@ def normalize_appearance(value, layout=None) -> dict:
     appearance_id = value["appearanceId"]
     if not known_appearance(appearance_id, layout):
         raise ValueError(f"Unknown appearance '{appearance_id}'")
-    return dict({"appearanceId": appearance_id}, **normalize_overrides(value))
+    overrides = normalize_overrides(value)
+    library = load_library()["appearances"]
+    if appearance_id in library:
+        _lights_only(overrides, library[appearance_id])
+    elif layout is not None:
+        custom = custom_appearances(layout).get(appearance_id) or {}
+        _lights_only(overrides, library.get(custom.get("baseAppearanceId")))
+    return dict({"appearanceId": appearance_id}, **overrides)
 
 
 def normalize_custom_appearances(value) -> dict:
@@ -180,9 +272,46 @@ def normalize_custom_appearances(value) -> dict:
             raise ValueError("A custom appearance name needs 1 to 80 characters")
         if row["baseAppearanceId"] not in library:
             raise ValueError("A custom appearance must start from a library appearance")
+        overrides = normalize_overrides(row)
+        _lights_only(overrides, library[row["baseAppearanceId"]])
         result.append(dict({"appearanceId": identifier, "label": label.strip(),
-                            "baseAppearanceId": row["baseAppearanceId"]}, **normalize_overrides(row)))
+                            "baseAppearanceId": row["baseAppearanceId"]}, **overrides))
     return {"version": 1, "custom": result}
+
+
+def _light_areas(value) -> dict:
+    """General lighting on only inside the areas (mode only) or everywhere except inside them (mode except).
+
+    An area is a floor area ({surfaceId}) or a rectangle on the plan ({rectangle: {minX, minZ, maxX, maxZ}},
+    metres). Exit signs, beacons and other lights that throw no floor pool stay on either way."""
+    if not isinstance(value, Mapping) or set(value) != {"mode", "areas"}:
+        raise ValueError("Scene lightAreas needs mode and areas")
+    if value["mode"] not in LIGHT_AREA_MODES:
+        raise ValueError("Scene lightAreas mode must be only or except")
+    areas = value["areas"]
+    if not isinstance(areas, list) or len(areas) > MAX_LIGHT_AREAS:
+        raise ValueError(f"Scene lightAreas takes a list of at most {MAX_LIGHT_AREAS} areas")
+    result, seen = [], set()
+    for area in areas:
+        if isinstance(area, Mapping) and set(area) == {"surfaceId"}:
+            if not isinstance(area["surfaceId"], str) or not FLOOR_AREA_ID.fullmatch(area["surfaceId"]):
+                raise ValueError("A light area's surfaceId must be a floor area id (fs-...)")
+            row, key = {"surfaceId": area["surfaceId"]}, area["surfaceId"]
+        elif isinstance(area, Mapping) and set(area) == {"rectangle"}:
+            rectangle = area["rectangle"]
+            if not isinstance(rectangle, Mapping) or set(rectangle) != set(RECTANGLE_KEYS):
+                raise ValueError("A light area rectangle needs minX, minZ, maxX and maxZ")
+            box = {k: _number(rectangle[k], "Light area " + k, -10000, 10000, 3) for k in RECTANGLE_KEYS}
+            if box["maxX"] - box["minX"] < 0.1 or box["maxZ"] - box["minZ"] < 0.1:
+                raise ValueError("A light area rectangle must be at least 0.1 m across each way")
+            row, key = {"rectangle": box}, tuple(box[k] for k in RECTANGLE_KEYS)
+        else:
+            raise ValueError("A light area is a floor area (surfaceId) or a rectangle")
+        if key in seen:
+            raise ValueError("List each light area once")
+        seen.add(key)
+        result.append(row)
+    return {"mode": value["mode"], "areas": result}
 
 
 def normalize_scene(value) -> dict:
@@ -206,12 +335,14 @@ def normalize_scene(value) -> dict:
             if item not in ("theme", "environment") and not (isinstance(item, str) and COLOR.fullmatch(item)):
                 raise ValueError("Scene background must be theme, environment or a hex color")
             normalized[key] = item.lower()
-        elif key == "shadows":
+        elif key in ("shadows", "lights", "glowHalo"):
             if type(item) is not bool:
-                raise ValueError("Scene shadows must be true or false")
+                raise ValueError(f"Scene {key} must be true or false")
             normalized[key] = item
         elif key == "environmentRotationDegrees":
             normalized[key] = _number(item, key, -360, 360, 3)
+        elif key == "lightAreas":
+            normalized[key] = _light_areas(item)
         else:
             normalized[key] = _number(item, key, 0, 5)
     if normalized:
@@ -234,23 +365,30 @@ def validate_layout_references(layout) -> None:
                 raise ValueError(f"Placement {placement.get('placementId')} part uses unknown appearance '{identifier}'")
 
 
-def library_summary(kind="appearances", query="", category=None, limit=60) -> list:
-    """Compact rows for agents: what can be applied, without file paths or provenance."""
+def library_summary(kind="appearances", query="", category=None, limit=60, glow=None) -> list:
+    """Compact rows for agents: what can be applied, without file paths or provenance.
+
+    ``glow`` filters appearances: None lists all, False only those without an emission (the Assembly view
+    draws no glow), True only the glowing ones."""
     library = load_library()
     words = [word for word in re.split(r"\s+", (query or "").lower()) if word]
     if kind == "scenes":
-        rows = [{"sceneId": row["sceneId"], "label": row["label"], "group": row["group"],
-                 "description": row["description"], "shadows": row["shadows"]}
+        # lightPools: the scene shows floor light pools and can take the glow halo (lighting L3 and L6).
+        rows = [dict({"sceneId": row["sceneId"], "label": row["label"], "group": row["group"],
+                      "description": row["description"], "shadows": row["shadows"]},
+                     **({"lightPools": True} if row.get("lightPools") else {}))
                 for row in library["scenes"].values()]
     elif kind == "decals":
         rows = [{"decalId": row["decalId"], "label": row["label"], "code": row["code"], "group": row["group"]}
                 for row in library["decals"].values()]
     else:
-        rows = [{"appearanceId": row["appearanceId"], "label": row["label"], "category": row["category"],
-                 "textured": bool(row.get("texture")), "color": row["color"], "roughness": row["roughness"],
-                 "metalness": row["metalness"], "tags": row.get("tags", [])}
+        rows = [dict({"appearanceId": row["appearanceId"], "label": row["label"], "category": row["category"],
+                      "textured": bool(row.get("texture")), "color": row["color"], "roughness": row["roughness"],
+                      "metalness": row["metalness"], "tags": row.get("tags", [])},
+                     **({"emission": dict(row["emission"])} if row.get("emission") else {}))
                 for row in library["appearances"].values()
-                if category is None or row["category"] == category]
+                if (category is None or row["category"] == category)
+                and (glow is None or bool(row.get("emission")) == glow)]
 
     def matches(row):
         text = json.dumps(row).lower()

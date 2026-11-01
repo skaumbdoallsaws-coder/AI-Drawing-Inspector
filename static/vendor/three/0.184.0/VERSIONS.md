@@ -35,11 +35,23 @@ The core and every addon are the same version.
 | `examples/jsm/geometries/DecalGeometry.js` | 10100 | `6b2da6ea840926dfb0278841f96067c02964c73644c7f189720e89fe9baa2b10` |
 | `LICENSE` | 1081 | `8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc` |
 | `package.json` | 3574 | `8308e43d6d6dd4c636c2dfe2e724da07dcd9fe4349bba6afb56f2c5ba6625391` |
+| `examples/jsm/postprocessing/UnrealBloomPass.js` | 14921 | `1158bb02f6467889aba19c1a788b9107054d7f6a558498b5e2152db5873bb859` |
+| `examples/jsm/postprocessing/Pass.js` | 4218 | `444b409c235ead986893c472e720da1b779a56985c7d10b279c7944b52bd61c5` |
+| `examples/jsm/shaders/CopyShader.js` | 729 | `a33057d5ac91c43304c186ac0e8816e62bb2ed471d3a00ff3018dfd5c0389718` |
+| `examples/jsm/shaders/LuminosityHighPassShader.js` | 1291 | `5044f780b6e6cf863947f64c36fe1587132f7fbe395ada863cd1e5f0388dcf1e` |
 
 The Facility appearance library (2026-10-19) added `RoomEnvironment.js`,
 `HDRLoader.js` and `DecalGeometry.js` from the same verified tarball:
 neutral reflections, Radiance `.hdr` scene lighting and projected equipment
 decals. `HDRLoader` reads uncompressed RGBE files only.
+
+The lighting plan's optional glow halo (2026-10-31, step L6) added
+`UnrealBloomPass.js` and the three files it imports (`Pass.js`,
+`CopyShader.js`, `LuminosityHighPassShader.js`). They came from the same
+tarball, re-downloaded and checked against the SHA-256 and npm integrity
+above. `EffectComposer` and `OutputPass` are not included: the halo is drawn
+over the normal frame, which keeps its antialiasing and per-material tone
+mapping.
 
 No Draco, Meshopt, KTX2, Basis, or other decoder is included or approved by
 this manifest. Compression support requires a separate measured dependency

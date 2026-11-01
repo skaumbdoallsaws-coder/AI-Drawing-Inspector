@@ -3,7 +3,7 @@ import sys, json, hashlib
 from pathlib import Path
 
 LIB = Path(sys.argv[1]); S = Path(sys.argv[2])
-VERSION = "2026.10.25.2"
+VERSION = "2026.11.01.1"
 tex_report = json.loads((S / "texture_report.json").read_text(encoding="utf-8"))
 zip_sha = {}
 for line in (S / "acg_zip_sha256.txt").read_text().splitlines():
@@ -99,12 +99,58 @@ add("concrete-smooth", "Smooth concrete", "stone", "#ffffff", 0.82, 0.0, tex("co
 add("marble-white", "White marble (visual)", "stone", "#ffffff", 0.14, 0.0, tex("marble-white"), ("marble", "stone", "countertop", "polished"),
     "Visual representation of polished marble; not a stone specification.")
 
+# Lights (docs/facility-lighting-plan.md, L1): the color is the unlit lens or sign plastic; emission is the glow the
+# Facility 3D view draws, untouched by tone mapping, in every scene. No light falls on other surfaces.
+GLOW = ("Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a "
+        "lighting or signage specification.")
+
+
+# L8: an outdoor light's emission has a beam angle: in the evening scene the 3D view then draws a soft cone from the
+# lamp down to the ground and a pool where its aim lands.
+OUTDOOR = ("Glows like a switched-on outdoor lamp in every scene; in the evening scene it also shows a soft beam down "
+           "to the ground and a pool of light where it lands. Visual only: it lights no other surface and is not a "
+           "lighting design.")
+
+
+# L4: a light may blink, strobe or turn like a rotating beacon, one cycle every periodSeconds; the 3D view shows
+# every pattern steady when the viewer prefers reduced motion.
+def light(appearance_id, label, color, glow, tags, roughness=0.3, pattern=None, note=None, beam=None):
+    emission = {"color": glow, "intensity": 1}
+    if pattern:
+        emission.update(pattern=pattern, periodSeconds=1)
+    if beam:
+        emission["beamAngleDegrees"] = beam
+    description = OUTDOOR if beam else GLOW
+    add(appearance_id, label, "lights", color, roughness, 0.0, None, ("light",) + tags + ("glow",),
+        note + " " + description if note else description, emission=emission)
+
+
+light("light-cool-white-led", "Cool-white LED", "#dfe4e8", "#eef4ff", ("lamp", "led", "cool white", "high bay", "lens"), 0.35)
+light("light-warm-white", "Warm-white light", "#e6e0d6", "#ffd29a", ("lamp", "warm white", "office", "lens"), 0.35)
+light("light-exit-green", "Exit sign green", "#2a7a48", "#2bea74", ("exit", "sign", "emergency", "green"))
+light("light-beacon-amber", "Beacon amber", "#b5740c", "#ffab1f", ("beacon", "amber", "warning", "forklift", "dock", "rotating"),
+      pattern="rotate", note="Turns like a rotating beacon, once a second (steady with reduced motion).")
+light("light-alarm-red", "Alarm red", "#8f1d18", "#ff2b1c", ("alarm", "red", "beacon", "fault", "strobe"),
+      pattern="strobe", note="Strobes: one short flash a second (steady with reduced motion).")
+light("light-signal-blue", "Signal blue", "#1e4f9a", "#3a86ff", ("signal", "blue", "indicator", "blinking"),
+      pattern="blink", note="Blinks once a second (steady with reduced motion).")
+light("light-stack-red", "Stack light red", "#7d1913", "#ff3a24", ("stack light", "andon", "red", "stop", "fault"))
+light("light-stack-amber", "Stack light amber", "#a96d06", "#ffb52a", ("stack light", "andon", "amber", "warning"))
+light("light-stack-green", "Stack light green", "#1d6b37", "#3cf27a", ("stack light", "andon", "green", "running"))
+light("light-pole-led", "Pole light LED", "#dfe4e8", "#fff1dc", ('lamp', 'led', 'pole light', 'street light', 'car park', 'parking', 'yard', 'outdoor', 'beam'), 0.35, beam=110,
+      note="Beam 110 degrees, for a car park or yard pole light.")
+light("light-wall-led", "Wall light LED", "#dfe4e8", "#fff1dc", ('lamp', 'led', 'wall light', 'wall pack', 'outdoor', 'beam'), 0.35, beam=100,
+      note="Beam 100 degrees, for a wall light along an outside wall.")
+light("light-dock-led", "Dock light LED", "#dfe4e8", "#ffe2b8", ('lamp', 'led', 'dock light', 'loading dock', 'truck yard', 'outdoor', 'beam'), 0.35, beam=70,
+      note="Beam 70 degrees, for a light over a dock door.")
+
 appearances = {
     "schemaVersion": 1, "libraryVersion": VERSION,
     "notes": "Appearances are visual only. They never change mass, density, strength or an assigned engineering material.",
     "categories": [{"categoryId": c, "label": l} for c, l in (
         ("metals", "Metals"), ("plastics", "Plastics"), ("wood", "Wood"), ("rubber", "Rubber"), ("glass", "Glass"),
-        ("fabric", "Fabric"), ("paper", "Paper & Cardboard"), ("paint", "Paint & Coatings"), ("stone", "Concrete & Stone"))],
+        ("fabric", "Fabric"), ("paper", "Paper & Cardboard"), ("paint", "Paint & Coatings"), ("stone", "Concrete & Stone"),
+        ("lights", "Lights"))],
     "textureSets": texture_sets, "appearances": A}
 
 ENV = [("machine-shop", "machine_shop_02", "Machine Shop 02"), ("warehouse", "empty_warehouse_01", "Empty Warehouse 01"),
@@ -120,10 +166,13 @@ for env_id, ph_id, name in ENV:
                    "resolution": "1k", "retrieved": "2026-10-19", "modifications": "None"}})
 
 
-def scene(scene_id, label, group, description, environment, intensity, background, ambient, directional, exposure, shadows=False):
+def scene(scene_id, label, group, description, environment, intensity, background, ambient, directional, exposure, shadows=False,
+          light_pools=False):
+    # lightPools: lit lamps hung high throw soft pools of light on the floor (lighting plan L3; Evening only).
     return {"sceneId": scene_id, "label": label, "group": group, "description": description,
             "environment": environment, "environmentIntensity": intensity, "background": background,
             "ambient": ambient, "directional": directional, "exposure": exposure, "shadows": shadows,
+            **({"lightPools": True} if light_pools else {}),
             "thumbnail": f"thumbnails/scenes/{scene_id}.png"}
 
 
@@ -144,6 +193,9 @@ scenes = {
         scene("soft-studio", "Soft studio", "studio", "Photographic studio lighting from a CC0 HDRI.", "soft-studio", 0.45, "theme", 0.2, 2.2, 1.0),
         scene("machine-shop", "Machine shop", "industrial", "Industrial hall lighting and reflections from a CC0 HDRI.", "machine-shop", 0.35, "theme", 0.15, 2.4, 1.0),
         scene("warehouse", "Warehouse", "industrial", "Overhead warehouse lighting from a CC0 HDRI.", "warehouse", 0.45, "theme", 0.15, 2.4, 1.0),
+        # Lighting plan L2, tuned on Factory 02: sun, sky and fill turned far down so glowing lamps read and the
+        # equipment stays recognizable.
+        scene("evening", "Evening / night shift", "industrial", "Night-shift look: sun and sky turned far down, so lit lamps, beacons and signs carry the picture.", "machine-shop", 0.06, "#0b0f16", 0.04, 0.25, 1.0, light_pools=True),
     ]}
 
 GROUP = {"W": "warning", "M": "mandatory", "P": "prohibition", "E": "emergency", "F": "fire"}

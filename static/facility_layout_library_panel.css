@@ -347,6 +347,22 @@
 .ip-flib-field input[type="checkbox"] { justify-self: start; accent-color: var(--accent, #4fc3f7); }
 .ip-flib-inline { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .ip-flib-inline select { flex: 1; min-width: 0; }
+/* General lights per area (L7): floor areas to tick, drawn rectangles to remove. */
+.ip-flib-areas { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 11px; }
+.ip-flib-areas[hidden] { display: none; }
+.ip-flib-coverage { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 10px; padding-top: 8px;
+    border-top: 1px solid var(--border-structure); font-size: 11px; }
+.ip-flib-coverage p { margin: 0; }
+.ip-flib-coverage .ip-flib-inline { align-self: stretch; }
+.ip-flib-coverage-caption { font-weight: 600; }
+.ip-flib-coverage-error { color: var(--severity-major, #ff6d00); }
+.ip-flib-coverage-spots { margin: 0; padding-left: 18px; align-self: stretch; max-height: 200px; overflow-y: auto; }
+.ip-flib-coverage-spots li { margin: 0 0 3px; }
+.ip-flib-area-list { display: flex; flex-direction: column; gap: 2px; align-self: stretch; max-height: 180px; overflow-y: auto; }
+.ip-flib-area { display: flex; align-items: center; gap: 6px; min-width: 0; align-self: stretch; }
+.ip-flib-area span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ip-flib-area-drawn span { white-space: normal; }
+.ip-flib-area input[type="checkbox"] { accent-color: var(--accent, #4fc3f7); }
 
 .ip-flib-actions, .ip-flib-save {
     display: flex;
@@ -365,7 +381,8 @@
 }
 .ip-flib-editor > .ip-flib-source:last-child { padding-bottom: 10px; }
 .ip-flib-save input { flex: 1 1 120px; }
-.ip-flib-actions button, .ip-flib-save button, .ip-flib-part button, .ip-flib-editor > button {
+.ip-flib-actions button, .ip-flib-save button, .ip-flib-part button, .ip-flib-editor > button, .ip-flib-areas button,
+.ip-flib-coverage button {
     padding: 4px 9px;
     font: inherit;
     font-size: 11px;
@@ -378,8 +395,9 @@
 .ip-flib-editor > button { margin-top: 8px; }
 .ip-flib-actions button:hover:not(:disabled), .ip-flib-save button:hover:not(:disabled) { background: var(--bg-hover); }
 .ip-flib-actions button:focus-visible, .ip-flib-save button:focus-visible,
-.ip-flib-part button:focus-visible, .ip-flib-editor > button:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); outline: none; }
-.ip-flib-actions button:disabled, .ip-flib-editor > button:disabled { opacity: 0.5; cursor: not-allowed; }
+.ip-flib-part button:focus-visible, .ip-flib-editor > button:focus-visible, .ip-flib-areas button:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring); outline: none; }
+.ip-flib-actions button:disabled, .ip-flib-editor > button:disabled, .ip-flib-areas button:disabled,
+.ip-flib-coverage button:disabled { opacity: 0.5; cursor: not-allowed; }
 .ip-flib-primary {
     color: var(--text-on-accent, #ffffff) !important;
     background: var(--primary-btn, #1565c0) !important;

@@ -157,6 +157,22 @@ def test_unrelated_and_cosmetic_edits_do_not_trigger_parking_reviews():
     assert review.review_changed_parking(before, after)["reviews"]
 
 
+def test_placements_the_light_check_clears_are_no_parking_change():
+    """3c: a new pole light on a spot the light helper clears (operation_proposals passes it as exempt)."""
+    before, after = layout(), layout()
+    after["placements"].append({"placementId": "pl-pole", "assetId": "asset-pole", "assetDefinitionRevision": "r" * 64,
+        "transform": {"position": {"x": 15, "y": 0, "z": 12}, "quaternion": {"x": 0, "y": 0, "z": 0, "w": 1}, "scale": 1}})
+    assert review.review_changed_parking(before, after)["reviews"]
+    asked = []
+    assert review.review_changed_parking(before, after, lambda zones: asked.append(
+        [item["zoneId"] for item in zones]) or {"pl-pole"}) is None
+    assert asked == [["zn-parking"]], "asked once, with the zones that changed"
+    assert review.review_changed_parking(before, before, lambda zones: asked.append(zones)) is None and len(asked) == 1
+    after["floorMarkings"][0]["width"] = 3
+    assert review.review_changed_parking(before, after, lambda zones: {"pl-pole"})["reviews"], (
+        "other parking changes still count")
+
+
 def test_geometry_dependency_missing_is_not_a_pass(monkeypatch):
     monkeypatch.setattr(review.routing, "Polygon", None)
     report = review.review_parking(layout(), ["zn-parking"])

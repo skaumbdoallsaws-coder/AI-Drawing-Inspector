@@ -83,6 +83,9 @@ def finish(value: Any, label: str = "finish") -> Dict[str, Any]:
     appearance_id = value.get("appearanceId")
     if appearance_id not in load_library()["appearances"]:
         raise AssemblyAppearanceError(f"{label}: {appearance_id!r} is not in the appearance library")
+    if load_library()["appearances"][appearance_id].get("emission"):
+        raise AssemblyAppearanceError(f"{label}: {appearance_id!r} is a Lights finish, which glows only in the "
+                                      "Facility 3D view; pick a paint, plastic or metal for an assembly")
     try:
         overrides = normalize_overrides({key: value[key] for key in OVERRIDES if value.get(key) is not None})
     except ValueError as error:

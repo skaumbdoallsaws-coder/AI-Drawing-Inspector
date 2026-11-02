@@ -461,3 +461,93 @@ def test_undo_http_contract_is_preview_only_and_principal_bound(context):
         authority["principal"] = replace(principal, roles=("viewer",))
         assert client.post(url, json=body).status_code == 403
     assert current(context)["revision"] == saved["revision"]
+
+
+def _counting(monkeypatch, service):
+    """How often a proposal is built (operation_proposals._prepare) and a batch is run (_prepare_operations)."""
+    from ai_inspector.facility_layout import operation_proposals
+    counts = {"built": 0, "run": 0}
+    build, run = operation_proposals._prepare, type(service)._prepare_operations
+
+    def counted_build(*args, **kwargs):
+        counts["built"] += 1
+        return build(*args, **kwargs)
+
+    def counted_run(self, *args, **kwargs):
+        counts["run"] += 1
+        return run(self, *args, **kwargs)
+    monkeypatch.setattr(operation_proposals, "_prepare", counted_build)
+    monkeypatch.setattr(type(service), "_prepare_operations", counted_run)
+    return counts
+
+
+def test_a_staged_proposal_is_built_once_for_its_preview_approval_and_apply(context, monkeypatch):
+    # 2026-11-02: the preview and the apply each rebuilt the proposal, and the commit ran the batch again (about
+    # 50 s after the reply on Factory 02). A kept proposal is a fresh copy for each look.
+    service, principal = context
+    before = current(context)
+    counts = _counting(monkeypatch, service)
+    proposal = propose(context, operations=[{"op": "rename_layout", "displayName": "Built once"}])
+    assert counts == {"built": 1, "run": 1}
+    preview = service.get_layout_proposal_preview(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, proposal["proposalId"])
+    assert preview["alternative"]["transactionBinding"] == proposal["alternative"]["transactionBinding"]
+    assert preview["alternative"]["ghostPreview"] == proposal["alternative"]["ghostPreview"]
+    preview["alternative"]["ghostPreview"]["layout"]["displayName"] = "Changed by a caller"
+    again = service.get_layout_proposal_preview(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, proposal["proposalId"])
+    assert again["alternative"]["ghostPreview"]["layout"]["displayName"] == "Built once"
+    saved = apply(context, proposal, approve(context, proposal))
+    assert current(context)["layout"]["displayName"] == "Built once"
+    assert counts == {"built": 1, "run": 1}
+    undo = propose(context, undo_receipt_id=saved["receipt"]["receiptId"])
+    restored = apply(context, undo, approve(context, undo, key="undo-built-once"), key="undo-built-once")
+    assert counts == {"built": 2, "run": 1}
+    assert restored["layout"]["displayName"] == before["layout"]["displayName"]
+
+
+def _moving(host):
+    context, placements = _place_review_assets(host)
+    target = placements[0]
+    proposal = propose(context, operations=[{"op": "move_placement", "placementId": target["placementId"],
+        "position": {"x": 10, "y": 0, "z": 6}}])
+    return context, target, proposal, approve(context, proposal)
+
+
+def test_a_kept_proposal_is_rebuilt_and_refused_when_the_catalog_moves_on(asset_host, monkeypatch):
+    context, target, proposal, approval = _moving(asset_host)
+    service, principal = context
+    counts = _counting(monkeypatch, service)
+    _advance_asset_head(asset_host, target["assetId"])
+    before = current(context)
+    with pytest.raises(FacilityLayoutError) as previewed:
+        service.get_layout_proposal_preview(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, proposal["proposalId"])
+    assert previewed.value.code == "stale_asset_definition_revision"
+    with pytest.raises(FacilityLayoutError) as applied:
+        apply(context, proposal, approval)
+    assert applied.value.code == "stale_asset_definition_revision"
+    assert counts["built"] == 2  # each look rebuilt it, and the rebuild said why
+    assert current(context) == before
+
+
+@pytest.mark.parametrize("change", ["catalog", "manual edit"])
+def test_the_commit_checks_again_what_changed_after_its_rebuild(asset_host, monkeypatch, change):
+    # The commit no longer runs the batch again: the save's base-revision check and recheck() refuse what changed
+    # between the apply's rebuild and its save.
+    context, target, proposal, approval = _moving(asset_host)
+    service, principal = context
+    rebuild = type(service)._regenerate_proposal
+
+    def then_it_changes(self, *args, **kwargs):
+        result = rebuild(self, *args, **kwargs)
+        if change == "catalog":
+            _advance_asset_head(asset_host, target["assetId"])
+        else:
+            service.apply_operations(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, current(context)["revision"],
+                [{"op": "rename_layout", "displayName": "Manual name"}])
+        return result
+    monkeypatch.setattr(type(service), "_regenerate_proposal", then_it_changes)
+    with pytest.raises(FacilityLayoutError) as raised:
+        apply(context, proposal, approval)
+    assert raised.value.code == ("stale_asset_definition_revision" if change == "catalog" else "revision_conflict")
+    moved = next(item for item in current(context)["layout"]["placements"]
+                 if item["placementId"] == target["placementId"])
+    assert moved["transform"]["position"] == target["transform"]["position"]

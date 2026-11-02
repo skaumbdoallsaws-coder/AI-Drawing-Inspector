@@ -2857,6 +2857,72 @@ async function main() {
             );
             assert.strictEqual(JSON.stringify(saved), savedBefore);
             assert.strictEqual(JSON.stringify(proposed), proposedBefore);
+            assert.deepStrictEqual(review.removedWalks, []);
+            assert.deepStrictEqual(review.removedNames, ['pl-b']);
+            assert.strictEqual(
+                workspaceModule.proposalPlainChangeSummary(review, {}),
+                'Changes: 1 new item, 1 moved item, 1 removed item. Removes pl-b.'
+            );
+            // A cleared zone (the user, 2026-11-02): its floor markings count,
+            // and what goes is named, by label where it has one.
+            const marked = clone(saved);
+            marked.placements[1].metadata = { instanceLabel: 'A05 kit cart' };
+            marked.floorMarkings = [
+                { markingId: 'fm-bay', label: 'A05 kit cart bay', text: 'KIT CART' },
+                { markingId: 'fm-text', text: 'A05' },
+                { markingId: 'fm-stays', label: 'Aisle edge' },
+            ];
+            const cleared = clone(marked);
+            cleared.placements.pop();
+            cleared.floorMarkings = [{ markingId: 'fm-stays', label: 'Aisle edge' }];
+            const clearReview = workspaceModule.buildLayoutProposalReview(marked, cleared);
+            assert.deepStrictEqual(clearReview.removedNames, [
+                'A05 kit cart', 'A05 kit cart bay (floor marking)', 'A05 (floor marking)']);
+            assert.strictEqual(
+                workspaceModule.proposalPlainChangeSummary(clearReview, {}),
+                'Changes: 1 removed item, 2 removed floor markings. Removes A05 kit cart, '
+                    + 'A05 kit cart bay (floor marking) and A05 (floor marking).'
+            );
+            const many = clone(saved);
+            many.floorMarkings = Array.from({ length: 26 }, function (unused, index) {
+                return { markingId: 'fm-' + index, label: 'Line ' + index };
+            });
+            const manyText = workspaceModule.proposalPlainChangeSummary(
+                workspaceModule.buildLayoutProposalReview(many, saved), {});
+            assert.ok(manyText.startsWith(
+                'Changes: 26 removed floor markings. Removes Line 0 (floor marking), '));
+            assert.ok(manyText.endsWith('Line 23 (floor marking) and 2 more.'));
+            // A saved walk that goes is named (the user, 2026-11-01): its
+            // walker and the places it stops at; a walk that stays is not.
+            function walk(id, walker, stops) {
+                return {
+                    movementProgramId: id,
+                    actorPlacementId: walker,
+                    orderedStops: stops.map(function (anchor, index) {
+                        return { stopId: 'nst-' + id + '-' + index, navigationAnchorId: anchor };
+                    }),
+                };
+            }
+            const walked = clone(saved);
+            walked.extensions = { facilityNavigation: { movementPrograms: [
+                walk('nmp-a', 'pl-a', ['na-home', 'na-b', 'na-home', 'na-c', 'na-d']),
+                walk('nmp-b', 'pl-b', ['na-e']),
+                walk('nmp-gone', 'pl-gone', ['na-f', 'na-g']),
+            ] } };
+            const unwalked = clone(proposed);
+            unwalked.extensions = { facilityNavigation: { movementPrograms: [
+                walk('nmp-b', 'pl-b', ['na-e']),
+            ] } };
+            const walkReview = workspaceModule.buildLayoutProposalReview(walked, unwalked);
+            assert.deepStrictEqual(walkReview.removedWalks, [
+                "the pl-a's saved walk (4 stops)",
+                'saved walk nmp-gone (2 stops)',
+            ]);
+            assert.strictEqual(
+                workspaceModule.proposalPlainChangeSummary(walkReview, {}),
+                'Changes: 1 new item, 1 moved item, 1 removed item. Removes pl-b. Also removes '
+                    + "the pl-a's saved walk (4 stops) and saved walk nmp-gone (2 stops)."
+            );
             const noBaseline = workspaceModule.proposalDiagnosticSummary({
                 metrics: { clearanceConflicts: 2 },
             });
@@ -7481,6 +7547,115 @@ async function main() {
             assert.deepStrictEqual(choices, [null, 'lot', 'floor:fs-a']);
             stop();
             data.workspace.destroy();
+        });
+
+    await check('Sage moves the 3D view: a glide in frames from plan, the roof off only while it flies or looks down '
+        + 'through it, and Back returns', async () => {
+            const data = fixture();
+            const workspace = data.workspace;
+            const frames = [];
+            const cancelled = [];
+            let still = false;
+            data.documentRef.defaultView = {
+                requestAnimationFrame(callback) { frames.push(callback); return frames.length; },
+                cancelAnimationFrame(id) { cancelled.push(id); },
+                matchMedia(query) { return { matches: still && query === '(prefers-reduced-motion: reduce)' }; },
+            };
+            const run = (from, to) => {
+                const at = [];
+                for (let time = from; frames.length; time += 100) {
+                    frames.shift()(time);
+                    at.push(time);
+                    if (to !== undefined && time >= to) break;
+                }
+                return at;
+            };
+            workspace._setViewMode('plan');
+            workspace.lastThreeFitFingerprint = null;   // a 3D view not fitted yet
+            const userCamera = clone(data.three.cameraView);
+            const userLayers = clone(workspace.layerVisibility);
+            assert.strictEqual(userLayers.overhead, true);
+            const back = workspace.sageViewBackButton;
+            assert.ok(back && back.nodeName === 'BUTTON' && back.textContent === 'Back' && back.hidden);
+            const view = { siteId: 'site-a', layoutId: 'fl-workspace', revision: 'rev-1', label: 'Assembly Cell A06',
+                from: 'south', roofHidden: false,
+                camera: { position: { x: 20, y: 5, z: 10 }, target: { x: 20, y: 0.7, z: 18 }, fov: 50 } };
+            // Not this layout, or not a camera above its target: nothing moves.
+            for (const other of [{ layoutId: 'fl-other' }, { siteId: 'site-b' },
+                { camera: { position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 1, z: 0 }, fov: 50 } }]) {
+                assert.strictEqual(await workspace.showSageView(Object.assign({}, view, other)), false);
+            }
+            assert.deepStrictEqual([workspace.viewMode, data.three.appliedCameraViews.length], ['plan', 0]);
+
+            assert.strictEqual(await workspace.showSageView(view), true);
+            assert.strictEqual(workspace.viewMode, '3d', 'from Plan it switches to 3D');
+            assert.strictEqual(back.hidden, false, 'Back shows on the 3D view');
+            assert.strictEqual(workspace.layerVisibility.overhead, false, 'no roof in the way while it flies');
+            await new Promise(resolve => setImmediate(resolve));
+            assert.strictEqual(data.three.fitLayoutCount, 0, 'entering 3D does not fit the layout over the glide');
+            const times = run(1000);
+            const seen = data.three.appliedCameraViews;
+            assert.ok(seen.length >= 40 && times.length === seen.length, 'about 5 s of frames at 10 a second');
+            assert.deepStrictEqual(seen[0].position, userCamera.position, 'it starts where the user was');
+            const last = seen[seen.length - 1];
+            assert.deepStrictEqual([last.position, last.target, last.fov],
+                [view.camera.position, view.camera.target, 50], 'it settles on Sage\'s view');
+            // Halfway it is on the fly-over: higher, farther out and 50 degrees round from where it settles.
+            const half = seen[Math.round((seen.length - 1) / 2)];
+            const heading = point => Math.atan2(point.x - 20, point.z - 18) * 180 / Math.PI;
+            const turned = Math.abs(((heading(half.position) - heading(view.camera.position)) + 540) % 360 - 180);
+            assert.ok(Math.abs(turned - 50) < 6, `halfway round the sweep (${turned.toFixed(1)} degrees)`);
+            assert.ok(half.position.y > 5 && Math.hypot(half.position.x - 20, half.position.z - 18) > 8);
+            assert.strictEqual(workspace.layerVisibility.overhead, true, 'the roof comes back: the view is under it');
+            assert.strictEqual(workspace.sageGlide, null);
+
+            // A second move keeps the first Back; a view down through the roof leaves the roof off.
+            assert.strictEqual(await workspace.showSageView(Object.assign({}, view, { roofHidden: true,
+                camera: { position: { x: 20, y: 30, z: -20 }, target: { x: 20, y: 0.7, z: 18 }, fov: 50 } })), true);
+            run(1000);
+            assert.strictEqual(workspace.layerVisibility.overhead, false, 'it looks down through the roof');
+            back.dispatch('click');
+            assert.deepStrictEqual(data.three.appliedCameraViews[data.three.appliedCameraViews.length - 1], userCamera,
+                'Back returns to the camera before Sage\'s first move');
+            assert.deepStrictEqual([workspace.viewMode, workspace.layerVisibility.overhead,
+                workspace.layerVisibility.roofSheeting], ['plan', true, userLayers.roofSheeting]);
+            assert.strictEqual(back.hidden, true);
+            assert.strictEqual(workspace.sageViewBack, null);
+            assert.strictEqual(workspace.lastThreeFitFingerprint, null, 'the next switch to 3D fits as before');
+
+            // The user takes over: a press on the 3D view stops the glide where it is and the roof settles.
+            assert.strictEqual(await workspace.showSageView(view), true);
+            run(1000, 1300);
+            const applied = data.three.appliedCameraViews.length;
+            workspace.threeView.dispatch('pointerdown');
+            assert.strictEqual(workspace.sageGlide, null);
+            assert.ok(cancelled.length >= 1, 'its next frame is cancelled');
+            run(2000);
+            assert.strictEqual(data.three.appliedCameraViews.length, applied, 'nothing more moves');
+            assert.strictEqual(workspace.layerVisibility.overhead, true);
+
+            // From far across the plant it climbs over what stands between, then comes down onto the sweep.
+            back.dispatch('click');
+            data.three.cameraView = Object.assign(clone(userCamera), { position: { x: 220, y: 5, z: 10 },
+                target: { x: 220, y: 0, z: 18 } });
+            const from = data.three.appliedCameraViews.length;
+            assert.strictEqual(await workspace.showSageView(view), true);
+            run(1000);
+            const crossing = data.three.appliedCameraViews.slice(from);
+            const top = Math.max.apply(null, crossing.map(item => item.position.y));
+            assert.ok(top > 45 && top < 100, `it climbs over the plant (${top.toFixed(1)} m)`);
+            assert.deepStrictEqual(crossing[crossing.length - 1].position, view.camera.position);
+            data.three.cameraView = clone(userCamera);
+
+            // Reduced motion: it goes straight there.
+            still = true;
+            frames.length = 0;
+            assert.strictEqual(await workspace.showSageView(view), true);
+            assert.strictEqual(frames.length, 0);
+            const jumped = data.three.appliedCameraViews[data.three.appliedCameraViews.length - 1];
+            assert.deepStrictEqual([jumped.position, jumped.target], [view.camera.position, view.camera.target]);
+            assert.strictEqual(workspace.layerVisibility.overhead, true);
+            workspace.destroy();
         });
 
     process.stdout.write(`${checks}/${checks} facility layout workspace checks passed\n`);

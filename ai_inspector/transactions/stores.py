@@ -19,6 +19,7 @@ from .types import (
     IdempotencyRecord,
     PreparedRecord,
     ProposalRecord,
+    TransactionError,
     TransactionIdempotencyConflictError,
     TransactionNotFoundError,
     TransactionPreparedError,
@@ -232,6 +233,10 @@ class VolatileTransactionStore:
             self._approvals.clear()
 
 
+# How many of the newest receipts latest_receipt_for reads. Receipts are filed by id, not by target.
+RECENT_RECEIPT_SCAN = 400
+
+
 class InMemoryReceiptStore:
     """Compatibility receipt store with strict replay rejection."""
 
@@ -344,6 +349,18 @@ class InMemoryReceiptStore:
                     "Transaction receipt was not found.",
                 )
             return deepcopy(receipt)
+
+    def latest_receipt_for(
+        self, target: Any, *, scan_limit: int = RECENT_RECEIPT_SCAN
+    ) -> Optional[TransactionReceipt]:
+        """The newest receipt bound to TARGET among the newest SCAN_LIMIT, or None."""
+
+        with self._lock:
+            recent = list(self._receipts.values())[-max(1, int(scan_limit)):]
+            for receipt in reversed(recent):
+                if receipt.binding.target == target:
+                    return deepcopy(receipt)
+        return None
 
 
 _ROOT_LOCKS: Dict[str, threading.RLock] = {}
@@ -660,3 +677,34 @@ class JsonReceiptStore:
                     "Transaction receipt was not found.",
                 )
             return deepcopy(receipt)
+
+    def latest_receipt_for(
+        self, target: Any, *, scan_limit: int = RECENT_RECEIPT_SCAN
+    ) -> Optional[TransactionReceipt]:
+        """The newest receipt bound to TARGET, or None. Receipts are filed by id, so this reads the newest
+        SCAN_LIMIT receipt files (by file time) newest first, parses only those naming the target's resource
+        and returns the first bound to TARGET. Unreadable records are skipped."""
+
+        marker = str(getattr(target, "resource_id", "")).encode("ascii", "replace")
+        with self._lock:
+            try:
+                with os.scandir(_native_fs_path(self._receipt_dir)) as listing:
+                    entries = [
+                        (entry.stat().st_mtime_ns, entry.name, entry.path)
+                        for entry in listing
+                        if entry.name.endswith(".json") and entry.is_file()
+                    ]
+            except OSError:
+                return None
+            entries.sort(reverse=True)
+            for _, _, path in entries[:max(1, int(scan_limit))]:
+                try:
+                    with open(path, "rb") as stream:
+                        if marker not in stream.read(MAX_RECORD_BYTES + 1):
+                            continue
+                    receipt = TransactionReceipt.from_dict(self._read_mapping(Path(path)))
+                except (OSError, TransactionError, ValueError, TypeError, KeyError):
+                    continue
+                if receipt.binding.target == target:
+                    return deepcopy(receipt)
+        return None

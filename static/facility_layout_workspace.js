@@ -1974,6 +1974,68 @@
         };
     }
 
+    // The saved walks a proposal takes out (a cell plan that clears the items a
+    // walk stops at removes that walk), named as Sage names them: "the A05
+    // operator's saved walk (4 stops)".
+    function removedWalkNames(savedLayout, proposedLayout) {
+        function programs(layout) {
+            const navigation = layout && layout.extensions
+                && layout.extensions.facilityNavigation;
+            const value = navigation && navigation.movementPrograms;
+            return Array.isArray(value) ? value.filter(function (item) {
+                return item && typeof item === 'object' && item.movementProgramId;
+            }) : [];
+        }
+        const kept = new Set(programs(proposedLayout).map(function (item) {
+            return item.movementProgramId;
+        }));
+        const placements = recordIndex(
+            (savedLayout || {}).placements,
+            'placementId'
+        );
+        return programs(savedLayout).filter(function (item) {
+            return !kept.has(item.movementProgramId);
+        }).map(function (item) {
+            const walker = placements.get(item.actorPlacementId) || {};
+            const metadata = walker.metadata && typeof walker.metadata === 'object'
+                ? walker.metadata : {};
+            const who = cleanString(metadata.instanceLabel || walker.label, '');
+            const stops = Array.isArray(item.orderedStops) ? item.orderedStops : [];
+            const places = new Set(stops.filter(function (stop) {
+                return stop && typeof stop === 'object';
+            }).map(function (stop) {
+                return stop.navigationAnchorId;
+            })).size;
+            const count = places + (places === 1 ? ' stop' : ' stops');
+            return who ? 'the ' + who + "'s saved walk (" + count + ')'
+                : 'saved walk ' + item.movementProgramId + ' (' + count + ')';
+        });
+    }
+
+    // What a proposal takes out, by name, as the saved layout names it: "A05
+    // kit cart", "A05 kit cart bay (floor marking)" (the user, 2026-11-02: a
+    // cleared zone names what it removes).
+    function removedRecordNames(savedLayout, proposedLayout) {
+        const names = [];
+        [
+            ['placements', 'placementId', ''],
+            ['floorMarkings', 'markingId', ' (floor marking)'],
+        ].forEach(function (kind) {
+            const kept = recordIndex((proposedLayout || {})[kind[0]], kind[1]);
+            const saved = (savedLayout || {})[kind[0]];
+            (Array.isArray(saved) ? saved : []).forEach(function (record) {
+                const identifier = cleanString(record && record[kind[1]], '');
+                if (!identifier || kept.has(identifier)) return;
+                const metadata = record.metadata && typeof record.metadata === 'object'
+                    ? record.metadata : {};
+                const name = cleanString(metadata.instanceLabel || record.label
+                    || record.text, '') || identifier;
+                names.push(name + kind[2]);
+            });
+        });
+        return names;
+    }
+
     function buildLayoutProposalReview(savedLayout, proposedLayout) {
         const before = savedLayout && typeof savedLayout === 'object'
             ? savedLayout : {};
@@ -2042,6 +2104,13 @@
                 after.routes,
                 'routeId'
             ),
+            markingChanges: collectionChangeCounts(
+                before.floorMarkings,
+                after.floorMarkings,
+                'markingId'
+            ),
+            removedNames: removedRecordNames(before, after),
+            removedWalks: removedWalkNames(before, after),
         };
     }
 
@@ -2218,10 +2287,19 @@
         return count + ' ' + (count === 1 ? singular : plural);
     }
 
+    // "A, B and C"; past LIMIT names, "A, B, ... and 4 more".
+    function listedNames(names, limit) {
+        const shown = names.slice(0, limit);
+        if (names.length > limit) shown.push((names.length - limit) + ' more');
+        return shown.length === 1 ? shown[0]
+            : shown.slice(0, -1).join(', ') + ' and ' + shown[shown.length - 1];
+    }
+
     function proposalPlainChangeSummary(review, alternative) {
         const source = review || {};
         const zones = source.zoneChanges || {};
         const routes = source.routeChanges || {};
+        const markings = source.markingChanges || {};
         const parts = [];
         [
             [(source.newPlacementIds || []).length, 'new item', 'new items'],
@@ -2233,6 +2311,9 @@
             [finite(routes.added, 0), 'new aisle', 'new aisles'],
             [finite(routes.changed, 0), 'changed aisle', 'changed aisles'],
             [finite(routes.removed, 0), 'removed aisle', 'removed aisles'],
+            [finite(markings.added, 0), 'new floor marking', 'new floor markings'],
+            [finite(markings.changed, 0), 'changed floor marking', 'changed floor markings'],
+            [finite(markings.removed, 0), 'removed floor marking', 'removed floor markings'],
         ].forEach(function (item) {
             if (item[0] > 0) parts.push(countPhrase(item[0], item[1], item[2]));
         });
@@ -2245,9 +2326,15 @@
             return operation.op === 'set_component_materials' || operation.op === 'set_appearance';
         }).length;
         if (repainted) parts.push(countPhrase(repainted, 'repainted item', 'repainted items'));
-        return parts.length
+        // What goes, by name (the user, 2026-11-02), and never silent about a
+        // saved walk that goes (2026-11-01).
+        const gone = Array.isArray(source.removedNames) ? source.removedNames : [];
+        const removes = gone.length ? ' Removes ' + listedNames(gone, 24) + '.' : '';
+        const walks = Array.isArray(source.removedWalks) ? source.removedWalks : [];
+        const also = walks.length ? ' Also removes ' + listedNames(walks, walks.length) + '.' : '';
+        return (parts.length
             ? 'Changes: ' + parts.join(', ') + '.'
-            : 'No items, zones or aisles change.';
+            : 'No items, zones or aisles change.') + removes + also;
     }
 
     function proposalPlainCheckSummary(alternative) {
@@ -2831,6 +2918,8 @@
         this.lastLayoutFitFingerprint = null;
         this.lastProposalRepaintOnly = false;
         this.lastThreeFitFingerprint = null;
+        this.sageViewBack = null;     // the view, camera and roof layers before Sage moved the 3D view (Back)
+        this.sageGlide = null;        // Sage's glide while it runs
         this.commandStates = {};
         this.unsubscribe = null;
         // Listeners for anything that changes what the viewport represents.
@@ -10843,9 +10932,18 @@
             this.threeWalkthroughTitle,
             walkthroughKeys
         );
+        this.sageViewBackButton = element(this.document, 'button', {
+            type: 'button',
+            className: 'ip-flw-sage-view-back',
+            'data-sage-view': 'back',
+            title: 'Back to your view before Sage moved it',
+            'aria-label': 'Back to your view before Sage moved it',
+            hidden: true,
+        }, 'Back');
         append(this.threeView,
             this.threeNavigation,
             this.threeCompass,
+            this.sageViewBackButton,
             this._buildThreeSettingsPanel(),
             this.threeWalkthroughHud,
             this.threeDroneHud,
@@ -11516,6 +11614,11 @@
             'keydown',
             this._handleThreeNavigationKeyDown.bind(this)
         );
+        this._listen(this.sageViewBackButton, 'click', this._returnFromSageView.bind(this));
+        // The user takes the 3D view back: a press, a wheel turn or a key on it stops Sage's glide where it is.
+        ['pointerdown', 'wheel', 'keydown'].forEach(function (type) {
+            this._listen(this.threeView, type, this._interruptSageGlide.bind(this));
+        }, this);
         this._listen(
             this.threeSettingsPanel,
             'input',
@@ -14262,6 +14365,220 @@
         return shown;
     };
 
+    // ---- Sage moves the 3D view (docs/sage-basic-shapes-plan.md, SV3b) ------------------------------------------------
+    // "Show me Assembly Cell A06": Sage's show_facility_views frames the area on the server (sage_views.py, SV0), and
+    // its done step hands the main view here through the chat page. The view switches to 3D and glides there in the
+    // page, so a screen recording catches it: a gentle fly-over, about 100 degrees round the area while it comes down,
+    // settling on Sage's view (from the south and above when that side is clear). It stays there. The roof layer is
+    // off while the camera flies and stays off only when the view looks down through the roof. Back returns to the
+    // view, camera and roof layers from before Sage's first move since the last Back.
+    const SAGE_SWEEP_DEGREES = 100;
+    const SAGE_HIGH_DEGREES = 60;      // the fly-over starts this far above the area, at most
+    const SAGE_FARTHER = 0.8;          // and this much farther out than the view
+    const SAGE_CLIMB = 0.25;           // crossing the plant it climbs this share of the way, up to SAGE_CLIMB_MAX m,
+    const SAGE_CLIMB_MAX = 80;         // so it flies over the racks and walls between the two places
+
+    function sagePoint(value) {
+        if (!value || typeof value !== 'object') return null;
+        const point = { x: Number(value.x), y: Number(value.y), z: Number(value.z) };
+        return [point.x, point.y, point.z].every(Number.isFinite) ? point : null;
+    }
+
+    function sageCameraFrom(value) {
+        const camera = value && typeof value === 'object' ? value.camera : null;
+        const position = sagePoint(camera && camera.position);
+        const target = sagePoint(camera && camera.target);
+        const fov = Number(camera && camera.fov);
+        if (!position || !target || !(fov > 1 && fov < 179) || position.y <= target.y) return null;
+        return { position: position, target: target, fov: fov };
+    }
+
+    function easeInOut(u) {
+        return u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+    }
+
+    function smoothUpTo(edge, u) {
+        const t = Math.max(0, Math.min(1, u / edge));
+        return t * t * (3 - 2 * t);
+    }
+
+    function mix(a, b, w) {
+        return a + (b - a) * w;
+    }
+
+    function wrapDegrees(value) {
+        return ((value % 360) + 540) % 360 - 180;
+    }
+
+    // The flight from START (the 3D view's camera now) to END (Sage's view), as a camera at u from 0 to 1. A path round
+    // the area comes down from high and farther out, sweeping SAGE_SWEEP_DEGREES, and the camera eases from where it
+    // is onto that path in the first 40% of the flight, climbing on the way when the two places are far apart.
+    function sageFlight(start, end) {
+        const relative = { x: end.position.x - end.target.x, y: end.position.y - end.target.y,
+            z: end.position.z - end.target.z };
+        const distance = Math.hypot(relative.x, relative.y, relative.z);
+        const heading = Math.atan2(relative.x, relative.z) * 180 / Math.PI;   // 0 north (+z), 90 east (+x)
+        const elevation = Math.asin(relative.y / distance) * 180 / Math.PI;
+        const high = Math.max(elevation, SAGE_HIGH_DEGREES);
+        const from = start.target || end.target;
+        const startHeading = Math.atan2(start.position.x - end.target.x, start.position.z - end.target.z)
+            * 180 / Math.PI;
+        // Sweep in from the side nearer the camera now.
+        const side = Math.abs(wrapDegrees(startHeading - (heading - SAGE_SWEEP_DEGREES)))
+            <= Math.abs(wrapDegrees(startHeading - (heading + SAGE_SWEEP_DEGREES))) ? 1 : -1;
+        const startFov = Number.isFinite(Number(start.fov)) ? Number(start.fov) : end.fov;
+        const travel = Math.hypot(start.position.x - end.position.x, start.position.y - end.position.y,
+            start.position.z - end.position.z);
+        const climb = Math.min(SAGE_CLIMB_MAX, SAGE_CLIMB * Math.hypot(start.position.x - end.position.x,
+            start.position.z - end.position.z));
+        return {
+            side: side,
+            seconds: Math.min(6.5, 4.5 + travel / 100),          // 4.5 s close by, 6.5 s across the plant
+            at: function (u) {
+                const along = easeInOut(u);
+                const onto = smoothUpTo(0.4, u);
+                const a = (heading - side * SAGE_SWEEP_DEGREES * (1 - along)) * Math.PI / 180;
+                const e = mix(high, elevation, along) * Math.PI / 180;
+                const d = distance * (1 + SAGE_FARTHER * (1 - along));
+                const path = u >= 1 ? end.position : {
+                    x: end.target.x + d * Math.sin(a) * Math.cos(e), y: end.target.y + d * Math.sin(e),
+                    z: end.target.z + d * Math.cos(a) * Math.cos(e) };
+                return {
+                    position: { x: mix(start.position.x, path.x, onto),
+                        y: mix(start.position.y, path.y, onto) + (onto < 1 ? climb * Math.sin(Math.PI * onto) : 0),
+                        z: mix(start.position.z, path.z, onto) },
+                    target: { x: mix(from.x, end.target.x, onto), y: mix(from.y, end.target.y, onto),
+                        z: mix(from.z, end.target.z, onto) },
+                    quaternion: { x: 0, y: 0, z: 0, w: 1 },   // the orbit controls aim the camera at the target
+                    fov: mix(startFov, end.fov, onto),
+                };
+            },
+        };
+    }
+
+    Workspace.prototype.showSageView = async function (request) {
+        const value = request && typeof request === 'object' ? request : {};
+        const layout = this.state && this.state.layout;
+        const end = sageCameraFrom(value);
+        const adapter = this.threeAdapter;
+        if (this.destroyed || !layout || !end || !adapter
+                || typeof adapter.applyCameraView !== 'function' || typeof adapter.getCameraView !== 'function'
+                || value.layoutId !== layout.layoutId
+                || value.siteId !== (layout.association && layout.association.siteId)) {
+            return false;
+        }
+        this._stopSageGlide(false);
+        const before = { viewMode: this.viewMode, layoutId: layout.layoutId, threeFit: this.lastThreeFitFingerprint,
+            layers: { overhead: this.layerVisibility.overhead, roofSheeting: this.layerVisibility.roofSheeting } };
+        if (this.viewMode !== '3d') {
+            this.lastThreeFitFingerprint = this.lastLayoutFitFingerprint;   // the glide places the camera, not a fit
+            this._setViewMode('3d');
+            if (this.viewMode !== '3d') return false;
+        }
+        let start = adapter.getCameraView();
+        if ((!start || !sagePoint(start.position)) && this.controller && typeof this.controller.ready === 'function') {
+            await this.controller.ready();                                  // a 3D view opened for the first time
+            if (this.destroyed) return false;
+            start = adapter.getCameraView();
+        }
+        if (!start || !sagePoint(start.position)) return false;
+        if (!this.sageViewBack || this.sageViewBack.layoutId !== layout.layoutId) {
+            this.sageViewBack = Object.assign(before, { camera: start });
+        }
+        const roofHidden = value.roofHidden === true;
+        const own = this.sageViewBack.layers;
+        this._setSageRoof({ overhead: false, roofSheeting: false });
+        this._renderSageViewBack();
+        const landed = function () {
+            // The roof comes back unless the view looks down through it.
+            if (!roofHidden) this._setSageRoof(own);
+        }.bind(this);
+        const view = this.document && this.document.defaultView;
+        let still = false;
+        try {
+            still = Boolean(view && typeof view.matchMedia === 'function'
+                && view.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        } catch (_) { still = false; }
+        const flight = sageFlight(Object.assign({}, start, { target: sagePoint(start.target) }), end);
+        if (still || !view || typeof view.requestAnimationFrame !== 'function') {
+            adapter.applyCameraView(flight.at(1));
+            landed();
+            return true;
+        }
+        const glide = { began: null, frame: null, view: view, landed: landed };
+        const step = function (now) {
+            if (this.sageGlide !== glide || this.destroyed) return;
+            if (glide.began === null) glide.began = now;
+            const u = Math.min(1, (now - glide.began) / (flight.seconds * 1000));
+            adapter.applyCameraView(flight.at(u));
+            if (u < 1) {
+                glide.frame = view.requestAnimationFrame(step);
+            } else {
+                this.sageGlide = null;
+                landed();
+            }
+        }.bind(this);
+        this.sageGlide = glide;
+        glide.frame = view.requestAnimationFrame(step);
+        return true;
+    };
+
+    Workspace.prototype._setSageRoof = function (layers) {
+        this.layerVisibility = normalizeLayerVisibility(Object.assign({}, this.layerVisibility, {
+            overhead: layers.overhead !== false, roofSheeting: layers.roofSheeting === true }));
+        this._applyLayerVisibility();
+    };
+
+    // Stops a glide where it is; LAND (the default) still settles the roof as the glide would have.
+    Workspace.prototype._stopSageGlide = function (land) {
+        const glide = this.sageGlide;
+        if (!glide) return false;
+        this.sageGlide = null;
+        if (glide.frame !== null && typeof glide.view.cancelAnimationFrame === 'function') {
+            glide.view.cancelAnimationFrame(glide.frame);
+        }
+        if (land !== false && !this.destroyed) glide.landed();
+        return true;
+    };
+
+    Workspace.prototype._interruptSageGlide = function (event) {
+        const target = event && event.target;
+        if (target && typeof target.getAttribute === 'function' && target.getAttribute('data-sage-view') === 'back') {
+            return;                                                         // Back handles its own click
+        }
+        this._stopSageGlide();
+    };
+
+    Workspace.prototype._renderSageViewBack = function () {
+        const button = this.sageViewBackButton;
+        if (!button) return;
+        const layout = this.state && this.state.layout;
+        const back = this.sageViewBack;
+        button.hidden = !(back && layout && back.layoutId === layout.layoutId && this.viewMode === '3d');
+    };
+
+    Workspace.prototype._returnFromSageView = function (event) {
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+        const back = this.sageViewBack;
+        const layout = this.state && this.state.layout;
+        this._stopSageGlide(false);
+        this.sageViewBack = null;
+        if (!back || this.destroyed || !layout || back.layoutId !== layout.layoutId) {
+            this._renderSageViewBack();
+            return false;
+        }
+        this._setSageRoof(back.layers);
+        if (back.camera && this.threeAdapter) this.threeAdapter.applyCameraView(back.camera);
+        if (back.viewMode !== this.viewMode && VIEW_MODES.includes(back.viewMode)) {
+            this._setViewMode(back.viewMode);
+            // Back to Plan or Site: the next switch to 3D fits the layout again as it would have without Sage.
+            if (this.viewMode !== '3d') this.lastThreeFitFingerprint = back.threeFit;
+        }
+        this._renderSageViewBack();
+        return true;
+    };
+
     // The legend's Hide does what the Scenes pane's does; the pane's block follows.
     Workspace.prototype._handleLightCoverageLegendClick = function (event) {
         const target = event && event.target;
@@ -14777,6 +15094,7 @@
     };
 
     Workspace.prototype._renderThreeNavigationState = function () {
+        this._renderSageViewBack();
         const appearance = this.threeNavigation.querySelector('[data-three-command="appearance"]');
         if (appearance) appearance.disabled = !this._canEditAppearance();
         if (!this.threeNavigation) return;
@@ -18016,6 +18334,7 @@
         this.destroyed = true;
         this.lightAreaDraw = null;
         this._hideLightCoverage();
+        this._stopSageGlide(false);
         if (this.walkCameraControl) this.walkCameraControl.dispose();
         this.walkCameraControl = null;
         this.clearMotionPlayback('workspace_destroyed');
@@ -18148,6 +18467,7 @@
         zoneDimensions: zoneDimensions,
         buildAutoArrangeRequest: buildAutoArrangeRequest,
         buildLayoutProposalReview: buildLayoutProposalReview,
+        proposalPlainChangeSummary: proposalPlainChangeSummary,
         proposalDiagnosticSummary: proposalDiagnosticSummary,
         resizeFloorMarkingFromHandle: resizeFloorMarkingFromHandle,
     });

@@ -24,6 +24,7 @@
         'herringbone',
         'cluster',
     ]);
+    const SIDE_HEADINGS = Object.freeze({ north: 0, east: 90, south: 180, west: 270 });
 
     function clone(value) {
         if (value === undefined) return undefined;
@@ -159,12 +160,59 @@
         };
     }
 
-    function mirrorRotationDegrees(rotationDegrees, start, end) {
-        const direction = rotateVector({ x: 1, z: 0 }, rotationDegrees);
-        const reflected = mirrorVector(direction, start, end);
-        return normalizeDegrees(
-            Math.atan2(-reflected.z, reflected.x) * 180 / Math.PI
+    // The turn of a mirrored copy. A turn cannot mirror the model itself, so one
+    // of its sides is kept as the mirror image of the original's and the others
+    // follow: sideDegrees, a heading in the model's own axes (north 0, east 90;
+    // its east side when not given).
+    function mirrorRotationDegrees(rotationDegrees, start, end, sideDegrees) {
+        const side = finite(sideDegrees, 90);
+        const facing = rotateVector(
+            { x: 0, z: 1 },
+            finite(rotationDegrees, 0) + side
         );
+        const reflected = mirrorVector(facing, start, end);
+        return normalizeDegrees(
+            Math.atan2(reflected.x, reflected.z) * 180 / Math.PI - side
+        );
+    }
+
+    // The side a model works from, as a heading in its own axes: its reviewed
+    // operator side, else its reviewed front, else null. The catalog holds the
+    // reviewed sides in the layout's model space (facilitySemantics
+    // .functionalSides); the workspace keeps the catalog record as source.
+    function facingSideDegrees(record) {
+        const value = record && typeof record === 'object' ? record : {};
+        const semantics = value.facilitySemantics
+            || (value.source && value.source.facilitySemantics)
+            || {};
+        const sides = semantics.functionalSides || {};
+        const roles = ['operator', 'front'];
+        for (let index = 0; index < roles.length; index += 1) {
+            const entry = sides[roles[index]];
+            const side = entry && typeof entry === 'object' ? entry.side : entry;
+            if (typeof side === 'string'
+                    && Object.prototype.hasOwnProperty.call(SIDE_HEADINGS, side)) {
+                return SIDE_HEADINGS[side];
+            }
+        }
+        return null;
+    }
+
+    // The side a mirrored copy keeps as the mirror image of its original's: a
+    // placement's operator side, else its front, else its north side (+Z, the
+    // front of a model file); a marking or a zone, its east side, as before.
+    function mirrorSideDegrees(item) {
+        if (!item || item.kind !== 'placement') return 90;
+        return Number.isFinite(item.facingSideDegrees) ? item.facingSideDegrees : 0;
+    }
+
+    // The side a cell turns toward its centre (face-center) or away from it
+    // (face-outward): a placement's operator side, else its front, else its
+    // north side (+Z, the front of a model file); a marking, its north side,
+    // as before.
+    function cellFacingSideDegrees(item) {
+        if (!item || item.kind !== 'placement') return 0;
+        return Number.isFinite(item.facingSideDegrees) ? item.facingSideDegrees : 0;
     }
 
     function pointInPolygon(point, boundary) {
@@ -324,6 +372,7 @@
                     || (record.definition && record.definition.supportSurfaces)
                     || []
                 ),
+                facingSideDegrees: facingSideDegrees(record),
             };
         }
         if (kind === 'floor-marking') {
@@ -1097,7 +1146,8 @@
             const rotationDegrees = mirrorRotationDegrees(
                 item.rotationDegrees,
                 axis.start,
-                axis.end
+                axis.end,
+                mirrorSideDegrees(item)
             );
             const copy = {
                 sourceId: item.id,
@@ -1512,7 +1562,7 @@
                 rotation = tangentHeading({
                     x: -offset.x,
                     z: -offset.z,
-                });
+                }) - cellFacingSideDegrees(item);
                 if (orientation === 'face-outward') rotation += 180;
             }
             if (shape === 'herringbone') {
@@ -1564,6 +1614,8 @@
         mirrorPoint: mirrorPoint,
         mirrorVector: mirrorVector,
         mirrorRotationDegrees: mirrorRotationDegrees,
+        facingSideDegrees: facingSideDegrees,
+        cellFacingSideDegrees: cellFacingSideDegrees,
         buildLinearPattern: buildLinearPattern,
         buildCircularPattern: buildCircularPattern,
         buildVerticalStack: buildVerticalStack,

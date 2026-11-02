@@ -20,6 +20,11 @@ PLANNED_OPERATIONS = DIRECT_OPERATIONS | frozenset({
     "set_site_context", "upsert_site_area", "delete_site_area", "place_asset_array", "delete_asset_array",
     "delete_placement", "delete_zone", "delete_floor_marking", "delete_route", "upsert_interior_wall",
     "delete_interior_wall",
+    # The saved walks the package's own deletions strand: the same rules as those deletions (operations.py).
+    "delete_stranded_movements",
+    # A stack's or a surface's attachments (plan_facility_stack, the ribbon's Stack and On Surface): the server
+    # checks each stack and attachment like any placement.
+    "set_snap_relationship",
 })
 MAX_PLANNED_OPERATIONS = 1000
 

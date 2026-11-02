@@ -62,6 +62,12 @@ def test_steps_name_zones_items_and_changes_in_plain_words():
     mixed = [place, {"op": "move_placement"}, {"op": "set_ground"}]
     assert running("preview_facility_operations", {"operations": mixed}, "preview") \
         == "Staging 3 changes for your review"
+    # A planned package says "for your review" only in Preview First mode: Apply Directly saves it without one.
+    assert running("preview_planned_design", {"packageId": "cell-1"}, "preview") \
+        == "Staging the planned changes for your review"
+    assert running("preview_planned_design", {"packageId": "cell-1"}, "direct") == "Staging the planned changes"
+    assert describe("preview_planned_design", {"packageId": "cell-1"}, edit_mode="direct")["done"] \
+        == "Staged the planned changes"
 
 
 def test_steps_never_show_internal_ids_or_break_on_odd_arguments():

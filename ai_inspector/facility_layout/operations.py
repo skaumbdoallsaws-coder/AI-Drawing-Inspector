@@ -17,8 +17,10 @@ from .canonical import canonical_layout_bytes, canonicalize_layout, layout_revis
 from .diff import build_exact_layout_diff, facility_layout_diff_hash
 from .errors import FacilityValidationError
 from .navigation_contract import (
+    FACILITY_NAVIGATION_LIMITS,
     FacilityNavigationContractError,
     canonicalize_facility_navigation_extension,
+    navigation_anchor_dangles,
     navigation_identity_index,
     validate_navigation_writer_authority,
 )
@@ -2658,6 +2660,165 @@ def _op_set_facility_navigation(
     return sorted(next_ids - previous_ids), sorted(previous_ids | next_ids)
 
 
+def _op_delete_stranded_movements(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    """Remove the saved walks that deletions earlier in this batch strand, and the stops only those walks use.
+
+    A walk (movement program) is stranded when its walker, or the item one of its stops belongs to, is gone.
+    Narrow by design: every walk listed must be stranded, every stranded walk and every stop left without its item
+    must be listed, and a stop listed must have lost its item or be used by no walk that stays. Every other walk,
+    stop, drawn path and handoff stays exactly as it was; each removed walk's own drawn paths go with it. A handoff
+    between a walk that goes and one that stays refuses the batch: the walk that stays would change. Undo restores
+    the whole earlier revision, walks included.
+    """
+
+    unknown = sorted(set(operation) - {"op", "movementProgramIds", "navigationAnchorIds"})
+    if unknown:
+        _fail(
+            "invalid_operation_field",
+            "delete_stranded_movements contains unsupported fields.",
+            details={"unknownFields": unknown},
+        )
+
+    def listed_ids(field: str, prefix: str, minimum: int, limit: int) -> List[str]:
+        values = operation.get(field)
+        if not isinstance(values, list) or not minimum <= len(values) <= limit:
+            _fail("invalid_operation_field", f"{field} must list {minimum} to {limit} IDs.")
+        cleaned = [_clean_id(value, field, prefix) for value in values]
+        if len(set(cleaned)) != len(cleaned):
+            _fail("invalid_operation_field", f"{field} must not repeat an ID.")
+        return cleaned
+
+    removed = set(listed_ids(
+        "movementProgramIds", "nmp", 0, FACILITY_NAVIGATION_LIMITS["movementPrograms"]))
+    listed = set(listed_ids(
+        "navigationAnchorIds", "na", 0, FACILITY_NAVIGATION_LIMITS["anchors"]))
+    if not removed and not listed:  # a stop no walk uses can be left on a deleted item: then only stops are listed
+        _fail("invalid_operation_field", "List the saved walks or stops to remove.")
+    extensions = document.get("extensions")
+    navigation = extensions.get("facilityNavigation") if isinstance(extensions, dict) else None
+    if not isinstance(navigation, dict):
+        _fail("facility_navigation_removal_invalid", "This layout has no saved walks to remove.")
+    identities = navigation_identity_index(document)
+    anchors = {
+        str(item.get("navigationAnchorId")): item
+        for item in navigation.get("anchors") or []
+        if isinstance(item, Mapping)
+    }
+    programs = {
+        str(item.get("movementProgramId")): item
+        for item in navigation.get("movementPrograms") or []
+        if isinstance(item, Mapping)
+    }
+    missing = sorted((removed - set(programs)) | (listed - set(anchors)))
+    if missing:
+        _fail(
+            "facility_navigation_removal_invalid",
+            "These saved walks or stops do not exist.",
+            details={"unknownIds": missing},
+        )
+    gone = {
+        anchor_id for anchor_id, anchor in anchors.items()
+        if navigation_anchor_dangles(anchor, identities)
+    }
+
+    def stops(program: Mapping[str, Any]) -> set:
+        return {str(value) for value in program.get("requiredAnchorIds") or []} | {
+            str(stop.get("navigationAnchorId"))
+            for stop in program.get("orderedStops") or []
+            if isinstance(stop, Mapping)
+        }
+
+    stranded = {
+        program_id for program_id, program in programs.items()
+        if program.get("actorPlacementId") not in identities.placement_ids
+        or stops(program) & gone
+    }
+    if removed - stranded:
+        _fail(
+            "facility_navigation_removal_not_stranded",
+            "A saved walk can be removed here only when its walker or an item it stops at is deleted earlier "
+            "in the same change.",
+            details={"movementProgramIds": sorted(removed - stranded)},
+        )
+    if stranded - removed:
+        _fail(
+            "facility_navigation_removal_incomplete",
+            "Every saved walk whose walker or stop is deleted must be removed in the same change.",
+            details={"movementProgramIds": sorted(stranded - removed)},
+        )
+    in_use = set()
+    for program_id, program in programs.items():
+        if program_id not in removed:
+            in_use |= stops(program)
+    for item in navigation.get("manualPathConstraints") or []:
+        if isinstance(item, Mapping) and str(item.get("movementProgramId")) not in removed:
+            in_use |= {
+                str(snap.get("refId")) for snap in item.get("snapRefs") or []
+                if isinstance(snap, Mapping) and snap.get("refKind") == "navigation_anchor"
+            }
+    walked = set()
+    for program_id in removed:
+        walked |= stops(programs[program_id])
+    if listed & in_use:
+        _fail(
+            "facility_navigation_removal_in_use",
+            "A stop that a remaining saved walk or its drawn path uses stays.",
+            details={"navigationAnchorIds": sorted(listed & in_use)},
+        )
+    if listed - gone - walked:
+        _fail(
+            "facility_navigation_removal_not_stranded",
+            "Only a stop whose item is deleted, or one that only the removed walks use, can be removed here.",
+            details={"navigationAnchorIds": sorted(listed - gone - walked)},
+        )
+    if gone - listed:
+        _fail(
+            "facility_navigation_removal_incomplete",
+            "Every stop whose item is deleted must be removed in the same change.",
+            details={"navigationAnchorIds": sorted(gone - listed)},
+        )
+    handoffs = set()
+    for item in navigation.get("handoffPrograms") or []:
+        if not isinstance(item, Mapping):
+            continue
+        taking_part = {
+            str(item.get("sourceMovementProgramId")),
+            str(item.get("targetMovementProgramId")),
+        }
+        if taking_part & removed and taking_part - removed:
+            _fail(
+                "facility_navigation_removal_handoff",
+                "A saved walk that hands work to a walk that stays cannot be removed: the other walk would change.",
+                details={
+                    "handoffProgramId": item.get("handoffProgramId"),
+                    "movementProgramIds": sorted(taking_part),
+                },
+            )
+        if taking_part & removed:
+            handoffs.add(str(item.get("handoffProgramId")))
+    constraints = {
+        str(item.get("manualPathConstraintId"))
+        for item in navigation.get("manualPathConstraints") or []
+        if isinstance(item, Mapping) and str(item.get("movementProgramId")) in removed
+    }
+    for collection, field, ids in (
+        ("movementPrograms", "movementProgramId", removed),
+        ("anchors", "navigationAnchorId", listed),
+        ("handoffPrograms", "handoffProgramId", handoffs),
+        ("manualPathConstraints", "manualPathConstraintId", constraints),
+    ):
+        navigation[collection] = [
+            item for item in navigation.get(collection) or []
+            if not (isinstance(item, Mapping) and str(item.get(field)) in ids)
+        ]
+    return [], sorted(removed | listed | handoffs | constraints)
+
+
 def _op_clear_layout_contents(
     document: Dict[str, Any],
     _operation: Mapping[str, Any],
@@ -2764,6 +2925,7 @@ _HANDLERS: Dict[str, _Handler] = {
     "delete_decal": _op_edit_decal_row,
     "set_ground": _op_set_ground,
     "set_facility_navigation": _op_set_facility_navigation,
+    "delete_stranded_movements": _op_delete_stranded_movements,
     "clear_layout_contents": _op_clear_layout_contents,
 }
 
@@ -2918,7 +3080,10 @@ def apply_facility_layout_operations(
         )
 
     after = canonicalize_layout(after)
-    content_changed = canonical_layout_bytes(before) != canonical_layout_bytes(after)
+    # Worked out once and handed on: on Factory 02 each takes about half a second.
+    before_bytes = canonical_layout_bytes(before)
+    after_bytes: Optional[bytes] = canonical_layout_bytes(after)
+    content_changed = before_bytes != after_bytes
     if content_changed and updated_at is not None:
         if not isinstance(updated_at, str) or not updated_at:
             raise FacilityLayoutOperationError(
@@ -2927,9 +3092,14 @@ def apply_facility_layout_operations(
             )
         after["updatedAt"] = updated_at
         after = canonicalize_layout(after)
+        after_bytes = None  # a new document
 
     findings = _validation_findings(after)
-    canonical_diff = build_exact_layout_diff(before, after)
+    if after_bytes is None:
+        after_bytes = canonical_layout_bytes(after)
+    canonical_diff = build_exact_layout_diff(
+        before, after, known_bytes=(before_bytes, after_bytes)
+    )
     changed = bool(canonical_diff["changed"])
     diff_hash = facility_layout_diff_hash(
         layout_id=str(after.get("layoutId") or ""),
@@ -2937,6 +3107,7 @@ def apply_facility_layout_operations(
         operations=normalized_operations,
         after=after,
         canonical_diff=canonical_diff,
+        after_bytes=after_bytes,
     )
     return {
         "schemaVersion": 1,

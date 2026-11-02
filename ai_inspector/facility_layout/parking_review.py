@@ -50,13 +50,45 @@ def _near_floor(y, zone):
     return abs(float(y) - float(zone["floorElevation"])) <= .1
 
 
+def _once(cache, kind, item, build):
+    """build(item), once per item for one review (CACHE None: every time). The item is kept with it so its id is
+    not reused while the cache lives."""
+    if cache is None:
+        return build(item)
+    key = (kind, id(item))
+    if key not in cache:
+        cache[key] = (item, build(item))
+    return cache[key][1]
+
+
+def _apart(left, right):
+    """True when two shapes' envelopes are apart: then they share no area and no point."""
+    a, b = left.bounds, right.bounds
+    return a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1]
+
+
+def _may_cover(bounds, x, z):
+    """False when (x, z) is outside the envelope BOUNDS: a shape covers no point outside its envelope."""
+    return bounds[0] <= x <= bounds[2] and bounds[1] <= z <= bounds[3]
+
+
+def _overlap_area(shape, other):
+    """shape.intersection(other).area, without the intersection when the envelopes are apart."""
+    return 0.0 if _apart(shape, other) else shape.intersection(other).area
+
+
 def _is_bay(mark):
     # Any other role still counts: relabelling a bay must not take it out of the review.
     return mark.get("markingType") == "parking_box" and mark.get("semanticRole") != "staging"
 
 
-def _records(layout, zone):
-    area = _polygon(zone)
+def _route_polygon(route):
+    points = route.get("centerline", [])
+    return routing.LineString([(p["x"], p["z"]) for p in points]).buffer(route.get("corridorWidth", 0) / 2, cap_style=2)
+
+
+def _records(layout, zone, cache=None):
+    area = _once(cache, "zone", zone, _polygon)
     bays, lanes, walks = [], [], []
     for mark in layout.get("floorMarkings", []):
         if not _near_floor(mark["transform"]["position"]["y"], zone):
@@ -65,8 +97,8 @@ def _records(layout, zone):
         is_lane = mark["semanticRole"] == "forklift_lane" and mark["markingType"] == "keep_clear"
         if not (is_bay or is_lane):
             continue
-        shape = _mark_polygon(mark)
-        if shape.intersection(area).area > 1e-6:
+        shape = _once(cache, "mark", mark, _mark_polygon)
+        if _overlap_area(shape, area) > 1e-6:
             (bays if is_bay else lanes).append((mark["markingId"], shape))
     for route in layout.get("routes", []):
         points = route.get("centerline", [])
@@ -76,8 +108,8 @@ def _records(layout, zone):
         kind = route.get("routeKind")
         if kind not in {"forklift", "material", "operator"}:
             continue
-        shape = routing.LineString([(p["x"], p["z"]) for p in points]).buffer(width / 2, cap_style=2)
-        if shape.intersection(area).area > 1e-6:
+        shape = _once(cache, "route", route, _route_polygon)
+        if _overlap_area(shape, area) > 1e-6:
             (walks if kind == "operator" else lanes).append((route["routeId"], shape))
     return area, bays, lanes, walks
 
@@ -142,13 +174,18 @@ def review_parking(layout, zone_ids, requested_spaces=None):
     return result
 
 
-def _scope_snapshot(layout, zone, exempt=frozenset()):
+def _scope_snapshot(layout, zone, exempt=frozenset(), cache=None):
     from shapely.geometry import Point
-    area, bays, lanes, walks = _records(layout, zone)
+    area, bays, lanes, walks = _records(layout, zone, cache)
+    bounds = area.bounds
+
+    def covered(position):
+        x, z = position["x"], position["z"]
+        return _may_cover(bounds, x, z) and area.covers(Point(x, z))
     # Finishes do not change parking function; placement motion does.
     placements = [(p["placementId"], p["assetId"], p["assetDefinitionRevision"], p["transform"])
-        for p in layout.get("placements", []) if p["placementId"] not in exempt and area.covers(Point(
-            p["transform"]["position"]["x"], p["transform"]["position"]["z"]))
+        for p in layout.get("placements", []) if p["placementId"] not in exempt
+        and covered(p["transform"]["position"])
         and _near_floor(p["transform"]["position"]["y"], zone)]
     return (zone["label"], zone["boundary"], zone["floorElevation"],
             sorted((key, shape.wkb_hex) for key, shape in [*bays, *lanes, *walks]), sorted(placements))
@@ -168,6 +205,8 @@ def review_changed_parking(before, after, excuse=None):
         return {"reviewVersion": VERSION, "status": "not_checked", "certified": False,
                 "reason": "Parking review exceeded its geometry scope. Review selected zones separately."}
     parking_marks = [[mark for mark in d.get("floorMarkings", []) if _is_bay(mark)] for d in (before, after)]
+    # Each zone's and marking's polygon is built once for this review (Factory 02: 128 zones, ~240 parking marks).
+    cache = {}
     selected = []
     for zone in after.get("zones", []):
         named = bool(re.search(r"\bparking\b|\bcar\s*park\b", zone.get("label", ""), re.I))
@@ -175,13 +214,15 @@ def review_changed_parking(before, after, excuse=None):
         was_named = old and re.search(r"\bparking\b|\bcar\s*park\b", old.get("label", ""), re.I)
         if not (named or was_named) and not any(
                 candidate and _near_floor(mark["transform"]["position"]["y"], candidate)
-                and _polygon(candidate).intersection(_mark_polygon(mark)).area > 1e-6
+                and _overlap_area(_once(cache, "zone", candidate, _polygon),
+                                  _once(cache, "mark", mark, _mark_polygon)) > 1e-6
                 for candidate, marks in zip((old, zone), parking_marks) for mark in marks):
             continue
-        if old is None or _scope_snapshot(before, old) != _scope_snapshot(after, zone):
+        if old is None or _scope_snapshot(before, old, cache=cache) != _scope_snapshot(after, zone, cache=cache):
             selected.append((zone, old))
     excused = excuse([zone for zone, _ in selected]) if selected and excuse else None
     if excused:
         selected = [(zone, old) for zone, old in selected
-                    if old is None or _scope_snapshot(before, old, excused) != _scope_snapshot(after, zone, excused)]
+                    if old is None or _scope_snapshot(before, old, excused, cache)
+                    != _scope_snapshot(after, zone, excused, cache)]
     return review_parking(after, [zone["zoneId"] for zone, _ in selected]) if selected else None

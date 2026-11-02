@@ -1046,12 +1046,8 @@ def _evidence_context(
     )
 
 
-def _point_in_polygon(
-    x: float,
-    z: float,
-    boundary: Sequence[Mapping[str, Any]],
-) -> bool:
-    points = [
+def _boundary_points(boundary: Sequence[Mapping[str, Any]]) -> list[tuple[float, float]]:
+    return [
         (float(item["x"]), float(item["z"]))
         for item in boundary
         if isinstance(item, Mapping)
@@ -1062,6 +1058,79 @@ def _point_in_polygon(
         and math.isfinite(float(item["x"]))
         and math.isfinite(float(item["z"]))
     ]
+
+
+def _point_in_polygon(
+    x: float,
+    z: float,
+    boundary: Sequence[Mapping[str, Any]],
+) -> bool:
+    return _point_in_points(x, z, _boundary_points(boundary))
+
+
+# A point further than this outside a boundary's envelope is outside it for _point_in_points
+# (the margin covers rounding in the crossing test; the test has no edge tolerance).
+_ENVELOPE_MARGIN = 1.0e-6
+
+# (zone id, boundary points, envelope widened by _ENVELOPE_MARGIN) per zone, in zone order.
+_ZoneIndex = list[tuple[str, list[tuple[float, float]], tuple[float, float, float, float]]]
+
+
+def _zone_point_index(zones: Sequence[Any]) -> _ZoneIndex | None:
+    """Each zone's boundary read once, as _point_in_polygon reads it, leaving out zones of under
+    3 points (they hold no point). None when a zone cannot be read that way (not an object, no
+    zoneId, a boundary that is not a list, points that cannot be read): then each placement scans
+    the zones, meeting any error as before."""
+    index = []
+    for zone in zones:
+        if not isinstance(zone, Mapping) or "zoneId" not in zone:
+            return None
+        boundary = zone.get("boundary", [])
+        if not isinstance(boundary, (list, tuple)):
+            return None
+        try:
+            points = _boundary_points(boundary)
+        except (ArithmeticError, LookupError, TypeError, ValueError):
+            return None
+        if len(points) < 3:
+            continue
+        index.append((str(zone["zoneId"]), points, (
+            min(point[0] for point in points) - _ENVELOPE_MARGIN,
+            min(point[1] for point in points) - _ENVELOPE_MARGIN,
+            max(point[0] for point in points) + _ENVELOPE_MARGIN,
+            max(point[1] for point in points) + _ENVELOPE_MARGIN,
+        )))
+    return index
+
+
+def _zones_at(
+    x: float,
+    z: float,
+    zones: Sequence[Any],
+    zone_index: _ZoneIndex | None,
+) -> list[str]:
+    """The ids of the zones whose boundary holds (x, z), in zone order: through ZONE_INDEX
+    (_zone_point_index(zones)), or by reading each zone's boundary when it is None."""
+    if zone_index is None:
+        return [
+            str(zone["zoneId"])
+            for zone in zones
+            if _point_in_polygon(x, z, zone.get("boundary", []))
+        ]
+    return [
+        zone_id
+        for zone_id, points, envelope in zone_index
+        if envelope[0] <= x <= envelope[2]
+        and envelope[1] <= z <= envelope[3]
+        and _point_in_points(x, z, points)
+    ]
+
+
+def _point_in_points(
+    x: float,
+    z: float,
+    points: Sequence[tuple[float, float]],
+) -> bool:
     if len(points) < 3:
         return False
     inside = False
@@ -1545,6 +1614,7 @@ def build_facility_layout_observation(
         ],
         key=lambda item: str(item.get("zoneId")),
     )
+    zone_index = _zone_point_index(zones)  # each boundary read once for the placements below
     placements = []
     stale_dependencies = []
     for raw in sorted(
@@ -1584,11 +1654,7 @@ def build_facility_layout_observation(
         try:
             x = float(point["x"])
             z = float(point["z"])
-            zone_ids = [
-                str(zone["zoneId"])
-                for zone in zones
-                if _point_in_polygon(x, z, zone.get("boundary", []))
-            ]
+            zone_ids = _zones_at(x, z, zones, zone_index)
         except (KeyError, TypeError, ValueError):
             pass
         physical_geometry = []

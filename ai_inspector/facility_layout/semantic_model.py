@@ -1630,6 +1630,128 @@ def _placement_center_in_polygon(
         return False
 
 
+# A point outside a boundary's envelope by more than this is outside it for point_in_polygon, whose edge
+# tolerance is GEOMETRY_EPSILON (the margin also covers rounding in its crossing test).
+_ENVELOPE_MARGIN = 1.0e-6
+
+
+def _shape_bounds(shape: BaseGeometry | None) -> tuple[float, float, float, float] | None:
+    """A shape's envelope (min x, min z, max x, max z); None when unknown (no shape, empty, not finite)."""
+    if shape is None:
+        return None
+    try:
+        bounds = tuple(float(value) for value in shape.bounds)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if len(bounds) != 4 or not all(math.isfinite(value) for value in bounds):
+        return None
+    return bounds
+
+
+def _bounds_may_meet(
+    left: tuple[float, float, float, float] | None,
+    right: tuple[float, float, float, float] | None,
+) -> bool:
+    """False only when two known envelopes are apart, so their shapes cannot intersect (touching is meeting)."""
+    if left is None or right is None:
+        return True
+    return not (
+        left[2] < right[0]
+        or right[2] < left[0]
+        or left[3] < right[1]
+        or right[3] < left[1]
+    )
+
+
+def _boundary_bounds(
+    boundary: Sequence[tuple[float, float]],
+) -> tuple[float, float, float, float] | None:
+    """A boundary's envelope widened by _ENVELOPE_MARGIN; None when unknown."""
+    try:
+        xs = [float(point[0]) for point in boundary]
+        zs = [float(point[1]) for point in boundary]
+    except (IndexError, KeyError, TypeError, ValueError):
+        return None
+    if not xs or not all(math.isfinite(value) for value in (*xs, *zs)):
+        return None
+    return (
+        min(xs) - _ENVELOPE_MARGIN,
+        min(zs) - _ENVELOPE_MARGIN,
+        max(xs) + _ENVELOPE_MARGIN,
+        max(zs) + _ENVELOPE_MARGIN,
+    )
+
+
+def _point_may_be_inside(
+    point: tuple[float, float] | None,
+    bounds: tuple[float, float, float, float] | None,
+) -> bool:
+    """False only when a known point is outside a known widened envelope (a NaN point stays possible)."""
+    if point is None or bounds is None:
+        return True
+    return not (
+        point[0] < bounds[0]
+        or point[0] > bounds[2]
+        or point[1] < bounds[1]
+        or point[1] > bounds[3]
+    )
+
+
+def _cached_scope_shape(
+    cache: dict[Any, Any] | None,
+    kind: str,
+    item: Mapping[str, Any],
+    build: Any,
+) -> tuple[BaseGeometry | None, tuple[float, float, float, float] | None]:
+    """build(item) and its envelope, once per item for one semantic-map build (nothing changes the items meanwhile)."""
+    key = (kind, id(item))
+    if cache is not None and key in cache:
+        return cache[key][1]
+    shape = build(item)
+    value = (shape, _shape_bounds(shape))
+    if cache is not None:
+        cache[key] = (item, value)  # holding the item keeps its id from being reused while the cache lives
+    return value
+
+
+def _placement_scope_facts(
+    record: Mapping[str, Any],
+    cache: dict[Any, Any] | None,
+) -> dict[str, Any]:
+    """What a scope's placement filter reads of a geometry-index record, once per semantic-map build: its zone ids,
+    the envelope of its physical shapes (None when unknown or when it has none) and its centre (None when unreadable,
+    which _placement_center_in_polygon reads as outside)."""
+    key = ("placement", id(record))
+    if cache is not None and key in cache:
+        return cache[key][1]
+    placement = record["placement"]
+    transform = placement.get("transform")
+    transform = transform if isinstance(transform, Mapping) else {}
+    position = transform.get("position")
+    position = position if isinstance(position, Mapping) else {}
+    try:
+        center = (float(position["x"]), float(position["z"]))
+    except (KeyError, TypeError, ValueError):
+        center = None
+    envelopes = [_shape_bounds(shape) for shape in record["allPhysical"]]
+    bounds = None
+    if envelopes and all(item is not None for item in envelopes):
+        bounds = (
+            min(item[0] for item in envelopes),
+            min(item[1] for item in envelopes),
+            max(item[2] for item in envelopes),
+            max(item[3] for item in envelopes),
+        )
+    facts = {
+        "zoneIds": frozenset(str(item) for item in placement.get("zoneIds", []) or []),
+        "bounds": bounds,
+        "center": center,
+    }
+    if cache is not None:
+        cache[key] = (record, facts)
+    return facts
+
+
 def _spatial_geometry_index(
     placements: Sequence[Mapping[str, Any]],
     *,
@@ -2076,7 +2198,10 @@ def _scope_spatial_metrics(
     policy: Mapping[str, Any],
     cell_envelopes: Sequence[tuple[str, BaseGeometry]] = (),
     include_all_placements: bool = False,
+    shape_cache: dict[Any, Any] | None = None,
 ) -> dict[str, Any]:
+    """shape_cache: one dict for all the scopes of one semantic-map build, which then works out each marking's,
+    route's and placement's geometry once instead of once per scope (_cached_scope_shape)."""
     if scope_shape is None:
         return {
             "geometryEngineAvailable": _GEOMETRY_ENGINE_AVAILABLE,
@@ -2084,21 +2209,27 @@ def _scope_spatial_metrics(
             "blockers": [_blocker("scope_polygon_invalid", [scope_id])],
         }
 
+    # Envelopes only skip exact tests that would be False.
+    scope_bounds = _shape_bounds(scope_shape)
+    boundary_bounds = _boundary_bounds(boundary)
     relevant = []
     for record in geometry_index:
         placement = record["placement"]
-        intersects = any(
-            shape.intersects(scope_shape)
-            for shape in record["allPhysical"]
-        )
+        facts = _placement_scope_facts(record, shape_cache)
         if (
             include_all_placements
-            or
-            intersects
-            or scope_id in {
-                str(item) for item in placement.get("zoneIds", []) or []
-            }
-            or _placement_center_in_polygon(placement, boundary)
+            or scope_id in facts["zoneIds"]
+            or (
+                _bounds_may_meet(facts["bounds"], scope_bounds)
+                and any(
+                    shape.intersects(scope_shape)
+                    for shape in record["allPhysical"]
+                )
+            )
+            or (
+                _point_may_be_inside(facts["center"], boundary_bounds)
+                and _placement_center_in_polygon(placement, boundary)
+            )
         ):
             relevant.append(record)
 
@@ -2201,7 +2332,9 @@ def _scope_spatial_metrics(
             if include_all_placements:
                 incomplete_route_geometry.append(route_id)
             continue
-        shape = _route_corridor_shape(route)
+        shape, shape_bounds = _cached_scope_shape(
+            shape_cache, "route", route, _route_corridor_shape
+        )
         if shape is None:
             if include_all_placements or _line_intersects_polygon(
                 line,
@@ -2209,7 +2342,10 @@ def _scope_spatial_metrics(
             ):
                 incomplete_route_geometry.append(route_id)
             continue
-        if not shape.intersects(scope_shape):
+        if not (
+            _bounds_may_meet(shape_bounds, scope_bounds)
+            and shape.intersects(scope_shape)
+        ):
             continue
         clipped = shape.intersection(scope_shape)
         if clipped.is_empty:
@@ -2238,7 +2374,9 @@ def _scope_spatial_metrics(
     for marking in markings:
         if str(marking.get("semanticRole") or "") not in reservation_roles:
             continue
-        shape = _oriented_rectangle_shape(marking)
+        shape, shape_bounds = _cached_scope_shape(
+            shape_cache, "marking", marking, _oriented_rectangle_shape
+        )
         marking_id = str(marking.get("markingId") or "")
         if shape is None:
             transform = marking.get("transform")
@@ -2255,7 +2393,10 @@ def _scope_spatial_metrics(
             if include_all_placements or center_inside:
                 incomplete_marking_geometry.append(marking_id)
             continue
-        if shape.intersects(scope_shape):
+        if (
+            _bounds_may_meet(shape_bounds, scope_bounds)
+            and shape.intersects(scope_shape)
+        ):
             marking_shapes.append(shape.intersection(scope_shape))
             if marking.get("evidenceAuthoritative") is not True:
                 unauthoritative_markings.append(marking_id)
@@ -2981,6 +3122,8 @@ def build_facility_semantic_map(state: Mapping[str, Any]) -> dict[str, Any]:
         for zone_id in route["connectedZoneIds"]:
             route_ids_by_zone.setdefault(zone_id, []).append(route["routeId"])
 
+    # Shared by every scope's spatial metrics in this build (Factory 02 has 129 scopes).
+    shape_cache: dict[Any, Any] = {}
     semantic_zones = []
     for source_order, zone in enumerate(zones):
         zone_id = str(zone["zoneId"])
@@ -3005,6 +3148,7 @@ def build_facility_semantic_map(state: Mapping[str, Any]) -> dict[str, Any]:
             shell=shell,
             policy=policy,
             cell_envelopes=cell_envelopes,
+            shape_cache=shape_cache,
         )
         physical_contact = spatial_metrics.get("physicalFloorContact")
         physical_contact = (
@@ -3087,6 +3231,7 @@ def build_facility_semantic_map(state: Mapping[str, Any]) -> dict[str, Any]:
         geometry_index=geometry_index,
         source_routes=source_routes,
         cell_envelopes=cell_envelopes,
+        shape_cache=shape_cache,
         shell=shell,
         policy=policy,
         identity=(
@@ -6597,15 +6742,20 @@ def analyze_facility_asset_access(
     use_selection: bool = False,
     maximum_results: int = 20,
     shell_obstacles: Sequence[Any] = (),
+    semantic: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Measure an authored asset side without inventing side requirements."""
+    """Measure an authored asset side without inventing side requirements.
+
+    semantic: build_facility_semantic_map(state) when the caller has built it already (read only here).
+    """
 
     role = _normalized_interface_role(interface_role)
     aliases = _ASSET_ACCESS_ROLE_ALIASES.get(role)
     if aliases is None:
         raise ValueError("interfaceRole is unsupported")
     maximum = max(1, min(int(maximum_results), 50))
-    semantic = build_facility_semantic_map(state)
+    if semantic is None:
+        semantic = build_facility_semantic_map(state)
     semantic_placements = {
         str(item.get("placementId")): item
         for item in semantic.get("placements", [])
@@ -7476,6 +7626,7 @@ def _complete_facility_semantic_map(
     shell: Mapping[str, Any],
     policy: Mapping[str, Any],
     identity: Mapping[str, Any],
+    shape_cache: dict[Any, Any] | None = None,
     facility_bounds: tuple[float, float, float, float] | None,
     semantic_zones: list[dict[str, Any]],
     routes: list[dict[str, Any]],
@@ -7644,6 +7795,7 @@ def _complete_facility_semantic_map(
             policy=policy,
             cell_envelopes=cell_envelopes,
             include_all_placements=True,
+            shape_cache=shape_cache,
         )
     else:
         facility_spatial_metrics = {

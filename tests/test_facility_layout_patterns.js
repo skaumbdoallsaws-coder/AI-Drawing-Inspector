@@ -515,13 +515,66 @@ check('mirror reflects a placement and its orientation across a grid axis', () =
     assert.strictEqual(result.copies.length, 1);
     near(result.copies[0].position.x, 8);
     near(result.copies[0].position.z, 2);
-    near(result.copies[0].rotationDegrees, 180);
+    // No reviewed side: its north side (+Z, a model file's front) is kept as the
+    // mirror image, so across a north-south line the copy does not turn.
+    near(result.copies[0].rotationDegrees, 0);
     assert.strictEqual(result.copies[0].mirrored, true);
     assert.deepStrictEqual(result.guide, {
         kind: 'mirror',
         start: { x: 5, z: 0 },
         end: { x: 5, z: 10 },
     });
+});
+
+check('mirror keeps a machine\'s operator side, else its front, else its north side', () => {
+    // A turn cannot mirror a model, so the copy turns to keep that side as the
+    // mirror image of the original's.
+    const data = fixture();
+    const index = data.catalog.findIndex(item => item.assetId === 'asset-mill');
+    const record = data.catalog[index];
+    const mill = data.layout.placements.find(item => item.placementId === 'mill');
+    mill.transform.quaternion = { x: 0, y: -Math.SQRT1_2, z: 0, w: Math.SQRT1_2 };
+    const northSouth = { axisStart: { x: 5, z: 0 }, axisEnd: { x: 5, z: 10 } };
+    const eastWest = { axisStart: { x: 0, z: 5 }, axisEnd: { x: 10, z: 5 } };
+    function mirrored(axis) {
+        const seed = patterns.collectSelection(
+            data.layout,
+            data.catalog,
+            ['mill'],
+            { includeZones: false }
+        );
+        return [seed[0].facingSideDegrees, patterns.buildMirror(seed, axis).copies[0]];
+    }
+    // Operator side south: turned 270 it faces east, and its mirror image across
+    // a north-south line faces west (the old turn left it facing east). Across an
+    // east-west line it still faces east.
+    record.facilitySemantics = { functionalSides: {
+        front: { side: 'north' },
+        operator: { side: 'south', evidenceStatus: 'inferred' },
+    } };
+    assert.strictEqual(mirrored(northSouth)[0], 180);
+    near(mirrored(northSouth)[1].rotationDegrees, 90);
+    near(mirrored(eastWest)[1].rotationDegrees, 270);
+    // No operator side: the front. Front west, turned 270, faces south, and
+    // stays south across a north-south line.
+    record.facilitySemantics = { functionalSides: { front: { side: 'west' } } };
+    assert.strictEqual(mirrored(northSouth)[0], 270);
+    near(mirrored(northSouth)[1].rotationDegrees, 270);
+    // The workspace's catalog keeps the catalog record as source.
+    data.catalog[index] = {
+        assetId: record.assetId,
+        assetDefinitionRevision: record.assetDefinitionRevision,
+        width: record.width,
+        depth: record.depth,
+        height: record.height,
+        source: { facilitySemantics: record.facilitySemantics },
+    };
+    assert.strictEqual(mirrored(northSouth)[0], 270);
+    near(mirrored(northSouth)[1].rotationDegrees, 270);
+    // No reviewed side: the north side. Turned 270 it faces west; mirrored, east.
+    data.catalog[index].source = {};
+    assert.strictEqual(mirrored(northSouth)[0], null);
+    near(mirrored(northSouth)[1].rotationDegrees, 90);
 });
 
 check('mirror copies a complete mixed cell across a construction line', () => {
@@ -542,8 +595,12 @@ check('mirror copies a complete mixed cell across a construction line', () => {
     const zone = result.copies.find(copy => copy.sourceId === 'zone-cell');
     near(mill.position.x, 2);
     near(mill.position.z, 2);
+    // Its north side, mirrored across a line at 45 degrees, faces east.
+    near(mill.rotationDegrees, 90);
     near(marking.position.x, 3);
     near(marking.position.z, 3);
+    // A marking keeps its east side as the mirror image, as before.
+    near(marking.rotationDegrees, 270);
     assert.strictEqual(zone.boundary.length, 4);
     near(zone.boundary[0].x, 6);
     near(zone.boundary[0].z, 0);
@@ -609,6 +666,50 @@ check('U-cell layout arranges heterogeneous equipment on three sides', () => {
         );
     });
     assert.ok(result.moves.every(move => Number.isFinite(move.rotationDegrees)));
+});
+
+check('cell face center turns the side a machine works from to the centre', () => {
+    // The user's circle of mills (2026-11-01): face center turned each model's
+    // +Z to the centre, so a mill working from its south side faced out.
+    const data = fixture();
+    const record = data.catalog.find(item => item.assetId === 'asset-mill');
+    function apart(first, second) {
+        return Math.abs((((first - second) % 360) + 540) % 360 - 180);
+    }
+    function mill(orientation) {
+        const seed = patterns.collectSelection(
+            data.layout,
+            data.catalog,
+            ['mill', 'bench', 'rack'],
+            { includeZones: false }
+        );
+        const result = patterns.buildCellLayout(seed, {
+            shape: 'loop', width: 10, depth: 8, gap: 1, orientation: orientation,
+        });
+        const move = result.moves[seed.findIndex(item => item.id === 'mill')];
+        const center = result.guide.center;
+        const toward = Math.atan2(
+            center.x - move.position.x,
+            center.z - move.position.z
+        ) * 180 / Math.PI;
+        return { rotation: move.rotationDegrees, toward: toward };
+    }
+    // Turned R, a side at heading h in the model's own axes faces R + h.
+    record.facilitySemantics = { functionalSides: {
+        front: { side: 'north' },
+        operator: { side: 'south', evidenceStatus: 'inferred' },
+    } };
+    let turned = mill('face-center');
+    assert.ok(apart(turned.rotation + 180, turned.toward) < 1e-6);
+    turned = mill('face-outward');
+    assert.ok(apart(turned.rotation + 180, turned.toward + 180) < 1e-6);
+    record.facilitySemantics = { functionalSides: { front: { side: 'west' } } };
+    turned = mill('face-center');
+    assert.ok(apart(turned.rotation + 270, turned.toward) < 1e-6);
+    delete record.facilitySemantics;
+    turned = mill('face-center');
+    assert.ok(apart(turned.rotation, turned.toward) < 1e-6);
+    near(patterns.cellFacingSideDegrees({ kind: 'floor-marking', facingSideDegrees: 90 }), 0);
 });
 
 check('U-cell opening can be inverted without changing its center or footprint', () => {

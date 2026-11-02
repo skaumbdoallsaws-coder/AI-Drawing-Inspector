@@ -98,25 +98,26 @@ def test_place_asset_cannot_bypass_proof_with_inline_materials(gym, copied_visua
     assert gym.current() == before
 
 
-@pytest.mark.parametrize("phase", ["create", "preview", "apply", "commit_replay"])
+@pytest.mark.parametrize("phase", ["create", "preview", "apply", "commit_recheck"])
 def test_changed_real_visual_rejected_before_saved_mutation(gym, copied_visual, request, monkeypatch, phase):
     before = gym.current()
     op = operation(gym, request)
     if phase != "create":
         proposal = propose(gym, op)
-    if phase in {"apply", "commit_replay"}:
+    if phase in {"apply", "commit_recheck"}:
         approval = gym.approval(proposal, "changed-visual-" + phase)
         assert approval.status_code == 200
-    if phase == "commit_replay":
-        prepare = gym.host.service._prepare_operations
+    if phase == "commit_recheck":
+        # The visual changes after the apply's rebuild has passed its checks, just before the commit: the commit
+        # checks the components again itself (it no longer replays the operations) and must refuse.
+        regenerate = gym.host.service._regenerate_proposal
         calls = []
-        def change_after_commit_replay(*args, **kwargs):
-            result = prepare(*args, **kwargs)
+        def change_after_regenerate(*args, **kwargs):
+            result = regenerate(*args, **kwargs)
             calls.append(True)
-            if len(calls) == 2:
-                change_visual(copied_visual)
+            change_visual(copied_visual)
             return result
-        monkeypatch.setattr(gym.host.service, "_prepare_operations", change_after_commit_replay)
+        monkeypatch.setattr(gym.host.service, "_regenerate_proposal", change_after_regenerate)
     else:
         change_visual(copied_visual)
     with pytest.raises(FacilityLayoutError) as error:
@@ -130,8 +131,8 @@ def test_changed_real_visual_rejected_before_saved_mutation(gym, copied_visual, 
                 approval.json()["approvalToken"], proposal["alternative"]["transactionBinding"],
                 session_id="authoring-test-approver", idempotency_key="changed-visual-" + phase)
     assert error.value.code == "component_visual_revision_conflict"
-    if phase == "commit_replay":
-        assert len(calls) == 2
+    if phase == "commit_recheck":
+        assert len(calls) == 1
     assert gym.current() == before
 
 

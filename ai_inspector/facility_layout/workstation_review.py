@@ -27,7 +27,8 @@ def tool_spec():
     return {"name": "review_facility_workstations", "description":
         "Second-pass functional review of the saved layout: actual footprint gaps, authored working/service "
         "sides, operator assignments and route evidence. Run before arranging workstations and after changes. "
-        "Supply processZoneIds in the user's intended process order to check each material-flow leg. "
+        "Supply processZoneIds (two or more zones) in the user's intended process order to check each "
+        "material-flow leg between them; for one zone use zoneIds. "
         "Missing evidence is not a clearance failure or permission to invent machine sides. Paginate all results.",
         "input_schema": {"type": "object", "additionalProperties": False, "properties": {
             "zoneIds": deepcopy(ids), "placementIds": deepcopy(ids),
@@ -101,8 +102,9 @@ def review_workstations(state, arguments=None, *, shell_obstacles=()):
     for role in ("operator", "service", "material_input", "material_output"):
         scoped = [p for p in selected if role in _required_roles(semantics[p])]
         if scoped:
+            # The map is built once per review: on Factory 02 each build takes seconds.
             analyzed = analyze_facility_asset_access(state, interface_role=role,
-                scope_ids=scoped, maximum_results=50, shell_obstacles=shell_obstacles)
+                scope_ids=scoped, maximum_results=50, shell_obstacles=shell_obstacles, semantic=semantic)
             access[role] = {p["placementId"]: p for p in analyzed["records"]}
     shapes = {key: _shape(p) for key, p in placements.items()}
     operators = {key: p for key, p in placements.items()
@@ -111,7 +113,8 @@ def review_workstations(state, arguments=None, *, shell_obstacles=()):
                   if operator.get("metadata", {}).get("machinePlacementId") in selected]
     operator_faces = {}
     if associated:
-        faces = analyze_facility_asset_access(state, interface_role="front", scope_ids=associated, maximum_results=50)
+        faces = analyze_facility_asset_access(state, interface_role="front", scope_ids=associated, maximum_results=50,
+                                              semantic=semantic)
         operator_faces = {p["placementId"]: p for p in faces["records"]}
     for operator_id, operator in operators.items():
         assigned = operator.get("metadata", {}).get("machinePlacementId")
@@ -190,8 +193,14 @@ def review_workstations(state, arguments=None, *, shell_obstacles=()):
                         evidence="derived")
         result["processFlow"]["status"] = "topology_checked_only"
     elif candidates:
+        # One zone has no legs between zones, and processZoneIds needs two or more: asking for them here sent Sage into
+        # a call the schema refuses ("malformed request", 2026-11-01).
+        action = ("Inspect each machine's loading/handoff connection inside the zone; processZoneIds checks the legs "
+                  "between two or more zones." if len(zone_ids) == 1 else
+                  "Call this review with processZoneIds in the intended order, then inspect each machine's "
+                  "loading/handoff connection.")
         finding("process_sequence_unverified", "The intended station-to-station material sequence has not been reviewed.", [],
-                "Call this review with processZoneIds in the intended order, then inspect each machine's loading/handoff connection.")
+                action)
     result["findingCounts"] = dict(Counter(f["code"] for f in findings))
     result["status"] = "needs_review" if findings else "no_issues_detected_in_checked_scope" if selected else "no_workstations_in_scope"
     if result["nextOffset"] is not None:

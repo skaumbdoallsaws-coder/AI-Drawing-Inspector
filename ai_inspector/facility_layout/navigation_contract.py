@@ -411,6 +411,23 @@ def _derived_position_ref(value: Any, path: str, identities: NavigationIdentityI
         )
 
 
+def navigation_anchor_dangles(anchor: Mapping[str, Any], identities: NavigationIdentityIndex) -> bool:
+    """True when an anchor names something the layout no longer has: its owner, or the source of its derived
+    position (a deleted placement, marking, route, zone anchor or process binding). The same lookups the
+    contract's own validation makes."""
+    for key, check in (("ownerRef", _owner_ref), ("derivedPositionRef", _derived_position_ref)):
+        value = anchor.get(key) if isinstance(anchor, Mapping) else None
+        if value is None:
+            continue
+        try:
+            check(value, f"$.{key}", identities)
+        except FacilityNavigationContractError as error:
+            if error.code == "facility_navigation_dangling_identity":
+                return True
+            raise
+    return False
+
+
 def navigation_identity_index(layout: Mapping[str, Any]) -> NavigationIdentityIndex:
     zone_anchor_ids = set()
     for zone in layout.get("zones", []):
@@ -1986,6 +2003,7 @@ __all__ = [
     "canonical_facility_navigation_extension_bytes",
     "canonicalize_facility_navigation_extension",
     "facility_navigation_extension_revision",
+    "navigation_anchor_dangles",
     "navigation_field_mapping_matrix",
     "navigation_contract_manifest",
     "navigation_identity_index",

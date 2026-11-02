@@ -2356,7 +2356,8 @@ class FacilityLayoutService:
     def _layout_content_fingerprint(
         document: Mapping[str, Any],
     ) -> str:
-        candidate = deepcopy(dict(document))
+        # canonical_layout_bytes works on a detached copy, so a shallow one is enough here.
+        candidate = dict(document)
         # Repository-owned timestamps change during an approved save and are
         # not part of the user-approved spatial content.
         candidate["createdAt"] = "__repository_timestamp__"
@@ -2367,11 +2368,7 @@ class FacilityLayoutService:
     def _collection_receipt_summary(
         values: Any,
     ) -> dict[str, Any]:
-        items = (
-            deepcopy(list(values))
-            if isinstance(values, list)
-            else []
-        )
+        items = list(values) if isinstance(values, list) else []  # only hashed
         return {
             "count": len(items),
             "sha256": hashlib.sha256(
@@ -2384,11 +2381,7 @@ class FacilityLayoutService:
         cls,
         diagnostics: Any,
     ) -> dict[str, Any]:
-        value = (
-            deepcopy(dict(diagnostics))
-            if isinstance(diagnostics, Mapping)
-            else {}
-        )
+        value = dict(diagnostics) if isinstance(diagnostics, Mapping) else {}  # hashed; parts copied below
         findings = value.get("findings")
         summary = {
             "sha256": hashlib.sha256(
@@ -2467,15 +2460,13 @@ class FacilityLayoutService:
         prepared: Mapping[str, Any],
         dependencies: FacilityDependencySnapshot,
     ) -> dict[str, Any]:
+        operation_result = cls._compact_operation_result(prepared)
         return {
             "dependencies": dependencies.to_dict(),
-            "operationResult": cls._compact_operation_result(prepared),
-            "spatialDiagnostics": cls._diagnostic_receipt_summary(
-                prepared.get("spatialDiagnostics")
-            ),
-            "routingDiagnostics": cls._diagnostic_receipt_summary(
-                prepared.get("routingDiagnostics")
-            ),
+            "operationResult": operation_result,
+            # The same summaries as the operation result's.
+            "spatialDiagnostics": deepcopy(operation_result["spatialDiagnostics"]),
+            "routingDiagnostics": deepcopy(operation_result["routingDiagnostics"]),
             "alternativeId": alternative["alternativeId"],
             "strategy": alternative["strategy"],
             "metrics": deepcopy(alternative["metrics"]),
@@ -2710,6 +2701,9 @@ class FacilityLayoutService:
             raise AssertionError("unreachable")
 
         class _FacilityApplyAdapter:
+            def __init__(self) -> None:
+                self.regenerated: tuple[Any, ...] | None = None
+
             def regenerate(
                 self,
                 proposal: ProposalRecord,
@@ -2722,12 +2716,13 @@ class FacilityLayoutService:
                         layout_id=layout_id,
                     )
                 )
+                # Kept here for commit (2026-11-02): the plan carries only
+                # what the kernel keeps, not deep copies of both layouts.
+                self.regenerated = (regenerated, alternative, prepared,
+                                    dependencies)
                 return MutationPlan(
                     binding=regenerated,
-                    payload={
-                        "alternative": alternative,
-                        "prepared": prepared,
-                    },
+                    payload={"alternativeId": alternative["alternativeId"]},
                     recovery=service._proposal_recovery_context(
                         alternative,
                         prepared,
@@ -2736,41 +2731,55 @@ class FacilityLayoutService:
                 )
 
             def commit(self, plan: MutationPlan) -> CommitResult:
-                alternative = plan.payload["alternative"]
-                operations = alternative["operations"]
-                from .operation_proposals import UNDO_TYPE, prepare_undo
-                if alternative["strategy"] == UNDO_TYPE:
-                    prepared, dependencies, _ = prepare_undo(service, principal, site_id, layout_id,
-                        plan.binding.base_revision, operations[0]["receiptId"])
-                else:
-                    prepared, dependencies = service._prepare_operations(
-                        principal, site_id, layout_id, plan.binding.base_revision,
-                        operations, required_action="proposal.apply")
-                # The full transaction binding was established during
-                # regeneration. Replaying operations must still preserve the
-                # exact approved content and diff.
-                if (
-                    prepared["diffHash"] != plan.binding.diff_hash
-                    or canonical_layout_bytes(prepared["document"])
-                    != canonical_layout_bytes(
-                        alternative["ghostPreview"]["layout"]
-                    )
-                    or plan.recovery
-                    != service._proposal_recovery_context(
-                        alternative,
-                        prepared,
-                        dependencies,
-                    )
-                ):
+                if self.regenerated is None or self.regenerated[0] != plan.binding:
                     raise TransactionBindingError(
                         "transaction_binding_mismatch",
                         "Facility Layout changed during commit.",
                     )
-                from .operation_proposals import PROPOSAL_TYPE
-                if alternative["strategy"] == PROPOSAL_TYPE:
-                    from .proposal_components import validate_proposal_components
-                    validate_proposal_components(service, principal, site_id, layout_id,
-                        plan.binding.base_revision, operations)
+                _, alternative, prepared, dependencies = self.regenerated
+                operations = alternative["operations"]
+                from .operation_proposals import PROPOSAL_TYPE, UNDO_TYPE, recheck
+                exact = alternative["strategy"] in {PROPOSAL_TYPE, UNDO_TYPE}
+                if exact:
+                    # The regenerate just rebuilt this exact batch on the
+                    # approved base revision, and the kernel bound it to the
+                    # approval; the save refuses any other base revision under
+                    # the repository's write lock. Until 2026-11-02 the commit
+                    # replayed the batch (about 20 s on Factory 02). Checked
+                    # again instead: what the save cannot see (recheck:
+                    # artwork, component visuals, current catalog revisions,
+                    # the referenced dependencies).
+                    if recheck(service, principal, site_id, layout_id,
+                               plan.binding.base_revision, operations, prepared,
+                               undo=alternative["strategy"] == UNDO_TYPE
+                               ) != plan.binding.dependency_fingerprint:
+                        raise TransactionBindingError(
+                            "transaction_binding_mismatch",
+                            "Facility Layout changed during commit.",
+                        )
+                else:
+                    # A generated layout is replayed as before: replaying its
+                    # operations must preserve the exact approved content.
+                    prepared, dependencies = service._prepare_operations(
+                        principal, site_id, layout_id, plan.binding.base_revision,
+                        operations, required_action="proposal.apply")
+                    if (
+                        prepared["diffHash"] != plan.binding.diff_hash
+                        or canonical_layout_bytes(prepared["document"])
+                        != canonical_layout_bytes(
+                            alternative["ghostPreview"]["layout"]
+                        )
+                        or plan.recovery
+                        != service._proposal_recovery_context(
+                            alternative,
+                            prepared,
+                            dependencies,
+                        )
+                    ):
+                        raise TransactionBindingError(
+                            "transaction_binding_mismatch",
+                            "Facility Layout changed during commit.",
+                        )
                 saved = service.layout_repository.save_approved_layout(
                     principal,
                     site_id,
@@ -2778,10 +2787,13 @@ class FacilityLayoutService:
                     prepared["document"],
                     plan.binding.base_revision,
                 )
-                commit_payload = service._proposal_commit_payload(
-                    alternative,
-                    prepared,
-                    dependencies,
+                commit_payload = (
+                    deepcopy(dict(plan.recovery["commitPayload"])) if exact
+                    else service._proposal_commit_payload(
+                        alternative,
+                        prepared,
+                        dependencies,
+                    )
                 )
                 return CommitResult(
                     revision=saved["revision"],
@@ -2964,6 +2976,32 @@ class FacilityLayoutService:
                 "Facility Layout receipt was not found.",
             )
         return receipt.to_dict()
+
+    def latest_layout_receipt(
+        self,
+        principal: FacilityPrincipal,
+        site_id: str,
+        layout_id: str,
+    ) -> dict[str, Any] | None:
+        """The layout's newest receipt (its last saved change that has one), or None. Sage's
+        show_facility_views uses it for "show me what you changed" when the app window has no receipt of its
+        own (after a restart, or in a new window)."""
+        require_facility_action(
+            principal,
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            action="receipt.read",
+        )
+        store = self.transaction_runtime.kernel.receipt_store
+        find = getattr(store, "latest_receipt_for", None)
+        if find is None:
+            return None
+        receipt = find(facility_transaction_target(
+            tenant_id=principal.tenant_id,
+            site_id=site_id,
+            layout_id=layout_id,
+        ))
+        return receipt.to_dict() if receipt is not None else None
 
     def _prepare_operations(
         self,

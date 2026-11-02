@@ -37,6 +37,10 @@ def tool_specs():
     from ai_inspector.facility_layout.light_coverage import tool_spec as light_coverage_tool_spec
     from ai_inspector.facility_layout.light_positions import tool_spec as light_positions_tool_spec
     from ai_inspector.facility_layout.parking_review import tool_spec as parking_tool_spec
+    from ai_inspector.facility_layout.sage_patterns import tool_specs as pattern_tool_specs
+    from ai_inspector.facility_layout.sage_positions import tool_spec as position_tool_spec
+    from ai_inspector.facility_layout.sage_stacks import tool_spec as stack_tool_spec
+    from ai_inspector.facility_layout.sage_views import tool_spec as views_tool_spec
     from ai_inspector.facility_layout.workstation_review import tool_spec as workstation_tool_spec
     from .research_tools import tool_specs as research_tool_specs
     from .site_tools import tool_specs as site_tool_specs
@@ -46,6 +50,7 @@ def tool_specs():
             *[deepcopy(spec) for spec in facility_layout_read_tool_specs() if spec["name"] in READ_NAMES],
             *engineering_tool_specs(), *authoring_tool_specs(), *component_tool_specs(), *library_tool_specs(),
             parking_tool_spec(), workstation_tool_spec(), light_positions_tool_spec(), light_coverage_tool_spec(),
+            *pattern_tool_specs(), position_tool_spec(), stack_tool_spec(), views_tool_spec(),
             *research_tool_specs(),
             *site_tool_specs()]
 
@@ -79,6 +84,9 @@ class FacilityReadGateway:
         self.pdf, self.pdfs = None, []  # the PDFs prepared this turn, shown as file cards under the reply
         self.credential_check = None
         self.receipts = []
+        # Set by the pilot from what the app window sent with the turn: whether it has this layout open (Sage's
+        # show_facility_views moves its 3D view) and the receipts of the changes saved in it, newest last.
+        self.app_window, self.receipt_ids = False, []
         self.lock = asyncio.Lock()
         self.specs = tool_specs()
         self.validators = {spec["name"]: Draft202012Validator(spec["input_schema"]) for spec in self.specs}
@@ -246,6 +254,67 @@ class FacilityReadGateway:
                 'sheets': sheets, 'paper': '11 x 17 in (tabloid), landscape', 'bytes': len(content),
                 'revision': saved.get('revision'), 'shownInChat': 'as a file card the user clicks to open'}
 
+    def _last_change_ids(self, layout):
+        """What the last change saved in the user's app window made or changed, still in LAYOUT. A window with no
+        change of its own (after a restart, or a new window) uses the layout's newest receipt on the server."""
+        from ai_inspector.facility_layout import sage_views
+        receipts = [item for item in self.receipt_ids if isinstance(item, str) and item]
+        site_id, layout_id = self.reference["siteId"], self.reference["layoutId"]
+        try:
+            if receipts:
+                receipt = self.runtime.service.get_layout_receipt(self.principal, site_id, layout_id, receipts[-1])
+            else:
+                receipt = self.runtime.service.latest_layout_receipt(self.principal, site_id, layout_id)
+        except FacilityLayoutError as exc:
+            raise PilotError("show_views_refused", "The last saved change could not be read. Ask the user which "
+                             "area to show.", 422) from exc
+        if receipt is None:
+            raise PilotError("show_views_refused", "No saved change of this layout is on record, so there is no last "
+                             "change to show. Ask the user which area to show.", 422)
+        ids = sage_views.shown_ids(layout, sage_views.changed_ids(receipt))
+        if not ids:
+            raise PilotError("show_views_refused", "The last saved change left nothing to show (it only removed "
+                             "items, or they are gone since). Ask the user which area to show.", 422)
+        return ids
+
+    def _show_views(self, arguments):
+        """Sage's show_facility_views (docs/sage-basic-shapes-plan.md, SV0 and the live view of SV3b): the views are
+        framed here; the app window glides its 3D view to the first when the step is done (progress.view_show)."""
+        from ai_inspector.facility_layout import sage_views
+        saved = read_bound_layout(self.runtime, self.principal, self.reference)
+        last, query = arguments.get("target") == "last_change", arguments.get("query")
+        if sum((bool(arguments.get("targetIds")), last, bool(query))) > 1:
+            raise PilotError("show_views_refused", "Give one of query, targetIds or target last_change.", 422)
+        matched = None
+        if query:
+            try:
+                ids, matched = sage_views.resolve_query(saved["layout"], query)
+            except ValueError as exc:
+                raise PilotError("show_views_refused", str(exc), 422) from exc
+        else:
+            ids = self._last_change_ids(saved["layout"]) if last else list(arguments.get("targetIds") or [])
+        if not ids:
+            raise PilotError("show_views_refused", "Give query (the name the user said), targetIds (placement, zone "
+                             "or floor marking ids) or target last_change.", 422)
+        catalog = self.runtime.asset_catalog_provider(self.principal, self.reference["siteId"])
+        try:
+            shell = self.runtime.service.effective_shell(self.principal, self.reference["siteId"], saved["layout"])
+        except FacilityLayoutError:
+            shell = None  # the layout's own walls still count; the shell's are left out
+        try:
+            result = sage_views.frame_views(saved["layout"], catalog, ids,
+                                            max_views=arguments.get("maxViews") or sage_views.DEFAULT_VIEWS,
+                                            shell=shell)
+        except ValueError as exc:
+            raise PilotError("show_views_refused", str(exc), 422) from exc
+        result["liveView"] = sage_views.live_view(result["views"], bool(self.app_window))
+        result["pictures"] = "None: you have not seen these areas. Never describe how they look."
+        if last:
+            result["lastChange"] = True
+        if matched:
+            result["query"] = {"text": query, "matchedBy": matched, "idCount": len(ids)}
+        return dict(result, identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=True)
+
     def _read_data(self, name, arguments):
         from .site_tools import CATALOG_TOOLS, NAMES as SITE_NAMES, STEP_TOOLS, read_site
         if name == 'prepare_layout_pdf':
@@ -301,6 +370,35 @@ class FacilityReadGateway:
             saved = read_bound_layout(self.runtime, self.principal, self.reference)
             return dict(review_parking(saved["layout"], arguments["zoneIds"], arguments.get("requestedSpaces")),
                         identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=True)
+        from ai_inspector.facility_layout import sage_patterns, sage_positions, sage_stacks, sage_views
+        if name == sage_views.TOOL:
+            return self._show_views(arguments)
+        if name in sage_patterns.NAMES or name in (sage_positions.TOOL, sage_stacks.TOOL):
+            # The ribbon's patterns, cells (R1), Position tools (R3), stacks and cell groups (R4), planned on the
+            # server (docs/sage-ribbon-tools-plan.md).
+            saved = read_bound_layout(self.runtime, self.principal, self.reference)
+            catalog = self.runtime.asset_catalog_provider(self.principal, self.reference["siteId"])
+            try:
+                if name == sage_positions.TOOL:
+                    result = sage_positions.plan_position(saved["layout"], catalog, arguments,
+                                                          revision=self.reference["revision"])
+                elif name == sage_stacks.TOOL:
+                    result = sage_stacks.plan_stack(saved["layout"], catalog, arguments,
+                                                    revision=self.reference["revision"])
+                else:
+                    result = sage_patterns.plan(name, saved["layout"], catalog, arguments,
+                                                revision=self.reference["revision"])
+            except ValueError as exc:
+                raise PilotError("layout_pattern_refused", str(exc), 422) from exc
+            package = result.pop("operations")
+            prefix = {sage_patterns.PATTERN_TOOL: "pattern", sage_patterns.CELL_TOOL: "cell",
+                      sage_stacks.TOOL: "stack"}.get(name, "position")
+            package_id = f"{prefix}-{len(self.packages) + 1}"
+            self.packages[package_id] = package
+            result["package"] = {"packageId": package_id, "operations": len(package)}
+            result["staging"] = ("Stage it unchanged with preview_planned_design and this packageId: one review. "
+                                 "Describe it from this summary; never rewrite its positions.")
+            return dict(result, identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=True)
         if name == "suggest_facility_light_positions":
             from ai_inspector.facility_layout.light_positions import suggest_light_positions
             saved = read_bound_layout(self.runtime, self.principal, self.reference)

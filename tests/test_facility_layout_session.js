@@ -1995,8 +1995,10 @@ async function main() {
             assert.strictEqual(state.history.at(-1).operationCount, 4);
             assert.strictEqual(state.selection.length, 4);
             assert.strictEqual(state.layout.placements[3].transform.position.x, 19);
-            assert.ok(Math.abs(state.layout.placements[3].transform.quaternion.y - 1) < 1e-6);
-            assert.ok(Math.abs(state.layout.placements[3].transform.quaternion.w) < 1e-6);
+            // No reviewed side: the copy keeps its north side as the mirror image, so
+            // across a north-south line it does not turn.
+            assert.ok(Math.abs(state.layout.placements[3].transform.quaternion.y) < 1e-6);
+            assert.ok(Math.abs(state.layout.placements[3].transform.quaternion.w - 1) < 1e-6);
             const copiedZone = state.layout.zones[1];
             assert.deepStrictEqual(
                 copiedZone.anchors[0].position,

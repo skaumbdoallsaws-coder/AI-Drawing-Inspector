@@ -5108,3 +5108,30 @@ select.ip-flw-site-input {
 .ip-flw-site-check-item.ip-flw-site-check-none {
     border-left-color: #3fb950;
 }
+
+/* Sage moved the 3D view ("show me ..."): Back returns to the view before (docs/sage-basic-shapes-plan.md, SV3b). */
+.ip-flw-sage-view-back {
+    position: absolute;
+    z-index: 14;
+    top: 44px;
+    left: 50%;
+    min-height: 26px;
+    padding: 3px 14px;
+    border: 1px solid var(--ip-flw-accent);
+    border-radius: 13px;
+    color: var(--ip-flw-text);
+    background: color-mix(in srgb, var(--ip-flw-panel) 92%, transparent);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transform: translateX(-50%);
+}
+
+.ip-flw-sage-view-back:hover,
+.ip-flw-sage-view-back:focus-visible {
+    background: var(--ip-flw-accent-soft);
+}
+
+.ip-flw-sage-view-back[hidden] {
+    display: none;
+}

@@ -1,7 +1,12 @@
 """Exact operation previews and receipt-bound undo using the existing transaction kernel."""
+from collections import OrderedDict
 from copy import deepcopy
 import hashlib
 import json
+import pickle
+import threading
+import time
+import weakref
 
 from .authorization import require_facility_action
 from .diff import build_exact_layout_diff, facility_layout_diff_hash
@@ -29,20 +34,24 @@ ALLOWED_OPERATIONS = frozenset({
     "set_site_context", "set_building_pose", "upsert_site_area", "delete_site_area",
     "upsert_site_reference", "delete_site_reference", "set_emergency_plan",
 })
+# A package from the server's planner (a cell plan or its clear) may also remove the saved walks its own deletions
+# strand; the kernel allows nothing else (operations.py, delete_stranded_movements). Model-written batches may not.
+PLANNED_ONLY_OPERATIONS = frozenset({"delete_stranded_movements"})
 
 
 def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
-def guard_operations(operations, max_operations=50, max_bytes=24000):
+def guard_operations(operations, max_operations=50, max_bytes=24000, planned=False):
     """Model-written batches stay small; a design package built by the server's planner may be larger."""
+    allowed = ALLOWED_OPERATIONS | PLANNED_ONLY_OPERATIONS if planned else ALLOWED_OPERATIONS
     if not isinstance(operations, list) or not 1 <= len(operations) <= max_operations:
         raise FacilityValidationError("operation_proposal_invalid", f"Propose between 1 and {max_operations} operations.")
     if len(json.dumps(operations, allow_nan=False).encode()) > max_bytes:
         raise FacilityValidationError("operation_proposal_too_large", "Split the proposal into smaller batches.")
     for operation in operations:
-        if not isinstance(operation, dict) or operation.get("op") not in ALLOWED_OPERATIONS:
+        if not isinstance(operation, dict) or operation.get("op") not in allowed:
             raise FacilityValidationError("operation_proposal_denied", "This operation is not authorized for assisted editing.")
 
 
@@ -211,8 +220,128 @@ def _cleared_pole_lights(service, principal, site_id, before, prepared, zones):
     return cleared_pole_spots(prepared["document"], catalog, new)
 
 
+# A prepared proposal is kept for its next look (2026-11-02). After a Sage turn stages a batch, the app opens its
+# review, or in Apply directly fetches it, approves it and applies it; the preview and the apply each rebuilt the whole
+# proposal again, about 30 s each on Factory 02. The rebuild depends only on the saved layout (its revision is the hash
+# of its bytes), the request, and the revisions the result references, so a prepared result is reused while the layout
+# is still at its base revision and recheck() still passes for it: the artwork, the component visuals, the catalog's
+# current revision for each changed or restored item, and the shell, policy, asset, vehicle and process-map revisions,
+# giving the same dependency fingerprint. Anything else rebuilds it, and the rebuild reports what changed.
+MEMO_LIMIT = 3  # proposals kept per service, pickled (a few MB each on Factory 02)
+MEMO_SECONDS = 1800
+
+
+class _PreparedMemo:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.entries = OrderedDict()
+
+    def get(self, key):
+        with self.lock:
+            entry = self.entries.get(key)
+            if entry is None or time.monotonic() - entry[0] > MEMO_SECONDS:
+                self.entries.pop(key, None)
+                return None
+            self.entries.move_to_end(key)
+            return entry[1]
+
+    def put(self, key, blob):
+        with self.lock:
+            self.entries[key] = (time.monotonic(), blob)
+            self.entries.move_to_end(key)
+            while len(self.entries) > MEMO_LIMIT:
+                self.entries.popitem(last=False)
+
+    def drop(self, key):
+        with self.lock:
+            self.entries.pop(key, None)
+
+
+_MEMOS = weakref.WeakKeyDictionary()
+_MEMOS_LOCK = threading.Lock()
+
+
+def _memo(service):
+    with _MEMOS_LOCK:
+        try:
+            memo = _MEMOS.get(service)
+            if memo is None:
+                memo = _MEMOS[service] = _PreparedMemo()
+        except TypeError:  # a service that cannot be weakly referenced keeps nothing
+            return None
+        return memo
+
+
+def _memo_key(principal, site_id, layout_id, base_revision, request, undo, edit_mode, limits, planned):
+    try:
+        return fingerprint({"tenant": principal.tenant_id, "principal": principal.principal_id,
+            "roles": sorted(principal.roles), "sites": sorted(principal.allowed_site_ids), "site": site_id,
+            "layout": layout_id, "base": base_revision, "request": request, "undo": bool(undo), "editMode": edit_mode,
+            "limits": list(limits) if limits else None, "planned": bool(planned)})
+    except (AttributeError, TypeError, ValueError):
+        return None  # prepare itself says what is wrong with the request
+
+
+def _dependency_hash(dependencies, prepared, component_proofs):
+    return fingerprint({"schemaVersion": 1, "dependencies": dependencies.to_dict(),
+        "spatialEngineVersion": prepared["spatialDiagnostics"].get("spatialEngineVersion"),
+        "routingEngineVersion": prepared["routingDiagnostics"].get("routingEngineVersion"),
+        **({"componentVisuals": component_proofs} if component_proofs else {})})
+
+
+def recheck(service, principal, site_id, layout_id, base_revision, operations, prepared, *, undo=False):
+    """A prepared result checked again: the layout is still at its base revision, and what can change outside its
+    bytes still passes. Raises as prepare would; returns the dependency fingerprint to compare with the binding."""
+    current = service.get_layout(principal, site_id, layout_id)
+    if current["revision"] != base_revision:
+        raise FacilityConflictError("revision_conflict", "Facility Layout revision conflict.",
+                                    details={"currentRevision": current["revision"]})
+    document = prepared["document"]
+    component_proofs = []
+    if undo:
+        saved = {item["placementId"]: item for item in current["layout"]["placements"]}
+        checked = [item for item in document["placements"] if saved.get(item["placementId"]) != item]
+    else:
+        from .proposal_artifacts import validate_proposal_artwork
+        from .proposal_components import validate_proposal_components
+        validate_proposal_artwork(service, principal, site_id, current["layout"], operations)
+        component_proofs = validate_proposal_components(
+            service, principal, site_id, layout_id, base_revision, operations)
+        affected = set(prepared["affectedIds"]) | set(prepared["createdIds"])
+        checked = [item for item in document["placements"] if item["placementId"] in affected]
+    service._validate_current_proposal_asset_revisions(principal, site_id, {"assetSet": [
+        {"assetId": item["assetId"], "assetDefinitionRevision": item["assetDefinitionRevision"]} for item in checked]})
+    dependencies = service.validate_dependencies(principal, site_id, document)
+    return _dependency_hash(dependencies, prepared, component_proofs)
+
+
 def prepare(service, principal, site_id, layout_id, base_revision, request, *, undo=False, edit_mode="preview",
             limits=None, planned=False):
+    key = _memo_key(principal, site_id, layout_id, base_revision, request, undo, edit_mode, limits, planned)
+    memo = _memo(service) if key else None
+    blob = memo.get(key) if memo else None
+    if blob is not None:
+        kept = pickle.loads(blob)  # a fresh copy for this caller
+        alternative, binding, prepared, _ = kept
+        try:
+            if recheck(service, principal, site_id, layout_id, base_revision, alternative["operations"], prepared,
+                       undo=undo) == binding.dependency_fingerprint:
+                return kept
+        except Exception:  # noqa: BLE001 - the rebuild below raises the real reason
+            pass
+        memo.drop(key)
+    result = _prepare(service, principal, site_id, layout_id, base_revision, request, undo=undo,
+                      edit_mode=edit_mode, limits=limits, planned=planned)
+    if memo:
+        try:
+            memo.put(key, pickle.dumps(result, protocol=pickle.HIGHEST_PROTOCOL))
+        except (pickle.PicklingError, TypeError, AttributeError):
+            pass  # not kept: the next look rebuilds it
+    return result
+
+
+def _prepare(service, principal, site_id, layout_id, base_revision, request, *, undo=False, edit_mode="preview",
+             limits=None, planned=False):
     component_proofs = []
     design_review = None
     cleared_lights = {}
@@ -226,7 +355,7 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
             service, principal, site_id, layout_id, base_revision, request["receiptId"], baseline_out=baseline)
     else:
         operations = deepcopy(request["operations"])
-        guard_operations(operations, *(limits or ()))
+        guard_operations(operations, *(limits or ()), planned=planned)
         from .proposal_artifacts import validate_proposal_artwork
         current = service.get_layout(principal, site_id, layout_id)
         if current["revision"] != base_revision:
@@ -291,10 +420,7 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
             site_review['findingCount'] = len(site_review['findings'])
             site_review['findingsTruncated'] = len(site_review['findings']) > 40
             site_review['findings'] = site_review['findings'][:40]
-    dependency_hash = fingerprint({"schemaVersion": 1, "dependencies": dependencies.to_dict(),
-        "spatialEngineVersion": prepared["spatialDiagnostics"].get("spatialEngineVersion"),
-        "routingEngineVersion": prepared["routingDiagnostics"].get("routingEngineVersion"),
-        **({"componentVisuals": component_proofs} if component_proofs else {})})
+    dependency_hash = _dependency_hash(dependencies, prepared, component_proofs)
     binding = facility_layout_binding(tenant_id=principal.tenant_id, site_id=site_id, layout_id=layout_id,
         base_revision=base_revision, diff_hash=prepared["diffHash"], dependency_fingerprint=dependency_hash)
     introduced = _introduced_problems(service, baseline, prepared)

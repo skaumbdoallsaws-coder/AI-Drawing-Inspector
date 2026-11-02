@@ -3435,6 +3435,14 @@ def _aisle_checks(
     aisle_count = 0
     obstructed_routes: set[str] = set()
     unverified_count = 0
+    physical_by_placement = {
+        placement_id: tuple(
+            record
+            for record in records_by_placement[placement_id]
+            if record.record_kind == "physical"
+        )
+        for placement_id in sorted(records_by_placement)
+    }
     for raw_route in layout.get("routes", []):
         if not isinstance(raw_route, Mapping):
             continue
@@ -3523,17 +3531,15 @@ def _aisle_checks(
                 details={"shellFeatureId": feature_id, "segmentIndexes": blocked,
                          "corridorWidth": corridor_width},
             ))
-        for placement_id in sorted(records_by_placement):
-            physical_records = tuple(
-                record
-                for record in records_by_placement[placement_id]
-                if record.record_kind == "physical"
-            )
+        segment_bounds = tuple(polygon_bounds(corridor) for corridor in segment_polygons)
+        for placement_id, physical_records in physical_by_placement.items():
             blocked_segments = [
                 index
                 for index, corridor in enumerate(segment_polygons)
                 if any(
-                    polygons_intersect(corridor, record.polygon)
+                    # polygons_intersect's own first test, on bounds worked out once.
+                    bounds_intersect(segment_bounds[index], record.bounds)
+                    and polygons_intersect(corridor, record.polygon)
                     for record in physical_records
                 )
             ]

@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .canonical import canonical_layout_bytes, canonicalize_layout, layout_revision
 
@@ -89,8 +89,16 @@ def _walk(before: Any, after: Any, path: str, entries: List[Dict[str, Any]]) -> 
 def build_exact_layout_diff(
     before: Mapping[str, Any],
     after: Mapping[str, Any],
+    *,
+    known_bytes: Optional[Tuple[bytes, bytes]] = None,
 ) -> Dict[str, Any]:
-    """Return a stable, lossless before/after diff for two layout documents."""
+    """Return a stable, lossless before/after diff for two layout documents.
+
+    known_bytes: (canonical_layout_bytes(before), canonical_layout_bytes(after)) when the caller has
+    worked them out. They give the same revisions as the canonical copies below:
+    canonical_layout_bytes validates with require_canonical, which fails unless canonicalizing again
+    keeps the bytes.
+    """
 
     normalized_before = canonicalize_layout(deepcopy(dict(before)))
     normalized_after = canonicalize_layout(deepcopy(dict(after)))
@@ -99,8 +107,16 @@ def build_exact_layout_diff(
     entries.sort(key=lambda item: (str(item["path"]), str(item["op"])))
     return {
         "schemaVersion": FACILITY_LAYOUT_DIFF_SCHEMA_VERSION,
-        "beforeRevision": layout_revision(normalized_before),
-        "afterRevision": layout_revision(normalized_after),
+        "beforeRevision": (
+            layout_revision(known_bytes[0])
+            if known_bytes is not None
+            else layout_revision(normalized_before)
+        ),
+        "afterRevision": (
+            layout_revision(known_bytes[1])
+            if known_bytes is not None
+            else layout_revision(normalized_after)
+        ),
         "changed": bool(entries),
         "entries": entries,
     }
@@ -113,14 +129,19 @@ def facility_layout_diff_hash(
     operations: Sequence[Mapping[str, Any]],
     after: Mapping[str, Any],
     canonical_diff: Mapping[str, Any],
+    after_bytes: Optional[bytes] = None,
 ) -> str:
-    """Bind one exact operation proposal to its base and resulting content."""
+    """Bind one exact operation proposal to its base and resulting content.
 
+    after_bytes: canonical_layout_bytes(after) when the caller has worked it out.
+    """
+
+    content = after_bytes if after_bytes is not None else canonical_layout_bytes(after)
     payload = {
         "layoutId": layout_id,
         "baseRevision": base_revision,
         "operations": deepcopy([dict(operation) for operation in operations]),
-        "afterContentHash": hashlib.sha256(canonical_layout_bytes(after)).hexdigest(),
+        "afterContentHash": hashlib.sha256(content).hexdigest(),
         "canonicalDiff": deepcopy(dict(canonical_diff)),
     }
     return hashlib.sha256(_canonical_payload_bytes(payload)).hexdigest()

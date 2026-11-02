@@ -20672,7 +20672,7 @@
         }
     };
     </script>
-    <link rel="stylesheet" href="/static/facility_layout_workspace.css?v=20261101-sage-overlay-1">
+    <link rel="stylesheet" href="/static/facility_layout_workspace.css?v=20261102-sage-view-1">
     <link rel="stylesheet" href="/static/facility_layout_library_panel.css?v=20261101-cc3-2">
     <link rel="stylesheet" href="/static/walkthrough_camera_settings.css?v=20260927-1">
     <link rel="stylesheet" href="/static/facility_layout_sheets.css?v=20260929-open-layout-1">
@@ -21612,12 +21612,12 @@
     <script src="/static/assembly_smart_dimension.js?v=20261026-smart-dimension-2"></script>
     <script src="/static/assembly_library_panel.js?v=20261031-lights-1"></script>
     <script src="/static/facility_layout_sheets.js?v=20260929-open-layout-1"></script>
-    <script src="/static/facility_layout_patterns.js?v=20260912-construction-contract"></script>
+    <script src="/static/facility_layout_patterns.js?v=20261101-cell-facing"></script>
     <script src="/static/facility_layout_command_adapter.js?v=20260912-contract-v1-retry-fix"></script>
     <script src="/static/facility_layout_session.js?v=20261101-checks-1"></script>
     <script src="/static/facility_layout_transport.js?v=20261101-cc3-1"></script>
     <script src="/static/facility_layout_generation_view.js?v=20260917-generation-research"></script>
-    <script src="/static/facility_layout_workspace.js?v=20261101-sage-overlay-1"></script>
+    <script src="/static/facility_layout_workspace.js?v=20261102-sage-view-4"></script>
     <script src="/static/facility_layout_app.js?v=20261101-cc3-1"></script>
     <script src="/static/desktop_workflow_observation.js?v=20260915-workflow-coverage"></script>
     <script src="/static/desktop_runtime_bridge.js?v=20260915-workflow-coverage"></script>
@@ -46662,7 +46662,19 @@
         // Sage's check_lighting_coverage (docs/facility-lighting-plan.md, "Sage shows the overlay"): its done step
         // names the area and the revision Sage read, and the facility view shows the same estimate on the floor,
         // as the Scenes pane would, while it holds that revision with no unsaved edits.
+        // Sage's show_facility_views (docs/sage-basic-shapes-plan.md, SV3b): its done step carries the main view,
+        // and the facility view glides its 3D camera there, with a Back button, while it holds that layout.
         function _trainFacilityShowFromStep(step) {
+            const cameraView = step && step.state === 'done' && step.show && step.show.cameraView;
+            if (cameraView && typeof cameraView === 'object') {
+                const viewer = _trainFacilityLayoutAuthoringApp && _trainFacilityLayoutAuthoringApp.workspace;
+                if (viewer && typeof viewer.showSageView === 'function') {
+                    viewer.showSageView(cameraView).catch(function (error) {
+                        console.warn('The view Sage found could not be shown.', error);
+                    });
+                }
+                return;
+            }
             const coverage = step && step.state === 'done' && step.show && step.show.lightingCoverage;
             if (!coverage || typeof coverage !== 'object') return;
             const workspace = _trainFacilityLayoutAuthoringApp && _trainFacilityLayoutAuthoringApp.workspace;

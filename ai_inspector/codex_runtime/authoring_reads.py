@@ -1,5 +1,6 @@
 """Bounded authoring facts from the authorized, revision-bound facility document."""
 from copy import deepcopy
+import json
 
 from .policy import PilotError
 
@@ -19,6 +20,9 @@ SINGLETONS = {
     "perimeter_walls": "facilityPerimeterWalls", "navigation": "facilityNavigation",
 }
 READ_NAMES = frozenset({"inspect_facility_authoring", "inspect_facility_asset"})
+PAGE_RECORDS = 25          # a page holds at most this many records
+PAGE_SIZE_ACCEPTED = 50    # the pageSize inspect_facility_semantics takes; more than PAGE_RECORDS still pages
+PAGE_BYTES = 48000         # a page's records stay under this (the gateway refuses a result over 64 KB)
 
 
 def tool_specs():
@@ -28,13 +32,14 @@ def tool_specs():
         "Use zones for zone fillColor; floor_surfaces for cosmetic material/color finishes; ground for physical elevations. "
         "Prefer targeted upsert operations to preserve unrelated records. Perimeter settings exclude generated panels. "
         "wall_artworks includes existing legacy perimeter graphics that must be preserved. All dimensions are meters. "
-        "Use nextOffset with the same view/filters to page; offset is bound to this saved revision.",
+        "Filter with ids or query only. pageSize up to 50 is accepted; a page holds at most 25 records, fewer when "
+        "they are large: use nextOffset with the same view/filters to page; offset is bound to this saved revision.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["view"],
             "properties": {"view": {"enum": [*COLLECTIONS, *SINGLETONS, "wall_artworks", "overview"]},
                 "ids": {"type": "array", "items": identity, "maxItems": 25, "uniqueItems": True},
                 "query": {"type": "string", "maxLength": 120},
                 "offset": {"type": "integer", "minimum": 0, "maximum": 100000},
-                "pageSize": {"type": "integer", "minimum": 1, "maximum": 25}}}},
+                "pageSize": {"type": "integer", "minimum": 1, "maximum": PAGE_SIZE_ACCEPTED}}}},
         {"name": "inspect_facility_asset", "description":
             "Read an authorized catalog asset's exact geometry, coordinate frame, capabilities, connectors and revision. "
             "supportSurfaces name the spots that hold items (place_asset attachTo); facilitySemantics.workstationSeat "
@@ -57,8 +62,13 @@ def _page(rows, args, id_key):
             continue
         selected.append(row)
     selected.sort(key=lambda row: str(row.get(id_key, "")))
-    offset, size = args.get("offset", 0), args.get("pageSize", 10)
-    end = min(len(selected), offset + size)
+    offset, size = args.get("offset", 0), min(args.get("pageSize", 10), PAGE_RECORDS)
+    end, used = offset, 0
+    while end < min(len(selected), offset + size):
+        used += len(json.dumps(selected[end], allow_nan=False).encode()) + 2
+        if used > PAGE_BYTES and end > offset:
+            break  # at least one record a page; the rest from nextOffset
+        end += 1
     return {"records": deepcopy(selected[offset:end]), "total": len(selected),
             "nextOffset": end if end < len(selected) else None}
 

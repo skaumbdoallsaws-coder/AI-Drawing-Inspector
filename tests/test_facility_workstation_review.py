@@ -129,6 +129,19 @@ def test_unknown_ids_and_schema_limits():
         assert list(Draft202012Validator(schema).iter_errors(arguments))
 
 
+def test_one_zone_review_does_not_ask_for_a_one_zone_process():
+    # processZoneIds needs two or more zones (above); a review of one zone must not send Sage there.
+    state = _state()
+    report = review.review_workstations(state, {"zoneIds": ["dept-machining"]})
+    assert report["totalWorkstations"] >= 1  # the CNC stands there
+    sequence = [item for item in report["findings"] if item["code"] == "process_sequence_unverified"]
+    assert sequence and "two or more zones" in sequence[0]["nextAction"]
+    assert "Call this review with processZoneIds" not in sequence[0]["nextAction"]
+    whole = review.review_workstations(state)  # no zone scope: the sequence across zones is still asked for
+    assert any(item["code"] == "process_sequence_unverified" and "Call this review with processZoneIds"
+               in item["nextAction"] for item in whole["findings"])
+
+
 def test_partial_page_is_not_reported_as_complete():
     result = review.review_workstations(_state(), {"pageSize": 1})
     assert result["status"] == "partial_review" and result["nextOffset"] == 1

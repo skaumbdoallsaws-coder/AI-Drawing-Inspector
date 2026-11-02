@@ -94,6 +94,41 @@ def test_invalid_arguments_report_the_failed_field(setup):
     assert result["error"]["details"]["findings"][0]["path"] == "/pageSize"
 
 
+def test_a_page_size_up_to_50_is_read_as_pages_of_25(setup, monkeypatch):
+    """inspect_facility_semantics takes pageSize up to 50; the same on this read was refused as malformed (live
+    turn "show me the R03 robot", 2026-11-02, the probable cause). Now it is read, a page at most 25 records."""
+    host, ref, saved = setup
+    saved["layout"]["zones"] = [{"zoneId": f"zn-{index:02d}", "label": f"Bay {index}"} for index in range(30)]
+    monkeypatch.setattr(host.service, "get_layout", lambda *args: deepcopy(saved))
+    gateway = FacilityReadGateway(host.agent_runtime, host.principal(), ref, turn_id="authoring-page")
+    result = asyncio.run(gateway.call("inspect_facility_authoring", {"view": "zones", "query": "bay", "pageSize": 50}))
+    assert result["ok"], result
+    assert len(result["data"]["records"]) == 25 and result["data"]["total"] == 30
+    assert result["data"]["nextOffset"] == 25
+
+
+def test_a_page_of_large_records_stops_where_they_fit(setup, monkeypatch):
+    """43 placements of Robot Cell R01, with provenance, passed the 64 KB limit in one page of 25 and the read
+    failed ("result too large to read", live turn "Stack 4 pallets at R01's input", 2026-11-02). Now the page
+    stops where they fit and the rest come from nextOffset."""
+    host, ref, saved = setup
+    provenance = {"provenanceId": "layout-pattern:" + "a" * 40 + ":1", "notes": ["x" * 120] * 20}
+    saved["layout"]["placements"] = [{
+        "placementId": f"pl-r01-{index:02d}", "assetId": "asset-cnc-mill", "metadata": {
+            "instanceLabel": f"R01 item {index}", "layoutProvenance": provenance}} for index in range(43)]
+    monkeypatch.setattr(host.service, "get_layout", lambda *args: deepcopy(saved))
+    gateway = FacilityReadGateway(host.agent_runtime, host.principal(), ref, turn_id="authoring-bytes")
+    seen, offset = [], 0
+    while offset is not None:
+        arguments = {"view": "placements", "query": "R01", "pageSize": 50, **({"offset": offset} if offset else {})}
+        result = asyncio.run(gateway.call("inspect_facility_authoring", arguments))
+        assert result["ok"], result
+        assert 0 < len(result["data"]["records"]) < 25 and result["data"]["total"] == 43
+        seen += [record["placementId"] for record in result["data"]["records"]]
+        offset = result["data"]["nextOffset"]
+    assert seen == [f"pl-r01-{index:02d}" for index in range(43)]
+
+
 def test_union_diagnostics_use_requested_operation_only():
     def variant(op, field):
         return {"type": "object", "properties": {"op": {"const": op}, field: {"type": "string"}}, "required": ["op", field]}

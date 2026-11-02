@@ -28,7 +28,9 @@ def edit_tool_specs():
         {"name": "preview_planned_design", "description":
          "Stage a whole package by its packageId, as one review: one build step (plan_warehouse_building, "
          "plan_warehouse_zones, plan_floor_markings, plan_storage_layout, plan_site_docks, plan_site_parking, "
-         "plan_warehouse_contents) or the paint plan_design_paint prepared. The same validation as "
+         "plan_warehouse_contents), the paint plan_design_paint prepared, or a pattern, cell, position or stack "
+         "from plan_facility_pattern, plan_facility_cell, plan_facility_position or plan_facility_stack. The same "
+         "validation as "
          "preview_facility_operations; this tool never saves. In Apply Directly mode the app applies a package "
          "without findings after your turn (approvalRequired false); otherwise it opens a review. A package belongs "
          "to this turn and the saved layout it was planned on.", "input_schema": obj({"packageId": text(40)})},
@@ -88,7 +90,9 @@ class FacilityEditGateway(FacilityReadGateway):
             package = self.packages.get(arguments["packageId"])
             if package is None:
                 raise PilotError("codex_design_package_unknown",
-                                 "Plan it first with a build step or plan_design_paint and use the packageId it returned.", 404)
+                                 "Plan it first with a build step, plan_design_paint, plan_facility_pattern, "
+                                 "plan_facility_cell, plan_facility_position or plan_facility_stack and use the "
+                                 "packageId it returned.", 404)
             result = create(self.runtime.service, self.principal, self.reference["siteId"], self.reference["layoutId"],
                             self.reference["revision"], operations=package, edit_mode=self.edit_mode, limits=PACKAGE_LIMITS,
                             planned=True)

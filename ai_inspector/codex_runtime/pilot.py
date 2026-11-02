@@ -32,7 +32,14 @@ zone IDs. To inspect placements in a zone, use view=placements and query with th
 the returned geometric membership. Labels such as station counts are not measured inventory or capacity.
 Use small pageSize values when only examples are requested. Do not use scripting or delegate to other agents.
 For a functional shop or workstation review use review_facility_workstations. Supply the intended processZoneIds
-sequence when known, and distinguish measured gaps and access findings from unverified machine-side information.
+sequence (two or more zones) when known, or zoneIds for one zone, and distinguish measured gaps and access findings
+from unverified machine-side information.
+Only when the user asks to see, show, look at or go to something ("show me Assembly Cell A06", "take me to the
+dock doors", "show me what you changed"), call show_facility_views: query with what they named, in their words
+(the server resolves zone, floor-marking and equipment names; a zone brings what stands in it), targetIds when you
+already hold the ids, or target last_change. Do not look it up first. Then say in one sentence where the view went,
+from its liveView, or that nothing moved.
+You have not seen the area: never describe how it looks. Never call it unasked.
 """
 
 EDIT_INSTRUCTIONS = """You are InspectorPro's engineering assistant. Inspect the bound saved layout with MCP tools.
@@ -72,6 +79,37 @@ place_asset, even off the helper's spots: in a car park or yard it is then stage
 a reason to refuse or move it. Light fittings come lit: no finish step.
 For how well an area is lit, or its dark spots, call check_lighting_coverage. Call its numbers an estimate, not a
 lighting design, and never say a layout meets or fails a lighting code or standard.
+Only when the user asks to see, show, look at or go to something ("show me Assembly Cell A06", "take me to the
+dock doors", "show me what you changed"), call show_facility_views: query with what they named, in their words
+(the server resolves zone, floor-marking and equipment names; a zone brings what stands in it), targetIds when you
+already hold the ids, or target last_change. Do not look it up first. Then say in one sentence where the view went,
+from its liveView, or that nothing moved.
+You have not seen the area: never describe how it looks. Never call it unasked.
+To repeat items in a row or a grid, call plan_facility_pattern (count includes the original: "5 more" is count
+6); kind mirror mirrors them across a line, circular repeats them round a centre and perimeter round a rectangle.
+For a row or grid the user gives no direction for, leave direction and rowDirection out and say which way the tool
+picked; "2 m apart" is the clear gap. Never ask the user to move the seed first: when a pattern does not fit where
+the seed stands, the tool moves the seed in the same change; say what seedMoved says.
+To arrange machines as a cell (line, L, U, grid, parallel, serpentine, loop, spine, herringbone, cluster), call
+plan_facility_cell with placementIds for machines already placed, or assets for new ones and the zone they go in.
+Never compute pattern or cell positions yourself or write the copies by hand. To clear a zone, to lay it out
+again or only to clear it (then give no strategy or machines), give clearZone true with its zoneId in that call:
+the tool finds what stands there, floor markings included, and keeps the building's columns, its structure and
+locked items. Never look up a zone's items or review its workstations before plan_facility_cell: it spaces and
+turns the machines itself. To remove only some items, give them as removeIds. Stage the packageId with
+preview_planned_design unchanged and describe the result from the tool's summary: say which way the machines face
+from its operatorSides, never from the facing you asked for; a machine with frontReviewed false has an unverified
+facing: say so. When the summary has cleared (what a cleared zone loses and keeps) or alsoRemoves (a saved walk that
+stops at a removed item goes in the same change), say it word for word, never leave it out. When the tool refuses,
+say why in plain words and ask.
+To line items up, space them evenly, move or copy them by a distance, put them beside another item, set the distance
+between two, or swap two (or two cells), call plan_facility_position (mode align, distribute, offset, relative,
+distance or swap) with the itemIds; never compute the positions yourself. North is +z. Stage its packageId with
+preview_planned_design unchanged and say what moved from its summary, including carriedAlong (items on a moved
+support, or the rest of its stack).
+To stack an item ("a stack of 3 of these crates") or put items on another's surface ("put the vise on the bench"),
+call plan_facility_stack (mode stack or surface). To make items a named manufacturing cell, or to ungroup a cell
+(its items stay), call plan_facility_cell with action group or ungroup. Stage the packageId unchanged.
 Before constructing unfamiliar operations, call inspect_facility_operation_contracts with the operation names.
 Follow the returned schema, including nested required fields and enums; do not discover it by trial and error.
 On schema rejection use the returned operationContract and findings to correct ALL fields together.
@@ -131,7 +169,8 @@ address them or clearly report an incomplete draft. A valid operation or noNewEr
 For workcells consider operator orientation, input/output flow and service access; for rooms consider entrances,
 circulation and operational space. Never cover those with furniture or equipment just to reach a requested count.
 For a shop, production area or workstation arrangement, use review_facility_workstations before choosing final
-positions. Supply processZoneIds in the intended process order and paginate the selected zone/placement scope.
+positions yourself (not before plan_facility_cell, which positions the machines). Supply processZoneIds (two or
+more zones) in the intended process order, or zoneIds for one zone, and paginate the selected zone/placement scope.
 Do a second functional pass: working face and operator position, loading/unloading, full machine travel,
 maintenance access, point-of-use storage, and every handoff through the process. Compare crowded zones with
 underused neighboring space before packing machines tighter. Nearby footprint gaps are measurements, not
@@ -266,6 +305,13 @@ def viewport_selection(normalized):
     return picked
 
 
+def app_window_open(normalized):
+    """Whether the turn came from an app window that has the layout open (it sends its live state with every turn):
+    only then can show_facility_views move a 3D view."""
+    live = normalized.get("facility_layout_live_state")
+    return isinstance(live, dict) and isinstance(live.get("viewportMode"), str)
+
+
 async def inspect_facility(request, host, http_request, normalized, *, text_sink=None, status_sink=None,
                            step_sink=None, settings=None, transport_factory=AppServer, memory_context=""):
     settings = settings or PilotSettings.from_environment()
@@ -293,6 +339,9 @@ async def inspect_facility(request, host, http_request, normalized, *, text_sink
         max_calls=settings.max_calls, timeout=settings.timeout_seconds, status_sink=status_sink)
     if editing:
         gateway.edit_mode = edit_mode
+    gateway.app_window = app_window_open(normalized)
+    gateway.receipt_ids = [item for item in normalized.get("facility_layout_receipt_ids") or []
+                           if isinstance(item, str)][-6:]
     if subscription:
         gateway.credential_check = subscription.check
     progress = None

@@ -32,6 +32,8 @@ EXPORT = ("Exporting", "Exported", "export")
 PLACE = ("Placing", "Placed", "place")
 REMOVE = ("Removing", "Removed", "remove")
 MOVE = ("Moving", "Moved", "move")
+PLAN = ("Planning", "Planned", "plan")
+FRAME = ("Finding a view of", "Found a view of", "find a view of")
 
 SIMPLE = {
     "inspect_facility_context": (READ, "the layout overview"),
@@ -53,7 +55,6 @@ SIMPLE = {
     "suggest_facility_light_positions": (CHECK, "clear spots for the light"),
     "check_lighting_coverage": (CHECK, "the lighting coverage"),
     "check_site_references": (CHECK, "how well the photo, map and reference points agree"),
-    "preview_planned_design": (STAGE, "the planned changes for review"),
     "inspect_facility_findings": (READ, "layout findings"),
     "inspect_pattern_provenance": (READ, "how equipment patterns were made"),
     "inspect_cell_layout_provenance": (READ, "how work cells were set up"),
@@ -146,11 +147,13 @@ REASONS = {
     "codex_tool_budget_exhausted": "step limit reached",
     "codex_tool_denied": "not allowed",
     "codex_document_unavailable": "the layout changed",
+    "show_views_refused": "nothing to show",
     "documentation_workflow_blocked": "the app cannot build it yet",
     "documentation_assembly_required": "no assembly is loaded",
     "documentation_assembly_changed": "the assembly changed",
     "documentation_value_not_stated": "not in your message",
     "documentation_build_failed": "the build failed",
+    "layout_pattern_refused": "not possible as asked",
 }
 
 
@@ -274,9 +277,108 @@ def _changes(operations):
     return f"{len(rows)} change" + ("" if len(rows) == 1 else "s")
 
 
+def _pattern(args, names):
+    ids = _ids(args.get("seedIds"))
+    seed = _named(ids, names) or (f"{len(ids)} items" if len(ids) > 1 else "an item")
+    count, rows, kind = args.get("count"), args.get("rows"), args.get("kind")
+    count = count if type(count) is int else None
+    if kind == "mirror":
+        return f"a mirror image of {seed}"
+    if kind == "perimeter":
+        return f"a ring of copies of {seed}"
+    if kind == "circular":
+        total = args.get("totalDegrees")
+        shape = "an arc" if type(total) in (int, float) and total < 360 else "a circle"
+        return f"{shape} of {count} from {seed}" if count else f"{shape} from {seed}"
+    if type(rows) is int and rows > 1 and count:
+        return f"a {count} by {rows} grid of {seed}"
+    return f"a row of {count} from {seed}" if count else f"a row from {seed}"
+
+
+def _cell(args, names):
+    from ai_inspector.facility_layout.sage_patterns import SHAPE_NAMES
+    if args.get("action") == "ungroup":
+        zone = names.zone(args.get("zoneId")) if isinstance(args.get("zoneId"), str) else None
+        return f"the ungrouping of {zone}" if zone else "the ungrouping of a cell"
+    if args.get("action") == "group":
+        ids = _ids(args.get("itemIds"))
+        things = _named(ids, names) or (f"{len(ids)} items" if len(ids) != 1 else "1 item")
+        return f"a cell around {things}"
+    shape = SHAPE_NAMES.get(args.get("strategy"), "")
+    ids = _ids(args.get("placementIds"))
+    assets = args.get("assets") if isinstance(args.get("assets"), list) else []
+    count = len(ids) or sum(item.get("count") for item in assets
+                            if isinstance(item, dict) and type(item.get("count")) is int)
+    subject = (f"a {shape} cell" if shape else "a cell") + (f" of {count} machines" if count else "")
+    zone = names.zone(args.get("zoneId"))
+    where = zone or ("a zone" if isinstance(args.get("zoneId"), str) else "")
+    if args.get("clearZone") is True:
+        if not count and not shape:  # only clears it
+            return f"the clearing of {where}" if where else "the clearing of a zone"
+        return f"{subject} in {where}, cleared first" if where else f"{subject}, its zone cleared first"
+    if zone:
+        return f"{subject} in {zone}"
+    return subject + (" in a zone" if isinstance(args.get("zoneId"), str) else "")
+
+
+POSITION_SIDES = {"north": "north of", "east": "east of", "south": "south of", "west": "west of"}
+
+
+def _position(args, names):
+    """plan_facility_position: "the alignment of M21 and M22", "a swap of Bench 1 and Bench 2"."""
+    ids = _ids(args.get("itemIds"))
+    things = _named(ids, names) or (f"{len(ids)} items" if len(ids) != 1 else "1 item")
+    reference = names.any(args.get("referenceId")) if isinstance(args.get("referenceId"), str) else None
+    mode = args.get("mode")
+    if mode == "align":
+        return f"the alignment of {things}"
+    if mode == "distribute":
+        return f"the spacing of {things}"
+    if mode == "offset":
+        return f"copies of {things}" if args.get("copy") is True else f"a move of {things}"
+    if mode == "relative":
+        side = POSITION_SIDES.get(args.get("side"))
+        return f"a move of {things} {side} {reference}" if side and reference else f"a move of {things}"
+    if mode == "distance":
+        distance = args.get("distance")
+        if reference and isinstance(distance, (int, float)) and not isinstance(distance, bool):
+            return f"{things} {round(float(distance), 3):g} m from {reference}"
+        return f"the distance from {things} to {reference}" if reference else f"a move of {things}"
+    if mode == "swap":
+        return f"a swap of {things}"
+    return f"the positions of {things}"
+
+
+def _stack(args, names):
+    """plan_facility_stack: "a stack of 3 from Crate 1", "Box 1 and Vise 1 on Bench 1"."""
+    if args.get("mode") == "surface":
+        ids = _ids(args.get("itemIds"))
+        things = _named(ids, names) or (f"{len(ids)} items" if len(ids) != 1 else "1 item")
+        support = names.any(args.get("supportId")) if isinstance(args.get("supportId"), str) else None
+        return f"{things} on {support}" if support else f"{things} on a surface"
+    item = names.any(args.get("placementId")) if isinstance(args.get("placementId"), str) else None
+    count = args.get("count") if type(args.get("count")) is int else 3
+    return f"a stack of {count} from {item}" if item else f"a stack of {count}"
+
+
 def _step(name, args, names, edit_mode):
     if name in SIMPLE:
         return SIMPLE[name]
+    if name == "plan_facility_pattern":
+        return PLAN, _pattern(args, names)
+    if name == "plan_facility_cell":
+        return PLAN, _cell(args, names)
+    if name == "plan_facility_position":
+        return PLAN, _position(args, names)
+    if name == "plan_facility_stack":
+        return PLAN, _stack(args, names)
+    if name == "show_facility_views":
+        if args.get("target") == "last_change":
+            return FRAME, "the last change"
+        if _quoted(args.get("query")):
+            return FRAME, _quoted(args.get("query"))
+        ids = _ids(args.get("targetIds"))
+        return FRAME, _named(ids, names) or (f"{len(ids)} items" if len(ids) != 1 else "1 item")
     if name == "inspect_facility_authoring":
         return READ, _listing(AUTHORING_VIEWS.get(args.get("view"), "layout records"), args, names, paged=True)
     if name == "inspect_facility_semantics":
@@ -315,6 +417,8 @@ def _step(name, args, names, edit_mode):
     if name == "search_public_sources":
         query = _quoted(args.get("query"))
         return SEARCH, f"public sources for {query}" if query else "public sources"
+    if name == "preview_planned_design":  # "for your review" only when it goes to one, as below
+        return STAGE, "the planned changes" + (" for your review" if edit_mode == "preview" else "")
     if name == "preview_facility_operations":
         return STAGE, _changes(args.get("operations")) + (" for your review" if edit_mode == "preview" else "")
     if name == "inspect_documentation_type":
@@ -404,16 +508,29 @@ def _remark(text, limit=300):
 COVERAGE_KEYS = ("floorAreaId", "zoneId", "rectangle", "lot", "darkBelowLux")
 
 
+CAMERA_KEYS = ("label", "camera", "from", "roofHidden")
+
+
 def view_show(name, arguments, data):
-    """What the facility view shows when a step is done (docs/facility-lighting-plan.md, "Sage shows the overlay"):
-    after check_lighting_coverage, the same estimate on the floor, for the site, layout and revision Sage read. The
-    chat page hands it to the view, which shows it only while it holds that revision with no unsaved edits."""
-    if name != "check_lighting_coverage" or not isinstance(arguments, Mapping) or not isinstance(data, Mapping):
+    """What the facility view shows when a step is done.
+    - After check_lighting_coverage (docs/facility-lighting-plan.md, "Sage shows the overlay"): the same estimate on
+      the floor, for the site, layout and revision Sage read. The chat page hands it to the view, which shows it only
+      while it holds that revision with no unsaved edits.
+    - After show_facility_views (docs/sage-basic-shapes-plan.md, SV3b), when the app window has the layout open: its
+      main view, which the 3D view glides to, keeping the user's view for Back."""
+    if name not in ("check_lighting_coverage", "show_facility_views") or not isinstance(arguments, Mapping)             or not isinstance(data, Mapping):
         return None
     identity = data.get("identity")
     if not isinstance(identity, Mapping) or not all(isinstance(identity.get(key), str)
                                                     for key in ("siteId", "layoutId", "revision")):
         return None
+    if name == "show_facility_views":
+        views, live = data.get("views"), data.get("liveView")
+        if not isinstance(live, Mapping) or live.get("moves") is not True or not isinstance(views, list) or not views:
+            return None
+        return {"cameraView": {"siteId": identity["siteId"], "layoutId": identity["layoutId"],
+                               "revision": identity["revision"],
+                               **{key: deepcopy(views[0][key]) for key in CAMERA_KEYS if key in views[0]}}}
     return {"lightingCoverage": {"siteId": identity["siteId"], "layoutId": identity["layoutId"],
                                  "revision": identity["revision"],
                                  "area": {key: deepcopy(arguments[key]) for key in COVERAGE_KEYS if key in arguments}}}

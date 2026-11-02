@@ -108,5 +108,8 @@ def test_direct_cannot_bypass_permissions_or_stale_revision(gym):
 def test_policy_counts_actual_affected_objects_and_denies_unknown_or_destructive_operations():
     assert not evaluate([{"op": "set_appearance"}], {"affectedIds": [str(i) for i in range(21)]})["eligible"]
     assert not evaluate([{"op": "move_placement"}] * 21, {})["eligible"]
-    for op in ["delete_zone", "replace_asset", "set_ground", "set_plan_settings", "future_operation"]:
+    for op in ["delete_zone", "replace_asset", "set_ground", "set_plan_settings", "future_operation",
+               "set_snap_relationship"]:
         assert not evaluate([{"op": op}], {})["eligible"]
+    # The server's own planned packages: a stack or a surface sets snap relationships (plan_facility_stack).
+    assert evaluate([{"op": "duplicate_placement"}, {"op": "set_snap_relationship"}], {}, planned=True)["eligible"]

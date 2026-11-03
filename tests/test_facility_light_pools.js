@@ -623,6 +623,66 @@ test('the ceiling mask cuts the fill at the ceilings\' edge and never lights out
     const room81 = pools.sampleMask(pools.fillMask(bayGrid, [bays[81]]), 15.873, 13.284);
     assert.ok(room81 > 0.03 && Math.abs(pools.sampleMask(bayMask, 15.873, 13.284) - room81) < 1e-6, 'the wall of room 81: '
         + pools.sampleMask(bayMask, 15.873, 13.284) + ' (alone ' + room81 + ')');
+    // A fuzz case (2026-11-03): a notched ceiling whose straight edge (x 1.3126) runs 0.87 mm from two rooms, with a
+    // 0.3 m gap between them (z 1.7203 to 2.0203). These views have no colouring, so the fallback puts them in one
+    // channel. There an edge piece is an edge if points 1 mm to each side of its middle differ, and the piece beside
+    // both rooms and the gap had its middle beside a room: no edge, and the gap was lit up to 0.23 (b4348cc and
+    // aca8df1). In the fallback, edges are now cut at other outlines' corners within twice that, so the gap's part is
+    // an edge (50967ab).
+    const nearMiss = [rect(-4.42, -1.629, -1.888, -0.7564), rect(-4.5, -0.5264, -1.888, 0.8459),
+        rect(-1.848, -1.559, -0.3426, -0.8264), rect(-0.0426, 4.5, 1.1635, 4.6346), rect(1.31347, 1.1459, 3.3897, 1.7203),
+        rect(1.31347, 2.0203, 3.2397, 4.4646), rect(3.5127, -4.5, 4.5366, 4.5), rect(-4.5, 0.5364, 4.5, 1.4195),
+        [{ x: -2.7205, z: -1.7126 }, { x: 1.3126, z: -1.7126 }, { x: 1.3126, z: 3.9914 }, { x: -0.6386, z: 3.4914 },
+            { x: -0.7828, z: -1.2126 }, { x: -0.9271, z: 3.4914 }, { x: -2.7205, z: 3.9914 }]];
+    const nearGrid = { minX: -6, minZ: -6, cell: 0.25, cols: 48, rows: 48 };
+    const nearMask = pools.fillMask(nearGrid, nearMiss);
+    assert.strictEqual(nearMask.channels, 4);
+    let gapMost = -Infinity;
+    for (let x = 1.3127; x <= 1.6; x += 0.0025) {
+        for (let z = 1.7204; z <= 2.0202; z += 0.0025) gapMost = Math.max(gapMost, pools.sampleMask(nearMask, x, z));
+    }
+    assert.ok(gapMost < 0, 'the gap between the rooms is dark: ' + gapMost);
+    let nearLit = 0;
+    for (let x = -5.3; x <= 5.3; x += 0.0373) {
+        for (let z = -5.3; z <= 5.3; z += 0.0411) {
+            if (!nearMiss.some(outline => pools.insideOutline(outline, x, z)) && pools.sampleMask(nearMask, x, z) > 0) nearLit += 1;
+        }
+    }
+    assert.strictEqual(nearLit, 0, 'no fill outside');
+    [[1.1, 1.87], [1.5, 1.5], [1.5, 2.3]].forEach(([x, z]) => {
+        assert.ok(pools.sampleMask(nearMask, x, z) > 0.1, 'the ceiling beside the gap and the rooms stay lit at ' + x + ', ' + z);
+    });
+    // Codex on 50967ab (2026-11-03), with ceiling A (-3, -3)-(0, 3):
+    // 1. Outline B's west edge slants from 1 mm west of A's east edge to 1.5 mm east of it. The sliver between them,
+    //    outside both, was lit (+0.24; b4348cc -0.01), alone and with five strips (the fallback): the corner cut at
+    //    B's corner left A's edge piece with its middle where the probe jumped the sliver. Coloured layouts keep
+    //    b4348cc's cuts; in the fallback the probe stays nearer than an edge running alongside the piece.
+    const ceilingA = rect(-3, -3, 0, 3);
+    const fiveStrips = Array.from({ length: 5 }, (_, k) => rect(-5.5 + 0.12 * k, -2, -5.42 + 0.12 * k, 2));
+    const slanted = [ceilingA, [{ x: -0.001, z: -2 }, { x: 3, z: -2 }, { x: 3, z: 2 }, { x: 0.0015, z: 2 }]];
+    [['alone', slanted], ['in the fallback', slanted.concat(fiveStrips)]].forEach(([name, outlines]) => {
+        const mask = pools.fillMask(nearGrid, outlines);
+        assert.ok(pools.sampleMask(mask, 0.0004, 0.5) < 0, 'the sliver is dark, ' + name + ': ' + pools.sampleMask(mask, 0.0004, 0.5));
+        [-0.2, 0.8, 1.4, 1.95].forEach(z => {
+            const mid = (-0.001 + (z + 2) * 0.000625) / 2;
+            assert.ok(pools.sampleMask(mask, mid, z) < 0, 'the sliver at z ' + z + ', ' + name + ': ' + pools.sampleMask(mask, mid, z));
+        });
+        assert.ok(pools.sampleMask(mask, -1, 0) > 0.2 && pools.sampleMask(mask, 1, 0) > 0.2, 'A and B are lit, ' + name);
+    });
+    // 2. B's corner 1.5 mm east of A's edge: a coloured layout changed, (0.057, -1.928) inside B going from +0.062 to
+    //    -0.048 (as b4348cc reads where B's corner is on A's edge). Coloured layouts keep b4348cc's cuts.
+    const cornerOff = pools.fillMask(nearGrid, [ceilingA, [{ x: 0.0015, z: -2 }, { x: 3, z: -2 }, { x: 3, z: 2 }, { x: -0.0005, z: 2 }]]);
+    assert.ok(Math.abs(pools.sampleMask(cornerOff, 0.057, -1.928) - 0.062) < 1e-3, 'a coloured layout as b4348cc: '
+        + pools.sampleMask(cornerOff, 0.057, -1.928));
+    // A fallback layout from the fuzz: rooms 0.2 mm apart (x 1.0378 and 1.038) and a slanted edge crossing the gap. With
+    // the probe bounded by any edge, the edge's 0.2 mm piece in the gap was an edge and darkened the room east of it
+    // (0.24 to -0.12); only edges running alongside a piece bound its probe.
+    const crossing = [rect(-4.48, -2.3473, -2.6327, -1.3226), rect(-2.3319, -4.4998, 1.0372, -2.3481),
+        rect(-2.0327, 1.1718, 1.0378, 3.9091), rect(1.338, -2.3273, 2.093, -1.3221), rect(1.338, 0.1103, 2.0738, 0.8718),
+        rect(1.038, 1.1918, 2.0738, 3.6091), [{ x: -1.3696, z: -2 }, { x: 1, z: -2.321 }, { x: 2.2, z: 1.7 }, { x: -1.3, z: 2.4475 }]];
+    const crossingMask = pools.fillMask(nearGrid, crossing);
+    assert.ok(pools.sampleMask(crossingMask, 1.041, 2.057) > 0.2, 'the room beside the crossing is lit: '
+        + pools.sampleMask(crossingMask, 1.041, 2.057));
     // Six strips 0.1 m wide, 0.02 m apart: five near one another, more than the channels. Some share a channel,
     // still never lit outside.
     const strips = Array.from({ length: 6 }, (_, k) => rect(k * 0.12, -2, k * 0.12 + 0.1, 2));

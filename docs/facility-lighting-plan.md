@@ -521,12 +521,36 @@ lights on, lamps now light what they shine on, not only the floor; a zone ceilin
       - When no colouring is found, aca8df1's grouping puts groups that clash in a channel with the fewest near
         them: near those outlines the fill is cut. So is a notch narrower than a texel diagonal within one outline,
         or between two outlines that touch (they share a channel).
-      - Known limit, as at aca8df1 (it applies only in that fallback): the fill decides whether a piece of an edge
-        is an edge from points 1 mm to each side of its middle, and cuts edges only at other outlines' corners within
-        0.1 mm of them. Two outlines 0.1-1 mm apart in one channel (only the fallback puts clashing outlines
-        together) can hide an edge piece past the end of the nearer one. One fuzz layout (a notched ceiling, two
-        rooms 0.87 mm from its edge with a 0.3 m gap between them) lit the gap up to 0.21, outside every ceiling,
-        at aca8df1 and now; the colouring keeps such outlines apart, so 94cb4a8 did not.
+      - Edge pieces (2026-11-03, fixing a limit aca8df1 had): the fill decides whether a piece of an edge is an
+        edge from points 1 mm (FILL_EDGE_PROBE) to each side of its middle. Edges were cut only at other outlines'
+        corners within 0.1 mm, so two outlines 0.1-1 mm apart in one channel (only the fallback puts clashing
+        outlines together) could hide an edge piece past the end of the nearer one. One fuzz layout (a notched
+        ceiling, two rooms 0.87 mm from its edge with a 0.3 m gap between them) lit the gap up to 0.23, outside every
+        ceiling, at aca8df1 and b4348cc. In the fallback, edges are now cut at other outlines' corners within 2 mm
+        (twice the probe), so each piece is judged beside its own neighbour: the gap reads -0.01 (now a test).
+        - The gym's mask is identical texel for texel, and the time is the same (fuzz: 310 vs 314 ms per 60
+          layouts).
+        - Fuzz, 260 layouts as before: the channel layouts are identical to b4348cc; of 193 fallback layouts, 2
+          differ from aca8df1. Both have a room within 1 mm of another outline. One had its leak fixed (4 probes); in
+          the other aca8df1 darkened a room along a 0.15 mm seam (-0.135 where the edge is 0.16 m away), now 0.15.
+        - With gaps of 0.2-1.2 mm on purpose (160 layouts): the real leaks are gone. What still reads above zero
+          outside is within 0.01 mm of an edge, in seams under 1 mm that the rule joins, as before.
+        - Round 2 (Codex on 50967ab, 2026-11-03). The 2 mm cut is used only in the fallback; coloured layouts keep
+          b4348cc's cuts (0.1 mm, FILL_CORNER_CUT) and read as b4348cc texel for texel. The cut had changed a coloured
+          layout: a room's corner 1.5 mm from a ceiling's edge darkened the room beside the corner (+0.062 to
+          -0.048, what b4348cc reads where the corner is on the edge). And it lit a slanted sliver (0-1.5 mm) between
+          two ceilings (+0.24; b4348cc -0.01), alone and in the fallback: the piece's middle sat where the probe
+          jumped the sliver. In the fallback the probe now stays within half the distance to an edge running
+          alongside the piece (within about 6 degrees, FILL_ALONGSIDE) but not parallel to it. Parallel outlines under
+          1 mm apart, and an edge crossing such a gap, still read as one surface (a fuzz layout: with the probe
+          bounded by every edge, a 0.2 mm piece crossing a gap darkened the room beside it). All three are tests.
+        - The trade-off: a sliver can only read dark if a texel beside it does (the filter blends texels), so a dark
+          sliver means a dark seam about one texel wide. b4348cc had it on one side; in the fallback it is on both.
+          50967ab had no seam but lit the sliver, even where it was 1.1-1.3 mm wide. Only slanted sub-mm slivers
+          between two ceilings are affected.
+        - Fuzz, 300 layouts (3 seeds, two of them with 0.2-1.2 mm gaps): coloured layouts identical to b4348cc;
+          fallback layouts identical to 50967ab but 1; never lit outside (b4348cc 2 points, aca8df1 4); never darker
+          than 50967ab. The gym's mask is identical; the time is the same.
       - Checked on 270 random layouts (rooms on a random grid, gaps of 0-30 cm, hallways, a slanted room): never
         lit outside, and never dark 0.3 m or more from a real edge. Most of those layouts needed the fallback.
       - After the Codex check of 94cb4a8, 120 overlap layouts (half of them with a notched ceiling over a room):

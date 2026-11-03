@@ -49,6 +49,9 @@
     const FILL_MASK_SUBDIVIDE = 2; // the ceiling mask's texels per fill map texel, each way
     const FILL_EDGE_TEXELS = 2;    // the ceiling mask's distances reach this many of its texels from the edge
     const FILL_MASK_INSET = 0.01;  // metres: a face on a ceiling zone's edge (a wall's outer face) is outside
+    const FILL_EDGE_PROBE = 1e-3;  // metres: an edge piece is an edge if points this far to its sides differ
+    const FILL_CORNER_CUT = 1e-4;  // metres: an edge is cut at another outline's corner nearer than this
+    const FILL_ALONGSIDE = 0.1;    // the sine of the widest angle at which another edge runs alongside an edge piece
     const FILL_BELOW = 0.05;       // the fill lights what is at least this far below its lamps (not a ceiling)
     const partCache = new WeakMap();
     const lampCache = new WeakMap();
@@ -484,12 +487,12 @@
         }).filter(function (points) { return points.length >= 3; });
         const reach = FILL_EDGE_TEXELS * cell;
         // The views coloured in four channels; with no such colouring, the grouping of aca8df1 (maskGroups).
-        const groups = maskChannels(shapes, minX, minZ, cell, cols, rows, reach + 2 * cell)
-            || maskGroups(shapes, 2 * reach + 2 * cell);
+        const channelled = maskChannels(shapes, minX, minZ, cell, cols, rows, reach + 2 * cell);
+        const groups = channelled || maskGroups(shapes, 2 * reach + 2 * cell);
         const channels = groups.length <= 2 ? Math.max(1, groups.length) : 4;
         const data = new Float32Array(cols * rows * channels).fill(-reach - FILL_MASK_INSET);
         groups.forEach(function (group, channel) {
-            const field = maskField(group, minX, minZ, cell, cols, rows);
+            const field = maskField(group, minX, minZ, cell, cols, rows, !channelled);
             for (let k = 0; k < field.length; k += 1) data[k * channels + channel] = field[k];
         });
         return { minX: minX, minZ: minZ, cell: cell, cols: cols, rows: rows, channels: channels, data: data };
@@ -1090,7 +1093,15 @@
     }
 
     // One mask channel: the signed, clamped distance to the edge of these outlines' union (see fillMask).
-    function maskField(shapes, minX, minZ, cell, cols, rows) {
+    // An edge piece is part of that edge when points to each side of its middle differ (inside one outline or none).
+    // - Coloured layouts (b4348cc): edges are cut where another edge crosses them or another outline's corner is
+    //   nearer than FILL_CORNER_CUT, and the points are FILL_EDGE_PROBE to each side.
+    // - The fallback grouping (2026-11-03), where outlines 0.1-1 mm apart share a channel: edges are also cut at other
+    //   outlines' corners within twice FILL_EDGE_PROBE, so an outline running beside part of a piece does not decide
+    //   for all of it. And the points are no farther than half the distance to an edge running alongside the piece
+    //   (within FILL_ALONGSIDE) but not parallel to it, so they cannot jump a slanted gap between the two. Parallel
+    //   outlines under 1 mm apart, and edges crossing such a gap, are still one surface.
+    function maskField(shapes, minX, minZ, cell, cols, rows, fallback) {
         const inside = new Uint8Array(cols * rows);
         shapes.forEach(function (points) {
             for (let j = 0; j < rows; j += 1) {
@@ -1116,6 +1127,35 @@
         const insideAny = function (x, z) {
             return shapes.some(function (points) { return insideOutline(points, x, z); });
         };
+        // In the fallback, every edge with its bounds, for the probe's bound (probeAt).
+        const edges = [];
+        if (fallback) {
+            shapes.forEach(function (points) {
+                points.forEach(function (a, index) {
+                    const b = points[(index + 1) % points.length];
+                    const length = Math.hypot(b.x - a.x, b.z - a.z);
+                    if (!(length > 1e-9)) return;
+                    edges.push({ a: a, b: b, length: length, ux: (b.x - a.x) / length, uz: (b.z - a.z) / length,
+                        minX: Math.min(a.x, b.x) - FILL_EDGE_PROBE * 2, maxX: Math.max(a.x, b.x) + FILL_EDGE_PROBE * 2,
+                        minZ: Math.min(a.z, b.z) - FILL_EDGE_PROBE * 2, maxZ: Math.max(a.z, b.z) + FILL_EDGE_PROBE * 2 });
+                });
+            });
+        }
+        const probeAt = function (mx, mz, ux, uz) {
+            let probe = FILL_EDGE_PROBE;
+            edges.forEach(function (edge) {
+                if (mx < edge.minX || mx > edge.maxX || mz < edge.minZ || mz > edge.maxZ) return;
+                // Only an edge running alongside, not parallel (nor the piece's own edge), and beside the middle:
+                // its nearest point inside the edge, not a corner (the piece is cut there).
+                const sine = Math.abs(ux * edge.uz - uz * edge.ux);
+                if (sine < 1e-9 || sine > FILL_ALONGSIDE) return;
+                const along = (mx - edge.a.x) * edge.ux + (mz - edge.a.z) * edge.uz;
+                if (along <= 0 || along >= edge.length) return;
+                probe = Math.min(probe, Math.abs((mx - edge.a.x) * edge.uz - (mz - edge.a.z) * edge.ux) / 2);
+            });
+            return Math.max(probe, 1e-6);
+        };
+        const cornerCut = fallback ? 2 * FILL_EDGE_PROBE : FILL_CORNER_CUT;
         shapes.forEach(function (points, shape) {
             points.forEach(function (p, index) {
                 const q = points[(index + 1) % points.length];
@@ -1123,12 +1163,13 @@
                 if (!(length > 1e-9)) return;
                 const ux = (q.x - p.x) / length;
                 const uz = (q.z - p.z) / length;
-                // Cut where another outline's corner lies on this edge or another edge crosses it.
+                // Cut where another edge crosses this one or another outline's corner is near it (cornerCut).
                 const cuts = [0, length];
                 shapes.forEach(function (others, other) {
                     others.forEach(function (r, k) {
                         const t = others[(k + 1) % others.length];
-                        if (other !== shape && Math.abs(ux * (r.z - p.z) - uz * (r.x - p.x)) < 1e-4) {
+                        const off = Math.abs(ux * (r.z - p.z) - uz * (r.x - p.x));
+                        if (other !== shape && (fallback ? off <= cornerCut : off < cornerCut)) {
                             cuts.push((r.x - p.x) * ux + (r.z - p.z) * uz);
                         }
                         const ex = t.x - r.x;
@@ -1149,8 +1190,9 @@
                     const middle = (from + to) / 2;
                     const mx = p.x + ux * middle;
                     const mz = p.z + uz * middle;
-                    const left = insideAny(mx - uz * 1e-3, mz + ux * 1e-3);
-                    if (left === insideAny(mx + uz * 1e-3, mz - ux * 1e-3)) continue;
+                    const probe = fallback ? probeAt(mx, mz, ux, uz) : FILL_EDGE_PROBE;
+                    const left = insideAny(mx - uz * probe, mz + ux * probe);
+                    if (left === insideAny(mx + uz * probe, mz - ux * probe)) continue;
                     // The normal into the footprint.
                     const nx = left ? -uz : uz;
                     const nz = left ? ux : -ux;

@@ -7845,6 +7845,123 @@ test('an open-deck ceiling is exposed steel joists under a ribbed deck, girders 
     assert.strictEqual(added, 0);
 });
 
+// Codex review of de6a50d (2026-11-03): the joists follow an outline's long sides however its edges are split, and a
+// roof over a concave open deck (whose corners' average lies outside it) sits on the deck.
+test('open-deck joists follow the long sides however the edges are split; a roof over a concave deck sits on it', async () => {
+    const data = await libraryFixture();
+    const zone = (id, points, ceiling, roof) => {
+        const made = styledZone(id, points.map(([x, z]) => ({ x, z })), '#5b8def');
+        if (ceiling) made.extensions.ceiling = ceiling;
+        if (roof) made.extensions.roof = roof;
+        return made;
+    };
+    const deck = { heightMeters: 3.6, finish: 'open-deck' };
+    const show = async list => {
+        await data.adapter.setScene({ layout: { placements: [], zones: list, extensions: {} }, assetCatalog: [] });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    const steelOf = id => {
+        let found = null;
+        renderedScene().traverse(o => { if (o.userData && o.userData.facilityZoneOpenDeck && o.parent.userData.zoneId === id) found = o; });
+        return found;
+    };
+    const joistPositions = id => {
+        const steel = steelOf(id);
+        const group = steel.geometry.groups[0];
+        return Array.from(steel.geometry.attributes.position.array.slice(group.start * 3, (group.start + group.count) * 3));
+    };
+    // A 24 x 10 m room: whole, its long edges split in three 8 m parts, and the same starting partway along a side.
+    const plain = [[0, 0], [24, 0], [24, 10], [0, 10]];
+    const split = [[0, 0], [8, 0], [16, 0], [24, 0], [24, 10], [16, 10], [8, 10], [0, 10]];
+    const rolled = split.slice(1).concat(split.slice(0, 1));
+    await show([zone('zn-plain', plain, deck), zone('zn-split', split.map(([x, z]) => [x, z + 20]), deck),
+        zone('zn-rolled', rolled.map(([x, z]) => [x, z + 40]), deck)]);
+    const summary = new Map(data.adapter.getDiagnostics().zoneCeilings.map(c => [c.zoneId, c.steel]));
+    assert.deepStrictEqual(['zn-plain', 'zn-split', 'zn-rolled'].map(id => [summary.get(id).joists, summary.get(id).girders]),
+        [[13, 0], [13, 0], [13, 0]], 'joists across the 10 m way, no girder');
+    // The same steel, moved: as many triangles on the same corners (a side found from its other end lists them in
+    // another order).
+    const corners = (id, dz) => {
+        const values = joistPositions(id);
+        const list = new Set();
+        for (let i = 0; i < values.length; i += 3) {
+            list.add([values[i], values[i + 1], values[i + 2] - dz].map(v => Math.round(v * 1e4) / 1e4 + 0).join(','));
+        }
+        return [values.length / 9, Array.from(list).sort()];
+    };
+    const reference = corners('zn-plain', 0);
+    assert.deepStrictEqual(corners('zn-split', 20), reference, 'split: the same joists');
+    assert.deepStrictEqual(corners('zn-rolled', 40), reference, 'split and starting partway: the same joists');
+    // An L whose corners' average (8, 8) is outside it, with an open deck and a roof at 3.6 m: the roof sits on the deck
+    // (3.6 + 0.504 + 0.04). A roof sharing only an edge with a deck stays at its own height.
+    const corner = [[0, 0], [20, 0], [20, 4], [4, 4], [4, 20], [0, 20]];
+    await show([zone('zn-l', corner, deck, { heightMeters: 3.6 }),
+        zone('zn-beside', [[20, 0], [30, 0], [30, 4], [20, 4]], null, { heightMeters: 3.6 })]);
+    const roofs = new Map(data.adapter.getDiagnostics().zoneRoofs.map(r => [r.zoneId, Math.round(r.base * 1000) / 1000]));
+    assert.deepStrictEqual([roofs.get('zn-l'), roofs.get('zn-beside')], [4.144, 3.6]);
+});
+
+// Codex review of aa4e4b8 (2026-11-03): whether a roof sits on a deck skips outlines whose bounds are apart and stops
+// once they share enough, and its areas stay exact far from the origin.
+test('a roof over a deck: rooms apart cost nothing to check, and neighbours far from the origin do not lift', async () => {
+    const data = await libraryFixture();
+    const deck = { heightMeters: 3.6, finish: 'open-deck' };
+    const roof = { heightMeters: 3.6 };
+    const zone = (id, points, ceiling, roofed) => {
+        const made = styledZone(id, points, '#5b8def');
+        if (ceiling) made.extensions.ceiling = ceiling;
+        if (roofed) made.extensions.roof = roofed;
+        return made;
+    };
+    const show = async list => {
+        const began = performance.now();
+        await data.adapter.setScene({ layout: { placements: [], zones: list, extensions: {} }, assetCatalog: [] });
+        await settleAsync();
+        data.scheduler.flush();
+        return performance.now() - began;
+    };
+    const bases = () => new Map(data.adapter.getDiagnostics().zoneRoofs.map(r => [r.zoneId, Math.round(r.base * 1000) / 1000]));
+    // A rectangle [x0, x1] x [z0, z1] with each side in n parts.
+    const split = (x0, z0, x1, z1, n) => {
+        const points = [];
+        const side = (ax, az, bx, bz) => {
+            for (let k = 0; k < n; k += 1) points.push({ x: ax + (bx - ax) * k / n, z: az + (bz - az) * k / n });
+        };
+        side(x0, z0, x1, z0);
+        side(x1, z0, x1, z1);
+        side(x1, z1, x0, z1);
+        side(x0, z1, x0, z0);
+        return points;
+    };
+    // Two rooms side by side, turned and moved 900 km away, rounded to 1 um as a saved layout stores them: only the
+    // one with the deck sits on it (aa4e4b8 found 0.0028 m2 shared and lifted the other).
+    const far = points => points.map(({ x, z }) => ({
+        x: +(900000 + 0.28 * x - 0.96 * z).toFixed(6), z: +(900000 + 0.96 * x + 0.28 * z).toFixed(6),
+    }));
+    await show([zone('zn-deck', far(split(0, 0, 24, 10, 64)), deck, roof), zone('zn-next', far(split(24, 0, 48, 10, 64)), null, roof)]);
+    const pair = bases();
+    assert.deepStrictEqual([pair.get('zn-deck'), pair.get('zn-next')], [4.144, 3.6]);
+    // 48 rooms apart, 24 x 10 m with 128 corners each, a deck and a roof: each roof sits on its own deck, and checking
+    // the 48 x 48 roof and deck pairs takes well under a second (against roofs at 10 m, above the decks: no check).
+    const rooms = height => Array.from({ length: 48 }, (_, k) => {
+        const x = (k % 8) * 30;
+        const z = Math.floor(k / 8) * 15;
+        return zone('zn-room-' + k, split(x, z, x + 24, z + 10, 32), deck, { heightMeters: height });
+    });
+    await show(rooms(10));
+    let unchecked = Infinity;
+    let checked = Infinity;
+    for (let run = 0; run < 2; run += 1) {  // the faster of two each, against noise
+        unchecked = Math.min(unchecked, await show(rooms(10)));
+        checked = Math.min(checked, await show(rooms(3.6)));
+    }
+    const all = bases();
+    assert.strictEqual(all.size, 48);
+    assert.ok(Array.from(all.values()).every(base => base === 4.144), 'every roof on its deck');
+    assert.ok(checked - unchecked < 1000, `the check took ${Math.round(checked - unchecked)} ms`);
+});
+
 // Zone roofs (2026-11-02): a flat roof with a textured membrane, a low parapet and its coping, solid from above,
 // outside and inside, on the roof sheeting layer.
 test('a zone roof covers its zone, solid from above, outside and inside, with a parapet and coping, on the roof sheeting layer', async () => {

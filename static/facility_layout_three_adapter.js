@@ -10785,20 +10785,121 @@
             return Math.min(OPEN_DECK.maxDepth, Math.max(OPEN_DECK.minDepth, OPEN_DECK.depthPerMeter * height));
         }
 
-        // An outline's plan frame: `along` its longest edge and `across` at right angles to it (a rectangle's short
-        // way), unit vectors.
+        // An outline's plan frame: `along` its longest side and `across` at right angles to it (a rectangle's short
+        // way), unit vectors. A side is a run of edges in one straight line, so an edge split in parts counts whole.
         function outlineFrame(points) {
-            let along = { x: 1, z: 0 };
-            let longest = 0;
+            const edges = [];
             points.forEach(function (point, i) {
                 const next = points[(i + 1) % points.length];
                 const length = Math.hypot(next.x - point.x, next.z - point.z);
-                if (length > longest + 1e-9) {
-                    longest = length;
-                    along = { x: (next.x - point.x) / length, z: (next.z - point.z) / length };
-                }
+                if (length > 1e-9) edges.push({ length: length, x: (next.x - point.x) / length, z: (next.z - point.z) / length });
             });
+            const straight = function (a, b) { return Math.abs(a.x * b.z - a.z * b.x) < 1e-6 && a.x * b.x + a.z * b.z > 0; };
+            // Start at an edge that begins a side, so a side across the outline's first point is not split.
+            let start = 0;
+            while (start < edges.length && straight(edges[(start + edges.length - 1) % edges.length], edges[start])) start += 1;
+            if (start === edges.length) start = 0;
+            let along = { x: 1, z: 0 };
+            let longest = 0;
+            let side = null;
+            for (let k = 0; k <= edges.length; k += 1) {
+                const edge = k < edges.length ? edges[(start + k) % edges.length] : null;
+                if (side && edge && straight(side, edge)) {
+                    side.length += edge.length;
+                    continue;
+                }
+                if (side && side.length > longest + 1e-9) {
+                    longest = side.length;
+                    along = { x: side.x, z: side.z };
+                }
+                side = edge && { length: edge.length, x: edge.x, z: edge.z };
+            }
             return { along: along, across: { x: -along.z, z: along.x } };
+        }
+
+        // An outline for overlap tests: its points and plan bounds, and its triangles once outlinesOverlap needs them.
+        function overlapOutline(points) {
+            const outline = { points: points, triangles: null };
+            Object.assign(outline, planBounds(points));
+            return outline;
+        }
+
+        function planBounds(points) {
+            let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+            points.forEach(function (point) {
+                minX = Math.min(minX, point.x);
+                minZ = Math.min(minZ, point.z);
+                maxX = Math.max(maxX, point.x);
+                maxZ = Math.max(maxZ, point.z);
+            });
+            return { minX: minX, minZ: minZ, maxX: maxX, maxZ: maxZ };
+        }
+
+        // The plan area two bounds share (0 when apart or only touching).
+        function boundsShared(a, b) {
+            return Math.max(0, Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX))
+                * Math.max(0, Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ));
+        }
+
+        // Whether two outlines (overlapOutline) share more than `least` square metres of plan: their triangles
+        // clipped pair by pair (each triangle is convex). Outlines or triangles whose bounds share no more are
+        // skipped, it stops once the total passes `least`, and areas are taken from a corner of each polygon (and the
+        // triangulation from the outline's first point) so they stay exact far from the origin.
+        function outlinesOverlap(a, b, least) {
+            if (a.points.length < 3 || b.points.length < 3 || boundsShared(a, b) <= least) return false;
+            const triangles = function (outline) {
+                if (!outline.triangles) {
+                    const points = outline.points;
+                    const origin = points[0];
+                    outline.triangles = THREE.ShapeUtils.triangulateShape(points.map(function (point) {
+                        return new THREE.Vector2(point.x - origin.x, point.z - origin.z);
+                    }), []).map(function (corners) {
+                        const triangle = corners.map(function (k) { return points[k]; });
+                        return { corners: triangle, bounds: planBounds(triangle) };
+                    });
+                }
+                return outline.triangles;
+            };
+            const area = function (polygon) {
+                const o = polygon[0];
+                let twice = 0;
+                for (let i = 1; i + 1 < polygon.length; i += 1) {
+                    twice += (polygon[i].x - o.x) * (polygon[i + 1].z - o.z) - (polygon[i + 1].x - o.x) * (polygon[i].z - o.z);
+                }
+                return twice / 2;
+            };
+            const clip = function (subject, by) {
+                const sign = area(by) > 0 ? 1 : -1;
+                let polygon = subject;
+                for (let i = 0; i < by.length && polygon.length; i += 1) {
+                    const p = by[i];
+                    const q = by[(i + 1) % by.length];
+                    const side = function (v) { return sign * ((q.x - p.x) * (v.z - p.z) - (q.z - p.z) * (v.x - p.x)); };
+                    const kept = [];
+                    polygon.forEach(function (v, k) {
+                        const w = polygon[(k + 1) % polygon.length];
+                        const sv = side(v);
+                        const sw = side(w);
+                        if (sv >= 0) kept.push(v);
+                        if ((sv >= 0) !== (sw >= 0)) {
+                            const t = sv / (sv - sw);
+                            kept.push({ x: v.x + (w.x - v.x) * t, z: v.z + (w.z - v.z) * t });
+                        }
+                    });
+                    polygon = kept;
+                }
+                return polygon.length >= 3 ? Math.abs(area(polygon)) : 0;
+            };
+            const fromB = triangles(b);
+            let shared = 0;
+            for (const triangle of triangles(a)) {
+                for (const other of fromB) {
+                    if (boundsShared(triangle.bounds, other.bounds) <= 0) continue;
+                    shared += clip(triangle.corners, other.corners);
+                    if (shared > least) return true;
+                }
+            }
+            return false;
         }
 
         // Under each 'open-deck' ceiling (its mesh is the deck), its steel (openDeckGeometry), a child of the ceiling:
@@ -11260,8 +11361,8 @@
         // sheeting layer (hidden by default, so the overview looks in). Where two roofs meet (a building and its
         // annex), the lower one's parapet has no outer face there (it would face into the other building) and the
         // higher one's outer face comes down to the lower one's membrane. Over an 'open-deck' ceiling (2026-11-03) the
-        // roof sits on its deck: the slab rises to the top of the highest deck under it (a ceiling whose middle is
-        // inside the roof) and the parapet's face still comes down to the wall tops, closing the band between.
+        // roof sits on its deck: the slab rises to the top of the highest deck under it (one whose outline shares some
+        // area with the roof's) and the parapet's face still comes down to the wall tops, closing the band between.
         function renderZoneRoofs() {
             if (!state.modelRoot || typeof THREE.Mesh !== 'function' || typeof THREE.BufferGeometry !== 'function'
                     || !THREE.ShapeUtils || typeof THREE.MeshStandardMaterial !== 'function') return 0;
@@ -11276,8 +11377,7 @@
                 const points = zoneFloorPoints(zone);
                 if (points.length < 3) return;
                 decks.push({
-                    x: points.reduce(function (sum, point) { return sum + point.x; }, 0) / points.length,
-                    z: points.reduce(function (sum, point) { return sum + point.z; }, 0) / points.length,
+                    outline: overlapOutline(points),
                     top: finite(zone.floorElevation, 0) + height + openDeckDepth(height) + OPEN_DECK.deckThickness,
                 });
             });
@@ -11288,8 +11388,9 @@
                 const points = zoneFloorPoints(zone);
                 const wall = finite(zone.floorElevation, 0) + height;
                 let base = wall;
+                const outline = points.length >= 3 ? overlapOutline(points) : null;
                 decks.forEach(function (deck) {
-                    if (deck.top > base && points.length >= 3 && pointInOutline(points, deck.x, deck.z)) base = deck.top;
+                    if (outline && deck.top > base && outlinesOverlap(deck.outline, outline, 1e-3)) base = deck.top;
                 });
                 entries.push({ zone: zone, height: height, points: points, base: base, wall: wall });
             });

@@ -411,6 +411,32 @@ Page/console errors: 0/0
 External requests: 0
 ```
 
+The offline smoke evidence in
+`tests/fixtures/facility_layout/rendering/three-offline-smoke-result.json`
+binds only the vendor entries loaded by its page and script. Its `source`
+object records `manifestEntriesSha256` and `manifestEntryPaths`. The paths
+are relative to `static/vendor/three/0.184.0`:
+
+- `build/three.core.min.js`
+- `build/three.module.min.js`
+- `examples/jsm/loaders/GLTFLoader.js`
+- `examples/jsm/utils/BufferGeometryUtils.js`
+- `examples/jsm/utils/SkeletonUtils.js`
+
+The page imports Three and GLTFLoader; their transitive imports load core
+and the two utilities. `tools/facility_three_manifest.py` is shared by the
+producer and evidence test. It hashes compact ASCII JSON of
+`[path, byte_count, sha256]` lists, sorted by path, with no trailing newline,
+extracted from the `VERSIONS.md` File/Bytes/SHA-256 table. Missing, malformed,
+or duplicate required entries fail. Unused rows, prose, row order, and line
+endings do not affect this binding. The existing `fixtureSha256`,
+`moduleSha256`, and `loaderSha256` bindings remain unchanged.
+
+Evidence carrying only the legacy whole-file `manifestSha256` is rejected.
+Regenerate it with `python tools/verify_facility_three_offline.py`; do not
+edit evidence hashes by hand. Other renderer and release evidence bindings
+retain their existing scope.
+
 No compression decoder is adopted in P0. The two private machine GLBs are
 under 1 MB and the rack prototype is 13.5 MB. Meshopt, Draco, or KTX2 requires
 a separate representative-asset measurement and dependency decision.

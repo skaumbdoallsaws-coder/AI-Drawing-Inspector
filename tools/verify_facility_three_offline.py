@@ -19,6 +19,10 @@ from playwright.sync_api import sync_playwright
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from tools.facility_three_manifest import P0_VENDOR_PATHS, p0_manifest_entries_sha256
+
+
 FIXTURE = (
     ROOT
     / "tests"
@@ -69,6 +73,9 @@ def main() -> int:
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise SystemExit(f"Missing offline dependency files: {missing}")
+    manifest_entries_sha256 = p0_manifest_entries_sha256(
+        MANIFEST.read_text(encoding="ascii")
+    )
     if not args.edge_path.is_file():
         raise SystemExit(f"Microsoft Edge not found: {args.edge_path}")
 
@@ -191,7 +198,8 @@ def main() -> int:
             "failedRequests": failed_requests,
         },
         "source": {
-            "manifestSha256": sha256_file(MANIFEST),
+            "manifestEntriesSha256": manifest_entries_sha256,
+            "manifestEntryPaths": list(P0_VENDOR_PATHS),
             "fixtureSha256": sha256_file(FIXTURE),
             "moduleSha256": sha256_file(
                 VENDOR_ROOT / "build" / "three.module.min.js"

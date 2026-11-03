@@ -15,8 +15,8 @@
   },
   "consoleErrors": [],
   "environment": {
-    "browser": "150.0.4078.105",
-    "os": "Windows-11-10.0.26200-SP0",
+    "browser": "156.0.4314.58",
+    "os": "Windows-11-10.0.26300-SP0",
     "python": "3.14.0 (tags/v3.14.0:ebf955d, Oct  7 2025, 10:15:03) [MSC v.1944 64 bit (AMD64)]"
   },
   "network": {
@@ -24,7 +24,7 @@
     "externalRequestsBlocked": true,
     "failedRequests": [],
     "failedResponses": [],
-    "servedOrigin": "http://127.0.0.1:51296"
+    "servedOrigin": "http://127.0.0.1:63106"
   },
   "pageErrors": [],
   "passed": true,
@@ -43,7 +43,14 @@
   "source": {
     "fixtureSha256": "7cb68fa8a90f26f7c5637627272076a9cf5d0590bf73d83b0efd144c571b4a86",
     "loaderSha256": "97642d720f16cc9a0c9844934198e4d0c023bea8e89576d0f7545d03b2d103d2",
-    "manifestSha256": "7dd2d2de363524c25286bb581579512d082de47ef03144d0fb07fccd3f42bdde",
+    "manifestEntriesSha256": "25e9477c0f09723854b3c5f164163cd0a3e95ad67047aac01637831c0ed8210b",
+    "manifestEntryPaths": [
+      "build/three.core.min.js",
+      "build/three.module.min.js",
+      "examples/jsm/loaders/GLTFLoader.js",
+      "examples/jsm/utils/BufferGeometryUtils.js",
+      "examples/jsm/utils/SkeletonUtils.js"
+    ],
     "moduleSha256": "36a60b0120335f89a80a0dab70292292b0ec414b3d05e83cd09a3ea428c6712a"
   }
 }

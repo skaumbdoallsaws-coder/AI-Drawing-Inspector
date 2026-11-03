@@ -3,6 +3,8 @@ import json
 import re
 from pathlib import Path
 
+from tools.facility_three_manifest import P0_VENDOR_PATHS, p0_manifest_entries_sha256
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RENDERING = ROOT / "tests" / "fixtures" / "facility_layout" / "rendering"
@@ -111,13 +113,22 @@ def test_renderer_benchmark_is_reproducible_and_meets_p0_budget():
 
 def test_offline_three_smoke_uses_only_local_pinned_modules():
     result = _load(RENDERING / "three-offline-smoke-result.json")
+    source = result["source"]
+    assert "manifestEntriesSha256" in source and "manifestEntryPaths" in source, (
+        "P0 offline smoke evidence lacks scoped manifest entries "
+        "(legacy manifestSha256 is not accepted); regenerate with "
+        "python tools/verify_facility_three_offline.py"
+    )
     assert result["schemaVersion"] == "facility-three-offline-smoke-v1"
     assert result["passed"] is True
     assert result["pageErrors"] == []
     assert result["consoleErrors"] == []
     assert result["network"]["blockedExternalRequests"] == []
     assert all(result["checks"].values())
-    assert result["source"]["manifestSha256"] == _sha256(VENDOR / "VERSIONS.md")
+    assert source["manifestEntryPaths"] == list(P0_VENDOR_PATHS)
+    assert source["manifestEntriesSha256"] == p0_manifest_entries_sha256(
+        (VENDOR / "VERSIONS.md").read_text(encoding="ascii")
+    )
     assert result["source"]["fixtureSha256"] == _sha256(
         RENDERING / "three-offline-smoke.html"
     )

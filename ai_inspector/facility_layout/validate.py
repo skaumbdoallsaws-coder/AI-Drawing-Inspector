@@ -554,15 +554,19 @@ def _typed_ids(
 
 
 def _ceiling_extension(zone: Mapping[str, Any], path: str) -> None:
-    """A zone's ceiling, which lamps hang from: {heightMeters} above its floor (ceilings.py)."""
+    """A zone's ceiling, which lamps hang from ({heightMeters} above its floor, an optional finish), and its roof
+    ({heightMeters}): ceilings.py."""
     raw_extensions = zone.get("extensions")
-    if not isinstance(raw_extensions, Mapping) or raw_extensions.get("ceiling") is None:
+    if not isinstance(raw_extensions, Mapping):
         return
-    from .ceilings import normalize_ceiling
-    try:
-        normalize_ceiling(raw_extensions["ceiling"])
-    except ValueError as exc:
-        _fail("invalid_layout_shape", str(exc), f"{path}.extensions.ceiling")
+    from .ceilings import normalize_ceiling, normalize_roof
+    for key, normalize in (("ceiling", normalize_ceiling), ("roof", normalize_roof)):
+        if raw_extensions.get(key) is None:
+            continue
+        try:
+            normalize(raw_extensions[key])
+        except ValueError as exc:
+            _fail("invalid_layout_shape", str(exc), f"{path}.extensions.{key}")
 
 
 def _cell_group_extension(zone: Mapping[str, Any], path: str) -> None:

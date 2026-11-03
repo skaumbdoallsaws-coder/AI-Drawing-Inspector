@@ -3,6 +3,9 @@
 A pendant placed with its base at 1.7 m failed unsupported_mounting_surface: the gym's shell has only a floor. Now a
 zone may have a ceiling, the checks see it as a "ceiling" mounting surface, and a hung item whose top meets it, inside
 the zone, is accepted; collisions with the table below stay 3D.
+
+Later the same day: a ceiling may name a finish (how the 3D view draws it), and a zone may have a roof
+(set_zone_roof, the 3D view only).
 """
 from copy import deepcopy
 import json
@@ -182,7 +185,7 @@ def test_set_zone_ceiling_sets_changes_and_clears_it():
     doc = run(doc, {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": None})["document"]
     assert "extensions" not in doc["zones"][0]
     for bad, text in (({"heightMeters": 1.5}, "between 2 and 40"), ({"heightMeters": True}, "between 2 and 40"),
-                      ({"heightMeters": 3, "label": "x"}, "Expected zoneId and heightMeters"),
+                      ({"heightMeters": 3, "label": "x"}, "Expected zoneId, heightMeters"),
                       ({"zoneId": "zn-missing", "heightMeters": 3}, "Zone")):
         with pytest.raises(FacilityLayoutError, match=text):
             apply_facility_layout_operations(doc, [dict({"op": "set_zone_ceiling", "zoneId": "zn-lounge"}, **bad)])
@@ -260,5 +263,135 @@ def test_a_sage_preview_of_a_ceiling_and_a_hung_lamp_is_accepted_and_saves(tmp_p
                 place("pl-lamp", CEILING - 1.1, {"mountingSurface": HANGS})])
         assert refused.value.code == "spatial_validation_failed"
         assert "unsupported_mounting_surface" in json.dumps(refused.value.details)
+    finally:
+        host.close()
+
+
+def _lounge_layout():
+    layout = json.loads((FIXTURES / "empty_cell.json").read_text())
+    zone = {"zoneId": "zn-lounge", "zoneType": "workcell", "label": "Lounge", "boundary": rectangle(0, 0, 6, 4),
+            "floorElevation": 0.0, "anchors": [], "evidence": []}
+    return apply_facility_layout_operations(layout, [{"op": "add_zone", "zone": zone}])["document"]
+
+
+def _run(doc, *operations):
+    result = apply_facility_layout_operations(doc, list(operations))
+    validate_layout(result["document"])
+    return result["document"]
+
+
+def test_a_ceiling_finish_is_saved_with_it_and_left_out_means_charcoal():
+    doc = _lounge_layout()
+    for finish in ("acoustic-tile", "open-deck"):
+        done = _run(doc, {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": 3, "finish": finish})
+        assert done["zones"][0]["extensions"] == {"ceiling": {"heightMeters": 3, "finish": finish}}
+    # Setting it again without a finish sets the whole ceiling: no finish (drawn matte charcoal, as before).
+    tiled = _run(doc, {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": 3, "finish": "acoustic-tile"})
+    plain = _run(tiled, {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": 3.2})
+    assert plain["zones"][0]["extensions"] == {"ceiling": {"heightMeters": 3.2}}
+    cleared = _run(tiled, {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": None})
+    assert "extensions" not in cleared["zones"][0]
+    for bad, text in (({"heightMeters": 3, "finish": "marble"}, "finish is one of: acoustic-tile, open-deck"),
+                      ({"heightMeters": 3, "finish": None}, "finish is one of"),
+                      ({"heightMeters": None, "finish": "open-deck"}, "alone, to remove the ceiling")):
+        with pytest.raises(FacilityLayoutError, match=text):
+            apply_facility_layout_operations(tiled, [dict({"op": "set_zone_ceiling", "zoneId": "zn-lounge"}, **bad)])
+    saved = deepcopy(tiled)
+    saved["zones"][0]["extensions"]["ceiling"]["finish"] = "wood"
+    with pytest.raises(FacilityLayoutError, match="finish is one of"):
+        validate_layout(saved)
+    # Lamps hang from a tiled ceiling as from any other: the checks see the same mounting surface.
+    shell, layout = scene()
+    layout["zones"][1]["extensions"]["ceiling"]["finish"] = "acoustic-tile"
+    feature = next(item for item in shell_with_plan_boundary(shell, layout)["features"]
+                   if item["featureId"] == "layout-ceiling-zn-lounge")
+    assert feature["geometry"]["elevation"] == CEILING
+    assert errors(shell, layout, placement("pl-lamp", "asset-test-pendant-dome", 15, 10, CEILING - 1.3)) == []
+
+
+def test_set_zone_roof_sets_changes_and_clears_it_beside_a_ceiling():
+    doc = _run(_lounge_layout(), {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": 3.6,
+                                  "finish": "open-deck"},
+               {"op": "set_zone_roof", "zoneId": "zn-lounge", "heightMeters": 3.6})
+    assert doc["zones"][0]["extensions"] == {"ceiling": {"heightMeters": 3.6, "finish": "open-deck"},
+                                             "roof": {"heightMeters": 3.6}}
+    done = apply_facility_layout_operations(doc, [{"op": "set_zone_roof", "zoneId": "zn-lounge", "heightMeters": 4.25}])
+    assert done["operationResults"][0] == {"index": 0, "op": "set_zone_roof", "createdIds": [],
+                                           "affectedIds": ["zn-lounge"]}
+    assert done["document"]["zones"][0]["extensions"]["roof"] == {"heightMeters": 4.25}
+    # Removing the roof keeps the ceiling; removing both drops the emptied extensions.
+    roofless = _run(doc, {"op": "set_zone_roof", "zoneId": "zn-lounge", "heightMeters": None})
+    assert roofless["zones"][0]["extensions"] == {"ceiling": {"heightMeters": 3.6, "finish": "open-deck"}}
+    bare = _run(roofless, {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": None},
+                {"op": "set_zone_roof", "zoneId": "zn-lounge", "heightMeters": None})
+    assert "extensions" not in bare["zones"][0]
+    for bad, text in (({"heightMeters": 1.5}, "roof's heightMeters must be between 2 and 40"),
+                      ({"heightMeters": 41}, "between 2 and 40"), ({"heightMeters": "3"}, "between 2 and 40"),
+                      ({"heightMeters": 3, "finish": "open-deck"}, "Expected zoneId and heightMeters"),
+                      ({}, "Expected zoneId and heightMeters"),
+                      ({"zoneId": "zn-missing", "heightMeters": 3}, "Zone")):
+        with pytest.raises(FacilityLayoutError, match=text):
+            apply_facility_layout_operations(doc, [dict({"op": "set_zone_roof", "zoneId": "zn-lounge"}, **bad)])
+    for broken in ({"heightMeters": 100}, {"heightMeters": 3, "parapet": 1}, 3.6):
+        saved = deepcopy(doc)
+        saved["zones"][0]["extensions"]["roof"] = broken
+        with pytest.raises(FacilityLayoutError, match="zone roof"):
+            validate_layout(saved)
+    # The checks do not see a roof: no mounting surface or other shell feature comes from it.
+    shell, layout = scene(ceiling=None)
+    plain = shell_with_plan_boundary(shell, layout)
+    layout["zones"][1]["extensions"] = {"roof": {"heightMeters": 3.6}}
+    assert shell_with_plan_boundary(shell, layout) == plain
+
+
+def test_sage_can_set_a_ceiling_finish_and_a_roof():
+    from jsonschema import Draft202012Validator
+    from ai_inspector.codex_runtime.edit_schemas import operation_batch_schema
+    from ai_inspector.facility_layout.operation_proposals import guard_operations
+    schema = operation_batch_schema()
+    validator = Draft202012Validator(schema)
+    good = [{"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": 3, "finish": "acoustic-tile"},
+            {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": 3.6, "finish": "open-deck"},
+            {"op": "set_zone_roof", "zoneId": "zn-lounge", "heightMeters": 3.6},
+            {"op": "set_zone_roof", "zoneId": "zn-lounge", "heightMeters": None}]
+    for operation in good:
+        assert not list(validator.iter_errors({"operations": [operation]})), operation
+        guard_operations([operation])
+    for operation in ({"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": 3, "finish": "marble"},
+                      {"op": "set_zone_roof", "zoneId": "zn-lounge", "heightMeters": 1},
+                      {"op": "set_zone_roof", "zoneId": "zn-lounge"}):
+        assert list(validator.iter_errors({"operations": [operation]})), operation
+    variants = {v["properties"]["op"].get("const"): v for v in schema["properties"]["operations"]["items"]["oneOf"]}
+    assert "'acoustic-tile' (a white suspended ceiling of 600 mm tiles)" in variants["set_zone_ceiling"]["description"]
+    assert "flat commercial roof" in variants["set_zone_roof"]["description"]
+    assert "roof sheeting layer" in variants["set_zone_roof"]["description"]
+
+
+def test_a_sage_preview_of_a_tiled_ceiling_and_a_roof_saves(tmp_path):
+    from ai_inspector.facility_layout.host import LocalFacilityLayoutHost, LOCAL_SITE_ID, LOCAL_LAYOUT_ID
+    from ai_inspector.facility_layout.operation_proposals import create
+    host = LocalFacilityLayoutHost(tmp_path / "facility", private_assets=False)
+    try:
+        service, principal = host.service, host.principal()
+        host.ensure_bootstrap()
+        operations = [
+            {"op": "add_zone", "zoneId": "zn-lounge", "zone": {
+                "label": "Lounge", "zoneType": "workcell", "anchors": [], "evidence": [], "floorElevation": 0,
+                "boundary": rectangle(0, 0, 10, 10)}},
+            {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": 3, "finish": "acoustic-tile"},
+            {"op": "set_zone_roof", "zoneId": "zn-lounge", "heightMeters": 3.6},
+        ]
+        revision = service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["revision"]
+        proposal = create(service, principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, revision, operations=operations)
+        assert proposal["alternative"]["validation"]["spatial"]["metrics"]["errorCount"] == 0
+        approval = service.approve_layout_proposal(
+            principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, proposal["proposalId"],
+            proposal["alternative"]["transactionBinding"], session_id="test-session", idempotency_key="roof-key",
+            explicit_approval=True)
+        saved = service.apply_layout_proposal(
+            principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, approval["approvalToken"],
+            proposal["alternative"]["transactionBinding"], session_id="test-session", idempotency_key="roof-key")["layout"]
+        assert saved["zones"][0]["extensions"] == {"ceiling": {"heightMeters": 3, "finish": "acoustic-tile"},
+                                                   "roof": {"heightMeters": 3.6}}
     finally:
         host.close()

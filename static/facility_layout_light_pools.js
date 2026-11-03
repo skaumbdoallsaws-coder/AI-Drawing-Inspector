@@ -11,7 +11,9 @@
 // accent spot (a Lights finish whose emission is marked accent), are candidates for a few real spot lights without
 // shadows (spotsOf, spotSettings; the adapter gives SPOT_COUNT of them to the candidates nearest the view). The
 // general lighting's pools also add a gentle fill on everything standing under them: fillField sums the pools into
-// a small map over the plan, and patchFillShader adds it to a lit material's indirect light below the lamps.
+// a small map over the plan, and patchFillShader adds it to a lit material's indirect light below the lamps. The
+// fill is only under zone ceilings (the user's choice, 2026-11-02): the adapter passes only pools whose lamp is in
+// a zone with a ceiling, and fillMask gives the shader those zones' footprint, outside which it adds nothing.
 (function (root, factory) {
     'use strict';
 
@@ -44,6 +46,9 @@
     const FILL_LIMIT = 1.5;        // where many lamps overlap
     const FILL_CELL = 0.25;        // metres per texel of the fill map, coarser on a large plan
     const FILL_MAX_CELLS = 512;    // per side
+    const FILL_MASK_SUBDIVIDE = 2; // the ceiling mask's texels per fill map texel, each way
+    const FILL_EDGE_TEXELS = 2;    // the ceiling mask's distances reach this many of its texels from the edge
+    const FILL_MASK_INSET = 0.01;  // metres: a face on a ceiling zone's edge (a wall's outer face) is outside
     const FILL_BELOW = 0.05;       // the fill lights what is at least this far below its lamps (not a ceiling)
     const partCache = new WeakMap();
     const lampCache = new WeakMap();
@@ -441,11 +446,321 @@
         return { minX: minX, minZ: minZ, cell: cell, cols: cols, rows: rows, data: data, pools: lit.length };
     }
 
+    // The zone ceilings' footprint over a fill map ({minX, minZ, cell, cols, rows}), for the shader to cut the fill
+    // off at its edge: a map FILL_MASK_SUBDIVIDE times finer over the same plan, with `channels` (1, 2 or 4) values
+    // per texel. The shader takes the largest; above zero it adds the fill.
+    // - Outlines nearer each other than six texels (0.75 m) without touching go in different channels
+    //   (maskChannels), each with the outlines it touches, so each reads its own distances, as if the others were
+    //   not there: a room's wall a few centimetres from the next room keeps its fill, also when a hallway joins them.
+    //   Touching outlines share a channel, so an edge two of them share is not an edge.
+    // - A channel holds, per texel, the signed distance in metres (+ inside) to the edge of its footprints, clamped
+    //   to FILL_EDGE_TEXELS texels, less FILL_MASK_INSET (maskField). Read with linear filtering it is above zero
+    //   only inside them:
+    //   - Each texel is also held at or below the signed distance to the line of every footprint edge within a
+    //     texel diagonal of it (that edge may cross a cell the texel is a corner of). Linear filtering mixes a
+    //     cell's four texels, so in a cell an edge crosses the value is at most that edge's line distance, which is
+    //     below zero on the edge's outer side, where any outside point of the cell is. A cell no edge crosses is
+    //     all inside or all outside.
+    //   - Along a straight edge that changes nothing: the cut is exactly on the edge, less the inset. Only in an
+    //     inner (reflex) corner of a footprint does it take about a texel and a half off the inside.
+    //   - The map's own border texels are outside, so the clamped reads beyond the last texel centres are too.
+    // - Outside every ceiling, every channel is at or below zero. With more than four groups near one another, one
+    //   shares a channel: near the others its fill is cut a little, never lit outside. So is a single outline's
+    //   own notch narrower than a texel diagonal, or two touching outlines' (they share a channel).
+    // Built once per grid and outlines: each outline's inside by scanlines, the distances only near the edges.
+    function fillMask(grid, outlines) {
+        const minX = grid.minX;
+        const minZ = grid.minZ;
+        const cell = grid.cell / FILL_MASK_SUBDIVIDE;
+        const cols = grid.cols * FILL_MASK_SUBDIVIDE;
+        const rows = grid.rows * FILL_MASK_SUBDIVIDE;
+        const shapes = (outlines || []).map(function (outline) {
+            return (Array.isArray(outline) ? outline : []).filter(function (point) {
+                return point && Number.isFinite(point.x) && Number.isFinite(point.z);
+            });
+        }).filter(function (points) { return points.length >= 3; });
+        const reach = FILL_EDGE_TEXELS * cell;
+        const groups = maskChannels(shapes, 2 * reach + 2 * cell);
+        const channels = groups.length <= 2 ? Math.max(1, groups.length) : 4;
+        const data = new Float32Array(cols * rows * channels).fill(-reach - FILL_MASK_INSET);
+        groups.forEach(function (group, channel) {
+            const field = maskField(group, minX, minZ, cell, cols, rows);
+            for (let k = 0; k < field.length; k += 1) data[k * channels + channel] = field[k];
+        });
+        return { minX: minX, minZ: minZ, cell: cell, cols: cols, rows: rows, channels: channels, data: data };
+    }
+
+    // The outlines in at most four channels, as lists of outlines. Two outlines touch when they overlap or meet, and
+    // clash when they do not but are nearer each other than `apart`: in one channel their edges would cut each
+    // other's fill. A group grows from an outline through the outlines touching it, leaving out any that clashes with
+    // one already in; groups are made until each outline and each touching pair is in one, so no shared edge is an
+    // edge in all of them (two rooms a wall's width apart, joined by a hallway: {room, hallway} and {room 2,
+    // hallway}). Groups that overlap or come nearer than `apart` take different channels; one that finds no free
+    // channel joins the one with the fewest groups near it.
+    function maskChannels(shapes, apart) {
+        const count = shapes.length;
+        const boxes = shapes.map(outlineBox);
+        const distances = new Map();
+        const between = function (i, j) {
+            if (i === j) return 0;
+            const key = Math.min(i, j) * count + Math.max(i, j);
+            if (!distances.has(key)) {
+                distances.set(key, boxGap(boxes[i], boxes[j]) >= apart ? Infinity : outlineDistance(shapes[i], shapes[j]));
+            }
+            return distances.get(key);
+        };
+        const clashing = function (i, j) {
+            const distance = between(i, j);
+            return distance > 1e-4 && distance < apart;
+        };
+        const touches = shapes.map(function (shape, i) {
+            const list = [];
+            for (let j = 0; j < count; j += 1) if (j !== i && between(i, j) <= 1e-4) list.push(j);
+            return list;
+        });
+        const groups = [];
+        const grow = function (seed) {
+            const members = seed.slice();
+            const queue = seed.slice();
+            while (queue.length) {
+                touches[queue.shift()].forEach(function (next) {
+                    if (members.indexOf(next) >= 0) return;
+                    if (members.some(function (member) { return clashing(member, next); })) return;
+                    members.push(next);
+                    queue.push(next);
+                });
+            }
+            groups.push(members.sort(function (a, b) { return a - b; }));
+        };
+        const grouped = function (list) {
+            return groups.some(function (group) {
+                return list.every(function (index) { return group.indexOf(index) >= 0; });
+            });
+        };
+        for (let i = 0; i < count; i += 1) if (!grouped([i])) grow([i]);
+        touches.forEach(function (list, i) {
+            list.forEach(function (j) { if (j > i && !grouped([i, j])) grow([i, j]); });
+        });
+        const kept = groups.filter(function (group, index) {
+            return !groups.some(function (other, at) {
+                return at !== index && group.every(function (member) { return other.indexOf(member) >= 0; })
+                    && (other.length > group.length || at < index);
+            });
+        });
+        const near = function (a, b) {
+            return a.some(function (i) { return b.some(function (j) { return between(i, j) < apart; }); });
+        };
+        const channels = [];
+        kept.forEach(function (group, index) {
+            const crowd = channels.map(function (members) {
+                return members.filter(function (other) { return near(kept[other], group); }).length;
+            });
+            let choice = crowd.indexOf(0);
+            if (choice < 0 && channels.length < 4) {
+                channels.push([]);
+                choice = channels.length - 1;
+            }
+            if (choice < 0) choice = crowd.indexOf(Math.min.apply(null, crowd));
+            channels[choice].push(index);
+        });
+        return channels.map(function (members) {
+            const indices = [];
+            members.forEach(function (group) {
+                kept[group].forEach(function (index) { if (indices.indexOf(index) < 0) indices.push(index); });
+            });
+            return indices.map(function (index) { return shapes[index]; });
+        });
+    }
+
+    function outlineBox(points) {
+        const box = { minX: Infinity, minZ: Infinity, maxX: -Infinity, maxZ: -Infinity };
+        points.forEach(function (point) {
+            box.minX = Math.min(box.minX, point.x);
+            box.minZ = Math.min(box.minZ, point.z);
+            box.maxX = Math.max(box.maxX, point.x);
+            box.maxZ = Math.max(box.maxZ, point.z);
+        });
+        return box;
+    }
+
+    function boxGap(a, b) {
+        return Math.hypot(Math.max(0, a.minX - b.maxX, b.minX - a.maxX), Math.max(0, a.minZ - b.maxZ, b.minZ - a.maxZ));
+    }
+
+    // The plan distance between two outlines: 0 when they overlap or touch.
+    function outlineDistance(a, b) {
+        if (insideOutline(b, a[0].x, a[0].z) || insideOutline(a, b[0].x, b[0].z)) return 0;
+        let best = Infinity;
+        a.forEach(function (p, i) {
+            const q = a[(i + 1) % a.length];
+            b.forEach(function (r, j) {
+                best = Math.min(best, segmentDistance(p, q, r, b[(j + 1) % b.length]));
+            });
+        });
+        return best;
+    }
+
+    function segmentDistance(p, q, r, t) {
+        const cross = function (o, u, v) { return (u.x - o.x) * (v.z - o.z) - (u.z - o.z) * (v.x - o.x); };
+        const d1 = cross(r, t, p);
+        const d2 = cross(r, t, q);
+        const d3 = cross(p, q, r);
+        const d4 = cross(p, q, t);
+        if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return 0;
+        return Math.min(pointSegment(p, r, t), pointSegment(q, r, t), pointSegment(r, p, q), pointSegment(t, p, q));
+    }
+
+    function pointSegment(v, a, b) {
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const length = dx * dx + dz * dz;
+        const t = length > 0 ? Math.max(0, Math.min(1, ((v.x - a.x) * dx + (v.z - a.z) * dz) / length)) : 0;
+        return Math.hypot(v.x - a.x - dx * t, v.z - a.z - dz * t);
+    }
+
+    // One mask channel: the signed, clamped distance to the edge of these outlines' union (see fillMask).
+    function maskField(shapes, minX, minZ, cell, cols, rows) {
+        const inside = new Uint8Array(cols * rows);
+        shapes.forEach(function (points) {
+            for (let j = 0; j < rows; j += 1) {
+                const z = minZ + (j + 0.5) * cell;
+                const crossings = [];
+                for (let a = 0, b = points.length - 1; a < points.length; b = a, a += 1) {
+                    const p = points[a];
+                    const q = points[b];
+                    if ((p.z > z) !== (q.z > z)) crossings.push(p.x + (z - p.z) * (q.x - p.x) / (q.z - p.z));
+                }
+                crossings.sort(function (u, v) { return u - v; });
+                for (let k = 0; k + 1 < crossings.length; k += 2) {
+                    const i0 = Math.max(0, Math.ceil((crossings[k] - minX) / cell - 0.5));
+                    const i1 = Math.min(cols - 1, Math.ceil((crossings[k + 1] - minX) / cell - 0.5) - 1);
+                    for (let i = i0; i <= i1; i += 1) inside[j * cols + i] = 1;
+                }
+            }
+        });
+        const reach = FILL_EDGE_TEXELS * cell;
+        const diagonal = Math.SQRT2 * cell * (1 + 1e-6);
+        const near = new Float32Array(cols * rows).fill(reach);
+        const lines = new Float32Array(cols * rows).fill(Infinity);
+        const insideAny = function (x, z) {
+            return shapes.some(function (points) { return insideOutline(points, x, z); });
+        };
+        shapes.forEach(function (points, shape) {
+            points.forEach(function (p, index) {
+                const q = points[(index + 1) % points.length];
+                const length = Math.hypot(q.x - p.x, q.z - p.z);
+                if (!(length > 1e-9)) return;
+                const ux = (q.x - p.x) / length;
+                const uz = (q.z - p.z) / length;
+                // Cut where another outline's corner lies on this edge or another edge crosses it.
+                const cuts = [0, length];
+                shapes.forEach(function (others, other) {
+                    others.forEach(function (r, k) {
+                        const t = others[(k + 1) % others.length];
+                        if (other !== shape && Math.abs(ux * (r.z - p.z) - uz * (r.x - p.x)) < 1e-4) {
+                            cuts.push((r.x - p.x) * ux + (r.z - p.z) * uz);
+                        }
+                        const ex = t.x - r.x;
+                        const ez = t.z - r.z;
+                        const denominator = ux * ez - uz * ex;
+                        if (Math.abs(denominator) < 1e-12) return;
+                        const along = ((r.x - p.x) * ez - (r.z - p.z) * ex) / denominator;
+                        const across = ((r.x - p.x) * uz - (r.z - p.z) * ux) / denominator;
+                        if (across > 0 && across < 1) cuts.push(along);
+                    });
+                });
+                const sorted = cuts.filter(function (t) { return t >= 0 && t <= length; })
+                    .sort(function (u, v) { return u - v; });
+                for (let k = 0; k + 1 < sorted.length; k += 1) {
+                    const from = sorted[k];
+                    const to = sorted[k + 1];
+                    if (!(to - from > 1e-6)) continue;
+                    const middle = (from + to) / 2;
+                    const mx = p.x + ux * middle;
+                    const mz = p.z + uz * middle;
+                    const left = insideAny(mx - uz * 1e-3, mz + ux * 1e-3);
+                    if (left === insideAny(mx + uz * 1e-3, mz - ux * 1e-3)) continue;
+                    // The normal into the footprint.
+                    const nx = left ? -uz : uz;
+                    const nz = left ? ux : -ux;
+                    const ax = p.x + ux * from;
+                    const az = p.z + uz * from;
+                    const span = to - from;
+                    const i0 = Math.max(0, Math.floor((Math.min(ax, p.x + ux * to) - reach - minX) / cell));
+                    const i1 = Math.min(cols - 1, Math.floor((Math.max(ax, p.x + ux * to) + reach - minX) / cell));
+                    const j0 = Math.max(0, Math.floor((Math.min(az, p.z + uz * to) - reach - minZ) / cell));
+                    const j1 = Math.min(rows - 1, Math.floor((Math.max(az, p.z + uz * to) + reach - minZ) / cell));
+                    for (let j = j0; j <= j1; j += 1) {
+                        const cz = minZ + (j + 0.5) * cell - az;
+                        for (let i = i0; i <= i1; i += 1) {
+                            const cx = minX + (i + 0.5) * cell - ax;
+                            const t = Math.max(0, Math.min(span, cx * ux + cz * uz));
+                            const distance = Math.hypot(cx - ux * t, cz - uz * t);
+                            const at = j * cols + i;
+                            if (distance < near[at]) near[at] = distance;
+                            if (distance <= diagonal) lines[at] = Math.min(lines[at], cx * nx + cz * nz);
+                        }
+                    }
+                }
+            });
+        });
+        const data = new Float32Array(cols * rows);
+        for (let j = 0; j < rows; j += 1) {
+            for (let i = 0; i < cols; i += 1) {
+                const k = j * cols + i;
+                const border = i === 0 || j === 0 || i === cols - 1 || j === rows - 1;
+                const signed = Math.min(inside[k] ? near[k] : -near[k], lines[k]) - FILL_MASK_INSET;
+                data[k] = border ? Math.min(signed, -FILL_MASK_INSET) : signed;
+            }
+        }
+        return data;
+    }
+
+    // A fill mask's value at plan point (x, z) as the shader reads it: the largest of its channels, each filtered.
+    function sampleMask(mask, x, z) {
+        let best = -Infinity;
+        for (let channel = 0; channel < (mask.channels || 1); channel += 1) {
+            best = Math.max(best, sampleLinear(mask, x, z, mask.channels || 1, channel));
+        }
+        return best;
+    }
+
+    // A map's value at plan point (x, z) as the GPU's linear filtering reads it (texel centres, clamped at the
+    // border): for the fill mask, positive inside the footprint.
+    function sampleLinear(field, x, z, channels, channel) {
+        const step = channels || 1;
+        const u = (x - field.minX) / field.cell - 0.5;
+        const v = (z - field.minZ) / field.cell - 0.5;
+        const i = Math.floor(u);
+        const j = Math.floor(v);
+        const fu = u - i;
+        const fv = v - j;
+        const at = function (column, row) {
+            const a = Math.min(field.cols - 1, Math.max(0, column));
+            const b = Math.min(field.rows - 1, Math.max(0, row));
+            return field.data[(b * field.cols + a) * step + (channel || 0)];
+        };
+        return (at(i, j) * (1 - fu) + at(i + 1, j) * fu) * (1 - fv) + (at(i, j + 1) * (1 - fu) + at(i + 1, j + 1) * fu) * fv;
+    }
+
+    // Whether plan point (x, z) is inside the outline (an array of {x, z}, even-odd).
+    function insideOutline(outline, x, z) {
+        let hit = false;
+        const points = Array.isArray(outline) ? outline : [];
+        for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+            const a = points[i];
+            const b = points[j];
+            if ((a.z > z) !== (b.z > z) && x < (b.x - a.x) * (z - a.z) / (b.z - a.z) + a.x) hit = !hit;
+        }
+        return hit;
+    }
+
     // A lit material's fragment shader with the fill added to its indirect light (before lights_fragment_end, where
     // three adds the ambient light): the point's world position from the view position, mapped onto the fill map by
     // facilityFillMatrix (x and z to 0..1, y kept), and lit only below the map's lamps. False when the shader has no
     // lights (an unlit material).
-    const FILL_UNIFORMS = 'uniform sampler2D facilityFillMap;\nuniform mat4 facilityFillMatrix;\n'
+    const FILL_UNIFORMS = 'uniform sampler2D facilityFillMap;\nuniform sampler2D facilityFillMask;\n'
+        + 'uniform vec4 facilityFillChannels;\nuniform mat4 facilityFillMatrix;\n'
         + 'uniform float facilityFillStrength;\n';
     const FILL_FRAGMENT = [
         'if ( facilityFillStrength > 0.0 ) {',
@@ -453,7 +768,12 @@
         '    vec4 facilityAt = facilityFillMatrix * vec4( facilityWorld, 1.0 );',
         '    if ( facilityAt.x >= 0.0 && facilityAt.x <= 1.0 && facilityAt.z >= 0.0 && facilityAt.z <= 1.0 ) {',
         '        vec4 facilityFill = texture2D( facilityFillMap, facilityAt.xz );',
-        '        if ( facilityAt.y < facilityFill.a ) irradiance += facilityFill.rgb * facilityFillStrength;',
+        // Unused channels of the mask read -1.
+        '        vec4 facilityMask = mix( vec4( - 1.0 ), texture2D( facilityFillMask, facilityAt.xz ), facilityFillChannels );',
+        '        float facilityCeiling = max( max( facilityMask.r, facilityMask.g ), max( facilityMask.b, facilityMask.a ) );',
+        '        if ( facilityAt.y < facilityFill.a && facilityCeiling > 0.0 ) {',
+        '            irradiance += facilityFill.rgb * facilityFillStrength;',
+        '        }',
         '    }',
         '}',
     ].join('\n');
@@ -588,6 +908,13 @@
         spotsOf: spotsOf,
         spotSettings: spotSettings,
         fillField: fillField,
+        fillMask: fillMask,
+        sampleMask: sampleMask,
+        sampleLinear: sampleLinear,
+        FILL_EDGE_TEXELS: FILL_EDGE_TEXELS,
+        FILL_MASK_SUBDIVIDE: FILL_MASK_SUBDIVIDE,
+        FILL_MASK_INSET: FILL_MASK_INSET,
+        insideOutline: insideOutline,
         patchFillShader: patchFillShader,
     };
 }));

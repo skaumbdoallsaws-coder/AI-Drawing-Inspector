@@ -385,6 +385,136 @@ test('the general lighting fill is a map of its pools, gentle, capped, and only 
     const hall = pools.fillField([{ x: 0, z: 0, radius: 5, color: white, lampY: 10 },
         { x: 400, z: 150, radius: 5, color: white, lampY: 10 }]);
     assert.ok(hall.cols <= 512 && hall.rows <= 512 && hall.cell > 0.25);
+    assert.ok(pools.insideOutline([{ x: -1, z: -3 }, { x: 3, z: -3 }, { x: 3, z: 3 }, { x: -1, z: 3 }], 0, 0));
+    assert.ok(!pools.insideOutline([{ x: -1, z: -3 }, { x: 3, z: -3 }, { x: 3, z: 3 }, { x: -1, z: 3 }], -2, 0));
+    assert.ok(!pools.insideOutline(null, 0, 0));
+});
+
+// Under zone ceilings only (2026-11-02): the shader adds the fill only where the ceiling mask, read as the GPU reads
+// it (linear between texel centres), is above zero: never outside the footprint, inside all but a centimetre along a
+// straight edge and a little more in an inner corner.
+test('the ceiling mask cuts the fill at the ceilings\' edge and never lights outside it, and builds fast', () => {
+    const white = { r: 1, g: 1, b: 1 };
+    const field = pools.fillField([{ x: 0, z: 0, radius: 1.5, color: white, lampY: 3.185 }]);
+    const room = [{ x: -1.1, z: -3 }, { x: 3, z: -3 }, { x: 3, z: 3 }, { x: -1.1, z: 3 }];
+    const mask = pools.fillMask(field, [room]);
+    const fine = pools.FILL_MASK_SUBDIVIDE;
+    assert.deepStrictEqual([mask.minX, mask.minZ, mask.cols, mask.rows, mask.cell],
+        [field.minX, field.minZ, field.cols * fine, field.rows * fine, field.cell / fine], 'finer, over the same plan');
+    const read = (x, z) => pools.sampleMask(mask, x, z);
+    const inset = pools.FILL_MASK_INSET;
+    const reach = pools.FILL_EDGE_TEXELS * mask.cell;
+    // The lamp would reach 1.9 m past the wall at x -1.1.
+    assert.ok(pools.sampleLinear(field, -1.3, 0.1, 4, 0) > 0, 'the fill map itself reaches past the wall');
+    for (const outside of [0, 0.001, 0.01, 0.05, 0.2, 0.4, 1.5]) {
+        assert.ok(read(-1.1 - outside, 0.1) < 0, outside + ' m outside: no fill (' + read(-1.1 - outside, 0.1) + ')');
+    }
+    assert.ok(read(-1.1 + inset * 0.9, 0.1) < 0, 'a face on the edge (a wall\'s outer face) is outside');
+    for (const inside of [0.011, 0.05, 0.09, 0.12]) {
+        assert.ok(Math.abs(read(-1.1 + inside, 0.1) - (inside - inset)) < 1e-6, inside + ' m inside: lit, the distance');
+    }
+    assert.strictEqual(read(1, 0.1), Math.fround(reach - inset), 'deep inside: clamped');
+    assert.ok(read(-2.6, 0.1) < 0 && read(-2.99, 0.1) < 0, 'outside, to the map border');
+    // Two rooms side by side: the edge they share is inside the footprint, without a dip.
+    const left = [{ x: -2.5, z: -3 }, { x: -1.1, z: -3 }, { x: -1.1, z: 3 }, { x: -2.5, z: 3 }];
+    const both = pools.fillMask(field, [left, room]);
+    for (const x of [-1.4, -1.1, -1, -0.8]) {
+        assert.strictEqual(pools.sampleMask(both, x, 0.1), Math.fround(reach - inset), 'shared edge at ' + x);
+    }
+    assert.ok(pools.sampleMask(both, -2.52, 0.1) < 0 && pools.sampleMask(both, -2.48, 0.1) > 0, 'the outer edge still cuts');
+    // A room inside a bigger one with a ceiling: the bigger one's edge only.
+    const nested = pools.fillMask(field, [[{ x: -3, z: -3 }, { x: 3, z: -3 }, { x: 3, z: 3 }, { x: -3, z: 3 }], room]);
+    assert.strictEqual(pools.sampleMask(nested, -1.1, 0.1), Math.fround(reach - inset), 'a nested room adds no edge');
+    // Never lit outside, also by an inner corner, a step between two rooms, a gap narrower than a texel or a slanted
+    // overlap (where plain linear filtering of distances would leak a few centimetres), probed every 7 mm; inside,
+    // dark only near an edge.
+    const shapes = {
+        ell: [[{ x: -2.07, z: -2.1 }, { x: 2.13, z: -2.1 }, { x: 2.13, z: 0.06 }, { x: 0.11, z: 0.06 }, { x: 0.11, z: 2.2 }, { x: -2.07, z: 2.2 }]],
+        step: [[{ x: -3, z: -2 }, { x: 0.07, z: -2 }, { x: 0.07, z: 2 }, { x: -3, z: 2 }], [{ x: 0.07, z: -1 }, { x: 3, z: -1 }, { x: 3, z: 3 }, { x: 0.07, z: 3 }]],
+        gap: [[{ x: -3, z: -2 }, { x: -0.03, z: -2 }, { x: -0.03, z: 2 }, { x: -3, z: 2 }], [{ x: 0.05, z: -2 }, { x: 3, z: -2 }, { x: 3, z: 2 }, { x: 0.05, z: 2 }]],
+        slanted: [[{ x: -3, z: -2 }, { x: 0.5, z: -2 }, { x: 0.5, z: 1 }, { x: -3, z: 1 }], [{ x: -0.4, z: -0.7 }, { x: 3, z: -1.3 }, { x: 2.6, z: 2.9 }, { x: -0.9, z: 2.4 }]],
+        hallway: [[{ x: -3, z: -2 }, { x: -0.03, z: -2 }, { x: -0.03, z: 2 }, { x: -3, z: 2 }], [{ x: 0.05, z: -2 }, { x: 3, z: -2 }, { x: 3, z: 2 }, { x: 0.05, z: 2 }],
+            [{ x: -3, z: 2 }, { x: 3, z: 2 }, { x: 3, z: 2.9 }, { x: -3, z: 2.9 }]],
+    };
+    Object.entries(shapes).forEach(([name, outlines]) => {
+        const shaped = pools.fillMask(field, outlines);
+        let lit = 0;
+        let darkFar = 0;
+        for (let x = -2.98; x <= 2.98; x += 0.0071) {
+            for (let z = -2.98; z <= 2.98; z += 0.0073) {
+                const value = pools.sampleMask(shaped, x, z);
+                if (!outlines.some(outline => pools.insideOutline(outline, x, z))) {
+                    if (value > 0) lit += 1;
+                } else if (value <= 0 && outlines.every(outline => outline.every((point, k) => {
+                    const next = outline[(k + 1) % outline.length];
+                    const length = Math.hypot(next.x - point.x, next.z - point.z);
+                    const t = Math.max(0, Math.min(1, ((x - point.x) * (next.x - point.x) + (z - point.z) * (next.z - point.z)) / (length * length)));
+                    return Math.hypot(x - point.x - (next.x - point.x) * t, z - point.z - (next.z - point.z) * t) > 0.2;
+                }))) darkFar += 1;
+            }
+        }
+        assert.strictEqual(lit, 0, name + ': no fill outside');
+        assert.strictEqual(darkFar, 0, name + ': inside, dark only within 0.2 m of an edge');
+    });
+    // Codex review of b4437c2: two rooms 8 cm apart (a wall's width). Each footprint reads its own distances in its
+    // own channel, so a wall face 5 cm inside the first room keeps its fill when the second gets a ceiling.
+    const first = [{ x: -3, z: -2 }, { x: -0.03, z: -2 }, { x: -0.03, z: 2 }, { x: -3, z: 2 }];
+    const second = [{ x: 0.05, z: -2 }, { x: 3, z: -2 }, { x: 3, z: 2 }, { x: 0.05, z: 2 }];
+    const alone = pools.fillMask(field, [first]);
+    const paired = pools.fillMask(field, [first, second]);
+    assert.deepStrictEqual([alone.channels, paired.channels], [1, 2]);
+    assert.ok(Math.abs(pools.sampleMask(alone, -0.08, 0.3) - (0.05 - inset)) < 1e-6, 'the wall, one room');
+    assert.strictEqual(pools.sampleMask(paired, -0.08, 0.3), pools.sampleMask(alone, -0.08, 0.3), 'the wall, both rooms');
+    assert.ok(pools.sampleMask(paired, 0.01, 0.3) < 0 && pools.sampleMask(paired, 0.1, 0.3) > 0, 'the gap dark, the second lit');
+    // Codex re-check of a068a1d: a hallway across their ends joins the two rooms. Each room keeps its channel, with
+    // the hallway: the wall still reads as with one room, the hallway is lit over both rooms and the gap stays dark.
+    const hallway = [{ x: -3, z: 2 }, { x: 3, z: 2 }, { x: 3, z: 3 }, { x: -3, z: 3 }];
+    const joined = pools.fillMask(field, [first, second, hallway]);
+    assert.strictEqual(joined.channels, 2);
+    assert.strictEqual(pools.sampleMask(joined, -0.08, 0.3), pools.sampleMask(alone, -0.08, 0.3), 'the wall, rooms joined');
+    assert.ok(Math.abs(pools.sampleMask(joined, 0.1, 0.3) - (0.05 - inset)) < 1e-6, 'the second room\'s wall');
+    const hallOnly = pools.fillMask(field, [hallway]);
+    for (const x of [-1.5, -0.5, 0.5, 1.5]) {
+        assert.ok(pools.sampleMask(joined, x, 2.05) > 0, 'the hallway over the rooms at x ' + x);
+        assert.ok(pools.sampleMask(joined, x, 2.05) >= pools.sampleMask(hallOnly, x, 2.05), 'no darker than the hallway alone');
+    }
+    // Over the gap's closed end the footprint has two inner corners; past their cost (about 0.18 m) it is lit.
+    assert.ok(pools.sampleMask(joined, 0.01, 2.25) > 0, 'the hallway over the gap');
+    assert.ok(pools.sampleMask(joined, 0.01, 1.99) < 0 && pools.sampleMask(joined, 0.01, 0) < 0, 'the gap, up to its closed end');
+    for (const [x, z] of [[-1.5, 2], [1.5, 2], [-0.5, 1.99], [0.5, 2.01]]) {
+        assert.ok(pools.sampleMask(joined, x, z) > 0.05, 'no dark line on the shared edges at ' + x + ', ' + z);
+    }
+    // Far apart footprints share a channel; touching ones are one footprint.
+    assert.strictEqual(pools.fillMask(field, [first, [{ x: 2, z: -2 }, { x: 2.9, z: -2 }, { x: 2.9, z: 2 }, { x: 2, z: 2 }]]).channels, 1);
+    assert.strictEqual(pools.fillMask(field, [first, [{ x: -0.03, z: -2 }, { x: 3, z: -2 }, { x: 3, z: 2 }, { x: -0.03, z: 2 }]]).channels, 1);
+    // Six strips 0.1 m wide, 0.05 m apart: more footprints near one another than channels. One shares a channel,
+    // still never lit outside; the others keep their own.
+    const strips = Array.from({ length: 6 }, (_, k) => [{ x: k * 0.15, z: -2 }, { x: k * 0.15 + 0.1, z: -2 },
+        { x: k * 0.15 + 0.1, z: 2 }, { x: k * 0.15, z: 2 }]);
+    const crowded = pools.fillMask(field, strips);
+    assert.strictEqual(crowded.channels, 4);
+    Object.entries({ paired: [paired, [first, second]], joined: [joined, [first, second, hallway]], crowded: [crowded, strips] })
+        .forEach(([name, [shapedMask, outlines]]) => {
+        let lit = 0;
+        for (let x = -2.98; x <= 2.98; x += 0.0071) {
+            for (let z = -2.98; z <= 2.98; z += 0.0073) {
+                if (!outlines.some(outline => pools.insideOutline(outline, x, z)) && pools.sampleMask(shapedMask, x, z) > 0) lit += 1;
+            }
+        }
+        assert.strictEqual(lit, 0, name + ': no fill outside');
+    });
+    // A large building: 2,000 lamps under 100 ceiling zones builds in well under a second.
+    const zones = [];
+    for (let a = 0; a < 10; a += 1) for (let b = 0; b < 10; b += 1) {
+        zones.push([{ x: a * 8, z: b * 6 }, { x: a * 8 + 8, z: b * 6 }, { x: a * 8 + 8, z: b * 6 + 6 }, { x: a * 8, z: b * 6 + 6 }]);
+    }
+    const lamps = Array.from({ length: 2000 }, (_, k) => ({ x: (k * 7.3) % 80, z: (k * 3.1) % 60, radius: 1.5, color: white, lampY: 3.185 }));
+    const started = Date.now();
+    const hall = pools.fillField(lamps);
+    const hallMask = pools.fillMask(hall, zones);
+    const took = Date.now() - started;
+    assert.ok(took < 1000, '2,000 lamps, 100 zones: ' + took + ' ms');
+    assert.ok(pools.sampleMask(hallMask, 40.2, 30.3) > 0 && pools.sampleMask(hallMask, -0.05, 30.3) < 0);
 });
 
 test('the fill goes into the indirect light of a lit material (three r184 standard, lambert, phong, toon), not an unlit one', async () => {
@@ -394,7 +524,9 @@ test('the fill goes into the indirect light of a lit material (three r184 standa
         assert.ok(pools.patchFillShader(shader), name);
         const source = shader.fragmentShader;
         assert.ok(/uniform sampler2D facilityFillMap;/.test(source) && /uniform mat4 facilityFillMatrix;/.test(source)
-            && /uniform float facilityFillStrength;/.test(source), name + ' declares the fill');
+            && /uniform float facilityFillStrength;/.test(source) && /uniform sampler2D facilityFillMask;/.test(source),
+        name + ' declares the fill');
+        assert.ok(/facilityAt\.y < facilityFill\.a && facilityCeiling > 0\.0/.test(source), name + ' only under the ceilings');
         const fill = source.indexOf('irradiance += facilityFill.rgb * facilityFillStrength');
         assert.ok(fill > 0 && fill < source.indexOf('#include <lights_fragment_end>'), name + ' before the indirect light is used');
         assert.ok(fill > source.indexOf('#include <lights_fragment_begin>'), name + ' after irradiance is declared');

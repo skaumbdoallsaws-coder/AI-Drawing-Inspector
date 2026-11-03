@@ -33,6 +33,7 @@ ALLOWED_OPERATIONS = frozenset({
     "upsert_decal", "delete_decal", "edit_perimeter_walls", "upsert_wall_artwork", "delete_wall_artwork",
     "set_site_context", "set_building_pose", "upsert_site_area", "delete_site_area",
     "upsert_site_reference", "delete_site_reference", "set_emergency_plan", "set_zone_ceiling",
+    "set_zone_roof",
 })
 # A package from the server's planner (a cell plan or its clear) may also remove the saved walks its own deletions
 # strand; the kernel allows nothing else (operations.py, delete_stranded_movements). Model-written batches may not.

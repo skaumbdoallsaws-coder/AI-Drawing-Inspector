@@ -364,14 +364,22 @@ def operation_batch_schema():
                           "meeting point outside: an assembly-point placement or a position), shelter and restroom "
                           "zones, and the site phone number (only when the user gives it). The evacuation and emergency "
                           "maps draw from it. It moves nothing. Null removes it.")
-    operation("set_zone_ceiling", {"zoneId": ref("zoneId"), "heightMeters": nullable(number(2, 40))},
-              description="Give a zone a ceiling heightMeters above its floor (2-40 m), or null to remove it, so lamps "
-                          "can hang from it. A hung item's asset must allow the ceiling "
+    operation("set_zone_ceiling", {"zoneId": ref("zoneId"), "heightMeters": nullable(number(2, 40)),
+                                   "finish": {"enum": ["acoustic-tile", "open-deck"]}},
+              required=["zoneId", "heightMeters"],
+              description="Give a zone a ceiling heightMeters above its floor (2-40 m), or null (without a finish) to "
+                          "remove it, so lamps can hang from it. finish is how the 3D view draws it: 'acoustic-tile' "
+                          "(a white suspended ceiling of 600 mm tiles), 'open-deck' or left out (matte charcoal). "
+                          "A hung item's asset must allow the ceiling "
                           "(coordinateFrame.allowedMountingSurfaces includes 'ceiling'). Place it inside the zone with "
                           "its top at the ceiling: transform.position.y = the ceiling's height minus the asset's "
                           "height, and metadata.mountingSurface {surfaceKind: 'ceiling'} (implied when the ceiling is "
                           "the asset's only mounting surface). It may hang over a table: items collide only where "
                           "their heights overlap.")
+    operation("set_zone_roof", {"zoneId": ref("zoneId"), "heightMeters": nullable(number(2, 40))},
+              description="Give a zone a flat commercial roof whose underside is heightMeters above its floor (2-40 m: "
+                          "the wall tops), or null to remove it. Only the 3D view draws it (on the roof sheeting "
+                          "layer, hidden by default); it holds nothing up and nothing hangs from it.")
     operation("rename_layout", {"displayName": ref("label")})
     for name, key, definition, reset in (("set_floor_surfaces", "surfaces", "floorSurfaces", False),
             ("set_interior_walls", "walls", "interiorWalls", False), ("set_perimeter_walls", "wallSettings", "perimeterWalls", True),

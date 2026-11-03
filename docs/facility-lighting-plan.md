@@ -413,8 +413,7 @@ lights on, lamps now light what they shine on, not only the floor; a zone ceilin
     pure black even by day.
   - Matte charcoal (#2a2a2d, roughness 1); no shadow, never picked, on the overhead layer, in every scene. Hung
     lamps sit in it (polygon offset).
-  - Not built: a ceiling finish on `set_zone_ceiling`. It would be cheap (a color or a library finish id saved with
-    the ceiling); offered, not shipped.
+  - A finish came later: 'acoustic-tile' or 'open-deck' (see "Ceiling finishes and zone roofs" below).
 - **Accent spot LED** (`light-accent-spot`, Lights). Warm white `#ffc08a` (about 3000 K), beam 30 degrees,
   estimate 700 lm at 30 degrees, and `emission.accent: true`.
   - Python accepts `accent` only as true with a beam angle.
@@ -446,6 +445,37 @@ lights on, lamps now light what they shine on, not only the floor; a zone ceilin
     point. A chair under a downlight is lifted; the ceiling is not.
   - Materials are patched once, the first time the fill is wanted, and switched off by a uniform outside Evening.
     A daytime-only session patches nothing.
+  - Only under zone ceilings (the user's choice after the first port, 2026-11-02): only pools whose lamp is in a
+    zone with `extensions.ceiling` count. A layout without a zone ceiling gets no map, no uniforms and no patched
+    material: Factory 02's Evening is pixel for pixel as at 12a038a again (aisle identical; hall identical but for a
+    blinking beacon's 7 pixels). Removing the last ceiling frees both maps.
+  - The ceiling mask (`fillMask`, after a Codex review of 43662a6) cuts the fill at the ceilings' footprint, so
+    outside it the fill is exactly zero. It is a second half-float map, twice as fine as the fill map over the same
+    plan (0.125 m texels), holding the signed distance to the footprint's edge less 1 cm. The shader adds the fill
+    only where it reads above zero.
+    - Read with linear filtering, distances alone leak a few centimetres past an inner corner. So each texel is
+      also held at or below the signed distance to the line of every footprint edge within a texel diagonal: in a
+      cell an edge crosses, the filtered value is then at most that edge's line distance, below zero on its outer
+      side. The fill map itself is no longer cut, so a room's own walls keep all their fill.
+    - The cost: 1 cm along a straight edge (a wall face on a ceiling zone's edge counts as outside), up to about
+      0.18 m in an inner corner of the footprint, and the map's outermost 0.125 m, where the fill is near zero.
+    - Built once per fill map grid and set of outlines, by scanlines and only near the edges: 2,000 lamps under
+      100 ceiling zones take about 30 ms (the first version's per-texel outline tests took 1.8-2.5 s).
+    - Nearby rooms keep separate distances (after Codex reviews of b4437c2 and a068a1d). Two outlines touch when
+      they overlap or meet, and clash when they do not but are nearer than 0.75 m. The mask has up to 4 channels
+      (R, RG or RGBA) and the shader takes the largest.
+      - Each channel holds groups of outlines. A group grows from an outline through the outlines touching it,
+        leaving out any that clashes with one already in. Groups are made until each outline and each touching
+        pair is in one, so a shared edge is never an edge everywhere.
+      - Groups that overlap or come nearer than 0.75 m take different channels. Two rooms a wall's width apart,
+        joined by a hallway across their ends, become {room 1, hallway} and {room 2, hallway}.
+      - A room's wall a few centimetres from the next room's ceiling keeps its fill. Before, the other room's edge
+        lines cut it: a wall 5 cm inside read -0.085 instead of +0.04, at a068a1d still when a hallway joined them.
+      - Outside every ceiling every channel is at most zero.
+      - With more than four groups near one another, one shares a channel: near the others its fill is cut a
+        little, never lit outside. So is a notch narrower than a texel diagonal within one outline, or between two
+        touching ones.
+      - The gym's 20 ceilings are one group: its mask is the same, texel for texel.
 - **Gym check.** `gym_lighting_check.py` in the test root makes the scratch layout `fl-gym-lighting-check` from the
   test store's gym copy (282 items, read only). It adds:
   - a 3.2 m ceiling on the wellness lounge;
@@ -469,8 +499,61 @@ lights on, lamps now light what they shine on, not only the floor; a zone ceilin
   - Gym lounge: 129 vs 122 ms. Gym overview: 57.5 vs 54.4 ms. The rounds cross both ways.
   - Factory 02 hall: 164 vs 167 ms. Aisle: 151 vs 155 ms. No spot candidates (its lamps hang high and throw
     pools); a fill of 800 pools (512 x 334 map).
-  - Factory 02's Evening now shows its racks, boxes and columns lit under the rows, where they were dark
-    silhouettes (`measure-f02-*-lamps.png` vs `-before.png`).
+  - Factory 02's Evening then showed its racks, boxes and columns lit under the rows, where they were dark
+    silhouettes. The user did not want Factory 02 changed by gym work: the fill is now only under zone ceilings
+    (above), which Factory 02 does not have.
+
+## Ceiling finishes and zone roofs (2026-11-02, test copy)
+
+Asked by the user through the main session: "please build commercial ceiling + roof for all the areas that need
+them" (the Private Gym). A layout with neither renders as before: Factory 02 pixel for pixel.
+
+- **Ceiling finish.** `set_zone_ceiling` takes an optional `finish`:
+  - 'acoustic-tile': a white suspended ceiling of 600 x 600 mm matte tiles in a thin light grey T-bar grid;
+  - 'open-deck', or left out: the matte charcoal as before.
+  - Saved as `extensions.ceiling.finish`. A set replaces the whole ceiling, so leaving the finish out clears it. A
+    null height with a finish is refused.
+  - The tiles are one 128-texel texture with the grid on 2 texels at each edge, mipmapped. It is mapped by plan
+    position (x / 0.6, z / 0.6), so the grid lines up across rooms.
+  - **Bulkheads.** Where a ceiling borders a higher one (reception 3.0 m beside cardio 3.6 m), a vertical face
+    closes the step. It runs from the lower ceiling up to the higher one, faces the higher room and takes its color
+    (charcoal, or the tiles' plain #f1f0ec). Without it the gap showed the sky, or the roof.
+- **Zone roofs.** New operation `set_zone_roof` {zoneId, heightMeters}: 2-40 m, or null to remove it. Saved as
+  `extensions.roof` {heightMeters}, allowed in a Sage preview, one sentence in Sage's schema.
+  - A flat commercial roof over the zone outline. Its underside is at floor + heightMeters (the wall tops); it is
+    0.2 m thick, with a light grey membrane (#c4c7c9) on top.
+  - A 0.2 m wide parapet (#a4a7aa) rises 0.45 m above the membrane, and its outer face comes 0.1 m down past the
+    underside.
+  - Drawn from above and outside only: the membrane faces up and there is no underside, so a ceiling at the same
+    height cannot flicker against it. No shadow, never picked, on the 'Roof sheeting (3D)' layer (off by default).
+  - **Shared edges.** Where a roof meets one as high or higher, its parapet has no outer face there. Where it meets
+    a lower one, the outer face comes down only to that roof's membrane, however little lower it is (annex 3.3 m
+    over pool 3.2 m: down to 3.4 m). Each edge is cut where a neighbour's corner lies on it or a neighbour's edge
+    crosses it, so a roof crossing the middle of an edge leaves the open parts their face. Without this, the annex
+    parapet's outer face showed through a doorway from inside the main building. (The lower-neighbour rule and the
+    crossing cuts came from a Codex review of b4437c2.)
+- **Check.** `roof_check.py` in the test root makes the scratch `fl-gym-roof-check`, a copy of
+  `fl-gym-lighting-check` with the heights the main session will set on the real gym. It has 5 roofs and 20
+  ceilings, 10 of them acoustic tile (the lounge included). Shots are in `ui-data/drive/gym-roofs/`.
+  - Inside views (reception, washrooms, pool, annex, lounge, free weights, soccer, the cardio-reception step):
+    roofs on and off are identical, apart from models finishing loading and a 15 x 2 pixel streak in the free
+    weights view: a crack where a ceiling meets a wall top, through which a roof face shows when the layer is on.
+  - At b4437c2 the pool view also had a one-pixel line where the tile ceiling meets the wall top: the annex
+    parapet's outer face, then coming down to 3.2 m over the 3.2 m pool roof, showing through such a crack. With
+    the face stopping at the pool membrane (3.4 m) the pool views are identical with roofs on and off.
+  - The overview and the street views show the roofs over the ceilings with the layer on.
+  - Lounge Evening under the white tiles: the 28 downlights sit flush in the grid and the pendant canopies meet it
+    cleanly, without flicker (two shots of each close-up are identical). The accent washes and the fill read as
+    before (the ceiling mask changed at most 1 level in 3 pixels).
+  - Factory 02: the saved scene is identical to before, but for the compass widget's anti-aliasing. Evening is
+    identical to 43662a6, with the same draw calls and triangles.
+- **Frame time.** Each frame timed until the GPU finished, in interleaved rounds.
+  - Gym, roof layer on vs off: overview 66.9 vs 68.2 ms; free weights 50.1 vs 49.4 ms; cardio-reception step 46.6
+    vs 46.6 ms.
+  - Factory 02 Evening in a fresh browser: hall 126-130 ms, aisle 132-158 ms, as at 43662a6. With the browser grown
+    to 4 GB and 600 MB free on the machine, the same frames took 270-300 ms.
+  - The fill on the gym with all 20 ceilings builds in 56 ms in the page, the first time (the mask alone takes
+    2 ms in Node).
 
 ## L7 results (2026-10-31, test copy)
 

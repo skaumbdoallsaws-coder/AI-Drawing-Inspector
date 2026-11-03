@@ -557,26 +557,60 @@ def _op_set_zone_ceiling(
     _index: int,
     _base_revision: str,
 ) -> Tuple[List[str], List[str]]:
-    """Give a zone a ceiling heightMeters above its floor, which lamps hang from, or null to remove it."""
+    """Give a zone a ceiling heightMeters above its floor, which lamps hang from, with an optional finish (the 3D
+    view's look; left out: matte charcoal), or null to remove it."""
     from .ceilings import KEY, normalize_ceiling
+    fields = set(operation)
+    if not {"op", "zoneId", "heightMeters"} <= fields <= {"op", "zoneId", "heightMeters", "finish"} \
+            or (operation["heightMeters"] is None and "finish" in operation):
+        _fail("invalid_zone_ceiling", "Expected zoneId, heightMeters and an optional finish (or a null heightMeters, "
+                                      "alone, to remove the ceiling).")
+    value = None
+    if operation["heightMeters"] is not None:
+        ceiling = {"heightMeters": operation["heightMeters"]}
+        if "finish" in operation:
+            ceiling["finish"] = operation["finish"]
+        try:
+            value = normalize_ceiling(ceiling)
+        except ValueError as exc:
+            _fail("invalid_zone_ceiling", str(exc))
+    return _set_zone_extension(document, operation, KEY, value)
+
+
+def _op_set_zone_roof(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    """Give a zone a flat roof whose underside is heightMeters above its floor (the 3D view only), or null to remove
+    it."""
+    from .ceilings import ROOF_KEY, normalize_roof
     if set(operation) != {"op", "zoneId", "heightMeters"}:
-        _fail("invalid_zone_ceiling", "Expected zoneId and heightMeters (or null to remove the ceiling).")
+        _fail("invalid_zone_roof", "Expected zoneId and heightMeters (or null to remove the roof).")
+    value = None
+    if operation["heightMeters"] is not None:
+        try:
+            value = normalize_roof({"heightMeters": operation["heightMeters"]})
+        except ValueError as exc:
+            _fail("invalid_zone_roof", str(exc))
+    return _set_zone_extension(document, operation, ROOF_KEY, value)
+
+
+def _set_zone_extension(document, operation, key, value):
+    """Set one zone extension, or remove it (and an emptied extensions object) when value is None."""
     zone_id = _clean_id(operation.get("zoneId"), "zoneId", "zn")
     zone = _find(document, "zones", "zoneId", zone_id, "Zone")
     extensions = zone.get("extensions")
     if extensions is not None and not isinstance(extensions, dict):
         _fail("invalid_layout_shape", "Zone extensions must be an object.")
-    if operation["heightMeters"] is None:
+    if value is None:
         if extensions is not None:
-            extensions.pop(KEY, None)
+            extensions.pop(key, None)
             if not extensions:
                 zone.pop("extensions")
         return [], [zone_id]
-    try:
-        value = normalize_ceiling({"heightMeters": operation["heightMeters"]})
-    except ValueError as exc:
-        _fail("invalid_zone_ceiling", str(exc))
-    zone.setdefault("extensions", {})[KEY] = value
+    zone.setdefault("extensions", {})[key] = value
     return [], [zone_id]
 
 
@@ -2895,6 +2929,7 @@ _HANDLERS: Dict[str, _Handler] = {
     "add_zone": _op_add_zone,
     "edit_zone": _op_edit_zone,
     "set_zone_ceiling": _op_set_zone_ceiling,
+    "set_zone_roof": _op_set_zone_roof,
     "delete_zone": _op_delete_zone,
     "add_floor_marking": _op_add_floor_marking,
     "add_floor_path": _op_add_floor_path,

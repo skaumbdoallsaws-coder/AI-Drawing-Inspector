@@ -109,8 +109,20 @@
     // width in metres.
     const ZONE_LIMIT_COLOR = '#4d7c8a';
     const ZONE_LIMIT_WIDTH = 0.1;
-    // A zone ceiling (ceilings.py), seen from inside the room: matte charcoal.
+    // A zone ceiling (ceilings.py), seen from inside the room: matte charcoal ('open-deck' or no finish), or
+    // 'acoustic-tile': off-white 600 mm tiles in a thin light grey T-bar grid (about 19 mm), tiled from the plan's
+    // origin so the grid lines up across rooms.
     const ZONE_CEILING_COLOR = '#2a2a2d';
+    const CEILING_TILE = Object.freeze({
+        meters: 0.6, texels: 128, gridTexels: 2, tile: [241, 240, 236], grid: [196, 199, 202], plain: '#f1f0ec',
+    });
+    // A zone roof (ceilings.py): a flat slab whose underside is at the zone's floor plus its height (the wall
+    // tops), a light grey membrane on top and a low parapet along its edge that comes down a little below the slab,
+    // over a wall a little lower than the roof. All in metres.
+    const ZONE_ROOF = Object.freeze({
+        thickness: 0.2, parapetHeight: 0.45, parapetWidth: 0.2, drop: 0.1,
+        membrane: '#c4c7c9', parapet: '#a4a7aa',
+    });
     // From this many floor markings on, their paint is drawn merged (batchFloorMarkings).
     const FLOOR_MARKING_BATCH_MINIMUM = 40;
     const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1 =
@@ -2420,6 +2432,7 @@
             floorMarkingTextures: new Map(),
             zoneObjects: [],
             zoneCeilingObjects: [],
+            zoneRoofObjects: [],
             wallObjects: [],
             floorSurfaceObjects: [],
             wallFinishObjects: [],
@@ -2641,7 +2654,8 @@
             // Lamps that light things (2026-11-02): spot light candidates per render group and the fixed set of
             // spot lights; the general lighting's fill map and the uniforms every patched material shares.
             lampSpots: { lists: new Map(), candidates: [], root: null, lights: [], key: '', assigned: 0 },
-            lightFill: { uniforms: null, texture: null, field: null, key: '', patched: 0 },
+            lightFill: { uniforms: null, texture: null, field: null, key: '', patched: 0,
+                mask: null, maskTexture: null, maskKey: '', buildMs: 0 },
             // Lighting coverage estimate (CC3): the workspace's prepared bands and outlines, and their objects.
             lightCoverage: { view: null, root: null },
             // Glow halo (L6): GPU resources only while it is drawn; failed: why it cannot be, for this view;
@@ -9987,6 +10001,8 @@
             state.zoneObjects = [];
             disposeObjectGraphs(state.zoneCeilingObjects);
             state.zoneCeilingObjects = [];
+            disposeObjectGraphs(state.zoneRoofObjects);
+            state.zoneRoofObjects = [];
             disposeObjectGraphs(state.routeObjects);
             state.routeObjects = [];
             state.pickObjects = [];
@@ -10683,21 +10699,27 @@
         // A zone with extensions.ceiling {heightMeters} (ceilings.py: lamps hang from it) shows a flat ceiling over its
         // boundary at its floor plus that height: matte charcoal, facing down only, so it is seen from inside the room
         // and the view from above or outside looks straight in. It casts no shadow, is never picked and follows the
-        // overhead layer. Hung lamps sit in it: anything at its own height is drawn in front of it.
+        // overhead layer. Hung lamps sit in it: anything at its own height is drawn in front of it. Its finish
+        // 'acoustic-tile' draws it as a white tiled suspended ceiling instead (CEILING_TILE). Where it borders a lower
+        // ceiling, a bulkhead closes the step between them (zoneCeilingSteps).
         function renderZoneCeilings() {
             if (!state.modelRoot || typeof THREE.Mesh !== 'function' || typeof THREE.BufferGeometry !== 'function'
                     || !THREE.ShapeUtils || typeof THREE.MeshStandardMaterial !== 'function') return 0;
             const layout = state.currentInput && state.currentInput.layout || {};
+            let tiles = null;
             (Array.isArray(layout.zones) ? layout.zones : []).forEach(function (zone) {
                 const ceiling = zone && zone.extensions && zone.extensions.ceiling;
                 const height = Number(ceiling && ceiling.heightMeters);
                 if (!(height > 0)) return;
-                const geometry = zoneCeilingGeometry(zoneFloorPoints(zone), finite(zone.floorElevation, 0) + height);
+                const tiled = ceiling.finish === 'acoustic-tile' && typeof THREE.DataTexture === 'function';
+                const geometry = zoneCeilingGeometry(zoneFloorPoints(zone), finite(zone.floorElevation, 0) + height,
+                    tiled);
                 if (!geometry) return;
-                const material = new THREE.MeshStandardMaterial({
-                    color: ZONE_CEILING_COLOR, roughness: 1, metalness: 0,
+                if (tiled && !tiles) tiles = ceilingTileTexture();
+                const material = new THREE.MeshStandardMaterial(Object.assign({
+                    roughness: 1, metalness: 0,
                     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
-                });
+                }, tiled ? { color: '#ffffff', map: tiles } : { color: ZONE_CEILING_COLOR }));
                 const mesh = new THREE.Mesh(geometry, material);
                 mesh.name = 'FacilityZoneCeiling:' + String(zone.zoneId || '');
                 mesh.castShadow = false;
@@ -10705,12 +10727,104 @@
                 mesh.raycast = function () {};
                 mesh.userData = Object.assign({}, mesh.userData, {
                     facilityZoneCeiling: true, zoneId: zone.zoneId, heightMeters: height,
+                    finish: tiled ? 'acoustic-tile' : (ceiling.finish === 'open-deck' ? 'open-deck' : null),
                 });
                 mesh.visible = state.layerVisibility.overhead !== false;
                 state.modelRoot.add(mesh);
                 state.zoneCeilingObjects.push(mesh);
             });
+            zoneCeilingSteps(state.zoneCeilingObjects.map(function (mesh) {
+                const zone = (layout.zones || []).find(function (item) { return item && item.zoneId === mesh.userData.zoneId; });
+                return { mesh: mesh, points: zoneFloorPoints(zone), y: mesh.geometry.attributes.position.getY(0) };
+            }));
             return state.zoneCeilingObjects.length;
+        }
+
+        // Whether plan point (x, z) is inside the outline (even-odd).
+        function pointInOutline(points, x, z) {
+            let hit = false;
+            for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+                const a = points[i];
+                const b = points[j];
+                if ((a.z > z) !== (b.z > z) && x < (b.x - a.x) * (z - a.z) / (b.z - a.z) + a.x) hit = !hit;
+            }
+            return hit;
+        }
+
+        // Where a ceiling borders a lower one (their outlines share an edge, the higher one beyond the lower one's
+        // edge), a vertical bulkhead from the lower ceiling up to the higher one, so the step does not open onto the
+        // space above the lower ceiling. It faces the higher room only, in that ceiling's color (tiles: their plain
+        // white), and is a child of that ceiling: its layer, its disposal.
+        function zoneCeilingSteps(entries) {
+            const inside = pointInOutline;
+            const outwardSign = function (points) {
+                let twiceArea = 0;
+                points.forEach(function (point, i) {
+                    const next = points[(i + 1) % points.length];
+                    twiceArea += point.x * next.z - next.x * point.z;
+                });
+                return twiceArea > 0 ? 1 : -1;
+            };
+            entries.forEach(function (high) {
+                const positions = [];
+                entries.forEach(function (low) {
+                    if (low === high || !(high.y - low.y > 0.01) || low.points.length < 3) return;
+                    const sign = outwardSign(low.points);
+                    low.points.forEach(function (p, i) {
+                        const q = low.points[(i + 1) % low.points.length];
+                        const length = Math.hypot(q.x - p.x, q.z - p.z);
+                        if (!(length > 0.01)) return;
+                        const ux = (q.x - p.x) / length;
+                        const uz = (q.z - p.z) / length;
+                        const nx = sign * uz;
+                        const nz = -sign * ux;
+                        high.points.forEach(function (r, k) {
+                            const t = high.points[(k + 1) % high.points.length];
+                            const off = function (point) { return Math.abs(ux * (point.z - p.z) - uz * (point.x - p.x)); };
+                            if (off(r) > 0.05 || off(t) > 0.05) return;
+                            const tr = (r.x - p.x) * ux + (r.z - p.z) * uz;
+                            const tt = (t.x - p.x) * ux + (t.z - p.z) * uz;
+                            const from = Math.max(0, Math.min(tr, tt));
+                            const to = Math.min(length, Math.max(tr, tt));
+                            if (!(to - from > 0.01)) return;
+                            const middle = (from + to) / 2;
+                            if (!inside(high.points, p.x + ux * middle + nx * 0.05, p.z + uz * middle + nz * 0.05)) return;
+                            const a = [p.x + ux * from, p.z + uz * from];
+                            const b = [p.x + ux * to, p.z + uz * to];
+                            // Turned to face the higher room (n), as front faces are counter-clockwise.
+                            const corners = [[a[0], low.y, a[1]], [a[0], high.y, a[1]], [b[0], high.y, b[1]],
+                                [b[0], low.y, b[1]]];
+                            const ex = corners[1][0] - corners[0][0];
+                            const ey = corners[1][1] - corners[0][1];
+                            const ez = corners[1][2] - corners[0][2];
+                            const fx = corners[2][0] - corners[0][0];
+                            const fy = corners[2][1] - corners[0][1];
+                            const fz = corners[2][2] - corners[0][2];
+                            const facing = (ey * fz - ez * fy) * nx + (ex * fy - ey * fx) * nz;
+                            const order = facing > 0 ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2];
+                            order.forEach(function (c) { positions.push(corners[c][0], corners[c][1], corners[c][2]); });
+                        });
+                    });
+                });
+                if (!positions.length) return;
+                const normals = [];
+                for (let i = 0; i < positions.length; i += 3) normals.push(0, 1, 0);
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+                if (typeof geometry.computeBoundingSphere === 'function') geometry.computeBoundingSphere();
+                const tiled = high.mesh.userData.finish === 'acoustic-tile';
+                const step = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
+                    color: tiled ? CEILING_TILE.plain : ZONE_CEILING_COLOR, roughness: 1, metalness: 0,
+                    polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+                }));
+                step.name = 'FacilityZoneCeilingStep:' + String(high.mesh.userData.zoneId || '');
+                step.castShadow = false;
+                step.receiveShadow = false;
+                step.raycast = function () {};
+                step.userData = Object.assign({}, step.userData, { facilityZoneCeilingStep: true });
+                high.mesh.add(step);
+            });
         }
 
         function zoneCeilingDiagnostics(mesh) {
@@ -10727,15 +10841,45 @@
                     - (position.getX(b) - position.getX(a)) * (position.getZ(c) - position.getZ(a));
                 if (up < 0) facingDown += 1;
             }
+            const step = (mesh.children || []).find(function (child) { return child.userData.facilityZoneCeilingStep; });
             return { zoneId: mesh.userData.zoneId, heightMeters: mesh.userData.heightMeters, visible: mesh.visible,
-                inScene: attached, y: position.count ? position.getY(0) : null,
-                triangles: index ? index.count / 3 : 0, facingDown: facingDown };
+                finish: mesh.userData.finish, inScene: attached, y: position.count ? position.getY(0) : null,
+                triangles: index ? index.count / 3 : 0, facingDown: facingDown,
+                stepTriangles: step ? step.geometry.attributes.position.count / 3 : 0 };
+        }
+
+        // The acoustic tile: one 600 mm tile, its T-bar half on each edge, repeated by the ceiling's plan UVs.
+        function ceilingTileTexture() {
+            const size = CEILING_TILE.texels;
+            const data = new Uint8Array(size * size * 4);
+            for (let row = 0; row < size; row += 1) {
+                for (let column = 0; column < size; column += 1) {
+                    const edge = Math.min(row, column, size - 1 - row, size - 1 - column) < CEILING_TILE.gridTexels;
+                    const color = edge ? CEILING_TILE.grid : CEILING_TILE.tile;
+                    data.set([color[0], color[1], color[2], 255], (row * size + column) * 4);
+                }
+            }
+            const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+            texture.name = 'FacilityCeilingTile';
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearMipmapLinearFilter;
+            texture.generateMipmaps = true;
+            if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+            if (state.renderer && state.renderer.capabilities
+                    && typeof state.renderer.capabilities.getMaxAnisotropy === 'function') {
+                texture.anisotropy = Math.min(8, state.renderer.capabilities.getMaxAnisotropy());
+            }
+            texture.needsUpdate = true;
+            return texture;
         }
 
         // The outline as triangles facing down at height y, so only the view from below draws them; null if it does
         // not triangulate. Their shading normal points up: lit like the room under it (as indoor light bounces up),
         // not black because no light shines up at it, so it reads as its color by day and dark in Evening.
-        function zoneCeilingGeometry(points, y) {
+        // With tiles, its UVs are plan metres over the tile size, so every tiled ceiling shares one grid.
+        function zoneCeilingGeometry(points, y, tiled) {
             if (points.length < 3) return null;
             const triangles = THREE.ShapeUtils.triangulateShape(points.map(function (point) {
                 return new THREE.Vector2(point.x, point.z);
@@ -10743,10 +10887,12 @@
             if (!triangles.length) return null;
             const positions = [];
             const normals = [];
+            const uvs = [];
             const indices = [];
             points.forEach(function (point) {
                 positions.push(point.x, y, point.z);
                 normals.push(0, 1, 0);
+                uvs.push(point.x / CEILING_TILE.meters, point.z / CEILING_TILE.meters);
             });
             triangles.forEach(function (triangle) {
                 const a = points[triangle[0]];
@@ -10760,10 +10906,217 @@
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
             geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+            if (tiled) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
             geometry.setIndex(indices);
             if (typeof geometry.computeBoundingSphere === 'function') geometry.computeBoundingSphere();
             if (typeof geometry.computeBoundingBox === 'function') geometry.computeBoundingBox();
             return geometry;
+        }
+
+        // ---- Zone roofs (2026-11-02) -------------------------------------------------------------------------------
+        // A zone with extensions.roof {heightMeters} (ceilings.py) shows a flat commercial roof over its boundary
+        // (ZONE_ROOF): its underside at the zone's floor plus that height, a light grey membrane on top and a low
+        // parapet along the edge. Only faces seen from above and from outside are drawn (no underside), so from
+        // inside the room the view is as before and a ceiling at the roof's height has nothing to flicker against.
+        // It casts no shadow, is never picked and follows the roof sheeting layer (hidden by default, so the overview
+        // looks in). Where two roofs meet (a building and its annex), the lower one's parapet has no outer face
+        // there (it would face into the other building) and the higher one's outer face comes down to the lower
+        // one's membrane.
+        function renderZoneRoofs() {
+            if (!state.modelRoot || typeof THREE.Mesh !== 'function' || typeof THREE.BufferGeometry !== 'function'
+                    || !THREE.ShapeUtils || typeof THREE.MeshStandardMaterial !== 'function') return 0;
+            const layout = state.currentInput && state.currentInput.layout || {};
+            let materials = null;
+            const entries = [];
+            (Array.isArray(layout.zones) ? layout.zones : []).forEach(function (zone) {
+                const roof = zone && zone.extensions && zone.extensions.roof;
+                const height = Number(roof && roof.heightMeters);
+                if (!(height > 0)) return;
+                entries.push({ zone: zone, height: height, points: zoneFloorPoints(zone),
+                    base: finite(zone.floorElevation, 0) + height });
+            });
+            entries.forEach(function (entry) {
+                const zone = entry.zone;
+                const height = entry.height;
+                const geometry = zoneRoofGeometry(entry.points, entry.base, entries.filter(function (other) {
+                    return other !== entry && other.points.length >= 3;
+                }));
+                if (!geometry) return;
+                if (!materials) {
+                    materials = [ZONE_ROOF.membrane, ZONE_ROOF.parapet].map(function (color) {
+                        return new THREE.MeshStandardMaterial({ color: color, roughness: 0.95, metalness: 0 });
+                    });
+                }
+                const mesh = new THREE.Mesh(geometry, materials);
+                mesh.name = 'FacilityZoneRoof:' + String(zone.zoneId || '');
+                mesh.castShadow = false;
+                mesh.receiveShadow = false;
+                mesh.raycast = function () {};
+                mesh.userData = Object.assign({}, mesh.userData, {
+                    facilityZoneRoof: true, zoneId: zone.zoneId, heightMeters: height,
+                });
+                mesh.visible = state.layerVisibility.roofSheeting !== false;
+                state.modelRoot.add(mesh);
+                state.zoneRoofObjects.push(mesh);
+            });
+            return state.zoneRoofObjects.length;
+        }
+
+        function zoneRoofDiagnostics(mesh) {
+            let attached = false;
+            for (let object = mesh; object; object = object.parent) if (object === state.scene) attached = true;
+            const position = mesh.geometry.attributes.position;
+            const normal = mesh.geometry.attributes.normal;
+            let low = Infinity;
+            let high = -Infinity;
+            let facingDown = 0;
+            for (let i = 0; i < position.count; i += 1) {
+                low = Math.min(low, position.getY(i));
+                high = Math.max(high, position.getY(i));
+                if (i % 3 === 0 && normal.getY(i) < -1e-6) facingDown += 1;
+            }
+            return { zoneId: mesh.userData.zoneId, heightMeters: mesh.userData.heightMeters, visible: mesh.visible,
+                inScene: attached, lowest: low, highest: high, triangles: position.count / 3, facingDown: facingDown };
+        }
+
+        // Non-indexed triangles with flat normals: group 0 the membrane (the outline at the slab's top, facing up),
+        // group 1 the parapet (per edge: its outer face from a little below the slab to its top, its top, and its
+        // inner face above the membrane). The inner line is the outline moved in by the parapet's width (mitred).
+        // Neighbours are the other roofs ({points, base}): see zoneRoofEdgeSpans. Null if the outline does not
+        // triangulate.
+        function zoneRoofGeometry(points, base, neighbours) {
+            if (points.length < 3) return null;
+            let twiceArea = 0;
+            points.forEach(function (point, i) {
+                const next = points[(i + 1) % points.length];
+                twiceArea += point.x * next.z - next.x * point.z;
+            });
+            if (!(Math.abs(twiceArea) > 1e-9)) return null;
+            const triangles = THREE.ShapeUtils.triangulateShape(points.map(function (point) {
+                return new THREE.Vector2(point.x, point.z);
+            }), []);
+            if (!triangles.length) return null;
+            const sign = twiceArea > 0 ? 1 : -1;
+            const outward = points.map(function (point, i) {
+                const next = points[(i + 1) % points.length];
+                const length = Math.hypot(next.x - point.x, next.z - point.z) || 1;
+                return { x: sign * (next.z - point.z) / length, z: -sign * (next.x - point.x) / length };
+            });
+            const width = ZONE_ROOF.parapetWidth;
+            const inner = points.map(function (point, i) {
+                const before = outward[(i + points.length - 1) % points.length];
+                const after = outward[i];
+                const det = before.x * after.z - before.z * after.x;
+                let dx = -width * before.x;
+                let dz = -width * before.z;
+                if (Math.abs(det) > 1e-6) {
+                    dx = width * (before.z - after.z) / det;
+                    dz = width * (after.x - before.x) / det;
+                    const reach = Math.hypot(dx, dz);
+                    if (reach > 4 * width) { dx *= 4 * width / reach; dz *= 4 * width / reach; }
+                }
+                return { x: point.x + dx, z: point.z + dz };
+            });
+            const top = base + ZONE_ROOF.thickness;
+            const crest = top + ZONE_ROOF.parapetHeight;
+            const positions = [];
+            const normals = [];
+            // One triangle, turned so its face is toward normal (front faces are counter-clockwise from that side).
+            const triangle = function (a, b, c, normal) {
+                const ux = b[0] - a[0]; const uy = b[1] - a[1]; const uz = b[2] - a[2];
+                const vx = c[0] - a[0]; const vy = c[1] - a[1]; const vz = c[2] - a[2];
+                const facing = (uy * vz - uz * vy) * normal[0] + (uz * vx - ux * vz) * normal[1]
+                    + (ux * vy - uy * vx) * normal[2];
+                [a].concat(facing < 0 ? [c, b] : [b, c]).forEach(function (corner) {
+                    positions.push(corner[0], corner[1], corner[2]);
+                    normals.push(normal[0], normal[1], normal[2]);
+                });
+            };
+            const quad = function (a, b, c, d, normal) {
+                triangle(a, b, c, normal);
+                triangle(a, c, d, normal);
+            };
+            triangles.forEach(function (corners) {
+                const [a, b, c] = corners.map(function (k) { return [points[k].x, top, points[k].z]; });
+                triangle(a, b, c, [0, 1, 0]);
+            });
+            const membraneCount = positions.length / 3;
+            points.forEach(function (point, i) {
+                const j = (i + 1) % points.length;
+                const next = points[j];
+                const out = [outward[i].x, 0, outward[i].z];
+                zoneRoofEdgeSpans(point, next, outward[i], neighbours || [], base).forEach(function (span) {
+                    const a = span.from;
+                    const b = span.to;
+                    quad([a.x, span.low, a.z], [b.x, span.low, b.z], [b.x, crest, b.z], [a.x, crest, a.z], out);
+                });
+                quad([point.x, crest, point.z], [next.x, crest, next.z], [inner[j].x, crest, inner[j].z],
+                    [inner[i].x, crest, inner[i].z], [0, 1, 0]);
+                quad([inner[i].x, top, inner[i].z], [inner[j].x, top, inner[j].z], [inner[j].x, crest, inner[j].z],
+                    [inner[i].x, crest, inner[i].z], [-out[0], 0, -out[2]]);
+            });
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+            geometry.addGroup(0, membraneCount, 0);
+            geometry.addGroup(membraneCount, positions.length / 3 - membraneCount, 1);
+            if (typeof geometry.computeBoundingSphere === 'function') geometry.computeBoundingSphere();
+            if (typeof geometry.computeBoundingBox === 'function') geometry.computeBoundingBox();
+            return geometry;
+        }
+
+        // The parts of a roof edge (p to q, outward normal n) that get a parapet outer face, each {from, to, low}: the
+        // edge is cut where a neighbouring roof's corners lie on it or its edges cross it; a part whose outside is
+        // another roof as high or higher gets none, a part over a lower roof comes down only to that roof's
+        // membrane (however little lower it is), and a free part comes down ZONE_ROOF.drop below the slab.
+        function zoneRoofEdgeSpans(p, q, n, neighbours, base) {
+            const length = Math.hypot(q.x - p.x, q.z - p.z);
+            if (!(length > 1e-6)) return [];
+            const ux = (q.x - p.x) / length;
+            const uz = (q.z - p.z) / length;
+            const cuts = [0, length];
+            neighbours.forEach(function (other) {
+                other.points.forEach(function (v, index) {
+                    const t = (v.x - p.x) * ux + (v.z - p.z) * uz;
+                    if (Math.abs(ux * (v.z - p.z) - uz * (v.x - p.x)) <= 0.05 && t > 1e-3 && t < length - 1e-3) {
+                        cuts.push(t);
+                    }
+                    // Where the neighbour's edge from v crosses this one.
+                    const w = other.points[(index + 1) % other.points.length];
+                    const ex = w.x - v.x;
+                    const ez = w.z - v.z;
+                    const denominator = ux * ez - uz * ex;
+                    if (Math.abs(denominator) < 1e-12) return;
+                    const along = ((v.x - p.x) * ez - (v.z - p.z) * ex) / denominator;
+                    const across = ((v.x - p.x) * uz - (v.z - p.z) * ux) / denominator;
+                    if (across > 0 && across < 1 && along > 1e-3 && along < length - 1e-3) cuts.push(along);
+                });
+            });
+            cuts.sort(function (a, b) { return a - b; });
+            const spans = [];
+            for (let k = 0; k + 1 < cuts.length; k += 1) {
+                const from = cuts[k];
+                const to = cuts[k + 1];
+                if (!(to - from > 1e-3)) continue;
+                const middle = (from + to) / 2;
+                const x = p.x + ux * middle + n.x * 0.05;
+                const z = p.z + uz * middle + n.z * 0.05;
+                let beyond = null;
+                neighbours.forEach(function (other) {
+                    if (pointInOutline(other.points, x, z) && (!beyond || other.base > beyond.base)) beyond = other;
+                });
+                if (beyond && beyond.base >= base - 1e-6) continue;
+                const low = beyond ? beyond.base + ZONE_ROOF.thickness : base - ZONE_ROOF.drop;
+                const last = spans[spans.length - 1];
+                if (last && last.low === low && Math.abs(last.end - from) < 1e-9) {
+                    last.end = to;
+                    last.to = { x: p.x + ux * to, z: p.z + uz * to };
+                    continue;
+                }
+                spans.push({ low: low, end: to, from: { x: p.x + ux * from, z: p.z + uz * from },
+                    to: { x: p.x + ux * to, z: p.z + uz * to } });
+            }
+            return spans;
         }
 
         function renderFacilityAisles() {
@@ -12781,6 +13134,7 @@
             }
             renderZoneMarkings();
             renderZoneCeilings();
+            renderZoneRoofs();
             renderFacilityAisles();
             renderFloorMarkings();
             Array.from(state.baseGroups.keys()).sort().forEach(function (key) {
@@ -13516,6 +13870,9 @@
             });
             state.zoneCeilingObjects.forEach(function (object) {
                 object.visible = next.overhead !== false;
+            });
+            state.zoneRoofObjects.forEach(function (object) {
+                object.visible = next.roofSheeting !== false;
             });
             state.renderGroups.forEach(function (record) {
                 if (record && record.container) {
@@ -14381,23 +14738,44 @@
 
         function lightFillAvailable() {
             return Boolean(lightPoolsRuntime && typeof lightPoolsRuntime.fillField === 'function'
-                && typeof THREE.DataTexture === 'function' && THREE.DataUtils && THREE.HalfFloatType !== undefined);
+                && typeof lightPoolsRuntime.insideOutline === 'function' && typeof lightPoolsRuntime.fillMask === 'function'
+                && typeof THREE.DataTexture === 'function' && THREE.DataUtils && THREE.HalfFloatType !== undefined
+                && THREE.RedFormat !== undefined && THREE.RGFormat !== undefined && typeof THREE.Vector4 === 'function');
         }
 
+        // The zones with a ceiling (ceilings.py), as outlines: the fill is only under them, from their lamps.
+        function ceilingOutlines() {
+            const layout = state.currentInput && state.currentInput.layout || {};
+            return (Array.isArray(layout.zones) ? layout.zones : []).filter(function (zone) {
+                const ceiling = zone && zone.extensions && zone.extensions.ceiling;
+                return Number(ceiling && ceiling.heightMeters) > 0;
+            }).map(zoneFloorPoints).filter(function (points) { return points.length >= 3; });
+        }
+
+        // The fill (lightPoolsRuntime.fillField): only under zone ceilings, from the pools of lamps inside them (the
+        // user's choice, 2026-11-02), cut off at the ceilings' footprint by the mask (fillMask, built once per grid
+        // and outlines). A layout without a zone ceiling gets none and no material is patched; when its last
+        // ceiling goes, the maps are freed.
         function syncLightFill() {
             const fill = state.lightFill;
-            const wanted = lightPoolsWanted() && Boolean(state.modelRoot) && lightFillAvailable();
+            const outlines = lightFillAvailable() ? ceilingOutlines() : [];
+            if (!outlines.length) {
+                clearLightFill();
+                return 0;
+            }
+            const wanted = lightPoolsWanted() && Boolean(state.modelRoot);
             if (!wanted) {
                 if (fill.uniforms) fill.uniforms.facilityFillStrength.value = 0;
                 return 0;
             }
             if (!fill.uniforms) {
-                fill.uniforms = { facilityFillMap: { value: null }, facilityFillMatrix: { value: new THREE.Matrix4() },
-                    facilityFillStrength: { value: 0 } };
+                fill.uniforms = { facilityFillMap: { value: null }, facilityFillMask: { value: null },
+                    facilityFillChannels: { value: new THREE.Vector4(1, 0, 0, 0) },
+                    facilityFillMatrix: { value: new THREE.Matrix4() }, facilityFillStrength: { value: 0 } };
             }
             const areas = state.lightAreas.resolved;
             const pools = [];
-            const parts = [state.lightAreas.version];
+            const parts = [state.lightAreas.version, JSON.stringify(outlines)];
             state.lightPools.meshes.forEach(function (mesh) {
                 if (!mesh || mesh.visible === false) return;
                 parts.push(mesh.uuid);
@@ -14405,26 +14783,39 @@
                     // General lighting indoors: an outdoor lamp's beam pool (L8) gives no fill.
                     if (pool.lamp) return;
                     if (lightAreasRuntime && !lightAreasRuntime.lit(areas, pool.x, pool.z)) return;
+                    if (!outlines.some(function (outline) {
+                        return lightPoolsRuntime.insideOutline(outline, pool.x, pool.z);
+                    })) return;
                     pools.push({ x: pool.x, z: pool.z, radius: pool.radius, color: pool.color, lampY: pool.lampY });
                 });
             });
             const key = parts.join('|');
             if (key !== fill.key) {
+                const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
                 fill.key = key;
                 if (fill.texture) fill.texture.dispose();
                 fill.texture = null;
                 fill.field = lightPoolsRuntime.fillField(pools);
                 if (fill.field) {
-                    const data = new Uint16Array(fill.field.data.length);
-                    for (let k = 0; k < data.length; k += 1) data[k] = THREE.DataUtils.toHalfFloat(fill.field.data[k]);
-                    fill.texture = new THREE.DataTexture(data, fill.field.cols, fill.field.rows, THREE.RGBAFormat,
-                        THREE.HalfFloatType);
-                    fill.texture.magFilter = THREE.LinearFilter;
-                    fill.texture.minFilter = THREE.LinearFilter;
-                    fill.texture.generateMipmaps = false;
-                    fill.texture.needsUpdate = true;
+                    fill.texture = halfFloatMap(fill.field.data, fill.field.cols, fill.field.rows, THREE.RGBAFormat);
+                    const grid = fill.field;
+                    const maskKey = JSON.stringify(outlines) + '|' + [grid.minX, grid.minZ, grid.cell, grid.cols,
+                        grid.rows].join(',');
+                    if (maskKey !== fill.maskKey) {
+                        if (fill.maskTexture) fill.maskTexture.dispose();
+                        fill.maskKey = maskKey;
+                        fill.mask = lightPoolsRuntime.fillMask(grid, outlines);
+                        const channels = fill.mask.channels || 1;
+                        fill.maskTexture = halfFloatMap(fill.mask.data, fill.mask.cols, fill.mask.rows,
+                            { 1: THREE.RedFormat, 2: THREE.RGFormat, 4: THREE.RGBAFormat }[channels]);
+                        fill.uniforms.facilityFillChannels.value.set(1, channels > 1 ? 1 : 0, channels > 2 ? 1 : 0,
+                            channels > 3 ? 1 : 0);
+                    }
                 }
                 fill.uniforms.facilityFillMap.value = fill.texture;
+                fill.uniforms.facilityFillMask.value = fill.field ? fill.maskTexture : null;
+                fill.buildMs = Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now())
+                    - started) * 10) / 10;
             }
             fill.uniforms.facilityFillStrength.value = fill.field ? 1 : 0;
             if (fill.field) {
@@ -14433,6 +14824,36 @@
             }
             invalidate();
             return fill.field ? fill.field.pools : 0;
+        }
+
+        // A float map as a half-float texture, read with linear filtering.
+        function halfFloatMap(values, cols, rows, format) {
+            const data = new Uint16Array(values.length);
+            for (let k = 0; k < data.length; k += 1) data[k] = THREE.DataUtils.toHalfFloat(values[k]);
+            const texture = new THREE.DataTexture(data, cols, rows, format, THREE.HalfFloatType);
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearFilter;
+            texture.generateMipmaps = false;
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        function clearLightFill() {
+            const fill = state.lightFill;
+            if (fill.texture) fill.texture.dispose();
+            if (fill.maskTexture) fill.maskTexture.dispose();
+            fill.texture = null;
+            fill.field = null;
+            fill.key = '';
+            fill.maskTexture = null;
+            fill.mask = null;
+            fill.maskKey = '';
+            fill.buildMs = 0;
+            if (fill.uniforms) {
+                fill.uniforms.facilityFillMap.value = null;
+                fill.uniforms.facilityFillMask.value = null;
+                fill.uniforms.facilityFillStrength.value = 0;
+            }
         }
 
         // World space to the fill map: x and z to 0..1 over the map, y the model's own height.
@@ -14481,15 +14902,7 @@
             spots.candidates = [];
             spots.key = '';
             spots.assigned = 0;
-            const fill = state.lightFill;
-            if (fill.texture) fill.texture.dispose();
-            fill.texture = null;
-            fill.field = null;
-            fill.key = '';
-            if (fill.uniforms) {
-                fill.uniforms.facilityFillMap.value = null;
-                fill.uniforms.facilityFillStrength.value = 0;
-            }
+            clearLightFill();
         }
 
         function lampLightingDiagnostics() {
@@ -14511,6 +14924,7 @@
                     pools: fill.field ? fill.field.pools : 0,
                     cells: fill.field ? fill.field.cols * fill.field.rows : 0,
                     patchedMaterials: fill.patched,
+                    buildMs: fill.buildMs,
                 },
             };
         }
@@ -16173,6 +16587,8 @@
                 zoneMarkingCount: state.zoneObjects.length,
                 zoneCeilingCount: state.zoneCeilingObjects.length,
                 zoneCeilings: state.zoneCeilingObjects.map(zoneCeilingDiagnostics),
+                zoneRoofCount: state.zoneRoofObjects.length,
+                zoneRoofs: state.zoneRoofObjects.map(zoneRoofDiagnostics),
                 appearanceLibrary: finishDiagnostics(),
                 perimeterWallCount: state.wallObjects.length,
                 visiblePerimeterWallCount: state.wallObjects.filter(object => object.visible).length,

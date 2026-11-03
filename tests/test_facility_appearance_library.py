@@ -108,7 +108,7 @@ def test_lights_glow_in_the_facility_view_and_stay_out_of_the_assembly_lists():
     lights = {key for key, row in library["appearances"].items() if row["category"] == "lights"}
     assert lights == {"light-cool-white-led", "light-warm-white", "light-exit-green", "light-beacon-amber", "light-alarm-red",
                       "light-signal-blue", "light-stack-red", "light-stack-amber", "light-stack-green",
-                      "light-pole-led", "light-wall-led", "light-dock-led"}
+                      "light-pole-led", "light-wall-led", "light-dock-led", "light-accent-spot"}
     for row in library["appearances"].values():
         # Only the Lights glow; each keeps an unlit color (the plastic when switched off) and a rendered thumbnail.
         assert bool(row.get("emission")) == (row["category"] == "lights"), row["appearanceId"]
@@ -129,12 +129,23 @@ def test_lights_glow_in_the_facility_view_and_stay_out_of_the_assembly_lists():
     # The outdoor ones have a beam angle (L8): the evening scene shows a beam and a pool where it lands.
     beams = {row["appearanceId"]: row["emission"].get("beamAngleDegrees") for row in listed["items"]}
     assert {key: value for key, value in beams.items() if value} == {
-        "light-pole-led": 110, "light-wall-led": 100, "light-dock-led": 70}
+        "light-pole-led": 110, "light-wall-led": 100, "light-dock-led": 70, "light-accent-spot": 30}
+    # The accent spot (2026-11-02) lights what its lens faces in the evening scene, with a spot light, not a pool.
+    accents = {row["appearanceId"] for row in listed["items"] if row["emission"].get("accent")}
+    assert accents == {"light-accent-spot"}
+    accent = library["appearances"]["light-accent-spot"]
+    assert accent["label"] == "Accent spot LED" and accent["estimate"]["lumens"] == 700
+    assert accent["estimate"]["beamAngleDegrees"] == 30 and "8 m" in accent["description"]
+    assert "Accent spot LED (emission.accent)" in tool_specs()[0]["description"]
     assert "emission.beamAngleDegrees" in tool_specs()[0]["description"]
     from ai_inspector.facility_layout.appearance_library import _valid_emission
     assert _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 10})
     assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 170})
     assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": "wide"})
+    assert _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 30, "accent": True})
+    assert not _valid_emission({"color": "#ffffff", "intensity": 1, "accent": True}), "an accent spot has a beam"
+    assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 30, "accent": False})
+    assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 30, "accent": 1})
     assert "emission.pattern" in tool_specs()[0]["description"]
     assert "Lights finish: the light's color, lit and unlit" in listed["adjustments"]
     assert all("emission" not in row for row in library_summary("appearances", category="metals"))
@@ -157,7 +168,15 @@ def test_lights_glow_in_the_facility_view_and_stay_out_of_the_assembly_lists():
                                       {"color": "#00ff00", "intensity": 1, "pattern": "blink", "periodSeconds": 0.2},
                                       {"color": "#00ff00", "intensity": 1, "pattern": "blink", "periodSeconds": True},
                                       {"color": "#00ff00", "intensity": 1, "periodSeconds": 1},
-                                      {"color": "#00ff00", "intensity": 1, "pattern": "steady", "periodSeconds": 1}])
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "steady", "periodSeconds": 1},
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "cycle", "periodSeconds": 1},
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "blink", "periodSeconds": 20},
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "blink", "periodSeconds": 1,
+                                       "cycleColors": ["#ff0000", "#0000ff"]},
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "cycle", "periodSeconds": 20,
+                                       "cycleColors": ["#ff0000"]},
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "cycle", "periodSeconds": 20,
+                                       "cycleColors": ["#ff0000", "blue"]}])
 def test_a_malformed_emission_stops_the_library_from_loading(tmp_path, emission):
     for name in ("appearances", "scenes", "decals"):
         (tmp_path / f"{name}.json").write_bytes((LIBRARY_ROOT / f"{name}.json").read_bytes())
@@ -169,7 +188,10 @@ def test_a_malformed_emission_stops_the_library_from_loading(tmp_path, emission)
 
 
 @pytest.mark.parametrize("emission", [{"color": "#00ff00", "intensity": 1, "pattern": "steady"},
-                                      {"color": "#00ff00", "intensity": 2, "pattern": "strobe", "periodSeconds": 0.5}])
+                                      {"color": "#00ff00", "intensity": 2, "pattern": "strobe", "periodSeconds": 0.5},
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "cycle", "periodSeconds": 60},
+                                      {"color": "#00ff00", "intensity": 1, "pattern": "cycle", "periodSeconds": 2,
+                                       "cycleColors": ["#ff0000", "#00ff00", "#0000ff"]}])
 def test_a_light_may_carry_a_pattern_with_its_period(tmp_path, emission):
     for name in ("appearances", "scenes", "decals"):
         (tmp_path / f"{name}.json").write_bytes((LIBRARY_ROOT / f"{name}.json").read_bytes())
@@ -212,7 +234,69 @@ def test_a_use_of_a_light_finish_sets_its_own_pattern_and_sage_is_told_how():
     assert "pattern steady|blink|strobe|rotate" in list_library({"kind": "appearances"})["adjustments"]
 
 
+def test_a_light_may_cycle_through_colors_and_sage_is_told_how():
+    """Colour-changing accent lighting (the user's game room, 2026-11-02): a Lights finish eases through a list of
+    colors, one loop per periodSeconds (2 to 60 s), or through the default palette without one."""
+    from ai_inspector.facility_layout import appearance_library as aplib
+    strip = {"key": "p:strip/led#0", "appearanceId": "light-cool-white-led", "pattern": "cycle", "periodSeconds": 20,
+             "cycleColors": ["#8A4DFF", "#00d5ff", "#ff3dce"]}
+    doc = apply(layout(), {"op": "set_component_materials", "placementId": "pl-0",
+                           "materials": {"representation": "overview", "overrides": [strip]}})
+    assert doc["placements"][0]["componentMaterials"]["overrides"] == [
+        dict(strip, cycleColors=["#8a4dff", "#00d5ff", "#ff3dce"])], "colors saved in lower case"
+    doc = apply(doc, set_appearance(["pl-1"], {"appearanceId": "light-warm-white", "pattern": "cycle",
+                                               "periodSeconds": 60}),
+                custom({"appearanceId": "custom-party", "label": "Party", "baseAppearanceId": "light-cool-white-led",
+                        "pattern": "cycle", "periodSeconds": 2, "cycleColors": ["#ff0000"] * 8}),
+                set_appearance(["pl-2"], {"appearanceId": "custom-party"}))
+    assert doc["placements"][1]["appearance"] == {"appearanceId": "light-warm-white", "pattern": "cycle",
+                                                  "periodSeconds": 60}, "no colors: the default palette"
+    assert doc["extensions"]["facilityAppearances"]["custom"][0]["cycleColors"] == ["#ff0000"] * 8
+    validate_layout(doc)
+    # A use may stop a cycle with another pattern, and the 3D view keeps the same default palette.
+    doc = apply(doc, set_appearance(["pl-2"], {"appearanceId": "custom-party", "pattern": "blink", "periodSeconds": 1}))
+    assert doc["placements"][2]["appearance"]["pattern"] == "blink"
+    finishes_js = (Path(__file__).resolve().parents[1] / "static/facility_layout_finishes.js").read_text(encoding="utf-8")
+    palette = ", ".join(f"'{color}'" for color in aplib.DEFAULT_CYCLE_COLORS)
+    assert f"DEFAULT_CYCLE_COLORS = Object.freeze([{palette}])" in finishes_js
+    # The schema Sage writes against takes it, refuses a bad list, and the tool text says how.
+    from jsonschema import Draft202012Validator
+    from ai_inspector.codex_runtime.edit_schemas import operation_batch_schema
+    from ai_inspector.codex_runtime.library_tools import list_library, tool_specs
+    schema = operation_batch_schema()
+    operation = {"op": "set_component_materials", "placementId": "pl-0", "visualSha256": "a" * 64,
+                 "materials": {"representation": "overview", "overrides": [strip]}}
+    assert not list(Draft202012Validator(schema).iter_errors({"operations": [operation]}))
+    for bad in (["#ff0000"], ["#ff0000"] * 9, ["#ff0000", "red"]):
+        operation["materials"]["overrides"] = [dict(strip, cycleColors=bad)]
+        assert list(Draft202012Validator(schema).iter_errors({"operations": [operation]})), bad
+    whole = {"op": "set_appearance", "placementIds": ["pl-0"], "appearance": {
+        "appearanceId": "light-cool-white-led", "pattern": "cycle", "periodSeconds": 30}}
+    assert not list(Draft202012Validator(schema).iter_errors({"operations": [whole]}))
+    variant = next(v for v in schema["properties"]["operations"]["items"]["oneOf"]
+                   if v["properties"]["op"].get("const") == "set_component_materials")
+    assert "pattern: 'cycle'" in variant["description"] and "cycleColors" in variant["description"]
+    assert "add pattern cycle with periodSeconds (2-60 s per loop) and cycleColors" in tool_specs()[0]["description"]
+    assert "or cycle with periodSeconds 2-60 and cycleColors" in list_library({"kind": "appearances"})["adjustments"]
+
+
 @pytest.mark.parametrize("override, message", [
+    ({"appearanceId": "light-stack-red", "pattern": "cycle"}, "needs periodSeconds"),
+    ({"appearanceId": "light-stack-red", "pattern": "cycle", "periodSeconds": 1}, "between 2 and 60"),
+    ({"appearanceId": "light-stack-red", "pattern": "cycle", "periodSeconds": 61}, "between 2 and 60"),
+    ({"appearanceId": "light-stack-red", "pattern": "blink", "periodSeconds": 20}, "between 0.5 and 10"),
+    ({"appearanceId": "light-stack-red", "pattern": "blink", "periodSeconds": 1, "cycleColors": ["#ff0000", "#0000ff"]},
+     "cycleColors goes with pattern cycle"),
+    ({"appearanceId": "light-stack-red", "cycleColors": ["#ff0000", "#0000ff"]}, "cycleColors goes with pattern cycle"),
+    ({"appearanceId": "light-stack-red", "pattern": "cycle", "periodSeconds": 20, "cycleColors": ["#ff0000"]},
+     "2 to 8 colors"),
+    ({"appearanceId": "light-stack-red", "pattern": "cycle", "periodSeconds": 20, "cycleColors": ["#ff0000"] * 9},
+     "2 to 8 colors"),
+    ({"appearanceId": "light-stack-red", "pattern": "cycle", "periodSeconds": 20, "cycleColors": "#ff0000"},
+     "2 to 8 colors"),
+    ({"appearanceId": "light-stack-red", "pattern": "cycle", "periodSeconds": 20, "cycleColors": ["#ff0000", "blue"]},
+     "six-digit hex color"),
+    ({"appearanceId": "paint-machine-gray", "pattern": "cycle", "periodSeconds": 20}, "only on a Lights finish"),
     ({"appearanceId": "light-stack-red", "periodSeconds": 1}, "goes with a pattern"),
     ({"appearanceId": "light-stack-red", "pattern": "steady", "periodSeconds": 1}, "no periodSeconds"),
     ({"appearanceId": "light-stack-red", "pattern": "blink"}, "needs periodSeconds"),

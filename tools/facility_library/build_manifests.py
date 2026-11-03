@@ -3,7 +3,7 @@ import sys, json, hashlib
 from pathlib import Path
 
 LIB = Path(sys.argv[1]); S = Path(sys.argv[2])
-VERSION = "2026.11.01.1"
+VERSION = "2026.11.02.1"
 tex_report = json.loads((S / "texture_report.json").read_text(encoding="utf-8"))
 zip_sha = {}
 for line in (S / "acg_zip_sha256.txt").read_text().splitlines():
@@ -112,15 +112,24 @@ OUTDOOR = ("Glows like a switched-on outdoor lamp in every scene; in the evening
            "lighting design.")
 
 
+# 2026-11-02: an accent spot's emission is marked accent: in the evening scene the 3D view lights what its beam
+# reaches with a spot light instead of a pool. (The general and outdoor lights' estimate data, CC1, and this one's
+# are written in appearances.json itself.)
+ACCENT = ("In the evening scene it lights what its beam reaches (a wall, an object or the floor) within about 8 m. "
+          "Glows like a switched-on lamp in every scene. Visual only: not a lighting design.")
+
+
 # L4: a light may blink, strobe or turn like a rotating beacon, one cycle every periodSeconds; the 3D view shows
 # every pattern steady when the viewer prefers reduced motion.
-def light(appearance_id, label, color, glow, tags, roughness=0.3, pattern=None, note=None, beam=None):
+def light(appearance_id, label, color, glow, tags, roughness=0.3, pattern=None, note=None, beam=None, accent=False):
     emission = {"color": glow, "intensity": 1}
     if pattern:
         emission.update(pattern=pattern, periodSeconds=1)
     if beam:
         emission["beamAngleDegrees"] = beam
-    description = OUTDOOR if beam else GLOW
+    if accent:
+        emission["accent"] = True
+    description = ACCENT if accent else OUTDOOR if beam else GLOW
     add(appearance_id, label, "lights", color, roughness, 0.0, None, ("light",) + tags + ("glow",),
         note + " " + description if note else description, emission=emission)
 
@@ -143,6 +152,8 @@ light("light-wall-led", "Wall light LED", "#dfe4e8", "#fff1dc", ('lamp', 'led', 
       note="Beam 100 degrees, for a wall light along an outside wall.")
 light("light-dock-led", "Dock light LED", "#dfe4e8", "#ffe2b8", ('lamp', 'led', 'dock light', 'loading dock', 'truck yard', 'outdoor', 'beam'), 0.35, beam=70,
       note="Beam 70 degrees, for a light over a dock door.")
+light("light-accent-spot", "Accent spot LED", "#e6ddd0", "#ffc08a", ('lamp', 'led', 'spot', 'spotlight', 'accent', 'warm white', 'recessed', 'adjustable', 'beam'), beam=30,
+      accent=True, note="Beam 30 degrees, warm white (about 3000 K), for an adjustable spot aimed at a wall, a picture or an object.")
 
 appearances = {
     "schemaVersion": 1, "libraryVersion": VERSION,

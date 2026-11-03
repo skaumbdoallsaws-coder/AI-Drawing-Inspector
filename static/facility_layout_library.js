@@ -11,7 +11,7 @@
 
     const BASE_URL = '/static/facility_library/';
     const OVERRIDE_FIELDS = Object.freeze(['color', 'roughness', 'metalness', 'opacity', 'textureStrength',
-        'sizeMeters', 'rotationDegrees', 'offsetMeters', 'mapping', 'grain', 'pattern', 'periodSeconds']);
+        'sizeMeters', 'rotationDegrees', 'offsetMeters', 'mapping', 'grain', 'pattern', 'periodSeconds', 'cycleColors']);
     const PREFERENCES_KEY = 'inspectorpro.facilityLibrary.v1';
     const MAX_RECENTS = 12;
     const clone = value => JSON.parse(JSON.stringify(value));
@@ -143,9 +143,14 @@
         if (result.emission && overrides.pattern !== undefined) {
             delete result.emission.pattern;
             delete result.emission.periodSeconds;
+            delete result.emission.cycleColors;
             if (overrides.pattern !== 'steady') {
                 result.emission.pattern = overrides.pattern;
                 result.emission.periodSeconds = overrides.periodSeconds;
+            }
+            // A cycle eases through its own colors; without them, the default palette (facility_layout_finishes.js).
+            if (overrides.pattern === 'cycle' && Array.isArray(overrides.cycleColors)) {
+                result.emission.cycleColors = overrides.cycleColors.slice();
             }
         }
         if (result.texture && textureSet) {
@@ -201,6 +206,7 @@
         } : null;
         const emission = resolved.emission ? [resolved.emission.color, resolved.emission.intensity]
             .concat(resolved.emission.pattern ? [resolved.emission.pattern, resolved.emission.periodSeconds] : [])
+            .concat(resolved.emission.cycleColors ? [resolved.emission.cycleColors.join(' ')] : [])
             .concat(resolved.emission.beamAngleDegrees ? [resolved.emission.beamAngleDegrees] : []) : null;
         return JSON.stringify([resolved.appearanceId, resolved.missing === true, resolved.model, resolved.color,
             resolved.roughness, resolved.metalness, resolved.opacity, resolved.transmission || 0, resolved.ior || 0,

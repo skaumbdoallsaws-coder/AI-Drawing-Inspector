@@ -149,8 +149,9 @@
         "offsetMeters": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": -100, "maximum": 100}},
         "mapping": {"enum": ["box", "cylindrical", "uv"]},
         "grain": {"enum": ["part", "length", "width", "height"]},
-        "pattern": {"description": "Lights finishes only: how the light shows; blink, strobe and rotate need periodSeconds.", "enum": ["steady", "blink", "strobe", "rotate"]},
-        "periodSeconds": {"description": "Lights finishes only: seconds per cycle of a blink, strobe or rotate pattern.", "type": "number", "minimum": 0.5, "maximum": 10}
+        "pattern": {"description": "Lights finishes only: how the light shows; blink, strobe, rotate and cycle need periodSeconds.", "enum": ["steady", "blink", "strobe", "rotate", "cycle"]},
+        "periodSeconds": {"description": "Lights finishes only: seconds per cycle of a blink, strobe or rotate pattern (0.5 to 10), or per color loop of a cycle (2 to 60).", "type": "number", "minimum": 0.5, "maximum": 60},
+        "cycleColors": {"description": "Lights finishes with pattern cycle only: the colors the glow eases through, in order, one loop per periodSeconds; without them violet, blue, cyan, magenta.", "type": "array", "minItems": 2, "maxItems": 8, "items": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}}
       },
       "additionalProperties": false
     },
@@ -670,8 +671,9 @@
                       "offsetMeters": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number", "minimum": -100, "maximum": 100}},
                       "mapping": {"enum": ["box", "cylindrical", "uv"]},
                       "grain": {"enum": ["part", "length", "width", "height"]},
-                      "pattern": {"description": "Lights finishes only: how the light shows; blink, strobe and rotate need periodSeconds.", "enum": ["steady", "blink", "strobe", "rotate"]},
-                      "periodSeconds": {"description": "Lights finishes only: seconds per cycle of a blink, strobe or rotate pattern.", "type": "number", "minimum": 0.5, "maximum": 10}
+                      "pattern": {"description": "Lights finishes only: how the light shows; blink, strobe, rotate and cycle need periodSeconds.", "enum": ["steady", "blink", "strobe", "rotate", "cycle"]},
+                      "periodSeconds": {"description": "Lights finishes only: seconds per cycle of a blink, strobe or rotate pattern (0.5 to 10), or per color loop of a cycle (2 to 60).", "type": "number", "minimum": 0.5, "maximum": 60},
+                      "cycleColors": {"description": "Lights finishes with pattern cycle only: the colors the glow eases through, in order, one loop per periodSeconds; without them violet, blue, cyan, magenta.", "type": "array", "minItems": 2, "maxItems": 8, "items": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}$"}}
                     },
                     "additionalProperties": false
                   }

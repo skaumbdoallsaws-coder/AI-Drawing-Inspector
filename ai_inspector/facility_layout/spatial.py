@@ -2333,7 +2333,10 @@ def _zone_checks(
     )
 
 
-def _mounting_reference(placement: Mapping[str, Any]) -> dict[str, Any]:
+def _mounting_reference(
+    placement: Mapping[str, Any],
+    allowed: Any = None,
+) -> dict[str, Any]:
     metadata = placement.get("metadata")
     raw = None
     if isinstance(metadata, Mapping):
@@ -2346,6 +2349,9 @@ def _mounting_reference(placement: Mapping[str, Any]) -> dict[str, Any]:
         if family in {"foundation", "mounting_surface", "floor"}:
             raw = snap
     if not isinstance(raw, Mapping):
+        # An asset that only hangs from a ceiling (a pendant lamp) hangs from one unasked (ceilings.py).
+        if isinstance(allowed, list) and list(allowed) == ["ceiling"]:
+            return {"surfaceKind": "ceiling", "featureId": None}
         return {"surfaceKind": "floor", "featureId": None}
     return {
         "surfaceKind": str(
@@ -2410,14 +2416,14 @@ def _mounting_checks(
     prepared_surfaces: Sequence[PreparedSurface] | None = None,
 ) -> list[dict[str, Any]]:
     placement_id = str(placement.get("placementId") or "")
-    reference = _mounting_reference(placement)
-    requested_kind = str(reference["surfaceKind"])
     coordinate = _asset_field(asset, "coordinateFrame", {})
     allowed = (
         coordinate.get("allowedMountingSurfaces")
         if isinstance(coordinate, Mapping)
         else None
     )
+    reference = _mounting_reference(placement, allowed)
+    requested_kind = str(reference["surfaceKind"])
     if isinstance(allowed, list) and allowed and requested_kind not in allowed:
         return [
             _finding(
@@ -2512,6 +2518,11 @@ def _mounting_checks(
         if isinstance(position, Mapping)
         else 0.0
     )
+    support_y = position_y + anchor_y
+    if requested_kind == "ceiling":
+        # A hung item meets its ceiling with its top: the highest point of its physical volume (ceilings.py).
+        physical = [record for record in records if record.record_kind == "physical"] or list(records)
+        support_y = max(record.maximum_y for record in physical)
     elevations = []
     for feature in containing:
         geometry = feature.get("geometry")
@@ -2526,17 +2537,19 @@ def _mounting_checks(
                 )
             )
     if elevations and not any(
-        abs(position_y + anchor_y - elevation) <= 1.0e-6
+        abs(support_y - elevation) <= 1.0e-6
         for elevation in elevations
     ):
         return [
             _finding(
                 "unsupported_mounting_surface",
                 "error",
-                "Placement elevation does not coincide with its mounting surface.",
+                "A hung placement's top does not meet its ceiling."
+                if requested_kind == "ceiling"
+                else "Placement elevation does not coincide with its mounting surface.",
                 subject_refs=(placement_id,),
                 details={
-                    "placementSupportY": _rounded(position_y + anchor_y),
+                    "placementSupportY": _rounded(support_y),
                     "surfaceElevations": sorted(_rounded(item) for item in elevations),
                 },
             )

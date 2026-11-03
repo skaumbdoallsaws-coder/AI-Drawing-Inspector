@@ -553,6 +553,18 @@ def _typed_ids(
     return result
 
 
+def _ceiling_extension(zone: Mapping[str, Any], path: str) -> None:
+    """A zone's ceiling, which lamps hang from: {heightMeters} above its floor (ceilings.py)."""
+    raw_extensions = zone.get("extensions")
+    if not isinstance(raw_extensions, Mapping) or raw_extensions.get("ceiling") is None:
+        return
+    from .ceilings import normalize_ceiling
+    try:
+        normalize_ceiling(raw_extensions["ceiling"])
+    except ValueError as exc:
+        _fail("invalid_layout_shape", str(exc), f"{path}.extensions.ceiling")
+
+
 def _cell_group_extension(zone: Mapping[str, Any], path: str) -> None:
     raw_extensions = zone.get("extensions")
     if raw_extensions is None:
@@ -1260,6 +1272,7 @@ def validate_layout(
         _required(zone, required, path)
         extensions.add_open_object(zone, _ZONE_FIELDS, path)
         _cell_group_extension(zone, path)
+        _ceiling_extension(zone, path)
         if zone["zoneType"] not in zone_types:
             _fail("invalid_layout_shape", "Zone type is unsupported.", f"{path}.zoneType")
         _string(zone["label"], f"{path}.label", minimum=1, maximum=120)

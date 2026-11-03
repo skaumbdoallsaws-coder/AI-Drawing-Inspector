@@ -298,7 +298,8 @@ def operation_batch_schema():
     operation("set_appearance", {"placementIds": array(ref("placementId"), 50, 1, uniqueItems=True), "color": nullable(COLOR),
               "appearance": nullable(ref("facilityAppearance"))}, ["placementIds"],
               "Give exactly one of color (a plain color) or appearance (a finish from list_facility_library, plus only the "
-              "adjustments you need, such as grain or sizeMeters, or on a Lights finish pattern and periodSeconds). Null "
+              "adjustments you need, such as grain or sizeMeters, or on a Lights finish pattern and periodSeconds, "
+              "and cycleColors for a cycle). Null "
               "in either resets to the asset's own finish. "
               "Finishes are visual only and never change the asset's engineering material.")
     variants[-1]["oneOf"] = [{"required": ["color"]}, {"required": ["appearance"]}]
@@ -309,10 +310,14 @@ def operation_batch_schema():
         "overrides. "
         "A part can take a plain finish (color, roughness, metalness) or a library finish (appearanceId). On a Lights "
         "finish, color recolors the lamp (its glow, and its unlit lens at half brightness), and pattern (steady, blink, "
-        "strobe or rotate) with periodSeconds (0.5-10 s per cycle; none for steady) sets how it shows, whatever the "
-        "finish's own pattern. Example, a stack light whose red lamp should blink: {key: <the red lamp's key>, "
-        "appearanceId: 'light-stack-red', pattern: 'blink', periodSeconds: 1}. Pick the finish of the color you want "
-        "and add the pattern; do not borrow a blinking finish of another color.")
+        "strobe, rotate or cycle) with periodSeconds (0.5-10 s per cycle; 2-60 s per color loop for cycle; none for "
+        "steady) sets how it shows, whatever the finish's own pattern. Example, a stack light whose red lamp should "
+        "blink: {key: <the red lamp's key>, appearanceId: 'light-stack-red', pattern: 'blink', periodSeconds: 1}. Pick "
+        "the finish of the color you want and add the pattern; do not borrow a blinking finish of another color. "
+        "cycle slowly changes color: the glow eases through cycleColors (2-8 '#rrggbb'; without them violet, blue, "
+        "cyan, magenta), one loop per periodSeconds, then repeats; the colors replace color. Example, accent lighting "
+        "that changes color: {key: <the strip's key>, appearanceId: 'light-cool-white-led', pattern: 'cycle', "
+        "periodSeconds: 20, cycleColors: ['#8a4dff', '#00d5ff', '#ff3dce']}.")
     variants[-1]["allOf"] = [{"if": {"properties": {"materials": {"not": {"type": "null"}}}},
                                "then": {"required": ["visualSha256"]}}]
     from ai_inspector.facility_layout.appearance_library import load_library
@@ -359,6 +364,14 @@ def operation_batch_schema():
                           "meeting point outside: an assembly-point placement or a position), shelter and restroom "
                           "zones, and the site phone number (only when the user gives it). The evacuation and emergency "
                           "maps draw from it. It moves nothing. Null removes it.")
+    operation("set_zone_ceiling", {"zoneId": ref("zoneId"), "heightMeters": nullable(number(2, 40))},
+              description="Give a zone a ceiling heightMeters above its floor (2-40 m), or null to remove it, so lamps "
+                          "can hang from it. A hung item's asset must allow the ceiling "
+                          "(coordinateFrame.allowedMountingSurfaces includes 'ceiling'). Place it inside the zone with "
+                          "its top at the ceiling: transform.position.y = the ceiling's height minus the asset's "
+                          "height, and metadata.mountingSurface {surfaceKind: 'ceiling'} (implied when the ceiling is "
+                          "the asset's only mounting surface). It may hang over a table: items collide only where "
+                          "their heights overlap.")
     operation("rename_layout", {"displayName": ref("label")})
     for name, key, definition, reset in (("set_floor_surfaces", "surfaces", "floorSurfaces", False),
             ("set_interior_walls", "walls", "interiorWalls", False), ("set_perimeter_walls", "wallSettings", "perimeterWalls", True),

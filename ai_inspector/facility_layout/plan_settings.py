@@ -131,6 +131,9 @@ def shell_with_plan_boundary(
     append_wall_features(result, layout)
     from .interior_walls import append_interior_features
     append_interior_features(result, layout)
+    # Zone ceilings: "ceiling" mounting surfaces that lamps hang from (ceilings.py).
+    from .ceilings import append_ceiling_features
+    append_ceiling_features(result, layout)
     from .ground import KEY as GROUND_KEY, apply_ground_to_shell
     if GROUND_KEY in layout.get("extensions", {}):
         apply_ground_to_shell(result, layout)

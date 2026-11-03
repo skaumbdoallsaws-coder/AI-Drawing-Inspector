@@ -282,7 +282,7 @@ def test_the_lot_is_outdoor_ground_not_the_building(project):
 def test_lamp_data_is_typical_and_matches_the_outdoor_beams():
     data = lamp_data(LIBRARY)
     assert set(data) == {"light-cool-white-led", "light-warm-white", "light-pole-led", "light-wall-led",
-                         "light-dock-led"}, "general and outdoor lights; no signal lights"
+                         "light-dock-led", "light-accent-spot"}, "general, outdoor and accent lights; no signal lights"
     for appearance_id in data:
         row = LIBRARY["appearances"][appearance_id]
         assert row["estimate"]["basis"] == "typical, for estimates"

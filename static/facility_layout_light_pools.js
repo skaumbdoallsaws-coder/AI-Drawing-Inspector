@@ -6,6 +6,12 @@
 // (a Lights finish with a beam angle) throws its pool where its aim meets the ground, sized by the beam, and shows a
 // soft see-through cone down to it. This module finds the lamps in a geometry and builds the quads and the cone; the
 // 3D adapter decides when they show.
+//
+// Lamps that light things (2026-11-02, the gym's Evening): a pendant hung below MIN_HEIGHT over a table, and an
+// accent spot (a Lights finish whose emission is marked accent), are candidates for a few real spot lights without
+// shadows (spotsOf, spotSettings; the adapter gives SPOT_COUNT of them to the candidates nearest the view). The
+// general lighting's pools also add a gentle fill on everything standing under them: fillField sums the pools into
+// a small map over the plan, and patchFillShader adds it to a lit material's indirect light below the lamps.
 (function (root, factory) {
     'use strict';
 
@@ -23,6 +29,22 @@
     const BEAM_REACH = 80;         // metres along an outdoor lamp's aim to look for the ground (L8)
     const BEAM_STEP = 0.25;        // metres per step while looking
     const BEAM_SEGMENTS = 24;      // around a beam cone
+    const SPOT_COUNT = 8;          // real spot lights in Evening; a fixed number, so lit materials compile once
+    const SPOT_MIN_HEIGHT = 0.5;   // metres above the floor: a pendant hangs between this and MIN_HEIGHT
+    const SPOT_REACH = { accent: 8, pendant: 6 };  // metres; a spot's light fades to nothing there
+    const SPOT_DEFAULT_LUMENS = { accent: 700, pendant: 1500 };  // a lamp without estimate data (an authored glow)
+    const SPOT_MAX_ANGLE = 85;     // degrees from the aim to a spot's edge
+    const SPOT_PENUMBRA = 0.8;
+    // three's light units per lux (an estimated, typical lux), set by eye in the gym's Evening: a warm white pendant
+    // (4,000 lm, 110 degrees) gives about 500 lux on a table 1.7 m below it, which then reads about as lit as under
+    // the daytime scene's sun (2.4).
+    const LUX_TO_SCENE = 1 / 250;
+    const FILL_SPREAD = 2;         // general lighting's fill reaches this many pool radii from a lamp
+    const FILL_PEAK = 0.7;         // fill (three's irradiance) under one lamp, a quarter of the daytime sun's
+    const FILL_LIMIT = 1.5;        // where many lamps overlap
+    const FILL_CELL = 0.25;        // metres per texel of the fill map, coarser on a large plan
+    const FILL_MAX_CELLS = 512;    // per side
+    const FILL_BELOW = 0.05;       // the fill lights what is at least this far below its lamps (not a ceiling)
     const partCache = new WeakMap();
     const lampCache = new WeakMap();
 
@@ -246,7 +268,7 @@
                 }
                 const height = point.y - floorY;
                 if (height < MIN_HEIGHT) return;
-                pools.push({ x: point.x, z: point.z, radius: poolRadius(height), color: color });
+                pools.push({ x: point.x, z: point.z, radius: poolRadius(height), color: color, lampY: point.y });
             });
         }
         return pools;
@@ -274,6 +296,174 @@
         texture.generateMipmaps = true;
         texture.needsUpdate = true;
         return texture;
+    }
+
+    // ---- Lamps that light things (2026-11-02) ----------------------------------------------------------------
+    // The parts of a glowing geometry with a patch facing down, as lampsOf gives lamps, without the share a lamp
+    // needs: a bare bulb under a pendant's shade faces down only at its tip (about a tenth of its surface). Cached.
+    const bulbCache = new WeakMap();
+    function bulbsOf(geometry) {
+        if (!geometry || !geometry.attributes || !geometry.attributes.position) return [];
+        if (bulbCache.has(geometry)) return bulbCache.get(geometry);
+        const bulbs = lampPartsOf(geometry).parts.filter(function (part) { return part.area > 0; }).map(function (part) {
+            return { x: part.x, y: part.y, z: part.z, area: part.area, nx: part.nx, ny: part.ny, nz: part.nz };
+        });
+        bulbCache.set(geometry, bulbs);
+        return bulbs;
+    }
+
+    // The spot light candidates a glowing mesh gives, one per copy (an instanced mesh draws many), in the coordinates
+    // `toRoot` maps world space into: its accent lamps (glow.accent: aimed along the lens as placed, at any height)
+    // or else its pendants: a finish with lighting data (glow.lumens, from its estimate: never a sign, beacon or
+    // signal lamp) on lamps or bare bulbs (bulbsOf) still facing down there, hung SPOT_MIN_HEIGHT to MIN_HEIGHT above
+    // `floorY` (higher ones throw pools). A copy's lamps make one spot at their area-weighted centre, aimed along
+    // their mean aim.
+    function spotsOf(THREE, mesh, toRoot, glow, floorY) {
+        if (!glow) return [];
+        const accent = glow.accent === true;
+        const geometry = mesh && mesh.geometry;
+        const lamps = accent ? lampsOf(geometry) : Number(glow.lumens) > 0 ? bulbsOf(geometry) : [];
+        if (!lamps.length) return [];
+        const base = new THREE.Matrix4().multiplyMatrices(toRoot, mesh.matrixWorld);
+        const instance = new THREE.Matrix4();
+        const matrix = new THREE.Matrix4();
+        const point = new THREE.Vector3();
+        const aim = new THREE.Vector3();
+        const spots = [];
+        const copies = mesh.isInstancedMesh ? mesh.count : 1;
+        for (let copy = 0; copy < copies; copy += 1) {
+            if (mesh.isInstancedMesh) {
+                mesh.getMatrixAt(copy, instance);
+                matrix.multiplyMatrices(base, instance);
+            } else {
+                matrix.copy(base);
+            }
+            if (Math.abs(matrix.determinant()) < 1e-12) continue;  // a hidden, zero-scale copy
+            const sum = { x: 0, y: 0, z: 0, ax: 0, ay: 0, az: 0, area: 0, lamps: 0 };
+            lamps.forEach(function (lamp) {
+                point.set(lamp.x, lamp.y, lamp.z).applyMatrix4(matrix);
+                aim.set(lamp.nx, lamp.ny, lamp.nz).transformDirection(matrix);
+                if (!accent) {
+                    const height = point.y - floorY;
+                    if (aim.y > FACING_DOWN || height < SPOT_MIN_HEIGHT || height >= MIN_HEIGHT) return;
+                }
+                const weight = lamp.area > 0 ? lamp.area : 1;
+                sum.x += point.x * weight;
+                sum.y += point.y * weight;
+                sum.z += point.z * weight;
+                sum.ax += aim.x * weight;
+                sum.ay += aim.y * weight;
+                sum.az += aim.z * weight;
+                sum.area += weight;
+                sum.lamps += 1;
+            });
+            const length = Math.hypot(sum.ax, sum.ay, sum.az);
+            if (!sum.lamps || !(length > 0)) continue;
+            spots.push({ x: sum.x / sum.area, y: sum.y / sum.area, z: sum.z / sum.area,
+                aim: { x: sum.ax / length, y: sum.ay / length, z: sum.az / length },
+                kind: accent ? 'accent' : 'pendant', lamps: sum.lamps });
+        }
+        return spots;
+    }
+
+    // A spot light's settings for a candidate: three's SpotLight intensity is in candela, the peak of a beam whose
+    // intensity falls as cos^m off its aim, half its peak at half the beam angle (as the coverage estimate, CC), times
+    // LUX_TO_SCENE. The lumens and beam come from the finish's estimate data, else its emission's beam angle, else
+    // typical values. The cone runs to 1.5 times half the beam (at most SPOT_MAX_ANGLE) with a soft edge, so it is
+    // about half as bright at half the beam angle; the light fades to nothing at SPOT_REACH.
+    function spotSettings(spot, glow) {
+        const kind = spot.kind === 'accent' ? 'accent' : 'pendant';
+        const lumens = Number(glow && glow.lumens) > 0 ? Number(glow.lumens) : SPOT_DEFAULT_LUMENS[kind];
+        let beam = Number(glow && (glow.estimateBeamAngleDegrees || glow.beamAngleDegrees));
+        if (!(beam >= 10 && beam <= 170)) beam = kind === 'accent' ? 30 : 110;
+        const half = beam * Math.PI / 360;
+        const m = Math.log(0.5) / Math.log(Math.cos(half));
+        const candela = lumens * (m + 1) / (2 * Math.PI);
+        return {
+            intensity: candela * LUX_TO_SCENE,
+            angle: Math.min(SPOT_MAX_ANGLE * Math.PI / 180, 1.5 * half),
+            penumbra: SPOT_PENUMBRA,
+            distance: SPOT_REACH[kind],
+            decay: 2,
+        };
+    }
+
+    // The fill general lighting gives what stands under it, as a map over the plan: each lit pool ({x, z, radius,
+    // color {r, g, b}, lampY}) adds its color times FILL_PEAK, falling smoothly to nothing FILL_SPREAD radii out;
+    // the sum is capped at FILL_LIMIT. The alpha is the highest lamp over the texel, less FILL_BELOW: the fill
+    // lights only what is lower. Null without pools. Texel (i, j) covers x from minX + i cell, z from minZ + j cell.
+    function fillField(pools) {
+        const lit = (pools || []).filter(function (pool) {
+            return pool && Number.isFinite(pool.x) && Number.isFinite(pool.z) && pool.radius > 0
+                && Number.isFinite(pool.lampY) && pool.color;
+        });
+        if (!lit.length) return null;
+        let minX = Infinity;
+        let minZ = Infinity;
+        let maxX = -Infinity;
+        let maxZ = -Infinity;
+        lit.forEach(function (pool) {
+            const reach = pool.radius * FILL_SPREAD;
+            minX = Math.min(minX, pool.x - reach);
+            minZ = Math.min(minZ, pool.z - reach);
+            maxX = Math.max(maxX, pool.x + reach);
+            maxZ = Math.max(maxZ, pool.z + reach);
+        });
+        const cell = Math.max(FILL_CELL, (maxX - minX) / FILL_MAX_CELLS, (maxZ - minZ) / FILL_MAX_CELLS);
+        const cols = Math.max(1, Math.ceil((maxX - minX) / cell));
+        const rows = Math.max(1, Math.ceil((maxZ - minZ) / cell));
+        const data = new Float32Array(cols * rows * 4);
+        lit.forEach(function (pool) {
+            const reach = pool.radius * FILL_SPREAD;
+            const top = pool.lampY - FILL_BELOW;
+            const i0 = Math.max(0, Math.floor((pool.x - reach - minX) / cell));
+            const i1 = Math.min(cols - 1, Math.floor((pool.x + reach - minX) / cell));
+            const j0 = Math.max(0, Math.floor((pool.z - reach - minZ) / cell));
+            const j1 = Math.min(rows - 1, Math.floor((pool.z + reach - minZ) / cell));
+            for (let j = j0; j <= j1; j += 1) {
+                const dz = minZ + (j + 0.5) * cell - pool.z;
+                for (let i = i0; i <= i1; i += 1) {
+                    const dx = minX + (i + 0.5) * cell - pool.x;
+                    const t = (dx * dx + dz * dz) / (reach * reach);
+                    if (t >= 1) continue;
+                    const weight = FILL_PEAK * (1 - t) * (1 - t);
+                    const k = (j * cols + i) * 4;
+                    data[k] += pool.color.r * weight;
+                    data[k + 1] += pool.color.g * weight;
+                    data[k + 2] += pool.color.b * weight;
+                    data[k + 3] = Math.max(data[k + 3], top);
+                }
+            }
+        });
+        for (let k = 0; k < data.length; k += 4) {
+            for (let c = 0; c < 3; c += 1) data[k + c] = Math.min(FILL_LIMIT, data[k + c]);
+        }
+        return { minX: minX, minZ: minZ, cell: cell, cols: cols, rows: rows, data: data, pools: lit.length };
+    }
+
+    // A lit material's fragment shader with the fill added to its indirect light (before lights_fragment_end, where
+    // three adds the ambient light): the point's world position from the view position, mapped onto the fill map by
+    // facilityFillMatrix (x and z to 0..1, y kept), and lit only below the map's lamps. False when the shader has no
+    // lights (an unlit material).
+    const FILL_UNIFORMS = 'uniform sampler2D facilityFillMap;\nuniform mat4 facilityFillMatrix;\n'
+        + 'uniform float facilityFillStrength;\n';
+    const FILL_FRAGMENT = [
+        'if ( facilityFillStrength > 0.0 ) {',
+        '    vec3 facilityWorld = transpose( mat3( viewMatrix ) ) * ( - vViewPosition - viewMatrix[ 3 ].xyz );',
+        '    vec4 facilityAt = facilityFillMatrix * vec4( facilityWorld, 1.0 );',
+        '    if ( facilityAt.x >= 0.0 && facilityAt.x <= 1.0 && facilityAt.z >= 0.0 && facilityAt.z <= 1.0 ) {',
+        '        vec4 facilityFill = texture2D( facilityFillMap, facilityAt.xz );',
+        '        if ( facilityAt.y < facilityFill.a ) irradiance += facilityFill.rgb * facilityFillStrength;',
+        '    }',
+        '}',
+    ].join('\n');
+
+    function patchFillShader(shader) {
+        const marker = '#include <lights_fragment_end>';
+        // Every lit shader includes lights_fragment_begin before it, which reads vViewPosition.
+        if (!shader || typeof shader.fragmentShader !== 'string' || shader.fragmentShader.indexOf(marker) < 0) return false;
+        shader.fragmentShader = FILL_UNIFORMS + shader.fragmentShader.replace(marker, FILL_FRAGMENT + '\n' + marker);
+        return true;
     }
 
     // One square per pool, lying face up at height `y` (above its own ground, for an outdoor lamp's pool), colored
@@ -376,6 +566,14 @@
         MIN_LAMP_SHARE: MIN_LAMP_SHARE,
         MIN_HEIGHT: MIN_HEIGHT,
         BEAM_REACH: BEAM_REACH,
+        SPOT_COUNT: SPOT_COUNT,
+        SPOT_MIN_HEIGHT: SPOT_MIN_HEIGHT,
+        SPOT_REACH: SPOT_REACH,
+        LUX_TO_SCENE: LUX_TO_SCENE,
+        FILL_SPREAD: FILL_SPREAD,
+        FILL_PEAK: FILL_PEAK,
+        FILL_LIMIT: FILL_LIMIT,
+        FILL_BELOW: FILL_BELOW,
         BEAM_VERTEX_SHADER: BEAM_VERTEX_SHADER,
         BEAM_FRAGMENT_SHADER: BEAM_FRAGMENT_SHADER,
         lampPartsOf: lampPartsOf,
@@ -386,5 +584,10 @@
         poolTexture: poolTexture,
         poolGeometry: poolGeometry,
         beamGeometry: beamGeometry,
+        bulbsOf: bulbsOf,
+        spotsOf: spotsOf,
+        spotSettings: spotSettings,
+        fillField: fillField,
+        patchFillShader: patchFillShader,
     };
 }));

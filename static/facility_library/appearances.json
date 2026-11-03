@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "libraryVersion": "2026.11.01.1",
+  "libraryVersion": "2026.11.02.1",
   "notes": "Appearances are visual only. They never change mass, density, strength or an assigned engineering material.",
   "categories": [
     {
@@ -1449,6 +1449,43 @@
       "estimate": {
         "lumens": 3000,
         "beamAngleDegrees": 70,
+        "basis": "typical, for estimates"
+      }
+    },
+    {
+      "appearanceId": "light-accent-spot",
+      "label": "Accent spot LED",
+      "category": "lights",
+      "model": "standard",
+      "color": "#e6ddd0",
+      "roughness": 0.3,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "lamp",
+        "led",
+        "spot",
+        "spotlight",
+        "accent",
+        "warm white",
+        "recessed",
+        "adjustable",
+        "beam",
+        "glow"
+      ],
+      "description": "Beam 30 degrees, warm white (about 3000 K), for an adjustable spot aimed at a wall, a picture or an object. In the evening scene it lights what its beam reaches (a wall, an object or the floor) within about 8 m. Glows like a switched-on lamp in every scene. Visual only: not a lighting design.",
+      "thumbnail": "thumbnails/appearances/light-accent-spot.png",
+      "emission": {
+        "color": "#ffc08a",
+        "intensity": 1,
+        "beamAngleDegrees": 30,
+        "accent": true
+      },
+      "estimate": {
+        "lumens": 700,
+        "beamAngleDegrees": 30,
         "basis": "typical, for estimates"
       }
     }

@@ -109,6 +109,8 @@
     // width in metres.
     const ZONE_LIMIT_COLOR = '#4d7c8a';
     const ZONE_LIMIT_WIDTH = 0.1;
+    // A zone ceiling (ceilings.py), seen from inside the room: matte charcoal.
+    const ZONE_CEILING_COLOR = '#2a2a2d';
     // From this many floor markings on, their paint is drawn merged (batchFloorMarkings).
     const FLOOR_MARKING_BATCH_MINIMUM = 40;
     const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1 =
@@ -2417,6 +2419,7 @@
             floorMarkingCount: 0,
             floorMarkingTextures: new Map(),
             zoneObjects: [],
+            zoneCeilingObjects: [],
             wallObjects: [],
             floorSurfaceObjects: [],
             wallFinishObjects: [],
@@ -2635,6 +2638,10 @@
             finishGeometryCache: new Map(),
             // Floor light pools: one mesh (or null, no lamps) per render group, under one root.
             lightPools: { root: null, meshes: new Map(), material: null, texture: null, beams: null, groundKey: '' },
+            // Lamps that light things (2026-11-02): spot light candidates per render group and the fixed set of
+            // spot lights; the general lighting's fill map and the uniforms every patched material shares.
+            lampSpots: { lists: new Map(), candidates: [], root: null, lights: [], key: '', assigned: 0 },
+            lightFill: { uniforms: null, texture: null, field: null, key: '', patched: 0 },
             // Lighting coverage estimate (CC3): the workspace's prepared bands and outlines, and their objects.
             lightCoverage: { view: null, root: null },
             // Glow halo (L6): GPU resources only while it is drawn; failed: why it cannot be, for this view;
@@ -6502,6 +6509,8 @@
                 beginLightPatternFrame();
                 state.lightAreas.fresh.clear();
                 if (state.lightCoverage.view) syncLightCoverage();
+                assignLampSpots();
+                updateLightFillMatrix();
                 state.renderer.render(state.scene, state.camera);
                 if (bloomWanted()) drawBloom();
                 else if (state.bloom.pass) disposeBloom();
@@ -9942,6 +9951,7 @@
             }
             disposeObjectGraphs([record.container, record.prototypeObject]);
             dropLightPools(record);
+            state.lampSpots.lists.delete(record);
             record.pickObjects.forEach(function (object) {
                 state.instanceLookup.delete(object);
                 if (object && object.uuid) state.instanceLookup.delete(object.uuid);
@@ -9975,6 +9985,8 @@
             state.floorMarkingTextures = new Map();
             disposeObjectGraphs(state.zoneObjects);
             state.zoneObjects = [];
+            disposeObjectGraphs(state.zoneCeilingObjects);
+            state.zoneCeilingObjects = [];
             disposeObjectGraphs(state.routeObjects);
             state.routeObjects = [];
             state.pickObjects = [];
@@ -10665,6 +10677,93 @@
                 state.zoneObjects.push(object);
             });
             return state.zoneObjects.length;
+        }
+
+        // ---- Zone ceilings (2026-11-02) ----------------------------------------------------------------------------
+        // A zone with extensions.ceiling {heightMeters} (ceilings.py: lamps hang from it) shows a flat ceiling over its
+        // boundary at its floor plus that height: matte charcoal, facing down only, so it is seen from inside the room
+        // and the view from above or outside looks straight in. It casts no shadow, is never picked and follows the
+        // overhead layer. Hung lamps sit in it: anything at its own height is drawn in front of it.
+        function renderZoneCeilings() {
+            if (!state.modelRoot || typeof THREE.Mesh !== 'function' || typeof THREE.BufferGeometry !== 'function'
+                    || !THREE.ShapeUtils || typeof THREE.MeshStandardMaterial !== 'function') return 0;
+            const layout = state.currentInput && state.currentInput.layout || {};
+            (Array.isArray(layout.zones) ? layout.zones : []).forEach(function (zone) {
+                const ceiling = zone && zone.extensions && zone.extensions.ceiling;
+                const height = Number(ceiling && ceiling.heightMeters);
+                if (!(height > 0)) return;
+                const geometry = zoneCeilingGeometry(zoneFloorPoints(zone), finite(zone.floorElevation, 0) + height);
+                if (!geometry) return;
+                const material = new THREE.MeshStandardMaterial({
+                    color: ZONE_CEILING_COLOR, roughness: 1, metalness: 0,
+                    polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+                });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.name = 'FacilityZoneCeiling:' + String(zone.zoneId || '');
+                mesh.castShadow = false;
+                mesh.receiveShadow = false;
+                mesh.raycast = function () {};
+                mesh.userData = Object.assign({}, mesh.userData, {
+                    facilityZoneCeiling: true, zoneId: zone.zoneId, heightMeters: height,
+                });
+                mesh.visible = state.layerVisibility.overhead !== false;
+                state.modelRoot.add(mesh);
+                state.zoneCeilingObjects.push(mesh);
+            });
+            return state.zoneCeilingObjects.length;
+        }
+
+        function zoneCeilingDiagnostics(mesh) {
+            let attached = false;
+            for (let object = mesh; object; object = object.parent) if (object === state.scene) attached = true;
+            const index = mesh.geometry.index;
+            const position = mesh.geometry.attributes.position;
+            let facingDown = 0;
+            for (let t = 0; index && t < index.count; t += 3) {
+                const a = index.getX(t);
+                const b = index.getX(t + 1);
+                const c = index.getX(t + 2);
+                const up = (position.getZ(b) - position.getZ(a)) * (position.getX(c) - position.getX(a))
+                    - (position.getX(b) - position.getX(a)) * (position.getZ(c) - position.getZ(a));
+                if (up < 0) facingDown += 1;
+            }
+            return { zoneId: mesh.userData.zoneId, heightMeters: mesh.userData.heightMeters, visible: mesh.visible,
+                inScene: attached, y: position.count ? position.getY(0) : null,
+                triangles: index ? index.count / 3 : 0, facingDown: facingDown };
+        }
+
+        // The outline as triangles facing down at height y, so only the view from below draws them; null if it does
+        // not triangulate. Their shading normal points up: lit like the room under it (as indoor light bounces up),
+        // not black because no light shines up at it, so it reads as its color by day and dark in Evening.
+        function zoneCeilingGeometry(points, y) {
+            if (points.length < 3) return null;
+            const triangles = THREE.ShapeUtils.triangulateShape(points.map(function (point) {
+                return new THREE.Vector2(point.x, point.z);
+            }), []);
+            if (!triangles.length) return null;
+            const positions = [];
+            const normals = [];
+            const indices = [];
+            points.forEach(function (point) {
+                positions.push(point.x, y, point.z);
+                normals.push(0, 1, 0);
+            });
+            triangles.forEach(function (triangle) {
+                const a = points[triangle[0]];
+                const b = points[triangle[1]];
+                const c = points[triangle[2]];
+                // The y of (b - a) x (c - a): below zero, a, b, c already turn to face down.
+                const up = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z);
+                if (up > 0) indices.push(triangle[0], triangle[2], triangle[1]);
+                else indices.push(triangle[0], triangle[1], triangle[2]);
+            });
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+            geometry.setIndex(indices);
+            if (typeof geometry.computeBoundingSphere === 'function') geometry.computeBoundingSphere();
+            if (typeof geometry.computeBoundingBox === 'function') geometry.computeBoundingBox();
+            return geometry;
         }
 
         function renderFacilityAisles() {
@@ -12681,6 +12780,7 @@
                 applyGroundLayers();
             }
             renderZoneMarkings();
+            renderZoneCeilings();
             renderFacilityAisles();
             renderFloorMarkings();
             Array.from(state.baseGroups.keys()).sort().forEach(function (key) {
@@ -13414,6 +13514,9 @@
             state.zoneObjects.forEach(function (object) {
                 object.visible = next[object.userData.visibilityLayer] !== false;
             });
+            state.zoneCeilingObjects.forEach(function (object) {
+                object.visible = next.overhead !== false;
+            });
             state.renderGroups.forEach(function (record) {
                 if (record && record.container) {
                     record.container.visible = next[record.visibilityLayer || 'assets'] !== false;
@@ -13909,6 +14012,10 @@
                 material.toneMapped = !on;
                 material.needsUpdate = true;
             }
+            // A cycle light switched off keeps its first color in the lens, as a recolored lamp keeps its color.
+            if (!on && data.facilityGlow && data.facilityGlow.pattern === 'cycle' && material.color) {
+                material.color.set(finishesRuntime.unlitColor(data.facilityGlow.color));
+            }
             // A blinking light sets its own brightness each time it is drawn (L4).
             if (data.facilityGlow && finishesRuntime && finishesRuntime.glowMoves(data.facilityGlow)) {
                 material.onBeforeRender = drawPatternedGlow;
@@ -13954,6 +14061,13 @@
             const still = Boolean(state.motion.prefersReducedMotion);
             const seconds = patterns.clock / 1000;
             material.emissiveIntensity = finite(glow.intensity, 1) * (still ? 1 : finishesRuntime.glowLevel(glow, seconds));
+            // A cycle light changes color instead: the glow, and its unlit lens at half brightness (its first color,
+            // steady, under reduced motion).
+            if (glow.pattern === 'cycle') {
+                const color = finishesRuntime.glowColor(glow, still ? 0 : seconds);
+                material.emissive.set(color);
+                if (material.color) material.color.set(finishesRuntime.unlitColor(color));
+            }
             if (still || !glowCopyInView(object, camera)) return;
             patterns.drawn = true;
             patterns.next = Math.min(patterns.next, finishesRuntime.nextGlowChange(glow, seconds));
@@ -14040,8 +14154,9 @@
                 if (!object.isMesh || !object.geometry || !object.material || Array.isArray(object.material)) return;
                 const data = object.material.userData || {};
                 const glow = data.facilityGlow || data.facilityAuthoredGlow;
-                // A blinking lamp throws no pool: a steady pool under it would not blink with it (L4).
-                if (!glow || finishesRuntime.glowMoves(glow)) return;
+                // A blinking lamp throws no pool: a steady pool under it would not blink with it (L4). An accent spot
+                // lights what it aims at with a spot light instead (syncLampSpots).
+                if (!glow || finishesRuntime.glowMoves(glow) || glow.accent) return;
                 const color = new THREE.Color();
                 if (Array.isArray(glow.rgb)) color.setRGB(glow.rgb[0], glow.rgb[1], glow.rgb[2]);
                 else color.set(glow.color);
@@ -14104,7 +14219,10 @@
             }
             const wanted = lightPoolsWanted() && Boolean(state.modelRoot);
             if (pools.root) pools.root.visible = wanted;
-            if (!wanted) return 0;
+            if (!wanted) {
+                syncLampLighting();
+                return 0;
+            }
             if (!pools.root) {
                 pools.root = createContainer();
                 pools.root.name = 'FacilityLightPools';
@@ -14121,8 +14239,280 @@
                 if (mesh) mesh.visible = record.container.visible !== false;
             });
             maskLightPools();
+            syncLampLighting();
             invalidate();
             return countLightPools();
+        }
+
+        // ---- Lamps that light things (2026-11-02) ------------------------------------------------------------------
+        // In a scene with floor pools (Evening) and with the lights on, lamps also light what they shine on:
+        // - Spots: a pendant hung below the pool height over a table, and an accent spot (a Lights finish marked
+        //   accent), are candidates for SPOT_COUNT real three.js spot lights without shadows (light_pools.spotsOf and
+        //   spotSettings). The count is fixed while the scene has any, so lit materials compile once; before each
+        //   frame the lights go to the candidates nearest the view (the orbit target, or ahead of a walker), and
+        //   unused ones are dark. A candidate follows its group's layer. Light areas (L7) switch general lighting
+        //   only, so they leave these on.
+        // - Fill: the general lighting's floor pools (not outdoor beams; lamps the areas leave on, on shown layers)
+        //   are summed into a small map over the plan (light_pools.fillField), and every lit material in the model
+        //   adds it to its indirect light below the lamps (light_pools.patchFillShader; patched once, the first time
+        //   it is wanted, then off by a uniform outside Evening). So a chair under a downlight is lifted, a ceiling
+        //   above it is not.
+        function syncLampLighting() {
+            syncLampSpots();
+            syncLightFill();
+        }
+
+        function lampLightingAvailable() {
+            return Boolean(lightPoolsRuntime && typeof lightPoolsRuntime.spotsOf === 'function'
+                && typeof THREE.SpotLight === 'function' && typeof THREE.Matrix4 === 'function');
+        }
+
+        function buildLampSpots(record) {
+            const spots = [];
+            if (!record.container || typeof record.container.traverse !== 'function') return spots;
+            record.container.updateMatrixWorld(true);
+            const toRoot = new THREE.Matrix4();
+            if (state.modelRoot && state.modelRoot.matrixWorld) toRoot.copy(state.modelRoot.matrixWorld).invert();
+            record.container.traverse(function (object) {
+                if (!object.isMesh || !object.geometry || !object.material || Array.isArray(object.material)) return;
+                const data = object.material.userData || {};
+                const glow = data.facilityGlow || data.facilityAuthoredGlow;
+                // A blinking lamp lights nothing steady, as it throws no pool (L4).
+                if (!glow || finishesRuntime.glowMoves(glow)) return;
+                const color = new THREE.Color();
+                if (Array.isArray(glow.rgb)) color.setRGB(glow.rgb[0], glow.rgb[1], glow.rgb[2]);
+                else color.set(glow.color);
+                lightPoolsRuntime.spotsOf(THREE, object, toRoot, glow, 0).forEach(function (spot) {
+                    spots.push(Object.assign(spot, { color: color, settings: lightPoolsRuntime.spotSettings(spot, glow) }));
+                });
+            });
+            return spots;
+        }
+
+        function syncLampSpots() {
+            const spots = state.lampSpots;
+            spots.lists.forEach(function (list, record) {
+                if (state.renderGroups.get(record.baseKey) !== record) spots.lists.delete(record);
+            });
+            const wanted = lightPoolsWanted() && Boolean(state.modelRoot) && lampLightingAvailable();
+            const candidates = [];
+            if (wanted) {
+                state.renderGroups.forEach(function (record) {
+                    if (!record || !record.container) return;
+                    if (!spots.lists.has(record)) spots.lists.set(record, buildLampSpots(record));
+                    if (record.container.visible === false) return;
+                    Array.prototype.push.apply(candidates, spots.lists.get(record));
+                });
+            }
+            spots.candidates = candidates;
+            spots.key = '';
+            if (!candidates.length) {
+                if (spots.root && spots.root.parent) spots.root.parent.remove(spots.root);
+                spots.assigned = 0;
+                return 0;
+            }
+            if (!spots.root) {
+                spots.root = createContainer();
+                spots.root.name = 'FacilityLampSpots';
+                for (let slot = 0; slot < lightPoolsRuntime.SPOT_COUNT; slot += 1) {
+                    const light = new THREE.SpotLight(0xffffff, 0);
+                    light.name = 'FacilityLampSpot:' + slot;
+                    light.castShadow = false;
+                    spots.root.add(light);
+                    spots.root.add(light.target);
+                    spots.lights.push(light);
+                }
+            }
+            if (spots.root.parent !== state.modelRoot) state.modelRoot.add(spots.root);
+            assignLampSpots();
+            invalidate();
+            return candidates.length;
+        }
+
+        // Where the view looks, in the model's coordinates: the orbit target, or 3 m ahead of a walker.
+        function lampSpotFocus() {
+            const focus = new THREE.Vector3();
+            const target = state.controls && state.controls.target;
+            if (!state.walkthrough.active && target && Number.isFinite(target.x)) {
+                focus.set(target.x, finite(target.y, 0), finite(target.z, 0));
+            } else if (state.camera) {
+                state.camera.getWorldDirection(focus);
+                focus.multiplyScalar(3).add(state.camera.position);
+            }
+            if (state.modelRoot && typeof state.modelRoot.worldToLocal === 'function') state.modelRoot.worldToLocal(focus);
+            return focus;
+        }
+
+        function assignLampSpots() {
+            const spots = state.lampSpots;
+            if (!spots.root || !spots.root.parent || !spots.candidates.length) return;
+            const focus = lampSpotFocus();
+            const chosen = spots.candidates.map(function (spot, index) {
+                const dx = spot.x - focus.x;
+                const dy = spot.y - focus.y;
+                const dz = spot.z - focus.z;
+                return { index: index, distance: dx * dx + dy * dy + dz * dz };
+            }).sort(function (a, b) { return a.distance - b.distance || a.index - b.index; })
+                .slice(0, spots.lights.length);
+            const key = chosen.map(function (pick) { return pick.index; }).join(',');
+            if (key === spots.key) return;
+            spots.key = key;
+            spots.lights.forEach(function (light, slot) {
+                const pick = chosen[slot];
+                if (!pick) {
+                    light.intensity = 0;
+                    return;
+                }
+                const spot = spots.candidates[pick.index];
+                const settings = spot.settings;
+                light.color.copy(spot.color);
+                light.intensity = settings.intensity;
+                light.angle = settings.angle;
+                light.penumbra = settings.penumbra;
+                light.distance = settings.distance;
+                light.decay = settings.decay;
+                light.position.set(spot.x, spot.y, spot.z);
+                light.target.position.set(spot.x + spot.aim.x, spot.y + spot.aim.y, spot.z + spot.aim.z);
+                light.updateMatrixWorld();
+                light.target.updateMatrixWorld();
+            });
+            spots.assigned = chosen.length;
+        }
+
+        function lightFillAvailable() {
+            return Boolean(lightPoolsRuntime && typeof lightPoolsRuntime.fillField === 'function'
+                && typeof THREE.DataTexture === 'function' && THREE.DataUtils && THREE.HalfFloatType !== undefined);
+        }
+
+        function syncLightFill() {
+            const fill = state.lightFill;
+            const wanted = lightPoolsWanted() && Boolean(state.modelRoot) && lightFillAvailable();
+            if (!wanted) {
+                if (fill.uniforms) fill.uniforms.facilityFillStrength.value = 0;
+                return 0;
+            }
+            if (!fill.uniforms) {
+                fill.uniforms = { facilityFillMap: { value: null }, facilityFillMatrix: { value: new THREE.Matrix4() },
+                    facilityFillStrength: { value: 0 } };
+            }
+            const areas = state.lightAreas.resolved;
+            const pools = [];
+            const parts = [state.lightAreas.version];
+            state.lightPools.meshes.forEach(function (mesh) {
+                if (!mesh || mesh.visible === false) return;
+                parts.push(mesh.uuid);
+                (state.lightAreas.pools.get(mesh) || []).forEach(function (pool) {
+                    // General lighting indoors: an outdoor lamp's beam pool (L8) gives no fill.
+                    if (pool.lamp) return;
+                    if (lightAreasRuntime && !lightAreasRuntime.lit(areas, pool.x, pool.z)) return;
+                    pools.push({ x: pool.x, z: pool.z, radius: pool.radius, color: pool.color, lampY: pool.lampY });
+                });
+            });
+            const key = parts.join('|');
+            if (key !== fill.key) {
+                fill.key = key;
+                if (fill.texture) fill.texture.dispose();
+                fill.texture = null;
+                fill.field = lightPoolsRuntime.fillField(pools);
+                if (fill.field) {
+                    const data = new Uint16Array(fill.field.data.length);
+                    for (let k = 0; k < data.length; k += 1) data[k] = THREE.DataUtils.toHalfFloat(fill.field.data[k]);
+                    fill.texture = new THREE.DataTexture(data, fill.field.cols, fill.field.rows, THREE.RGBAFormat,
+                        THREE.HalfFloatType);
+                    fill.texture.magFilter = THREE.LinearFilter;
+                    fill.texture.minFilter = THREE.LinearFilter;
+                    fill.texture.generateMipmaps = false;
+                    fill.texture.needsUpdate = true;
+                }
+                fill.uniforms.facilityFillMap.value = fill.texture;
+            }
+            fill.uniforms.facilityFillStrength.value = fill.field ? 1 : 0;
+            if (fill.field) {
+                eachMaterial(state.modelRoot, patchFillMaterial);
+                updateLightFillMatrix();
+            }
+            invalidate();
+            return fill.field ? fill.field.pools : 0;
+        }
+
+        // World space to the fill map: x and z to 0..1 over the map, y the model's own height.
+        function updateLightFillMatrix() {
+            const fill = state.lightFill;
+            if (!fill.field || !fill.uniforms || !fill.uniforms.facilityFillStrength.value) return;
+            const field = fill.field;
+            const width = field.cols * field.cell;
+            const depth = field.rows * field.cell;
+            const toMap = new THREE.Matrix4().set(1 / width, 0, 0, -field.minX / width, 0, 1, 0, 0,
+                0, 0, 1 / depth, -field.minZ / depth, 0, 0, 0, 1);
+            const toRoot = new THREE.Matrix4();
+            if (state.modelRoot && state.modelRoot.matrixWorld) toRoot.copy(state.modelRoot.matrixWorld).invert();
+            fill.uniforms.facilityFillMatrix.value.multiplyMatrices(toMap, toRoot);
+        }
+
+        // A lit material (not a glow, not unlit) gets the fill once; its own shader hook, if any, runs first.
+        function patchFillMaterial(material) {
+            const data = material && material.userData;
+            if (!data || data.facilityFill || data.facilityGlow || data.facilityAuthoredGlow) return;
+            if (!(material.isMeshStandardMaterial || material.isMeshLambertMaterial || material.isMeshPhongMaterial
+                    || material.isMeshToonMaterial)) return;
+            const fill = state.lightFill;
+            const before = material.onBeforeCompile;
+            const beforeKey = material.customProgramCacheKey;
+            material.onBeforeCompile = function (shader, renderer) {
+                if (typeof before === 'function') before.call(this, shader, renderer);
+                Object.assign(shader.uniforms, fill.uniforms);
+                lightPoolsRuntime.patchFillShader(shader);
+            };
+            material.customProgramCacheKey = function () {
+                return (typeof beforeKey === 'function' ? beforeKey.call(this) : '') + '|facility-fill-1';
+            };
+            data.facilityFill = true;
+            fill.patched += 1;
+            material.needsUpdate = true;
+        }
+
+        function disposeLampLighting() {
+            const spots = state.lampSpots;
+            if (spots.root && spots.root.parent) spots.root.parent.remove(spots.root);
+            spots.lights.forEach(function (light) { if (typeof light.dispose === 'function') light.dispose(); });
+            spots.root = null;
+            spots.lights = [];
+            spots.lists.clear();
+            spots.candidates = [];
+            spots.key = '';
+            spots.assigned = 0;
+            const fill = state.lightFill;
+            if (fill.texture) fill.texture.dispose();
+            fill.texture = null;
+            fill.field = null;
+            fill.key = '';
+            if (fill.uniforms) {
+                fill.uniforms.facilityFillMap.value = null;
+                fill.uniforms.facilityFillStrength.value = 0;
+            }
+        }
+
+        function lampLightingDiagnostics() {
+            const spots = state.lampSpots;
+            const fill = state.lightFill;
+            const lit = spots.root && spots.root.parent ? spots.lights.filter(function (light) {
+                return light.intensity > 0;
+            }) : [];
+            return {
+                spots: {
+                    candidates: spots.candidates.length,
+                    lights: spots.root && spots.root.parent ? spots.lights.length : 0,
+                    lit: lit.length,
+                    accents: spots.candidates.filter(function (spot) { return spot.kind === 'accent'; }).length,
+                    pendants: spots.candidates.filter(function (spot) { return spot.kind === 'pendant'; }).length,
+                },
+                fill: {
+                    on: Boolean(fill.uniforms && fill.uniforms.facilityFillStrength.value > 0),
+                    pools: fill.field ? fill.field.pools : 0,
+                    cells: fill.field ? fill.field.cols * fill.field.rows : 0,
+                    patchedMaterials: fill.patched,
+                },
+            };
         }
 
         // ---- Lighting coverage (docs/facility-lighting-plan.md, CC3) --------------------------------------------
@@ -14338,6 +14728,7 @@
                 info.dark = dark;
             });
             syncLightBeams();
+            syncLightFill();
         }
 
         // ---- Outdoor light beams (docs/facility-lighting-plan.md, L8) ------------------------------------------
@@ -14473,6 +14864,7 @@
                 pools.beams = null;
             }
             pools.groundKey = '';
+            disposeLampLighting();
         }
 
         // Glow halo (lighting L6): a scene adjustment (glowHalo), off by default, drawn only in a scene with floor
@@ -15063,6 +15455,7 @@
                 lights: lightsOn(),
                 lightPools: countLightPools(),
                 lightBeams: countLightBeams(),
+                lampLighting: lampLightingDiagnostics(),
                 lightPatterns: {
                     inView: state.lightPatterns.inView,
                     timer: state.lightPatterns.timer !== null,
@@ -15778,6 +16171,8 @@
                 placementTransformAudit: getPlacementTransformAudit(),
                 floorMarkingCount: state.floorMarkingCount,
                 zoneMarkingCount: state.zoneObjects.length,
+                zoneCeilingCount: state.zoneCeilingObjects.length,
+                zoneCeilings: state.zoneCeilingObjects.map(zoneCeilingDiagnostics),
                 appearanceLibrary: finishDiagnostics(),
                 perimeterWallCount: state.wallObjects.length,
                 visiblePerimeterWallCount: state.wallObjects.filter(object => object.visible).length,

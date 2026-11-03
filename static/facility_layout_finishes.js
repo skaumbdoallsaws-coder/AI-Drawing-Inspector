@@ -319,7 +319,7 @@
             material.envMap = settings.envMap;
             material.envMapIntensity = Number.isFinite(settings.envMapIntensity) ? settings.envMapIntensity : 0.7;
         }
-        applyEmission(material, resolved.emission);
+        applyEmission(material, resolved.emission, resolved.estimate);
         material.needsUpdate = true;
         return material;
     }
@@ -328,16 +328,69 @@
     // A light may blink, strobe (one short flash) or turn like a rotating beacon: emission.pattern, one cycle every
     // emission.periodSeconds. Every lamp runs on one shared clock, so lamps with the same pattern change together,
     // and each pattern is a few fixed brightness steps, so a view only has to redraw when a step changes.
-    const GLOW_PATTERNS = ['steady', 'blink', 'strobe', 'rotate'];
+    // A cycle light (2026-11-02, accent lighting) stays at full brightness and eases its glow through
+    // emission.cycleColors instead, one loop per period; its unlit lens follows at half brightness (the recolor rule).
+    // The loop is cut into steps, at most CYCLE_STEPS_PER_COLOR per color and CYCLE_STEPS_PER_SECOND a second, so a
+    // view in which one shows redraws a few times a second, not every frame.
+    const GLOW_PATTERNS = ['steady', 'blink', 'strobe', 'rotate', 'cycle'];
+    // Without cycleColors: violet, blue, cyan, magenta, for a dark evening scene (appearance_library.py keeps the same).
+    const DEFAULT_CYCLE_COLORS = Object.freeze(['#8a4dff', '#2f6bff', '#00d5ff', '#ff3dce']);
+    const CYCLE_STEPS_PER_COLOR = 48;
+    const CYCLE_STEPS_PER_SECOND = 8;
+    const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
     const STROBE_FLASH = 0.1;
     // A rotating beacon in 8 steps per turn: the beam sweeps past the viewer, then the dome glows dimly.
     const ROTATE_LEVELS = [1, 0.55, 0.2, 0.2, 0.2, 0.2, 0.2, 0.55];
+
+    function cycleColors(glow) {
+        const list = glow && glow.cycleColors;
+        const valid = Array.isArray(list) && list.length >= 2 && list.length <= 8
+            && list.every(function (color) { return typeof color === 'string' && HEX_COLOR.test(color); });
+        return (valid ? list : DEFAULT_CYCLE_COLORS).map(function (color) { return color.toLowerCase(); });
+    }
 
     function glowCycle(glow) {
         const pattern = glow && glow.pattern;
         const period = Number(glow && glow.periodSeconds);
         if (GLOW_PATTERNS.indexOf(pattern) <= 0 || !Number.isFinite(period) || period <= 0) return null;
-        return { pattern: pattern, period: period };
+        const cycle = { pattern: pattern, period: period };
+        if (pattern === 'cycle') {
+            cycle.colors = cycleColors(glow);
+            cycle.perColor = Math.max(1, Math.min(CYCLE_STEPS_PER_COLOR,
+                Math.floor(period * CYCLE_STEPS_PER_SECOND / cycle.colors.length)));
+            cycle.steps = cycle.perColor * cycle.colors.length;
+        }
+        return cycle;
+    }
+
+    // The step of a cycle light's loop at a time on the shared clock.
+    function cycleStep(cycle, seconds) {
+        const turns = seconds / cycle.period;
+        return Math.floor((turns - Math.floor(turns)) * cycle.steps + 1e-9) % cycle.steps;
+    }
+
+    function mixColors(from, to, amount) {
+        const a = parseInt(from.slice(1), 16), b = parseInt(to.slice(1), 16);
+        return '#' + [16, 8, 0].map(function (shift) {
+            const start = (a >> shift) & 255, end = (b >> shift) & 255;
+            return ('0' + Math.round(start + (end - start) * amount).toString(16)).slice(-2);
+        }).join('');
+    }
+
+    // The unlit lens of a recolored light: its color at half brightness (as facility_layout_library.js recolors).
+    function unlitColor(color) {
+        return mixColors('#000000', String(color).toLowerCase(), 0.5);
+    }
+
+    // The color a glow shows at a time on the shared clock (seconds): a cycle light's step of its loop, eased
+    // between two of its colors; any other glow its own color.
+    function glowColor(glow, seconds) {
+        const cycle = glowCycle(glow);
+        if (!cycle || cycle.pattern !== 'cycle') return glow && typeof glow.color === 'string' ? glow.color : null;
+        const step = cycleStep(cycle, seconds);
+        const index = Math.floor(step / cycle.perColor);
+        const t = (step - index * cycle.perColor) / cycle.perColor;
+        return mixColors(cycle.colors[index], cycle.colors[(index + 1) % cycle.colors.length], t * t * (3 - 2 * t));
     }
 
     function glowMoves(glow) {
@@ -347,7 +400,7 @@
     // Brightness of a glow, 0 to 1, at a time on the shared clock (seconds).
     function glowLevel(glow, seconds) {
         const cycle = glowCycle(glow);
-        if (!cycle) return 1;
+        if (!cycle || cycle.pattern === 'cycle') return 1;
         const turns = seconds / cycle.period;
         const phase = turns - Math.floor(turns);
         if (cycle.pattern === 'blink') return phase < 0.5 ? 1 : 0;
@@ -359,6 +412,10 @@
     function nextGlowChange(glow, seconds) {
         const cycle = glowCycle(glow);
         if (!cycle) return Infinity;
+        if (cycle.pattern === 'cycle') {
+            const turn = Math.floor(seconds / cycle.period) * cycle.period;
+            return turn + (cycleStep(cycle, seconds) + 1) * cycle.period / cycle.steps;
+        }
         const marks = cycle.pattern === 'blink' ? [0.5, 1] : cycle.pattern === 'strobe' ? [STROBE_FLASH, 1]
             : ROTATE_LEVELS.map(function (level, index) { return (index + 1) / ROTATE_LEVELS.length; });
         const start = Math.floor(seconds / cycle.period) * cycle.period;
@@ -375,8 +432,9 @@
     // A light finish glows: its emission is drawn on top of the lit color and kept out of tone mapping, so a
     // lens reads as switched on in every scene, bright or dark. No light falls on other surfaces.
     // userData.facilityGlow records the glow (and its pattern, if it blinks) so the lights can be switched and
-    // blinked without rebuilding the material.
-    function applyEmission(material, emission) {
+    // blinked without rebuilding the material. With the finish's estimate data (CC1) it also records the lamp's
+    // typical lumens and beam, which a lamp that lights things in the evening scene uses (accent spots, pendants).
+    function applyEmission(material, emission, estimate) {
         if (!emission || typeof emission.color !== 'string' || !material.emissive) return false;
         const intensity = Number(emission.intensity);
         material.emissive.set(emission.color);
@@ -385,9 +443,22 @@
         const glow = { color: emission.color, intensity: material.emissiveIntensity };
         const cycle = glowCycle(emission);
         if (cycle) Object.assign(glow, { pattern: cycle.pattern, periodSeconds: cycle.period });
+        // A cycle light starts on its first color: the glow and, at half brightness, the unlit lens.
+        if (cycle && cycle.pattern === 'cycle') {
+            Object.assign(glow, { color: cycle.colors[0], cycleColors: cycle.colors.slice() });
+            material.emissive.set(glow.color);
+            if (material.color) material.color.set(unlitColor(glow.color));
+        }
         // An outdoor light (L8): in the evening scene its lamps show a beam down to the ground and a pool there.
         const beam = Number(emission.beamAngleDegrees);
         if (Number.isFinite(beam) && beam > 0) glow.beamAngleDegrees = beam;
+        // An accent spot (2026-11-02): in the evening scene it lights what its beam reaches, not a pool on the floor.
+        if (emission.accent === true) glow.accent = true;
+        // A steady lamp's typical output (a blinking one lights nothing steady, as in the coverage estimate).
+        if (!cycle && estimate && Number(estimate.lumens) > 0) {
+            glow.lumens = Number(estimate.lumens);
+            if (Number(estimate.beamAngleDegrees) > 0) glow.estimateBeamAngleDegrees = Number(estimate.beamAngleDegrees);
+        }
         material.userData.facilityGlow = glow;
         return true;
     }
@@ -500,6 +571,9 @@
         GLOW_PATTERNS: GLOW_PATTERNS,
         glowMoves: glowMoves,
         glowLevel: glowLevel,
+        glowColor: glowColor,
+        unlitColor: unlitColor,
+        DEFAULT_CYCLE_COLORS: DEFAULT_CYCLE_COLORS,
         nextGlowChange: nextGlowChange,
         isLibraryTexture: isLibraryTexture,
         mappingFor: mappingFor,

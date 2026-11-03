@@ -7498,6 +7498,203 @@ async function bloomFixture(gl, extra) {
     return data;
 }
 
+// Zone ceilings (2026-11-02): a zone with a ceiling height shows a flat ceiling over it, seen from inside the room.
+test('a zone ceiling shows over its zone at its height, seen from below only, never picked, with the overhead layer', async () => {
+    const THREE = await libraryThree();
+    const data = await libraryFixture();
+    // An L-shaped lounge with a 3.2 m ceiling on a raised floor, and a zone without one.
+    const lounge = Object.assign(styledZone('zn-lounge', [{ x: 0, z: 0 }, { x: 10, z: 0 }, { x: 10, z: -6 }, { x: 4, z: -6 },
+        { x: 4, z: -3 }, { x: 0, z: -3 }, { x: 0, z: 0 }], '#5b8def'), { floorElevation: 0.5 });
+    lounge.extensions.ceiling = { heightMeters: 3.2 };
+    const open = styledZone('zn-open', [{ x: 20, z: 0 }, { x: 30, z: 0 }, { x: 30, z: 10 }, { x: 20, z: 10 }], '#58b6a6');
+    const show = async (zones, sceneId) => {
+        await data.adapter.setScene({ layout: { placements: [], zones,
+            extensions: sceneId ? { facilityScene: { version: 1, sceneId } } : {} }, assetCatalog: [] });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    const ceilings = () => {
+        const found = [];
+        renderedScene().traverse(o => { if (o.userData && o.userData.facilityZoneCeiling) found.push(o); });
+        return found;
+    };
+    await show([lounge, open]);
+    assert.strictEqual(data.adapter.getDiagnostics().zoneCeilingCount, 1);
+    const [mesh] = ceilings();
+    assert.strictEqual(mesh.userData.zoneId, 'zn-lounge');
+    const position = mesh.geometry.attributes.position;
+    assert.strictEqual(position.count, 6, 'the outline, closing point dropped');
+    for (let i = 0; i < position.count; i += 1) assert.ok(Math.abs(position.getY(i) - 3.7) < 1e-6, 'floor plus height');
+    const index = mesh.geometry.index;
+    assert.strictEqual(index.count, 12, 'four triangles cover the L');
+    const corner = k => new THREE.Vector3(position.getX(k), position.getY(k), position.getZ(k));
+    let area = 0;
+    for (let t = 0; t < index.count; t += 3) {
+        const a = corner(index.getX(t));
+        const normal = new THREE.Vector3().crossVectors(corner(index.getX(t + 1)).sub(a), corner(index.getX(t + 2)).sub(a));
+        assert.ok(normal.y < 0, 'triangle ' + t / 3 + ' faces down');
+        area += normal.length() / 2;
+    }
+    assert.ok(Math.abs(area - 48) < 1e-6, 'covers the zone: ' + area);
+    const normal = mesh.geometry.attributes.normal;
+    for (let i = 0; i < normal.count; i += 1) assert.strictEqual(normal.getY(i), 1, 'shaded like the room under it');
+    assert.strictEqual(mesh.material.side, THREE.FrontSide, 'from above it is not drawn');
+    assert.strictEqual('#' + mesh.material.color.getHexString(THREE.SRGBColorSpace), '#2a2a2d', 'matte charcoal');
+    assert.ok(mesh.material.roughness > 0.9 && mesh.material.metalness === 0);
+    assert.ok(mesh.material.polygonOffset && mesh.material.polygonOffsetFactor > 0, 'a lamp at its height is drawn in front');
+    assert.strictEqual(mesh.castShadow, false);
+    const hits = [];
+    mesh.raycast({}, hits);
+    assert.strictEqual(hits.length, 0, 'never picked');
+    data.adapter.setLayerVisibility({ overhead: false });
+    assert.strictEqual(mesh.visible, false, 'hidden with the overhead layer');
+    data.adapter.setLayerVisibility({ overhead: true });
+    assert.strictEqual(mesh.visible, true);
+    await show([lounge, open], 'evening');
+    assert.strictEqual(ceilings().length, 1, 'in every scene');
+    let freed = 0;
+    ceilings()[0].geometry.addEventListener('dispose', () => { freed += 1; });
+    const cleared = Object.assign({}, lounge, { extensions: { style: lounge.extensions.style } });
+    await show([cleared, open], 'evening');
+    assert.strictEqual(data.adapter.getDiagnostics().zoneCeilingCount, 0);
+    assert.strictEqual(ceilings().length, 0);
+    assert.strictEqual(freed, 1, 'the cleared ceiling is freed');
+});
+
+// Lamps that light things (2026-11-02): in Evening with the lights on, a pendant over a table and an accent spot get
+// one of a fixed set of spot lights; the general lighting gives a gentle fill below its lamps.
+test('in Evening a pendant and accent spots get spot lights, the downlights fill what stands below, all off with the lights', async () => {
+    const THREE = await libraryThree();
+    const LENS = { pendant: 'p:pendant/lens#0', accent: 'p:accent/lens#0', downlight: 'p:downlight/lens#0' };
+    const data = await libraryFixture({ assetResolver: request => {
+        if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+        if (request.stage !== 'overview') return null;
+        const object = new THREE.Group();
+        if (request.assetId === 'chair') {
+            const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.9, 0.5).translate(0, 0.45, 0),
+                new THREE.MeshStandardMaterial({ color: 0x6b4b3a }));
+            seat.userData.facilityPartKey = 'p:chair/seat#0';
+            object.add(seat);
+            return object;
+        }
+        const geometry = {
+            pendant: () => new THREE.CylinderGeometry(0.15, 0.15, 0.01, 16),
+            // Its lens faces 30 degrees off down toward +z, like asset-gym-accent-spot-30.
+            accent: () => new THREE.CylinderGeometry(0.03, 0.03, 0.004, 16).rotateX(-Math.PI / 6),
+            downlight: () => new THREE.BoxGeometry(0.15, 0.015, 0.15).translate(0, 0.0075, 0),
+        }[request.assetId]();
+        const lensMaterial = new THREE.MeshStandardMaterial({ color: 0xf2f2ee });
+        lensMaterial.userData = { facilityAuthoredFinish: true, facilityMaterialRole: 'lens' };
+        const lens = new THREE.Mesh(geometry, lensMaterial);
+        lens.userData.facilityPartKey = LENS[request.assetId];
+        object.add(lens);
+        return object;
+    } });
+    const lit = (value, assetId, appearanceId) => Object.assign(value, {
+        componentMaterials: { representation: 'overview', overrides: [{ key: LENS[assetId], appearanceId }] } });
+    const yaw180 = { x: 0, y: 1, z: 0, w: 0 };
+    const base = [
+        lit(placement('pendant', 'pendant', REV_A, 2.65, 1.7184, -11.5), 'pendant', 'light-warm-white'),
+        lit(placement('spot-a', 'accent', REV_A, 1.6, 3.1324, -3.9, yaw180), 'accent', 'light-accent-spot'),
+        lit(placement('spot-b', 'accent', REV_A, 3.7, 3.1324, -3.9), 'accent', 'light-accent-spot'),
+        lit(placement('down', 'downlight', REV_A, 9, 3.185, -10), 'downlight', 'light-warm-white'),
+        placement('chair', 'chair', REV_A, 9, 0, -10),
+    ];
+    const catalog = ['pendant', 'accent', 'downlight', 'chair'].map(id => asset(id, REV_A));
+    const show = async (sceneId, adjustments, list) => {
+        await data.adapter.setScene({ layout: { placements: list || base, extensions: {
+            facilityScene: Object.assign({ version: 1, sceneId }, adjustments ? { adjustments } : {}) } }, assetCatalog: catalog });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    const info = () => data.adapter.getDiagnostics().appearanceLibrary;
+    const spotLights = () => {
+        const found = [];
+        renderedScene().traverse(o => { if (o.isSpotLight) found.push(o); });
+        return found;
+    };
+    const meshOf = partKey => {
+        let found = null;
+        renderedScene().traverse(o => { if (o.isMesh && o.userData.facilityPartKey === partKey) found = found || o; });
+        return found;
+    };
+    await show('machine-shop');
+    assert.deepStrictEqual(info().lampLighting.spots, { candidates: 0, lights: 0, lit: 0, accents: 0, pendants: 0 }, 'daytime: none');
+    assert.strictEqual(info().lampLighting.fill.on, false);
+    assert.strictEqual(spotLights().length, 0);
+    await show('evening');
+    assert.deepStrictEqual(info().lampLighting.spots, { candidates: 3, lights: 8, lit: 3, accents: 2, pendants: 1 });
+    assert.strictEqual(info().lightPools, 1, 'only the downlight throws a pool: the accent spots and the low pendant light things');
+    assert.strictEqual(info().lightBeams, 0, 'an accent spot draws no beam cone');
+    const lights = spotLights();
+    assert.strictEqual(lights.length, 8, 'a fixed set, so lit materials compile once');
+    assert.ok(lights.every(light => light.castShadow === false));
+    const on = lights.filter(light => light.intensity > 0);
+    const near = (light, x, z) => Math.abs(light.position.x - x) < 0.01 && Math.abs(light.position.z - z) < 0.01;
+    const aimOf = light => new THREE.Vector3().subVectors(light.target.position, light.position).normalize();
+    const round = v => Math.round(v * 1000) / 1000 + 0;
+    const spotA = on.find(light => near(light, 1.6, -3.9));
+    const spotB = on.find(light => near(light, 3.7, -3.9));
+    const pendant = on.find(light => near(light, 2.65, -11.5));
+    assert.ok(spotA && spotB && pendant, 'each candidate has its light');
+    assert.deepStrictEqual(aimOf(spotA).toArray().map(round), [0, -0.866, -0.5], 'yaw 180 aims toward -z');
+    assert.deepStrictEqual(aimOf(spotB).toArray().map(round), [0, -0.866, 0.5]);
+    assert.ok(Math.abs(spotA.angle - 22.5 * Math.PI / 180) < 1e-6, '30 degree beam');
+    assert.strictEqual(spotA.distance, 8);
+    assert.ok(Math.abs(spotA.color.r - new THREE.Color('#ffc08a').r) < 1e-6, 'its glow color');
+    assert.deepStrictEqual(aimOf(pendant).toArray().map(round), [0, -1, 0]);
+    assert.strictEqual(pendant.distance, 6);
+    // From the finishes' estimate data: 4,000 lm at 110 degrees, 700 lm at 30 degrees.
+    const lampPools = require('../static/facility_layout_light_pools.js');
+    assert.ok(Math.abs(pendant.intensity - lampPools.spotSettings({ kind: 'pendant' }, { lumens: 4000, estimateBeamAngleDegrees: 110 }).intensity) < 1e-9);
+    assert.ok(Math.abs(spotA.intensity - lampPools.spotSettings({ kind: 'accent' }, { lumens: 700, estimateBeamAngleDegrees: 30 }).intensity) < 1e-9);
+    // The fill: the downlight's pool, under it only, on lit materials (not the glows).
+    const fill = info().lampLighting.fill;
+    assert.strictEqual(fill.on, true);
+    assert.strictEqual(fill.pools, 1);
+    const chair = meshOf('p:chair/seat#0');
+    assert.strictEqual(chair.material.userData.facilityFill, true);
+    assert.ok(/\|facility-fill-1$/.test(chair.material.customProgramCacheKey()));
+    const shader = { fragmentShader: THREE.ShaderLib.standard.fragmentShader, vertexShader: '', uniforms: {} };
+    chair.material.onBeforeCompile(shader, null);
+    assert.ok(/facilityFillStrength/.test(shader.fragmentShader));
+    assert.strictEqual(shader.uniforms.facilityFillStrength.value, 1);
+    const map = shader.uniforms.facilityFillMap.value;
+    assert.ok(map && map.isDataTexture && map.type === THREE.HalfFloatType);
+    const at = new THREE.Vector3(9, 1, -10).applyMatrix4(shader.uniforms.facilityFillMatrix.value);
+    assert.ok(at.x > 0.4 && at.x < 0.6 && at.z > 0.4 && at.z < 0.6, 'the chair is mid-map');
+    assert.ok(Math.abs(at.y - 1) < 1e-6, 'the height is kept, to compare with the lamps');
+    assert.ok(!meshOf(LENS.downlight).material.userData.facilityFill, 'a glow is not filled');
+    const patched = fill.patchedMaterials;
+    // Lights off: no spot lights, no fill; back on, the same ones.
+    await show('evening', { lights: false });
+    assert.strictEqual(info().lampLighting.spots.lights, 0);
+    assert.strictEqual(spotLights().length, 0);
+    assert.strictEqual(info().lampLighting.fill.on, false);
+    assert.strictEqual(shader.uniforms.facilityFillStrength.value, 0, 'the patched shader turns off by its uniform');
+    await show('evening');
+    assert.strictEqual(info().lampLighting.spots.lit, 3);
+    assert.strictEqual(spotLights()[0], lights[0], 'the same lights');
+    assert.strictEqual(info().lampLighting.fill.patchedMaterials, patched, 'no material patched twice');
+    // Their layer hidden: the lamps light nothing.
+    data.adapter.setLayerVisibility({ assets: false });
+    assert.strictEqual(info().lampLighting.spots.candidates, 0);
+    assert.strictEqual(info().lampLighting.fill.pools, 0);
+    data.adapter.setLayerVisibility({ assets: true });
+    assert.strictEqual(info().lampLighting.spots.candidates, 3);
+    // Ten accent spots and a pendant: eight lights, given to the candidates nearest the view, the rest dark.
+    const row = Array.from({ length: 10 }, (_, k) => lit(placement('row-' + k, 'accent', REV_A, k * 4, 3.1324, 20), 'accent', 'light-accent-spot'));
+    await show('evening', null, row.concat([base[0], base[3]]));
+    assert.deepStrictEqual(info().lampLighting.spots, { candidates: 11, lights: 8, lit: 8, accents: 10, pendants: 1 });
+    const current = shader.uniforms.facilityFillMap.value;
+    assert.ok(current && current.isDataTexture, 'the downlight still fills');
+    let freed = 0;
+    current.addEventListener('dispose', () => { freed += 1; });
+    data.adapter.dispose();
+    assert.strictEqual(freed, 1, 'the fill map is freed with the adapter');
+    assert.strictEqual(shader.uniforms.facilityFillMap.value, null);
+});
+
 test('the glow halo is a scene adjustment drawn around the glows in Evening with the lights on, and frees its buffers', async () => {
     const THREE = await libraryThree();
     const gl = fakeGl(0);
@@ -7738,6 +7935,62 @@ test('a blinking light redraws only when it changes, and only while it is in vie
     assert.strictEqual(timers.size, 1);
     data.adapter.dispose();
     assert.strictEqual(timers.size, 0, 'no timer outlives the view');
+});
+
+test('a cycle light eases its glow and unlit lens through its colors, steady on the first under reduced motion', async () => {
+    const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffffff'];
+    const placements = [lampPlacement('party', 0, { appearanceId: 'light-cool-white-led', pattern: 'cycle',
+        periodSeconds: 8, cycleColors: colors })];
+    const show = async (data, scene) => {
+        await data.adapter.setScene({ layout: { placements, extensions: scene ? { facilityScene: scene } : {} },
+            assetCatalog: [asset('light-row', REV_A)] });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    const data = await blinkFixture();
+    await show(data, null);
+    await drawLikeThree(data);
+    let lens = data.lens('cycle');
+    assert.ok(lens, 'the lens cycles');
+    assert.strictEqual(lens.material.onBeforeRender.name, 'drawPatternedGlow');
+    const at = data.centre(lens);
+    const hex = () => [lens.material.emissive.getHexString(), lens.material.color.getHexString()];
+    // 1 s on the shared clock: halfway from red to green, the unlit lens the same at half brightness.
+    data.clock.now = 1000;
+    data.aim(at);
+    assert.deepStrictEqual(hex(), ['808000', '404000']);
+    assert.strictEqual(lens.material.emissiveIntensity, 1, 'full brightness: only the color changes');
+    const timers = data.clock.timers;
+    assert.strictEqual(timers.size, 1);
+    assert.strictEqual(Array.from(timers.values())[0].at, 1133, 'the next step at 1.125 s (8 s / 64 steps), just after it');
+    data.fire();
+    const [glow] = hex();
+    assert.notStrictEqual(glow, '808000', 'one step on');
+    assert.ok(parseInt(glow.slice(2, 4), 16) > parseInt(glow.slice(0, 2), 16), 'further toward green, ' + glow);
+    // The loop repeats: at 8 s it is red again.
+    data.clock.now = 8000;
+    data.aim(at);
+    assert.deepStrictEqual(hex(), ['ff0000', '800000']);
+    // Lights off: no glow, no redraws, and the lens keeps the first color.
+    await show(data, { version: 1, sceneId: 'machine-shop', adjustments: { lights: false } });
+    lens = data.lens('cycle');
+    data.clock.now = 3000;
+    data.aim(data.centre(lens));
+    assert.strictEqual(lens.material.emissiveIntensity, 0);
+    assert.strictEqual(lens.material.color.getHexString(), '800000');
+    assert.strictEqual(timers.size, 0);
+    data.adapter.dispose();
+
+    // Under reduced motion: steady on the first color, no timer.
+    const still = await blinkFixture({ prefersReducedMotion: true });
+    await show(still, null);
+    await drawLikeThree(still);
+    still.clock.now = 3000;
+    lens = still.lens('cycle');
+    still.aim(still.centre(lens));
+    assert.deepStrictEqual(hex(), ['ff0000', '800000'], 'steady on red, though the loop would be blue at 3 s');
+    assert.strictEqual(still.clock.timers.size, 0);
+    still.adapter.dispose();
 });
 
 test('blinking lights show steady under reduced motion; a batch idles once none of its copies is in view; no pools', async () => {

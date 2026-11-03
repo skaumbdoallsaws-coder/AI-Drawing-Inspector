@@ -27,14 +27,20 @@ override on such a finish recolors the light: the glow takes the color and the
 unlit lens the same color at half brightness, so a blinking lamp's dark step and
 a switched-off lamp keep its color. Only the Facility view draws a glow, so the
 Assembly tools leave these finishes out. An emission may also carry
-``"pattern"`` (steady, blink, strobe or rotate) with ``"periodSeconds"`` (0.5 to
-10 s per cycle): the Facility view then blinks it, steady under reduced motion.
-A use of a Lights finish (a placement, a part or a custom finish) may set its own
-``pattern`` and ``periodSeconds`` the same way, e.g. a red stack lamp that blinks.
+``"pattern"`` (steady, blink, strobe, rotate or cycle) with ``"periodSeconds"``
+(0.5 to 10 s per cycle; 2 to 60 s per color loop for cycle): the Facility view then
+blinks it, steady under reduced motion. A cycle light eases its glow through
+``"cycleColors"`` (2 to 8 colors, DEFAULT_CYCLE_COLORS without them), one loop per
+period, its unlit lens following at half brightness; steady (the first color) under
+reduced motion. A use of a Lights finish (a placement, a part or a custom finish)
+may set its own ``pattern``, ``periodSeconds`` and ``cycleColors`` the same way, e.g.
+a red stack lamp that blinks.
 An outdoor light's emission may carry ``"beamAngleDegrees"`` (10 to 160): in the
 evening scene the Facility view then draws a soft beam from the lamp down to the
 ground and a pool of light where its aim lands (docs/facility-lighting-plan.md, L8).
-A general or outdoor Lights finish may carry ``estimate`` (``{"lumens", "beamAngleDegrees", "basis"}``): a
+With ``"accent": true`` as well (an accent spot) the view instead lights what the
+beam reaches (a wall, an object, the floor) with a spot light, and draws no pool.
+A general, outdoor or accent Lights finish may carry ``estimate`` (``{"lumens", "beamAngleDegrees", "basis"}``): a
 typical output and beam angle, for the lighting coverage estimate only (light_coverage.py, CC).
 """
 from collections.abc import Mapping
@@ -57,10 +63,10 @@ GRAINS = ("part", "length", "width", "height")
 OVERRIDE_FIELDS = frozenset({
     "color", "roughness", "metalness", "opacity", "textureStrength",
     "sizeMeters", "rotationDegrees", "offsetMeters", "mapping", "grain",
-    "pattern", "periodSeconds",
+    "pattern", "periodSeconds", "cycleColors",
 })
 # Overrides that only a Lights finish (one with an emission) takes.
-LIGHT_OVERRIDES = ("pattern", "periodSeconds")
+LIGHT_OVERRIDES = ("pattern", "periodSeconds", "cycleColors")
 SCENE_ADJUSTMENTS = frozenset({
     "exposure", "environmentIntensity", "ambient", "directional",
     "background", "shadows", "environmentRotationDegrees", "lights", "lightAreas", "glowHalo",
@@ -72,7 +78,22 @@ FLOOR_AREA_ID = re.compile(r"fs-[a-z0-9-]{1,76}")
 RECTANGLE_KEYS = ("minX", "minZ", "maxX", "maxZ")
 
 
-GLOW_PATTERNS = ("steady", "blink", "strobe", "rotate")
+GLOW_PATTERNS = ("steady", "blink", "strobe", "rotate", "cycle")
+# A cycle light (2026-11-02, accent lighting) eases through its colors, one loop per period: slow ambient loops, so a
+# longer period than a blink. Without cycleColors the Facility view uses this palette, chosen for a dark evening
+# scene: violet, blue, cyan, magenta (static/facility_layout_finishes.js keeps the same list).
+DEFAULT_CYCLE_COLORS = ("#8a4dff", "#2f6bff", "#00d5ff", "#ff3dce")
+MIN_CYCLE_COLORS, MAX_CYCLE_COLORS = 2, 8
+
+
+def _period_range(pattern):
+    """Seconds per cycle a pattern takes: 0.5 to 10 for blink, strobe and rotate, 2 to 60 per color loop for cycle."""
+    return (2, 60) if pattern == "cycle" else (0.5, 10)
+
+
+def _valid_cycle_colors(colors):
+    return (isinstance(colors, list) and MIN_CYCLE_COLORS <= len(colors) <= MAX_CYCLE_COLORS
+            and all(isinstance(color, str) and COLOR.fullmatch(color) for color in colors))
 
 
 def _finite_number(value):
@@ -84,7 +105,9 @@ def _valid_emission(emission):
     (docs/facility-lighting-plan.md)."""
     if not isinstance(emission, Mapping) or not (
             {"color", "intensity"} <= set(emission)
-            <= {"color", "intensity", "pattern", "periodSeconds", "beamAngleDegrees"}):
+            <= {"color", "intensity", "pattern", "periodSeconds", "cycleColors", "beamAngleDegrees", "accent"}):
+        return False
+    if "accent" in emission and not (emission["accent"] is True and "beamAngleDegrees" in emission):
         return False
     if "beamAngleDegrees" in emission and not (
             _finite_number(emission["beamAngleDegrees"]) and 10 <= emission["beamAngleDegrees"] <= 160):
@@ -96,9 +119,12 @@ def _valid_emission(emission):
     pattern = emission.get("pattern", "steady")
     if pattern not in GLOW_PATTERNS:
         return False
+    if "cycleColors" in emission and not (pattern == "cycle" and _valid_cycle_colors(emission["cycleColors"])):
+        return False
     if pattern == "steady":
         return "periodSeconds" not in emission
-    return _finite_number(emission.get("periodSeconds")) and 0.5 <= emission["periodSeconds"] <= 10
+    low, high = _period_range(pattern)
+    return _finite_number(emission.get("periodSeconds")) and low <= emission["periodSeconds"] <= high
 
 
 @lru_cache(maxsize=4)
@@ -184,24 +210,33 @@ def normalize_overrides(value: Mapping) -> dict:
             result[key] = item
         elif key == "pattern":
             if item not in GLOW_PATTERNS:
-                raise ValueError("pattern must be steady, blink, strobe or rotate")
+                raise ValueError("pattern must be steady, blink, strobe, rotate or cycle")
             result[key] = item
         elif key == "periodSeconds":
-            result[key] = _number(item, key, 0.5, 10, 3)
-    # As in the library: a steady light has no period; blink, strobe and rotate need one.
+            # "pattern" sorts first, so it is checked by now: a cycle takes a longer period.
+            result[key] = _number(item, key, *_period_range(value.get("pattern")), 3)
+        elif key == "cycleColors":
+            if not (isinstance(item, list) and MIN_CYCLE_COLORS <= len(item) <= MAX_CYCLE_COLORS):
+                raise ValueError(f"cycleColors takes {MIN_CYCLE_COLORS} to {MAX_CYCLE_COLORS} colors")
+            result[key] = [_color(color, "Each cycleColors entry") for color in item]
+    # As in the library: a steady light has no period; blink, strobe, rotate and cycle need one.
     if "periodSeconds" in result and "pattern" not in result:
-        raise ValueError("periodSeconds goes with a pattern (blink, strobe or rotate)")
+        raise ValueError("periodSeconds goes with a pattern (blink, strobe, rotate or cycle)")
     if result.get("pattern") == "steady" and "periodSeconds" in result:
         raise ValueError("A steady light has no periodSeconds")
     if result.get("pattern", "steady") != "steady" and "periodSeconds" not in result:
-        raise ValueError(f"A {result['pattern']} light needs periodSeconds (0.5 to 10 s per cycle)")
+        low, high = _period_range(result["pattern"])
+        unit = "s per color loop" if result["pattern"] == "cycle" else "s per cycle"
+        raise ValueError(f"A {result['pattern']} light needs periodSeconds ({low:g} to {high:g} {unit})")
+    if "cycleColors" in result and result.get("pattern") != "cycle":
+        raise ValueError("cycleColors goes with pattern cycle")
     return result
 
 
 def _lights_only(overrides, base_row):
-    """pattern and periodSeconds belong to a light: refuse them on a finish without a glow."""
+    """pattern, periodSeconds and cycleColors belong to a light: refuse them on a finish without a glow."""
     if any(key in overrides for key in LIGHT_OVERRIDES) and not (base_row and base_row.get("emission")):
-        raise ValueError("pattern and periodSeconds go only on a Lights finish (one that glows)")
+        raise ValueError("pattern, periodSeconds and cycleColors go only on a Lights finish (one that glows)")
 
 
 def custom_appearances(layout) -> dict:

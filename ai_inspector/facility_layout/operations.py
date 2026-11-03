@@ -551,6 +551,35 @@ def _op_edit_zone(
     return [], [zone_id]
 
 
+def _op_set_zone_ceiling(
+    document: Dict[str, Any],
+    operation: Mapping[str, Any],
+    _index: int,
+    _base_revision: str,
+) -> Tuple[List[str], List[str]]:
+    """Give a zone a ceiling heightMeters above its floor, which lamps hang from, or null to remove it."""
+    from .ceilings import KEY, normalize_ceiling
+    if set(operation) != {"op", "zoneId", "heightMeters"}:
+        _fail("invalid_zone_ceiling", "Expected zoneId and heightMeters (or null to remove the ceiling).")
+    zone_id = _clean_id(operation.get("zoneId"), "zoneId", "zn")
+    zone = _find(document, "zones", "zoneId", zone_id, "Zone")
+    extensions = zone.get("extensions")
+    if extensions is not None and not isinstance(extensions, dict):
+        _fail("invalid_layout_shape", "Zone extensions must be an object.")
+    if operation["heightMeters"] is None:
+        if extensions is not None:
+            extensions.pop(KEY, None)
+            if not extensions:
+                zone.pop("extensions")
+        return [], [zone_id]
+    try:
+        value = normalize_ceiling({"heightMeters": operation["heightMeters"]})
+    except ValueError as exc:
+        _fail("invalid_zone_ceiling", str(exc))
+    zone.setdefault("extensions", {})[KEY] = value
+    return [], [zone_id]
+
+
 def _op_delete_zone(
     document: Dict[str, Any],
     operation: Mapping[str, Any],
@@ -2865,6 +2894,7 @@ _HANDLERS: Dict[str, _Handler] = {
     "archive_layout": _op_archive_layout,
     "add_zone": _op_add_zone,
     "edit_zone": _op_edit_zone,
+    "set_zone_ceiling": _op_set_zone_ceiling,
     "delete_zone": _op_delete_zone,
     "add_floor_marking": _op_add_floor_marking,
     "add_floor_path": _op_add_floor_path,

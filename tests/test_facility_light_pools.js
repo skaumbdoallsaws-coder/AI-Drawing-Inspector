@@ -121,6 +121,25 @@ test('each copy hung high and facing down throws one pool per lamp, wider the hi
     assert.deepStrictEqual(pools.poolsOf(THREE, sign, identity, color, 0), [], 'no lamps, no pools');
 });
 
+test('a thin recessed downlight hung flush with a 3.2 m ceiling is a lamp: 28 of them throw 28 pools', async () => {
+    // The gym lounge's downlights (ceiling mounting, 2026-11-02): 0.15 x 0.15 x 0.015 m, the base 3.185 m up so the
+    // top meets the ceiling, the lens (its underside) facing down, about 3 m apart.
+    const THREE = await three();
+    const color = new THREE.Color(1, 0.85, 0.6);
+    const downlight = new THREE.BoxGeometry(0.15, 0.015, 0.15).translate(0, 0.0075, 0);
+    assert.deepStrictEqual(pools.lampsOf(downlight).length, 1, 'one lamp: its underside');
+    const mesh = new THREE.InstancedMesh(downlight, new THREE.MeshBasicMaterial(), 28);
+    for (let index = 0; index < 28; index += 1) {
+        mesh.setMatrixAt(index, new THREE.Matrix4().makeTranslation(1.5 + 3 * (index % 7), 3.2 - 0.015, 1.5 + 3 * Math.floor(index / 7)));
+    }
+    mesh.updateMatrixWorld(true);
+    const found = pools.poolsOf(THREE, mesh, new THREE.Matrix4(), color, 0);
+    assert.strictEqual(found.length, 28);
+    assert.deepStrictEqual([found[0].x, found[0].z, found[27].x, found[27].z].map(v => Math.round(v * 1000) / 1000),
+        [1.5, 1.5, 19.5, 10.5], 'each under its downlight');
+    found.forEach(pool => assert.ok(Math.abs(pool.radius - pools.poolRadius(3.185)) < 1e-6, 'from 3.185 m up'));
+});
+
 test('pool quads lie face up on the floor, colored per pool, with a soft round spot', async () => {
     const THREE = await three();
     const warm = new THREE.Color(1, 0.8, 0.6);
@@ -250,6 +269,139 @@ test('an outdoor pool lies on its own ground, and a beam is an open cone from th
     }
     assert.ok(/beamAlong/.test(pools.BEAM_VERTEX_SHADER) && /project_vertex/.test(pools.BEAM_VERTEX_SHADER));
     assert.ok(/instanceColor/.test(pools.BEAM_VERTEX_SHADER) && /facilityBeamStrength/.test(pools.BEAM_FRAGMENT_SHADER));
+});
+
+// Lamps that light things (2026-11-02): pendants over tables and accent spots become spot light candidates; the
+// general lighting's pools sum into a fill map that lit materials add below the lamps.
+test('a pendant hung over a table and an accent spot aimed along its lens are spot candidates; high lamps are not', async () => {
+    const THREE = await three();
+    const identity = new THREE.Matrix4();
+    // A billiard pendant's three shades, 1.2 m apart, their lenses facing down.
+    const shades = merge(THREE, [-1.2, 0, 1.2].map(x => new THREE.CylinderGeometry(0.15, 0.15, 0.01, 16).translate(x, 0, 0)));
+    const mesh = new THREE.InstancedMesh(shades, new THREE.MeshBasicMaterial(), 4);
+    mesh.setMatrixAt(0, new THREE.Matrix4().makeTranslation(2.65, 1.7184, -11.5)); // over the pool table
+    mesh.setMatrixAt(1, new THREE.Matrix4().makeTranslation(9, 3.185, -10));       // high: it throws pools instead
+    mesh.setMatrixAt(2, new THREE.Matrix4().makeTranslation(9, 0.3, -10));         // on the floor
+    mesh.setMatrixAt(3, new THREE.Matrix4().makeScale(0, 0, 0));                   // hidden
+    mesh.updateMatrixWorld(true);
+    const glow = { color: '#ffd29a', intensity: 1, lumens: 4000, estimateBeamAngleDegrees: 110 };
+    const found = pools.spotsOf(THREE, mesh, identity, glow, 0);
+    assert.strictEqual(found.length, 1, 'only the pendant over the table');
+    const spot = found[0];
+    assert.deepStrictEqual([spot.x, spot.y, spot.z].map(v => Math.round(v * 100) / 100), [2.65, 1.71, -11.5],
+        'one spot for the fixture, at the centre of its shades');
+    assert.strictEqual(spot.kind, 'pendant');
+    assert.strictEqual(spot.lamps, 3);
+    assert.ok(Math.abs(spot.aim.y + 1) < 1e-6, 'straight down');
+    assert.deepStrictEqual(pools.spotsOf(THREE, mesh, identity, null, 0), [], 'no glow, no light');
+    assert.deepStrictEqual(pools.spotsOf(THREE, mesh, identity, { color: '#2fd36b', intensity: 1 }, 0), [],
+        'a finish without lighting data (an exit sign, a signal lamp) lights nothing');
+    // A vintage pendant's bare bulbs face down only at their tips, a tenth of their surface: still its lamps.
+    const bulbs = merge(THREE, [-0.4, 0, 0.4].map(x => new THREE.SphereGeometry(0.03, 16, 12).scale(1, 2, 1).translate(x, 0, 0)));
+    assert.strictEqual(pools.lampsOf(bulbs).length, 0, 'no lamp by the share rule');
+    assert.strictEqual(pools.bulbsOf(bulbs).length, 3);
+    const vintage = new THREE.Mesh(bulbs, new THREE.MeshBasicMaterial());
+    vintage.position.set(2.65, 1.75, -11.5);
+    vintage.updateMatrixWorld(true);
+    const lit = pools.spotsOf(THREE, vintage, identity, glow, 0);
+    assert.strictEqual(lit.length, 1);
+    assert.deepStrictEqual([lit[0].x, lit[0].z].map(v => Math.round(v * 100) / 100), [2.65, -11.5]);
+    assert.ok(lit[0].y < 1.75 && lit[0].aim.y < -0.99, 'at the bulb tips, aimed down');
+    assert.strictEqual(lit[0].lamps, 3);
+    // An exit sign's bottom edge faces down too, but its finish has no lighting data.
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.05), new THREE.MeshBasicMaterial());
+    sign.position.set(0, 2.2, 0);
+    sign.updateMatrixWorld(true);
+    assert.deepStrictEqual(pools.spotsOf(THREE, sign, identity, { color: '#2fd36b', intensity: 1 }, 0), []);
+    // An accent spot (asset-gym-accent-spot-30): its lens faces 30 degrees off down toward +z; yaw 180 turns it
+    // toward -z. It is a candidate at any height, aimed along its lens as placed.
+    const lens = new THREE.CylinderGeometry(0.03, 0.03, 0.004, 16).rotateX(-Math.PI / 6);
+    const accent = { color: '#ffc08a', intensity: 1, beamAngleDegrees: 30, accent: true, lumens: 700 };
+    const spotMesh = new THREE.InstancedMesh(lens, new THREE.MeshBasicMaterial(), 2);
+    spotMesh.setMatrixAt(0, new THREE.Matrix4().compose(new THREE.Vector3(1.6, 3.1324, -3.9),
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI), new THREE.Vector3(1, 1, 1)));
+    spotMesh.setMatrixAt(1, new THREE.Matrix4().makeTranslation(3.7, 3.1324, -3.9));
+    spotMesh.updateMatrixWorld(true);
+    const aimed = pools.spotsOf(THREE, spotMesh, identity, accent, 0);
+    assert.strictEqual(aimed.length, 2);
+    assert.ok(aimed.every(item => item.kind === 'accent'));
+    const round = v => Math.round(v * 1000) / 1000 + 0;
+    assert.deepStrictEqual([aimed[0].aim.x, aimed[0].aim.y, aimed[0].aim.z].map(round), [0, -0.866, -0.5], 'yaw 180: toward -z');
+    assert.deepStrictEqual([aimed[1].aim.x, aimed[1].aim.y, aimed[1].aim.z].map(round), [0, -0.866, 0.5], 'as modelled');
+    // The same lens glowing as a plain light is no pendant: 3.13 m up, it throws a pool.
+    assert.deepStrictEqual(pools.spotsOf(THREE, spotMesh, identity, { color: '#ffffff' }, 0), []);
+});
+
+test('a spot light has settings from the lamp lumens and beam: candela, cone, soft edge and reach', () => {
+    const accent = pools.spotSettings({ kind: 'accent' }, { lumens: 700, beamAngleDegrees: 30, estimateBeamAngleDegrees: 30 });
+    const half = 15 * Math.PI / 180;
+    const m = Math.log(0.5) / Math.log(Math.cos(half));
+    assert.ok(Math.abs(accent.intensity - 700 * (m + 1) / (2 * Math.PI) * pools.LUX_TO_SCENE) < 1e-9);
+    assert.ok(Math.abs(accent.angle - 1.5 * half) < 1e-9, '1.5 times half the beam');
+    assert.strictEqual(accent.distance, 8);
+    assert.strictEqual(accent.decay, 2);
+    assert.ok(accent.penumbra > 0.5);
+    // A pendant from its finish estimate: 4000 lm at 110 degrees; a wider beam's cone stops at 85 degrees.
+    const pendant = pools.spotSettings({ kind: 'pendant' }, { lumens: 4000, estimateBeamAngleDegrees: 110 });
+    assert.ok(Math.abs(pendant.angle - 82.5 * Math.PI / 180) < 1e-9);
+    const wide = pools.spotSettings({ kind: 'pendant' }, { lumens: 4000, estimateBeamAngleDegrees: 140 });
+    assert.ok(Math.abs(wide.angle - 85 * Math.PI / 180) < 1e-9);
+    assert.strictEqual(pendant.distance, 6);
+    // On the felt 1.7 m below: about 500 lux.
+    const lux = pendant.intensity / pools.LUX_TO_SCENE / (1.7 * 1.7);
+    assert.ok(lux > 450 && lux < 550, 'lux ' + lux);
+    // Without data: typical values, not nothing.
+    const plain = pools.spotSettings({ kind: 'accent' }, {});
+    assert.ok(Math.abs(plain.intensity - accent.intensity) < 1e-9, '700 lm at 30 degrees');
+    assert.ok(pools.spotSettings({ kind: 'pendant' }, null).intensity > 0);
+});
+
+test('the general lighting fill is a map of its pools, gentle, capped, and only below the lamps', () => {
+    assert.strictEqual(pools.fillField([]), null);
+    assert.strictEqual(pools.fillField([{ x: 0, z: 0, radius: 1.5, color: { r: 1, g: 1, b: 1 } }]), null, 'no lamp height');
+    const white = { r: 1, g: 1, b: 1 };
+    const one = pools.fillField([{ x: 0, z: 0, radius: 1.5, color: white, lampY: 3.185 }]);
+    assert.strictEqual(one.pools, 1);
+    assert.strictEqual(one.cell, 0.25);
+    assert.deepStrictEqual([one.minX, one.minZ, one.cols, one.rows], [-3, -3, 24, 24], 'out to twice the pool radius');
+    const at = (field, x, z) => {
+        const i = Math.floor((x - field.minX) / field.cell);
+        const j = Math.floor((z - field.minZ) / field.cell);
+        return Array.from(field.data.slice((j * field.cols + i) * 4, (j * field.cols + i) * 4 + 4));
+    };
+    const middle = at(one, 0.1, 0.1);
+    assert.ok(middle[0] > 0.4 && middle[0] <= pools.FILL_PEAK, 'about FILL_PEAK under the lamp: ' + middle[0]);
+    assert.ok(Math.abs(middle[3] - (3.185 - pools.FILL_BELOW)) < 1e-6, 'lit only below the lamp');
+    const edge = at(one, 2.4, 0.1);
+    assert.ok(edge[0] > 0 && edge[0] < middle[0] / 4, 'fading toward the edge: ' + edge[0]);
+    assert.deepStrictEqual(at(one, 2.9, 2.9), [0, 0, 0, 0], 'nothing past the reach');
+    // Many lamps over one spot add up, to a cap; a warm lamp gives a warm fill.
+    const crowd = pools.fillField(Array.from({ length: 9 }, () => ({ x: 0, z: 0, radius: 1.5, color: white, lampY: 3 })));
+    assert.ok(Math.abs(at(crowd, 0.1, 0.1)[0] - pools.FILL_LIMIT) < 1e-6);
+    const warm = pools.fillField([{ x: 0, z: 0, radius: 1.5, color: { r: 1, g: 0.8, b: 0.5 }, lampY: 3 }]);
+    const tint = at(warm, 0.1, 0.1);
+    assert.ok(tint[0] > tint[1] && tint[1] > tint[2]);
+    // A whole factory floor stays within 512 texels a side.
+    const hall = pools.fillField([{ x: 0, z: 0, radius: 5, color: white, lampY: 10 },
+        { x: 400, z: 150, radius: 5, color: white, lampY: 10 }]);
+    assert.ok(hall.cols <= 512 && hall.rows <= 512 && hall.cell > 0.25);
+});
+
+test('the fill goes into the indirect light of a lit material (three r184 standard, lambert, phong, toon), not an unlit one', async () => {
+    const THREE = await three();
+    ['standard', 'physical', 'lambert', 'phong', 'toon'].forEach(name => {
+        const shader = { fragmentShader: THREE.ShaderLib[name].fragmentShader, uniforms: {} };
+        assert.ok(pools.patchFillShader(shader), name);
+        const source = shader.fragmentShader;
+        assert.ok(/uniform sampler2D facilityFillMap;/.test(source) && /uniform mat4 facilityFillMatrix;/.test(source)
+            && /uniform float facilityFillStrength;/.test(source), name + ' declares the fill');
+        const fill = source.indexOf('irradiance += facilityFill.rgb * facilityFillStrength');
+        assert.ok(fill > 0 && fill < source.indexOf('#include <lights_fragment_end>'), name + ' before the indirect light is used');
+        assert.ok(fill > source.indexOf('#include <lights_fragment_begin>'), name + ' after irradiance is declared');
+    });
+    assert.ok(/vec3 irradiance = /.test(THREE.ShaderChunk.lights_fragment_begin), 'three declares irradiance there');
+    assert.strictEqual(pools.patchFillShader({ fragmentShader: THREE.ShaderLib.basic.fragmentShader }), false, 'unlit');
+    assert.strictEqual(pools.patchFillShader(null), false);
 });
 
 (async () => {

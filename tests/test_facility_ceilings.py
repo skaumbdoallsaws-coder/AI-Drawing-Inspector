@@ -1,0 +1,264 @@
+"""Zone ceilings that lamps hang from (ceilings.py): the Private Gym's table pendants, 2026-11-02.
+
+A pendant placed with its base at 1.7 m failed unsupported_mounting_surface: the gym's shell has only a floor. Now a
+zone may have a ceiling, the checks see it as a "ceiling" mounting surface, and a hung item whose top meets it, inside
+the zone, is accepted; collisions with the table below stay 3D.
+"""
+from copy import deepcopy
+import json
+from pathlib import Path
+
+import pytest
+
+from ai_inspector.facility_layout.errors import FacilityLayoutError
+from ai_inspector.facility_layout.operations import apply_facility_layout_operations
+from ai_inspector.facility_layout.plan_settings import shell_with_plan_boundary
+from ai_inspector.facility_layout.spatial import diagnose_layout
+from ai_inspector.facility_layout.validate import validate_layout
+
+FIXTURES = Path(__file__).parent / "fixtures" / "facility_layout"
+CEILING = 3.2
+
+
+def box(asset_id, width, depth, height, mounting=("floor",)):
+    half_w, half_d = width / 2, depth / 2
+    footprint = [{"x": -half_w, "z": -half_d}, {"x": half_w, "z": -half_d},
+                 {"x": half_w, "z": half_d}, {"x": -half_w, "z": half_d}]
+    return {"assetId": asset_id, "category": "workstation",
+            "coordinateFrame": {"allowedMountingSurfaces": list(mounting), "floorAnchor": {"x": 0, "y": 0, "z": 0}},
+            "geometry": {"footprintPolygons": [footprint], "heightInterval": {"minimumY": 0, "maximumY": height}},
+            "collision": {"geometry": {"footprintIndex": 0}, "verticalInterval": {"minimumY": 0, "maximumY": height}},
+            "clearances": []}
+
+
+# Scratch stand-ins for the gym's assets: a table, a dome pendant that only hangs, a bar pendant that may also stand.
+ASSETS = [box("asset-test-table", 2.4, 1.2, 0.75),
+          box("asset-test-pendant-dome", 0.455, 0.455, 1.3, ("ceiling",)),
+          box("asset-test-pendant-bar", 1.56, 0.344, 1.2, ("floor", "ceiling")),
+          box("asset-test-downlight", 0.15, 0.15, 0.015, ("ceiling",))]
+HANGS = {"surfaceKind": "ceiling"}
+
+
+def placement(placement_id, asset_id, x, z, y=0.0, metadata=None):
+    return {"placementId": placement_id, "assetId": asset_id, "assetDefinitionRevision": "a" * 64,
+            "transform": {"position": {"x": x, "y": y, "z": z}, "quaternion": {"x": 0, "y": 0, "z": 0, "w": 1},
+                          "scale": 1},
+            "positionMode": "manual", "snapRelationship": None, "metadata": metadata or {}}
+
+
+def rectangle(x0, z0, x1, z1):
+    return [{"x": x0, "z": z0}, {"x": x1, "z": z0}, {"x": x1, "z": z1}, {"x": x0, "z": z1}]
+
+
+def scene(ceiling=CEILING):
+    """The spatial golden floor (20 x 20 m) as a cell (x 0-10) and a lounge (x 10-20) with a ceiling, a table in it."""
+    golden = json.loads((FIXTURES / "spatial" / "golden_scenarios.json").read_text(encoding="ascii"))
+    layout = deepcopy(golden["baseLayout"])
+    layout["zones"][0]["boundary"] = rectangle(0, 0, 10, 20)
+    layout["zones"].append({"zoneId": "zn-lounge", "zoneType": "workcell", "label": "Lounge",
+                            "boundary": rectangle(10, 0, 20, 20), "floorElevation": 0.0, "anchors": [], "evidence": []})
+    if ceiling is not None:
+        # As set_zone_ceiling saves it (that operation is tested on a whole layout below).
+        layout["zones"][1]["extensions"] = {"ceiling": {"heightMeters": ceiling}}
+    layout["placements"] = [placement("pl-table", "asset-test-table", 15, 10)]
+    return golden["shell"], layout
+
+
+def errors(shell, layout, *hung):
+    layout = deepcopy(layout)
+    layout["placements"] += list(hung)
+    result = diagnose_layout(layout, ASSETS, shell=shell_with_plan_boundary(shell, layout))
+    return [(item["code"], item["message"]) for item in result["findings"] if item["severity"] == "error"]
+
+
+def test_a_lamp_hangs_from_the_zone_ceiling_over_a_table():
+    shell, layout = scene()
+    # Its top meets the 3.2 m ceiling: the dome (1.3 m) from 1.9 m, the bar (1.2 m) from 2.0 m, both over the table.
+    dome = placement("pl-dome", "asset-test-pendant-dome", 15, 10, y=CEILING - 1.3)
+    bar = placement("pl-bar", "asset-test-pendant-bar", 15, 10.4, y=CEILING - 1.2, metadata={"mountingSurface": HANGS})
+    assert errors(shell, layout, dome, bar) == [], "no mounting error, no collision with the table below"
+    # The checks see the ceiling as a mounting surface the size of the zone; the shell authority is untouched.
+    effective = shell_with_plan_boundary(shell, layout)
+    ceiling = next(f for f in effective["features"] if f["featureId"] == "layout-ceiling-zn-lounge")
+    assert (ceiling["featureKind"], ceiling["surfaceKind"], ceiling["geometry"]["elevation"]) == (
+        "mounting_surface", "ceiling", CEILING)
+    assert ceiling["geometry"]["boundary"] == rectangle(10, 0, 20, 20)
+    assert not any(f["featureId"].startswith("layout-ceiling-") for f in shell["features"])
+    # A ceiling over a raised zone floor counts from that floor.
+    layout["zones"][1]["floorElevation"] = 0.5
+    assert errors(shell, layout, dict(dome, transform=dict(dome["transform"], position={"x": 15, "y": 2.4, "z": 10}))) == []
+
+
+def test_thin_recessed_downlights_sit_flush_with_the_ceiling():
+    # The gym lounge's downlights: 0.015 m thin, the base at 3.185 m so the top meets 3.2 m; 28 at 3 m spacing.
+    shell, layout = scene()
+    lights = [placement(f"pl-down-{index:02d}", "asset-test-downlight", 10.5 + 3 * (index % 4), 1 + 3 * (index // 4),
+                        y=CEILING - 0.015) for index in range(28)]
+    assert errors(shell, layout, *lights) == []
+    # 1 mm low, it is refused like any lamp off its ceiling.
+    low = dict(lights[0], transform=dict(lights[0]["transform"], position={"x": 10.5, "y": 3.184, "z": 1}))
+    assert [code for code, _ in errors(shell, layout, low)] == ["unsupported_mounting_surface"]
+
+
+def test_a_catalog_asset_without_mounting_fields_hangs_when_its_placement_says_so():
+    # Like the gym's: a private-manifest asset (no allowedMountingSurfaces, no floorAnchor) on a layout with a ground.
+    from ai_inspector.facility_layout.host import _asset
+    pendant = _asset(asset_id="asset-test-manifest-pendant", display_name="Test pendant", category="Lighting",
+                     width=0.455, depth=0.455, height=1.3, description="Scratch pendant.")["definition"]
+    assert "allowedMountingSurfaces" not in json.dumps(pendant)
+    shell, layout = scene()
+    layout["extensions"] = {"facilityGround": {"schemaVersion": 1, "surfaces": [
+        {"surfaceId": "floor", "minX": 0, "maxX": 20, "minZ": 0, "maxZ": 20, "startElevation": 0, "endElevation": 0,
+         "slopeAxis": "x", "color": "#808080"}]}}
+    hung = placement("pl-dome", "asset-test-manifest-pendant", 15, 10, y=1.9, metadata={"mountingSurface": HANGS})
+
+    def found(item):
+        result = diagnose_layout(dict(layout, placements=layout["placements"] + [item]), ASSETS + [pendant],
+                                 shell=shell_with_plan_boundary(shell, layout))
+        return [entry["message"] for entry in result["findings"] if entry["severity"] == "error"]
+
+    assert found(hung) == []
+    # Without the placement's mountingSurface it stands on the ground: the 1.7 m failure the gym saw.
+    assert found(dict(hung, metadata={})) == [
+        "Placement requires one continuous, level ground surface at its support elevation."]
+
+
+@pytest.mark.parametrize("case, message", [
+    ("too low", "top does not meet its ceiling"),
+    ("too high", "top does not meet its ceiling"),
+    ("in the cell", "outside the requested mounting surface"),
+    ("across the zone edge", "outside the requested mounting surface"),
+    ("no ceiling", "does not exist in the Facility Shell"),
+    ("bar without metadata", "does not coincide with its mounting surface"),
+])
+def test_a_hung_lamp_off_its_ceiling_is_refused(case, message):
+    shell, layout = scene(None if case == "no ceiling" else CEILING)
+    x, y = {"too low": (15, 1.7), "too high": (15, 2.0), "in the cell": (5, 1.9),
+            "across the zone edge": (10.1, 1.9)}.get(case, (15, 1.9))
+    if case == "bar without metadata":
+        # An asset that may also stand on the floor stands unless the placement says it hangs.
+        lamp = placement("pl-bar", "asset-test-pendant-bar", 15, 12, y=2.0)
+    else:
+        lamp = placement("pl-dome", "asset-test-pendant-dome", x, 12, y=y)
+    found = errors(shell, layout, lamp)
+    # Across the edge it is not inside one zone either.
+    expected = ["unsupported_mounting_surface"] + (["zone_containment_violation"] if "edge" in case else [])
+    assert [code for code, _ in found] == expected, found
+    assert message in dict(found)["unsupported_mounting_surface"]
+
+
+def test_collisions_with_the_table_below_stay_3d():
+    # A 2 m ceiling hangs the dome down to 0.7 m, into the 0.75 m table: that is a collision, as before.
+    shell, layout = scene(2.0)
+    low = placement("pl-dome", "asset-test-pendant-dome", 15, 10, y=2.0 - 1.3)
+    assert errors(shell, layout, low) == [("placement_collision", "Placement collision volumes overlap.")]
+    # Beside the table at the same height, no collision.
+    assert errors(shell, layout, dict(low, transform=dict(low["transform"], position={"x": 17.5, "y": 0.7, "z": 10}))) == []
+
+
+def test_set_zone_ceiling_sets_changes_and_clears_it():
+    layout = json.loads((FIXTURES / "empty_cell.json").read_text())
+    zone = {"zoneId": "zn-lounge", "zoneType": "workcell", "label": "Lounge", "boundary": rectangle(0, 0, 6, 4),
+            "floorElevation": 0.0, "anchors": [], "evidence": []}
+
+    def run(doc, *operations):
+        result = apply_facility_layout_operations(doc, list(operations))
+        validate_layout(result["document"])
+        return result
+
+    done = run(layout, {"op": "add_zone", "zone": zone},
+               {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": 3.2})
+    doc = done["document"]
+    assert doc["zones"][0]["extensions"] == {"ceiling": {"heightMeters": 3.2}}
+    assert done["operationResults"][1] == {"index": 1, "op": "set_zone_ceiling", "createdIds": [],
+                                           "affectedIds": ["zn-lounge"]}
+    doc = run(doc, {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": 3.25})["document"]
+    assert doc["zones"][0]["extensions"] == {"ceiling": {"heightMeters": 3.25}}
+    # Clearing keeps the zone's other extensions and drops an empty one.
+    kept = deepcopy(doc)
+    kept["zones"][0]["extensions"]["note"] = {"x": 1}
+    kept = run(kept, {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": None})["document"]
+    assert kept["zones"][0]["extensions"] == {"note": {"x": 1}}
+    doc = run(doc, {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": None})["document"]
+    assert "extensions" not in doc["zones"][0]
+    for bad, text in (({"heightMeters": 1.5}, "between 2 and 40"), ({"heightMeters": True}, "between 2 and 40"),
+                      ({"heightMeters": 3, "label": "x"}, "Expected zoneId and heightMeters"),
+                      ({"zoneId": "zn-missing", "heightMeters": 3}, "Zone")):
+        with pytest.raises(FacilityLayoutError, match=text):
+            apply_facility_layout_operations(doc, [dict({"op": "set_zone_ceiling", "zoneId": "zn-lounge"}, **bad)])
+    # A saved ceiling out of range is refused on save, too.
+    saved = deepcopy(doc)
+    saved["zones"][0]["extensions"] = {"ceiling": {"heightMeters": 100}}
+    with pytest.raises(FacilityLayoutError, match="between 2 and 40"):
+        validate_layout(saved)
+
+
+def test_sage_can_set_a_ceiling_and_is_told_how_to_hang_a_lamp():
+    from jsonschema import Draft202012Validator
+    from ai_inspector.codex_runtime.edit_schemas import operation_batch_schema
+    from ai_inspector.facility_layout.operation_proposals import guard_operations
+    schema = operation_batch_schema()
+    validator = Draft202012Validator(schema)
+    for height in (3.2, None):
+        operations = [{"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": height}]
+        assert not list(validator.iter_errors({"operations": operations}))
+        guard_operations(operations)
+    assert list(validator.iter_errors({"operations": [{"op": "set_zone_ceiling", "zoneId": "zn-lounge",
+                                                       "heightMeters": 1}]}))
+    variant = next(v for v in schema["properties"]["operations"]["items"]["oneOf"]
+                   if v["properties"]["op"].get("const") == "set_zone_ceiling")
+    assert "metadata.mountingSurface {surfaceKind: 'ceiling'}" in variant["description"]
+    assert "allowedMountingSurfaces includes 'ceiling'" in variant["description"]
+
+
+def test_a_sage_preview_of_a_ceiling_and_a_hung_lamp_is_accepted_and_saves(tmp_path):
+    # Sage's own path (operation_proposals.create, the same checks a save runs): the ceiling, a table and a lamp over
+    # it in one preview, with no error, then approved and saved. The catalog's workbench stands in for both.
+    from ai_inspector.facility_layout.host import LocalFacilityLayoutHost, LOCAL_SITE_ID, LOCAL_LAYOUT_ID
+    from ai_inspector.facility_layout.operation_proposals import create
+    host = LocalFacilityLayoutHost(tmp_path / "facility", private_assets=False)
+    try:
+        service, principal = host.service, host.principal()
+        bench = next(item for item in host.ensure_bootstrap()["assetCatalog"] if item["assetId"] == "asset-workbench")
+
+        def place(placement_id, y, metadata):
+            return {"op": "place_asset", "placement": {
+                "placementId": placement_id, "assetId": "asset-workbench",
+                "assetDefinitionRevision": bench["assetDefinitionRevision"],
+                "transform": {"position": {"x": 5, "y": y, "z": 5}, "quaternion": {"x": 0, "y": 0, "z": 0, "w": 1},
+                              "scale": 1},
+                "positionMode": "manual", "snapRelationship": None, "metadata": metadata}}
+
+        operations = [
+            {"op": "add_zone", "zoneId": "zn-lounge", "zone": {
+                "label": "Lounge", "zoneType": "workcell", "anchors": [], "evidence": [], "floorElevation": 0,
+                "boundary": rectangle(0, 0, 10, 10)}},
+            {"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": CEILING},
+            place("pl-table", 0, {}),
+            place("pl-lamp", CEILING - 1.0, {"mountingSurface": HANGS}),
+        ]
+        revision = service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["revision"]
+        proposal = create(service, principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, revision, operations=operations)
+        validation = proposal["alternative"]["validation"]
+        assert validation["spatial"]["metrics"]["errorCount"] == 0, validation
+        assert validation["spatial"]["metrics"]["placementCollisions"] == 0
+        approval = service.approve_layout_proposal(
+            principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, proposal["proposalId"],
+            proposal["alternative"]["transactionBinding"], session_id="test-session", idempotency_key="ceiling-key", explicit_approval=True)
+        saved = service.apply_layout_proposal(
+            principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, approval["approvalToken"],
+            proposal["alternative"]["transactionBinding"], session_id="test-session", idempotency_key="ceiling-key")["layout"]
+        assert saved["zones"][0]["extensions"] == {"ceiling": {"heightMeters": CEILING}}
+        lamp = next(item for item in saved["placements"] if item["placementId"] == "pl-lamp")
+        assert lamp["transform"]["position"]["y"] == CEILING - 1.0
+        assert lamp["metadata"]["mountingSurface"] == HANGS
+        # 0.1 m lower, the preview is refused for the lamp's mounting, as a save would be.
+        revision = service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["revision"]
+        with pytest.raises(FacilityLayoutError) as refused:
+            create(service, principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, revision, operations=[
+                {"op": "delete_placement", "placementId": "pl-lamp"},
+                place("pl-lamp", CEILING - 1.1, {"mountingSurface": HANGS})])
+        assert refused.value.code == "spatial_validation_failed"
+        assert "unsupported_mounting_surface" in json.dumps(refused.value.details)
+    finally:
+        host.close()

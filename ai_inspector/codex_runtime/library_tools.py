@@ -14,10 +14,14 @@ def tool_specs():
         "lights: LED and warm white, exit green, beacon, alarm, signal and stack-light colors) glow like a "
         "switched-on lamp; their emission is the glow color, and emission.pattern marks the beacon that turns, the "
         "alarm that strobes and the signal that blinks (the others are steady). Any of them can blink, strobe or turn "
-        "instead: add pattern and periodSeconds to that use of the finish. Put one on a lamp's lens or a sign face with "
+        "instead: add pattern and periodSeconds to that use of the finish. For accent lighting that slowly changes "
+        "color, add pattern cycle with periodSeconds (2-60 s per loop) and cycleColors (2-8 colors; default violet, "
+        "blue, cyan, magenta). Put one on a lamp's lens or a sign face with "
         "set_component_materials, or on a whole small fitting with set_appearance; it lights no other surface. "
         "The outdoor ones (Pole light LED, Wall light LED, Dock light LED) have emission.beamAngleDegrees: in the "
         "evening scene a lamp with one also shows a soft beam down to the ground and a pool of light where it lands. "
+        "Accent spot LED (emission.accent) is for an adjustable spot aimed at a wall, a picture or an object: in the "
+        "evening scene it lights what its lens faces, as placed, within about 8 m (no beam or pool is drawn). "
         "The pole light, the wall light and the rotating beacons come lit: their model gives the lens its Lights "
         "finish (Pole light LED, Wall light LED, Beacon amber), with no step from you, although their catalog "
         "descriptions still say to give it one. A stack light comes with its green lamp on (Stack light green, "
@@ -39,8 +43,10 @@ def list_library(arguments):
     result = {"kind": kind, "libraryVersion": load_library()["libraryVersion"], "count": len(rows), "items": rows}
     if kind == "appearances":
         result["adjustments"] = ("color (on a Lights finish: the light's color, lit and unlit), pattern "
-                                 "steady|blink|strobe|rotate with periodSeconds 0.5-10 (Lights finishes only; none "
-                                 "for steady), roughness, metalness, opacity, "
+                                 "steady|blink|strobe|rotate with periodSeconds 0.5-10, or cycle with periodSeconds "
+                                 "2-60 and cycleColors (2-8 '#rrggbb', eased through one loop per period; the default "
+                                 "is violet, blue, cyan, magenta) (Lights finishes only; none for steady), roughness, "
+                                 "metalness, opacity, "
                                  "textureStrength (0-1); sizeMeters "
                                  "(texture tile size); rotationDegrees; offsetMeters [u, v]; mapping box|cylindrical|uv; "
                                  "grain part|length|width|height (part: along each part's own long side; otherwise the object axis the grain or brushing follows)")

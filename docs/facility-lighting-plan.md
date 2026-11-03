@@ -366,6 +366,112 @@ Notes for the next steps:
   beacon in view keeps drawing while the window is minimized (1 to 4 frames a second). Worth one check in the
   desktop app.
 
+## Cycle pattern (2026-11-02, test copy)
+
+Added for the game room's color-changing accent lighting (the user, through the main session). A fifth pattern,
+`cycle`: the glow stays at full brightness and eases through `cycleColors` (2 to 8 `#rrggbb`), one loop every
+`periodSeconds` (2 to 60 s; blink, strobe and rotate keep 0.5 to 10), then repeats. Without `cycleColors` it uses
+violet, blue, cyan, magenta (`#8a4dff #2f6bff #00d5ff #ff3dce`). The unlit lens follows the current color at half
+brightness, as a recolored lamp does. A use of a Lights finish (placement, part or custom finish) sets it like the
+other patterns; another pattern on top drops the colors. Each step between two colors is eased (smoothstep), and
+the loop is cut into steps, at most 48 per color and 8 a second, so a cycling lamp in view redraws 8 times a
+second at most, on the same timer as a blink. Like the other patterns: steady (its first color) under reduced
+motion, no floor pool, no timer while out of view or hidden. Check (`cycle_check.py` in the test root, scratch
+layout `fl-cycle-light-check`, a beacon lens with the default palette and a 12 s loop, Evening): 8.0 frames a
+second in view, 94 colors over 13 s, the lens always half the glow; shots in `ui-data/drive/cycle-light/`.
+
+## Ceiling mounting (2026-11-02, test copy)
+
+Added so the Private Gym's table pendants and recessed downlights can be placed (the user, through the main
+session): its lounge has 3.2 m walls but the shell has only a floor, so a lamp hung at 1.7 m failed
+`unsupported_mounting_surface`. A zone may now carry `extensions.ceiling` = `{heightMeters}` (2 to 40 m above its
+`floorElevation`, over its whole boundary), set or cleared (null) by the operation `set_zone_ceiling` {zoneId,
+heightMeters}. `shell_with_plan_boundary` adds each one to the shell the checks see as a "ceiling" mounting surface
+(`layout-ceiling-<zoneId>`, `ceilings.py`); the shared shell authority is not edited. A placement hangs when it says
+`metadata.mountingSurface` `{"surfaceKind": "ceiling"}` (implied when its asset's `allowedMountingSurfaces` is only
+`["ceiling"]`); its footprint must lie inside a zone ceiling and its top (the highest point of its physical volume)
+must meet it, so `transform.position.y` = ceiling minus the asset's height (a 1.3 m pendant under 3.2 m: 1.9; a
+0.015 m downlight: 3.185). Collisions stay 3D: a lamp over a table collides only where their heights overlap.
+Sage: `set_zone_ceiling` is in its schema and allowed in a preview (review, not direct apply); its description says
+how to hang a lamp. Floor pools are unchanged: a lamp throws one only from 3 m up and facing down, so the
+downlights do (checked with 28 at 3.185 m) and a pendant whose lens hangs at 1.9 m does not. Check
+(`ceiling_check.py` in the test root, scratch layout `fl-ceiling-check`, scratch pendant
+`asset-ceiling-check-pendant`): without a ceiling the server refuses the hung lamp; with a 3.2 m ceiling it previews
+without errors, saves, and shows over the table in 3D; shots in `ui-data/drive/ceiling-mounting/`.
+
+## Gym lighting: lamps that light things, zone ceilings (2026-11-02, test copy)
+
+Asked by the user through the main session: "brighter lighter ... key locations like the piano need to be lit ...
+play with light to not hide things in the room", and "a ceiling with those ceiling lights". In Evening with the
+lights on, lamps now light what they shine on, not only the floor; a zone ceiling shows from inside the room.
+
+- **Zone ceilings.** A zone with `extensions.ceiling` (above) is drawn as a flat ceiling over its boundary at its
+  floor plus that height (`renderZoneCeilings`).
+  - Its triangles face down, so only a view from below draws it: the overview and any view from above or outside
+    look straight in.
+  - Its shading normal points up, so it is lit like the room under it. Facing down, nothing shone on it and it drew
+    pure black even by day.
+  - Matte charcoal (#2a2a2d, roughness 1); no shadow, never picked, on the overhead layer, in every scene. Hung
+    lamps sit in it (polygon offset).
+  - Not built: a ceiling finish on `set_zone_ceiling`. It would be cheap (a color or a library finish id saved with
+    the ceiling); offered, not shipped.
+- **Accent spot LED** (`light-accent-spot`, Lights). Warm white `#ffc08a` (about 3000 K), beam 30 degrees,
+  estimate 700 lm at 30 degrees, and `emission.accent: true`.
+  - Python accepts `accent` only as true with a beam angle.
+  - The 3D view draws no floor pool or beam cone for it. It lights what its lens faces, as placed, with a spot light
+    reaching about 8 m: a wall (an oval wash), an object or the floor.
+  - Sage is told in one sentence. Library 2026.11.02.1.
+  - The coverage estimate (CC) counts it like any lamp with data: 700 lm, aimed along its lens.
+- **Spot lights** (`spotsOf`, `spotSettings`, `syncLampSpots`). The candidates are:
+  - accent spots, at any height;
+  - pendants: a Lights finish with estimate data (general lighting only, never a sign, beacon or signal lamp)
+    whose lamps face down 0.5 to 3 m above the floor.
+  - A pendant's lamp may be a bare bulb: any glowing part with a patch facing down (`bulbsOf`). The gym's vintage
+    billiard pendant has three bulbs, a tenth of whose surface faces down, so the pool lamp test (a fifth) would
+    miss them.
+  - Each copy gives one spot: at its lamps' centre, aimed along their mean aim. Its intensity is the lamp's candela
+    (lumens and beam, as CC) times LUX_TO_SCENE (1/250, set by eye). The cone is 1.5 times half the beam, soft
+    edged, fading to nothing at 8 m (accent) or 6 m (pendant). No shadows.
+  - The scene holds a fixed 8 three.js spot lights while there are candidates, so lit materials compile once.
+  - Before each frame they go to the 8 candidates nearest the orbit target (or 3 m ahead of a walker); unused ones
+    are dark.
+  - They follow the lights switch, the scene and the asset layer. Light areas (L7) switch general lighting only,
+    so they leave spots on.
+- **Fill** (`fillField`, `patchFillShader`, `syncLightFill`). General lighting gently lifts what stands under it.
+  - The lit floor pools (not outdoor beams, not lamps an area switches off) are summed into a small half-float
+    map over the plan (0.25 m texels, at most 512 a side).
+  - Each adds its color times 0.7 (about a quarter of the daytime sun), falling smoothly to nothing at twice its
+    pool radius, capped at 1.5.
+  - Every lit material in the model adds the map to its indirect light, only below the highest lamp over that
+    point. A chair under a downlight is lifted; the ceiling is not.
+  - Materials are patched once, the first time the fill is wanted, and switched off by a uniform outside Evening.
+    A daytime-only session patches nothing.
+- **Gym check.** `gym_lighting_check.py` in the test root makes the scratch layout `fl-gym-lighting-check` from the
+  test store's gym copy (282 items, read only). It adds:
+  - a 3.2 m ceiling on the wellness lounge;
+  - 28 downlights at 3.185 m, 3.1 m apart;
+  - the vintage billiard pendant over the pool table (yaw 90);
+  - a dome over the chess table;
+  - four accent spots: two at z -3.9 aimed at the piano and guitar wall (yaw 0: the lens faces +z and the wall is
+    at z -3.08), two at x 0.95 washing the scripture on the west wall (yaw -90);
+  - warm white lenses on all of them.
+  - It previews with no errors and saves (316 items). Evening: 6 spot candidates (4 accents, 2 pendants), fill
+    from 28 pools.
+  - The shots (`ui-data/drive/gym-lighting/`) show:
+    - the felt and balls lit under the pendant; the chess table under the dome;
+    - two washes on the piano and guitar wall and two on the west wall;
+    - the black chairs under the downlights readable;
+    - the ceiling dark over the room from inside, absent from the overview.
+  - Daytime: no spots and no fill (0 patched materials). The ceiling reads matte grey from inside and is invisible
+    from above.
+- **Frame time.** Each frame timed until the GPU finished; 6 interleaved rounds of 15 frames, new lighting on vs
+  off; machine short of memory.
+  - Gym lounge: 129 vs 122 ms. Gym overview: 57.5 vs 54.4 ms. The rounds cross both ways.
+  - Factory 02 hall: 164 vs 167 ms. Aisle: 151 vs 155 ms. No spot candidates (its lamps hang high and throw
+    pools); a fill of 800 pools (512 x 334 map).
+  - Factory 02's Evening now shows its racks, boxes and columns lit under the rows, where they were dark
+    silhouettes (`measure-f02-*-lamps.png` vs `-before.png`).
+
 ## L7 results (2026-10-31, test copy)
 
 What L7 added:

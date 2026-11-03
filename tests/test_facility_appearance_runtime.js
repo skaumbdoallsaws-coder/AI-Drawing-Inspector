@@ -72,7 +72,7 @@ test('on a light the color override is its glow, the unlit color stays, and the 
     assert.deepStrictEqual(libraryApi.search(library, { kind: 'appearance', category: 'lights' }).map(row => row.id), [
         'light-cool-white-led', 'light-warm-white', 'light-exit-green', 'light-beacon-amber', 'light-alarm-red',
         'light-signal-blue', 'light-stack-red', 'light-stack-amber', 'light-stack-green',
-        'light-pole-led', 'light-wall-led', 'light-dock-led']);
+        'light-pole-led', 'light-wall-led', 'light-dock-led', 'light-accent-spot']);
     // An outdoor light's beam angle (L8) comes with it and makes its own material.
     assert.strictEqual(libraryApi.resolveAppearance(library, { appearanceId: 'light-pole-led' }, {}).emission.beamAngleDegrees, 110);
     const pole = libraryApi.resolveAppearance(library, { appearanceId: 'light-pole-led' }, {});
@@ -137,7 +137,55 @@ test('lights blink, strobe or turn on one shared clock and change only at fixed 
     // A turning beacon changes only where its brightness steps: 4 times a turn, not 8.
     assert.deepStrictEqual([0, 0.125, 0.25, 0.9].map(t => next(rotate, t)), [0.125, 0.25, 0.875, 1]);
     assert.strictEqual(next(Object.assign({}, blink, { periodSeconds: 2 }), 3.1), 4);
-    assert.deepStrictEqual(finishes.GLOW_PATTERNS, ['steady', 'blink', 'strobe', 'rotate']);
+    assert.deepStrictEqual(finishes.GLOW_PATTERNS, ['steady', 'blink', 'strobe', 'rotate', 'cycle']);
+});
+
+test('a cycle light eases through its colors, one loop per period, then repeats (accent lighting)', () => {
+    const library = libraryApi.indexLibrary(manifests());
+    const layout = { extensions: { facilityAppearances: { version: 1, custom: [{ appearanceId: 'custom-party',
+        label: 'Party', baseAppearanceId: 'light-cool-white-led', pattern: 'cycle', periodSeconds: 20,
+        cycleColors: ['#8a4dff', '#00d5ff'] }] } } };
+    const resolve = value => libraryApi.resolveAppearance(library, value, layout);
+    const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffffff'];
+    const glow = resolve({ appearanceId: 'light-cool-white-led', pattern: 'cycle', periodSeconds: 8, cycleColors: colors })
+        .emission;
+    assert.deepStrictEqual(glow, { color: '#eef4ff', intensity: 1, pattern: 'cycle', periodSeconds: 8, cycleColors: colors });
+    const at = t => finishes.glowColor(glow, t);
+    // 2 s per color: each color at its mark, halfway between two colors at the middle, eased (slow near each color).
+    assert.deepStrictEqual([0, 2, 4, 6].map(at), colors, 'each color at its mark, the first at t = 0');
+    assert.strictEqual(at(1), '#808000', 'halfway from red to green');
+    assert.strictEqual(at(5), '#8080ff', 'halfway from blue to white');
+    assert.strictEqual(at(0.5), '#d72800', 'a quarter of the way in time, less of the way in color');
+    // The end of the loop eases from the last color back to the first, then the loop repeats.
+    assert.strictEqual(at(7), '#ff8080', 'halfway from white back to red');
+    assert.strictEqual(at(7.99), '#ff0303', 'nearly red again');
+    assert.deepStrictEqual([8, 9, 13, 23, 801].map(at), [at(0), at(1), at(5), at(7), at(1)], 'the loop repeats');
+    // Full brightness all the time; the view redraws at each step: 16 per color here, at most 8 a second.
+    assert.ok(finishes.glowMoves(glow));
+    assert.deepStrictEqual([0, 0.5, 7.9, 9].map(t => finishes.glowLevel(glow, t)), [1, 1, 1, 1]);
+    const next = (value, t) => Math.round(finishes.nextGlowChange(value, t) * 1e6) / 1e6;
+    assert.deepStrictEqual([0, 0.1, 1, 7.95, 8].map(t => next(glow, t)), [0.125, 0.125, 1.125, 8, 8.125]);
+    const fast = Object.assign({}, glow, { periodSeconds: 2, cycleColors: colors.concat(colors) });
+    assert.strictEqual(next(fast, 0), 0.125, '2 s through 8 colors: 8 steps a second');
+    const slow = Object.assign({}, glow, { periodSeconds: 60, cycleColors: colors.slice(0, 2) });
+    assert.strictEqual(next(slow, 0), 0.625, '60 s through 2 colors: 48 steps per color');
+    // Without cycleColors, the default palette for a dark evening scene.
+    const plain = resolve({ appearanceId: 'light-warm-white', pattern: 'cycle', periodSeconds: 20 }).emission;
+    assert.ok(!plain.cycleColors);
+    assert.deepStrictEqual([0, 5, 10, 15, 20].map(t => finishes.glowColor(plain, t)),
+        finishes.DEFAULT_CYCLE_COLORS.concat([finishes.DEFAULT_CYCLE_COLORS[0]]));
+    assert.deepStrictEqual(finishes.DEFAULT_CYCLE_COLORS, ['#8a4dff', '#2f6bff', '#00d5ff', '#ff3dce']);
+    // A custom finish may cycle; a use of it may change its pattern, which drops its colors.
+    assert.deepStrictEqual(resolve({ appearanceId: 'custom-party' }).emission.cycleColors, ['#8a4dff', '#00d5ff']);
+    assert.deepStrictEqual(resolve({ appearanceId: 'custom-party', pattern: 'blink', periodSeconds: 1 }).emission,
+        { color: '#eef4ff', intensity: 1, pattern: 'blink', periodSeconds: 1 });
+    assert.strictEqual(finishes.glowColor({ color: '#3a86ff', pattern: 'blink', periodSeconds: 1 }, 0.7), '#3a86ff');
+    // The colors are part of the finish: a different list gets its own material.
+    const sign = value => libraryApi.finishSignature(resolve(value), 1);
+    assert.notStrictEqual(sign({ appearanceId: 'custom-party' }), sign({ appearanceId: 'custom-party', pattern: 'cycle',
+        periodSeconds: 20, cycleColors: ['#8a4dff', '#ff3dce'] }));
+    assert.ok(libraryApi.OVERRIDE_FIELDS.includes('cycleColors'), 'the Appearances pane keeps them in a draft');
+    assert.strictEqual(finishes.unlitColor('#8A4DFF'), '#452780', 'the unlit lens: half brightness');
 });
 
 test('search and scenes follow the manifest; unknown scenes fall back to Classic', () => {
@@ -298,7 +346,11 @@ async function runThreeTests() {
     assert.strictEqual(led.toneMapped, false);
     assert.strictEqual(led.color.getHexString(), 'dfe4e8', 'the base color is the unlit lens');
     assert.ok(finishes.isGlowMaterial(led) && finishes.isFinishMaterial(led));
-    assert.deepStrictEqual(led.userData.facilityGlow, { color: '#eef4ff', intensity: 1 });
+    // With the finish's estimate data, the lamp's typical lumens and beam (lamps that light things, 2026-11-02).
+    assert.deepStrictEqual(led.userData.facilityGlow, { color: '#eef4ff', intensity: 1, lumens: 20000, estimateBeamAngleDegrees: 120 });
+    const accent = finishes.createFinishMaterial(THREE, libraryApi.resolveAppearance(library, { appearanceId: 'light-accent-spot' }, {}), {});
+    assert.deepStrictEqual(accent.userData.facilityGlow, { color: '#ffc08a', intensity: 1, beamAngleDegrees: 30, accent: true,
+        lumens: 700, estimateBeamAngleDegrees: 30 }, 'an accent spot is marked');
     const copy = led.clone();
     assert.ok(finishes.isGlowMaterial(copy) && copy.toneMapped === false && copy.emissive.getHexString() === 'eef4ff');
     const amber = finishes.createFinishMaterial(THREE,
@@ -307,6 +359,13 @@ async function runThreeTests() {
     assert.deepStrictEqual(amber.userData.facilityGlow, { color: '#ff9900', intensity: 1, pattern: 'rotate', periodSeconds: 1 },
         'a light that turns keeps its pattern with the glow');
     assert.ok(finishes.glowMoves(amber.userData.facilityGlow) && !finishes.glowMoves(led.userData.facilityGlow));
+    // A cycle light starts on its first color, its unlit lens the same color at half brightness.
+    const party = finishes.createFinishMaterial(THREE, libraryApi.resolveAppearance(library, { appearanceId:
+        'light-cool-white-led', pattern: 'cycle', periodSeconds: 20, cycleColors: ['#8a4dff', '#00d5ff'] }, {}), {});
+    assert.strictEqual(party.emissive.getHexString(), '8a4dff');
+    assert.strictEqual(party.color.getHexString(), '452780');
+    assert.deepStrictEqual(party.userData.facilityGlow, { color: '#8a4dff', intensity: 1, pattern: 'cycle',
+        periodSeconds: 20, cycleColors: ['#8a4dff', '#00d5ff'] });
     const paint = finishes.createFinishMaterial(THREE, libraryApi.resolveAppearance(library, { appearanceId: 'paint-machine-gray' }, {}), {});
     assert.ok(!finishes.isGlowMaterial(paint) && paint.toneMapped === true && paint.emissive.getHex() === 0);
 

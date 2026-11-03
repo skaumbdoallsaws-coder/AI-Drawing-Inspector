@@ -1,0 +1,236 @@
+Desktop close investigation - Job 2 - 2026-11-03
+
+Scope and confidence
+The fix targets the full application launched with --application. The reported
+InspectorProNativeApplication bridge is installed by that mode's preload.
+No running application, port 8480, port 9335, Electron process, or private store
+was inspected. The incident's exact main-process state is therefore unknown.
+The ranking below is an inference from the reported symptoms and source, not a
+claim that a particular promise or native view was observed failing.
+
+Ranked findings (line numbers in this section refer to the PRE-CHANGE source)
+
+1. Synchronous browser suspension failure can permanently latch transition.
+   desktop/src/application-main.cjs:107 sets transition = true; line 108 calls
+   browser.suspend BEFORE entering try at line 109. A synchronous exception
+   never reaches the catch or finally. Every later change returns at line 106.
+   desktop/src/research-pane.cjs:302 calls publish from suspend; line 111 sends
+   to native chrome/splitter webContents. A stale/destroyed view can throw here.
+   This precisely fits no dialog, a live backend, and a responsive renderer.
+   It requires an initialized research pane; the incident does not establish
+   whether one had ever been opened. An attached pane is not a separate visible
+   top-level window. The old finally's resume call at line 135 could also throw,
+   but it ran AFTER clearing transition, so it did not itself latch that flag.
+
+2. The FIRST close can hang in browser/document cleanup before stopping backend.
+   application-main.cjs:130 sets closing, then lines 132 and 90-103 await
+   shutdown. Lines 93-96 await browser construction, pane.dispose and
+   documents.dispose before runtime.stop at line 97. None had a deadline.
+   research-pane.cjs:17, :57 and :299 await construction/proxy/navigation;
+   :320-321 await connection/storage/proxy disposal. document-preview.cjs:105
+   awaits session connection/storage cleanup. Any unresolved promise here
+   leaves the main window and backend alive without creating a dialog.
+   This also requires browser/document initialization and fits the first
+   observed WM_CLOSE. Important distinction: with closing already true, the
+   old native close/before-quit handlers at application-main.cjs:193 and :241
+   STOP preventing default. Another native X could bypass cleanup; File > Close
+   still silently returns at line 106. Thus closing=true is not proof that a
+   second WM_CLOSE would have been swallowed.
+
+3. A previous native reload/restart can leave transition true forever.
+   application-main.cjs:119 awaits loadURL; :126 awaits runtime.restart;
+   :135 clears transition only when execution reaches finally. Later close
+   events are prevented at :193/:241 and discarded by :106.
+   The meaningful navigation promise is loadURL; Electron webContents.reload
+   is a fire-and-forget API, so await reload() does not await page completion.
+   runtime-supervisor.cjs:308 waits for starting, and :314 chains stop then
+   start. stopOwned itself has 15s graceful + 5s forced waits (:52, :197-204),
+   but stop's starting dependency can be stuck, including response-reader
+   cleanup (:43). Application startup has a 120s allowance (:161), so an
+   ordinary restart can also be long. Lower likelihood if the only reloads
+   were facility-session reloads, as reported: those do not enter change().
+
+4. An undisplayed or unresolved native dialog can hold the transition.
+   application-main.cjs:111 awaits Unsaved work; :117 awaits a blocker message;
+   :127 awaits a restart-error message; :134 awaits a general-error message;
+   :99 awaits a cleanup warning. message at :87-88 had no timeout. Even an
+   observation timeout at :77 routes into that unbounded message await.
+   The absence of a visible native dialog makes an ordinary user-decision
+   wait less likely, but does not rule out an unresolved dialog API call.
+   Saved describes the facility document, not the entire observer: unchanged
+   static/index.html:22321-22337 aggregates dirty/busy/pending across workflows.
+   Assembly animation/rehydration and other workflow flags are included at
+   :22359-22381. A loaded 3D model alone is not a blocker (:22358).
+   A valid busy/pending result, invalid observation, changed fingerprint, or
+   explicit Cancel intentionally keeps the window open (application-lifecycle
+   .cjs:2-22). Those rules were retained. Alone they should produce a reason
+   or an explicit cancellation; they explain silence only with another fault.
+
+5. Shutdown exceptions leave closing sticky; late shutdown stages can hang.
+   After application-main.cjs:130, any rejected disposal, stop, evidence write,
+   window.destroy, or app.quit enters :134, which does not reset closing.
+   Even after a dismissed error dialog, File > Close returns silently at :106.
+   An unresolved evidence write at :101-102 also prevents destruction. These
+   are weaker explanations for a still-live backend if stop already finished.
+   The native handler distinction described in finding 2 still applies.
+
+6. Startup and automation have additional gates, unlikely after three hours.
+   booted starts false (:16), becomes true only after initial loadURL (:213-214),
+   and is never reset by a facility session or 3D view. Close while !booted was
+   silently discarded (:106), including an initial navigation that never
+   completed. The window normally starts hidden, but second-instance handling
+   can show it (:156). Acceptance cleanup sets closing before shutdown (:238).
+   Interactive startup failure awaits a dialog and runtime.stop (:245-247);
+   automated failure sets closing (:251) and awaits cleanup/report writes
+   (:254-265). These are separate startup/acceptance routes, not an explanation
+   for a normally booted three-hour interactive run.
+
+Caller and state audit
+All application change callers were inspected: native close (:193), File >
+Close / Alt+F4 (:199), before-quit (:241), View > Reload (:201), F5/Ctrl+R when
+research does not handle it (:188-190), Backend > Restart (:207), application
+navigation via installApplicationLinks (:185; application-links.cjs:19/:29),
+and explicitly requested acceptance drivers (:221). Application IPC does not
+call change directly: browser commands may initialize the pane, overlay IPC
+suspends it, and observation IPC resolves the five-second observation requests.
+transition is assigned only in change; closing assignments are enumerated above;
+booted has one successful startup assignment. Backend interruption (:162-165)
+freezes the renderer and shows a message but does not set those three flags.
+Native beforeunload protection was not implicated or changed; the facility
+listener checks InspectorProNativeApplication (static/index.html:56900-56905).
+
+Other lifecycle implementations inspected, not used by this launch mode
+entry.cjs:4-10 selects mutually exclusive application, --preview, and managed
+runtime entry points. application-main does not import runtime-lifecycle or
+lifecycle-coordinator. In managed mode, runtime-lifecycle.cjs:89 joins an
+existing closing promise, :90 rejects during restart, :96-109 awaits workflow,
+adapter and decision callbacks, and :115-149 awaits restart/recovery callbacks.
+These can remain busy when an injected/unbounded dependency never settles.
+lifecycle-coordinator.cjs:91-95 bounds ordinary callbacks, but :217-219 explicitly
+disables the commit deadline; cancellation during commit is refused at :232.
+runtime-main.cjs:64/:99 awaits research disposal; :69/:108 awaits dialogs;
+:221-226 binds native/menu requests to lifecycle.close. Preview main.cjs:186
+silently returns while actionRunning, including its unbounded dialog at :194.
+These alternate safety/recovery regimes were left unchanged to keep this fix
+local to the reported full application.
+
+Implemented behavior (CURRENT source line numbers)
+- application-main.cjs:131 queues one close behind reload/restart, coalesces
+  duplicate closes with a visible status, and explains loading/shutdown gates.
+  :153 places suspension inside try; :188 sets closing only after interactive
+  cleanup succeeds; :191/:195 release flags after failures. A pending close
+  performs fresh observation/confirmation, never reuses a reload authorization.
+- application-lifecycle.cjs:14 bounds each observation and confirmation with
+  an AbortController. Late confirmation replies cannot authorize destruction.
+  Existing Unsaved work buttons, Cancel default, and fingerprint recheck remain.
+- application-main.cjs:104 bounds shutdown stages, still attempts owned backend
+  cleanup after browser errors, and writes the original backends/network/cleanup
+  evidence before warning dialogs. cleanupErrors is additive. A timeout never
+  fabricates a successful receipt. Failed cleanup keeps the window available
+  for a fresh close attempt; the draft remains frozen after backend shutdown.
+- application-main.cjs:88 and application-preload.cjs:92 display a text-only
+  status above the frozen-page overlay, independent of native-dialog delivery.
+  The preload adds no renderer-to-main authority. Informational dialogs expire
+  safely; Unsaved work expiry keeps the draft and requires a new confirmation.
+- runtime-supervisor.cjs:312 accepts the step's signal and checks it after old
+  backend cleanup, before start. A timed-out restart cannot later launch a new
+  owned process after close. Late restart completion cannot re-enable networking
+  in application-main. Existing owned-child-only termination and receipts remain.
+
+Deadlines
+Workflow observation: 5s each; Unsaved work confirmation: 60s; informational
+messages: 30s; application loadURL/reload step: 15s (stop navigation on timeout);
+backend restart: 165s (covers existing 20s stop + 120s startup + 20s failed-start
+cleanup with margin); account/browser/document cleanup: 10s per step; backend
+stop: 30s (longer than its normal 20s cleanup budget); evidence write: 5s.
+These are await deadlines, not a guarantee against a synchronously blocked main
+JavaScript thread. Promise timeouts do not forcibly cancel arbitrary OS work.
+Cleanup failures remain visible and retryable instead of granting unsafe exit.
+
+Verification
+Runner: Node v24.11.1, node:test. No Electron or browser was launched.
+Commands ran hidden via the supplied pythonw.exe and tools/run_hidden.pyw.
+For venv-backed suite runs, PYTHONHOME and PYTHONPATH were cleared and
+CONSTRUCTION_TEST_PYTHON was set to
+C:/Users/might/Documents/InspectorPro-CopilotTest/venv/Scripts/python.exe.
+
+From desktop/:
+1. node --test tests/*.test.cjs
+   Initial untouched baseline: 690 tests, 666 pass, 24 fail.
+   Untouched baseline with the specified test venv: same 690 / 666 / 24.
+2. node --test tests/application.test.cjs
+   14 tests, 14 pass, 0 fail.
+3. node --check src/application-main.cjs
+   Exit 0.
+4. node --test tests/application-close.test.cjs tests/application.test.cjs tests/application-titlebar.test.cjs
+   Initial focused run: 34 tests, 34 pass, 0 fail.
+5. node --test tests/application-close.test.cjs tests/application.test.cjs tests/application-titlebar.test.cjs tests/runtime-supervisor.test.cjs
+   Expanded run: 65 tests, 65 pass, 0 fail.
+   Final run: 66 tests, 66 pass, 0 fail.
+6. node --test tests/*.test.cjs
+   Intermediate: 710 tests, 686 pass, 24 fail.
+   Final: 711 tests, 687 pass, 24 fail; zero skipped/cancelled/todo.
+   Exactly the same 24 failing test names as both untouched baselines.
+   All 21 added regression tests pass.
+
+From the repository root: git diff --check completed with exit 0.
+All changed source, test and report files use LF line endings.
+
+The 24 failures comprise the supplied 11 known failures plus 13 existing kernel
+integration tests blocked by ModuleNotFoundError: No module named 'fastapi'.
+The designated test venv also lacks fastapi; this was confirmed with import
+metadata and directory existence checks. No installation or test bypass was
+attempted. The additional failures affect desktop-runtime-bridge (one),
+facility-desktop-session (one), and facility-local-draft-recovery (eleven).
+Therefore the requested assertion that only 11 tests fail cannot be verified in
+this environment. The patch introduces zero additional failing test names.
+Full captured logs: .night-tmp/desktop-close/{baseline,baseline-venv,after,final}.out
+
+Not verified
+Actual WM_CLOSE / Alt+F4 delivery, native dialog display/abort behavior, and
+native view cleanup with a three-hour session were not exercised, as Electron
+and access to the user's running application were explicitly prohibited.
+The incident's exact failing step cannot be proven without its main-process
+state/logs. A blocked main event loop cannot run JavaScript deadline timers.
+The restricted clone does not contain desktop/node_modules/electron typings;
+no dependency downloads were performed. The two alternative desktop entry
+points retain the separate lifecycle behaviors noted above.
+
+Changes are uncommitted. No network, installs, live app access, private stores,
+large generated trees, or unrelated source files were used or modified.
+
+Job 2b review follow-up - 2026-11-03 (supersedes the cancellation note above)
+
+P1: Startup now carries the restart/stop abort signal through READY polling,
+fetch, response reads and reader cancellation. The request deadline also covers
+response cleanup. Stop cancels startup and reaches the directly owned child
+without awaiting startup. Concurrent startup failure and Stop share one cleanup
+promise, shutdown request and retained receipt; late reader completion cannot
+restore readiness. No process discovery or unrelated termination was added.
+
+P2: All last-application-run.json writers, including automated startup failure,
+now use one promise queue. A timed-out in-flight write retains its queue position
+until the filesystem operation actually settles. Expired queued attempts never
+start, and rejected writes release the queue for a later retry. Close still has
+a bounded, visible failure while storage is unavailable. Unsaved work
+confirmation and backend cleanup evidence are preserved.
+
+Regression proof and verification (Node node:test, hidden runner, no Electron)
+- Final new regression cases evaluated with only the two source modules loaded
+  from git show 02fc51b: 6 tests, 0 pass, 1 assertion failure (concurrent evidence
+  writes), 5 cancelled by their 3s test deadlines (stalled startup/cleanup).
+  Working source files were not replaced. The preload and baseline copies are
+  under .night-tmp/job2b/. The initial regressions also failed before source edits.
+- node --test tests/application-close.test.cjs tests/application.test.cjs
+  tests/application-titlebar.test.cjs tests/runtime-supervisor.test.cjs
+  Final: 73 tests, 73 pass, no failures/cancellations/skips.
+- node --test --test-concurrency=1 tests/*.test.cjs
+  718 tests, 694 pass, 24 fail, no cancellations/skips. All seven added tests pass.
+  Failing names exactly match .night-tmp/desktop-close/final.out: the 11 known
+  failures plus 13 missing-fastapi failures. The designated test venv was used
+  with PYTHONPATH/PYTHONHOME cleared. No installs or network access were used.
+- node --check src/application-main.cjs and src/runtime-supervisor.cjs: exit 0.
+- git diff --check: exit 0. Changed files retain LF line endings.
+Logs: .night-tmp/job2b/{red,red-final,focused-final,full}.out.
+Native close delivery and real Electron cleanup remain unverified as requested.
+Changes remain uncommitted.

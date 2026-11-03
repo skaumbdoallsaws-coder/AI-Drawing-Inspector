@@ -9,6 +9,82 @@ const path = require('node:path');
 const { createManagedRuntime } = require('../src/runtime-supervisor.cjs');
 
 const turn = () => new Promise(resolve => setImmediate(resolve));
+
+test('expired restart cannot launch another backend after owned cleanup settles', async t => {
+  const f = fixture(t);
+  await f.supervisor.start();
+  const controller = new AbortController();
+  const restarting = f.supervisor.restart({ signal: controller.signal });
+  const stopping = f.supervisor.stop();
+  controller.abort(new Error('restart deadline expired'));
+  await assert.rejects(restarting, /restart deadline expired/);
+  const cleanup = await stopping;
+  assert.equal(f.launches.length, 1);
+  assert.equal(cleanup.terminationConfirmed, true);
+  assert.equal(cleanup.resourcesClosed, true);
+  assert.deepEqual(f.children[0].kills, []);
+  assert.deepEqual(f.supervisor.getEvidence()[0].cleanup, cleanup);
+});
+
+for (const stage of ['read', 'cleanup']) for (const cancelBy of ['restart deadline', 'stop']) {
+  test(cancelBy + ' cancels replacement startup stalled in reader ' + stage, { timeout: 3000 }, async t => {
+    let cancelStarted, releaseCancel;
+    const cancelling = new Promise(resolve => { cancelStarted = resolve; });
+    const cancelled = new Promise(resolve => { releaseCancel = resolve; });
+    const f = fixture(t, [{}, { ignoreShutdown: true }], { fetch: async (_url, _options, child, runtime) => {
+      if (child.pid === f.children[0].pid) return new Response(JSON.stringify(runtime));
+      let read = false;
+      return { ok: true, body: { getReader: () => ({
+        read: async () => {
+          if (stage === 'read') { cancelStarted(); await cancelled; }
+          return read ? { done: true } : (read = true, { value: Buffer.from(JSON.stringify(runtime)), done: false });
+        },
+        cancel: () => { cancelStarted(); return cancelled; },
+      }) } };
+    } });
+    await f.supervisor.start();
+    const controller = new AbortController();
+    const restarting = f.supervisor.restart({ signal: controller.signal });
+    const rejected = assert.rejects(restarting, cancelBy === 'stop'
+      ? { code: 'desktop_startup_cancelled' } : /restart deadline expired/);
+    await cancelling;
+    assert.equal(f.children.length, 2, 'cancel only after the replacement child has started');
+    if (cancelBy === 'restart deadline') controller.abort(new Error('restart deadline expired'));
+    const cleanup = await f.supervisor.stop();
+    await rejected;
+    assert.equal(f.requests[1].options.signal.aborted, true);
+    assert.equal(cleanup.processId, f.children[1].pid);
+    assert.equal(cleanup.terminationConfirmed, true);
+    assert.equal(cleanup.forced, true);
+    assert.equal(cleanup.resourcesClosed, false);
+    assert.equal(f.children[1].controls.filter(value => value.command === 'shutdown').length, 1);
+    assert.deepEqual(f.children[0].kills, []);
+    assert.deepEqual(f.children[1].kills, ['SIGKILL']);
+    assert.deepEqual(f.supervisor.getEvidence()[1].cleanup, cleanup);
+    const saved = JSON.parse(fs.readFileSync(path.join(f.root, 'desktop-logs', cleanup.instanceId + '-process.json')));
+    assert.deepEqual(saved, cleanup);
+    releaseCancel(); await turn();
+    assert.equal(f.supervisor.getState().status, 'cleanup-failed');
+    assert.equal(f.supervisor.getCredential(), null);
+    assert.equal(f.states.filter(state => state === 'ready').length, 1, 'late cleanup cannot authorize the replacement');
+  });
+}
+
+test('startup request deadline bounds response cleanup without an explicit stop', { timeout: 3000 }, async t => {
+  const f = fixture(t, [{}], { options: { startupTimeoutMs: 80 }, fetch: async () => ({
+    ok: true, body: { getReader: () => ({
+      read: async () => ({ done: true }), cancel: () => new Promise(() => {}),
+    }) },
+  }) });
+  // AbortSignal.timeout is unref'ed; the fake transport has no live socket.
+  const keepAlive = setTimeout(() => {}, 3000);
+  try { await assert.rejects(f.supervisor.start(), { name: 'TimeoutError' }); }
+  finally { clearTimeout(keepAlive); }
+  assert.equal(f.children[0].ended, true);
+  assert.equal(f.supervisor.getEvidence()[0].cleanup.resourcesClosed, true);
+  assert.equal(f.supervisor.getState().status, 'failed');
+});
+
 function fixture(t, plans = [{}], overrides = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ip-supervisor-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

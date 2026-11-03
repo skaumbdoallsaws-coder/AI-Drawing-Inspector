@@ -8,15 +8,17 @@ const { loadApplicationProfile } = require('./application-profile.cjs');
 const { createManagedRuntime } = require('./runtime-supervisor.cjs');
 const { createApplicationNetwork } = require('./application-network.cjs');
 const { installApplicationLinks } = require('./application-links.cjs');
-const { authorizeTransition } = require('./application-lifecycle.cjs');
+const { authorizeTransition, transitionStep } = require('./application-lifecycle.cjs');
 const { ICON_PATH, brandApplication, brandWindow } = require('./application-branding.cjs');
 const { documentURL, createDocumentPreview } = require('./document-preview.cjs');
 brandApplication(app);
 const root = path.resolve(__dirname, '../..');
 let window, runtime, network, closing = false, transition = false, booted = false, profile;
+let closeRequested = false, transitionStatus = null;
 let acceptanceOutput = null;
 let browser = null, browserPromise = null, documents = null, pythonPath, applicationOverlay = false;
 let chatgptAccount = null;
+let evidenceWrites = Promise.resolve();
 const trusted = event => !!window && !window.isDestroyed() && event.sender === window.webContents
   && event.senderFrame === window.webContents.mainFrame && network.local(event.senderFrame.url);
 function isDocument(url) { try { documentURL(url, profile.origin); return true; } catch (_) { return false; } }
@@ -84,55 +86,131 @@ ipcMain.on('ip-application-observed', (event, id, value) => {
   const item = observations.get(id); if (!item) return;
   clearTimeout(item.timer); observations.delete(id); item.resolve(value);
 });
+function transitionNotice(detail) {
+  transitionStatus = detail;
+  if (!window || window.isDestroyed()) return;
+  // A renderer notice stays visible even if the native dialog fails to appear.
+  window.show(); window.focus();
+  window.webContents.send('ip-application-transition-status', detail);
+}
 async function message(message, detail = '') {
-  return dialog.showMessageBox(window, { type: 'info', title: 'InspectorPro', message, detail, buttons: ['OK'] });
+  try {
+    return await transitionStep('Application message', signal => dialog.showMessageBox(window,
+      { type: 'info', title: 'InspectorPro', message, detail, buttons: ['OK'], signal }), 30000);
+  } catch (error) {
+    transitionNotice(message + ' ' + detail + ' ' + error.message);
+    return { response: 0 };
+  }
+}
+function writeEvidence(evidence, signal) {
+  const content = JSON.stringify(evidence, null, 2);
+  const write = evidenceWrites.then(() => {
+    signal?.throwIfAborted();
+    return fs.writeFile(path.join(profile.dataRoot, 'last-application-run.json'), content);
+  });
+  // Keep the actual write in the queue after a caller's deadline expires.
+  // A retry must not overlap it; an expired queued attempt must never start.
+  evidenceWrites = write.catch(() => {});
+  return write;
 }
 async function shutdown() {
-  chatgptAccount?.close();
+  const errors = [];
+  const attempt = async (label, action, timeoutMs) => {
+    try { return await transitionStep(label, action, timeoutMs); }
+    catch (error) { errors.push({ step: label, code: error.code || 'desktop_cleanup_failed', message: error.message }); }
+  };
+  await attempt('Account helper cleanup', () => chatgptAccount?.close());
   if (browserPromise) {
-    const pane = await browserPromise.catch(() => null);
-    await pane?.dispose(); browser = null; browserPromise = null;
+    const pane = await attempt('Browser initialization', () => browserPromise.catch(() => null));
+    await attempt('Browser cleanup', () => pane?.dispose());
+    if (!errors.length) { browser = null; browserPromise = null; }
   }
-  await documents?.dispose(); documents = null;
-  const cleanup = await runtime?.stop();
+  await attempt('Document cleanup', () => documents?.dispose());
+  if (!errors.length) documents = null;
+  // Always attempt owned backend cleanup, even when a browser/session step fails.
+  const cleanup = await attempt('Backend cleanup', () => runtime?.stop(), 30000);
+  if (profile) await attempt('Cleanup evidence', signal => writeEvidence({
+    backends: runtime?.getEvidence(), network: network?.getEvidence(), cleanup: cleanup || null,
+    ...(errors.length ? { cleanupErrors: errors.slice() } : {}),
+  }, signal), 5000);
+  if (errors.length) throw new Error(errors.map(error => error.step + ': ' + error.message).join('\n'));
   if (!acceptanceOutput && cleanup && (!cleanup.terminationConfirmed || !cleanup.stdioClosed || !cleanup.resourcesClosed)) {
+    transitionNotice('Backend cleanup was not fully confirmed. The diagnostic log has been retained. No unrelated server was stopped.');
     await message('Backend cleanup was not fully confirmed.', 'The diagnostic log has been retained. No unrelated server was stopped.');
   }
-  if (profile) await fs.writeFile(path.join(profile.dataRoot, 'last-application-run.json'), JSON.stringify({
-    backends: runtime?.getEvidence(), network: network?.getEvidence(), cleanup }, null, 2));
   return cleanup;
 }
 async function change(kind, destination) {
-  if (transition || closing || !booted) return;
-  transition = true;
-  browser?.suspend(true, 'application-transition');
+  if (closing) {
+    if (kind === 'close') transitionNotice('Application shutdown is already in progress.');
+    return;
+  }
+  if (transition) {
+    if (kind === 'close') {
+      if (transition !== 'close') closeRequested = true;
+      transitionNotice('Close requested. Waiting for the current ' + transition + ' step or its deadline. '
+        + 'If the Unsaved work dialog is open, respond there; confirmation is still required.');
+    }
+    return;
+  }
+  if (!booted) {
+    if (kind === 'close') {
+      transitionNotice('The application is still loading. Close is unavailable until its workflow state can be checked. Please retry Close.');
+      await message('The application is still loading.', 'Close is unavailable until its workflow state can be checked. Please retry Close.');
+    }
+    return;
+  }
+  transition = kind;
   try {
-    const authorized = await authorizeTransition({ kind, observe, confirmDiscard: async state => {
-      const result = await dialog.showMessageBox(window, { type: 'warning', title: 'Unsaved work',
+    browser?.suspend(true, 'application-transition');
+    if (kind === 'close') transitionNotice('Checking for unsaved work before closing...');
+    const authorized = await authorizeTransition({ kind, observe, confirmDiscard: async (state, signal) => {
+      const result = await dialog.showMessageBox(window, { type: 'warning', title: 'Unsaved work', signal,
         message: kind === 'close' ? 'Close without saving your changes?' : 'Reload without saving your changes?',
         detail: 'Affected workflows: ' + state.affected.join(', ') + '. Cancel to return to the application and use Save.',
         buttons: ['Cancel', kind === 'close' ? 'Close without saving' : 'Reload without saving'], defaultId: 0, cancelId: 0 });
       return result.response === 1;
     }});
-    if (!authorized.allowed) { if (!authorized.cancelled) await message(authorized.reason); return; }
+    if (!authorized.allowed) {
+      transitionNotice(authorized.cancelled ? 'Close or reload cancelled. Your unsaved work remains open.' : authorized.reason);
+      if (!authorized.cancelled) await message(authorized.reason);
+      return;
+    }
     if (kind === 'reload') {
-      if (destination) await window.loadURL(destination);
-      else await window.webContents.reload();
+      await transitionStep('Application reload', () => destination ? window.loadURL(destination) : window.webContents.reload(),
+        15000, () => window.webContents.stop());
       return;
     }
     if (kind === 'restart') {
       window.webContents.send('ip-application-freeze', true);
       network.setEnabled(false);
-      try { await runtime.restart(); network.setEnabled(true); window.webContents.send('ip-application-freeze', false); }
-      catch (error) { await message('Backend restart failed. Your draft remains in this window.', error.code || 'See the backend log. Retry Restart backend.'); }
+      try {
+        await transitionStep('Backend restart', signal => runtime.restart({ signal }), 165000);
+        network.setEnabled(true); window.webContents.send('ip-application-freeze', false);
+      } catch (error) {
+        transitionNotice('Backend restart failed. Your draft remains in this window. ' + error.message);
+        await message('Backend restart failed. Your draft remains in this window.', error.code || 'See the backend log. Retry Restart backend.');
+      }
       return;
     }
-    closing = true;
+    transitionNotice('Closing: cleaning up the browser and owned backend...');
+    window.webContents.send('ip-application-freeze', true, 'InspectorPro is closing. Your draft remains in this window until cleanup finishes.');
     network.setEnabled(false);
     await shutdown();
+    closing = true;
     window.destroy(); app.quit();
-  } catch (error) { await message('The window was kept open.', error.message); }
-  finally { transition = false; if (!closing) browser?.suspend(false, 'application-transition'); }
+  } catch (error) {
+    closing = false;
+    transitionNotice('The window was kept open. ' + error.message);
+    await message('The window was kept open.', error.message);
+  } finally {
+    transition = false;
+    try { if (!closing) browser?.suspend(false, 'application-transition'); }
+    catch (error) { transitionNotice('The browser could not resume. ' + error.message + ' Please retry Close.'); }
+    finally {
+      if (closeRequested && !closing) { closeRequested = false; void change('close'); }
+    }
+  }
 }
 async function external(url) {
   let parsed; try { parsed = new URL(url); } catch (_) { return; }
@@ -183,7 +261,10 @@ async function start() {
     if (!event.defaultPrevented && contents === window.webContents) browser?.trackDownload(item);
   });
   installApplicationLinks({ window, network, external, reload: url => change('reload', url), openBrowser, isDocument });
-  window.webContents.on('did-finish-load', () => browser?.refresh());
+  window.webContents.on('did-finish-load', () => {
+    browser?.refresh();
+    if (transitionStatus) transitionNotice(transitionStatus);
+  });
   window.webContents.on('will-attach-webview', event => event.preventDefault());
   window.webContents.on('before-input-event', (event, input) => {
     if (input.type === 'keyDown' && (input.key === 'F5' || ((input.control || input.meta) && input.key.toLowerCase() === 'r'))) {
@@ -262,7 +343,7 @@ async function failStartup(error) {
     await fs.writeFile(path.join(acceptanceOutput, 'driver-failure.json'), JSON.stringify({
       status: 'failed', phase: 'startup', ...startupFailure, desktop: evidence,
     }, null, 2));
-    if (profile) await fs.writeFile(path.join(profile.dataRoot, 'last-application-run.json'), JSON.stringify(evidence, null, 2));
+    if (profile) await transitionStep('Cleanup evidence', signal => writeEvidence(evidence, signal), 5000);
   } catch (caught) {
     console.error('Could not retain startup failure evidence:', caught.code || caught.message);
   } finally {

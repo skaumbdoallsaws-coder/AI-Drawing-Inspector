@@ -89,9 +89,22 @@ ipcRenderer.on('ip-application-observe', (_event, id) => {
   try { result = observe ? observe() : null; } catch (_) { result = null; }
   ipcRenderer.send('ip-application-observed', id, result);
 });
+let transitionNotice = null;
+ipcRenderer.on('ip-application-transition-status', (_event, detail) => {
+  transitionNotice?.remove(); transitionNotice = null;
+  if (typeof detail !== 'string' || !detail) return;
+  const notice = document.createElement('div');
+  notice.setAttribute('role', 'status');
+  notice.style.cssText = 'position:fixed;bottom:16px;left:16px;right:16px;z-index:2147483647;padding:16px;background:#fff4ce;color:#182128;border:1px solid #a88725;border-radius:6px;font:14px system-ui;white-space:pre-wrap;';
+  const text = document.createElement('span'); text.textContent = detail;
+  const dismiss = document.createElement('button'); dismiss.textContent = 'Dismiss';
+  dismiss.style.cssText = 'margin-left:16px';
+  dismiss.addEventListener('click', () => { notice.remove(); if (transitionNotice === notice) transitionNotice = null; });
+  notice.append(text, dismiss); document.documentElement.appendChild(notice); transitionNotice = notice;
+});
 let overlay = null;
 let previousInert = null;
-ipcRenderer.on('ip-application-freeze', (_event, frozen) => {
+ipcRenderer.on('ip-application-freeze', (_event, frozen, detail) => {
   if (!frozen) {
     overlay?.remove(); overlay = null;
     if (previousInert !== null) document.documentElement.inert = previousInert;
@@ -103,8 +116,8 @@ ipcRenderer.on('ip-application-freeze', (_event, frozen) => {
   document.documentElement.inert = true;
   if (!overlay) {
     overlay = document.createElement('div');
-    overlay.textContent = 'InspectorPro backend is restarting. Your draft remains in this window.';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#182128e8;color:white;display:grid;place-items:center;font:16px system-ui;pointer-events:all';
+    overlay.textContent = typeof detail === 'string' ? detail : 'InspectorPro backend is restarting. Your draft remains in this window.';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:#182128e8;color:white;display:grid;place-items:center;font:16px system-ui;pointer-events:all';
     document.documentElement.appendChild(overlay);
   }
 });

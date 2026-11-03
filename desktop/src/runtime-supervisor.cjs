@@ -31,16 +31,32 @@ function childEnvironment(profile, python, source = process.env) {
   Object.assign(result, { PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8', PYTHON_DOTENV_DISABLED: '1' });
   return result;
 }
-async function readJson(response, limit = 16 * 1024 * 1024) {
+async function withAbort(promise, signal) {
+  if (!signal) return promise;
+  let abort;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      abort = () => reject(signal.reason);
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, { once: true });
+    })]);
+  } finally { signal.removeEventListener('abort', abort); }
+}
+async function readJson(response, limit = 16 * 1024 * 1024, signal) {
   if (!response?.body?.getReader) throw failure('desktop_response_invalid');
   const reader = response.body.getReader(), chunks = []; let bytes = 0;
   try {
     for (;;) {
-      const { value, done } = await reader.read(); if (done) break;
+      signal?.throwIfAborted();
+      const { value, done } = await withAbort(reader.read(), signal); if (done) break;
       bytes += value.length; if (bytes > limit) throw failure('desktop_response_too_large');
       chunks.push(value);
     }
-  } finally { await reader.cancel().catch(() => {}); }
+  } finally {
+    // Attempt cancellation even after abort, but never wait indefinitely for it.
+    await withAbort(Promise.resolve().then(() => reader.cancel()).catch(() => {}), signal);
+  }
+  signal?.throwIfAborted();
   const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
   if (!response.ok) {
     const error = failure(result?.error?.code || 'desktop_backend_request_failed', result?.error?.message || 'The protected backend rejected the request');
@@ -56,6 +72,7 @@ function createManagedRuntime({ profile, python, appRoot, logRoot = path.join(pr
   if (!path.isAbsolute(python) || !path.isAbsolute(appRoot)) throw failure('desktop_executable_path_invalid');
   fs.mkdirSync(logRoot, { recursive: true });
   let state = 'idle', owned = null, starting = null, stopping = null, restarting = null, stableBinding = null;
+  let startupController = null;
   const history = [];
   const elapsed = item => Math.max(0, Math.round(performance.now() - item.startedMonotonic));
   function diagnosticCheckpoint(item, line) {
@@ -175,19 +192,25 @@ function createManagedRuntime({ profile, python, appRoot, logRoot = path.join(pr
         Math.round(performance.now() - began));
     }
   }
-  async function requestWith(item, endpoint, body, timeoutMs = 15000) {
+  async function requestWith(item, endpoint, body, timeoutMs = 15000, signal) {
     if (owned !== item || item.exited || !item.readyObserved || !/^\/(?!\/)[^\r\n#]*$/.test(endpoint)) throw failure('desktop_backend_unavailable');
-    const response = await fetchImpl(profile.origin + endpoint, { redirect: 'error', signal: AbortSignal.timeout(timeoutMs),
+    const requestSignal = AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]);
+    requestSignal.throwIfAborted();
+    const response = await withAbort(fetchImpl(profile.origin + endpoint, { redirect: 'error', signal: requestSignal,
       method: body === undefined ? 'GET' : 'POST', headers: { Accept: 'application/json', 'X-InspectorPro-Desktop-Token': item.credential,
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }), requestSignal);
     if (owned !== item || item.exited) throw failure('desktop_backend_changed');
-    const result = await readJson(response);
+    const result = await readJson(response, undefined, requestSignal);
     if (owned !== item || item.exited) throw failure('desktop_backend_changed');
     return result;
   }
-  async function stopOwned(item) {
-    if (!item) return { terminationConfirmed: true, stdioClosed: true, resourcesClosed: true, notStarted: true };
-    if (item.cleanup) return item.cleanup;
+  function stopOwned(item) {
+    if (!item) return Promise.resolve({ terminationConfirmed: true, stdioClosed: true, resourcesClosed: true, notStarted: true });
+    if (item.cleanup) return Promise.resolve(item.cleanup);
+    // Startup cancellation and Close share one shutdown request and receipt.
+    return item.cleanupPromise ||= cleanupOwned(item);
+  }
+  async function cleanupOwned(item) {
     const requestId = randomUUID(); item.shutdownRequestId = requestId;
     item.timings.shutdownRequestedElapsedMs = elapsed(item);
     if (!item.exited) {
@@ -212,10 +235,13 @@ function createManagedRuntime({ profile, python, appRoot, logRoot = path.join(pr
     if (!item.closed) { item.child?.stdin?.destroy(); item.child?.stdout?.destroy(); item.child?.stderr?.destroy(); item.child?.unref?.(); }
     return result;
   }
-  function start() {
+  function start({ signal } = {}) {
+    if (signal?.aborted) return Promise.reject(signal.reason);
     if (starting) return starting;
     if (state === 'ready') return Promise.resolve(owned.runtime);
     if (stopping || (owned && !owned.closed)) return Promise.reject(failure('desktop_backend_still_owned'));
+    startupController = new AbortController();
+    const startupSignal = AbortSignal.any([startupController.signal, ...(signal ? [signal] : [])]);
     starting = (async () => {
       const instanceId = randomUUID();
       const item = { instanceId, credential: randomBytes(32).toString('hex'), runtime: null, exited: false, closed: false,
@@ -228,6 +254,7 @@ function createManagedRuntime({ profile, python, appRoot, logRoot = path.join(pr
       let stdout = '';
       const startedAt = Date.now();
       try {
+        startupSignal.throwIfAborted();
         const entry = profile.mode === 'application' ? 'application_backend.py' : 'managed_backend.py';
         item.child = spawnImpl(python, ['-u', ...(startupDiagnostics ? ['-X', 'importtime'] : []), path.join(appRoot, 'desktop', 'runtime', entry), '--profile-file', profile.profileFile],
           { cwd: appRoot, env: childEnvironment(profile, python), windowsHide: true, shell: false, stdio: ['pipe','pipe','pipe'] });
@@ -275,7 +302,8 @@ function createManagedRuntime({ profile, python, appRoot, logRoot = path.join(pr
         });
         item.child.stdin.write(JSON.stringify({ schemaVersion: 1, credential: item.credential, instanceId }) + '\n');
         item.timings.startControlSentElapsedMs = elapsed(item);
-        while (!item.ready && !item.startError && !item.exited && Date.now() - startedAt < startupTimeoutMs) await wait(25);
+        while (!item.ready && !item.startError && !item.exited && Date.now() - startedAt < startupTimeoutMs) await withAbort(wait(25), startupSignal);
+        startupSignal.throwIfAborted();
         if (item.startError) throw item.startError;
         if (item.exited) throw failure('desktop_backend_early_exit');
         if (!item.ready) throw failure('desktop_backend_startup_timeout', 'Backend startup exceeded its deadline; inspect the retained runtime log');
@@ -286,7 +314,8 @@ function createManagedRuntime({ profile, python, appRoot, logRoot = path.join(pr
         item.timings.readyObservedElapsedMs = elapsed(item);
         const remaining = startupTimeoutMs - (Date.now() - startedAt);
         if (remaining <= 0) throw failure('desktop_backend_startup_timeout');
-        const actual = validateRuntime(await requestWith(item, '/api/desktop-shell/runtime', undefined, remaining), profile, instanceId);
+        const actual = validateRuntime(await requestWith(item, '/api/desktop-shell/runtime', undefined, remaining, startupSignal), profile, instanceId);
+        startupSignal.throwIfAborted();
         if (actual.processId !== item.child.pid) throw failure('desktop_owned_runtime_mismatch');
         const binding = { identity: actual.identity, owner: actual.owner, storeBinding: actual.storeBinding, document: actual.document };
         if (stableBinding && !isDeepStrictEqual(binding, stableBinding)) throw failure('desktop_restarted_store_mismatch');
@@ -297,21 +326,25 @@ function createManagedRuntime({ profile, python, appRoot, logRoot = path.join(pr
         item.startupElapsedMs = elapsed(item); item.timings.failureElapsedMs = item.startupElapsedMs;
         item.failure = { code: error.code || 'desktop_startup_failed', message: error.message };
         if (!item.child) { item.spawnError = true; item.exited = true; item.closed = true; }
-        await stopOwned(item); changed('failed'); throw error;
+        await stopOwned(item);
+        if (owned === item && state === 'starting') changed('failed');
+        throw error;
       }
-    })().finally(() => { starting = null; });
+    })().finally(() => { starting = null; startupController = null; });
     return starting;
   }
   function stop() {
     if (stopping) return stopping;
-    if (starting && owned && !owned.runtime) owned.startError ||= failure('desktop_startup_cancelled');
-    stopping = (async () => { if (starting) await starting.catch(() => {}); changed('stopping'); const receipt = await stopOwned(owned);
+    startupController?.abort(failure('desktop_startup_cancelled'));
+    stopping = (async () => { changed('stopping'); const receipt = await stopOwned(owned);
       changed(receipt.terminationConfirmed && receipt.stdioClosed && receipt.resourcesClosed ? 'stopped' : 'cleanup-failed'); return receipt;
     })().finally(() => { stopping = null; }); return stopping;
   }
-  function restart() {
+  function restart({ signal } = {}) {
     if (restarting) return restarting;
-    restarting = (async () => { const stopped = await stop(); if (!stopped.terminationConfirmed || !stopped.stdioClosed || !stopped.resourcesClosed) throw failure('desktop_cleanup_unverified'); return start(); })()
+    restarting = (async () => { const stopped = await stop(); if (!stopped.terminationConfirmed || !stopped.stdioClosed || !stopped.resourcesClosed) throw failure('desktop_cleanup_unverified');
+      // A close may have expired the restart while its old backend was stopping.
+      signal?.throwIfAborted(); return start({ signal }); })()
       .finally(() => { restarting = null; }); return restarting;
   }
   return { start, stop, restart, getState: project,

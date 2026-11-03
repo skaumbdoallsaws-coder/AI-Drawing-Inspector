@@ -244,7 +244,7 @@ def custom_appearances(layout) -> dict:
     extensions = layout.get("extensions") if isinstance(layout, Mapping) else None
     value = extensions.get(CUSTOM_KEY) if isinstance(extensions, Mapping) else None
     rows = value.get("custom") if isinstance(value, Mapping) else None
-    return {row["appearanceId"]: row for row in rows or []
+    return {row["appearanceId"]: row for row in (rows if isinstance(rows, list) else [])
             if isinstance(row, Mapping) and isinstance(row.get("appearanceId"), str)}
 
 
@@ -278,7 +278,9 @@ def normalize_appearance(value, layout=None) -> dict:
         _lights_only(overrides, library[appearance_id])
     elif layout is not None:
         custom = custom_appearances(layout).get(appearance_id) or {}
-        _lights_only(overrides, library.get(custom.get("baseAppearanceId")))
+        # The custom list is checked on its own (a base that is not a library ID is refused there).
+        base = custom.get("baseAppearanceId")
+        _lights_only(overrides, library.get(base) if isinstance(base, str) else None)
     return dict({"appearanceId": appearance_id}, **overrides)
 
 
@@ -305,7 +307,7 @@ def normalize_custom_appearances(value) -> dict:
         label = row["label"]
         if not isinstance(label, str) or not label.strip() or len(label.strip()) > 80:
             raise ValueError("A custom appearance name needs 1 to 80 characters")
-        if row["baseAppearanceId"] not in library:
+        if not isinstance(row["baseAppearanceId"], str) or row["baseAppearanceId"] not in library:
             raise ValueError("A custom appearance must start from a library appearance")
         overrides = normalize_overrides(row)
         _lights_only(overrides, library[row["baseAppearanceId"]])
@@ -355,7 +357,7 @@ def normalize_scene(value) -> dict:
         raise ValueError("Unsupported scene document")
     if type(value["version"]) is not int or value["version"] != 1:
         raise ValueError("Unsupported scene version")
-    if value["sceneId"] not in load_library()["scenes"]:
+    if not isinstance(value["sceneId"], str) or value["sceneId"] not in load_library()["scenes"]:
         raise ValueError(f"Unknown scene '{value['sceneId']}'")
     result = {"version": 1, "sceneId": value["sceneId"]}
     adjustments = value.get("adjustments")

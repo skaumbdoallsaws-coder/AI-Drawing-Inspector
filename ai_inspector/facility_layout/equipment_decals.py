@@ -42,7 +42,8 @@ def normalize_equipment_decals(value, layout) -> dict:
     rows = value["decals"]
     if not isinstance(rows, list) or len(rows) > MAX_EQUIPMENT_DECALS:
         raise ValueError(f"A layout holds at most {MAX_EQUIPMENT_DECALS} equipment decals")
-    placements = {p.get("placementId") for p in layout.get("placements", []) if isinstance(p, Mapping)}
+    placements = {p.get("placementId") for p in layout.get("placements", [])
+                  if isinstance(p, Mapping) and isinstance(p.get("placementId"), str)}
     site = layout.get("association", {}).get("siteId") if isinstance(layout.get("association"), Mapping) else None
     from .appearance_library import load_library
     library_decals = load_library()["decals"]
@@ -62,7 +63,7 @@ def normalize_equipment_decals(value, layout) -> dict:
             raise ValueError("Decals must reference an imported content-addressed image")
         if IMAGE_PATH.fullmatch(path) and site is not None and path.split("/")[3] != site:
             raise ValueError("Decal image belongs to another site")
-        if row["placementId"] not in placements:
+        if not isinstance(row["placementId"], str) or row["placementId"] not in placements:
             raise ValueError("Decal placement is missing")
         anchor = row["anchor"]
         if not isinstance(anchor, Mapping) or set(anchor) != {"position", "normal", "rotationDegrees"}:
@@ -81,7 +82,7 @@ def normalize_equipment_decals(value, layout) -> dict:
             "heightMeters": _number(row["heightMeters"], "heightMeters", 0.02, 10),
         }
         if "libraryDecalId" in row:
-            if row["libraryDecalId"] not in library_decals:
+            if not isinstance(row["libraryDecalId"], str) or row["libraryDecalId"] not in library_decals:
                 raise ValueError("Unknown library decal")
             item["libraryDecalId"] = row["libraryDecalId"]
         result.append(item)

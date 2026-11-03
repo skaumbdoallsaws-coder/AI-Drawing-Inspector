@@ -396,10 +396,36 @@ def test_custom_finishes_round_trip_and_cannot_be_deleted_while_in_use():
     {"appearanceId": "custom-a", "label": "", "baseAppearanceId": "wood-oak"},
     {"appearanceId": "custom-a", "label": "x", "baseAppearanceId": "custom-b"},
     {"appearanceId": "custom-a", "label": "x", "baseAppearanceId": "wood-oak", "strength": 1},
+    {"appearanceId": "custom-a", "label": "x", "baseAppearanceId": []},
+    {"appearanceId": "custom-a", "label": "x", "baseAppearanceId": {}},
 ])
 def test_invalid_custom_finishes_are_rejected(row):
     with pytest.raises(FacilityLayoutError):
         apply(layout(), custom(row))
+
+
+@pytest.mark.parametrize("referenced", (True, False))
+@pytest.mark.parametrize("base", ([], {}))
+def test_a_custom_finish_base_that_is_not_a_string_is_refused(referenced, base):
+    # 2026-11-03 (Codex on a67c85e): a list or an object here made the library lookup raise TypeError, an HTTP 500 on
+    # a whole save; a placement using the finish reached it first.
+    doc = apply(layout(), custom({"appearanceId": "custom-coat", "label": "Coat", "baseAppearanceId": "wood-oak"}))
+    if referenced:
+        doc = apply(doc, set_appearance(["pl-1"], {"appearanceId": "custom-coat"}))
+    doc["extensions"]["facilityAppearances"]["custom"][0]["baseAppearanceId"] = base
+    with pytest.raises(FacilityLayoutError) as refused:
+        validate_layout(doc)
+    assert refused.value.code == "invalid_custom_appearances"
+    assert str(refused.value) == "A custom appearance must start from a library appearance"
+
+
+@pytest.mark.parametrize("rows", (5, {}))
+def test_a_custom_finish_list_that_is_not_a_list_is_refused(rows):
+    doc = apply(layout(), custom({"appearanceId": "custom-coat", "label": "Coat", "baseAppearanceId": "wood-oak"}),
+                set_appearance(["pl-1"], {"appearanceId": "custom-coat"}))
+    doc["extensions"]["facilityAppearances"]["custom"] = rows
+    with pytest.raises(FacilityLayoutError):
+        validate_layout(doc)
 
 
 # Scenes -----------------------------------------------------------------------------
@@ -421,6 +447,16 @@ def test_scene_is_saved_with_the_layout_and_removed_by_null():
     errors = Draft202012Validator(operation_batch_schema()).iter_errors({"operations": [
         {"op": "set_scene", "scene": {"version": 1, "sceneId": "machine-shop", "adjustments": {"lights": False}}}]})
     assert not list(errors)
+
+
+@pytest.mark.parametrize("scene_id", ([], {}))
+def test_a_scene_id_that_is_not_a_string_is_refused(scene_id):
+    # 2026-11-03: a list or an object here made the library lookup raise TypeError (an HTTP 500 on a whole save).
+    doc = layout()
+    doc.setdefault("extensions", {})["facilityScene"] = {"version": 1, "sceneId": scene_id}
+    with pytest.raises(FacilityLayoutError) as refused:
+        validate_layout(doc)
+    assert refused.value.code == "invalid_scene"
 
 
 def test_a_scene_change_without_a_scene_id_keeps_the_saved_scene():
@@ -624,6 +660,10 @@ def test_equipment_decals_bind_to_one_placement_and_go_away_with_it():
     {"widthMeters": 0},
     {"anchor": {"position": {"x": 0, "y": 0, "z": 0}, "normal": {"x": 0, "y": 0, "z": 0}, "rotationDegrees": 0}},
     {"libraryDecalId": "iso7010-x999"},
+    {"placementId": []},
+    {"placementId": {}},
+    {"libraryDecalId": []},
+    {"libraryDecalId": {}},
 ])
 def test_invalid_equipment_decals_are_rejected(patch):
     with pytest.raises(FacilityLayoutError):

@@ -101,7 +101,7 @@ def test_stored_roads_get_kinds_labels_and_property_frame_lines(monkeypatch):
     assert normalize_site_context(stale, doc)["roads"] == roads
 
 
-@pytest.mark.parametrize("patch", [{"mtfcc": "S1710"}, {"roadId": "bad id!"}, {"names": ["a"] * 5},
+@pytest.mark.parametrize("patch", [{"mtfcc": "S1710"}, {"mtfcc": []}, {"roadId": "bad id!"}, {"names": ["a"] * 5},
                                    {"lonLat": [[-93.0, 45.0]]}, {"lonLat": [[-93.0, 45.0]] * 401},
                                    {"extra": 1}])
 def test_invalid_roads_are_rejected(monkeypatch, patch):
@@ -116,6 +116,8 @@ def test_road_ids_must_be_unique_and_the_source_known(monkeypatch):
     roads = doc["extensions"][KEY]["roads"]
     with pytest.raises(ValueError):
         normalize_site_context({**doc["extensions"][KEY], "roads": {**roads, "source": "osm"}}, doc)
+    with pytest.raises(ValueError):
+        normalize_site_context({**doc["extensions"][KEY], "roads": {**roads, "source": []}}, doc)
     roads["items"][1]["roadId"] = roads["items"][0]["roadId"]
     with pytest.raises(ValueError):
         normalize_site_context(doc["extensions"][KEY], doc)

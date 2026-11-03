@@ -609,6 +609,36 @@ def test_a_whole_layout_save_leaves_malformed_zones_to_validation(tmp_path):
         host.close()
 
 
+def test_a_whole_layout_save_with_a_changed_cover_and_a_kind_that_is_not_a_string_is_a_422(tmp_path):
+    # Codex review of f950f83: a whole save that changes a ceiling height runs validation before refusing the change,
+    # and a zoneType or layout status sent as a list or an object made validation's set test raise TypeError: HTTP 500,
+    # not a 422. Each is refused as malformed now, and the saved layout is untouched.
+    host, client, url, _ = _http_lounge(tmp_path)
+    try:
+        covered = client.get(url).json()
+        higher = dict(DECK, heightMeters=DECK["heightMeters"] + 1)
+        cases = (("zoneType a list", lambda doc: _lounge(doc).update(zoneType=[])),
+                 ("zoneType an object", lambda doc: _lounge(doc).update(zoneType={})),
+                 ("status a list", lambda doc: doc.update(status=[])),
+                 ("status an object", lambda doc: doc.update(status={})))
+        for name, change in cases:
+            changed = deepcopy(covered["layout"])
+            _lounge(changed)["extensions"]["ceiling"] = higher
+            change(changed)
+            refused = client.put(url, json={"baseRevision": covered["revision"], "layout": changed})
+            assert refused.status_code == 422, (name, refused.status_code, refused.text)
+            assert refused.json()["error"]["code"] == "invalid_layout_shape", (name, refused.text)
+        # The cover change alone is still refused as a kept cover.
+        changed = deepcopy(covered["layout"])
+        _lounge(changed)["extensions"]["ceiling"] = higher
+        refused = client.put(url, json={"baseRevision": covered["revision"], "layout": changed})
+        assert refused.status_code == 422, refused.text
+        assert refused.json()["error"]["code"] == "zone_ceiling_or_roof_kept", refused.text
+        assert client.get(url).json()["revision"] == covered["revision"]
+    finally:
+        host.close()
+
+
 def test_undo_and_redo_of_a_ceiling_and_roof_still_work(tmp_path):
     # Receipt-bound Undo (the UI's Undo after an approved or direct change, and Sage's) restores the revision before
     # set_zone_ceiling and set_zone_roof; doing them again sets them again; their own null removes them.

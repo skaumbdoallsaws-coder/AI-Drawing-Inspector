@@ -177,6 +177,9 @@ def test_manufacturing_cell_interfaces_validate_and_canonicalize():
         ("width", 0),
         ("opacity", 1.1),
         ("positionMode", "screen"),
+        ("markingType", []),
+        ("semanticRole", {}),
+        ("positionMode", []),
     ),
 )
 def test_floor_marking_invalid_values_fail_closed(field: str, value: object):
@@ -441,6 +444,92 @@ def test_surface_attachment_contract_is_closed_and_revision_safe():
     extra = deepcopy(document)
     extra["placements"][1]["snapRelationship"]["browserPixels"] = 10
     assert _error_code(extra) == "invalid_layout_shape"
+
+
+def _layouts_in(value):
+    if isinstance(value, dict):
+        if {"layoutId", "placements", "zones"} <= set(value):
+            yield value
+        for item in value.values():
+            yield from _layouts_in(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _layouts_in(item)
+
+
+def _first_path(value, pattern, path=()):
+    """The first path in value matching pattern (a tuple of keys, "*" for any list index)."""
+    if not pattern:
+        return path
+    head, rest = pattern[0], pattern[1:]
+    if head == "*":
+        items = enumerate(value) if isinstance(value, list) else ()
+    else:
+        items = [(head, value[head])] if isinstance(value, dict) and head in value else ()
+    for key, item in items:
+        found = _first_path(item, rest, path + (key,))
+        if found is not None:
+            return found
+    return None
+
+
+@pytest.mark.parametrize(
+    ("fixture", "pattern"),
+    (
+        ("authoring/p5-authoring-result.json", ("status",)),
+        ("authoring/p5-authoring-result.json", ("zones", "*", "zoneType")),
+        ("authoring/p5-authoring-result.json", ("placements", "*", "positionMode")),
+        ("planning/p8-planning-golden.json", ("zones", "*", "anchors", "*", "anchorKind")),
+        ("planning/p8-planning-golden.json", ("zones", "*", "anchors", "*", "allowedRouteKinds", "*")),
+        ("design_loop/fdl-material-travel-v1.json", ("routes", "*", "routeKind")),
+        ("design_loop/fdl-material-travel-v1.json", ("routes", "*", "routingMode")),
+        ("design_loop/fdl-material-travel-v1.json", ("processBindings", "*", "bindingRole")),
+        ("utility_cell.json", ("utilityNetworks", "*", "networkKind")),
+        ("utility_cell.json", ("utilityNetworks", "*", "nodes", "*", "networkRole")),
+    ),
+)
+@pytest.mark.parametrize("value", ([], {}))
+def test_kinds_that_are_not_strings_fail_closed(fixture: str, pattern: tuple, value: object):
+    # 2026-11-03 (Codex on f950f83): a list or an object where a kind is named made the set test raise TypeError, an
+    # HTTP 500 on a whole save instead of the document's 422.
+    data = json.loads((FIXTURES / fixture).read_text(encoding="utf-8"))
+    for document in _layouts_in(data):
+        path = _first_path(document, pattern)
+        if path is None:
+            continue
+        try:
+            validate_layout(document)
+        except FacilityLayoutError:
+            continue
+        target = document
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = deepcopy(value)
+        assert _error_code(document) == "invalid_layout_shape"
+        return
+    pytest.fail(f"no valid layout in {fixture} has {pattern}")
+
+
+@pytest.mark.parametrize("field", ("side", "surfaceSource", "evidenceStatus"))
+@pytest.mark.parametrize("value", ([], {}))
+def test_surface_attachment_kinds_that_are_not_strings_fail_closed(field: str, value: object):
+    document = _load("repeated_assets.json")
+    support, child = document["placements"]
+    child["snapRelationship"] = {
+        "family": "surface_attachment",
+        "attachmentId": "surface-rack-a-top",
+        "supportPlacementId": support["placementId"],
+        "surfaceId": "derived-top",
+        "side": "above",
+        "localPosition": {"x": 0.25, "z": -0.1},
+        "localRotationDegrees": 0,
+        "normalOffsetMeters": 0,
+        "surfaceSource": "derived_aabb",
+        "evidenceStatus": "unverified",
+    }
+    validate_layout(document)
+    child["snapRelationship"][field] = value
+    assert _error_code(document) == "invalid_layout_shape"
 
 
 def test_future_schema_is_read_only_and_original_bytes_are_preserved():

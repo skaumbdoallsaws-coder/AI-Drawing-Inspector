@@ -17,7 +17,7 @@ X_FACES = {'positive_x', 'negative_x'}
 def validate_relationship(value):
     if not isinstance(value, Mapping) or value.get('family') != 'wall_attachment':
         raise ValueError('Wall attachment fields are incomplete or unsupported')
-    if value.get('face') not in {'positive_z', 'negative_z'} | X_FACES:
+    if not isinstance(value.get('face'), str) or value['face'] not in {'positive_z', 'negative_z'} | X_FACES:
         raise ValueError('Wall attachment face must be positive_z, negative_z, positive_x or negative_x')
     along = 'localZ' if value['face'] in X_FACES else 'localX'
     if set(value) != (X_FACE_FIELDS if along == 'localZ' else FIELDS):

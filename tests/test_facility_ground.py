@@ -37,6 +37,8 @@ def test_support_across_tiles_but_not_gaps_slopes_or_wrong_elevation():
     lambda g:g['surfaces'][0].update(maxX=0),
     lambda g:g['surfaces'][0].update(color='red'),
     lambda g:g['surfaces'][0].update(slopeAxis='y'),
+    lambda g:g['surfaces'][0].update(slopeAxis=[]),
+    lambda g:g['surfaces'][0].update(slopeAxis={}),
     lambda g:g.update(unknown=True),
     lambda g:g.update(schemaVersion=True),
 ])

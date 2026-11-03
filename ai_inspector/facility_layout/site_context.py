@@ -141,7 +141,7 @@ def _image(value: Any, georeference: Mapping[str, Any], site_id: str | None,
         raise ValueError("Site images must reference a stored site image")
     if site_id is not None and path.split("/")[3] != site_id:
         raise ValueError("Site image belongs to another site")
-    if value["source"] not in sources:
+    if not isinstance(value["source"], str) or value["source"] not in sources:
         raise ValueError("Site image source is not supported")
     captured = value["captured"]
     if captured is not None and (not isinstance(captured, str) or len(captured) > 40):
@@ -176,7 +176,7 @@ def _image(value: Any, georeference: Mapping[str, Any], site_id: str | None,
 
 
 def _overlay(value: Any, georeference: Mapping[str, Any], site_id: str | None) -> dict[str, Any]:
-    if not isinstance(value, Mapping) or value.get("layer") not in OVERLAY_LAYERS:
+    if not isinstance(value, Mapping) or not isinstance(value.get("layer"), str) or value["layer"] not in OVERLAY_LAYERS:
         raise ValueError("Each overlay names a layer: flood, wetlands, contours or soils")
     if value.get("source") != OVERLAY_LAYERS[value["layer"]]:
         raise ValueError("Overlay source does not match its layer")
@@ -205,7 +205,8 @@ def _layer_checks(value: Any) -> dict[str, Any]:
         raise ValueError("Layer checks hold at most 80 results and 8 errors")
     clean = []
     for result in results:
-        if not isinstance(result, Mapping) or result.get("layer") not in OVERLAY_LAYERS:
+        if not isinstance(result, Mapping) or not isinstance(result.get("layer"), str) \
+                or result["layer"] not in OVERLAY_LAYERS:
             raise ValueError("Each layer check result names a layer")
         items = result.get("items", [])
         if not isinstance(items, list) or len(items) > 12:
@@ -234,7 +235,7 @@ def _roads(value: Any, georeference: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, Mapping) or not {"source", "fetched", "geoBounds", "items"} <= set(value) \
             or set(value) - {"source", "fetched", "geoBounds", "items", "license", "attribution"}:
         raise ValueError("Roads need source, fetched, geoBounds and items")
-    if value["source"] not in ROAD_SOURCES:
+    if not isinstance(value["source"], str) or value["source"] not in ROAD_SOURCES:
         raise ValueError("Road source is not supported")
     bounds = value["geoBounds"]
     if not isinstance(bounds, Mapping) or set(bounds) != {"south", "west", "north", "east"}:
@@ -255,7 +256,7 @@ def _roads(value: Any, georeference: Mapping[str, Any]) -> dict[str, Any]:
                 or road_id in ids:
             raise ValueError("Each road needs a unique roadId")
         ids.add(road_id)
-        if item["mtfcc"] not in ROAD_KINDS:
+        if not isinstance(item["mtfcc"], str) or item["mtfcc"] not in ROAD_KINDS:
             raise ValueError("Road class is not supported")
         names = item["names"]
         if not isinstance(names, list) or len(names) > 4:

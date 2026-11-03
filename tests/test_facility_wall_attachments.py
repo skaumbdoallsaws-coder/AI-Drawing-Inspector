@@ -96,7 +96,7 @@ def test_bare_floating_asset_still_rejected_and_other_collision_not_exempted():
     assert 'placement_collision' in codes(layout,assets,shell)
 
 
-@pytest.mark.parametrize('field,value',[('normalGapMeters',.5),('normalGapMeters',float('nan')),('localX',True),('localX',10**1000),('face','top')])
+@pytest.mark.parametrize('field,value',[('normalGapMeters',.5),('normalGapMeters',float('nan')),('localX',True),('localX',10**1000),('face','top'),('face',[]),('face',{})])
 def test_wall_attachment_closed_field_contract(field,value):
     layout,_,_=scene();relationship=layout['placements'][1]['snapRelationship'];relationship[field]=value
     with pytest.raises(ValueError):validate_relationship(relationship)

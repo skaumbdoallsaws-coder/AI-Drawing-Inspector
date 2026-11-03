@@ -29,6 +29,7 @@ from ai_inspector.facility_layout.operations import (
     apply_facility_layout_operations,
     create_layout_document,
 )
+from ai_inspector.facility_layout.errors import FacilityValidationError
 from ai_inspector.facility_layout.validate import validate_layout
 
 
@@ -377,6 +378,27 @@ def _machine_obstacle_context(
             "status": "published",
         }
     return context
+
+
+@pytest.mark.parametrize("field", ("aisleKind", "direction", "clearanceEvidenceStatus", "widthAuthority"))
+@pytest.mark.parametrize("value", ([], {}))
+def test_aisle_kinds_that_are_not_strings_are_refused(field: str, value: object) -> None:
+    # 2026-11-03: a list or an object here made validation's set test raise TypeError (an HTTP 500 on a whole save).
+    layout = _department_layout()
+    request = parse_circulation_turn(
+        "Add a 6 m material aisle from Receiving to Shipping through Machining and Assembly.",
+        layout,
+    )["request"]
+    compiled = compile_primary_circulation_operations(layout, request)
+    document = apply_facility_layout_operations(
+        layout,
+        compiled["operations"],
+        base_revision=layout_revision(layout),
+    )["document"]
+    validate_layout(document)
+    document["routes"][0]["extensions"]["facilityAisle"][field] = value
+    with pytest.raises(FacilityValidationError):
+        validate_layout(document)
 
 
 def test_complete_material_route_is_parsed_and_compiled_deterministically() -> None:

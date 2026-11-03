@@ -74,6 +74,18 @@ def test_invalid_site_contexts_are_rejected(patch):
         normalize_site_context({"version": 1, "georeference": ORIGIN, **patch}, layout())
 
 
+@pytest.mark.parametrize("patch", [
+    lambda doc: {"imagery": [image(doc, source=[])]},
+    lambda doc: {"overlays": [{"layer": []}]},
+    lambda doc: {"layerChecks": {"geometryKey": "0123456789abcdef", "results": [{"layer": {}}]}},
+])
+def test_kinds_that_are_not_strings_are_rejected(patch):
+    # 2026-11-03: a list or an object here made the dict lookup raise TypeError (an HTTP 500 on a whole save).
+    doc = layout()
+    with pytest.raises(ValueError):
+        normalize_site_context({"version": 1, "georeference": ORIGIN, **patch(doc)}, doc)
+
+
 def test_images_must_be_stored_for_this_site_and_listed_once():
     doc = layout()
     foreign = dict(image(doc), imagePath="/api/facility-site-imagery/other-site/" + "c" * 64 + ".jpg")

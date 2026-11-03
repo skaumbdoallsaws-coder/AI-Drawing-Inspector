@@ -41,7 +41,7 @@ def normalize_ground(value):
             item[key] = float(number)
         if item["maxX"] <= item["minX"] or item["maxZ"] <= item["minZ"]:
             raise ValueError("ground rectangle must have positive dimensions")
-        if item["slopeAxis"] not in {"x", "z"} or not isinstance(item["color"], str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", item["color"]):
+        if not isinstance(item["slopeAxis"], str) or item["slopeAxis"] not in {"x", "z"} or not isinstance(item["color"], str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", item["color"]):
             raise ValueError("ground requires slopeAxis x/z and a hex color")
         for other in result:
             if (min(item["maxX"], other["maxX"]) - max(item["minX"], other["minX"]) > 1e-8

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import re
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Collection, Iterable, Mapping, Sequence
 
 from .canonical import (
     QUATERNION_NORMALIZATION_TOLERANCE,
@@ -286,6 +286,12 @@ def _revision(value: Any, path: str) -> str:
     return value
 
 
+def _member(value: Any, allowed: Collection[str]) -> bool:
+    """Whether a document value is one of the allowed strings. Only a string can be: a list or an object would make
+    the set test raise TypeError, an HTTP 500 instead of the document's 422 (2026-11-03)."""
+    return isinstance(value, str) and value in allowed
+
+
 def _string(
     value: Any,
     path: str,
@@ -497,7 +503,7 @@ def _surface_attachment_relationship(
             f"{path}.supportPlacementId",
         )
     _string(relationship["surfaceId"], f"{path}.surfaceId", minimum=1, maximum=120)
-    if relationship["side"] not in {"above", "below"}:
+    if not _member(relationship["side"], {"above", "below"}):
         _fail(
             "invalid_layout_shape",
             "Surface attachment side must be above or below.",
@@ -513,19 +519,19 @@ def _surface_attachment_relationship(
         f"{path}.normalOffsetMeters",
         minimum=0,
     )
-    if relationship["surfaceSource"] not in {"asset_definition", "derived_aabb"}:
+    if not _member(relationship["surfaceSource"], {"asset_definition", "derived_aabb"}):
         _fail(
             "invalid_layout_shape",
             "Surface attachment source is unsupported.",
             f"{path}.surfaceSource",
         )
-    if relationship["evidenceStatus"] not in {
+    if not _member(relationship["evidenceStatus"], {
         "authored",
         "derived",
         "inferred",
         "unverified",
         "unknown",
-    }:
+    }):
         _fail(
             "invalid_layout_shape",
             "Surface attachment evidence status is unsupported.",
@@ -672,9 +678,9 @@ def _cell_group_extension(zone: Mapping[str, Any], path: str) -> None:
                     "Manufacturing cell interfaces require side or facing.",
                     interface_path,
                 )
-            if "side" in interface and interface["side"] not in {
+            if "side" in interface and not _member(interface["side"], {
                 "north", "east", "south", "west",
-            }:
+            }):
                 _fail(
                     "invalid_layout_shape",
                     "Manufacturing cell interface side is unsupported.",
@@ -694,9 +700,9 @@ def _cell_group_extension(zone: Mapping[str, Any], path: str) -> None:
                         "Manufacturing cell interface facing cannot be zero.",
                         f"{interface_path}.facing",
                     )
-            if interface["evidenceStatus"] not in {
+            if not _member(interface["evidenceStatus"], {
                 "authored", "derived", "inferred", "unknown",
-            }:
+            }):
                 _fail(
                     "invalid_layout_shape",
                     "Manufacturing cell interface evidence is unsupported.",
@@ -763,13 +769,13 @@ def _facility_aisle_extension(route: Mapping[str, Any], path: str) -> None:
             "Facility aisle schemaVersion must be 1.",
             f"{aisle_path}.schemaVersion",
         )
-    if aisle.get("aisleKind") not in {"forklift", "pedestrian", "material"}:
+    if not _member(aisle.get("aisleKind"), {"forklift", "pedestrian", "material"}):
         _fail(
             "invalid_layout_shape",
             "Facility aisle kind is unsupported.",
             f"{aisle_path}.aisleKind",
         )
-    if aisle.get("direction") not in {"one_way", "two_way"}:
+    if not _member(aisle.get("direction"), {"one_way", "two_way"}):
         _fail(
             "invalid_layout_shape",
             "Facility aisle direction is unsupported.",
@@ -782,9 +788,9 @@ def _facility_aisle_extension(route: Mapping[str, Any], path: str) -> None:
             "Facility aisle color must be a six-digit hex color.",
             f"{aisle_path}.color",
         )
-    if aisle.get("clearanceEvidenceStatus") not in {
+    if not _member(aisle.get("clearanceEvidenceStatus"), {
         "authored", "derived", "inferred", "unknown", "unverified",
-    }:
+    }):
         _fail(
             "invalid_layout_shape",
             "Facility aisle clearance evidence status is unsupported.",
@@ -826,11 +832,11 @@ def _facility_aisle_extension(route: Mapping[str, Any], path: str) -> None:
                 "Generated Facility aisle areaAccounting must be overlay.",
                 f"{aisle_path}.areaAccounting",
             )
-        if aisle.get("widthAuthority") not in {
+        if not _member(aisle.get("widthAuthority"), {
             "user_authored",
             "policy_authored",
             "unknown",
-        }:
+        }):
             _fail(
                 "invalid_layout_shape",
                 "Facility aisle widthAuthority is unsupported.",
@@ -874,11 +880,11 @@ def _facility_aisle_extension(route: Mapping[str, Any], path: str) -> None:
             minimum=0,
         )
         authority = awareness.get("clearanceAuthority")
-        if authority not in {
+        if not _member(authority, {
             "geometric_non_overlap_only",
             "user_authored",
             "policy_authored",
-        }:
+        }):
             _fail(
                 "invalid_layout_shape",
                 "Obstacle clearance authority is unsupported.",
@@ -1148,7 +1154,7 @@ def validate_layout(
 
     _stable_id(layout["layoutId"], "$.layoutId", prefix=ID_PREFIXES["layoutId"])
     _string(layout["displayName"], "$.displayName", minimum=1, maximum=120)
-    if layout["status"] not in {"draft", "active", "template", "archived"}:
+    if not _member(layout["status"], {"draft", "active", "template", "archived"}):
         _fail("invalid_layout_shape", "Layout status is unsupported.", "$.status")
 
     association = _object(layout["association"], "$.association")
@@ -1277,7 +1283,7 @@ def validate_layout(
         extensions.add_open_object(zone, _ZONE_FIELDS, path)
         _cell_group_extension(zone, path)
         _ceiling_extension(zone, path)
-        if zone["zoneType"] not in zone_types:
+        if not _member(zone["zoneType"], zone_types):
             _fail("invalid_layout_shape", "Zone type is unsupported.", f"{path}.zoneType")
         _string(zone["label"], f"{path}.label", minimum=1, maximum=120)
         boundary = _polygon(zone["boundary"], f"{path}.boundary")
@@ -1347,7 +1353,7 @@ def validate_layout(
             if anchor_id in local_anchor_ids:
                 _fail("duplicate_id", "Duplicate zone anchor ID.", anchor_path)
             local_anchor_ids.add(anchor_id)
-            if anchor["anchorKind"] not in route_kinds:
+            if not _member(anchor["anchorKind"], route_kinds):
                 _fail(
                     "invalid_layout_shape",
                     "Zone anchor kind is unsupported.",
@@ -1360,7 +1366,7 @@ def validate_layout(
                 f"{anchor_path}.allowedRouteKinds",
                 maximum=4,
             )
-            if any(item not in route_kinds for item in allowed):
+            if any(not _member(item, route_kinds) for item in allowed):
                 _fail(
                     "invalid_layout_shape",
                     "Zone anchor allows an unsupported route kind.",
@@ -1428,14 +1434,14 @@ def validate_layout(
             f"{path}.markingId",
             prefix=ID_PREFIXES["markingId"],
         )
-        if marking["markingType"] not in marking_types:
+        if not _member(marking["markingType"], marking_types):
             _fail(
                 "invalid_layout_shape",
                 "Floor marking type is unsupported.",
                 f"{path}.markingType",
             )
         _string(marking["label"], f"{path}.label", minimum=1, maximum=120)
-        if marking["semanticRole"] not in semantic_roles:
+        if not _member(marking["semanticRole"], semantic_roles):
             _fail(
                 "invalid_layout_shape",
                 "Floor marking semantic role is unsupported.",
@@ -1474,7 +1480,7 @@ def validate_layout(
                 "Floor text markings require text.",
                 f"{path}.text",
             )
-        if marking["positionMode"] not in {"auto", "manual", "locked"}:
+        if not _member(marking["positionMode"], {"auto", "manual", "locked"}):
             _fail(
                 "invalid_layout_shape",
                 "Floor marking position mode is unsupported.",
@@ -1552,7 +1558,7 @@ def validate_layout(
                 "Facility Layout placement scale must equal one.",
                 f"{path}.transform.scale",
             )
-        if placement["positionMode"] not in {"auto", "manual", "locked"}:
+        if not _member(placement["positionMode"], {"auto", "manual", "locked"}):
             _fail(
                 "invalid_layout_shape",
                 "Placement position mode is unsupported.",
@@ -1607,7 +1613,7 @@ def validate_layout(
         if "label" in route:
             _string(route["label"], f"{path}.label", minimum=1, maximum=120)
         _facility_aisle_extension(route, path)
-        if route["routeKind"] not in route_kinds:
+        if not _member(route["routeKind"], route_kinds):
             _fail("invalid_layout_shape", "Route kind is unsupported.", f"{path}.routeKind")
         _endpoint(
             route["sourceEndpoint"],
@@ -1623,7 +1629,7 @@ def validate_layout(
             placement_ids=placement_ids,
             zone_anchors=zone_anchors,
         )
-        if route["routingMode"] not in {"orthogonal", "polyline", "vehicle"}:
+        if not _member(route["routingMode"], {"orthogonal", "polyline", "vehicle"}):
             _fail(
                 "invalid_layout_shape",
                 "Routing mode is unsupported.",
@@ -1704,7 +1710,7 @@ def validate_layout(
         }
         _required(network, required, path)
         extensions.add_open_object(network, _NETWORK_FIELDS, path)
-        if network["networkKind"] not in network_kinds:
+        if not _member(network["networkKind"], network_kinds):
             _fail(
                 "invalid_layout_shape",
                 "Utility network kind is unsupported.",
@@ -1744,7 +1750,7 @@ def validate_layout(
             extensions.add_open_object(node, _NETWORK_NODE_FIELDS, node_path)
             if node["nodeKind"] == "endpoint":
                 _required(node, ("endpointRef",), node_path)
-                if node["networkRole"] not in {"supply", "sink"}:
+                if not _member(node["networkRole"], {"supply", "sink"}):
                     _fail(
                         "invalid_layout_shape",
                         "Utility endpoint role must be supply or sink.",
@@ -1926,7 +1932,7 @@ def validate_layout(
                     "Process binding references an unknown route.",
                     f"{path}.routeIds",
                 )
-        if binding["bindingRole"] not in binding_roles:
+        if not _member(binding["bindingRole"], binding_roles):
             _fail(
                 "invalid_layout_shape",
                 "Process binding role is unsupported.",

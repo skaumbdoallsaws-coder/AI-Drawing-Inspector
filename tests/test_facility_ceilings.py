@@ -395,3 +395,100 @@ def test_a_sage_preview_of_a_tiled_ceiling_and_a_roof_saves(tmp_path):
                                                    "roof": {"heightMeters": 3.6}}
     finally:
         host.close()
+
+
+# 2026-11-03: edit_zone replaced a zone's extensions whole, so a Sage recolour sending extensions {style} dropped the
+# zone's ceiling and roof, and one copying the saved extensions (with them) was refused by the published schema.
+STYLE = {"fillColor": "#5b8def"}
+DECK = {"heightMeters": 3.6, "finish": "open-deck"}
+ROOF = {"heightMeters": 3.6}
+
+
+def _covered_lounge():
+    return _run(_lounge_layout(), {"op": "set_zone_ceiling", "zoneId": "zn-lounge", **DECK},
+                {"op": "set_zone_roof", "zoneId": "zn-lounge", **ROOF})
+
+
+def _lounge(doc):
+    return next(zone for zone in doc["zones"] if zone["zoneId"] == "zn-lounge")
+
+
+def test_edit_zone_keeps_the_ceiling_and_roof():
+    covered = _covered_lounge()
+    group = {"schemaVersion": 1, "groupKind": "manufacturing_cell", "membership": "geometric", "envelopePadding": 0,
+             "autoNumber": {"seriesId": "series-test", "baseName": "Cell", "prefix": "", "start": 1, "sequence": 1,
+                            "padding": 2}}
+    for sent in ({"style": STYLE}, {"style": STYLE, "ceiling": DECK, "roof": ROOF}, {"style": STYLE, "roof": ROOF}):
+        doc = _run(covered, {"op": "edit_zone", "zoneId": "zn-lounge", "patch": {"extensions": sent}})
+        assert _lounge(doc)["extensions"] == {"style": STYLE, "ceiling": DECK, "roof": ROOF}, sent
+    regrouped = _run(covered, {"op": "edit_zone", "zoneId": "zn-lounge", "patch": {"extensions": {"cellGroup": group}}})
+    assert _lounge(regrouped)["extensions"] == {"cellGroup": group, "ceiling": DECK, "roof": ROOF}
+    # Other fields as before; the rest of the extensions are still replaced whole.
+    renamed = _run(regrouped, {"op": "edit_zone", "zoneId": "zn-lounge", "patch": {"label": "Bar"}})
+    assert _lounge(renamed)["label"] == "Bar" and _lounge(renamed)["extensions"] == _lounge(regrouped)["extensions"]
+    plain = _run(_lounge_layout(), {"op": "edit_zone", "zoneId": "zn-lounge", "patch": {"extensions": {"style": STYLE}}})
+    assert _lounge(plain)["extensions"] == {"style": STYLE}
+    # Only set_zone_ceiling and set_zone_roof change them.
+    for start, sent in ((covered, {"ceiling": {"heightMeters": 4}}), (covered, {"ceiling": {"heightMeters": 3.6}}),
+                        (covered, {"roof": {"heightMeters": 5}}), (covered, {"roof": None}),
+                        (_lounge_layout(), {"ceiling": {"heightMeters": 3}})):
+        with pytest.raises(FacilityLayoutError) as refused:
+            apply_facility_layout_operations(start, [{"op": "edit_zone", "zoneId": "zn-lounge",
+                                                      "patch": {"extensions": {"style": STYLE, **sent}}}])
+        assert refused.value.code == "zone_ceiling_or_roof_kept", sent
+        assert "set_zone_" in str(refused.value)
+
+
+def test_a_sage_recolour_through_the_gateway_keeps_the_ceiling_and_roof(tmp_path):
+    import asyncio
+    from jsonschema import Draft202012Validator
+    from ai_inspector.codex_runtime.assisted_tools import FacilityEditGateway
+    from ai_inspector.facility_layout.host import LocalFacilityLayoutHost, LOCAL_SITE_ID, LOCAL_LAYOUT_ID
+    from ai_inspector.facility_layout.operation_proposals import create
+    host = LocalFacilityLayoutHost(tmp_path / "facility", private_assets=False)
+    try:
+        service, principal = host.service, host.principal()
+        host.ensure_bootstrap()
+
+        def save(proposal, key):
+            binding = proposal["alternative"]["transactionBinding"]
+            approval = service.approve_layout_proposal(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID,
+                proposal["proposalId"], binding, session_id="test-session", idempotency_key=key,
+                explicit_approval=True)
+            return service.apply_layout_proposal(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, approval["approvalToken"],
+                binding, session_id="test-session", idempotency_key=key)["layout"]
+
+        revision = service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["revision"]
+        save(create(service, principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, revision, operations=[
+            {"op": "add_zone", "zoneId": "zn-lounge", "zone": {
+                "label": "Lounge", "zoneType": "workcell", "anchors": [], "evidence": [], "floorElevation": 0,
+                "boundary": rectangle(0, 0, 10, 10)}},
+            {"op": "set_zone_ceiling", "zoneId": "zn-lounge", **DECK},
+            {"op": "set_zone_roof", "zoneId": "zn-lounge", **ROOF}]), "cover-key")
+        for k, color in enumerate(("#5b8def", "#c99b39")):
+            current = service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)
+            saved = _lounge(current["layout"])["extensions"]
+            # As Sage builds it: the saved extensions with a new fill (k = 1), or only the style (k = 0).
+            extensions = {**deepcopy(saved), "style": {"fillColor": color}} if k else {"style": {"fillColor": color}}
+            arguments = {"operations": [{"op": "edit_zone", "zoneId": "zn-lounge", "patch": {"extensions": extensions}}]}
+            gateway = FacilityEditGateway(host.agent_runtime, principal, {
+                "siteId": LOCAL_SITE_ID, "layoutId": LOCAL_LAYOUT_ID, "revision": current["revision"]},
+                turn_id=f"recolour-{k}")
+            schema = next(s for s in gateway.specs if s["name"] == "preview_facility_operations")["input_schema"]
+            assert Draft202012Validator(schema).is_valid(arguments), extensions
+            result = asyncio.run(gateway.call("preview_facility_operations", arguments))
+            assert result["ok"], result
+            proposal = service.get_layout_proposal_preview(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID,
+                                                           result["data"]["proposalId"])
+            after = save(proposal, f"recolour-key-{k}")
+            assert _lounge(after)["extensions"] == {"style": {"fillColor": color}, "ceiling": DECK, "roof": ROOF}
+        # A changed ceiling passes the schema but the operation refuses it.
+        current = service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)
+        gateway = FacilityEditGateway(host.agent_runtime, principal, {
+            "siteId": LOCAL_SITE_ID, "layoutId": LOCAL_LAYOUT_ID, "revision": current["revision"]}, turn_id="raise")
+        result = asyncio.run(gateway.call("preview_facility_operations", {"operations": [{"op": "edit_zone",
+            "zoneId": "zn-lounge", "patch": {"extensions": {"style": STYLE, "ceiling": {"heightMeters": 4}}}}]}))
+        assert not result["ok"] and "zone_ceiling_or_roof_kept" in json.dumps(result["error"]), result
+        assert service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["revision"] == current["revision"]
+    finally:
+        host.close()

@@ -533,8 +533,19 @@ def _op_edit_zone(
     if "zoneId" in patch:
         _fail("immutable_identity", "edit_zone cannot change zoneId.")
     zone = _find(document, "zones", "zoneId", zone_id, "Zone")
+    kept = _kept_zone_ceiling_and_roof(zone, patch)
     for key, value in patch.items():
         zone[str(key)] = deepcopy(value)
+    if kept:
+        extensions = zone.get("extensions")
+        if isinstance(extensions, dict):
+            for key, value in kept.items():
+                if value is None:
+                    extensions.pop(key, None)
+                else:
+                    extensions[key] = value
+        elif any(value is not None for value in kept.values()):
+            zone["extensions"] = {key: value for key, value in kept.items() if value is not None}
     if operation.get("layoutProvenance") is not None:
         _set_or_stale_layout_provenance(
             zone,
@@ -549,6 +560,27 @@ def _op_edit_zone(
             container="extensions",
         )
     return [], [zone_id]
+
+
+def _kept_zone_ceiling_and_roof(zone: Mapping[str, Any], patch: Mapping[str, Any]) -> Dict[str, Any] | None:
+    """edit_zone replaces the zone's extensions whole, but its ceiling and roof change only through set_zone_ceiling
+    and set_zone_roof (2026-11-03: a Sage recolour sending extensions {style} dropped them). A patch's extensions may
+    leave them out or repeat them unchanged; the saved ones (None: none) are put back after the patch. One that
+    differs is refused."""
+    if "extensions" not in patch:
+        return None
+    from .ceilings import KEY, ROOF_KEY
+    saved = zone.get("extensions")
+    saved = saved if isinstance(saved, Mapping) else {}
+    sent = patch["extensions"]
+    sent = sent if isinstance(sent, Mapping) else {}
+    kept = {}
+    for key, owner in ((KEY, "set_zone_ceiling"), (ROOF_KEY, "set_zone_roof")):
+        if key in sent and sent[key] != saved.get(key):
+            _fail("zone_ceiling_or_roof_kept", f"edit_zone keeps a zone's extensions.{key} as saved; leave it out "
+                                               f"or send it unchanged, and change it with {owner}.")
+        kept[key] = deepcopy(saved.get(key))
+    return kept
 
 
 def _op_set_zone_ceiling(

@@ -216,6 +216,15 @@ def operation_batch_schema():
         operation(edit, {**parent, identity: ref(identity), "patch": entity_shape(name, identity, patch=True)},
                   description="Shallow patch: nested objects/arrays replace that field. Preserve unrelated nested settings.")
         operation(delete, {**parent, identity: ref(identity)}, description="Delete this exact entity; existing reference checks still apply.")
+    # A zone's ceiling and roof ride along unchanged in an edit_zone patch (Sage copies the saved extensions to
+    # recolour or regroup a zone); the operation keeps the saved ones, so set_zone_ceiling and set_zone_roof own them.
+    from ai_inspector.facility_layout.ceilings import FINISHES
+    zone_edit = next(v for v in variants if v["properties"]["op"]["const"] == "edit_zone")
+    kept = zone_edit["properties"]["patch"]["properties"]["extensions"]["properties"]
+    kept["ceiling"] = obj({"heightMeters": number(2, 40), "finish": {"enum": list(FINISHES)}}, ["heightMeters"])
+    kept["roof"] = obj({"heightMeters": number(2, 40)})
+    zone_edit["description"] += (" A zone's extensions.ceiling and extensions.roof stay as saved: leave them out or "
+                                 "send them unchanged; set_zone_ceiling and set_zone_roof change them.")
     placement = definitions["placement"]["properties"]
     from ai_inspector.facility_layout.floor_paths import SCHEMA as floor_path_schema
     operation("add_floor_path", {"path": deepcopy(floor_path_schema)}, description=

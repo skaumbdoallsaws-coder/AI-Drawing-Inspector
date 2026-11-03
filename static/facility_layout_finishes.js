@@ -523,11 +523,18 @@
         return geometry.uuid + '|' + elements + '|' + mapping.mapping + '|' + mapping.axis + cylinder;
     }
 
+    // The cache holds only the projections it made, so whoever empties it may dispose them. A geometry the finish
+    // fits as it is (its own UVs under "Model UVs if present", or nothing to project) is handed back uncached: it
+    // belongs to its model, and the 3D view disposed it under a finish preview's key (2026-11-03, Codex on c0bbd61).
     function cachedFinishGeometry(THREE, cache, geometry, matrix, mapping) {
         if (!mapping || !geometry) return geometry;
         const effective = meshMapping(THREE, geometry, matrix, mapping);
         const key = geometryKey(geometry, matrix, effective);
-        if (!cache.has(key)) cache.set(key, finishGeometry(THREE, geometry, matrix, effective));
+        if (!cache.has(key)) {
+            const projected = finishGeometry(THREE, geometry, matrix, effective);
+            if (projected === geometry) return geometry;
+            cache.set(key, projected);
+        }
         return cache.get(key);
     }
 

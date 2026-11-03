@@ -2670,7 +2670,10 @@
             },
             // Library finishes, viewport scene and equipment decals.
             finishTextures: null,
-            finishGeometryCache: new Map(),
+            finishGeometryCache: trackedFinishGeometryCache(),
+            // Keys of the projections used while a group or a finish preview is built, and how many groups use each.
+            finishProjectionSink: null,
+            finishProjectionUsers: new Map(),
             // Floor light pools: one mesh (or null, no lamps) per render group, under one root.
             lightPools: { root: null, meshes: new Map(), material: null, texture: null, beams: null, groundKey: '' },
             // Lamps that light things (2026-11-02): spot light candidates per render group and the fixed set of
@@ -9993,20 +9996,41 @@
             return true;
         }
 
-        // A group's projected finish geometries are disposed with it, so the cache must not hand them out again or keep
-        // them. Between full rebuilds nothing else clears it: alternating one wood-finished placement between two
-        // assets grew it by a group's projections at each edit (2026-11-03, Codex on 4a05de6). A group owns the
-        // geometry it draws (copyRenderable), so none of these is used by a group that stays.
-        function forgetFinishGeometries(roots) {
-            if (!state.finishGeometryCache.size) return;
-            const owned = new Set();
-            roots.forEach(function (root) {
+        // Projected finish geometries belong to the groups (and finish previews) that use them. Between full rebuilds
+        // nothing else clears the cache: removed groups left theirs (2026-11-03, Codex on 4a05de6), and so did a
+        // projection replaced on its mesh before it was drawn, as a textured part finish over an object finish
+        // replaces the object finish's (Codex on 33fb535). The cache notes each key used while something is built.
+        function trackedFinishGeometryCache() {
+            const cache = new Map();
+            cache.get = function (key) {
+                if (state.finishProjectionSink) state.finishProjectionSink.add(key);
+                return Map.prototype.get.call(cache, key);
+            };
+            return cache;
+        }
+
+        // A removed group's projections leave the cache once no other group uses them. Those it drew are disposed with
+        // its objects; those it replaced before drawing are disposed here. The cache holds only projections it made
+        // (cachedFinishGeometry hands a model's own geometry back uncached), so none of these is a model's.
+        function forgetFinishGeometries(record) {
+            const keys = record.finishProjections || [];
+            if (!keys.length) return;
+            const drawn = new Set();
+            [record.container, record.prototypeObject].forEach(function (root) {
                 if (root && typeof root.traverse === 'function') {
-                    root.traverse(function (object) { if (object.geometry) owned.add(object.geometry); });
+                    root.traverse(function (object) { if (object.geometry) drawn.add(object.geometry); });
                 }
             });
-            state.finishGeometryCache.forEach(function (geometry, key) {
-                if (owned.has(geometry)) state.finishGeometryCache.delete(key);
+            keys.forEach(function (key) {
+                const users = (state.finishProjectionUsers.get(key) || 1) - 1;
+                if (users > 0) {
+                    state.finishProjectionUsers.set(key, users);
+                    return;
+                }
+                state.finishProjectionUsers.delete(key);
+                const geometry = Map.prototype.get.call(state.finishGeometryCache, key);
+                state.finishGeometryCache.delete(key);
+                if (geometry && !drawn.has(geometry) && typeof geometry.dispose === 'function') geometry.dispose();
             });
         }
 
@@ -10019,7 +10043,7 @@
                 && typeof state.modelRoot.remove === 'function') {
                 state.modelRoot.remove(record.container);
             }
-            forgetFinishGeometries([record.container, record.prototypeObject]);
+            forgetFinishGeometries(record);
             disposeObjectGraphs([record.container, record.prototypeObject]);
             dropLightPools(record);
             state.lampSpots.lists.delete(record);
@@ -10088,6 +10112,7 @@
                         && typeof geometry.dispose === 'function') geometry.dispose();
             });
             state.finishGeometryCache.clear();
+            state.finishProjectionUsers.clear();
             detachModelRootChildren();
         }
 
@@ -12855,6 +12880,23 @@
         }
 
         function buildRenderedGroup(group, prototype, representation) {
+            const outer = state.finishProjectionSink;
+            const keys = new Set();
+            state.finishProjectionSink = keys;
+            let record;
+            try {
+                record = drawRenderedGroup(group, prototype, representation);
+            } finally {
+                state.finishProjectionSink = outer;
+            }
+            record.finishProjections = Array.from(keys);
+            record.finishProjections.forEach(function (key) {
+                state.finishProjectionUsers.set(key, (state.finishProjectionUsers.get(key) || 0) + 1);
+            });
+            return record;
+        }
+
+        function drawRenderedGroup(group, prototype, representation) {
             removeExistingGroup(group);
             applyVisualSettingsToObject(prototype.object);
             const container = createContainer();
@@ -16659,12 +16701,23 @@
         // chosen placements on screen. Nothing is saved; clearing restores them.
         function previewFinish(spec) {
             clearFinishPreview();
+            const outer = state.finishProjectionSink;
+            const keys = new Set();
+            state.finishProjectionSink = keys;
+            try {
+                return showFinishPreview(spec, keys);
+            } finally {
+                state.finishProjectionSink = outer;
+            }
+        }
+
+        function showFinishPreview(spec, projections) {
             const request = spec && typeof spec === 'object' ? spec : {};
             const library = currentLibrary();
             if (!library || !libraryRuntime || !finishesRuntime || !state.modelRoot) return false;
             const resolved = libraryRuntime.resolveAppearance(library, request.appearance, currentLayout());
             if (!resolved) return false;
-            const preview = { objects: [], hidden: [] };
+            const preview = { objects: [], hidden: [], projections: projections };
             (Array.isArray(request.placementIds) ? request.placementIds : []).forEach(function (placementId) {
                 const record = renderRecordFor(placementId);
                 const placement = state.placements.find(function (item) { return item.placementId === placementId; });
@@ -16762,6 +16815,13 @@
                         material.dispose();
                     }
                 });
+            });
+            // Its projections that no group uses go with it: only its objects drew them.
+            (preview.projections || []).forEach(function (key) {
+                if (state.finishProjectionUsers.has(key)) return;
+                const geometry = Map.prototype.get.call(state.finishGeometryCache, key);
+                state.finishGeometryCache.delete(key);
+                if (geometry && typeof geometry.dispose === 'function') geometry.dispose();
             });
             invalidate();
             return true;

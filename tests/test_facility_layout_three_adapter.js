@@ -6751,6 +6751,154 @@ test('a placement changed in place while its model loads, then changed back, is 
     assert.strictEqual(drawn, rebuilt);
 });
 
+test('a textured part finish over an object finish leaves no projection behind as its placement moves', async () => {
+    // Codex on 33fb535: the part finish replaced the object finish's projection on its mesh before it was drawn, so
+    // the removed group's objects never showed it and the cache kept it: 2, 3, 4, 5, 6 entries.
+    const catalog = [asset('rack', REV_A), asset('bench', REV_A)];
+    const scene = z => ({ assetCatalog: catalog, layout: { placements: [
+        Object.assign(placement('a', 'rack', REV_A, 0, 0, z), { appearance: { appearanceId: 'wood-oak', grain: 'length' },
+            componentMaterials: { representation: 'overview', overrides: [{ key: 'p:Body#0', appearanceId: 'wood-walnut' }] } }),
+        finishPlacement('kept', 'bench', 6, { appearanceId: 'wood-maple' })] } });
+    const projected = data => data.adapter.getDiagnostics().appearanceLibrary.projectedGeometries;
+    const THREE = await libraryThree();
+    const dispose = THREE.BufferGeometry.prototype.dispose;
+    const disposals = new Map();
+    THREE.BufferGeometry.prototype.dispose = function () {
+        if (this.userData && this.userData.facilityFinishGeometry) disposals.set(this, (disposals.get(this) || 0) + 1);
+        return dispose.call(this);
+    };
+    try {
+        const fresh = await libraryFixture();
+        await drawnScene(fresh, scene(5));
+        const full = projected(fresh);
+        fresh.adapter.dispose();
+        const live = await libraryFixture();
+        const sizes = [];
+        for (let z = 0; z <= 5; z += 1) {
+            await drawnScene(live, scene(z));
+            sizes.push(projected(live));
+        }
+        assert.strictEqual(live.adapter.getDiagnostics().status, 'ready');
+        live.adapter.dispose();
+        assert(full >= 3, 'the object finish, the part finish over it and the kept placement');
+        assert.deepStrictEqual(sizes, sizes.map(() => full));
+        assert(disposals.size >= sizes.length, 'the projections of each removed group were disposed');
+        assert.deepStrictEqual([...disposals.values()].filter(count => count !== 1), [], 'each disposed once');
+    } finally {
+        THREE.BufferGeometry.prototype.dispose = dispose;
+    }
+});
+
+test('a finish preview leaves no projection behind once cleared, edit after edit', async () => {
+    // Its projections stayed in the cache. Each edit gives a moved group new geometry, so each preview after one added
+    // more, where a full rebuild used to clear them.
+    const scene = z => ({ assetCatalog: [asset('rack', REV_A)], layout: { placements: [placement('a', 'rack', REV_A, 0, 0, z)] } });
+    const projected = data => data.adapter.getDiagnostics().appearanceLibrary.projectedGeometries;
+    const live = await libraryFixture();
+    const left = [];
+    for (let z = 0; z < 4; z += 1) {
+        await drawnScene(live, scene(z));
+        const before = projected(live);
+        assert(live.adapter.previewFinish({ placementIds: ['a'], appearance: { appearanceId: 'wood-walnut' } }));
+        assert(projected(live) > before, 'the preview projects its finish');
+        live.adapter.clearFinishPreview();
+        left.push(projected(live) - before);
+    }
+    live.adapter.dispose();
+    assert.deepStrictEqual(left, [0, 0, 0, 0]);
+});
+
+test('clearing a finish preview fitted by the model\'s own UVs disposes nothing the scene still holds', async () => {
+    // Codex on c0bbd61: under "Model UVs if present" the cache handed the model's own geometry back under the preview's
+    // key, so clearing the preview disposed geometry the placement still drew, and the adapter disposed it again.
+    const THREE = await libraryThree();
+    const dispose = THREE.BufferGeometry.prototype.dispose;
+    const disposals = new Map();
+    THREE.BufferGeometry.prototype.dispose = function () {
+        disposals.set(this, (disposals.get(this) || 0) + 1);
+        return dispose.call(this);
+    };
+    const projected = data => data.adapter.getDiagnostics().appearanceLibrary.projectedGeometries;
+    const fitByUVs = { appearanceId: 'wood-oak', mapping: 'uv' };
+    const cases = [
+        { name: 'unfinished', appearance: null, preview: { appearance: fitByUVs } },
+        { name: 'wood-finished', appearance: { appearanceId: 'wood-maple' }, preview: { appearance: fitByUVs } },
+        { name: 'one part', appearance: null, preview: { partKey: 'p:Body#0', appearance: fitByUVs } },
+        { name: 'one part, wood-finished', appearance: { appearanceId: 'wood-maple' },
+            preview: { partKey: 'p:Body#0', appearance: fitByUVs } },
+    ];
+    const results = [];
+    try {
+        for (const item of cases) {
+            const input = { assetCatalog: [asset('rack', REV_A)],
+                layout: { placements: [finishPlacement('a', 'rack', 0, item.appearance)] } };
+            const fresh = await libraryFixture();
+            await drawnScene(fresh, input);
+            const full = projected(fresh);
+            fresh.adapter.dispose();
+            const live = await libraryFixture();
+            await drawnScene(live, input);
+            disposals.clear();
+            assert(live.adapter.previewFinish(Object.assign({ placementIds: ['a'] }, item.preview)), item.name);
+            live.scheduler.flush();
+            live.adapter.clearFinishPreview();
+            live.scheduler.flush();
+            const shown = new Set();
+            renderedScene().traverse(object => { if (object.geometry) shown.add(object.geometry); });
+            const disposedOnScreen = [...shown].filter(geometry => disposals.has(geometry)).length;
+            const cache = projected(live);
+            live.adapter.dispose();
+            const twice = [...disposals.values()].filter(count => count > 1).length;
+            results.push({ name: item.name, disposedOnScreen, twice, cache, full });
+        }
+    } finally {
+        THREE.BufferGeometry.prototype.dispose = dispose;
+    }
+    assert.deepStrictEqual(results, results.map(item => ({ name: item.name, disposedOnScreen: 0, twice: 0,
+        cache: item.full, full: item.full })));
+});
+
+test('placements fitted by their own UVs, moved edit after edit, keep what they draw and the cache a full rebuild has', async () => {
+    // The same models handed back as they are, on the paths that draw groups: an instanced batch, a part finish over an
+    // object finish, and one over a projection. Nothing the scene holds is disposed, nothing twice.
+    const THREE = await libraryThree();
+    const dispose = THREE.BufferGeometry.prototype.dispose;
+    const disposals = new Map();
+    THREE.BufferGeometry.prototype.dispose = function () {
+        disposals.set(this, (disposals.get(this) || 0) + 1);
+        return dispose.call(this);
+    };
+    const fitByUVs = id => ({ appearanceId: id, mapping: 'uv' });
+    const scene = z => ({ assetCatalog: [asset('rack', REV_A), asset('bench', REV_A)], layout: { placements: [
+        Object.assign(placement('uv-parts', 'rack', REV_A, 0, 0, z), { appearance: fitByUVs('wood-oak'),
+            componentMaterials: { representation: 'overview', overrides: [{ key: 'p:Body#0', appearanceId: 'wood-walnut', mapping: 'uv' }] } }),
+        Object.assign(placement('over-box', 'rack', REV_A, 3, 0, z), { appearance: { appearanceId: 'wood-oak', grain: 'length' },
+            componentMaterials: { representation: 'overview', overrides: [{ key: 'p:Body#0', appearanceId: 'wood-walnut', mapping: 'uv' }] } }),
+        finishPlacement('kept', 'bench', 6, fitByUVs('wood-maple'))] } });
+    const projected = data => data.adapter.getDiagnostics().appearanceLibrary.projectedGeometries;
+    const steps = [];
+    try {
+        const fresh = await libraryFixture();
+        await drawnScene(fresh, scene(5));
+        const full = projected(fresh);
+        fresh.adapter.dispose();
+        disposals.clear();
+        const live = await libraryFixture();
+        for (let z = 0; z <= 5; z += 1) {
+            await drawnScene(live, scene(z));
+            const shown = new Set();
+            renderedScene().traverse(object => { if (object.geometry) shown.add(object.geometry); });
+            steps.push({ cache: projected(live) - full, disposedOnScreen: [...shown].filter(geometry => disposals.has(geometry)).length });
+        }
+        assert.strictEqual(live.adapter.getDiagnostics().status, 'ready');
+        live.adapter.dispose();
+    } finally {
+        THREE.BufferGeometry.prototype.dispose = dispose;
+    }
+    assert.deepStrictEqual(steps, steps.map(() => ({ cache: 0, disposedOnScreen: 0 })));
+    assert.deepStrictEqual([...disposals.values()].filter(count => count > 1), [], 'nothing disposed twice');
+});
+
 test('a scene rebuild keeps the old materials until the new scene has drawn, so their shader programs are reused', async () => {
     // 2026-11-03: a commit's rebuild disposed every material first, and three compiled all their programs again.
     // A changed catalog takes the full rebuild (placement edits alone rebuild only the groups they change).

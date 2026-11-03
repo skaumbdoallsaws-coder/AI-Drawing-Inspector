@@ -310,6 +310,22 @@ async function runThreeTests() {
     }
     assert.strictEqual(bare.attributes.normal, undefined, 'the shared bounds box itself is untouched');
 
+    // A finish that fits a geometry as it is hands it back and leaves it out of the cache: whoever empties the cache
+    // disposes what it holds, and these belong to their models (2026-11-03, Codex on c0bbd61).
+    const fitCache = new Map();
+    assert.strictEqual(finishes.cachedFinishGeometry(THREE, fitCache, box, null, { mapping: 'uv', axis: 'x' }), box,
+        'a model with UVs of its own keeps them under "Model UVs if present"');
+    const empty = new THREE.BufferGeometry();
+    assert.strictEqual(finishes.cachedFinishGeometry(THREE, fitCache, empty, null, { mapping: 'box', axis: 'x' }), empty,
+        'nothing to project');
+    assert.strictEqual(finishes.cachedFinishGeometry(THREE, fitCache, projected, null, { mapping: 'uv', axis: 'x' }), projected,
+        'a projection already on the mesh');
+    assert.strictEqual(fitCache.size, 0, 'none of them is cached');
+    const fitted = finishes.cachedFinishGeometry(THREE, fitCache, bare, null, { mapping: 'uv', axis: 'x' });
+    assert.notStrictEqual(fitted, bare, 'a model without UVs is projected');
+    assert.strictEqual(fitCache.size, 1);
+    assert.strictEqual(finishes.cachedFinishGeometry(THREE, fitCache, bare, null, { mapping: 'uv', axis: 'x' }), fitted, 'once');
+
     const requested = [];
     const fakeTextures = {
         instance(url, colorSpace, transform, onFailed) {

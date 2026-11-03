@@ -914,7 +914,8 @@
     function normalizeLayoutProposalPreview(
         receipt,
         expectedAlternative,
-        expectedRevision
+        expectedRevision,
+        normalizedAlternative
     ) {
         const source = object(receipt, 'layout proposal preview receipt');
         if (source.previewPure !== true) {
@@ -937,7 +938,10 @@
             source.alternative,
             'layout proposal preview alternative'
         );
-        const alternative = normalizeLayoutAlternative({
+        // fetchAndInstallOperationProposal constructs its expected alternative
+        // from this very receipt. Reuse that normalization within this install;
+        // separately fetched review receipts still normalize and validate anew.
+        const alternative = normalizedAlternative || normalizeLayoutAlternative({
             ...rawAlternative,
             proposalId: proposalId,
             transactionBinding: rawAlternative.transactionBinding
@@ -2855,7 +2859,8 @@
                         expiresAt: alternative.expiresAt || source.expiresAt,
                     }],
                 }, reference.revision, reference);
-                normalizeLayoutProposalPreview(source, proposal.alternatives[0], reference.revision);
+                normalizeLayoutProposalPreview(source, proposal.alternatives[0], reference.revision,
+                    proposal.alternatives[0]);
                 return validateOperationProposal(proposal, reference);
             }, options);
         }

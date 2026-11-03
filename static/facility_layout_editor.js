@@ -471,8 +471,8 @@
         return Math.abs(quotient - Math.round(quotient)) < 0.000001;
     }
 
-    function collectTopPlanBounds(layout, options, includeWorldBounds) {
-        const geometry = collectTopPlanGeometry(layout, options);
+    function collectTopPlanBounds(layout, options, includeWorldBounds, inputGeometry) {
+        const geometry = inputGeometry || collectTopPlanGeometry(layout, options);
         let minX = Infinity;
         let minZ = Infinity;
         let maxX = -Infinity;
@@ -1462,12 +1462,14 @@
         layout,
         proposalPreview,
         options,
-        includeWorldBounds
+        includeWorldBounds,
+        geometry
     ) {
         const bounds = collectTopPlanBounds(
             layout,
             options,
-            includeWorldBounds
+            includeWorldBounds,
+            geometry
         );
         const beforePlacements = proposalPreview
             && Array.isArray(proposalPreview.beforePlacements)
@@ -1542,6 +1544,8 @@
         this.type = 'top-plan';
         this.layout = null;
         this.geometry = null;
+        this.updateDepth = 0;
+        this.renderPending = false;
         this.environmentDiagnostics = null;
         this.projection = null;
         this.renderProjection = null;
@@ -2322,7 +2326,44 @@
         return this.activityPathTypesVisible[actorType];
     };
 
+    // Workspace installs set the document, preview and selection synchronously.
+    // Keep their state changes immediate, but build the SVG only at the end.
+    TopPlanAdapter.prototype.beginUpdate = function () {
+        if (!this.updateDepth) this.updateGeometry = null;
+        this.updateDepth += 1;
+    };
+
+    TopPlanAdapter.prototype.endUpdate = function () {
+        this.updateDepth = Math.max(0, this.updateDepth - 1);
+        if (!this.updateDepth) {
+            try {
+                if (this.renderPending) {
+                    this.renderPending = false;
+                    this._render();
+                }
+            } finally {
+                this.updateGeometry = null;
+            }
+        }
+    };
+
+    TopPlanAdapter.prototype._collectGeometry = function () {
+        // Fit and render consume the same plan geometry during one install.
+        // This cache lives only for the synchronous transaction, and a new
+        // setLayout takes a new copy, even when its revision string is reused.
+        if (this.updateGeometry && this.updateGeometry.layout === this.layout) {
+            return this.updateGeometry.geometry;
+        }
+        const geometry = collectTopPlanGeometry(this.layout, this.options);
+        if (this.updateDepth) this.updateGeometry = { layout: this.layout, geometry: geometry };
+        return geometry;
+    };
+
     TopPlanAdapter.prototype._render = function () {
+        if (this.updateDepth) {
+            this.renderPending = true;
+            return;
+        }
         if (this.disposed || this.suspended || !this.svg) return;
         const size = this._measure();
         // Areas zone labels must not cover. The floating controls are measured
@@ -2342,7 +2383,7 @@
             return;
         }
 
-        this.geometry = collectTopPlanGeometry(this.layout, this.options);
+        this.geometry = this._collectGeometry();
         if (!this.projection
                 || this.projection.width !== size.width
                 || this.projection.height !== size.height) {
@@ -2350,7 +2391,9 @@
                 proposalReviewBounds(
                     this.layout,
                     this.proposalPreview,
-                    this.options
+                    this.options,
+                    undefined,
+                    this.geometry
                 ),
                 size,
                 this.options.padding
@@ -3894,13 +3937,14 @@
     TopPlanAdapter.prototype.setGhostPlacement = function (ghost) {
         if (this.disposed) return false;
         if (!ghost) {
+            if (!this.ghostPlacement) return true;
             this.ghostPlacement = null;
             this._render();
             return true;
         }
         const position = ghost.worldPosition || ghost.position;
         if (!position || !finite(position.x) || !finite(position.z)) return false;
-        this.ghostPlacement = {
+        const next = {
             assetId: ghost.assetId || '',
             assetDefinitionRevision: ghost.assetDefinitionRevision || '',
             transform: {
@@ -3916,6 +3960,8 @@
             valid: ghost.valid !== false,
             metadata: clone(ghost.metadata || {}),
         };
+        if (JSON.stringify(next) === JSON.stringify(this.ghostPlacement)) return true;
+        this.ghostPlacement = next;
         this._render();
         return true;
     };
@@ -4156,10 +4202,17 @@
     TopPlanAdapter.prototype.setSelections = function (identifiers) {
         if (this.disposed) return false;
         const requested = Array.isArray(identifiers) ? identifiers : [];
-        this.selections = new Set(requested.filter(function (identifier) {
+        const selections = new Set(requested.filter(function (identifier) {
             return typeof identifier === 'string' && identifier;
         }));
-        this.selection = requested.length ? requested[0] : null;
+        const selection = requested.length ? requested[0] : null;
+        const previous = Array.from(this.selections);
+        if (this.selection === selection && previous.length === selections.size
+                && Array.from(selections).every(function (id, index) {
+                    return id === previous[index];
+                })) return true;
+        this.selections = selections;
+        this.selection = selection;
         this._render();
         return true;
     };
@@ -4202,7 +4255,8 @@
                 this.layout,
                 this.proposalPreview,
                 this.options,
-                includeWorldBounds !== false || !hasLayoutContent
+                includeWorldBounds !== false || !hasLayoutContent,
+                this._collectGeometry()
             ),
             viewport,
             fitPadding
@@ -4655,7 +4709,11 @@
         const pending = [];
         this.views.forEach(function (entry) {
             if (typeof entry.adapter.setLayout === 'function') {
-                entry.adapter.setLayout(clone(this.layout));
+                // Our plan adapter already takes its own defensive copy. Keep
+                // the isolation boundary for arbitrary third-party adapters.
+                entry.adapter.setLayout(entry.adapter instanceof TopPlanAdapter
+                    && entry.adapter.setLayout === TopPlanAdapter.prototype.setLayout
+                    ? this.layout : clone(this.layout));
             } else if (typeof entry.adapter.setScene === 'function') {
                 const result = entry.adapter.setScene({
                     layout: clone(this.layout),
@@ -4685,7 +4743,7 @@
         }, this);
     };
 
-    FacilityLayoutEditorController.prototype.setLayout = function (layout) {
+    FacilityLayoutEditorController.prototype.setLayout = function (layout, options) {
         this._assertActive();
         this.layout = clone(assertLayout(layout));
         if (this.selection && !this._placementExists(this.selection)) {
@@ -4693,7 +4751,7 @@
         }
         this._notifyLayout();
         this._notifySelection();
-        return this.getState();
+        if (!options || options.returnState !== false) return this.getState();
     };
 
     FacilityLayoutEditorController.prototype.setAssetCatalog = function (catalog) {

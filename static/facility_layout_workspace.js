@@ -17764,7 +17764,29 @@
         }
     };
 
-    Workspace.prototype._syncController = function () {
+    Workspace.prototype._syncController = function (syncGhost) {
+        const plan = this.topAdapter;
+        const batch = plan && typeof plan.beginUpdate === 'function'
+            && typeof plan.endUpdate === 'function';
+        if (batch) plan.beginUpdate();
+        try {
+            this._syncPlanSettingsFromLayout();
+            this._updateController();
+            if (syncGhost) {
+                if (this.state.ghostPlacement && this.state.ghostPlacement.worldPosition) {
+                    this._renderGhost(this.state.ghostPlacement.worldPosition,
+                        this.state.ghostPlacement.assetId);
+                } else if (!this.state.ghostPlacement) {
+                    this._hideGhost();
+                }
+            }
+        } finally {
+            if (batch) plan.endUpdate();
+        }
+        if (this.state.layout && this.controller) this._notifyStructure();
+    };
+
+    Workspace.prototype._updateController = function () {
         if (!this.state.layout || !this.controller) return;
         const layoutAlternative = activeLayoutAlternative(this.state);
         const construction = this.constructionPreview;
@@ -17784,7 +17806,7 @@
         if (this.siteView) this.siteView.render(renderedLayout, { readOnly: this.sitePreviewReadOnly });
         const layoutFingerprint = JSON.stringify(renderedLayout);
         if (layoutFingerprint !== this.lastLayoutFingerprint) {
-            this.controller.setLayout(renderedLayout);
+            this.controller.setLayout(renderedLayout, { returnState: false });
             this.lastLayoutFingerprint = layoutFingerprint;
             this.lastLayoutFitFingerprint = fitFingerprintOf(renderedLayout);
         }
@@ -17865,7 +17887,6 @@
                 return placementIds.has(id);
             }));
         }
-        this._notifyStructure();
     };
 
     Workspace.prototype._syncPlanSettingsFromLayout = function () {
@@ -17947,17 +17968,7 @@
         } else {
             this.root.removeAttribute('data-full-layout-preview');
         }
-        this._syncPlanSettingsFromLayout();
-        this._syncController();
-        if (this.state.ghostPlacement
-                && this.state.ghostPlacement.worldPosition) {
-            this._renderGhost(
-                this.state.ghostPlacement.worldPosition,
-                this.state.ghostPlacement.assetId
-            );
-        } else if (!this.state.ghostPlacement) {
-            this._hideGhost();
-        }
+        this._syncController(true);
         this._renderProperties();
         if (this.refreshAppearanceDialog) this.refreshAppearanceDialog();
         this._renderAssetBrowser();

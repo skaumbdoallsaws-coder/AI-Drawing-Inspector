@@ -492,3 +492,157 @@ def test_a_sage_recolour_through_the_gateway_keeps_the_ceiling_and_roof(tmp_path
         assert service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["revision"] == current["revision"]
     finally:
         host.close()
+
+
+def test_edit_zone_refuses_extensions_that_are_not_an_object():
+    # Codex review of 668b7a4: on a covered zone a list, null, text or number became {ceiling, roof}, clearing the
+    # style; on a bare zone the same input failed later. Both are refused now, as the schema says.
+    for start in (_covered_lounge(), _lounge_layout()):
+        for sent in ([], None, "style", 3):
+            with pytest.raises(FacilityLayoutError) as refused:
+                apply_facility_layout_operations(start, [{"op": "edit_zone", "zoneId": "zn-lounge",
+                                                          "patch": {"extensions": sent}}])
+            assert refused.value.code == "invalid_zone_extensions", sent
+
+
+def _http_lounge(tmp_path):
+    """The bootstrap layout with a lounge and a bar saved through the HTTP API's operations save, then the lounge
+    covered (open deck and roof); a client for that API and the revision before the covers."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from ai_inspector.facility_layout.api import create_facility_layout_router
+    from ai_inspector.facility_layout.host import LocalFacilityLayoutHost, LOCAL_SITE_ID, LOCAL_LAYOUT_ID
+    host = LocalFacilityLayoutHost(tmp_path / "facility", private_assets=False)
+    host.ensure_bootstrap()
+    principal = host.principal()
+    app = FastAPI()
+    app.include_router(create_facility_layout_router(service=host.service, principal_resolver=lambda request: principal))
+    client = TestClient(app, headers={"X-InspectorPro-Session": "covers-test"})
+    url = f"/api/facility-layouts/{LOCAL_SITE_ID}/{LOCAL_LAYOUT_ID}"
+    zone = {"anchors": [], "evidence": [], "floorElevation": 0, "zoneType": "workcell"}
+    for operations in ([{"op": "add_zone", "zoneId": "zn-lounge",
+                         "zone": {**zone, "label": "Lounge", "boundary": rectangle(0, 0, 10, 10)}},
+                        {"op": "add_zone", "zoneId": "zn-bar",
+                         "zone": {**zone, "label": "Bar", "boundary": rectangle(10, 0, 20, 10)}}],
+                       [{"op": "set_zone_ceiling", "zoneId": "zn-lounge", **DECK},
+                        {"op": "set_zone_roof", "zoneId": "zn-lounge", **ROOF}]):
+        current = client.get(url).json()
+        response = client.put(url, json={"baseRevision": current["revision"], "operations": operations})
+        assert response.status_code == 200, response.text
+    return host, client, url, current["revision"]
+
+
+def test_a_whole_layout_save_keeps_the_ceiling_and_roof_and_a_saved_revision_restores_whole(tmp_path):
+    # Codex review of 668b7a4: the HTTP PUT of a whole layout bypassed edit_zone's rule.
+    host, client, url, bare_revision = _http_lounge(tmp_path)
+    try:
+        covered = client.get(url).json()
+        document = deepcopy(covered["layout"])
+        _lounge(document)["extensions"] = {"style": STYLE}
+        saved = client.put(url, json={"baseRevision": covered["revision"], "layout": document})
+        assert saved.status_code == 200, saved.text
+        assert _lounge(saved.json()["layout"])["extensions"] == {"style": STYLE, "ceiling": DECK, "roof": ROOF}
+        recoloured = client.get(url).json()
+        for zone_id, extensions in (("zn-lounge", {"style": STYLE, "ceiling": {"heightMeters": 4}, "roof": ROOF}),
+                                    ("zn-lounge", {"style": STYLE, "ceiling": DECK, "roof": None}),
+                                    ("zn-bar", {"ceiling": {"heightMeters": 3}})):
+            changed = deepcopy(recoloured["layout"])
+            next(z for z in changed["zones"] if z["zoneId"] == zone_id)["extensions"] = extensions
+            refused = client.put(url, json={"baseRevision": recoloured["revision"], "layout": changed})
+            assert refused.status_code == 422 and refused.json()["error"]["code"] == "zone_ceiling_or_roof_kept", \
+                (zone_id, extensions, refused.text)
+            assert "set_zone_" in refused.json()["error"]["message"]
+        assert client.get(url).json()["revision"] == recoloured["revision"]
+        # Sent unchanged, nothing changes.
+        same = client.put(url, json={"baseRevision": recoloured["revision"], "layout": recoloured["layout"]})
+        assert same.status_code == 200 and same.json()["revision"] == recoloured["revision"]
+        # A saved revision sent whole is a restore (an Undo): the one before the covers takes them off.
+        earlier = client.get(url + "/revisions/" + bare_revision).json()["layout"]
+        assert "ceiling" not in (_lounge(earlier).get("extensions") or {})
+        restored = client.put(url, json={"baseRevision": recoloured["revision"], "layout": earlier})
+        assert restored.status_code == 200, restored.text
+        assert not (_lounge(restored.json()["layout"]).get("extensions") or {}).get("ceiling")
+        assert not (_lounge(restored.json()["layout"]).get("extensions") or {}).get("roof")
+        # And the covered revision sent whole puts them back (a Redo).
+        redone = client.put(url, json={"baseRevision": restored.json()["revision"], "layout": covered["layout"]})
+        assert redone.status_code == 200, redone.text
+        assert _lounge(redone.json()["layout"])["extensions"] == {"ceiling": DECK, "roof": ROOF}
+        # Edited, an old revision is no restore: a new label on the bare one keeps the covers now saved.
+        edited = deepcopy(earlier)
+        _lounge(edited)["label"] = "Lounge 2"
+        kept = client.put(url, json={"baseRevision": redone.json()["revision"], "layout": edited})
+        assert kept.status_code == 200, kept.text
+        assert _lounge(kept.json()["layout"])["label"] == "Lounge 2"
+        assert _lounge(kept.json()["layout"])["extensions"] == {"ceiling": DECK, "roof": ROOF}
+    finally:
+        host.close()
+
+
+def test_a_whole_layout_save_leaves_malformed_zones_to_validation(tmp_path):
+    # Codex review of 216cd26: a covered, styled zone sent with "extensions": null became {ceiling, roof} and saved
+    # without its style (668b7a4 refused it); "zones": 3 and a list zoneId raised TypeError, not a 422; a zone without
+    # an id sending its covers got zone_ceiling_or_roof_kept, not invalid_id. Validation answers as without the rule.
+    host, client, url, _ = _http_lounge(tmp_path)
+    try:
+        covered = client.get(url).json()
+        document = deepcopy(covered["layout"])
+        _lounge(document)["extensions"] = {"style": STYLE, "ceiling": DECK, "roof": ROOF}
+        styled = client.put(url, json={"baseRevision": covered["revision"], "layout": document})
+        assert styled.status_code == 200, styled.text
+        styled = styled.json()
+        cases = (("extensions null", lambda doc: _lounge(doc).update(extensions=None), "invalid_layout_shape"),
+                 ("extensions a list", lambda doc: _lounge(doc).update(extensions=[]), "invalid_layout_shape"),
+                 ("zones a number", lambda doc: doc.update(zones=3), "invalid_layout_shape"),
+                 ("a zone a number", lambda doc: doc["zones"].append(5), "invalid_layout_shape"),
+                 ("zoneId a list", lambda doc: _lounge(doc).update(zoneId=[]), "invalid_id"),
+                 ("no zoneId", lambda doc: _lounge(doc).pop("zoneId"), "invalid_id"),
+                 ("zoneId malformed", lambda doc: _lounge(doc).update(zoneId="bad id!"), "invalid_id"))
+        for name, change, code in cases:
+            changed = deepcopy(styled["layout"])
+            change(changed)
+            refused = client.put(url, json={"baseRevision": styled["revision"], "layout": changed})
+            assert refused.status_code == 422 and refused.json()["error"]["code"] == code, (name, refused.text)
+        after = client.get(url).json()
+        assert after["revision"] == styled["revision"]
+        assert _lounge(after["layout"])["extensions"] == {"style": STYLE, "ceiling": DECK, "roof": ROOF}
+    finally:
+        host.close()
+
+
+def test_undo_and_redo_of_a_ceiling_and_roof_still_work(tmp_path):
+    # Receipt-bound Undo (the UI's Undo after an approved or direct change, and Sage's) restores the revision before
+    # set_zone_ceiling and set_zone_roof; doing them again sets them again; their own null removes them.
+    from ai_inspector.facility_layout.host import LocalFacilityLayoutHost, LOCAL_SITE_ID, LOCAL_LAYOUT_ID
+    from ai_inspector.facility_layout.operation_proposals import create
+    host = LocalFacilityLayoutHost(tmp_path / "facility", private_assets=False)
+    try:
+        service, principal = host.service, host.principal()
+        host.ensure_bootstrap()
+
+        def commit(key, **request):
+            revision = service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["revision"]
+            proposal = create(service, principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, revision, **request)
+            binding = proposal["alternative"]["transactionBinding"]
+            approval = service.approve_layout_proposal(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID,
+                proposal["proposalId"], binding, session_id="test-session", idempotency_key=key, explicit_approval=True)
+            return service.apply_layout_proposal(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, approval["approvalToken"],
+                binding, session_id="test-session", idempotency_key=key)
+
+        commit("lounge-key", operations=[{"op": "add_zone", "zoneId": "zn-lounge", "zone": {
+            "label": "Lounge", "zoneType": "workcell", "anchors": [], "evidence": [], "floorElevation": 0,
+            "boundary": rectangle(0, 0, 10, 10)}}])
+        bare = _lounge(service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["layout"])
+        covers = [{"op": "set_zone_ceiling", "zoneId": "zn-lounge", **DECK},
+                  {"op": "set_zone_roof", "zoneId": "zn-lounge", **ROOF}]
+        for round_ in range(2):
+            done = commit(f"covers-key-{round_}", operations=covers)
+            assert _lounge(done["layout"])["extensions"] == {"ceiling": DECK, "roof": ROOF}
+            undone = commit(f"undo-key-{round_}", undo_receipt_id=done["receipt"]["receiptId"])
+            assert _lounge(undone["layout"]) == bare
+        commit("covers-again", operations=covers)
+        cleared = commit("clear-key", operations=[{"op": "set_zone_ceiling", "zoneId": "zn-lounge", "heightMeters": None},
+                                              {"op": "set_zone_roof", "zoneId": "zn-lounge", "heightMeters": None}])
+        extensions = _lounge(cleared["layout"]).get("extensions") or {}
+        assert "ceiling" not in extensions and "roof" not in extensions
+    finally:
+        host.close()

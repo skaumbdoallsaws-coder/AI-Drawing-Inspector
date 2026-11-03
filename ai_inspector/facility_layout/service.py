@@ -39,6 +39,7 @@ from .authorization import FacilityPrincipal, require_facility_action
 from .errors import (
     FacilityAuthorizationError,
     FacilityConflictError,
+    FacilityLayoutError,
     FacilityNotFoundError,
     FacilityValidationError,
 )
@@ -1749,7 +1750,11 @@ class FacilityLayoutService:
         layout_id: str,
         document: Mapping[str, Any],
         base_revision: str,
+        *,
+        keep_zone_covers: bool = False,
     ) -> dict[str, Any]:
+        if keep_zone_covers:
+            document = self._kept_zone_covers(principal, site_id, layout_id, document)
         dependencies = self.validate_dependencies(
             principal,
             site_id,
@@ -1780,6 +1785,29 @@ class FacilityLayoutService:
         result["spatialDiagnostics"] = spatial
         result["routingDiagnostics"] = routing
         return result
+
+    def _kept_zone_covers(self, principal, site_id, layout_id, document):
+        """A whole-document save (the HTTP PUT) keeps zone ceilings and roofs as set_zone_ceiling and set_zone_roof
+        left them (ceilings.keep_layout_zone_covers), 2026-11-03. A document that is one of the layout's saved
+        revisions (Undo or a restore sending a whole earlier revision) is saved whole."""
+        from .ceilings import keep_layout_zone_covers
+        current = self.layout_repository.get_layout(principal, site_id, layout_id)
+        try:
+            revision = layout_revision(document)
+        except (FacilityLayoutError, TypeError, ValueError, KeyError):
+            revision = None
+        if revision is not None and revision != current["revision"]:
+            try:
+                self.layout_repository.get_layout_revision(principal, site_id, layout_id, revision)
+                return document
+            except FacilityNotFoundError:
+                pass
+        try:
+            return keep_layout_zone_covers(current["layout"], document)
+        except ValueError as exc:
+            # The document's own errors come first, as without the rule (a zone without an id sending a ceiling).
+            validate_layout(document)
+            raise FacilityValidationError("zone_ceiling_or_roof_kept", str(exc)) from exc
 
     def apply_operations(
         self,

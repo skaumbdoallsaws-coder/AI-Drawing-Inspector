@@ -340,6 +340,7 @@ def create_facility_layout_router(
                 layout_id,
                 document,
                 base_revision,
+                keep_zone_covers=True,
             )
         )
 

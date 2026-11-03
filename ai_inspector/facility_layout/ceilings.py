@@ -58,6 +58,62 @@ def normalize_roof(value: Any) -> dict:
     return {"heightMeters": _height(value["heightMeters"], "roof")}
 
 
+COVERS = ((KEY, "set_zone_ceiling"), (ROOF_KEY, "set_zone_roof"))
+
+
+def kept_zone_covers(saved_zone: Any, sent_extensions: Mapping[str, Any]) -> dict:
+    """A zone's ceiling and roof change only through set_zone_ceiling and set_zone_roof (2026-11-03). For extensions
+    sent to replace a zone's (an edit_zone patch, or a zone in a whole-document save): each of the two left out keeps
+    its saved value (None: none), and one sent must equal it. Returns {key: kept value or None}; raises ValueError
+    naming the operation that owns a changed one."""
+    extensions = saved_zone.get("extensions") if isinstance(saved_zone, Mapping) else None
+    saved = extensions if isinstance(extensions, Mapping) else {}
+    kept = {}
+    for key, owner in COVERS:
+        if key in sent_extensions and sent_extensions[key] != saved.get(key):
+            raise ValueError(f"A zone's extensions.{key} stays as saved: leave it out or send it unchanged, and change "
+                             f"it with {owner}.")
+        kept[key] = deepcopy(saved.get(key))
+    return kept
+
+
+def put_back_zone_covers(zone: dict, kept: Mapping[str, Any]) -> None:
+    """Set the zone's extensions.ceiling and extensions.roof to KEPT (kept_zone_covers), None meaning none."""
+    extensions = zone.get("extensions")
+    if not isinstance(extensions, dict):
+        if all(value is None for value in kept.values()):
+            return
+        extensions = zone["extensions"] = {}
+    for key, value in kept.items():
+        if value is None:
+            extensions.pop(key, None)
+        else:
+            extensions[key] = deepcopy(value)
+
+
+def keep_layout_zone_covers(saved_layout: Mapping[str, Any], document: Mapping[str, Any]) -> dict:
+    """A whole-document save (the HTTP PUT of a layout) under the same rule as edit_zone: a copy of DOCUMENT whose
+    zones keep their saved ceilings and roofs where they leave out extensions or leave them out of extensions; a
+    changed one (or one on a new zone) raises ValueError. What validation refuses is left as sent for it to refuse:
+    a document that is not an object, zones that are not a list, a zone that is not an object or has no string
+    zoneId, and extensions sent that are not an object (null included: only a zone without the field keeps them)."""
+    if not isinstance(document, Mapping):
+        return document
+    result = deepcopy(dict(document))
+    zones = result.get("zones")
+    if not isinstance(zones, list):
+        return result
+    saved = {zone["zoneId"]: zone for zone in saved_layout.get("zones") or []
+             if isinstance(zone, Mapping) and isinstance(zone.get("zoneId"), str)}
+    for zone in zones:
+        if not isinstance(zone, dict) or not isinstance(zone.get("zoneId"), str):
+            continue
+        if "extensions" in zone and not isinstance(zone["extensions"], Mapping):
+            continue
+        put_back_zone_covers(zone, kept_zone_covers(saved.get(zone["zoneId"]), zone.get("extensions") or {}))
+    return result
+
+
 def zone_ceiling(zone: Any) -> Mapping[str, Any] | None:
     extensions = zone.get("extensions") if isinstance(zone, Mapping) else None
     value = extensions.get(KEY) if isinstance(extensions, Mapping) else None

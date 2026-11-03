@@ -6391,6 +6391,398 @@ test('late detail load takes the current appearance rather than the original req
     data.adapter.dispose();
 });
 
+test('a scene load tints each group as it is built, not every group again after each one', async () => {
+    // 2026-11-03: each group built re-applied selection and appearance to all groups (1.7 s of a 2,242-placement
+    // plant's load). The groups built earlier are already up to date; the result is the same.
+    const count = 40;
+    const input = {layout:{placements:Array.from({length:count}, (_, k) => ({...placement('p' + k, 'a' + k, REV_A, k * 3, 0, 1),
+        ...(k % 3 === 0 ? {appearance:{color:'#bb4040'}} : {})}))},
+        assetCatalog:Array.from({length:count}, (_, k) => asset('a' + k, REV_A))};
+    const data=fixture();data.adapter.mount(data.host);
+    data.adapter.setSelection(['p1', 'p4']);
+    const setHex=FakeColor.prototype.setHex;let writes=0;
+    FakeColor.prototype.setHex=function(value){writes+=1;return setHex.call(this,value);};
+    try { await data.adapter.setScene(input); data.scheduler.flush(); }
+    finally { FakeColor.prototype.setHex=setHex; }
+    assert(writes > 0 && writes < 20 * count, 'colour writes while ' + count + ' groups load: ' + writes);
+    const colours=new Map();
+    FakeRenderer.instances.at(-1).lastRender.scene.traverse(o => {
+        if (o.userData?.placementId) o.traverse(c => { if (c.material) colours.set(o.userData.placementId, c.material); });
+    });
+    assert.equal(colours.size, count);
+    for (let k = 0; k < count; k += 1) {
+        assert.equal(colours.get('p' + k).color.getHex() === 0xbb4040, k % 3 === 0, 'the tint of p' + k);
+    }
+    // The same as applying to every group: a selection change after the load writes nothing new for unchanged groups.
+    const selected=['p1','p4'].map(id => colours.get(id)), other=colours.get('p2');
+    const before=[...selected, other].map(m => JSON.stringify([m.color.getHex(), m.emissive && m.emissive.getHex()]));
+    data.adapter.setSelection([]); data.adapter.setSelection(['p1', 'p4']);
+    assert.deepEqual([...selected, other].map(m => JSON.stringify([m.color.getHex(), m.emissive && m.emissive.getHex()])), before);
+    data.adapter.dispose();
+});
+
+test('a placement edit rebuilds only the groups it changes, drawn as a full rebuild draws them, and its Undo too', async () => {
+    // 2026-11-03: a commit or Undo on a big plant reloaded every model; now unchanged groups keep their objects,
+    // changed ones copy the model on screen, and only an asset not on screen loads.
+    const THREE = await libraryThree();
+    const calls = [];
+    const make = () => {
+        const data = fixture({ THREE, facilityLibrary: libraryStore(), assetResolver: request => {
+            calls.push(request.assetId);
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage === 'overview') {
+                const object = new THREE.Group();
+                object.add(new THREE.Mesh(new THREE.BoxGeometry(2, 1, 0.5), new THREE.MeshStandardMaterial({ color: 0x8899aa })));
+                return object;
+            }
+            return null;
+        } });
+        data.adapter.mount(data.host);
+        data.renderer = FakeRenderer.instances.at(-1);
+        return data;
+    };
+    const drawn = async (data, input) => { await data.adapter.setScene(input); await settleAsync(); data.scheduler.flush(); };
+    const named = (data, name) => { let found = null;
+        data.renderer.lastRender.scene.traverse(o => { if (o.name === name) found = o; }); return found; };
+    const summary = data => {
+        const d = data.adapter.getDiagnostics();
+        const names = [];
+        data.renderer.lastRender.scene.traverse(o => { if (o.name) names.push(o.name); });
+        return { status: d.status, pendingLoads: d.pendingLoads, placements: d.placementCount, groups: d.representationGroups,
+            audit: [d.placementTransformAudit.transformMismatchIds, d.placementTransformAudit.missingPlacementCount],
+            names: names.sort() };
+    };
+    const catalog = ['one', 'two', 'three', 'four'].map(id => asset(id, REV_A));
+    const before = { assetCatalog: catalog, layout: { placements: [placement('a','one',REV_A,0,0,0),
+        placement('b','one',REV_A,3,0,0), placement('c','two',REV_A,6,0,0), placement('d','three',REV_A,9,0,0)] } };
+    // b moves (its group is copied), c goes and e comes (the same group, copied), d stays, f is a new asset.
+    const after = { assetCatalog: catalog, layout: { placements: [placement('a','one',REV_A,0,0,0),
+        placement('b','one',REV_A,3,0,4), placement('d','three',REV_A,9,0,0), placement('e','two',REV_A,6,0,8),
+        placement('f','four',REV_A,12,0,0)] } };
+    const live = make();
+    await drawn(live, before);
+    const kept = named(live, 'FacilityAssetGroup:three|' + REV_A);
+    assert(kept);
+    calls.length = 0;
+    await drawn(live, after);
+    assert.deepStrictEqual([...new Set(calls)], ['four'], 'only the asset not on screen loads');
+    assert.strictEqual(named(live, 'FacilityAssetGroup:three|' + REV_A), kept, 'an unchanged group keeps its objects');
+    const fresh = make();
+    await drawn(fresh, after);
+    assert.deepStrictEqual(summary(live), summary(fresh), 'drawn as a full rebuild draws it');
+    assert.strictEqual(summary(live).status, 'ready');
+    calls.length = 0;
+    await drawn(live, before);
+    assert.deepStrictEqual(calls, [], 'the Undo loads nothing');
+    const first = make();
+    await drawn(first, before);
+    assert.deepStrictEqual(summary(live), summary(first), 'the Undo is drawn as the first scene was');
+    [live, fresh, first].forEach(data => data.adapter.dispose());
+});
+
+test('a group drawn from a copy of a model on screen owns its geometry and textures, each disposed once', async () => {
+    // Codex on 4a05de6: the copy shared the geometry and textures of the group it came from, and that group was
+    // disposed under it (at once when a placement moved; later when the group it came from went).
+    const THREE = await libraryThree();
+    const data = fixture({ THREE, facilityLibrary: libraryStore(), assetResolver: request => {
+        if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+        if (request.stage === 'overview') {
+            const object = new THREE.Group();
+            object.add(new THREE.Mesh(new THREE.BoxGeometry(2, 1, 0.5),
+                new THREE.MeshStandardMaterial({ map: new THREE.Texture() })));
+            return object;
+        }
+        return null;
+    } });
+    data.adapter.mount(data.host);
+    const renderer = FakeRenderer.instances.at(-1);
+    const disposals = new Map();
+    const watch = resource => {
+        if (disposals.has(resource)) return;
+        disposals.set(resource, 0);
+        resource.addEventListener('dispose', () => disposals.set(resource, disposals.get(resource) + 1));
+    };
+    // Everything the model groups draw and hold; none of it may be disposed while it is.
+    const held = () => {
+        const found = new Set();
+        const scene = renderer.lastRender.scene;
+        scene.traverse(object => {
+            if (!/^FacilityAssetGroup:/.test(object.name || '')) return;
+            object.traverse(child => {
+                if (child.geometry) found.add(child.geometry);
+                (Array.isArray(child.material) ? child.material : [child.material]).filter(Boolean).forEach(material =>
+                    Object.values(material).forEach(value => { if (value && value.isTexture) found.add(value); }));
+            });
+        });
+        found.forEach(watch);
+        return [...found].filter(resource => disposals.get(resource) > 0).length;
+    };
+    const drawn = async layout => {
+        await data.adapter.setScene({ assetCatalog: [asset('rack', REV_A)], layout });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    const red = { appearanceId: 'paint-gloss-red' }, yellow = { appearanceId: 'paint-safety-yellow' };
+    const at = (id, z, appearance) => Object.assign(placement(id, 'rack', REV_A, id === 'a' ? 0 : 3, 0, z),
+        appearance ? { appearance } : {});
+    await drawn({ placements: [at('a', 0), at('b', 0, red)] });
+    assert.strictEqual(held(), 0);
+    await drawn({ placements: [at('a', 4), at('b', 0, red)] });
+    assert.strictEqual(held(), 0, 'a moved: its copy outlives the group it was copied from');
+    await drawn({ placements: [at('a', 4), at('b', 4, yellow)] });
+    assert.strictEqual(held(), 0, "b moved and changed finish: copied from a's model");
+    await drawn({ placements: [at('b', 4, yellow)] });
+    assert.strictEqual(held(), 0, 'a went: b keeps what it draws');
+    assert.strictEqual(data.adapter.getDiagnostics().status, 'ready');
+    data.adapter.dispose();
+    const twice = [...disposals.values()].filter(count => count !== 1).length;
+    assert.strictEqual(twice, 0, 'each geometry and texture is disposed exactly once');
+});
+
+test('a placement moved in place in the layout drawn last is drawn where it is now', async () => {
+    // Codex on 4a05de6: the change check read the placements' live objects, so moving one inside the same input and
+    // drawing that input again kept the old object, and the transform audit found the mismatch.
+    const data = await libraryFixture();
+    const input = { assetCatalog: [asset('rack', REV_A), asset('bench', REV_A)], layout: { placements: [
+        placement('a', 'rack', REV_A, 0, 0, 0), placement('b', 'bench', REV_A, 3, 0, 0)] } };
+    await data.adapter.setScene(input);
+    await settleAsync();
+    data.scheduler.flush();
+    input.layout.placements[0].transform.position.z = 4;
+    await data.adapter.setScene(input);
+    await settleAsync();
+    data.scheduler.flush();
+    let moved = null;
+    renderedScene().traverse(object => { if (object.userData && object.userData.placementId === 'a') moved = object; });
+    assert(moved);
+    assert.strictEqual(moved.position.z, 4);
+    const audit = data.adapter.getDiagnostics().placementTransformAudit;
+    assert.deepStrictEqual([audit.transformMismatchIds, audit.missingPlacementCount], [[], 0]);
+    data.adapter.dispose();
+});
+
+test('a custom finish changed with a move is drawn in its new color, as a full rebuild draws it', async () => {
+    // Codex on 4a05de6: grouping resolved custom finishes from the previous layout, so the moved placement kept red.
+    const scene = (z, color) => ({ assetCatalog: [asset('rack', REV_A)], layout: {
+        extensions: { facilityAppearances: { version: 1, custom: [
+            { appearanceId: 'custom-coat', label: 'Coat', baseAppearanceId: 'paint-gloss-red', color }] } },
+        placements: [Object.assign(placement('a', 'rack', REV_A, 0, 0, z), { appearance: { appearanceId: 'custom-coat' } }),
+            placement('kept', 'rack', REV_A, 6, 0, 0)] } });
+    const colorOf = () => {
+        let hex = null;
+        renderedScene().traverse(object => {
+            if (object.userData && object.userData.placementId === 'a') {
+                object.traverse(child => { if (child.isMesh) hex = child.material.color.getHexString(); });
+            }
+        });
+        return hex;
+    };
+    const draw = async (data, input) => { await data.adapter.setScene(input); await settleAsync(); data.scheduler.flush(); };
+    const live = await libraryFixture();
+    await draw(live, scene(0, '#c02020'));
+    const red = colorOf();
+    await draw(live, scene(4, '#2040c0'));
+    const moved = colorOf();
+    live.adapter.dispose();
+    const fresh = await libraryFixture();
+    await draw(fresh, scene(4, '#2040c0'));
+    const rebuilt = colorOf();
+    fresh.adapter.dispose();
+    assert.notStrictEqual(rebuilt, red);
+    assert.strictEqual(moved, rebuilt);
+});
+
+test('finish geometries leave the cache with the groups that used them', async () => {
+    // Codex on 4a05de6: alternating one wood-finished placement between two assets, with another group kept, grew the
+    // projected-geometry cache by each edit's groups, as nothing clears it between full rebuilds.
+    const catalog = [asset('rack', REV_A), asset('bench', REV_A), asset('desk', REV_A)];
+    const oak = { appearanceId: 'wood-oak', grain: 'length' };
+    const scene = assetId => ({ assetCatalog: catalog, layout: { placements: [
+        finishPlacement('kept', 'rack', 0, oak), finishPlacement('moving', assetId, 3, oak)] } });
+    const draw = async (data, input) => {
+        await data.adapter.setScene(input);
+        await settleAsync();
+        data.scheduler.flush();
+        return data.adapter.getDiagnostics().appearanceLibrary.projectedGeometries;
+    };
+    const fresh = await libraryFixture();
+    const full = await draw(fresh, scene('bench'));
+    fresh.adapter.dispose();
+    assert(full >= 2);
+    const live = await libraryFixture();
+    const sizes = [];
+    for (const assetId of ['bench', 'desk', 'bench', 'desk', 'bench', 'desk', 'bench']) {
+        sizes.push(await draw(live, scene(assetId)));
+    }
+    assert.strictEqual(live.adapter.getDiagnostics().status, 'ready');
+    live.adapter.dispose();
+    assert.deepStrictEqual(sizes, sizes.map(() => full), 'as many as a full rebuild holds, after every edit');
+});
+
+// Round 3 (Codex on a5c91fa): keeping a group and copying a model read only what was taken when it was grouped.
+const coat = color => ({ facilityAppearances: { version: 1, custom: [
+    { appearanceId: 'custom-coat', label: 'Coat', baseAppearanceId: 'paint-gloss-red', color }] } });
+const coatedPart = (id, x, z) => Object.assign(placement(id, 'rack', REV_A, x, 0, z || 0), { componentMaterials: {
+    representation: 'overview', overrides: [{ key: 'p:Body#0', appearanceId: 'custom-coat' }] } });
+const partColor = id => {
+    let hex = null;
+    renderedScene().traverse(object => {
+        if (object.userData && object.userData.placementId === id) {
+            object.traverse(child => { if (child.isMesh) hex = child.material.color.getHexString(); });
+        }
+    });
+    return hex;
+};
+const drawnScene = async (data, input) => {
+    await data.adapter.setScene(input);
+    await settleAsync();
+    data.scheduler.flush();
+};
+
+test('a custom finish on a part, changed while another placement moves, is drawn in its new color', async () => {
+    // Codex on a5c91fa: the keep check compared part finishes as saved, not as resolved, so the part stayed red.
+    const scene = (color, z) => ({ assetCatalog: [asset('rack', REV_A), asset('bench', REV_A)], layout: {
+        extensions: coat(color), placements: [coatedPart('painted', 0), placement('mover', 'bench', REV_A, 5, 0, z)] } });
+    const live = await libraryFixture();
+    await drawnScene(live, scene('#c02020', 0));
+    const red = partColor('painted');
+    await drawnScene(live, scene('#2040c0', 4));
+    const moved = partColor('painted');
+    live.adapter.dispose();
+    const fresh = await libraryFixture();
+    await drawnScene(fresh, scene('#2040c0', 4));
+    const rebuilt = partColor('painted');
+    fresh.adapter.dispose();
+    assert.notStrictEqual(rebuilt, red);
+    assert.strictEqual(moved, rebuilt);
+});
+
+test('a custom finish on a part, changed on its own, is drawn in its new color', async () => {
+    // The finish-only path kept groups whose parts were the same as saved, though a custom finish they use changed.
+    const scene = color => ({ assetCatalog: [asset('rack', REV_A), asset('bench', REV_A)], layout: {
+        extensions: coat(color), placements: [coatedPart('painted', 0), placement('other', 'bench', REV_A, 5, 0, 0)] } });
+    const live = await libraryFixture();
+    await drawnScene(live, scene('#c02020'));
+    const red = partColor('painted');
+    await drawnScene(live, scene('#2040c0'));
+    const changed = partColor('painted');
+    live.adapter.dispose();
+    const fresh = await libraryFixture();
+    await drawnScene(fresh, scene('#2040c0'));
+    const rebuilt = partColor('painted');
+    fresh.adapter.dispose();
+    assert.notStrictEqual(rebuilt, red);
+    assert.strictEqual(changed, rebuilt);
+});
+
+test('a placement switched in place from overview to detail and moved loads its detail, as a full rebuild does', async () => {
+    // Codex on a5c91fa: the models on screen were indexed by the representation their placements ask for, read from
+    // the live objects, so the overview model was taken for the detail one.
+    const THREE = await libraryThree();
+    const extra = { assetResolver: request => {
+        if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+        if (request.stage === 'overview' || request.stage === 'detail') {
+            const object = new THREE.Group();
+            object.name = request.stage + '-model';
+            object.add(new THREE.Mesh(new THREE.BoxGeometry(2, 1, 0.5), new THREE.MeshStandardMaterial()));
+            return object;
+        }
+        return null;
+    } };
+    const input = { assetCatalog: [asset('rack', REV_A), asset('bench', REV_A)], layout: { placements: [
+        Object.assign(placement('a', 'rack', REV_A, 0, 0, 0), { componentMaterials: { representation: 'overview', overrides: [] } }),
+        placement('b', 'bench', REV_A, 5, 0, 0)] } };
+    const groups = data => data.adapter.getDiagnostics().representationGroups;
+    const live = await libraryFixture(extra);
+    await drawnScene(live, input);
+    assert(groups(live).some(group => /^rack\|/.test(group.key || group.representationKey) && group.representation === 'overview'));
+    input.layout.placements[0].componentMaterials.representation = 'detail';
+    input.layout.placements[0].transform.position.z = 4;
+    await drawnScene(live, input);
+    const after = groups(live);
+    live.adapter.dispose();
+    const fresh = await libraryFixture(extra);
+    await drawnScene(fresh, input);
+    const rebuilt = groups(fresh);
+    fresh.adapter.dispose();
+    assert(rebuilt.some(group => group.representation === 'detail'));
+    assert.deepStrictEqual(after, rebuilt);
+});
+
+test('a placement changed in place while its model loads, then changed back, is drawn as saved', async () => {
+    // The group drew the part color it found when its model arrived; its snapshot held the one it was grouped with.
+    // Changed back, the layout matched the snapshot, and the scene was kept with the other color.
+    const THREE = await libraryThree();
+    let release = null;
+    const gate = new Promise(resolve => { release = resolve; });
+    const extra = { assetResolver: request => {
+        if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+        if (request.stage === 'overview') {
+            const object = new THREE.Group();
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 0.5), new THREE.MeshStandardMaterial({ color: 0x8899aa }));
+            mesh.userData.facilityPartKey = 'p:Body#0';
+            object.add(mesh);
+            return request.assetId === 'rack' ? gate.then(() => object) : object;
+        }
+        return null;
+    } };
+    const input = { assetCatalog: [asset('rack', REV_A), asset('bench', REV_A)], layout: { placements: [
+        Object.assign(placement('painted', 'rack', REV_A, 0, 0, 0), { componentMaterials: { representation: 'overview',
+            overrides: [{ key: 'p:Body#0', color: '#c02020', roughness: 0.5, metalness: 0 }] } }),
+        placement('other', 'bench', REV_A, 5, 0, 0)] } };
+    const live = await libraryFixture(extra);
+    const loading = live.adapter.setScene(input);
+    await settleAsync();
+    input.layout.placements[0].componentMaterials.overrides[0].color = '#2040c0';
+    release();
+    await loading;
+    await settleAsync();
+    live.scheduler.flush();
+    input.layout.placements[0].componentMaterials.overrides[0].color = '#c02020';
+    await drawnScene(live, input);
+    const drawn = partColor('painted');
+    assert.strictEqual(live.adapter.getDiagnostics().status, 'ready');
+    live.adapter.dispose();
+    const fresh = await libraryFixture(extra);
+    await drawnScene(fresh, input);
+    const rebuilt = partColor('painted');
+    fresh.adapter.dispose();
+    assert.strictEqual(rebuilt, 'c02020');
+    assert.strictEqual(drawn, rebuilt);
+});
+
+test('a scene rebuild keeps the old materials until the new scene has drawn, so their shader programs are reused', async () => {
+    // 2026-11-03: a commit's rebuild disposed every material first, and three compiled all their programs again.
+    // A changed catalog takes the full rebuild (placement edits alone rebuild only the groups they change).
+    let catalogs = 0;
+    const scene = placements => ({layout:{placements},
+        assetCatalog:[asset('one',REV_A),asset('two',REV_A),asset('spare-' + (catalogs += 1),REV_A)]});
+    const materialsIn = root => { const found=new Set(); root.traverse(o => {
+        if (o.userData?.placementId) o.traverse(c => { if (c.material) found.add(c.material); }); }); return found; };
+    const data=fixture();data.adapter.mount(data.host);
+    await data.adapter.setScene(scene([placement('a','one',REV_A,1,0,1),placement('b','two',REV_A,4,0,1)]));
+    data.scheduler.flush();
+    const root=FakeRenderer.instances.at(-1).lastRender.scene;
+    const old=materialsIn(root);
+    assert(old.size >= 2);
+    const pending=data.adapter.setScene(scene([placement('a','one',REV_A,1,0,1),placement('c','two',REV_A,7,0,1)]));
+    const during=materialsIn(root);
+    assert([...old].every(m => !during.has(m)), 'the old materials leave the scene at once');
+    assert([...old].every(m => m.disposeCount === 0), 'and stay undisposed while the new scene loads');
+    await pending;
+    assert.equal(data.adapter.getDiagnostics().status, 'ready');
+    assert([...old].every(m => m.disposeCount === 0), 'until the new scene has drawn');
+    data.scheduler.flush();
+    assert([...old].every(m => m.disposeCount === 1), 'then they are disposed, once');
+    // Disposing the adapter in the middle of a rebuild disposes what it set aside.
+    const current=materialsIn(root);
+    const next=data.adapter.setScene(scene([placement('d','one',REV_A,2,0,2)]));
+    assert([...current].every(m => m.disposeCount === 0));
+    data.adapter.dispose();
+    await next.catch(() => null);
+    assert([...current].every(m => m.disposeCount === 1), 'disposed with the adapter');
+});
+
 test('selection changes uniforms without invalidating shaders or redundant instance colors', async () => {
     const data=fixture();data.adapter.mount(data.host);
     await data.adapter.setScene({layout:{placements:[placement('single','one',REV_A,1,0,1),
@@ -6622,7 +7014,10 @@ test('colors, scenes and library finishes update without reloading models; geome
     moved.layout.placements[0].transform.position.x = 1.5;
     await data.adapter.setScene(moved);
     await settleAsync();
-    assert.ok(data.resolverCalls() > afterFirstBuild, 'geometry edits still rebuild the scene');
+    // 2026-11-03: a move rebuilds the changed group from its model on screen, without loading it again.
+    assert.strictEqual(data.resolverCalls(), afterFirstBuild, 'a move reuses the model on screen');
+    const audit = data.adapter.getDiagnostics().placementTransformAudit;
+    assert.deepStrictEqual([audit.transformMismatchIds, audit.missingPlacementCount], [[], 0], 'the move is drawn');
     data.adapter.dispose();
 });
 

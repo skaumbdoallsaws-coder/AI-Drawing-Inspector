@@ -2509,6 +2509,9 @@
             loadTrace: [],
             warnings: [],
             pendingLoads: 0,
+            // A scene rebuild's old materials, out of the scene, disposed once the new one has drawn (keepPrograms).
+            retiredMaterials: new Set(),
+            retiringMaterials: false,
             renderRequests: 0,
             renderedFrames: 0,
             displayPixelRatio: 1,
@@ -6357,6 +6360,7 @@
         }
 
         function enterDegraded(reason, contextLost) {
+            disposeRetiredMaterials();
             if (state.motion.package || state.motion.root) {
                 disposeMotion(reason || 'renderer_degraded', true);
             }
@@ -6548,6 +6552,7 @@
                 if (bloomWanted()) drawBloom();
                 else if (state.bloom.pass) disposeBloom();
                 state.renderedFrames += 1;
+                if (state.status === 'ready') disposeRetiredMaterials();
                 scheduleLightPatterns();
                 return true;
             } catch (error) {
@@ -7096,7 +7101,22 @@
                     if (typeof candidate.dispose === 'function') candidate.dispose();
                 }
             });
-            if (typeof material.dispose === 'function') material.dispose();
+            if (state.retiringMaterials) state.retiredMaterials.add(material);
+            else if (typeof material.dispose === 'function') material.dispose();
+        }
+
+        // Shader programs outlive a scene rebuild (2026-11-03). three drops a program when the last material using it
+        // is disposed, so a rebuild that disposed every material first compiled them all again: 21 programs, about
+        // 3 s after each commit or Undo on a 2,242-placement plant. While setScene clears the old model, its
+        // materials are set aside (their textures and geometry still go), and disposed once the new scene is ready
+        // and has drawn a frame: its materials then use the same programs. Anything that stops drawing disposes them.
+        function disposeRetiredMaterials() {
+            if (!state.retiredMaterials.size) return;
+            const materials = Array.from(state.retiredMaterials);
+            state.retiredMaterials.clear();
+            materials.forEach(function (material) {
+                if (typeof material.dispose === 'function') material.dispose();
+            });
         }
 
         function disposeObjectGraphs(objects) {
@@ -9973,6 +9993,23 @@
             return true;
         }
 
+        // A group's projected finish geometries are disposed with it, so the cache must not hand them out again or keep
+        // them. Between full rebuilds nothing else clears it: alternating one wood-finished placement between two
+        // assets grew it by a group's projections at each edit (2026-11-03, Codex on 4a05de6). A group owns the
+        // geometry it draws (copyRenderable), so none of these is used by a group that stays.
+        function forgetFinishGeometries(roots) {
+            if (!state.finishGeometryCache.size) return;
+            const owned = new Set();
+            roots.forEach(function (root) {
+                if (root && typeof root.traverse === 'function') {
+                    root.traverse(function (object) { if (object.geometry) owned.add(object.geometry); });
+                }
+            });
+            state.finishGeometryCache.forEach(function (geometry, key) {
+                if (owned.has(geometry)) state.finishGeometryCache.delete(key);
+            });
+        }
+
         function disposeRenderGroup(record) {
             if (!record) return;
             if (record.container && record.container.parent
@@ -9982,6 +10019,7 @@
                 && typeof state.modelRoot.remove === 'function') {
                 state.modelRoot.remove(record.container);
             }
+            forgetFinishGeometries([record.container, record.prototypeObject]);
             disposeObjectGraphs([record.container, record.prototypeObject]);
             dropLightPools(record);
             state.lampSpots.lists.delete(record);
@@ -9995,7 +10033,8 @@
             });
         }
 
-        function clearModel() {
+        // Everything clearModel removes except the model groups and the finish geometries they use.
+        function clearModelLayers() {
             state.appearanceSceneKey = null;
             state.finishSceneKey = null;
             if(state.componentHighlight){disposeObjectGraphs([state.componentHighlight]);state.componentHighlight=null;}
@@ -10010,8 +10049,6 @@
             state.wallArtworkLoads = [];
             disposeGhostObject();
             disposeProposalObjects();
-            state.renderGroups.forEach(disposeRenderGroup);
-            state.renderGroups.clear();
             disposeObjectGraphs(state.floorMarkingObjects);
             state.floorMarkingObjects = [];
             state.floorMarkingCount = 0;
@@ -10024,14 +10061,9 @@
             state.zoneRoofObjects = [];
             disposeObjectGraphs(state.routeObjects);
             state.routeObjects = [];
-            state.pickObjects = [];
-            state.instanceLookup.clear();
-            // Prototypes reload on a full rebuild, so their projected copies are stale.
-            state.finishGeometryCache.forEach(function (geometry) {
-                if (geometry && geometry.userData && geometry.userData.facilityFinishGeometry
-                        && typeof geometry.dispose === 'function') geometry.dispose();
-            });
-            state.finishGeometryCache.clear();
+        }
+
+        function detachModelRootChildren() {
             if (state.modelRoot && Array.isArray(state.modelRoot.children)) {
                 while (state.modelRoot.children.length) {
                     const child = state.modelRoot.children[0];
@@ -10042,6 +10074,21 @@
                     }
                 }
             }
+        }
+
+        function clearModel() {
+            clearModelLayers();
+            state.renderGroups.forEach(disposeRenderGroup);
+            state.renderGroups.clear();
+            state.pickObjects = [];
+            state.instanceLookup.clear();
+            // Prototypes reload on a full rebuild, so their projected copies are stale.
+            state.finishGeometryCache.forEach(function (geometry) {
+                if (geometry && geometry.userData && geometry.userData.facilityFinishGeometry
+                        && typeof geometry.dispose === 'function') geometry.dispose();
+            });
+            state.finishGeometryCache.clear();
+            detachModelRootChildren();
         }
 
         function markingColorNumber(value, fallback) {
@@ -12246,6 +12293,7 @@
             state.resizeHandler = null;
 
             clearModel();
+            disposeRetiredMaterials();
             clearEnvironmentObjects();
             disposeSceneBackground();
             // Library resources are bound to this renderer; a pooled renderer
@@ -12478,6 +12526,7 @@
             state.reloadOnResume = state.pendingLoads > 0;
             if (state.reloadOnResume) abortLoading();
             state.suspended = true;
+            disposeRetiredMaterials();
             state.mountGeneration += 1;
             if (state.frameId !== null && cancelFrame) cancelFrame(state.frameId);
             state.frameId = null;
@@ -12749,6 +12798,46 @@
             return prototype;
         }
 
+        // A copy of a model on screen for another group, or for the same group drawn again (2026-11-03, Codex on
+        // 4a05de6). It owns its geometry and textures as a loaded model does: the group it came from may be disposed
+        // first, and each group disposes what it holds. Scene environments and decal images stay shared; their
+        // owners dispose them. A texture copy shares the image, so the pixels upload once.
+        function copyRenderable(prototype) {
+            const copy = cloneRenderable(prototype);
+            if (!copy || typeof copy.traverse !== 'function') return copy;
+            const geometries = new Map();
+            const textures = new Map();
+            const ownTexture = function (texture) {
+                const shared = texture.userData && (texture.userData.facilityEnvironment
+                    || texture.userData.facilitySharedTexture);
+                if (shared || typeof texture.clone !== 'function') return texture;
+                if (!textures.has(texture)) textures.set(texture, texture.clone());
+                return textures.get(texture);
+            };
+            const ownMaterial = function (material) {
+                if (!material) return material;
+                Object.keys(material).forEach(function (key) {
+                    if (material[key] && material[key].isTexture) material[key] = ownTexture(material[key]);
+                });
+                return material;
+            };
+            copy.traverse(function (object) {
+                if (object.geometry && typeof object.geometry.clone === 'function') {
+                    if (!geometries.has(object.geometry)) geometries.set(object.geometry, object.geometry.clone());
+                    object.geometry = geometries.get(object.geometry);
+                }
+                if (!object.material) return;
+                // cloneRenderable copies mesh materials only; lines and points get theirs here.
+                const copied = function (material) {
+                    return !object.isMesh && material && typeof material.clone === 'function' ? material.clone() : material;
+                };
+                object.material = Array.isArray(object.material)
+                    ? object.material.map(function (material) { return ownMaterial(copied(material)); })
+                    : ownMaterial(copied(object.material));
+            });
+            return copy;
+        }
+
         function createContainer() {
             const Type = THREE.Group || THREE.Object3D;
             return new Type();
@@ -12936,7 +13025,11 @@
             if (lightPoolsWanted()) syncLightPools();
             renderEquipmentDecals(record.placementIds);
             if (state.drone.active) applyCurrentDroneRecordWindow(record);
-            else applySelection();
+            else applySelection(false, record);
+            if (group.renderSignature !== undefined && !group.drawnDiffers
+                    && groupSnapshot(group, currentLayout()).renderSignature !== group.renderSignature) {
+                group.drawnDiffers = true;
+            }
             invalidate();
             return record;
         }
@@ -13330,7 +13423,8 @@
         async function resolveGroup(group, generation, signal) {
             let manifest = null;
             let overviewResolved = false;
-            const desiredRepresentation = group.placements[0]?.source?.componentMaterials?.representation;
+            const desiredRepresentation = group.desiredRepresentation !== undefined ? group.desiredRepresentation
+                : group.placements[0]?.source?.componentMaterials?.representation;
             const retainOverview = desiredRepresentation !== 'detail' && preferOverviewForLargeLayouts
                 && state.placements.length >= largeLayoutDetailThreshold;
             for (let index = 0; index < RESOLUTION_STAGES.length; index += 1) {
@@ -13514,7 +13608,91 @@
                 }
                 groups.get(key).placements.push(placement);
             });
+            groups.forEach(function (group) { Object.assign(group, groupSnapshot(group, layout)); });
             return { placements: placements, groups: groups };
+        }
+
+        // What a group draws, as text taken when it is grouped (2026-11-03, Codex on 4a05de6 and a5c91fa). The
+        // placements' objects and the layout's custom finishes can change in place before the next setScene, so
+        // keeping a group or copying its model reads only this and the group's key (asset, revision, part finishes
+        // as saved, placement finish as resolved):
+        // - desiredRepresentation: the representation its placements ask for (resolveGroup loads by it);
+        // - membershipSignature: placements, scales and part finishes as saved (regroupFinishes keeps by it);
+        // - partSignature: the part finishes as resolved, custom finishes included;
+        // - renderSignature: all of it with the resolved finish and the placements as saved.
+        function groupSnapshot(group, layout) {
+            const first = group.placements[0];
+            const parts = first && first.source && first.source.componentMaterials;
+            const desired = parts ? parts.representation : undefined;
+            const partSignature = JSON.stringify(group.placements.map(function (placement) {
+                return resolvedPartFinishes(placement, layout);
+            }));
+            return {
+                desiredRepresentation: desired === undefined ? null : desired,
+                membershipSignature: groupMembershipSignature(group),
+                partSignature: partSignature,
+                renderSignature: JSON.stringify([group.finish || null, partSignature,
+                    group.placements.map(function (placement) { return [placement.placementId, placement.source]; })]),
+            };
+        }
+
+        function resolvedPartFinishes(placement, layout) {
+            const parts = placement && placement.source && placement.source.componentMaterials;
+            const overrides = parts && Array.isArray(parts.overrides) ? parts.overrides : [];
+            const library = currentLibrary();
+            return overrides.filter(function (item) { return item && item.appearanceId; }).map(function (item) {
+                return [item.key, library && libraryRuntime
+                    ? libraryRuntime.resolveAppearance(library, item, layout) : item.appearanceId];
+            });
+        }
+
+        function adoptSnapshot(kept, group) {
+            ['desiredRepresentation', 'membershipSignature', 'partSignature', 'renderSignature'].forEach(function (key) {
+                kept[key] = group[key];
+            });
+        }
+
+        // Whether every group is drawn as its snapshot says. A placement or custom finish changed in place after
+        // grouping, before the group's model arrived, is drawn as it then was (buildRenderedGroup marks the group);
+        // no later edit may then keep or copy groups, and the scene is rebuilt in full.
+        function drawnAsGrouped() {
+            let same = true;
+            state.baseGroups.forEach(function (group) { if (group.drawnDiffers) same = false; });
+            return same;
+        }
+
+        // The model on screen a changed group can be drawn from, or null (2026-11-03, Codex on a5c91fa: the old
+        // group's wanted representation was read from its placements' live objects). Its own group's, when that
+        // asked for the same representation; else one loaded for a group of the same asset asking for the same;
+        // else, when the group asks for a representation, any of the same asset loaded in it. Reads only the old
+        // groups' snapshots and what each record was built with.
+        function modelSources(previousGroups, previousRecords) {
+            const onScreen = function (record) {
+                return Boolean(record && record.prototypeObject
+                    && (record.representation === 'overview' || record.representation === 'detail'));
+            };
+            const byWanted = new Map();
+            const byRepresentation = new Map();
+            previousRecords.forEach(function (record, key) {
+                const group = previousGroups.get(key);
+                if (!group || !onScreen(record)) return;
+                const asset = record.assetId + '|' + record.assetDefinitionRevision + '|';
+                if (!byWanted.has(asset + group.desiredRepresentation)) {
+                    byWanted.set(asset + group.desiredRepresentation, record);
+                }
+                if (!byRepresentation.has(asset + record.representation)) {
+                    byRepresentation.set(asset + record.representation, record);
+                }
+            });
+            return function (key, group) {
+                const own = previousRecords.get(key);
+                const oldGroup = previousGroups.get(key);
+                if (onScreen(own) && oldGroup && oldGroup.desiredRepresentation === group.desiredRepresentation) return own;
+                const asset = group.assetId + '|' + group.assetDefinitionRevision + '|';
+                const named = group.desiredRepresentation === 'detail' || group.desiredRepresentation === 'overview';
+                return byWanted.get(asset + group.desiredRepresentation)
+                    || (named ? byRepresentation.get(asset + group.desiredRepresentation) : null) || null;
+            };
         }
 
         // The layout with every finish removed: object and part finishes,
@@ -13559,36 +13737,28 @@
                     || state.walkthrough.active || state.drone.active) return false;
             let complete = true;
             state.baseGroups.forEach(function (group) {
-                if (!group.resolved || group.deferredVisual || group.deferredLoading) complete = false;
+                if (!group.resolved || group.deferredVisual || group.deferredLoading || group.drawnDiffers) complete = false;
             });
             if (!complete) return false;
-            const sources = new Map();
-            state.renderGroups.forEach(function (record) {
-                const assetKey = record.assetId + '|' + record.assetDefinitionRevision;
-                if (record.prototypeObject && record.representation !== 'operator-avatar' && !sources.has(assetKey)) {
-                    sources.set(assetKey, record);
-                }
-            });
             const previousInput = state.currentInput;
             state.currentInput = { layout: layout, assetCatalog: catalog };
             const built = createBaseGroups(layout, catalog);
             const previousGroups = state.baseGroups;
             const previousRecords = new Map(state.renderGroups);
+            const modelSource = modelSources(previousGroups, previousRecords);
             const plan = [];
             for (const entry of built.groups) {
                 const key = entry[0], group = entry[1];
                 const oldGroup = previousGroups.get(key);
                 const record = previousRecords.get(key);
-                if (oldGroup && record && groupMembershipSignature(oldGroup) === groupMembershipSignature(group)) {
+                // Custom finishes used by part finishes resolve again here (Codex on a5c91fa).
+                if (oldGroup && record && oldGroup.membershipSignature === group.membershipSignature
+                        && oldGroup.partSignature === group.partSignature) {
                     plan.push({ group: group, keep: oldGroup });
                     continue;
                 }
-                const source = record && record.prototypeObject ? record
-                    : sources.get(group.assetId + '|' + group.assetDefinitionRevision);
-                const desired = group.placements[0] && group.placements[0].source
-                    && group.placements[0].source.componentMaterials
-                    && group.placements[0].source.componentMaterials.representation;
-                if (!source || (desired === 'detail' && source.representation !== 'detail')) {
+                const source = modelSource(key, group);
+                if (!source) {
                     state.currentInput = previousInput;
                     return false;
                 }
@@ -13601,11 +13771,12 @@
             plan.forEach(function (step) {
                 if (step.keep) {
                     step.keep.placements = step.group.placements;
+                    adoptSnapshot(step.keep, step.group);
                     state.baseGroups.set(baseGroupKey(step.group), step.keep);
                     return;
                 }
                 const prototype = {
-                    object: cloneRenderable(step.source.prototypeObject),
+                    object: copyRenderable(step.source.prototypeObject),
                     bounds: (previousGroups.get(step.source.baseKey) || {}).bounds || step.group.bounds,
                     instancingEligible: step.source.prototypeInstancingEligible !== false,
                 };
@@ -13648,6 +13819,157 @@
             }));
         }
 
+        // The scene's layers besides the model groups, as setScene draws them after clearing the model.
+        function renderModelLayers() {
+            renderPerimeterWalls();
+            if(options.showFloor !== false && floorSurfacesRuntime){
+                state.floorSurfaceObjects=floorSurfacesRuntime.meshes(THREE,documentObject,state.currentInput.layout);
+                state.floorSurfaceObjects.forEach(object=>state.modelRoot.add(object));
+                applyGroundLayers();
+            }
+            renderZoneMarkings();
+            renderZoneCeilings();
+            renderZoneRoofs();
+            renderFacilityAisles();
+            renderFloorMarkings();
+        }
+
+        // Placement edits rebuild only the model groups they change (2026-11-03). Committing a Sage edit on a
+        // 2,242-placement plant changed a few of its 227 groups, yet the full rebuild reloaded and parsed every
+        // model: about 17 s before the view was ready, after the commit and again after its Undo. Here the rest of
+        // the scene is cleared and drawn again as the full rebuild does it; a group whose placements are the same
+        // keeps its objects; a changed group is built from a copy of its own model on screen, else of the same
+        // asset's (with the same wanted representation); only a group with neither loads, as in a full rebuild.
+        // A load in progress, another catalog, crossing the large-layout threshold, motion, activity, walks,
+        // drones and navigation previews take the full rebuild. Returns null then, else setScene's promise.
+        function rebuildChangedGroups(value) {
+            const layout = value.layout || {};
+            const catalog = value.assetCatalog || [];
+            if (!state.mounted || state.suspended || state.degraded || state.status !== 'ready'
+                    || !state.modelRoot || !state.renderGroups.size || state.pendingLoads > 0
+                    || state.appearanceCatalogKey !== JSON.stringify(catalog)
+                    || state.motion.package || state.motion.root || state.activity.scenario || state.activity.root
+                    || state.navigationPreview.payload || state.navigationPreview.root
+                    || state.walkthrough.active || state.drone.active) return null;
+            let settled = true;
+            state.baseGroups.forEach(function (group) {
+                if (!group.resolved || group.resolvePromise || group.deferredLoading || group.deferredQueued
+                        || group.drawnDiffers) {
+                    settled = false;
+                }
+            });
+            const large = function (count) {
+                return preferOverviewForLargeLayouts && count >= largeLayoutDetailThreshold;
+            };
+            const count = Array.isArray(layout.placements) ? layout.placements.length : 0;
+            if (!settled || large(count) !== large(state.placements.length)) return null;
+            // Grouping warns again about each catalog mismatch, and resolves custom finishes from the layout drawn
+            // now (Codex on 4a05de6: from the previous one, a finish changed with a move kept its old color).
+            state.warnings = state.warnings.filter(function (item) { return item.code !== 'asset_revision_mismatch'; });
+            clearFinishPreview();
+            setWalkthroughContextFocus(null);
+            state.currentInput = { layout: layout, assetCatalog: catalog };
+            const built = createBaseGroups(layout, catalog);
+            const previousGroups = state.baseGroups;
+            const previousRecords = new Map(state.renderGroups);
+            const modelSource = modelSources(previousGroups, previousRecords);
+            const plan = Array.from(built.groups.keys()).sort().map(function (key) {
+                const group = built.groups.get(key);
+                const oldGroup = previousGroups.get(key);
+                const record = previousRecords.get(key);
+                if (oldGroup && record && oldGroup.renderSignature === group.renderSignature) {
+                    return { key: key, group: group, keep: oldGroup, record: record };
+                }
+                return { key: key, group: group, source: modelSource(key, group) };
+            });
+
+            abortLoading();
+            const generation = state.sceneGeneration;
+            if (typeof AbortControllerType === 'function') {
+                state.abortController = new AbortControllerType();
+            }
+            const signal = state.abortController ? state.abortController.signal : null;
+            state.lastFit = null;
+            state.placements = built.placements;
+            state.baseGroups = new Map();
+            plan.forEach(function (step) {
+                if (step.keep) {
+                    step.keep.placements = step.group.placements;
+                    step.keep.catalog = step.group.catalog;
+                    adoptSnapshot(step.keep, step.group);
+                    state.baseGroups.set(step.key, step.keep);
+                } else {
+                    state.baseGroups.set(step.key, step.group);
+                }
+            });
+            state.worldBounds = computeWorldBounds();
+            syncEnvironment();
+
+            const loads = [];
+            const keptIds = [];
+            state.retiringMaterials = true;
+            try {
+                clearModelLayers();
+                previousRecords.forEach(function (record, key) {
+                    if (!state.baseGroups.has(key)) {
+                        disposeRenderGroup(record);
+                        state.renderGroups.delete(key);
+                    }
+                });
+                detachModelRootChildren();
+                state.appearanceSceneKey = appearanceOnlyKey(layout);
+                state.finishSceneKey = finishOnlyKey(layout);
+                state.appearanceCatalogKey = JSON.stringify(catalog);
+                renderModelLayers();
+                plan.forEach(function (step) {
+                    if (step.keep) {
+                        state.modelRoot.add(step.record.container);
+                        Array.prototype.push.apply(keptIds, step.record.placementIds);
+                        return;
+                    }
+                    if (step.source) {
+                        const prototype = {
+                            object: copyRenderable(step.source.prototypeObject),
+                            bounds: (previousGroups.get(step.source.baseKey) || {}).bounds || step.group.bounds,
+                            instancingEligible: step.source.prototypeInstancingEligible !== false,
+                        };
+                        step.group.bounds = prototype.bounds;
+                        step.group.resolved = true;
+                        buildRenderedGroup(step.group, prototype, step.source.representation);
+                        return;
+                    }
+                    buildRenderedGroup(step.group, makeFallbackPrototype(step.group.bounds), 'footprint');
+                    loads.push(step.group);
+                });
+            } finally {
+                state.retiringMaterials = false;
+            }
+            if (lightPoolsWanted()) syncLightPools();
+            renderEquipmentDecals(keptIds);
+            renderProposalObjects();
+            renderGhostObject();
+            applySelection();
+            state.worldBounds = computeWorldBounds();
+            syncEnvironment();
+            syncViewportSceneFromLayout();
+            invalidate();
+            if (!loads.length) return Promise.resolve(getDiagnostics());
+            notifyStatus('loading', null);
+            return (async function () {
+                for (let index = 0; index < loads.length; index += 1) {
+                    if (generation !== state.sceneGeneration || !state.mounted) break;
+                    await resolveBaseGroup(loads[index], generation, signal);
+                }
+                if (generation === state.sceneGeneration && state.mounted && !state.degraded) {
+                    notifyStatus('ready', null);
+                    state.worldBounds = computeWorldBounds();
+                    syncEnvironment();
+                    invalidate();
+                }
+                return getDiagnostics();
+            }());
+        }
+
         async function setScene(input) {
             const value = input && typeof input === 'object' ? input : {};
             // Library finishes and scenes resolve from the bundled manifests;
@@ -13664,13 +13986,14 @@
             const previous = state.currentInput;
             if (state.mounted && !state.suspended && !state.degraded
                     && state.status !== 'degraded'
-                    && state.renderGroups.size && previous && previous.layout
+                    && state.renderGroups.size && previous && previous.layout && drawnAsGrouped()
                     && state.appearanceSceneKey === appearanceOnlyKey(value.layout || {})
                     && state.appearanceCatalogKey === JSON.stringify(value.assetCatalog || [])) {
                 state.currentInput = { layout: value.layout || {}, assetCatalog: value.assetCatalog || [] };
                 const byId = new Map((value.layout.placements || []).map(p => [p.placementId, p]));
                 // Keep the group objects alive so pending detail loads also see the new finish.
                 state.placements.forEach(p => { p.source = byId.get(p.placementId) || p.source; });
+                state.baseGroups.forEach(group => { adoptSnapshot(group, groupSnapshot(group, state.currentInput.layout)); });
                 state.finishSceneKey = finishOnlyKey(state.currentInput.layout);
                 applySelection();
                 syncViewportSceneFromLayout();
@@ -13679,6 +14002,8 @@
                 return getDiagnostics();
             }
             if (regroupFinishes(value)) return getDiagnostics();
+            const rebuilt = rebuildChangedGroups(value);
+            if (rebuilt) return rebuilt;
             clearFinishPreview();
             if (state.motion.package || state.motion.root) {
                 disposeMotion('scene_changed', true);
@@ -13728,21 +14053,16 @@
                 return getDiagnostics();
             }
 
-            clearModel();
+            state.retiringMaterials = true;
+            try {
+                clearModel();
+            } finally {
+                state.retiringMaterials = false;
+            }
             state.appearanceSceneKey = appearanceOnlyKey(state.currentInput.layout);
             state.finishSceneKey = finishOnlyKey(state.currentInput.layout);
             state.appearanceCatalogKey = JSON.stringify(state.currentInput.assetCatalog);
-            renderPerimeterWalls();
-            if(options.showFloor !== false && floorSurfacesRuntime){
-                state.floorSurfaceObjects=floorSurfacesRuntime.meshes(THREE,documentObject,state.currentInput.layout);
-                state.floorSurfaceObjects.forEach(object=>state.modelRoot.add(object));
-                applyGroundLayers();
-            }
-            renderZoneMarkings();
-            renderZoneCeilings();
-            renderZoneRoofs();
-            renderFacilityAisles();
-            renderFloorMarkings();
+            renderModelLayers();
             Array.from(state.baseGroups.keys()).sort().forEach(function (key) {
                 const group = state.baseGroups.get(key);
                 buildRenderedGroup(
@@ -14734,10 +15054,16 @@
             // Emissive values are uniforms; changing them does not require a new shader program.
         }
 
-        function applySelection(skipInvalidate) {
+        function applySelection(skipInvalidate, onlyRecord) {
             // Plain-color appearances tint here. Library finishes own their
             // materials (their color is already in the material), so they are skipped.
-            const appearance = new Map(state.placements.map(function (p) {
+            // onlyRecord: a group just built. Every change of selection, focus or appearance applies to all groups, so
+            // the others are already up to date (2026-11-03: applying to all after each build made a scene's load
+            // quadratic, 1.7 s on a 2,242-placement plant).
+            const records = onlyRecord ? [onlyRecord] : Array.from(state.renderGroups.values());
+            const ids = onlyRecord ? new Set(onlyRecord.placementIds || []) : null;
+            const appearance = new Map((ids ? state.placements.filter(p => ids.has(p.placementId))
+                : state.placements).map(function (p) {
                 const value = p.source && p.source.appearance;
                 const color = value && !value.appearanceId && value.color;
                 return [p.placementId, /^#[0-9a-fA-F]{6}$/.test(color || '') ? parseInt(color.slice(1), 16) : null];
@@ -14746,7 +15072,7 @@
             const contextPlacementId = immersiveActive()
                 && state.walkthroughContextFocus
                 ? state.walkthroughContextFocus.placementId : null;
-            state.renderGroups.forEach(function (record) {
+            records.forEach(function (record) {
                 if (record.instanced) {
                     record.pickObjects.forEach(function (object) {
                         const placementIds = state.instanceLookup.get(object) || [];

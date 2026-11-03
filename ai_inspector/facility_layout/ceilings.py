@@ -12,7 +12,8 @@ ceiling and its top (the highest point of its physical volume) at that ceiling's
 lamp hung over a table collides with it only where their heights overlap.
 
 A ceiling may name a ``finish`` (``FINISHES``): "acoustic-tile" (a white suspended ceiling of 600 mm tiles) or
-"open-deck" (matte charcoal); without one it is drawn matte charcoal (the 3D view only; the checks ignore it).
+"open-deck" (exposed light grey steel joists whose underside is at the height, under a ribbed deck, 2026-11-03);
+without one it is drawn matte charcoal (the 3D view only; the checks ignore it).
 
 Zone roofs (2026-11-02): ``extensions.roof`` = ``{"heightMeters": H}`` draws a flat roof over the zone whose underside
 is H m above its floor (the wall tops), in the 3D view only, on the roof sheeting layer. ``set_zone_roof`` sets or

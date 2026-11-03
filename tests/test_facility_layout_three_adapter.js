@@ -7561,9 +7561,9 @@ test('a zone ceiling shows over its zone at its height, seen from below only, ne
     assert.strictEqual(freed, 1, 'the cleared ceiling is freed');
 });
 
-// Ceiling finishes (2026-11-02): 'acoustic-tile' is white 600 mm tiles on one grid from the plan's origin; 'open-deck'
-// and no finish stay the matte charcoal.
-test('an acoustic-tile ceiling is white tiles on one plan grid; open-deck and no finish stay charcoal', async () => {
+// Ceiling finishes (2026-11-02): 'acoustic-tile' is white 600 mm tiles on one grid from the plan's origin; no finish
+// stays the matte charcoal ('open-deck' is exposed steel since 2026-11-03: see the open-deck test).
+test('an acoustic-tile ceiling is white tiles on one plan grid; no finish stays charcoal', async () => {
     const THREE = await libraryThree();
     const data = await libraryFixture();
     const withCeiling = (id, x0, x1, ceiling) => {
@@ -7588,7 +7588,7 @@ test('an acoustic-tile ceiling is white tiles on one plan grid; open-deck and no
     await show(zones);
     const found = ceilings();
     assert.deepStrictEqual(data.adapter.getDiagnostics().zoneCeilings.map(c => [c.zoneId, c.finish, Math.round(c.y * 1000) / 1000]),
-        [['zn-reception', 'acoustic-tile', 3], ['zn-washrooms', 'acoustic-tile', 3.2], ['zn-cardio', 'open-deck', 3.6],
+        [['zn-reception', 'acoustic-tile', 3], ['zn-washrooms', 'acoustic-tile', 3.2], ['zn-cardio', 'open-deck', 4.104],
             ['zn-lounge', null, 3.2]]);
     const reception = found.get('zn-reception');
     const washrooms = found.get('zn-washrooms');
@@ -7617,17 +7617,18 @@ test('an acoustic-tile ceiling is white tiles on one plan grid; open-deck and no
             assert.ok(Math.abs(uv.getY(i) - position.getZ(i) / 0.6) < 1e-5);
         }
     });
-    ['zn-cardio', 'zn-lounge'].forEach(id => {
-        const mesh = found.get(id);
-        assert.strictEqual(mesh.material.map, null, id + ' has no texture');
+    {
+        const mesh = found.get('zn-lounge');
+        assert.strictEqual(mesh.material.map, null, 'no texture');
         assert.strictEqual(mesh.geometry.attributes.uv, undefined);
-        assert.strictEqual('#' + mesh.material.color.getHexString(THREE.SRGBColorSpace), '#2a2a2d', id + ' is charcoal');
-    });
-    // Steps: cardio (3.6) borders the washrooms (3.2) at x 20 and the lounge (3.2) at x 36; a bulkhead closes each,
-    // facing cardio, in its charcoal. Reception (3.0) borders nothing (0.3 m apart); the washrooms are the lower side.
+        assert.strictEqual('#' + mesh.material.color.getHexString(THREE.SRGBColorSpace), '#2a2a2d', 'charcoal');
+    }
+    // Steps: cardio (3.6, its deck 4.104) borders the washrooms (3.2) at x 20 and the lounge (3.2) at x 36; a bulkhead
+    // closes each up to the deck, facing cardio, in the open deck's edge grey. Reception (3.0) borders nothing (0.3 m
+    // apart); the washrooms are the lower side.
     assert.deepStrictEqual(data.adapter.getDiagnostics().zoneCeilings.map(c => c.stepTriangles), [0, 0, 4, 0]);
     const step = found.get('zn-cardio').children.find(child => child.userData.facilityZoneCeilingStep);
-    assert.strictEqual('#' + step.material.color.getHexString(THREE.SRGBColorSpace), '#2a2a2d');
+    assert.strictEqual('#' + step.material.color.getHexString(THREE.SRGBColorSpace), '#c3cad0');
     const stepPosition = step.geometry.attributes.position;
     const stepCorner = k => new THREE.Vector3(stepPosition.getX(k), stepPosition.getY(k), stepPosition.getZ(k));
     let stepArea = 0;
@@ -7638,10 +7639,10 @@ test('an acoustic-tile ceiling is white tiles on one plan grid; open-deck and no
         assert.ok(Math.abs(facing.y) < 1e-6, 'vertical');
         assert.ok(Math.abs(Math.abs(middle.x - 28) - 8) < 1e-6, 'on the shared edges');
         assert.ok(Math.sign(facing.x) === Math.sign(28 - middle.x), 'faces into cardio');
-        assert.ok(middle.y > 3.2 && middle.y < 3.6);
+        assert.ok(middle.y > 3.2 && middle.y < 4.104);
         stepArea += facing.length() / 2;
     }
-    assert.ok(Math.abs(stepArea - 2 * 10 * 0.4) < 1e-4, 'two 10 m edges, 0.4 m tall: ' + stepArea);
+    assert.ok(Math.abs(stepArea - 2 * 10 * 0.904) < 1e-4, 'two 10 m edges, 0.904 m tall: ' + stepArea);
     const stepHits = [];
     step.raycast({}, stepHits);
     assert.strictEqual(stepHits.length, 0);
@@ -7667,6 +7668,183 @@ test('an acoustic-tile ceiling is white tiles on one plan grid; open-deck and no
     assert.strictEqual('#' + tiledStep.material.color.getHexString(THREE.SRGBColorSpace), '#f1f0ec');
 });
 
+// Open deck (2026-11-03, the user chose "Exposed steel like Factory 02"): open-web steel joists with their underside at
+// the ceiling's height, spanning the short way about every 1.8 m, girders where a span is too long, under a ribbed deck
+// seen from below; edges close the band over the walls; a roof over it sits on the deck.
+test('an open-deck ceiling is exposed steel joists under a ribbed deck, girders on long spans, a roof on top', async () => {
+    const THREE = await libraryThree();
+    const data = await libraryFixture();
+    const rect = (id, x0, z0, x1, z1, ceiling, roof) => {
+        const zone = styledZone(id, [{ x: x0, z: z0 }, { x: x1, z: z0 }, { x: x1, z: z1 }, { x: x0, z: z1 }], '#5b8def');
+        if (ceiling) zone.extensions.ceiling = ceiling;
+        if (roof) zone.extensions.roof = roof;
+        return zone;
+    };
+    const deck = height => ({ heightMeters: height, finish: 'open-deck' });
+    const show = async list => {
+        await data.adapter.setScene({ layout: { placements: [], zones: list, extensions: {} }, assetCatalog: [] });
+        await settleAsync();
+        data.scheduler.flush();
+    };
+    const ceilings = () => {
+        const found = new Map();
+        renderedScene().traverse(o => { if (o.userData && o.userData.facilityZoneCeiling) found.set(o.userData.zoneId, o); });
+        return found;
+    };
+    // A hall and an annex (3.6, side by side), a wide room behind the hall (20 x 18 m: more than 24 depths across), a
+    // tiled office (3.0) behind the annex, a boxing room (4.2) past the annex, a pitch (6.2) and a low room (3.0).
+    const zones = [rect('zn-hall', 0, 0, 24, 10, deck(3.6)), rect('zn-annex', 24, 0, 40, 10, deck(3.6)),
+        rect('zn-wide', 0, 10, 20, 28, deck(3.6)),
+        rect('zn-office', 20, 10, 40, 20, { heightMeters: 3, finish: 'acoustic-tile' }),
+        rect('zn-boxing', 40, 0, 56, 10, deck(4.2)), rect('zn-pitch', 0, 40, 42, 68, deck(6.2)),
+        rect('zn-low', 60, 40, 66, 46, deck(3))];
+    await show(zones);
+    const summary = new Map(data.adapter.getDiagnostics().zoneCeilings.map(c => [c.zoneId, c]));
+    const round = v => Math.round(v * 1000) / 1000;
+    const steelOf = id => summary.get(id).steel;
+    // The depth scales with the room (0.14 of the height, 0.45 to 0.75 m); the flat face is the deck, on top.
+    assert.deepStrictEqual(zones.map(z => [z.zoneId, round(summary.get(z.zoneId).y), steelOf(z.zoneId) && round(steelOf(z.zoneId).depth)]),
+        [['zn-hall', 4.104, 0.504], ['zn-annex', 4.104, 0.504], ['zn-wide', 4.104, 0.504], ['zn-office', 3, null],
+            ['zn-boxing', 4.788, 0.588], ['zn-pitch', 6.95, 0.75], ['zn-low', 3.45, 0.45]]);
+    // Joists every ~1.8 m along the long way; girders split spans over 24 depths (wide: 18 m > 12.1 m; the pitch: 28 m >
+    // 18 m) into equal bays, the joists running girder to girder. Edges only where the outside is no ceiling (the
+    // outer walls) or a ceiling other than this deck that is not lower: hall | annex is the same deck; the office is
+    // lower (its bulkhead); annex | boxing: a higher deck, so the annex closes 3.6 m up to its deck and boxing nothing.
+    assert.deepStrictEqual(zones.map(z => steelOf(z.zoneId) && [steelOf(z.zoneId).joists, steelOf(z.zoneId).girders,
+        steelOf(z.zoneId).edges]), [[13, 0, 2], [9, 0, 2], [22, 1, 3], null, [9, 0, 3], [46, 1, 4], [3, 0, 4]]);
+    // Bulkheads from the office (3.0) up to the decks it borders, and from the annex's deck up to boxing's.
+    assert.deepStrictEqual(zones.map(z => summary.get(z.zoneId).stepTriangles), [2, 2, 2, 0, 2, 0, 0]);
+    const found = ceilings();
+    const hall = found.get('zn-hall');
+    const steel = hall.children.find(child => child.userData.facilityZoneOpenDeck);
+    assert.ok(steel && steel.parent === hall, 'the steel is a child of its deck: its layer, its disposal');
+    const position = steel.geometry.attributes.position;
+    const normal = steel.geometry.attributes.normal;
+    const [joists, girders] = steel.geometry.groups;
+    assert.deepStrictEqual(steel.geometry.groups.map(g => g.materialIndex), [0, 1]);
+    const box = new THREE.Box3().setFromBufferAttribute(position);
+    assert.ok(Math.abs(box.min.y - 3.6) < 1e-5, 'the underside at the ceiling height: the clear height stays ' + box.min.y);
+    assert.ok(Math.abs(box.max.y - 4.104) < 1e-5, 'up to the deck: ' + box.max.y);
+    assert.ok(box.min.x > -1e-5 && box.max.x < 24 + 1e-5 && box.min.z > -1e-5 && box.max.z < 10 + 1e-5, 'inside the hall');
+    // The hall's joists run across it (along z, 10 m), one every 24 / 13 m along x.
+    for (let k = joists.start; k < joists.start + joists.count; k += 1) {
+        const x = position.getX(k);
+        const line = (Math.round(x * 13 / 24 - 0.5) + 0.5) * 24 / 13;
+        assert.ok(Math.abs(x - line) <= 0.04 + 1e-5, 'on a joist line: ' + x);
+    }
+    // The hall's edges: its two outer walls (x 0 and z 0), from 3.6 m up to the deck, facing in, just inside.
+    let edgeArea = 0;
+    const vertex = (attribute, k) => new THREE.Vector3(attribute.getX(k), attribute.getY(k), attribute.getZ(k));
+    for (let k = girders.start; k < girders.start + girders.count; k += 3) {
+        const a = vertex(position, k);
+        const facing = new THREE.Vector3().crossVectors(vertex(position, k + 1).sub(a), vertex(position, k + 2).sub(a));
+        const middle = a.clone().add(vertex(position, k + 1)).add(vertex(position, k + 2)).multiplyScalar(1 / 3);
+        assert.ok(Math.abs(facing.y) < 1e-6 && middle.y > 3.6 && middle.y < 4.104, 'upright, over the wall tops');
+        assert.ok((Math.abs(middle.x - 0.02) < 1e-5 && facing.x > 0) || (Math.abs(middle.z - 0.02) < 1e-5 && facing.z > 0),
+            'just inside an outer wall, facing in');
+        edgeArea += facing.length() / 2;
+    }
+    assert.ok(Math.abs(edgeArea - (24 + 10) * 0.504) < 1e-3, 'two outer walls, the joists deep: ' + edgeArea);
+    // Faces seen from below (and the edges) are shaded as facing up, like the ceilings: lit like the room. The sides of
+    // the chords and the web are shaded by where they face, tipped up a little, so the steel reads against the deck.
+    let sides = 0;
+    for (let k = 0; k < normal.count; k += 1) {
+        const n = vertex(normal, k);
+        if (n.y === 1) continue;
+        assert.ok(k < joists.start + joists.count, 'the edges are lit like the room');
+        assert.ok(Math.abs(n.length() - 1) < 1e-5 && Math.abs(n.y - 0.35 / Math.hypot(1, 0.35)) < 1e-5, 'a side: ' + n.toArray());
+        sides += 1;
+    }
+    assert.ok(sides > joists.count / 3, 'the sides: ' + sides + ' of ' + joists.count);
+    const hex = material => '#' + material.color.getHexString(THREE.SRGBColorSpace);
+    assert.deepStrictEqual(steel.material.map(hex), ['#d4d9dd', '#c3cad0'], 'light grey joists, girders and edges');
+    assert.strictEqual(steel.castShadow, false);
+    const hits = [];
+    steel.raycast({}, hits);
+    assert.strictEqual(hits.length, 0, 'never picked');
+    // The wide room's girder at z 19 (two 9 m bays); the rest of its group are its edges.
+    const wide = found.get('zn-wide').children.find(child => child.userData.facilityZoneOpenDeck);
+    const wideGroup = wide.geometry.groups[1];
+    const widePosition = wide.geometry.attributes.position;
+    let girderVertices = 0;
+    for (let k = wideGroup.start; k < wideGroup.start + wideGroup.count; k += 1) {
+        const x = widePosition.getX(k);
+        const z = widePosition.getZ(k);
+        if (Math.abs(z - 19) <= 0.1 + 1e-5) girderVertices += 1;
+        else assert.ok(Math.abs(x - 0.02) < 1e-5 || Math.abs(z - 27.98) < 1e-5 || (Math.abs(x - 19.98) < 1e-5 && z >= 20 - 1e-5),
+            'otherwise an edge: ' + x + ', ' + z);
+    }
+    assert.ok(girderVertices > 0, 'a girder');
+    // The deck: ribbed, light grey, its ribs at right angles to the joists; mipmapped, so far off it is even.
+    const ribs = hall.material.map;
+    assert.ok(ribs && ribs.isDataTexture && ribs.name === 'FacilityOpenDeck');
+    assert.strictEqual(found.get('zn-pitch').material.map, ribs, 'one texture for every deck');
+    assert.deepStrictEqual([ribs.wrapS, ribs.wrapT, ribs.minFilter, ribs.generateMipmaps, ribs.colorSpace],
+        [THREE.RepeatWrapping, THREE.RepeatWrapping, THREE.LinearMipmapLinearFilter, true, THREE.SRGBColorSpace]);
+    assert.strictEqual(hex(hall.material), '#ffffff');
+    const texel = column => Array.from(ribs.image.data.slice(column * 4, column * 4 + 3));
+    assert.deepStrictEqual(texel(10), [224, 228, 231], 'the low flange, nearest: the lightest');
+    assert.ok(texel(40)[0] < texel(10)[0] - 10 && texel(40)[0] > 190, 'the recessed flange, a little darker: ' + texel(40));
+    assert.deepStrictEqual(texel(10), texel(10 + 64), 'a rib every 64 texels: 4 to a tile');
+    const uv = hall.geometry.attributes.uv;
+    const deckPosition = hall.geometry.attributes.position;
+    for (let k = 0; k < uv.count; k += 1) {
+        assert.ok(Math.abs(uv.getX(k) - deckPosition.getZ(k) / 0.6096) < 1e-5, 'across the ribs: along the joists');
+        assert.ok(Math.abs(uv.getY(k) - deckPosition.getX(k) / 0.6096) < 1e-5);
+    }
+    // The bulkhead from the office into the hall rises to the deck, in the edges' grey.
+    const step = hall.children.find(child => child.userData.facilityZoneCeilingStep);
+    const stepBox = new THREE.Box3().setFromBufferAttribute(step.geometry.attributes.position);
+    assert.deepStrictEqual([stepBox.min.y, stepBox.max.y, stepBox.min.x, stepBox.max.x].map(round), [3, 4.104, 20, 24]);
+    assert.strictEqual(hex(step.material), '#c3cad0');
+    // The overhead layer hides it all.
+    data.adapter.setLayerVisibility({ overhead: false });
+    assert.strictEqual(hall.visible, false);
+    data.adapter.setLayerVisibility({ overhead: true });
+    // Roofs: a shell over the hall and a tiled room (no ceiling of its own) sits on the hall's deck (4.104 + 0.04) and
+    // its free faces still come down to its wall tops (3.6 - 0.1); over the lower annex roof (3.2) only to its
+    // membrane. A roof over its own open deck sits on it too.
+    const shell = rect('zn-shell', 0, 0, 30, 10, null, { heightMeters: 3.6 });
+    const annexRoof = rect('zn-annex-roof', 0, 10, 30, 16, null, { heightMeters: 3.2 });
+    const tiled = rect('zn-tiled', 20, 0, 30, 10, { heightMeters: 3, finish: 'acoustic-tile' });
+    const pitch = rect('zn-pitch', 40, 0, 60, 10, deck(6.2), { heightMeters: 6.2 });
+    const roofScene = hallCeiling => [shell, annexRoof, rect('zn-hall', 0, 0, 20, 10, hallCeiling), tiled, pitch];
+    await show(roofScene(deck(3.6)));
+    const roofSummary = () => new Map(data.adapter.getDiagnostics().zoneRoofs.map(r => [r.zoneId, r]));
+    let roofs = roofSummary();
+    assert.deepStrictEqual(['zn-shell', 'zn-annex-roof', 'zn-pitch'].map(id => [round(roofs.get(id).base),
+        round(roofs.get(id).highest)]), [[4.144, 4.794], [3.2, 3.85], [6.99, 7.64]]);
+    let shellRoof = null;
+    renderedScene().traverse(o => {
+        if (o.userData && o.userData.facilityZoneRoof && o.userData.zoneId === 'zn-shell') shellRoof = o;
+    });
+    const roofPosition = shellRoof.geometry.attributes.position;
+    const feet = { free: Infinity, annex: Infinity };
+    const parapet = shellRoof.geometry.groups[1];
+    for (let k = parapet.start; k < parapet.start + parapet.count; k += 1) {
+        const x = roofPosition.getX(k);
+        const z = roofPosition.getZ(k);
+        if (Math.abs(z - 10) < 1e-6) feet.annex = Math.min(feet.annex, roofPosition.getY(k));
+        else if (Math.abs(z) < 1e-6 || Math.abs(x) < 1e-6 || Math.abs(x - 30) < 1e-6) feet.free = Math.min(feet.free, roofPosition.getY(k));
+    }
+    assert.deepStrictEqual([feet.free, feet.annex].map(round), [3.5, 3.2], 'the wall tops and the annex roof');
+    // The same shell without the open deck under it: as before.
+    await show(roofScene({ heightMeters: 3.6 }));
+    roofs = roofSummary();
+    assert.deepStrictEqual(['base', 'highest', 'lowest'].map(key => round(roofs.get('zn-shell')[key])), [3.6, 4.25, 3.2]);
+    // Removing the decks frees their texture and their steel.
+    await show(zones);
+    let freed = 0;
+    ceilings().get('zn-hall').material.map.addEventListener('dispose', () => { freed += 1; });
+    ceilings().get('zn-hall').children.find(child => child.userData.facilityZoneOpenDeck).geometry
+        .addEventListener('dispose', () => { freed += 1; });
+    await show([zones[3]]);
+    assert.strictEqual(freed, 2, 'the rib texture and the steel are freed');
+    let added = 0;
+    renderedScene().traverse(o => { if (/^FacilityZoneOpenDeck:/.test(o.name || '')) added += 1; });
+    assert.strictEqual(added, 0);
+});
+
 // Zone roofs (2026-11-02): a flat roof with a textured membrane, a low parapet and its coping, solid from above,
 // outside and inside, on the roof sheeting layer.
 test('a zone roof covers its zone, solid from above, outside and inside, with a parapet and coping, on the roof sheeting layer', async () => {
@@ -7677,7 +7855,7 @@ test('a zone roof covers its zone, solid from above, outside and inside, with a 
     const building = Object.assign(styledZone('zn-building', outline.concat([{ x: 0, z: 0 }]), '#5b8def'),
         { floorElevation: 0.5 });
     building.extensions.roof = { heightMeters: 3.6 };
-    building.extensions.ceiling = { heightMeters: 3.6, finish: 'open-deck' };
+    building.extensions.ceiling = { heightMeters: 3.6 };
     const open = styledZone('zn-open', [{ x: 20, z: 0 }, { x: 30, z: 0 }, { x: 30, z: 10 }, { x: 20, z: 10 }], '#58b6a6');
     const show = async (zones, sceneId) => {
         await data.adapter.setScene({ layout: { placements: [], zones,
@@ -7793,7 +7971,7 @@ test('a zone roof covers its zone, solid from above, outside and inside, with a 
         }
         assert.ok(wrap < 2 * within + 124, 'tileable: ' + wrap + ' vs ' + within);
     }
-    // A ceiling at the roof's height (this open deck) is drawn in front of the underside.
+    // A ceiling at the roof's height is drawn in front of the underside.
     let ceiling = null;
     renderedScene().traverse(o => { if (o.userData && o.userData.facilityZoneCeiling) ceiling = o; });
     assert.ok(roof.material[3].polygonOffset && roof.material[3].polygonOffsetFactor > ceiling.material.polygonOffsetFactor
@@ -8025,8 +8203,10 @@ test('in Evening a pendant and accent spots get spot lights, the downlights fill
     // ceiling zone the downlight is not in, changes nothing.
     for (const zones of [[], [room(0, -18, 22, -3, null)], [room(30, -18, 40, -3, 3.2)]]) {
         await show('evening', null, null, zones);
-        assert.deepStrictEqual(info().lampLighting.fill, { on: false, pools: 0, cells: 0, patchedMaterials: 0, buildMs: 0 },
+        const { buildMs, ...fill } = info().lampLighting.fill;
+        assert.deepStrictEqual(fill, { on: false, pools: 0, cells: 0, patchedMaterials: 0 },
             JSON.stringify(zones.map(z => z.extensions)));
+        assert.ok(buildMs >= 0 && buildMs <= 1, 'nothing built: ' + buildMs);
         assert.ok(!meshOf('p:chair/seat#0').material.userData.facilityFill, 'the chair is not patched');
         assert.strictEqual(info().lampLighting.spots.lit, 3, 'the spot lights do not depend on ceilings');
     }
@@ -8099,7 +8279,11 @@ test('in Evening a pendant and accent spots get spot lights, the downlights fill
     assert.strictEqual(shader.uniforms.facilityFillMap.value, null);
     assert.strictEqual(shader.uniforms.facilityFillMask.value, null);
     assert.strictEqual(shader.uniforms.facilityFillStrength.value, 0);
-    assert.deepStrictEqual(info().lampLighting.fill, { on: false, pools: 0, cells: 0, patchedMaterials: patched, buildMs: 0 });
+    {
+        const { buildMs, ...fill } = info().lampLighting.fill;
+        assert.deepStrictEqual(fill, { on: false, pools: 0, cells: 0, patchedMaterials: patched });
+        assert.ok(buildMs >= 0 && buildMs <= 1, 'nothing built: ' + buildMs);
+    }
     await show('evening');
     assert.ok(shader.uniforms.facilityFillMap.value && shader.uniforms.facilityFillMask.value, 'rebuilt');
     assert.strictEqual(info().lampLighting.fill.on, true);

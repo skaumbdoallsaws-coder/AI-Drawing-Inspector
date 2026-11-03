@@ -369,7 +369,8 @@ def operation_batch_schema():
               required=["zoneId", "heightMeters"],
               description="Give a zone a ceiling heightMeters above its floor (2-40 m), or null (without a finish) to "
                           "remove it, so lamps can hang from it. finish is how the 3D view draws it: 'acoustic-tile' "
-                          "(a white suspended ceiling of 600 mm tiles), 'open-deck' or left out (matte charcoal). "
+                          "(a white suspended ceiling of 600 mm tiles), 'open-deck' (exposed light grey steel joists, their "
+                          "underside at the height, under a ribbed deck) or left out (matte charcoal). "
                           "A hung item's asset must allow the ceiling "
                           "(coordinateFrame.allowedMountingSurfaces includes 'ceiling'). Place it inside the zone with "
                           "its top at the ceiling: transform.position.y = the ceiling's height minus the asset's "

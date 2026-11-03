@@ -566,14 +566,16 @@ them" (the Private Gym). A layout with neither renders as before: Factory 02 pix
 
 - **Ceiling finish.** `set_zone_ceiling` takes an optional `finish`:
   - 'acoustic-tile': a white suspended ceiling of 600 x 600 mm matte tiles in a thin light grey T-bar grid;
-  - 'open-deck', or left out: the matte charcoal as before.
+  - 'open-deck': exposed steel (2026-11-03, see "Open deck: exposed steel" below);
+  - left out: the matte charcoal as before.
   - Saved as `extensions.ceiling.finish`. A set replaces the whole ceiling, so leaving the finish out clears it. A
     null height with a finish is refused.
   - The tiles are one 128-texel texture with the grid on 2 texels at each edge, mipmapped. It is mapped by plan
     position (x / 0.6, z / 0.6), so the grid lines up across rooms.
   - **Bulkheads.** Where a ceiling borders a higher one (reception 3.0 m beside cardio 3.6 m), a vertical face
     closes the step. It runs from the lower ceiling up to the higher one, faces the higher room and takes its color
-    (charcoal, or the tiles' plain #f1f0ec). Without it the gap showed the sky, or the roof.
+    (charcoal, or the tiles' plain #f1f0ec; over an open deck, up to its deck in the edges' #c3cad0). Without it the
+    gap showed the sky, or the roof.
 - **Zone roofs.** New operation `set_zone_roof` {zoneId, heightMeters}: 2-40 m, or null to remove it. Saved as
   `extensions.roof` {heightMeters}, allowed in a Sage preview, one sentence in Sage's schema.
   - A flat commercial roof over the zone outline. Its underside is at floor + heightMeters (the wall tops); it is
@@ -639,6 +641,54 @@ them" (the Private Gym). A layout with neither renders as before: Factory 02 pix
     to 4 GB and 600 MB free on the machine, the same frames took 270-300 ms.
   - The fill on the gym with all 20 ceilings builds in 56 ms in the page, the first time (the mask alone takes
     2 ms in Node).
+
+## Open deck: exposed steel (2026-11-03, test copy)
+
+Asked by the user through the main session (C, after A+B): "Exposed steel like Factory 02" for the 10 'open-deck'
+zones in the gym (training floors 3.6 m, boxing 4.2 m, soccer 6.2 m). Tile rooms stay white tiles. A layout without an
+'open-deck' ceiling draws exactly as before.
+
+- **Joists.** Open-web steel joists (Warren: a bottom chord, a top chord and a zigzag web), one about every 1.8 m
+  along the zone's longest edge (spread evenly end to end), each spanning the zone the short way.
+  - Their underside is at the ceiling's height, so the clear height and the hung lamps stay as they were.
+  - Depth (my call, within the spec's 0.45-0.6 m for 3.6 m rooms and up to 0.75 m in the big halls): 0.14 x the
+    ceiling height, clamped to 0.45-0.75 m. That gives 3.6 m: 0.50 m, 4.2 m: 0.59 m, 6.2 m: 0.75 m.
+  - The web: one diagonal per panel, panels about one depth long. Chords 80 x 60 mm, web 30 x 30 mm. Each joist stops
+    20 mm inside the outline, flush with the edges.
+- **Girders** (my call): where the short way is more than 24 depths (12.1 m at 3.6 m, 18 m at 6.2 m), I-beam girders
+  as deep as the joists (200 mm flanges) run the long way and split it into equal bays; the joists run girder to
+  girder. In the gym: free weights (17 m), lower body (14 m), boxing (16 m) and soccer (28 m) get one each.
+- **Deck.** The flat ceiling face moves up to the top of the steel and becomes the ribbed deck, seen from below only.
+  - One procedural texture (256 x 4 texels for 0.61 m: 4 ribs of 152 mm, each a lighter low flange, a darker recessed
+    flange and two webs, with fold lines), shared by all decks, mipmapped, anisotropic up to 8. The ribs run at right
+    angles to the joists.
+  - Colors (the spec): joists #d4d9dd, girders and edges #c3cad0, the deck a little lighter (224, 228, 231).
+- **Shading.** Faces seen from below (the chords' undersides, the girders' flanges), the deck, the edges and the
+  bulkheads are shaded as facing up, like the ceilings: lit like the room, never half as bright. The sides of the
+  chords and the web are shaded by where they face, tipped up a little (0.35).
+  - My call, after a first try with all faces shaded as facing up: then the joists rendered at the deck's brightness
+    (both about 225 of 255 by day) and almost vanished, while Factory 02's joists read by their shaded sides.
+- **Edges.** A face from the ceiling's height up to the deck, facing in, 20 mm inside each part of the outline whose
+  outside is not a ceiling (an outer wall) or is a ceiling as high or higher that is not the same deck. It closes the
+  band between the 3.6 m wall tops and the deck. Next to the same deck at the same height the steel just goes on;
+  next to a lower ceiling the bulkhead closes it instead, from that ceiling up to the deck.
+- **Roofs on a deck.** A roof whose outline holds the middle of an open-deck zone sits on the deck: its underside
+  rises to the highest such deck's top + 0.04 m (main 3.6 -> 4.144 m, boxing 4.828 m, soccer 6.99 m). Its outer
+  face still comes down to 0.1 m below the wall tops (floor + roof height), so from outside it meets the walls as
+  before. Neighbour rules use the lifted heights. A roof with no open deck under it is unchanged.
+- **Merged.** Per zone, one mesh (2 materials) as a child of its deck: the overhead layer, disposal, no shadow, never
+  picked. The gym adds about 26,000 triangles and 20 draw calls.
+- Sage's schema text for `set_zone_ceiling` now describes 'open-deck' as exposed light grey steel joists under a
+  ribbed deck (it said matte charcoal).
+- **Check** (test UI, roof_check.py and deck_views.py in `ui-data/drive/gym-roofs/`, runs c0 before, c1/c2/d2 after):
+  - Factory 02: identical in all 8 shots but two spots (4 and 22 pixels) that flip the same way between two runs of
+    the same code. The gym lighting check (no open deck): identical in all 8 shots to the A+B run.
+  - The scratch gym: the steel reads under every deck by day; in Evening the deck is grey and the floor fill under
+    soccer and free weights is as before (28 pools, 6600 cells; 635 patched materials: the 2 steel materials more).
+  - From above with the roof layer off the overview looks through the web into the rooms, as Factory 02's.
+  - Roof layer on, 12 views from inside: the background shows on as many pixels as in the A+B run (no new opening).
+- **Frame time** (gym, roof layer off, median ms before -> after): overview 80.6 -> 79.4; free weights 47.7 -> 48.5;
+  cardio-reception step 49.9 -> 44.8. No cost shows.
 
 ## L7 results (2026-10-31, test copy)
 

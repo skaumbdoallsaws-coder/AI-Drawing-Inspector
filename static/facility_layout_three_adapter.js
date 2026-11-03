@@ -109,10 +109,24 @@
     // width in metres.
     const ZONE_LIMIT_COLOR = '#4d7c8a';
     const ZONE_LIMIT_WIDTH = 0.1;
-    // A zone ceiling (ceilings.py), seen from inside the room: matte charcoal ('open-deck' or no finish), or
-    // 'acoustic-tile': off-white 600 mm tiles in a thin light grey T-bar grid (about 19 mm), tiled from the plan's
-    // origin so the grid lines up across rooms.
+    // A zone ceiling (ceilings.py), seen from inside the room: matte charcoal (no finish), 'acoustic-tile':
+    // off-white 600 mm tiles in a thin light grey T-bar grid (about 19 mm), tiled from the plan's origin so the grid
+    // lines up across rooms, or 'open-deck': exposed steel (OPEN_DECK).
     const ZONE_CEILING_COLOR = '#2a2a2d';
+    // The 'open-deck' finish (2026-11-03; the user chose "Exposed steel like Factory 02"): open-web steel joists
+    // (Warren: two chords and a zigzag web) with their underside at the ceiling's height, every `spacing` m and
+    // spanning the zone's short way, under a ribbed steel deck seen from below. The depth scales with the room:
+    // `depthPerMeter` of the ceiling's height, within `minDepth` and `maxDepth`. A joist spans at most `spanPerDepth`
+    // depths; a wider zone gets girders (an I section) that split it into equal bays. Light grey like Factory 02's
+    // steel: joists `joist`, girders and edges `girder`, the deck a little lighter (`deck`, its ribs `ribPitch` m
+    // apart, one texture tile of `texels` per `ribTile` m). All in metres.
+    const OPEN_DECK = Object.freeze({
+        spacing: 1.8, depthPerMeter: 0.14, minDepth: 0.45, maxDepth: 0.75, spanPerDepth: 24, sideLift: 0.35,
+        chordWidth: 0.08, chordHeight: 0.06, webSize: 0.03,
+        flangeWidth: 0.2, flangeThickness: 0.02, webThickness: 0.012, deckThickness: 0.04, edgeInset: 0.02,
+        ribPitch: 0.1524, ribTile: 0.6096, texels: 256,
+        joist: '#d4d9dd', girder: '#c3cad0', deck: [224, 228, 231],
+    });
     const CEILING_TILE = Object.freeze({
         meters: 0.6, texels: 128, gridTexels: 2, tile: [241, 240, 236], grid: [196, 199, 202], plain: '#f1f0ec',
     });
@@ -10705,26 +10719,44 @@
         // boundary at its floor plus that height: matte charcoal, facing down only, so it is seen from inside the room
         // and the view from above or outside looks straight in. It casts no shadow, is never picked and follows the
         // overhead layer. Hung lamps sit in it: anything at its own height is drawn in front of it. Its finish
-        // 'acoustic-tile' draws it as a white tiled suspended ceiling instead (CEILING_TILE). Where it borders a lower
-        // ceiling, a bulkhead closes the step between them (zoneCeilingSteps).
+        // 'acoustic-tile' draws it as a white tiled suspended ceiling instead (CEILING_TILE). 'open-deck' (2026-11-03)
+        // draws exposed steel whose underside is at that height (OPEN_DECK): the flat face is its ribbed deck, at the
+        // top of the steel, and the joists, girders and edges are a child of it (zoneOpenDeckStructures). Where it
+        // borders a lower ceiling, a bulkhead closes the step between them (zoneCeilingSteps), up to the deck.
         function renderZoneCeilings() {
             if (!state.modelRoot || typeof THREE.Mesh !== 'function' || typeof THREE.BufferGeometry !== 'function'
                     || !THREE.ShapeUtils || typeof THREE.MeshStandardMaterial !== 'function') return 0;
             const layout = state.currentInput && state.currentInput.layout || {};
             let tiles = null;
+            let ribs = null;
             (Array.isArray(layout.zones) ? layout.zones : []).forEach(function (zone) {
                 const ceiling = zone && zone.extensions && zone.extensions.ceiling;
                 const height = Number(ceiling && ceiling.heightMeters);
                 if (!(height > 0)) return;
-                const tiled = ceiling.finish === 'acoustic-tile' && typeof THREE.DataTexture === 'function';
-                const geometry = zoneCeilingGeometry(zoneFloorPoints(zone), finite(zone.floorElevation, 0) + height,
-                    tiled);
+                const textures = typeof THREE.DataTexture === 'function';
+                const tiled = ceiling.finish === 'acoustic-tile' && textures;
+                const deck = ceiling.finish === 'open-deck';
+                const points = zoneFloorPoints(zone);
+                const floor = finite(zone.floorElevation, 0);
+                const depth = deck ? openDeckDepth(height) : 0;
+                const frame = deck ? outlineFrame(points) : null;
+                const geometry = zoneCeilingGeometry(points, floor + height + depth, tiled ? function (point) {
+                    return [point.x / CEILING_TILE.meters, point.z / CEILING_TILE.meters];
+                } : (deck && textures ? function (point) {
+                    // Across the ribs, which run at right angles to the joists.
+                    return [(point.x * frame.across.x + point.z * frame.across.z) / OPEN_DECK.ribTile,
+                        (point.x * frame.along.x + point.z * frame.along.z) / OPEN_DECK.ribTile];
+                } : null));
                 if (!geometry) return;
                 if (tiled && !tiles) tiles = ceilingTileTexture();
+                if (deck && textures && !ribs) ribs = openDeckTexture();
+                const look = tiled ? { color: '#ffffff', map: tiles } : (deck ? (ribs ? { color: '#ffffff', map: ribs }
+                    : { color: new THREE.Color().setRGB(OPEN_DECK.deck[0] / 255, OPEN_DECK.deck[1] / 255,
+                        OPEN_DECK.deck[2] / 255, THREE.SRGBColorSpace) }) : { color: ZONE_CEILING_COLOR });
                 const material = new THREE.MeshStandardMaterial(Object.assign({
                     roughness: 1, metalness: 0,
                     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
-                }, tiled ? { color: '#ffffff', map: tiles } : { color: ZONE_CEILING_COLOR }));
+                }, look));
                 const mesh = new THREE.Mesh(geometry, material);
                 mesh.name = 'FacilityZoneCeiling:' + String(zone.zoneId || '');
                 mesh.castShadow = false;
@@ -10732,17 +10764,310 @@
                 mesh.raycast = function () {};
                 mesh.userData = Object.assign({}, mesh.userData, {
                     facilityZoneCeiling: true, zoneId: zone.zoneId, heightMeters: height,
-                    finish: tiled ? 'acoustic-tile' : (ceiling.finish === 'open-deck' ? 'open-deck' : null),
+                    finish: tiled ? 'acoustic-tile' : (deck ? 'open-deck' : null),
+                    ceilingY: floor + height, deckDepth: depth,
                 });
                 mesh.visible = state.layerVisibility.overhead !== false;
                 state.modelRoot.add(mesh);
                 state.zoneCeilingObjects.push(mesh);
             });
-            zoneCeilingSteps(state.zoneCeilingObjects.map(function (mesh) {
+            const entries = state.zoneCeilingObjects.map(function (mesh) {
                 const zone = (layout.zones || []).find(function (item) { return item && item.zoneId === mesh.userData.zoneId; });
                 return { mesh: mesh, points: zoneFloorPoints(zone), y: mesh.geometry.attributes.position.getY(0) };
-            }));
+            });
+            zoneCeilingSteps(entries);
+            zoneOpenDeckStructures(entries);
             return state.zoneCeilingObjects.length;
+        }
+
+        // The 'open-deck' steel's depth under a ceiling `height` m up (OPEN_DECK).
+        function openDeckDepth(height) {
+            return Math.min(OPEN_DECK.maxDepth, Math.max(OPEN_DECK.minDepth, OPEN_DECK.depthPerMeter * height));
+        }
+
+        // An outline's plan frame: `along` its longest edge and `across` at right angles to it (a rectangle's short
+        // way), unit vectors.
+        function outlineFrame(points) {
+            let along = { x: 1, z: 0 };
+            let longest = 0;
+            points.forEach(function (point, i) {
+                const next = points[(i + 1) % points.length];
+                const length = Math.hypot(next.x - point.x, next.z - point.z);
+                if (length > longest + 1e-9) {
+                    longest = length;
+                    along = { x: (next.x - point.x) / length, z: (next.z - point.z) / length };
+                }
+            });
+            return { along: along, across: { x: -along.z, z: along.x } };
+        }
+
+        // Under each 'open-deck' ceiling (its mesh is the deck), its steel (openDeckGeometry), a child of the ceiling:
+        // its layer, its disposal. No shadow, never picked; one pair of materials for all.
+        function zoneOpenDeckStructures(entries) {
+            let materials = null;
+            entries.forEach(function (entry) {
+                if (!(entry.mesh.userData.deckDepth > 0)) return;
+                const geometry = openDeckGeometry(entry, entries);
+                if (!geometry) return;
+                if (!materials) {
+                    materials = [
+                        new THREE.MeshStandardMaterial({ color: OPEN_DECK.joist, roughness: 0.8, metalness: 0 }),
+                        new THREE.MeshStandardMaterial({ color: OPEN_DECK.girder, roughness: 0.8, metalness: 0 }),
+                    ];
+                }
+                const steel = new THREE.Mesh(geometry, materials);
+                steel.name = 'FacilityZoneOpenDeck:' + String(entry.mesh.userData.zoneId || '');
+                steel.castShadow = false;
+                steel.receiveShadow = false;
+                steel.raycast = function () {};
+                steel.userData = Object.assign({}, steel.userData, { facilityZoneOpenDeck: true },
+                    geometry.userData.openDeck);
+                entry.mesh.add(steel);
+            });
+        }
+
+        // The steel under 'open-deck' ceiling `entry` ({mesh, points, y}; y is its deck, the top of the steel), in the
+        // outline's frame (outlineFrame):
+        // - joists every OPEN_DECK.spacing along the outline's longest edge, evenly from end to end, each across the
+        //   outline wherever a line at right angles to that edge is inside it: a bottom chord with its underside at
+        //   the ceiling's height, a top chord under the deck and a zigzag web, about one depth per panel;
+        // - where the outline is more than OPEN_DECK.spanPerDepth depths across, girders along it (an I section as
+        //   deep as the joists) split it into equal bays, and the joists span from girder to girder;
+        // - edges: a face from the ceiling's height up to the deck, facing in, just inside each part of the outline
+        //   that has no ceiling beyond it (an outer wall) or a higher one or one that is not this open deck, so the
+        //   band above the wall tops does not open onto the outside. Over a lower ceiling the bulkhead closes it from
+        //   that ceiling up (zoneCeilingSteps); next to the same open deck the steel just goes on.
+        // Groups: 0 the joists, 1 the girders and edges. Flat faces, shaded mostly as facing up, like the ceilings: lit
+        // like the room, so the light grey reads in any scene and the sides are not half as bright. Null if empty.
+        function openDeckGeometry(entry, entries) {
+            const points = entry.points;
+            if (points.length < 3) return null;
+            const depth = entry.mesh.userData.deckDepth;
+            const bottom = entry.mesh.userData.ceilingY;
+            const top = entry.y;
+            const frame = outlineFrame(points);
+            const L = frame.along;
+            const S = frame.across;
+            const parts = [{ positions: [], normals: [] }, { positions: [], normals: [] }];
+            // A quad a b c d into group `part`, turned to face `facing`, shaded with normal `lit` (by default: a face
+            // seen from below or above as facing up, a side by where it faces, tipped up by OPEN_DECK.sideLift).
+            const face = function (part, a, b, c, d, facing, lit) {
+                const ux = b[0] - a[0]; const uy = b[1] - a[1]; const uz = b[2] - a[2];
+                const vx = c[0] - a[0]; const vy = c[1] - a[1]; const vz = c[2] - a[2];
+                const toward = (uy * vz - uz * vy) * facing[0] + (uz * vx - ux * vz) * facing[1]
+                    + (ux * vy - uy * vx) * facing[2];
+                let shade = lit || [0, 1, 0];
+                if (!lit && Math.abs(facing[1]) < 0.5) {
+                    const length = Math.hypot(facing[0], OPEN_DECK.sideLift, facing[2]);
+                    shade = [facing[0] / length, OPEN_DECK.sideLift / length, facing[2] / length];
+                }
+                (toward < 0 ? [a, c, b, a, d, c] : [a, b, c, a, c, d]).forEach(function (corner) {
+                    parts[part].positions.push(corner[0], corner[1], corner[2]);
+                    parts[part].normals.push(shade[0], shade[1], shade[2]);
+                });
+            };
+            // A bar from a to b, `wide` along `side` (a unit vector at right angles to it) and `high` the third way:
+            // its four long faces.
+            const bar = function (part, a, b, side, wide, high) {
+                const ux = b[0] - a[0];
+                const uy = b[1] - a[1];
+                const uz = b[2] - a[2];
+                const length = Math.hypot(ux, uy, uz);
+                if (!(length > 1e-6)) return;
+                const u = [ux / length, uy / length, uz / length];
+                const t = [u[1] * side[2] - u[2] * side[1], u[2] * side[0] - u[0] * side[2], u[0] * side[1] - u[1] * side[0]];
+                const corner = function (point, s, k) {
+                    return [point[0] + side[0] * s * wide / 2 + t[0] * k * high / 2,
+                        point[1] + side[1] * s * wide / 2 + t[1] * k * high / 2,
+                        point[2] + side[2] * s * wide / 2 + t[2] * k * high / 2];
+                };
+                face(part, corner(a, 1, -1), corner(b, 1, -1), corner(b, 1, 1), corner(a, 1, 1), side);
+                face(part, corner(a, -1, -1), corner(b, -1, -1), corner(b, -1, 1), corner(a, -1, 1),
+                    [-side[0], -side[1], -side[2]]);
+                face(part, corner(a, -1, 1), corner(b, -1, 1), corner(b, 1, 1), corner(a, 1, 1), t);
+                face(part, corner(a, -1, -1), corner(b, -1, -1), corner(b, 1, -1), corner(a, 1, -1), [-t[0], -t[1], -t[2]]);
+            };
+            const at = function (l, s, y) { return [L.x * l + S.x * s, y, L.z * l + S.z * s]; };
+            const ls = points.map(function (point) { return point.x * L.x + point.z * L.z; });
+            const ss = points.map(function (point) { return point.x * S.x + point.z * S.z; });
+            // Where the line at `value` of l (alongLine) or of s is inside the outline: [from, to] in the other.
+            const runs = function (alongLine, value) {
+                const a = alongLine ? ls : ss;
+                const b = alongLine ? ss : ls;
+                const hits = [];
+                for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+                    if ((a[i] > value) !== (a[j] > value)) hits.push(b[i] + (value - a[i]) * (b[j] - b[i]) / (a[j] - a[i]));
+                }
+                hits.sort(function (u, v) { return u - v; });
+                const found = [];
+                for (let k = 0; k + 1 < hits.length; k += 2) found.push([hits[k], hits[k + 1]]);
+                return found;
+            };
+            const lMin = Math.min.apply(null, ls);
+            const lMax = Math.max.apply(null, ls);
+            const sMin = Math.min.apply(null, ss);
+            const sMax = Math.max.apply(null, ss);
+            const bays = Math.max(1, Math.ceil((sMax - sMin) / (OPEN_DECK.spanPerDepth * depth) - 1e-9));
+            const girderLines = [];
+            for (let k = 1; k < bays; k += 1) girderLines.push(sMin + (sMax - sMin) * k / bays);
+            const chord = OPEN_DECK.chordHeight;
+            const lowY = bottom + chord / 2;
+            const highY = top - chord / 2;
+            const sideL = [L.x, 0, L.z];
+            const sideS = [S.x, 0, S.z];
+            const count = { joists: 0, girders: 0, edges: 0 };
+            const joistLines = Math.max(1, Math.round((lMax - lMin) / OPEN_DECK.spacing));
+            for (let k = 0; k < joistLines; k += 1) {
+                const l = lMin + (lMax - lMin) * (k + 0.5) / joistLines;
+                runs(true, l).forEach(function (run) {
+                    const stops = [run[0]].concat(girderLines.filter(function (s) {
+                        return s > run[0] + 0.1 && s < run[1] - 0.1;
+                    }), [run[1]]);
+                    for (let m = 0; m + 1 < stops.length; m += 1) {
+                        // Flush with the edges, so the web does not poke out past the outline.
+                        const from = stops[m] + OPEN_DECK.edgeInset;
+                        const to = stops[m + 1] - OPEN_DECK.edgeInset;
+                        if (!(to - from > 0.2)) continue;
+                        count.joists += 1;
+                        bar(0, at(l, from, lowY), at(l, to, lowY), sideL, OPEN_DECK.chordWidth, chord);
+                        bar(0, at(l, from, highY), at(l, to, highY), sideL, OPEN_DECK.chordWidth, chord);
+                        const panels = Math.max(2, Math.round((to - from) / depth));
+                        for (let panel = 0; panel < panels; panel += 1) {
+                            const s0 = from + (to - from) * panel / panels;
+                            const s1 = from + (to - from) * (panel + 1) / panels;
+                            const rising = panel % 2 === 0;
+                            bar(0, at(l, s0, rising ? lowY : highY), at(l, s1, rising ? highY : lowY), sideL,
+                                OPEN_DECK.webSize, OPEN_DECK.webSize);
+                        }
+                    }
+                });
+            }
+            const flange = OPEN_DECK.flangeThickness;
+            girderLines.forEach(function (s) {
+                runs(false, s).forEach(function (run) {
+                    if (!(run[1] - run[0] > 0.2)) return;
+                    count.girders += 1;
+                    bar(1, at(run[0], s, bottom + flange / 2), at(run[1], s, bottom + flange / 2), sideS,
+                        OPEN_DECK.flangeWidth, flange);
+                    bar(1, at(run[0], s, top - flange / 2), at(run[1], s, top - flange / 2), sideS,
+                        OPEN_DECK.flangeWidth, flange);
+                    bar(1, at(run[0], s, (bottom + top) / 2), at(run[1], s, (bottom + top) / 2), sideS,
+                        OPEN_DECK.webThickness, top - bottom - 2 * flange);
+                });
+            });
+            let twiceArea = 0;
+            points.forEach(function (point, i) {
+                const next = points[(i + 1) % points.length];
+                twiceArea += point.x * next.z - next.x * point.z;
+            });
+            const sign = twiceArea > 0 ? 1 : -1;
+            const others = entries.filter(function (other) { return other !== entry && other.points.length >= 3; });
+            points.forEach(function (point, i) {
+                const next = points[(i + 1) % points.length];
+                const length = Math.hypot(next.x - point.x, next.z - point.z);
+                if (!(length > 1e-6)) return;
+                const n = { x: sign * (next.z - point.z) / length, z: -sign * (next.x - point.x) / length };
+                const inset = OPEN_DECK.edgeInset;
+                outlineEdgePieces(point, next, n, others).forEach(function (piece) {
+                    const beyond = piece.beyond;
+                    let high = top;
+                    if (beyond) {
+                        if (beyond.mesh.userData.deckDepth > 0 && Math.abs(beyond.mesh.userData.ceilingY - bottom) < 0.01) return;
+                        if (beyond.y < top - 0.01) high = Math.min(top, beyond.y);
+                    }
+                    if (!(high - bottom > 0.01)) return;
+                    count.edges += 1;
+                    const a = { x: piece.from.x - n.x * inset, z: piece.from.z - n.z * inset };
+                    const b = { x: piece.to.x - n.x * inset, z: piece.to.z - n.z * inset };
+                    face(1, [a.x, bottom, a.z], [b.x, bottom, b.z], [b.x, high, b.z], [a.x, high, a.z], [-n.x, 0, -n.z],
+                        [0, 1, 0]);
+                });
+            });
+            if (!parts[0].positions.length && !parts[1].positions.length) return null;
+            const geometry = new THREE.BufferGeometry();
+            const positions = parts[0].positions.concat(parts[1].positions);
+            const normals = parts[0].normals.concat(parts[1].normals);
+            geometry.addGroup(0, parts[0].positions.length / 3, 0);
+            geometry.addGroup(parts[0].positions.length / 3, parts[1].positions.length / 3, 1);
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+            if (typeof geometry.computeBoundingSphere === 'function') geometry.computeBoundingSphere();
+            if (typeof geometry.computeBoundingBox === 'function') geometry.computeBoundingBox();
+            geometry.userData.openDeck = { joists: count.joists, girders: count.girders, edges: count.edges, depth: depth };
+            return geometry;
+        }
+
+        // The parts of outline edge p to q (outward normal n), cut where another outline's corner lies on it or one of
+        // its edges crosses it, each {from, to, beyond}: the other ({points, y}) just outside the part's middle, the
+        // highest if several, or null.
+        function outlineEdgePieces(p, q, n, others) {
+            const length = Math.hypot(q.x - p.x, q.z - p.z);
+            const ux = (q.x - p.x) / length;
+            const uz = (q.z - p.z) / length;
+            const cuts = [0, length];
+            others.forEach(function (other) {
+                other.points.forEach(function (v, index) {
+                    const t = (v.x - p.x) * ux + (v.z - p.z) * uz;
+                    if (Math.abs(ux * (v.z - p.z) - uz * (v.x - p.x)) <= 0.05 && t > 1e-3 && t < length - 1e-3) cuts.push(t);
+                    const w = other.points[(index + 1) % other.points.length];
+                    const ex = w.x - v.x;
+                    const ez = w.z - v.z;
+                    const denominator = ux * ez - uz * ex;
+                    if (Math.abs(denominator) < 1e-12) return;
+                    const along = ((v.x - p.x) * ez - (v.z - p.z) * ex) / denominator;
+                    const across = ((v.x - p.x) * uz - (v.z - p.z) * ux) / denominator;
+                    if (across > 0 && across < 1 && along > 1e-3 && along < length - 1e-3) cuts.push(along);
+                });
+            });
+            cuts.sort(function (a, b) { return a - b; });
+            const pieces = [];
+            for (let k = 0; k + 1 < cuts.length; k += 1) {
+                const from = cuts[k];
+                const to = cuts[k + 1];
+                if (!(to - from > 1e-3)) continue;
+                const middle = (from + to) / 2;
+                const x = p.x + ux * middle + n.x * 0.05;
+                const z = p.z + uz * middle + n.z * 0.05;
+                let beyond = null;
+                others.forEach(function (other) {
+                    if (pointInOutline(other.points, x, z) && (!beyond || other.y > beyond.y)) beyond = other;
+                });
+                pieces.push({ from: { x: p.x + ux * from, z: p.z + uz * from }, to: { x: p.x + ux * to, z: p.z + uz * to },
+                    beyond: beyond });
+            }
+            return pieces;
+        }
+
+        // The open deck's ribs seen from below (OPEN_DECK), across one tile: per rib the low flange (nearest, the
+        // lightest), a sloping web, the recessed high flange (a little darker) and the other web, a thin darker line
+        // at each fold. The same along the ribs. Mipmapped and anisotropic, so far off it is an even light grey.
+        function openDeckTexture() {
+            const width = OPEN_DECK.texels;
+            const height = 4;
+            const perRib = width / Math.round(OPEN_DECK.ribTile / OPEN_DECK.ribPitch);
+            const data = new Uint8Array(width * height * 4);
+            for (let column = 0; column < width; column += 1) {
+                const f = (column % perRib) / perRib;
+                let shade = f < 0.3 ? 1 : (f < 0.45 ? 0.86 : (f < 0.85 ? 0.93 : 0.86));
+                const fold = [0, 0.3, 0.45, 0.85].some(function (edge) { return Math.abs(f - edge) < 0.5 / perRib; });
+                if (fold) shade *= 0.9;
+                const color = OPEN_DECK.deck.map(function (value) { return Math.round(value * shade); });
+                for (let row = 0; row < height; row += 1) data.set([color[0], color[1], color[2], 255], (row * width + column) * 4);
+            }
+            const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+            texture.name = 'FacilityOpenDeck';
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearMipmapLinearFilter;
+            texture.generateMipmaps = true;
+            if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+            if (state.renderer && state.renderer.capabilities
+                    && typeof state.renderer.capabilities.getMaxAnisotropy === 'function') {
+                texture.anisotropy = Math.min(8, state.renderer.capabilities.getMaxAnisotropy());
+            }
+            texture.needsUpdate = true;
+            return texture;
         }
 
         // Whether plan point (x, z) is inside the outline (even-odd).
@@ -10759,7 +11084,8 @@
         // Where a ceiling borders a lower one (their outlines share an edge, the higher one beyond the lower one's
         // edge), a vertical bulkhead from the lower ceiling up to the higher one, so the step does not open onto the
         // space above the lower ceiling. It faces the higher room only, in that ceiling's color (tiles: their plain
-        // white), and is a child of that ceiling: its layer, its disposal.
+        // white; an open deck: its edges' grey, up to the deck), and is a child of that ceiling: its layer, its
+        // disposal.
         function zoneCeilingSteps(entries) {
             const inside = pointInOutline;
             const outwardSign = function (points) {
@@ -10818,9 +11144,10 @@
                 geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
                 geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
                 if (typeof geometry.computeBoundingSphere === 'function') geometry.computeBoundingSphere();
-                const tiled = high.mesh.userData.finish === 'acoustic-tile';
+                const finish = high.mesh.userData.finish;
                 const step = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
-                    color: tiled ? CEILING_TILE.plain : ZONE_CEILING_COLOR, roughness: 1, metalness: 0,
+                    color: finish === 'acoustic-tile' ? CEILING_TILE.plain
+                        : (finish === 'open-deck' ? OPEN_DECK.girder : ZONE_CEILING_COLOR), roughness: 1, metalness: 0,
                     polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
                 }));
                 step.name = 'FacilityZoneCeilingStep:' + String(high.mesh.userData.zoneId || '');
@@ -10847,10 +11174,14 @@
                 if (up < 0) facingDown += 1;
             }
             const step = (mesh.children || []).find(function (child) { return child.userData.facilityZoneCeilingStep; });
+            const steel = (mesh.children || []).find(function (child) { return child.userData.facilityZoneOpenDeck; });
             return { zoneId: mesh.userData.zoneId, heightMeters: mesh.userData.heightMeters, visible: mesh.visible,
                 finish: mesh.userData.finish, inScene: attached, y: position.count ? position.getY(0) : null,
                 triangles: index ? index.count / 3 : 0, facingDown: facingDown,
-                stepTriangles: step ? step.geometry.attributes.position.count / 3 : 0 };
+                stepTriangles: step ? step.geometry.attributes.position.count / 3 : 0,
+                steel: steel ? { joists: steel.userData.joists, girders: steel.userData.girders,
+                    edges: steel.userData.edges, depth: steel.userData.depth,
+                    triangles: steel.geometry.attributes.position.count / 3 } : null };
         }
 
         // The acoustic tile: one 600 mm tile, its T-bar half on each edge, repeated by the ceiling's plan UVs.
@@ -10883,8 +11214,9 @@
         // The outline as triangles facing down at height y, so only the view from below draws them; null if it does
         // not triangulate. Their shading normal points up: lit like the room under it (as indoor light bounces up),
         // not black because no light shines up at it, so it reads as its color by day and dark in Evening.
-        // With tiles, its UVs are plan metres over the tile size, so every tiled ceiling shares one grid.
-        function zoneCeilingGeometry(points, y, tiled) {
+        // With `uv` (a plan point to [u, v]) it carries UVs: for tiles, plan metres over the tile size, so every tiled
+        // ceiling shares one grid; for the open deck, across its ribs.
+        function zoneCeilingGeometry(points, y, uv) {
             if (points.length < 3) return null;
             const triangles = THREE.ShapeUtils.triangulateShape(points.map(function (point) {
                 return new THREE.Vector2(point.x, point.z);
@@ -10897,7 +11229,7 @@
             points.forEach(function (point) {
                 positions.push(point.x, y, point.z);
                 normals.push(0, 1, 0);
-                uvs.push(point.x / CEILING_TILE.meters, point.z / CEILING_TILE.meters);
+                if (uv) Array.prototype.push.apply(uvs, uv(point));
             });
             triangles.forEach(function (triangle) {
                 const a = points[triangle[0]];
@@ -10911,7 +11243,7 @@
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
             geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-            if (tiled) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+            if (uv) geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
             geometry.setIndex(indices);
             if (typeof geometry.computeBoundingSphere === 'function') geometry.computeBoundingSphere();
             if (typeof geometry.computeBoundingBox === 'function') geometry.computeBoundingBox();
@@ -10927,26 +11259,46 @@
         // underside (its polygon offset is smaller). It casts no shadow, is never picked and follows the roof
         // sheeting layer (hidden by default, so the overview looks in). Where two roofs meet (a building and its
         // annex), the lower one's parapet has no outer face there (it would face into the other building) and the
-        // higher one's outer face comes down to the lower one's membrane.
+        // higher one's outer face comes down to the lower one's membrane. Over an 'open-deck' ceiling (2026-11-03) the
+        // roof sits on its deck: the slab rises to the top of the highest deck under it (a ceiling whose middle is
+        // inside the roof) and the parapet's face still comes down to the wall tops, closing the band between.
         function renderZoneRoofs() {
             if (!state.modelRoot || typeof THREE.Mesh !== 'function' || typeof THREE.BufferGeometry !== 'function'
                     || !THREE.ShapeUtils || typeof THREE.MeshStandardMaterial !== 'function') return 0;
             const layout = state.currentInput && state.currentInput.layout || {};
             let materials = null;
             const entries = [];
+            const decks = [];
+            (Array.isArray(layout.zones) ? layout.zones : []).forEach(function (zone) {
+                const ceiling = zone && zone.extensions && zone.extensions.ceiling;
+                const height = Number(ceiling && ceiling.heightMeters);
+                if (!(height > 0) || ceiling.finish !== 'open-deck') return;
+                const points = zoneFloorPoints(zone);
+                if (points.length < 3) return;
+                decks.push({
+                    x: points.reduce(function (sum, point) { return sum + point.x; }, 0) / points.length,
+                    z: points.reduce(function (sum, point) { return sum + point.z; }, 0) / points.length,
+                    top: finite(zone.floorElevation, 0) + height + openDeckDepth(height) + OPEN_DECK.deckThickness,
+                });
+            });
             (Array.isArray(layout.zones) ? layout.zones : []).forEach(function (zone) {
                 const roof = zone && zone.extensions && zone.extensions.roof;
                 const height = Number(roof && roof.heightMeters);
                 if (!(height > 0)) return;
-                entries.push({ zone: zone, height: height, points: zoneFloorPoints(zone),
-                    base: finite(zone.floorElevation, 0) + height });
+                const points = zoneFloorPoints(zone);
+                const wall = finite(zone.floorElevation, 0) + height;
+                let base = wall;
+                decks.forEach(function (deck) {
+                    if (deck.top > base && points.length >= 3 && pointInOutline(points, deck.x, deck.z)) base = deck.top;
+                });
+                entries.push({ zone: zone, height: height, points: points, base: base, wall: wall });
             });
             entries.forEach(function (entry) {
                 const zone = entry.zone;
                 const height = entry.height;
                 const geometry = zoneRoofGeometry(entry.points, entry.base, entries.filter(function (other) {
                     return other !== entry && other.points.length >= 3;
-                }));
+                }), entry.wall);
                 if (!geometry) return;
                 if (!materials) {
                     const membrane = typeof THREE.DataTexture === 'function'
@@ -10967,7 +11319,7 @@
                 mesh.receiveShadow = false;
                 mesh.raycast = function () {};
                 mesh.userData = Object.assign({}, mesh.userData, {
-                    facilityZoneRoof: true, zoneId: zone.zoneId, heightMeters: height,
+                    facilityZoneRoof: true, zoneId: zone.zoneId, heightMeters: height, base: entry.base,
                 });
                 mesh.visible = state.layerVisibility.roofSheeting !== false;
                 state.modelRoot.add(mesh);
@@ -10995,6 +11347,7 @@
             const underside = (mesh.geometry.groups || []).find(function (group) { return group.materialIndex === 3; });
             const membrane = Array.isArray(mesh.material) ? mesh.material[0] : null;
             return { zoneId: mesh.userData.zoneId, heightMeters: mesh.userData.heightMeters, visible: mesh.visible,
+                base: mesh.userData.base,
                 inScene: attached, lowest: low, highest: high, triangles: position.count / 3, facingDown: facingDown,
                 undersideTriangles: underside ? underside.count / 3 : 0, textured: Boolean(membrane && membrane.map) };
         }
@@ -11105,8 +11458,9 @@
         // a ceiling: lit like the room under it). UVs are plan metres over ROOF_MEMBRANE.meters, along the outline's
         // longest edge, so the membrane's sheets run the length of the roof. The inner line is the outline moved in
         // by the parapet's width (mitred). Neighbours are the other roofs ({points, base}): see zoneRoofEdgeSpans.
-        // Null if the outline does not triangulate.
-        function zoneRoofGeometry(points, base, neighbours) {
+        // `wall` (by default `base`) is the wall tops, where a free face comes down to. Null if the outline does not
+        // triangulate.
+        function zoneRoofGeometry(points, base, neighbours, wall) {
             if (points.length < 3) return null;
             let twiceArea = 0;
             points.forEach(function (point, i) {
@@ -11182,7 +11536,8 @@
                 const next = points[j];
                 const out = [outward[i].x, 0, outward[i].z];
                 const into = [-out[0], 0, -out[2]];
-                zoneRoofEdgeSpans(point, next, outward[i], neighbours || [], base).forEach(function (span) {
+                zoneRoofEdgeSpans(point, next, outward[i], neighbours || [], base,
+                    wall === undefined ? base : Math.min(wall, base)).forEach(function (span) {
                     const a = span.from;
                     const b = span.to;
                     quad(1, [a.x, span.low, a.z], [b.x, span.low, b.z], [b.x, crest, b.z], [a.x, crest, a.z], out);
@@ -11215,10 +11570,10 @@
         // The parts of a roof edge (p to q, outward normal n) that get a parapet outer face, each {from, to, low,
         // under}: the edge is cut where a neighbouring roof's corners lie on it or its edges cross it; a part whose
         // outside is another roof as high or higher gets none, a part over a lower roof comes down only to that
-        // roof's membrane (however little lower it is), and a free part comes down ZONE_ROOF.drop below the slab.
-        // `under` is how low its inner side comes: the lower roof's underside (closing its slab's edge from inside)
-        // or the free face's foot.
-        function zoneRoofEdgeSpans(p, q, n, neighbours, base) {
+        // roof's membrane (however little lower it is), and a free part comes down ZONE_ROOF.drop below the wall tops
+        // (`wall`, the slab's underside unless the roof sits on an open deck). `under` is how low its inner side
+        // comes: the lower roof's underside (closing its slab's edge from inside) or the free face's foot.
+        function zoneRoofEdgeSpans(p, q, n, neighbours, base, wall) {
             const length = Math.hypot(q.x - p.x, q.z - p.z);
             if (!(length > 1e-6)) return [];
             const ux = (q.x - p.x) / length;
@@ -11255,8 +11610,8 @@
                     if (pointInOutline(other.points, x, z) && (!beyond || other.base > beyond.base)) beyond = other;
                 });
                 if (beyond && beyond.base >= base - 1e-6) continue;
-                const low = beyond ? beyond.base + ZONE_ROOF.thickness : base - ZONE_ROOF.drop;
-                const under = beyond ? beyond.base : base - ZONE_ROOF.drop;
+                const low = beyond ? beyond.base + ZONE_ROOF.thickness : wall - ZONE_ROOF.drop;
+                const under = beyond ? beyond.base : wall - ZONE_ROOF.drop;
                 const last = spans[spans.length - 1];
                 if (last && last.low === low && last.under === under && Math.abs(last.end - from) < 1e-9) {
                     last.end = to;

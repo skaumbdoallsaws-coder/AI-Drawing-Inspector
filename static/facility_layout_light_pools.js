@@ -449,10 +449,12 @@
     // The zone ceilings' footprint over a fill map ({minX, minZ, cell, cols, rows}), for the shader to cut the fill
     // off at its edge: a map FILL_MASK_SUBDIVIDE times finer over the same plan, with `channels` (1, 2 or 4) values
     // per texel. The shader takes the largest; above zero it adds the fill.
-    // - Outlines nearer each other than six texels (0.75 m) without touching go in different channels
-    //   (maskChannels), each with the outlines it touches, so each reads its own distances, as if the others were
-    //   not there: a room's wall a few centimetres from the next room keeps its fill, also when a hallway joins them.
-    //   Touching outlines share a channel, so an edge two of them share is not an edge.
+    // - A sample mixes the texels around it, and they read the edges within FILL_EDGE_TEXELS texels, so only the
+    //   outlines within four texels (0.5 m) of a point can change its value. Outlines nearer each other than that
+    //   without touching clash, and go in different channels (maskChannels): every point inside reads, in one
+    //   channel, the outlines around it less those across a gap from it, as if those were not there. A room's wall a
+    //   few centimetres from the next room keeps its fill, also when a hallway joins them or rooms meet nearby, and
+    //   outlines that meet share a channel there, so an edge two of them share is not an edge.
     // - A channel holds, per texel, the signed distance in metres (+ inside) to the edge of its footprints, clamped
     //   to FILL_EDGE_TEXELS texels, less FILL_MASK_INSET (maskField). Read with linear filtering it is above zero
     //   only inside them:
@@ -464,9 +466,10 @@
     //   - Along a straight edge that changes nothing: the cut is exactly on the edge, less the inset. Only in an
     //     inner (reflex) corner of a footprint does it take about a texel and a half off the inside.
     //   - The map's own border texels are outside, so the clamped reads beyond the last texel centres are too.
-    // - Outside every ceiling, every channel is at or below zero. With more than four groups near one another, one
-    //   shares a channel: near the others its fill is cut a little, never lit outside. So is a single outline's
-    //   own notch narrower than a texel diagonal, or two touching outlines' (they share a channel).
+    // - Outside every ceiling, every channel is at or below zero (a channel is a union of ceilings). When more than
+    //   four channels would be needed, some outlines share one: near the ones they clash with their fill is cut a
+    //   little, never lit outside. So is a single outline's own notch narrower than a texel diagonal, or a notch
+    //   between two outlines that touch (they share a channel).
     // Built once per grid and outlines: each outline's inside by scanlines, the distances only near the edges.
     function fillMask(grid, outlines) {
         const minX = grid.minX;
@@ -480,7 +483,9 @@
             });
         }).filter(function (points) { return points.length >= 3; });
         const reach = FILL_EDGE_TEXELS * cell;
-        const groups = maskChannels(shapes, 2 * reach + 2 * cell);
+        // The views coloured in four channels; with no such colouring, the grouping of aca8df1 (maskGroups).
+        const groups = maskChannels(shapes, minX, minZ, cell, cols, rows, reach + 2 * cell)
+            || maskGroups(shapes, 2 * reach + 2 * cell);
         const channels = groups.length <= 2 ? Math.max(1, groups.length) : 4;
         const data = new Float32Array(cols * rows * channels).fill(-reach - FILL_MASK_INSET);
         groups.forEach(function (group, channel) {
@@ -490,14 +495,385 @@
         return { minX: minX, minZ: minZ, cell: cell, cols: cols, rows: rows, channels: channels, data: data };
     }
 
-    // The outlines in at most four channels, as lists of outlines. Two outlines touch when they overlap or meet, and
+    // The outlines in at most four channels, as lists of outlines. Two outlines clash when they do not touch (overlap
+    // or meet) but are nearer each other than `apart`, the reach of a sample: in one channel the edges of one would
+    // cut the other's fill.
+    // - An outline inside another adds no edge and no area: it is left out (the other covers it in every channel).
+    // - A point inside a ceiling should read its view: the outlines within `apart` of it, nearest first from one that
+    //   holds it, leaving out any that clashes with one already in. Two rooms 8 cm apart joined by a hallway: in the
+    //   first room the first and the hallway; in the hallway over the gap, the hallway and the nearer room. Where
+    //   rooms meet, all of them.
+    // - Outlines that clash with none are in every view and every channel; with no clash at all there is one channel
+    //   with every outline. Clashing outlines with the same clash partners (a unit) are in a view all or none: none
+    //   clashes with another, and what keeps one out keeps all out. Views and channels take a unit as one.
+    // - Views are taken at each texel corner (the centre of the cell a sample mixes), from each outline within half
+    //   a cell diagonal of it, over the outlines within `apart` and a cell, so they hold for every point of the cell.
+    //   Only corners within that distance of an outline's edge need one: a corner deep inside an outline reads the
+    //   full value in any channel with it, and one far from every outline is dark in all.
+    // - A channel holds views with no clash between any of their outlines, so a point's channel has, near it, exactly
+    //   its view: a colouring of the views in four colours, two views that would clash in different ones (maskColours).
+    //   Null when it finds none (the caller then uses maskGroups).
+    // - Ties go by plan position, so the mask does not depend on the order of the outlines.
+    function maskChannels(shapes, minX, minZ, cell, cols, rows, apart) {
+        const list = uncoveredOutlines(shapes);
+        const count = list.length;
+        const boxes = list.map(outlineBox);
+        const clashes = list.map(function () { return []; });
+        for (let i = 0; i < count; i += 1) {
+            for (let j = i + 1; j < count; j += 1) {
+                if (boxGap(boxes[i], boxes[j]) >= apart) continue;
+                const distance = outlineDistance(list[i], list[j]);
+                if (distance > 1e-4 && distance < apart) {
+                    clashes[i].push(j);
+                    clashes[j].push(i);
+                }
+            }
+        }
+        const clashing = clashes.map(function (others) { return others.length > 0; });
+        if (clashing.indexOf(true) < 0) return [shapes];
+        // Ties go by plan position, not by the order of the outlines.
+        const keys = list.map(function (points) { return points.map(function (q) { return q.x + ' ' + q.z; }).join(','); });
+        const byPlace = list.map(function (shape, k) { return k; }).sort(function (a, b) {
+            const p = boxes[a];
+            const q = boxes[b];
+            return p.minX - q.minX || p.minZ - q.minZ || p.maxX - q.maxX || p.maxZ - q.maxZ
+                || (keys[a] < keys[b] ? -1 : keys[a] > keys[b] ? 1 : 0);
+        });
+        // Units, numbered by plan position.
+        const unitOf = new Int32Array(count).fill(-1);
+        const units = [];
+        const unitKeys = new Map();
+        byPlace.forEach(function (k) {
+            if (!clashing[k]) return;
+            const key = clashes[k].slice().sort(function (a, b) { return a - b; }).join(',');
+            if (!unitKeys.has(key)) {
+                unitKeys.set(key, units.length);
+                units.push([]);
+            }
+            unitOf[k] = unitKeys.get(key);
+            units[unitOf[k]].push(k);
+        });
+        const unitCount = units.length;
+        const unitClashes = units.map(function (members) {
+            const others = [];
+            clashes[members[0]].forEach(function (k) { if (others.indexOf(unitOf[k]) < 0) others.push(unitOf[k]); });
+            return others;
+        });
+        const clash = function (a, b) { return unitClashes[a].indexOf(b) >= 0; };
+        const around = apart + cell;
+        const around2 = around * around;
+        const own2 = cell * cell / 2 * (1 + 1e-6);
+        const spanOf = function (box) {
+            return {
+                minX: box.minX - around, maxX: box.maxX + around, minZ: box.minZ - around, maxZ: box.maxZ + around,
+                i0: Math.max(0, Math.floor((box.minX - around - minX) / cell)),
+                i1: Math.min(cols, Math.ceil((box.maxX + around - minX) / cell)),
+                j0: Math.max(0, Math.floor((box.minZ - around - minZ) / cell)),
+                j1: Math.min(rows, Math.ceil((box.maxZ + around - minZ) / cell)),
+            };
+        };
+        const spans = boxes.map(spanOf);
+        const unitSpans = units.map(function (members) {
+            const box = { minX: Infinity, minZ: Infinity, maxX: -Infinity, maxZ: -Infinity };
+            members.forEach(function (k) {
+                box.minX = Math.min(box.minX, boxes[k].minX);
+                box.minZ = Math.min(box.minZ, boxes[k].minZ);
+                box.maxX = Math.max(box.maxX, boxes[k].maxX);
+                box.maxZ = Math.max(box.maxZ, boxes[k].maxZ);
+            });
+            return spanOf(box);
+        });
+        // A view keeps two units only near both and when they do not clash: the corners within `around` of such a
+        // pair, row by row, and of them only those within `around` of an outline's edge (marked below).
+        const rects = [];
+        for (let a = 0; a < unitCount; a += 1) {
+            for (let b = a + 1; b < unitCount; b += 1) {
+                if (clash(a, b)) continue;
+                const rect = {
+                    i0: Math.max(unitSpans[a].i0, unitSpans[b].i0), i1: Math.min(unitSpans[a].i1, unitSpans[b].i1),
+                    j0: Math.max(unitSpans[a].j0, unitSpans[b].j0), j1: Math.min(unitSpans[a].j1, unitSpans[b].j1),
+                };
+                if (rect.i0 <= rect.i1 && rect.j0 <= rect.j1) rects.push(rect);
+            }
+        }
+        const views = new Map();
+        const record = function (view) {
+            if (view.length < 2) return;
+            const kept = view.slice().sort(function (a, b) { return a - b; });
+            const key = kept.join(',');
+            if (!views.has(key)) views.set(key, kept);
+        };
+        if (rects.length) {
+            const row = cols + 1;
+            const edges = new Uint8Array(row * (rows + 1));
+            list.forEach(function (points) {
+                points.forEach(function (p, k) { markBand(edges, p, points[(k + 1) % points.length], around, minX, minZ, cell, cols, rows); });
+            });
+            // The outlines near each tile of 16 x 16 texel corners, the largest first (likely to hold a corner deep).
+            const TILE = 16;
+            const tileCols = Math.floor(cols / TILE) + 1;
+            const tiles = [];
+            const areas = list.map(outlineArea);
+            spans.forEach(function (span, k) {
+                for (let tj = Math.floor(span.j0 / TILE); tj <= Math.floor(span.j1 / TILE); tj += 1) {
+                    for (let ti = Math.floor(span.i0 / TILE); ti <= Math.floor(span.i1 / TILE); ti += 1) {
+                        const at = tj * tileCols + ti;
+                        (tiles[at] = tiles[at] || []).push(k);
+                    }
+                }
+            });
+            tiles.forEach(function (tile) { if (tile) tile.sort(function (a, b) { return areas[b] - areas[a] || a - b; }); });
+            const distance = new Float64Array(unitCount);
+            const seen = new Float64Array(unitCount);
+            const blocked = new Float64Array(unitCount);
+            let stamp = 0;
+            let last = [];
+            const order = function (a, b) { return distance[a] - distance[b] || a - b; };
+            const greedy = function (near, seed) {
+                stamp += 1;
+                const view = [];
+                const take = function (u) {
+                    view.push(u);
+                    unitClashes[u].forEach(function (other) { blocked[other] = stamp; });
+                };
+                if (seed >= 0) take(seed);
+                near.forEach(function (u) { if (u !== seed && blocked[u] !== stamp) take(u); });
+                return view;
+            };
+            const visit = function (i, j) {
+                const x = minX + i * cell;
+                const z = minZ + j * cell;
+                const tile = tiles[Math.floor(j / TILE) * tileCols + Math.floor(i / TILE)];
+                if (!tile) return 0;
+                stamp += 1;
+                const mark = stamp;
+                const near = [];
+                let seeded = false;
+                let plain = false;
+                for (let t = 0; t < tile.length; t += 1) {
+                    const k = tile[t];
+                    const span = spans[k];
+                    if (x < span.minX || x > span.maxX || z < span.minZ || z > span.maxZ) continue;
+                    const edge = edgeDistance2(list[k], x, z);
+                    const inside = insideOutline(list[k], x, z);
+                    // Deep inside k: no edge near any point of the cell, the full value in every channel with k. So
+                    // are the next corners in the row, until one comes within `around` of k's edges: skip them.
+                    if (inside && edge >= around2) return Math.max(0, Math.floor((Math.sqrt(edge) - around) / cell - 1e-9));
+                    const d = inside ? 0 : edge;
+                    if (!(d < around2)) continue;
+                    if (d <= own2) seeded = true;
+                    if (!clashing[k]) {
+                        // A seed that clashes with nothing: the plain nearest-first view.
+                        if (d <= own2) plain = true;
+                        continue;
+                    }
+                    const u = unitOf[k];
+                    if (seen[u] !== mark) {
+                        seen[u] = mark;
+                        distance[u] = d;
+                        near.push(u);
+                    } else if (d < distance[u]) {
+                        distance[u] = d;
+                    }
+                }
+                if (!seeded || near.length < 2) return 0;
+                // Units that all clash with one another (a gap between rooms): a view keeps one at most.
+                let together = false;
+                for (let a = 0; a < near.length && !together; a += 1) {
+                    for (let b = a + 1; b < near.length; b += 1) {
+                        if (!clash(near[a], near[b])) {
+                            together = true;
+                            break;
+                        }
+                    }
+                }
+                if (!together) return 0;
+                near.sort(order);
+                // The same units in the same order, with the same seeds, as the last corner: the same views.
+                const signature = near.map(function (u) { return distance[u] <= own2 ? -1 - u : u; });
+                signature.push(plain ? -1 : 0);
+                if (signature.length === last.length && signature.every(function (u, at) { return u === last[at]; })) return 0;
+                last = signature;
+                // The plain view is also a seed's own when the seed holds the corner (the outlines holding it
+                // overlap, never clash, and come first anyway) or clashes with no unit near.
+                near.forEach(function (seed) {
+                    if (distance[seed] > own2) return;
+                    if (distance[seed] === 0 || !unitClashes[seed].some(function (other) { return seen[other] === mark; })) {
+                        plain = true;
+                    } else {
+                        record(greedy(near, seed));
+                    }
+                });
+                if (plain) record(greedy(near, -1));
+                return 0;
+            };
+            rects.sort(function (p, q) { return p.i0 - q.i0; });
+            for (let j = 0; j <= rows; j += 1) {
+                let next = 0;
+                last = [];
+                rects.forEach(function (rect) {
+                    if (j < rect.j0 || j > rect.j1) return;
+                    for (let i = Math.max(rect.i0, next); i <= rect.i1; i += 1) {
+                        if (edges[j * row + i]) i += visit(i, j);
+                    }
+                    next = Math.max(next, rect.i1 + 1);
+                });
+            }
+        }
+        // Each unit alone too, then only the views no other holds.
+        const sets = Array.from(views.values());
+        units.forEach(function (members, u) { sets.push([u]); });
+        sets.sort(function (a, b) {
+            if (a.length !== b.length) return b.length - a.length;
+            for (let k = 0; k < a.length; k += 1) if (a[k] !== b[k]) return a[k] - b[k];
+            return 0;
+        });
+        const maximal = sets.filter(function (set, index) {
+            return !sets.some(function (other, at) {
+                return at < index && set.every(function (u) { return other.indexOf(u) >= 0; });
+            });
+        });
+        const colours = maskColours(maximal, unitClashes, unitCount, 4);
+        if (!colours) return null;
+        const members = [];
+        maximal.forEach(function (set, index) {
+            while (members.length <= colours[index]) members.push(new Uint8Array(unitCount));
+            set.forEach(function (u) { members[colours[index]][u] = 1; });
+        });
+        return members.map(function (member) {
+            return list.filter(function (shape, k) { return !clashing[k] || member[unitOf[k]]; });
+        });
+    }
+
+    // A colouring of `sets` (lists of units) in at most `limit` colours, two sets with clashing units in different
+    // ones, or null: a small exact search (the set with the most colours around it first, then the most conflicts),
+    // over each connected group of conflicting sets on its own, each given up past a step budget.
+    function maskColours(sets, unitClashes, unitCount, limit) {
+        const count = sets.length;
+        const marks = new Uint8Array(unitCount);
+        const conflicts = sets.map(function () { return []; });
+        sets.forEach(function (set, a) {
+            marks.fill(0);
+            set.forEach(function (u) { unitClashes[u].forEach(function (other) { marks[other] = 1; }); });
+            for (let b = a + 1; b < count; b += 1) {
+                if (sets[b].some(function (u) { return marks[u]; })) {
+                    conflicts[a].push(b);
+                    conflicts[b].push(a);
+                }
+            }
+        });
+        const colours = new Int32Array(count).fill(-1);
+        const placed = new Uint8Array(count);
+        for (let first = 0; first < count; first += 1) {
+            if (placed[first]) continue;
+            const group = [first];
+            placed[first] = 1;
+            for (let at = 0; at < group.length; at += 1) {
+                conflicts[group[at]].forEach(function (b) {
+                    if (!placed[b]) {
+                        placed[b] = 1;
+                        group.push(b);
+                    }
+                });
+            }
+            group.sort(function (a, b) { return a - b; });
+            let steps = 0;
+            const solve = function (done, used) {
+                if (done === group.length) return true;
+                if ((steps += 1) > 20000) return false;
+                let pick = -1;
+                let pickSeen = -1;
+                group.forEach(function (a) {
+                    if (colours[a] >= 0) return;
+                    let seenColours = 0;
+                    conflicts[a].forEach(function (b) { if (colours[b] >= 0) seenColours |= 1 << colours[b]; });
+                    let bits = 0;
+                    for (let c = seenColours; c; c &= c - 1) bits += 1;
+                    if (bits > pickSeen || (bits === pickSeen && conflicts[a].length > conflicts[pick].length)) {
+                        pick = a;
+                        pickSeen = bits;
+                    }
+                });
+                let taken = 0;
+                conflicts[pick].forEach(function (b) { if (colours[b] >= 0) taken |= 1 << colours[b]; });
+                for (let c = 0; c < Math.min(limit, used + 1); c += 1) {
+                    if (taken & (1 << c)) continue;
+                    colours[pick] = c;
+                    if (solve(done + 1, Math.max(used, c + 1))) return true;
+                    colours[pick] = -1;
+                }
+                return false;
+            };
+            if (!solve(0, 0)) return null;
+        }
+        return Array.from(colours);
+    }
+
+    // Marks the texel corners within `reach` of segment pq, row by row.
+    function markBand(marks, p, q, reach, minX, minZ, cell, cols, rows) {
+        const length = Math.hypot(q.x - p.x, q.z - p.z);
+        const ux = length > 0 ? (q.x - p.x) / length : 1;
+        const uz = length > 0 ? (q.z - p.z) / length : 0;
+        const j0 = Math.max(0, Math.floor((Math.min(p.z, q.z) - reach - minZ) / cell));
+        const j1 = Math.min(rows, Math.ceil((Math.max(p.z, q.z) + reach - minZ) / cell));
+        for (let j = j0; j <= j1; j += 1) {
+            const range = capsuleRow(p.x, p.z, ux, uz, length, reach, minZ + j * cell);
+            if (!range) continue;
+            const i0 = Math.max(0, Math.ceil((range[0] - minX) / cell - 1e-9));
+            const i1 = Math.min(cols, Math.floor((range[1] - minX) / cell + 1e-9));
+            for (let i = i0; i <= i1; i += 1) marks[j * (cols + 1) + i] = 1;
+        }
+    }
+
+    // The x-range [lo, hi] of the points on line z within `reach` of the segment from (px, pz) along unit (ux, uz)
+    // for `length`, or null. The points within reach form a capsule, so on each line an interval.
+    function capsuleRow(px, pz, ux, uz, length, reach, z) {
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (let end = 0; end < 2; end += 1) {
+            const ex = px + ux * length * end;
+            const dz = z - (pz + uz * length * end);
+            if (Math.abs(dz) <= reach) {
+                const w = Math.sqrt(reach * reach - dz * dz);
+                lo = Math.min(lo, ex - w);
+                hi = Math.max(hi, ex + w);
+            }
+        }
+        // Along the segment: 0 <= (X - p).u <= length and |(X - p).n| <= reach, each linear in x.
+        let a = -Infinity;
+        let b = Infinity;
+        const terms = [[ux, (z - pz) * uz, 0, length], [-uz, (z - pz) * ux, -reach, reach]];
+        for (let k = 0; k < 2; k += 1) {
+            const slope = terms[k][0];
+            const offset = terms[k][1] - slope * px;
+            if (Math.abs(slope) < 1e-12) {
+                if (offset < terms[k][2] || offset > terms[k][3]) {
+                    a = Infinity;
+                    b = -Infinity;
+                }
+                continue;
+            }
+            const x1 = (terms[k][2] - offset) / slope;
+            const x2 = (terms[k][3] - offset) / slope;
+            a = Math.max(a, Math.min(x1, x2));
+            b = Math.min(b, Math.max(x1, x2));
+        }
+        if (a <= b) {
+            lo = Math.min(lo, a);
+            hi = Math.max(hi, b);
+        }
+        return lo <= hi ? [lo, hi] : null;
+    }
+
+    // The grouping of aca8df1, for layouts whose views do not colour in four (maskChannels). The outlines in at most
+    // four channels, as lists of outlines. Two outlines touch when they overlap or meet, and
     // clash when they do not but are nearer each other than `apart`: in one channel their edges would cut each
     // other's fill. A group grows from an outline through the outlines touching it, leaving out any that clashes with
     // one already in; groups are made until each outline and each touching pair is in one, so no shared edge is an
     // edge in all of them (two rooms a wall's width apart, joined by a hallway: {room, hallway} and {room 2,
     // hallway}). Groups that overlap or come nearer than `apart` take different channels; one that finds no free
     // channel joins the one with the fewest groups near it.
-    function maskChannels(shapes, apart) {
+    function maskGroups(shapes, apart) {
         const count = shapes.length;
         const boxes = shapes.map(outlineBox);
         const distances = new Map();
@@ -572,6 +948,96 @@
         });
     }
 
+    // The outlines not inside another (of two the same, the first), in their order.
+    function uncoveredOutlines(shapes) {
+        const boxes = shapes.map(outlineBox);
+        const areas = shapes.map(outlineArea);
+        const kept = [];
+        shapes.map(function (shape, k) { return k; }).sort(function (a, b) { return areas[b] - areas[a] || a - b; })
+            .forEach(function (k) {
+                if (!kept.some(function (c) { return outlineInside(shapes[k], boxes[k], shapes[c], boxes[c]); })) kept.push(k);
+            });
+        return kept.sort(function (a, b) { return a - b; }).map(function (k) { return shapes[k]; });
+    }
+
+    // Whether outline `inner` lies inside outline `outer` (its edges may run along outer's). Each edge of either is cut
+    // where it meets the other outline (crossing it, touching it at a corner or running along it); every piece of
+    // inner's edges must be inside or on outer, and no piece of outer's edges strictly inside inner. A notch of outer
+    // that only touches inner's edges (its tip on one, its mouth on another) leaves part of inner uncovered: kept.
+    function outlineInside(inner, innerBox, outer, outerBox) {
+        const slack = 1e-9;
+        if (innerBox.minX < outerBox.minX - slack || innerBox.maxX > outerBox.maxX + slack
+            || innerBox.minZ < outerBox.minZ - slack || innerBox.maxZ > outerBox.maxZ + slack) return false;
+        const on = function (points, x, z) { return edgeDistance2(points, x, z) <= 1e-12; };
+        const pieces = function (points, other, keep) {
+            for (let k = 0; k < points.length; k += 1) {
+                const p = points[k];
+                const q = points[(k + 1) % points.length];
+                const cuts = edgeCuts(p, q, other).concat([0, 1]).sort(function (a, b) { return a - b; });
+                for (let c = 0; c + 1 < cuts.length; c += 1) {
+                    if (!(cuts[c + 1] - cuts[c] > 1e-9)) continue;
+                    const t = (cuts[c] + cuts[c + 1]) / 2;
+                    if (!keep(p.x + (q.x - p.x) * t, p.z + (q.z - p.z) * t)) return false;
+                }
+            }
+            return true;
+        };
+        return pieces(inner, outer, function (x, z) { return insideOutline(outer, x, z) || on(outer, x, z); })
+            && pieces(outer, inner, function (x, z) { return !insideOutline(inner, x, z) || on(inner, x, z); });
+    }
+
+    // Where segment pq meets outline `other`, as fractions of pq: its edges' crossings and the corners on pq.
+    function edgeCuts(p, q, other) {
+        const cuts = [];
+        const dx = q.x - p.x;
+        const dz = q.z - p.z;
+        const length2 = dx * dx + dz * dz;
+        if (!(length2 > 0)) return cuts;
+        for (let k = 0; k < other.length; k += 1) {
+            const r = other[k];
+            const t = other[(k + 1) % other.length];
+            // A corner of other on pq.
+            const along = ((r.x - p.x) * dx + (r.z - p.z) * dz) / length2;
+            const ox = r.x - p.x - dx * along;
+            const oz = r.z - p.z - dz * along;
+            if (along > 0 && along < 1 && ox * ox + oz * oz <= 1e-12) cuts.push(along);
+            // Its edge rt crossing pq.
+            const ex = t.x - r.x;
+            const ez = t.z - r.z;
+            const denominator = dx * ez - dz * ex;
+            if (Math.abs(denominator) < 1e-15) continue;
+            const s = ((r.x - p.x) * ez - (r.z - p.z) * ex) / denominator;
+            const u = ((r.x - p.x) * dz - (r.z - p.z) * dx) / denominator;
+            if (s > 0 && s < 1 && u >= 0 && u <= 1) cuts.push(s);
+        }
+        return cuts;
+    }
+
+    function outlineArea(points) {
+        let twice = 0;
+        for (let k = 0, m = points.length - 1; k < points.length; m = k, k += 1) {
+            twice += points[m].x * points[k].z - points[k].x * points[m].z;
+        }
+        return Math.abs(twice) / 2;
+    }
+
+    // The squared plan distance from point (x, z) to an outline's edges (inside or out).
+    function edgeDistance2(points, x, z) {
+        let best = Infinity;
+        for (let k = 0, m = points.length - 1; k < points.length; m = k, k += 1) {
+            const ax = points[m].x;
+            const az = points[m].z;
+            const dx = points[k].x - ax;
+            const dz = points[k].z - az;
+            const length = dx * dx + dz * dz;
+            const t = length > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / length)) : 0;
+            const ex = x - ax - dx * t;
+            const ez = z - az - dz * t;
+            if (ex * ex + ez * ez < best) best = ex * ex + ez * ez;
+        }
+        return best;
+    }
+
     function outlineBox(points) {
         const box = { minX: Infinity, minZ: Infinity, maxX: -Infinity, maxZ: -Infinity };
         points.forEach(function (point) {
@@ -601,13 +1067,18 @@
     }
 
     function segmentDistance(p, q, r, t) {
+        if (segmentsCross(p, q, r, t)) return 0;
+        return Math.min(pointSegment(p, r, t), pointSegment(q, r, t), pointSegment(r, p, q), pointSegment(t, p, q));
+    }
+
+    // Whether segments pq and rt cross at a point inside both.
+    function segmentsCross(p, q, r, t) {
         const cross = function (o, u, v) { return (u.x - o.x) * (v.z - o.z) - (u.z - o.z) * (v.x - o.x); };
         const d1 = cross(r, t, p);
         const d2 = cross(r, t, q);
         const d3 = cross(p, q, r);
         const d4 = cross(p, q, t);
-        if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return 0;
-        return Math.min(pointSegment(p, r, t), pointSegment(q, r, t), pointSegment(r, p, q), pointSegment(t, p, q));
+        return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
     }
 
     function pointSegment(v, a, b) {
@@ -690,9 +1161,14 @@
                     const i1 = Math.min(cols - 1, Math.floor((Math.max(ax, p.x + ux * to) + reach - minX) / cell));
                     const j0 = Math.max(0, Math.floor((Math.min(az, p.z + uz * to) - reach - minZ) / cell));
                     const j1 = Math.min(rows - 1, Math.floor((Math.max(az, p.z + uz * to) + reach - minZ) / cell));
+                    // Only texels within `reach` of the piece change: on each row, its band.
                     for (let j = j0; j <= j1; j += 1) {
                         const cz = minZ + (j + 0.5) * cell - az;
-                        for (let i = i0; i <= i1; i += 1) {
+                        const range = capsuleRow(ax, az, ux, uz, span, reach * (1 + 1e-6), cz + az);
+                        if (!range) continue;
+                        const r0 = Math.max(i0, Math.floor((range[0] - minX) / cell - 0.5));
+                        const r1 = Math.min(i1, Math.ceil((range[1] - minX) / cell - 0.5));
+                        for (let i = r0; i <= r1; i += 1) {
                             const cx = minX + (i + 0.5) * cell - ax;
                             const t = Math.max(0, Math.min(span, cx * ux + cz * uz));
                             const distance = Math.hypot(cx - ux * t, cz - uz * t);

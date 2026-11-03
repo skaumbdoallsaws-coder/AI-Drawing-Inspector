@@ -484,13 +484,148 @@ test('the ceiling mask cuts the fill at the ceilings\' edge and never lights out
     for (const [x, z] of [[-1.5, 2], [1.5, 2], [-0.5, 1.99], [0.5, 2.01]]) {
         assert.ok(pools.sampleMask(joined, x, z) > 0.05, 'no dark line on the shared edges at ' + x + ', ' + z);
     }
-    // Far apart footprints share a channel; touching ones are one footprint.
-    assert.strictEqual(pools.fillMask(field, [first, [{ x: 2, z: -2 }, { x: 2.9, z: -2 }, { x: 2.9, z: 2 }, { x: 2, z: 2 }]]).channels, 1);
-    assert.strictEqual(pools.fillMask(field, [first, [{ x: -0.03, z: -2 }, { x: 3, z: -2 }, { x: 3, z: 2 }, { x: -0.03, z: 2 }]]).channels, 1);
-    // Six strips 0.1 m wide, 0.05 m apart: more footprints near one another than channels. One shares a channel,
-    // still never lit outside; the others keep their own.
-    const strips = Array.from({ length: 6 }, (_, k) => [{ x: k * 0.15, z: -2 }, { x: k * 0.15 + 0.1, z: -2 },
-        { x: k * 0.15 + 0.1, z: 2 }, { x: k * 0.15, z: 2 }]);
+    // Rooms farther apart than a sample reaches (0.5 m) share a channel, each as alone; touching ones too.
+    const rect = (x0, z0, x1, z1) => [{ x: x0, z: z0 }, { x: x1, z: z0 }, { x: x1, z: z1 }, { x: x0, z: z1 }];
+    const sixty = pools.fillMask(field, [first, rect(0.57, -2, 3, 2)]);
+    assert.strictEqual(sixty.channels, 1);
+    assert.strictEqual(pools.sampleMask(sixty, -0.08, 0.3), pools.sampleMask(alone, -0.08, 0.3), '0.6 m apart');
+    assert.strictEqual(pools.fillMask(field, [first, rect(2, -2, 2.9, 2)]).channels, 1);
+    assert.strictEqual(pools.fillMask(field, [first, rect(-0.03, -2, 3, 2)]).channels, 1);
+    // Codex re-check of aca8df1: three rooms meeting at (0, 0), and three more, each touching one of them and 8 cm
+    // from the next. Each junction reads with all the rooms meeting there, in any order of the outlines: the seams
+    // are lit like the middle of a room (aca8df1: -0.01 at (-0.05, 0)).
+    const junction = [rect(-4, -3, -3, -0.08), rect(0.08, -4, 3, -3), rect(3, 0.08, 4, 3), rect(-3, -3, 0, 0),
+        rect(0, -3, 3, 0), rect(-3, 0, 3, 3)];
+    const square = { minX: -5, minZ: -5, cell: 0.25, cols: 40, rows: 40 };
+    const seams = [[-0.05, 0], [0, 0.05], [0, 0], [-0.05, -0.05]];
+    for (let k = 0; k <= 52; k += 1) {
+        const s = -2.6 + k * 0.1;
+        seams.push([s, 0]);
+        if (s <= -0.1) seams.push([0, s]);
+        if (s <= -0.5) seams.push([-3, s]);
+        if (s >= 0.5) seams.push([s, -3], [3, s]);
+    }
+    const orders = [];
+    for (let k = 0; k < 6; k += 1) {
+        const turned = junction.slice(k).concat(junction.slice(0, k));
+        orders.push(turned, turned.slice().reverse());
+    }
+    const firstMeet = pools.fillMask(square, junction);
+    const full = Math.fround(pools.FILL_EDGE_TEXELS * firstMeet.cell - inset);
+    orders.forEach((order, index) => {
+        const meet = pools.fillMask(square, order);
+        assert.strictEqual(meet.channels, 4, 'order ' + index);
+        seams.forEach(([x, z]) => {
+            assert.ok(Math.abs(pools.sampleMask(meet, x, z) - full) < 1e-6, 'order ' + index + ', the seam at ' + x + ', ' + z
+                + ': ' + pools.sampleMask(meet, x, z));
+        });
+        for (let x = -4.9; x <= 4.9; x += 0.031) {
+            for (let z = -4.9; z <= 4.9; z += 0.029) {
+                assert.strictEqual(pools.sampleMask(meet, x, z), pools.sampleMask(firstMeet, x, z), 'order ' + index + ' at ' + x + ', ' + z);
+            }
+        }
+    });
+    {
+        let lit = 0;
+        let darkFar = 0;
+        for (let x = -4.6; x <= 4.6; x += 0.0071) {
+            for (let z = -4.6; z <= 4.6; z += 0.0073) {
+                const value = pools.sampleMask(firstMeet, x, z);
+                if (!junction.some(outline => pools.insideOutline(outline, x, z))) {
+                    if (value > 0) lit += 1;
+                } else if (value <= 0 && junction.every(outline => outline.every((point, k) => {
+                    const next = outline[(k + 1) % outline.length];
+                    const length = Math.hypot(next.x - point.x, next.z - point.z);
+                    const t = Math.max(0, Math.min(1, ((x - point.x) * (next.x - point.x) + (z - point.z) * (next.z - point.z)) / (length * length)));
+                    return Math.hypot(x - point.x - (next.x - point.x) * t, z - point.z - (next.z - point.z) * t) > 0.2;
+                }))) darkFar += 1;
+            }
+        }
+        assert.strictEqual(lit, 0, 'junction: no fill outside');
+        assert.strictEqual(darkFar, 0, 'junction: inside, dark only within 0.2 m of an edge');
+    }
+    // Codex re-check of 1147834: eight rooms, each 2-8 cm from its neighbours. Four channels hold them without a clash
+    // ({2,6}, {3,6}, {0,4,7}, {1,5,6}), so no room reads darker than alone (a room it touches can only add), in any
+    // order of the outlines, away from where two rooms touch only at a corner (a pinch, within 0.45 m of it). 1147834 packed them greedily and fell
+    // back: -0.14 at (-1.05, -2), 5 cm inside room 0's straight wall; alone 0.04.
+    const eight = [rect(-3, -3, -1, -1), rect(-0.92, -2.98, 1, -1), rect(-2.92, -0.92, -1, 1), rect(-0.98, -0.98, 1, 1),
+        rect(1.08, -0.92, 3, 1), rect(-3, 1.02, -1, 3), rect(-1, 1, 1, 3), rect(1.02, 1, 3, 3)];
+    const eightOrders = [eight, eight.slice().reverse(), eight.slice(3).concat(eight.slice(0, 3)), eight.slice(5).concat(eight.slice(0, 5))];
+    const roomsAlone = eight.map(room => pools.fillMask(square, [room]));
+    let checked = 0;
+    eightOrders.forEach((order, index) => {
+        const built = pools.fillMask(square, order);
+        assert.ok(built.channels <= 4, 'eight rooms, order ' + index);
+        eight.forEach((room, k) => {
+            for (let x = room[0].x + 0.01; x < room[1].x; x += 0.03) {
+                for (let z = room[0].z + 0.01; z < room[2].z; z += 0.03) {
+                    if (eight.some((other, at) => at !== k && other.some(q => Math.hypot(q.x - x, q.z - z) < 0.45))) continue;
+                    checked += 1;
+                    const own = pools.sampleMask(roomsAlone[k], x, z);
+                    assert.ok(pools.sampleMask(built, x, z) > own - 1e-6, 'eight rooms, order ' + index + ', room ' + k
+                        + ' at ' + x + ', ' + z + ': ' + pools.sampleMask(built, x, z) + ' (alone ' + own + ')');
+                }
+            }
+        });
+    });
+    assert.ok(checked > 10000, 'eight rooms: ' + checked + ' points');
+    // Codex check of 94cb4a8 (1): a room over the notch of a bigger ceiling, the notch's tip on the room's south edge
+    // and its mouth on the north one. The room's edges only touch the notched outline, so the room is not inside it
+    // and is kept, in either order: the notch is lit like the rest of the room (94cb4a8 dropped the room: -0.26 at
+    // (1.5, 8); aca8df1 0.24).
+    const notchGrid = { minX: -2, minZ: -2, cell: 0.25, cols: 64, rows: 64 };
+    const overNotch = rect(0, 0, 10, 10);
+    const notched = [[-1, -1], [11, -1], [11, 11], [2, 10], [1.5, 0], [1, 10], [-1, 11]].map(([x, z]) => ({ x, z }));
+    const besideNotch = rect(11.08, -1, 13, 11);
+    [[overNotch, notched, besideNotch], [besideNotch, notched, overNotch]].forEach((outlines, index) => {
+        const built = pools.fillMask(notchGrid, outlines);
+        assert.strictEqual(built.channels, 2, 'the notch, order ' + index);
+        const deep = Math.fround(pools.FILL_EDGE_TEXELS * built.cell - inset);
+        for (const [x, z] of [[1.5, 8], [1.5, 5], [1.5, 1], [1.3, 9.5], [1.7, 9.5]]) {
+            assert.strictEqual(pools.sampleMask(built, x, z), deep, 'the notch, order ' + index + ', at ' + x + ', ' + z);
+        }
+        let lit = 0;
+        for (let x = -1.95; x < 13.9; x += 0.037) {
+            for (let z = -1.95; z < 13.9; z += 0.041) {
+                if (!outlines.some(outline => pools.insideOutline(outline, x, z)) && pools.sampleMask(built, x, z) > 0) lit += 1;
+            }
+        }
+        assert.strictEqual(lit, 0, 'the notch, order ' + index + ': no fill outside');
+    });
+    // Codex check of 94cb4a8 (2): 130 rooms in a 12 x 12 grid of 2.2 m bays, 2-10 cm apart. Their views colour in
+    // four, but the search needs about 166,000 steps, past its budget (20,000 per group of conflicting views). Giving
+    // up is not proof that none exists, so the mask is then the grouping of aca8df1, texel for texel (its lit texels
+    // and their sum, from aca8df1's module: 37,469 and 7,105.326), never the least-clash packing. 94cb4a8 used that
+    // packing: 37,194 and 7,091.686, and -0.12 at (15.873, 13.284), 5 cm inside room 81's wall (alone 0.04).
+    let seed = 140444032;
+    const random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+    const holes = new Set();
+    while (holes.size < 14) holes.add(Math.floor(random() * 144));
+    const bays = [];
+    for (let i = 0; i < 12; i += 1) {
+        for (let j = 0; j < 12; j += 1) {
+            if (holes.has(i * 12 + j)) continue;
+            const gap = () => 0.01 + random() * 0.04;
+            bays.push(rect(i * 2.2 + gap(), j * 2.2 + gap(), (i + 1) * 2.2 - gap(), (j + 1) * 2.2 - gap()));
+        }
+    }
+    assert.strictEqual(bays.length, 130);
+    const bayGrid = { minX: -1, minZ: -1, cell: 0.25, cols: 112, rows: 112 };
+    const bayStart = Date.now();
+    const bayMask = pools.fillMask(bayGrid, bays);
+    const baySpent = Date.now() - bayStart;
+    assert.ok(baySpent < 1000, '130 rooms: ' + baySpent + ' ms');
+    let bayLit = 0;
+    let baySum = 0;
+    bayMask.data.forEach(value => { if (value > 0) { bayLit += 1; baySum += value; } });
+    assert.strictEqual(bayMask.channels, 4);
+    assert.ok(Math.abs(bayLit - 37469) <= 5 && Math.abs(baySum - 7105.326) < 0.05, '130 rooms, as aca8df1: ' + bayLit + ', ' + baySum);
+    const room81 = pools.sampleMask(pools.fillMask(bayGrid, [bays[81]]), 15.873, 13.284);
+    assert.ok(room81 > 0.03 && Math.abs(pools.sampleMask(bayMask, 15.873, 13.284) - room81) < 1e-6, 'the wall of room 81: '
+        + pools.sampleMask(bayMask, 15.873, 13.284) + ' (alone ' + room81 + ')');
+    // Six strips 0.1 m wide, 0.02 m apart: five near one another, more than the channels. Some share a channel,
+    // still never lit outside.
+    const strips = Array.from({ length: 6 }, (_, k) => rect(k * 0.12, -2, k * 0.12 + 0.1, 2));
     const crowded = pools.fillMask(field, strips);
     assert.strictEqual(crowded.channels, 4);
     Object.entries({ paired: [paired, [first, second]], joined: [joined, [first, second, hallway]], crowded: [crowded, strips] })
@@ -515,6 +650,38 @@ test('the ceiling mask cuts the fill at the ceilings\' edge and never lights out
     const took = Date.now() - started;
     assert.ok(took < 1000, '2,000 lamps, 100 zones: ' + took + ' ms');
     assert.ok(pools.sampleMask(hallMask, 40.2, 30.3) > 0 && pools.sampleMask(hallMask, -0.05, 30.3) < 0);
+    // Codex re-check of 5337cba: overlapping ceilings next to one 8 cm away built for seconds (20 nested: 11.8 s, 12
+    // overlapping in part: 2 s). Nested, overlapping in part, and overlapping in part each by its own small room:
+    // as fast as the rest, and each room's wall reads as with that room alone.
+    const turned = (x, z) => [(x - z) * Math.SQRT1_2, (x + z) * Math.SQRT1_2];
+    const turn = outline => outline.map(q => ({ x: turned(q.x, q.z)[0], z: turned(q.x, q.z)[1] }));
+    const overlapping = {
+        nested: Array.from({ length: 20 }, (_, i) => rect(i, 0, 80, 60)).concat([rect(80.08, 0, 84, 60)]),
+        partial: Array.from({ length: 20 }, (_, i) => rect(i, 0, 60 + i, 60)).concat([rect(0, -4, 80, -0.08)]),
+        neighbours: Array.from({ length: 20 }, (_, i) => rect(i, 0, 60 + i, 60))
+            .concat(Array.from({ length: 20 }, (_, i) => rect(i + 0.2, 60.08, i + 0.8, 61))),
+        // Codex re-check of 1147834: 100 overlapping in part, turned 45 degrees (1147834: 2.1 s; the views walked
+        // whole boxes of corners, and the fill each long slanted edge's whole box of texels).
+        rotated: Array.from({ length: 100 }, (_, i) => turn(rect(0.1 * i, 0, 80 + 0.1 * i, 60))).concat([turn(rect(0, -4, 90, -0.08))]),
+    };
+    const walls = {
+        nested: [[rect(0, 0, 80, 60), 79.95, 30], [rect(80.08, 0, 84, 60), 80.13, 30]],
+        partial: [[rect(0, 0, 79, 60), 30, 0.05], [rect(0, -4, 80, -0.08), 30, -0.13]],
+        neighbours: [[rect(0, 0, 79, 60), 30, 59.95], [rect(10.2, 60.08, 10.8, 61), 10.5, 60.13]],
+        rotated: [[turn(rect(0, 0, 89.9, 60)), ...turned(30, 0.05)], [turn(rect(0, -4, 90, -0.08)), ...turned(30, -0.13)]],
+    };
+    Object.entries(overlapping).forEach(([name, outlines]) => {
+        const begun = Date.now();
+        const built = pools.fillMask(hall, outlines);
+        const spent = Date.now() - begun;
+        assert.ok(spent < 1000, name + ': ' + spent + ' ms');
+        assert.ok(built.channels >= 2 && built.channels <= 4, name);
+        walls[name].forEach(([room, x, z]) => {
+            const own = pools.sampleMask(pools.fillMask(hall, [room]), x, z);
+            assert.ok(own > 0.03 && Math.abs(pools.sampleMask(built, x, z) - own) < 1e-6, name + ' at ' + x + ', ' + z + ': '
+                + pools.sampleMask(built, x, z) + ' (alone ' + own + ')');
+        });
+    });
 });
 
 test('the fill goes into the indirect light of a lit material (three r184 standard, lambert, phong, toon), not an unlit one', async () => {

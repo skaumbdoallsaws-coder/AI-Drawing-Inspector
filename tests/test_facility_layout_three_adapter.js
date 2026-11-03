@@ -8108,6 +8108,14 @@ test('in Evening a pendant and accent spots get spot lights, the downlights fill
     const pair = shader.uniforms.facilityFillMask.value;
     assert.ok(pair.format === THREE.RGFormat && pair.image.data.length === pair.image.width * pair.image.height * 2);
     assert.deepStrictEqual(shader.uniforms.facilityFillChannels.value.toArray(), [1, 1, 0, 0], 'two channels');
+    // Codex re-check of aca8df1: three rooms meeting, and three more each touching one and 8 cm from the next: four
+    // channels, an RGBA mask.
+    const meeting = [[-4, -3, -3, -0.08], [0.08, -4, 3, -3], [3, 0.08, 4, 3], [-3, -3, 0, 0], [0, -3, 3, 0], [-3, 0, 3, 3]]
+        .map(([x0, z0, x1, z1], k) => Object.assign(room(x0 + 11, z0 - 10, x1 + 11, z1 - 10, 3.2), { zoneId: 'zn-meet-' + k }));
+    await show('evening', null, null, meeting);
+    const four = shader.uniforms.facilityFillMask.value;
+    assert.ok(four.format === THREE.RGBAFormat && four.image.data.length === four.image.width * four.image.height * 4);
+    assert.deepStrictEqual(shader.uniforms.facilityFillChannels.value.toArray(), [1, 1, 1, 1], 'four channels');
     await show('evening');
     assert.deepStrictEqual(shader.uniforms.facilityFillChannels.value.toArray(), [1, 0, 0, 0]);
     // Their layer hidden: the lamps light nothing.

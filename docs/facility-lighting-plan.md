@@ -461,21 +461,77 @@ lights on, lamps now light what they shine on, not only the floor; a zone ceilin
       0.18 m in an inner corner of the footprint, and the map's outermost 0.125 m, where the fill is near zero.
     - Built once per fill map grid and set of outlines, by scanlines and only near the edges: 2,000 lamps under
       100 ceiling zones take about 30 ms (the first version's per-texel outline tests took 1.8-2.5 s).
-    - Nearby rooms keep separate distances (after Codex reviews of b4437c2 and a068a1d). Two outlines touch when
-      they overlap or meet, and clash when they do not but are nearer than 0.75 m. The mask has up to 4 channels
-      (R, RG or RGBA) and the shader takes the largest.
-      - Each channel holds groups of outlines. A group grows from an outline through the outlines touching it,
-        leaving out any that clashes with one already in. Groups are made until each outline and each touching
-        pair is in one, so a shared edge is never an edge everywhere.
-      - Groups that overlap or come nearer than 0.75 m take different channels. Two rooms a wall's width apart,
-        joined by a hallway across their ends, become {room 1, hallway} and {room 2, hallway}.
-      - A room's wall a few centimetres from the next room's ceiling keeps its fill. Before, the other room's edge
-        lines cut it: a wall 5 cm inside read -0.085 instead of +0.04, at a068a1d still when a hallway joined them.
-      - Outside every ceiling every channel is at most zero.
-      - With more than four groups near one another, one shares a channel: near the others its fill is cut a
-        little, never lit outside. So is a notch narrower than a texel diagonal within one outline, or between two
-        touching ones.
-      - The gym's 20 ceilings are one group: its mask is the same, texel for texel.
+    - Nearby rooms keep separate distances (after Codex reviews of b4437c2, a068a1d and aca8df1). The mask has up
+      to 4 channels (R, RG or RGBA) and the shader takes the largest.
+      - Reach: a sample mixes the 4 texels around it, and each texel reads the edges within 0.25 m. So only
+        outlines within 0.5 m of a point (0.25 m + 2 texels) can change its value.
+      - Two outlines clash when they do not touch (overlap or meet) but are nearer than 0.5 m. In one channel the
+        edges of one would cut the other's fill. (Before aca8df1's follow-up: 0.75 m, more than a sample reaches.)
+      - A point's view: the outlines within 0.5 m of it, nearest first from one that holds it, leaving out any that
+        clashes with one already in. Two rooms 8 cm apart joined by a hallway: in room 1, room 1 and the hallway; in
+        the hallway over the gap, the hallway and the nearer room. Where rooms meet, all of them.
+      - Views are taken at every texel corner (the centre of the cell a sample mixes), from each outline within half
+        a cell diagonal, over the outlines within 0.5 m plus a cell, so they hold for every point of that cell.
+        Only corners near two clashing outlines that do not clash with each other are visited; elsewhere a view
+        holds one clashing outline at most, which every channel holding that outline shows.
+      - Channels hold views with no clash among their outlines, so each point has a channel that, near it, holds
+        exactly its view. A view goes into the clash-free channel that already holds most of it. Outlines that
+        clash with none are in every channel; with no clash at all there is one channel with every outline (the
+        gym: its mask is the same as before, texel for texel).
+      - Ties go by plan position, so the mask does not depend on the order of the outlines.
+      - Overlapping ceilings (after the Codex re-check of 5337cba; it took 11.8 s for 20 nested ceilings next to
+        one 8 cm away):
+        - An outline inside another is left out; the other covers it in every channel.
+        - Inside means every piece of its edges, cut wherever they meet the other outline (crossing it, a corner on
+          it, or running along it), is inside or on the other, and no piece of the other's edges is strictly inside
+          it (after the Codex check of 94cb4a8). A room over the notch of a bigger ceiling, the notch's tip on one
+          edge and its mouth on the opposite one, only touches it and is kept. Before, the cuts missed corners lying
+          on an edge, the room was left out and the notch went dark (-0.26 instead of +0.24 at aca8df1).
+        - A texel corner inside an outline, and farther than the view radius from that outline's edges, needs no
+          view: every point of its cell reads the full value in any channel with that outline. The walk along a
+          row jumps over such corners.
+        - Outlines that hold a corner overlap, so they never clash: every seed holding it gets the same plain
+          nearest-first view, built once. So does a seed that clashes with nothing near.
+        - Each corner is visited once, row by row over the pairs' spans.
+        - Now: 20 nested 8-14 ms; 5 / 10 / 20 / 40 partly overlapping ceilings next to a strip 8 cm away 33 / 32 /
+          65 / 100 ms (Node, 2,000 lamps; aca8df1 10-20 ms).
+      - Channels as a colouring (after the Codex re-check of 1147834): the greedy packing could fall back although
+        four clash-free channels existed (eight rooms 2-8 cm apart: a straight wall 5 cm inside read -0.14 instead of
+        +0.04).
+        - Views are coloured in four colours, two views with a clash between them in different colours, by a small
+          exact search (most constrained view first), over each connected group of conflicting views on its own,
+          each with a budget of 20,000 steps.
+        - With no colouring found (five or more needed, or a group past its budget), the channels are the grouping
+          of aca8df1 (maskGroups, its code unchanged), so such a layout reads as at aca8df1, texel for texel (after
+          the Codex check of 94cb4a8). Running out of steps is not proof that four do not suffice: 130 rooms in a
+          12 x 12 grid of 2.2 m bays, 2-10 cm apart, colour in four but take about 166,000 steps. 94cb4a8 used a
+          least-clash packing there: -0.12 at a wall 5 cm inside a room, against 0.04 at aca8df1 and alone.
+        - Clashing outlines with the same clash partners (a unit) are in a view all or none, so views and the search
+          take a unit as one.
+        - Only texel corners within the view radius of an outline's edge are visited (marked per edge as a band, row by
+          row); corners deep inside or far outside need no view. The fill does the same for each edge: only the band
+          of texels within its reach, row by row, not the edge's whole box (the same texels, faster for slanted edges).
+        - Now: 100 rectangles overlapping in part, turned 45 degrees, next to a strip 8 cm away: about 170 ms
+          (aca8df1 about 700 ms, 1147834 2.1 s; Node, 2,000 lamps).
+      - Fixed cases: a room's wall a few centimetres from the next room's ceiling keeps its fill (b4437c2: a wall
+        5 cm inside read -0.085 instead of +0.04; a068a1d still when a hallway joined the rooms). Where three rooms
+        meet next to rooms 8 cm away, the seams read like the middle of a room (aca8df1: -0.01 at 5 cm from the
+        junction).
+      - Outside every ceiling every channel is at most zero (a channel is a union of ceilings).
+      - When no colouring is found, aca8df1's grouping puts groups that clash in a channel with the fewest near
+        them: near those outlines the fill is cut. So is a notch narrower than a texel diagonal within one outline,
+        or between two outlines that touch (they share a channel).
+      - Known limit, as at aca8df1 (it applies only in that fallback): the fill decides whether a piece of an edge
+        is an edge from points 1 mm to each side of its middle, and cuts edges only at other outlines' corners within
+        0.1 mm of them. Two outlines 0.1-1 mm apart in one channel (only the fallback puts clashing outlines
+        together) can hide an edge piece past the end of the nearer one. One fuzz layout (a notched ceiling, two
+        rooms 0.87 mm from its edge with a 0.3 m gap between them) lit the gap up to 0.21, outside every ceiling,
+        at aca8df1 and now; the colouring keeps such outlines apart, so 94cb4a8 did not.
+      - Checked on 270 random layouts (rooms on a random grid, gaps of 0-30 cm, hallways, a slanted room): never
+        lit outside, and never dark 0.3 m or more from a real edge. Most of those layouts needed the fallback.
+      - After the Codex check of 94cb4a8, 120 overlap layouts (half of them with a notched ceiling over a room):
+        every one without a colouring (85) reads as aca8df1, texel for texel; where the new containment test
+        changes a layout that has one (2), no point reads darker than at aca8df1.
 - **Gym check.** `gym_lighting_check.py` in the test root makes the scratch layout `fl-gym-lighting-check` from the
   test store's gym copy (282 items, read only). It adds:
   - a 3.2 m ceiling on the wellness lounge;

@@ -521,11 +521,26 @@ them" (the Private Gym). A layout with neither renders as before: Factory 02 pix
 - **Zone roofs.** New operation `set_zone_roof` {zoneId, heightMeters}: 2-40 m, or null to remove it. Saved as
   `extensions.roof` {heightMeters}, allowed in a Sage preview, one sentence in Sage's schema.
   - A flat commercial roof over the zone outline. Its underside is at floor + heightMeters (the wall tops); it is
-    0.2 m thick, with a light grey membrane (#c4c7c9) on top.
-  - A 0.2 m wide parapet (#a4a7aa) rises 0.45 m above the membrane, and its outer face comes 0.1 m down past the
-    underside.
-  - Drawn from above and outside only: the membrane faces up and there is no underside, so a ceiling at the same
-    height cannot flicker against it. No shadow, never picked, on the 'Roof sheeting (3D)' layer (off by default).
+    0.2 m thick, with a membrane on top.
+  - A 0.2 m wide parapet (#a4a7aa) rises 0.45 m above the membrane, with a darker coping (#8e9296) along its top,
+    and its outer face comes 0.1 m down past the underside.
+  - Solid from every side (2026-11-03; the user: "why am I going through the roof? they need to work like the
+    factory ones"): the membrane faces up, the underside (#d6dadd) faces down, and the parapet has faces inside and
+    out, its outer face also seen from inside down to the bottom of its drop. With the layer on, no view from inside
+    a roofed building opens onto the sky.
+    - A ceiling at the roof's height is drawn in front of the underside (polygon offset 2 against the ceiling's 1),
+      so nothing flickers; the underside shows only above a lower ceiling.
+    - Until then only the faces seen from above and outside were drawn.
+  - No shadow, never picked, on the 'Roof sheeting (3D)' layer (off by default).
+  - **Membrane texture** (asked with the solid roof: "also give great texture to the roof"): a light grey single-ply
+    membrane, one procedural 512-texel texture covering 12 m (nothing downloaded), laid along the roof's longest
+    edge:
+    - sheets 3 m wide with heat-welded side laps (the shadow of the upper sheet, its edge, then the welded strip,
+      about 19 cm in all), and an end lap every 12 m, staggered from sheet to sheet;
+    - soft mottling at four scales, some weathering, and each sheet a touch lighter or darker;
+    - mipmapped, with anisotropic filtering up to 8, so it shows no moire from afar. It is built once and shared by
+      all roofs: about 25 ms, 0.1 s the first time.
+    - No HVAC units or walkway pads (not asked).
   - **Shared edges.** Where a roof meets one as high or higher, its parapet has no outer face there. Where it meets
     a lower one, the outer face comes down only to that roof's membrane, however little lower it is (annex 3.3 m
     over pool 3.2 m: down to 3.4 m). Each edge is cut where a neighbour's corner lies on it or a neighbour's edge
@@ -542,6 +557,17 @@ them" (the Private Gym). A layout with neither renders as before: Factory 02 pix
     parapet's outer face, then coming down to 3.2 m over the 3.2 m pool roof, showing through such a crack. With
     the face stopping at the pool membrane (3.4 m) the pool views are identical with roofs on and off.
   - The overview and the street views show the roofs over the ceilings with the layer on.
+  - Solid roofs (2026-11-03), with the layer on:
+    - 8 views from inside the roofs show no sky: from between a tile ceiling and the roof (reception, washrooms,
+      wellness annex) the roof's underside and the parapet's inner faces close the view; under a ceiling at the
+      roof's height (cardio open deck, pool tiles, boxing) the ceiling shows, not the underside.
+    - Where a view from a room got past a ceiling (cracks where a ceiling meets a wall top, 1 pixel; past the end of
+      the cardio-reception bulkhead into the plenum, a band), the sky showed with the layer on; now the roof shows.
+    - Views with the layer off are unchanged: the gym lighting check is identical shot for shot. The scratch's
+      differences from the earlier run were state that run left (a table selected, one black frame); the change
+      touches only the roof functions.
+    - Known limit: a higher roof inside a lower one's outline would show the lower roof's underside inside it. The
+      gym's roofs do not overlap.
   - Lounge Evening under the white tiles: the 28 downlights sit flush in the grid and the pendant canopies meet it
     cleanly, without flicker (two shots of each close-up are identical). The accent washes and the fill read as
     before (the ceiling mask changed at most 1 level in 3 pixels).
@@ -550,6 +576,9 @@ them" (the Private Gym). A layout with neither renders as before: Factory 02 pix
 - **Frame time.** Each frame timed until the GPU finished, in interleaved rounds.
   - Gym, roof layer on vs off: overview 66.9 vs 68.2 ms; free weights 50.1 vs 49.4 ms; cardio-reception step 46.6
     vs 46.6 ms.
+  - Solid textured roofs (2026-11-03, a loaded machine: both twice the numbers above, rounds varying by half):
+    overview 133.5 vs 130.5 ms; free weights 101.9 vs 90.5 ms; cardio-reception step 66.4 vs 84.2 ms. No cost
+    shows; the roofs add 2 triangles of underside each (rectangles) and the parapets' inner faces.
   - Factory 02 Evening in a fresh browser: hall 126-130 ms, aisle 132-158 ms, as at 43662a6. With the browser grown
     to 4 GB and 600 MB free on the machine, the same frames took 270-300 ms.
   - The fill on the gym with all 20 ceilings builds in 56 ms in the page, the first time (the mask alone takes

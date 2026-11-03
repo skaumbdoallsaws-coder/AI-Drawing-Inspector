@@ -7667,9 +7667,9 @@ test('an acoustic-tile ceiling is white tiles on one plan grid; open-deck and no
     assert.strictEqual('#' + tiledStep.material.color.getHexString(THREE.SRGBColorSpace), '#f1f0ec');
 });
 
-// Zone roofs (2026-11-02): a flat roof with a membrane and a low parapet, drawn from above and outside only, on the
-// roof sheeting layer.
-test('a zone roof covers its zone from above and outside only, with a parapet, on the roof sheeting layer', async () => {
+// Zone roofs (2026-11-02): a flat roof with a textured membrane, a low parapet and its coping, solid from above,
+// outside and inside, on the roof sheeting layer.
+test('a zone roof covers its zone, solid from above, outside and inside, with a parapet and coping, on the roof sheeting layer', async () => {
     const THREE = await libraryThree();
     const data = await libraryFixture();
     // An L-shaped building (48 m2) whose roof's underside is 3.6 m up, on a floor 0.5 m up; a zone without a roof.
@@ -7698,9 +7698,12 @@ test('a zone roof covers its zone from above and outside only, with a parapet, o
     const [summary] = data.adapter.getDiagnostics().zoneRoofs;
     assert.ok(Math.abs(summary.lowest - 4.0) < 1e-6, 'the parapet comes 0.1 m below the underside: ' + summary.lowest);
     assert.ok(Math.abs(summary.highest - 4.75) < 1e-6, 'a 0.45 m parapet over a 0.2 m slab: ' + summary.highest);
-    assert.strictEqual(summary.facingDown, 0, 'nothing faces down: no underside');
+    assert.strictEqual(summary.undersideTriangles, 4, 'an underside over the L: four triangles');
+    assert.strictEqual(summary.facingDown, 4, 'only the underside faces down');
+    assert.strictEqual(summary.textured, true);
     const position = roof.geometry.attributes.position;
     const normal = roof.geometry.attributes.normal;
+    const uv = roof.geometry.attributes.uv;
     const corner = k => new THREE.Vector3(position.getX(k), position.getY(k), position.getZ(k));
     const inside = (x, z) => {
         let hit = false;
@@ -7711,37 +7714,90 @@ test('a zone roof covers its zone from above and outside only, with a parapet, o
         }
         return hit;
     };
-    const [membrane, parapet] = roof.geometry.groups;
-    assert.deepStrictEqual([membrane.start, membrane.materialIndex, parapet.materialIndex], [0, 0, 1]);
+    const [membrane, parapet, coping, underside] = roof.geometry.groups;
+    assert.deepStrictEqual(roof.geometry.groups.map(group => group.materialIndex), [0, 1, 2, 3]);
+    assert.strictEqual(membrane.start, 0);
+    const group = t => roof.geometry.groups.find(g => t >= g.start && t < g.start + g.count);
     let membraneArea = 0;
+    let undersideArea = 0;
     let outerArea = 0;
+    let fasciaInside = 0;
     let innerFaces = 0;
+    let copingFaces = 0;
     for (let t = 0; t < position.count; t += 3) {
         const a = corner(t);
         const cross = new THREE.Vector3().crossVectors(corner(t + 1).sub(a), corner(t + 2).sub(a));
         const n = new THREE.Vector3(normal.getX(t), normal.getY(t), normal.getZ(t));
-        assert.ok(cross.dot(n) > 0, 'triangle ' + t / 3 + ' is turned to face its normal');
         const middle = corner(t).add(corner(t + 1)).add(corner(t + 2)).multiplyScalar(1 / 3);
-        if (t < membrane.count) {
+        if (group(t) === underside) {
+            // Faces down, shaded as facing up (like a ceiling: lit like the room under it).
+            assert.ok(cross.y < 0 && n.y === 1 && Math.abs(middle.y - 4.1) < 1e-6, 'the underside faces down at the slab base');
+            undersideArea += cross.length() / 2;
+            continue;
+        }
+        assert.ok(cross.dot(n) > 0, 'triangle ' + t / 3 + ' is turned to face its normal');
+        if (group(t) === membrane) {
             assert.ok(n.y === 1 && Math.abs(middle.y - 4.3) < 1e-6, 'the membrane faces up at the slab top');
             membraneArea += cross.length() / 2;
-        } else if (Math.abs(n.y) < 1e-9) {
+        } else if (group(t) === coping) {
+            assert.ok(n.y === 1 && Math.abs(middle.y - 4.75) < 1e-6, 'the coping: the parapet top');
+            copingFaces += 1;
+        } else {
+            assert.strictEqual(group(t), parapet);
+            assert.ok(Math.abs(n.y) < 1e-9, 'the parapet\'s faces stand upright');
             const step = middle.clone().addScaledVector(n, 0.01);
-            if (inside(middle.x + n.x * -0.01, middle.z + n.z * -0.01) && !inside(step.x, step.z)) {
+            const back = middle.clone().addScaledVector(n, -0.01);
+            if (inside(back.x, back.z) && !inside(step.x, step.z)) {
                 outerArea += cross.length() / 2;  // on the outline, facing out
+            } else if (!inside(back.x, back.z) && inside(step.x, step.z)) {
+                assert.ok(middle.y < 4.3, 'the inner side of the outer face, below the membrane');
+                fasciaInside += cross.length() / 2;  // on the outline, facing in
             } else {
                 assert.ok(inside(step.x, step.z) && middle.y > 4.3, 'an inner face looks in over the membrane');
                 innerFaces += 1;
             }
-        } else {
-            assert.ok(n.y === 1 && Math.abs(middle.y - 4.75) < 1e-6, 'the parapet top');
         }
     }
     assert.ok(Math.abs(membraneArea - 48) < 1e-6, 'covers the zone: ' + membraneArea);
+    assert.ok(Math.abs(undersideArea - 48) < 1e-6, 'closes the zone from below: ' + undersideArea);
     assert.ok(Math.abs(outerArea - 32 * 0.75) < 1e-6, 'the outer faces wrap the 32 m outline, 0.75 m tall: ' + outerArea);
+    assert.ok(Math.abs(fasciaInside - 32 * 0.3) < 1e-4, 'from inside, from its foot to the membrane: ' + fasciaInside);
     assert.strictEqual(innerFaces, 12, 'six inner faces of two triangles');
+    assert.strictEqual(copingFaces, 12, 'six coping faces of two triangles');
+    // The membrane's UVs: plan metres over 12 m along the longest edge (0,0)-(10,0): its sheets run that way.
+    for (let k = membrane.start; k < membrane.start + membrane.count; k += 1) {
+        assert.ok(Math.abs(uv.getX(k) - position.getX(k) / 12) < 1e-6 && Math.abs(uv.getY(k) - position.getZ(k) / 12) < 1e-6);
+    }
     assert.strictEqual(roof.material[0].side, THREE.FrontSide);
-    assert.strictEqual('#' + roof.material[0].color.getHexString(THREE.SRGBColorSpace), '#c4c7c9', 'light grey membrane');
+    const hex = material => '#' + material.color.getHexString(THREE.SRGBColorSpace);
+    assert.deepStrictEqual(roof.material.map(hex), ['#ffffff', '#a4a7aa', '#8e9296', '#d6dadd'],
+        'a textured membrane, the parapet, a darker coping and the deck under it');
+    const sheets = roof.material[0].map;
+    assert.strictEqual(sheets.name, 'FacilityRoofMembrane');
+    assert.deepStrictEqual([sheets.wrapS, sheets.wrapT, sheets.minFilter, sheets.generateMipmaps],
+        [THREE.RepeatWrapping, THREE.RepeatWrapping, THREE.LinearMipmapLinearFilter, true], 'tiles, mipmapped');
+    {
+        // 512 texels over 12 m: a lap every 3 m (128 texels), its edge a darker line than mid-sheet; light grey.
+        const { data: texels, width } = sheets.image;
+        const row = y => { let sum = 0; for (let x = 0; x < width; x += 1) sum += texels[(y * width + x) * 4]; return sum / width; };
+        [0, 128, 256, 384].forEach(y => assert.ok(row(y) < row(y + 64) - 15, 'a lap at row ' + y + ': ' + row(y) + ' vs ' + row(y + 64)));
+        const mid = row(64);
+        assert.ok(mid > 190 && mid < 220, 'light grey: ' + mid);
+        // Tileable: across the wrap the texels change no more than between neighbours inside (on the second
+        // sheet's rows away from its laps; the first sheet's end lap is at the wrap).
+        let wrap = 0;
+        let within = 0;
+        for (let y = 131; y < 255; y += 1) {
+            wrap += Math.abs(texels[(y * width + width - 1) * 4] - texels[(y * width) * 4]);
+            within += Math.abs(texels[(y * width + 255) * 4] - texels[(y * width + 256) * 4]);
+        }
+        assert.ok(wrap < 2 * within + 124, 'tileable: ' + wrap + ' vs ' + within);
+    }
+    // A ceiling at the roof's height (this open deck) is drawn in front of the underside.
+    let ceiling = null;
+    renderedScene().traverse(o => { if (o.userData && o.userData.facilityZoneCeiling) ceiling = o; });
+    assert.ok(roof.material[3].polygonOffset && roof.material[3].polygonOffsetFactor > ceiling.material.polygonOffsetFactor
+        && roof.material[3].polygonOffsetUnits > ceiling.material.polygonOffsetUnits, 'the underside sits behind a ceiling at its height');
     assert.strictEqual(roof.castShadow, false, 'no shadow on the room');
     const hits = [];
     roof.raycast({}, hits);
@@ -7756,10 +7812,13 @@ test('a zone roof covers its zone from above and outside only, with a parapet, o
     assert.strictEqual(roofs().length, 1, 'in every scene');
     let freed = 0;
     roofs()[0].geometry.addEventListener('dispose', () => { freed += 1; });
+    let texturesFreed = 0;
+    roofs()[0].material[0].map.addEventListener('dispose', () => { texturesFreed += 1; });
     // A layout without roofs or ceilings draws neither.
     const plain = Object.assign({}, building, { extensions: { style: building.extensions.style } });
     await show([plain, open]);
     assert.strictEqual(freed, 1, 'the removed roof is freed');
+    assert.strictEqual(texturesFreed, 1, 'the membrane texture is freed with its roofs');
     assert.strictEqual(roofs().length, 0);
     assert.strictEqual(data.adapter.getDiagnostics().zoneRoofCount, 0);
     assert.strictEqual(data.adapter.getDiagnostics().zoneCeilingCount, 0);
@@ -7785,6 +7844,7 @@ test('where two roofs meet, the lower parapet has no outer face there and the hi
     data.scheduler.flush();
     const outer = {};
     const lowest = {};
+    const lowestInside = {};
     renderedScene().traverse(o => {
         if (!o.userData || !o.userData.facilityZoneRoof) return;
         const id = o.userData.zoneId;
@@ -7793,6 +7853,7 @@ test('where two roofs meet, the lower parapet has no outer face there and the hi
         const corner = k => new THREE.Vector3(position.getX(k), position.getY(k), position.getZ(k));
         outer[id] = 0;
         lowest[id] = Infinity;
+        lowestInside[id] = Infinity;
         for (let t = 0; t < position.count; t += 3) {
             if (Math.abs(normal.getY(t)) > 1e-9) continue;
             const a = corner(t);
@@ -7801,6 +7862,13 @@ test('where two roofs meet, the lower parapet has no outer face there and the hi
             const onOutline = (Math.abs(middle.x - box[0]) < 1e-6 || Math.abs(middle.x - box[2]) < 1e-6
                 || Math.abs(middle.z - box[1]) < 1e-6 || Math.abs(middle.z - box[3]) < 1e-6);
             if (!onOutline) continue;
+            const sx = middle.x + normal.getX(t) * 0.01;
+            const sz = middle.z + normal.getZ(t) * 0.01;
+            if (sx > box[0] && sx < box[2] && sz > box[1] && sz < box[3]) {
+                // The outer face's inner side, seen from inside.
+                for (let k = t; k < t + 3; k += 1) lowestInside[id] = Math.min(lowestInside[id], position.getY(k));
+                continue;
+            }
             outer[id] += new THREE.Vector3().crossVectors(corner(t + 1).sub(a), corner(t + 2).sub(a)).length() / 2;
             for (let k = t; k < t + 3; k += 1) lowest[id] = Math.min(lowest[id], position.getY(k));
         }
@@ -7816,7 +7884,15 @@ test('where two roofs meet, the lower parapet has no outer face there and the hi
     // The tower: over the building it comes down to the building's membrane (3.8), elsewhere 0.1 m below its slab.
     near(outer['zn-tower'], 10 * (4.85 - 3.8) + (6 + 10 + 6) * 0.75, 'tower outer faces');
     near(lowest['zn-tower'], 3.8, 'tower comes down to the building roof');
-    data.adapter.getDiagnostics().zoneRoofs.forEach(roof => assert.strictEqual(roof.facingDown, 0));
+    // From inside, the inner side of a face over a lower roof comes down to that roof's underside (it closes the
+    // lower slab's edge); elsewhere to the face's foot.
+    near(lowestInside['zn-building'], 3.3, 'building, over the annex: down to the annex underside');
+    near(lowestInside['zn-tower'], 3.6, 'tower, over the building: down to the building underside');
+    near(lowestInside['zn-annex'], 3.2, 'annex: its free faces\' foot');
+    data.adapter.getDiagnostics().zoneRoofs.forEach(roof => {
+        assert.strictEqual(roof.undersideTriangles, 2, roof.zoneId + ': an underside');
+        assert.strictEqual(roof.facingDown, 2, roof.zoneId + ': only the underside faces down');
+    });
 });
 
 // Codex review of b4437c2: a roof crossing another's edge with no corner on it, and a neighbour only a little lower.
@@ -7851,6 +7927,9 @@ test('a roof edge crossed by a higher roof keeps its open parts, and a slightly 
             const middle = corner(t).add(corner(t + 1)).add(corner(t + 2)).multiplyScalar(1 / 3);
             if (!(Math.abs(middle.x - x0) < 1e-6 || Math.abs(middle.x - x1) < 1e-6
                 || Math.abs(middle.z - z0) < 1e-6 || Math.abs(middle.z - z1) < 1e-6)) continue;
+            const sx = middle.x + normal.getX(t) * 0.01;
+            const sz = middle.z + normal.getZ(t) * 0.01;
+            if (sx > x0 && sx < x1 && sz > z0 && sz < z1) continue;  // the outer face's inner side
             outer[id].push([middle, new THREE.Vector3().crossVectors(corner(t + 1).sub(a), corner(t + 2).sub(a)).length() / 2]);
             for (let k = t; k < t + 3; k += 1) lowest[id] = Math.min(lowest[id], position.getY(k));
         }
@@ -7871,7 +7950,7 @@ test('a roof edge crossed by a higher roof keeps its open parts, and a slightly 
     assert.ok(shared.length > 0);
     near(area('zn-a'), (10 + 6 + 10) * 0.75 + 6 * 0.5, 'a outer faces');
     near(area('zn-b'), (6 + 6 + 6) * 0.75, 'b: none toward the higher a');
-    data.adapter.getDiagnostics().zoneRoofs.forEach(roof => assert.strictEqual(roof.facingDown, 0));
+    data.adapter.getDiagnostics().zoneRoofs.forEach(roof => assert.strictEqual(roof.facingDown, roof.undersideTriangles));
 });
 
 // Lamps that light things (2026-11-02): in Evening with the lights on, a pendant over a table and an accent spot get

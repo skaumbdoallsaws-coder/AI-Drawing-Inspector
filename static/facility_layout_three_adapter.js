@@ -118,11 +118,16 @@
     });
     // A zone roof (ceilings.py): a flat slab whose underside is at the zone's floor plus its height (the wall
     // tops), a light grey membrane on top and a low parapet along its edge that comes down a little below the slab,
-    // over a wall a little lower than the roof. All in metres.
+    // over a wall a little lower than the roof, capped by a darker coping. All in metres. The membrane is the color
+    // without a texture (ROOF_MEMBRANE); the underside is the roof deck seen from inside.
     const ZONE_ROOF = Object.freeze({
         thickness: 0.2, parapetHeight: 0.45, parapetWidth: 0.2, drop: 0.1,
-        membrane: '#c4c7c9', parapet: '#a4a7aa',
+        membrane: '#c4c7c9', parapet: '#a4a7aa', coping: '#8e9296', underside: '#d6dadd',
     });
+    // The roof membrane's texture (zoneRoofTexture): single-ply sheets `sheet` m wide that run along the roof's
+    // longest edge, heat-welded where they lap (a side lap every sheet, an end lap staggered along each), a little
+    // mottled and weathered. One tile of `texels` covers `meters` of roof; `base` is the sheet's sRGB color.
+    const ROOF_MEMBRANE = Object.freeze({ meters: 12, texels: 512, sheet: 3, endLapStep: 5, base: [206, 209, 210] });
     // From this many floor markings on, their paint is drawn merged (batchFloorMarkings).
     const FLOOR_MARKING_BATCH_MINIMUM = 40;
     const FACILITY_MOTION_PACKAGE_SCHEMA_VERSION_V1 =
@@ -10915,13 +10920,14 @@
 
         // ---- Zone roofs (2026-11-02) -------------------------------------------------------------------------------
         // A zone with extensions.roof {heightMeters} (ceilings.py) shows a flat commercial roof over its boundary
-        // (ZONE_ROOF): its underside at the zone's floor plus that height, a light grey membrane on top and a low
-        // parapet along the edge. Only faces seen from above and from outside are drawn (no underside), so from
-        // inside the room the view is as before and a ceiling at the roof's height has nothing to flicker against.
-        // It casts no shadow, is never picked and follows the roof sheeting layer (hidden by default, so the overview
-        // looks in). Where two roofs meet (a building and its annex), the lower one's parapet has no outer face
-        // there (it would face into the other building) and the higher one's outer face comes down to the lower
-        // one's membrane.
+        // (ZONE_ROOF): its underside at the zone's floor plus that height, a membrane on top (ROOF_MEMBRANE) and a low
+        // parapet along the edge with a coping. It is solid from every side: from above and outside the membrane and
+        // the parapet, from inside the underside and the inner side of the parapet's face, so with the roof on no view
+        // from inside the building opens onto the sky. A ceiling at the roof's height is drawn in front of the
+        // underside (its polygon offset is smaller). It casts no shadow, is never picked and follows the roof
+        // sheeting layer (hidden by default, so the overview looks in). Where two roofs meet (a building and its
+        // annex), the lower one's parapet has no outer face there (it would face into the other building) and the
+        // higher one's outer face comes down to the lower one's membrane.
         function renderZoneRoofs() {
             if (!state.modelRoot || typeof THREE.Mesh !== 'function' || typeof THREE.BufferGeometry !== 'function'
                     || !THREE.ShapeUtils || typeof THREE.MeshStandardMaterial !== 'function') return 0;
@@ -10943,9 +10949,17 @@
                 }));
                 if (!geometry) return;
                 if (!materials) {
-                    materials = [ZONE_ROOF.membrane, ZONE_ROOF.parapet].map(function (color) {
-                        return new THREE.MeshStandardMaterial({ color: color, roughness: 0.95, metalness: 0 });
-                    });
+                    const membrane = typeof THREE.DataTexture === 'function'
+                        ? { color: '#ffffff', map: zoneRoofTexture() } : { color: ZONE_ROOF.membrane };
+                    materials = [
+                        new THREE.MeshStandardMaterial(Object.assign({ roughness: 0.95, metalness: 0 }, membrane)),
+                        new THREE.MeshStandardMaterial({ color: ZONE_ROOF.parapet, roughness: 0.95, metalness: 0 }),
+                        new THREE.MeshStandardMaterial({ color: ZONE_ROOF.coping, roughness: 0.8, metalness: 0 }),
+                        new THREE.MeshStandardMaterial({
+                            color: ZONE_ROOF.underside, roughness: 1, metalness: 0,
+                            polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 2,
+                        }),
+                    ];
                 }
                 const mesh = new THREE.Mesh(geometry, materials);
                 mesh.name = 'FacilityZoneRoof:' + String(zone.zoneId || '');
@@ -10966,24 +10980,132 @@
             let attached = false;
             for (let object = mesh; object; object = object.parent) if (object === state.scene) attached = true;
             const position = mesh.geometry.attributes.position;
-            const normal = mesh.geometry.attributes.normal;
             let low = Infinity;
             let high = -Infinity;
             let facingDown = 0;
             for (let i = 0; i < position.count; i += 1) {
                 low = Math.min(low, position.getY(i));
                 high = Math.max(high, position.getY(i));
-                if (i % 3 === 0 && normal.getY(i) < -1e-6) facingDown += 1;
+                if (i % 3 !== 0) continue;
+                // The y of (b - a) x (c - a): below zero, the triangle faces down.
+                const up = (position.getZ(i + 1) - position.getZ(i)) * (position.getX(i + 2) - position.getX(i))
+                    - (position.getX(i + 1) - position.getX(i)) * (position.getZ(i + 2) - position.getZ(i));
+                if (up < -1e-9) facingDown += 1;
             }
+            const underside = (mesh.geometry.groups || []).find(function (group) { return group.materialIndex === 3; });
+            const membrane = Array.isArray(mesh.material) ? mesh.material[0] : null;
             return { zoneId: mesh.userData.zoneId, heightMeters: mesh.userData.heightMeters, visible: mesh.visible,
-                inScene: attached, lowest: low, highest: high, triangles: position.count / 3, facingDown: facingDown };
+                inScene: attached, lowest: low, highest: high, triangles: position.count / 3, facingDown: facingDown,
+                undersideTriangles: underside ? underside.count / 3 : 0, textured: Boolean(membrane && membrane.map) };
         }
 
-        // Non-indexed triangles with flat normals: group 0 the membrane (the outline at the slab's top, facing up),
-        // group 1 the parapet (per edge: its outer face from a little below the slab to its top, its top, and its
-        // inner face above the membrane). The inner line is the outline moved in by the parapet's width (mitred).
-        // Neighbours are the other roofs ({points, base}): see zoneRoofEdgeSpans. Null if the outline does not
-        // triangulate.
+        // The membrane texture (ROOF_MEMBRANE), tileable: smooth noise on lattices that wrap at the tile's edge for the
+        // mottling and the weathering, a slightly different tone per sheet, and at each lap a thin shadow line under the
+        // upper sheet's edge with its welded strip catching the light. Mipmapped and anisotropic, so the laps fade
+        // evenly with distance instead of shimmering.
+        function zoneRoofTexture() {
+            const size = ROOF_MEMBRANE.texels;
+            const perMeter = size / ROOF_MEMBRANE.meters;
+            const sheet = Math.round(ROOF_MEMBRANE.sheet * perMeter);
+            const hash = function (n) {
+                let h = Math.imul(n ^ 0x5bd1e995, 0x27d4eb2d);
+                h ^= h >>> 15;
+                h = Math.imul(h, 0x85ebca6b);
+                h ^= h >>> 13;
+                return (h >>> 0) / 4294967296;
+            };
+            // Smooth noise in [-1, 1] over `cells` lattice cells per side of the tile, added to `shade` as
+            // `amount` times it (or, for the weathering, darkening where it is above zero), row by row.
+            const shade = new Float32Array(size * size);
+            const layer = function (cells, salt, amount, weathering) {
+                const values = new Float32Array(cells * cells);
+                for (let k = 0; k < values.length; k += 1) values[k] = hash(k + salt * 1000003) * 2 - 1;
+                const left = new Int32Array(size);
+                const right = new Int32Array(size);
+                const blend = new Float32Array(size);
+                for (let x = 0; x < size; x += 1) {
+                    const u = x / size * cells;
+                    const i = Math.floor(u);
+                    left[x] = i % cells;
+                    right[x] = (i + 1) % cells;
+                    blend[x] = (u - i) * (u - i) * (3 - 2 * (u - i));
+                }
+                for (let y = 0; y < size; y += 1) {
+                    const v = y / size * cells;
+                    const j = Math.floor(v);
+                    const sv = (v - j) * (v - j) * (3 - 2 * (v - j));
+                    const low = (j % cells) * cells;
+                    const high = ((j + 1) % cells) * cells;
+                    for (let x = 0; x < size; x += 1) {
+                        const a = values[low + left[x]];
+                        const b = values[low + right[x]];
+                        const c = values[high + left[x]];
+                        const d = values[high + right[x]];
+                        const n = (a + (b - a) * blend[x]) * (1 - sv) + (c + (d - c) * blend[x]) * sv;
+                        if (weathering) {
+                            if (n > 0) shade[y * size + x] -= amount * n * n;
+                        } else {
+                            shade[y * size + x] += amount * n;
+                        }
+                    }
+                }
+            };
+            [[4, 4], [16, 2.5], [64, 1.5], [256, 1.2]].forEach(function (spec, k) { layer(spec[0], k + 1, spec[1], false); });
+            layer(6, 9, 9, true);
+            // Across a lap, d texels from the upper sheet's edge (below zero: on the sheet under it): the shadow it
+            // casts, its edge, then the welded strip, about 19 cm in all, so the laps still read from mid distance.
+            const lap = function (d) {
+                if (d >= -2 && d < 0) return -9;
+                if (d >= 0 && d < 2) return -20;
+                if (d >= 2 && d < 6) return 6;
+                return 0;
+            };
+            const data = new Uint8Array(size * size * 4);
+            for (let y = 0; y < size; y += 1) {
+                const strip = Math.floor(y / sheet);
+                const across = y - strip * sheet;
+                const tone = (hash(strip + 77) - 0.5) * 4;
+                const side = across < 6 ? lap(across) : (across >= sheet - 2 ? lap(across - sheet) : 0);
+                const endLap = Math.floor(((strip * ROOF_MEMBRANE.endLapStep) % ROOF_MEMBRANE.meters) * perMeter);
+                for (let x = 0; x < size; x += 1) {
+                    let value = shade[y * size + x] + tone + side;
+                    if (!side) {
+                        let along = x - endLap;
+                        if (along < -size / 2) along += size;
+                        if (along >= size / 2) along -= size;
+                        value += 0.8 * lap(along);
+                    }
+                    const at = (y * size + x) * 4;
+                    data[at] = Math.max(0, Math.min(255, Math.round(ROOF_MEMBRANE.base[0] + value)));
+                    data[at + 1] = Math.max(0, Math.min(255, Math.round(ROOF_MEMBRANE.base[1] + value)));
+                    data[at + 2] = Math.max(0, Math.min(255, Math.round(ROOF_MEMBRANE.base[2] + value * 1.06)));
+                    data[at + 3] = 255;
+                }
+            }
+            const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+            texture.name = 'FacilityRoofMembrane';
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearMipmapLinearFilter;
+            texture.generateMipmaps = true;
+            if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+            if (state.renderer && state.renderer.capabilities
+                    && typeof state.renderer.capabilities.getMaxAnisotropy === 'function') {
+                texture.anisotropy = Math.min(8, state.renderer.capabilities.getMaxAnisotropy());
+            }
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        // Non-indexed triangles with flat normals, in groups by material: 0 the membrane (the outline at the slab's
+        // top, facing up), 1 the parapet (per edge: its outer face from a little below the slab to its top, the inner
+        // side of that face from as low up to the slab's top, and its inner face above the membrane), 2 the coping
+        // (the parapet's top), 3 the underside (the outline at the slab's base, facing down, shaded as facing up like
+        // a ceiling: lit like the room under it). UVs are plan metres over ROOF_MEMBRANE.meters, along the outline's
+        // longest edge, so the membrane's sheets run the length of the roof. The inner line is the outline moved in
+        // by the parapet's width (mitred). Neighbours are the other roofs ({points, base}): see zoneRoofEdgeSpans.
+        // Null if the outline does not triangulate.
         function zoneRoofGeometry(points, base, neighbours) {
             if (points.length < 3) return null;
             let twiceArea = 0;
@@ -11017,58 +11139,85 @@
                 }
                 return { x: point.x + dx, z: point.z + dz };
             });
+            let along = { x: 1, z: 0 };
+            let longest = 0;
+            points.forEach(function (point, i) {
+                const next = points[(i + 1) % points.length];
+                const length = Math.hypot(next.x - point.x, next.z - point.z);
+                if (length > longest + 1e-9) {
+                    longest = length;
+                    along = { x: (next.x - point.x) / length, z: (next.z - point.z) / length };
+                }
+            });
             const top = base + ZONE_ROOF.thickness;
             const crest = top + ZONE_ROOF.parapetHeight;
-            const positions = [];
-            const normals = [];
-            // One triangle, turned so its face is toward normal (front faces are counter-clockwise from that side).
-            const triangle = function (a, b, c, normal) {
+            const parts = [0, 1, 2, 3].map(function () { return { positions: [], normals: [], uvs: [] }; });
+            // One triangle into group `part`, turned so its face is toward `facing` (front faces are counter-clockwise
+            // from that side), shaded with normal `shade` (by default `facing`).
+            const triangle = function (part, a, b, c, facing, shade) {
                 const ux = b[0] - a[0]; const uy = b[1] - a[1]; const uz = b[2] - a[2];
                 const vx = c[0] - a[0]; const vy = c[1] - a[1]; const vz = c[2] - a[2];
-                const facing = (uy * vz - uz * vy) * normal[0] + (uz * vx - ux * vz) * normal[1]
-                    + (ux * vy - uy * vx) * normal[2];
-                [a].concat(facing < 0 ? [c, b] : [b, c]).forEach(function (corner) {
-                    positions.push(corner[0], corner[1], corner[2]);
-                    normals.push(normal[0], normal[1], normal[2]);
+                const toward = (uy * vz - uz * vy) * facing[0] + (uz * vx - ux * vz) * facing[1]
+                    + (ux * vy - uy * vx) * facing[2];
+                const normal = shade || facing;
+                [a].concat(toward < 0 ? [c, b] : [b, c]).forEach(function (corner) {
+                    parts[part].positions.push(corner[0], corner[1], corner[2]);
+                    parts[part].normals.push(normal[0], normal[1], normal[2]);
+                    parts[part].uvs.push((corner[0] * along.x + corner[2] * along.z) / ROOF_MEMBRANE.meters,
+                        (corner[2] * along.x - corner[0] * along.z) / ROOF_MEMBRANE.meters);
                 });
             };
-            const quad = function (a, b, c, d, normal) {
-                triangle(a, b, c, normal);
-                triangle(a, c, d, normal);
+            const quad = function (part, a, b, c, d, facing) {
+                triangle(part, a, b, c, facing);
+                triangle(part, a, c, d, facing);
             };
             triangles.forEach(function (corners) {
                 const [a, b, c] = corners.map(function (k) { return [points[k].x, top, points[k].z]; });
-                triangle(a, b, c, [0, 1, 0]);
+                triangle(0, a, b, c, [0, 1, 0]);
+                const [d, e, f] = corners.map(function (k) { return [points[k].x, base, points[k].z]; });
+                triangle(3, d, e, f, [0, -1, 0], [0, 1, 0]);
             });
-            const membraneCount = positions.length / 3;
             points.forEach(function (point, i) {
                 const j = (i + 1) % points.length;
                 const next = points[j];
                 const out = [outward[i].x, 0, outward[i].z];
+                const into = [-out[0], 0, -out[2]];
                 zoneRoofEdgeSpans(point, next, outward[i], neighbours || [], base).forEach(function (span) {
                     const a = span.from;
                     const b = span.to;
-                    quad([a.x, span.low, a.z], [b.x, span.low, b.z], [b.x, crest, b.z], [a.x, crest, a.z], out);
+                    quad(1, [a.x, span.low, a.z], [b.x, span.low, b.z], [b.x, crest, b.z], [a.x, crest, a.z], out);
+                    quad(1, [a.x, span.under, a.z], [b.x, span.under, b.z], [b.x, top, b.z], [a.x, top, a.z], into);
                 });
-                quad([point.x, crest, point.z], [next.x, crest, next.z], [inner[j].x, crest, inner[j].z],
+                quad(2, [point.x, crest, point.z], [next.x, crest, next.z], [inner[j].x, crest, inner[j].z],
                     [inner[i].x, crest, inner[i].z], [0, 1, 0]);
-                quad([inner[i].x, top, inner[i].z], [inner[j].x, top, inner[j].z], [inner[j].x, crest, inner[j].z],
-                    [inner[i].x, crest, inner[i].z], [-out[0], 0, -out[2]]);
+                quad(1, [inner[i].x, top, inner[i].z], [inner[j].x, top, inner[j].z], [inner[j].x, crest, inner[j].z],
+                    [inner[i].x, crest, inner[i].z], into);
             });
             const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-            geometry.addGroup(0, membraneCount, 0);
-            geometry.addGroup(membraneCount, positions.length / 3 - membraneCount, 1);
+            const all = { positions: [], normals: [], uvs: [] };
+            let start = 0;
+            parts.forEach(function (part, index) {
+                const count = part.positions.length / 3;
+                geometry.addGroup(start, count, index);
+                start += count;
+                Array.prototype.push.apply(all.positions, part.positions);
+                Array.prototype.push.apply(all.normals, part.normals);
+                Array.prototype.push.apply(all.uvs, part.uvs);
+            });
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(all.positions, 3));
+            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(all.normals, 3));
+            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(all.uvs, 2));
             if (typeof geometry.computeBoundingSphere === 'function') geometry.computeBoundingSphere();
             if (typeof geometry.computeBoundingBox === 'function') geometry.computeBoundingBox();
             return geometry;
         }
 
-        // The parts of a roof edge (p to q, outward normal n) that get a parapet outer face, each {from, to, low}: the
-        // edge is cut where a neighbouring roof's corners lie on it or its edges cross it; a part whose outside is
-        // another roof as high or higher gets none, a part over a lower roof comes down only to that roof's
-        // membrane (however little lower it is), and a free part comes down ZONE_ROOF.drop below the slab.
+        // The parts of a roof edge (p to q, outward normal n) that get a parapet outer face, each {from, to, low,
+        // under}: the edge is cut where a neighbouring roof's corners lie on it or its edges cross it; a part whose
+        // outside is another roof as high or higher gets none, a part over a lower roof comes down only to that
+        // roof's membrane (however little lower it is), and a free part comes down ZONE_ROOF.drop below the slab.
+        // `under` is how low its inner side comes: the lower roof's underside (closing its slab's edge from inside)
+        // or the free face's foot.
         function zoneRoofEdgeSpans(p, q, n, neighbours, base) {
             const length = Math.hypot(q.x - p.x, q.z - p.z);
             if (!(length > 1e-6)) return [];
@@ -11107,13 +11256,14 @@
                 });
                 if (beyond && beyond.base >= base - 1e-6) continue;
                 const low = beyond ? beyond.base + ZONE_ROOF.thickness : base - ZONE_ROOF.drop;
+                const under = beyond ? beyond.base : base - ZONE_ROOF.drop;
                 const last = spans[spans.length - 1];
-                if (last && last.low === low && Math.abs(last.end - from) < 1e-9) {
+                if (last && last.low === low && last.under === under && Math.abs(last.end - from) < 1e-9) {
                     last.end = to;
                     last.to = { x: p.x + ux * to, z: p.z + uz * to };
                     continue;
                 }
-                spans.push({ low: low, end: to, from: { x: p.x + ux * from, z: p.z + uz * from },
+                spans.push({ low: low, under: under, end: to, from: { x: p.x + ux * from, z: p.z + uz * from },
                     to: { x: p.x + ux * to, z: p.z + uz * to } });
             }
             return spans;

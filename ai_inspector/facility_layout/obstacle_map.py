@@ -251,6 +251,11 @@ class ObstacleMap:
                 found[reason] = key
         return [reason for reason, _ in sorted(found.items(), key=lambda item: item[1])]
 
+    def unsupported(self, footprint: Polygon, low: float) -> str | None:
+        """Why nothing holds an item whose lowest point is this high here, as the mounting check sees it, or None
+        (always None for overhead items, which hang clear of the floor)."""
+        return None if self.overhead(low) else self._floor_reason(footprint, low)
+
     def overhead(self, low: float) -> bool:
         """Whether an item whose lowest point is this high hangs clear of the floor, as the checks count it
         (spatial._overhead_placement_ids): 4.5 m or more above the shell's floor elevation."""
@@ -259,13 +264,15 @@ class ObstacleMap:
     def _floor_reason(self, footprint: Polygon, elevation: float) -> str | None:
         """Why a floor item standing at this elevation has no floor under it, as the mounting check sees it, or None
         when it has: one level stretch of site ground, or one floor surface that holds the whole footprint at the
-        surface's own elevation."""
+        surface's own elevation. With no floor surfaces at all, the shell's floor elevation holds everywhere."""
         points = [tuple(point) for point in footprint.exterior.coords][:-1]
         if self.ground is not None:
             from .ground import supports_footprint
             return None if supports_footprint(self.ground, points, elevation) else OFF_FLOOR
         if not self.floors:
-            return None
+            if abs(elevation - self.floor_elevation) <= 1e-6:
+                return None
+            return f"the floor here is at {self.floor_elevation:g} m, not {elevation:g} m"
         heights = [height for boundary, height, _ in self.floors if polygon_contains_polygon(boundary, points)]
         if not heights:
             return OFF_FLOOR

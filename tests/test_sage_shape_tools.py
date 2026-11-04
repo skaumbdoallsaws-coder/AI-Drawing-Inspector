@@ -528,11 +528,12 @@ def test_overhead_counts_from_the_shell_s_floor_and_heights_stay_absolute():
         {"from": {"x": 1, "z": 5}, "to": {"x": 9, "z": 5}, "label": "Rail"}]}, revision="r1", author=fake_author,
         obstacles=obstacles)
     assert heights(rail) == ([1.0], [1.0])
-    for given, said in ((0, "elevationMeters 0 is below the floor, which is at 1 m here"),
-                        (4.5, "elevationMeters 4.5: an item between the floor and 5.5 m up would need something")):
-        with pytest.raises(shapes.ShapeError, match=re.escape(said)):
+    for given in (0, 4.5):                  # nothing holds an item there: below the floor, or above it under 5.5 m
+        with pytest.raises(shapes.ShapeError, match=re.escape(
+                f"the floor here is at 1 m, not {given:g} m (elevationMeters {given:g}: an item below 5.5 m would "
+                "need something to stand on")):
             shapes.plan(shapes.LINE_TOOL, layout, {"family": "cable_tray", "elevationMeters": given, "lines": [
-                {"from": {"x": 1, "z": 20}, "to": {"x": 15, "z": 20}}]}, revision="r1", author=fake_author,
+                {"from": {"x": 1, "z": 5}, "to": {"x": 15, "z": 5}}]}, revision="r1", author=fake_author,
                 obstacles=obstacles)
     tray = shapes.plan(shapes.LINE_TOOL, layout, {"family": "cable_tray", "elevationMeters": 5.5, "lines": [
         {"from": {"x": 1, "z": 20}, "to": {"x": 15, "z": 20}, "label": "Tray"}]}, revision="r1", author=fake_author,
@@ -547,6 +548,42 @@ def test_overhead_counts_from_the_shell_s_floor_and_heights_stay_absolute():
     with pytest.raises(shapes.ShapeError, match=re.escape("at least 5.5 m high (4.5 m above the floor, which is at 1")):
         shapes.plan(shapes.ROOF_TOOL, layout, {"area": area, "supportTopMeters": 5, "girders": {"at": [0, 12]}},
                     revision="r1", author=fake_author, obstacles=obstacles)
+
+
+def test_a_floor_item_stands_on_a_raised_floor_or_level_ground_at_its_height():
+    """Codex review 4: with the shell's floor at 1 m and a raised floor surface at 5 m, items given elevationMeters 5
+    stand on the raised floor (not overhead: that counts from the shell's floor, so 5.5 m). Points and pieces that
+    nothing holds at that height are left out with the reason; a height nothing holds anywhere is refused."""
+    layout = {"placements": [], "zones": []}
+    shell = {"coordinateFrame": {"floorElevation": 1.0},
+             "features": [floor_surface("floor-main", 0, 20, 1.0), floor_surface("mezzanine", 20, 40, 5.0)]}
+    obstacles = ObstacleMap(layout, shell=shell)
+    grid = shapes.plan(shapes.GRID_TOOL, layout, {"elevationMeters": 5, "x": {"at": [10, 30]}, "z": {"at": [5]}},
+                       revision="r1", author=fake_author, obstacles=obstacles)
+    assert [item["name"] for item in grid["items"]] == ["A-2"] and heights(grid) == ([5.0], [])
+    assert grid["dropped"] == [{"point": "A-1", "x": 10.0, "z": 5.0, "reasons": ["the floor here is at 1 m, not 5 m"]}]
+    rail = shapes.plan(shapes.LINE_TOOL, layout, {"family": "pedestrian_barrier", "elevationMeters": 5, "lines": [
+        {"from": {"x": 22, "z": 5}, "to": {"x": 30, "z": 5}, "label": "Edge"},
+        {"from": {"x": 12, "z": 10}, "to": {"x": 18, "z": 10}, "label": "Below"},
+        {"from": {"x": 16, "z": 15}, "to": {"x": 24, "z": 15}, "label": "Across"}]},
+        revision="r1", author=fake_author, obstacles=obstacles)
+    assert [piece["label"] for piece in rail["pieces"]] == ["Edge"] and heights(rail) == ([5.0], [])
+    assert rail["dropped"] == [{"line": "Below", "meters": 6.0, "reason": "the floor here is at 1 m, not 5 m"},
+                               {"line": "Across", "meters": 8.0, "reason": "off the floor"}]
+    with pytest.raises(shapes.ShapeError, match=re.escape(
+            "A-1 the floor here is at 1 m, not 3 m (elevationMeters 3: an item below 5.5 m would need something")):
+        shapes.plan(shapes.GRID_TOOL, layout, {"elevationMeters": 3, "x": {"at": [10]}, "z": {"at": [5]}},
+                    revision="r1", author=fake_author, obstacles=obstacles)
+    deck = {"surfaceId": "deck", "minX": 0, "maxX": 40, "minZ": 0, "maxZ": 30, "startElevation": 5,
+            "endElevation": 5, "slopeAxis": "x", "color": "#888888"}
+    ground = ObstacleMap(layout, shell={"coordinateFrame": {"floorElevation": 1.0}, "features": [],
+                                        "extensions": {"facilityGround": {"schemaVersion": 1, "surfaces": [deck]}}})
+    on_ground = shapes.plan(shapes.GRID_TOOL, layout, {"elevationMeters": 5, "x": {"at": [10]}, "z": {"at": [5]}},
+                            revision="r1", author=fake_author, obstacles=ground)
+    assert heights(on_ground) == ([5.0], [])
+    bare = ObstacleMap(layout)              # no floor surfaces: the shell's floor (0 m) holds, and nothing else
+    assert bare.reasons(column(5, 5), 0.0, 3.0) == []
+    assert bare.reasons(column(5, 5), 2.0, 5.0) == ["the floor here is at 0 m, not 2 m"]
 
 
 def test_a_floor_item_keeps_the_floor_s_elevation_to_the_layout_s_6_decimals():

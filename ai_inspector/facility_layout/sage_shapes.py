@@ -25,8 +25,9 @@ The plan's rules from the hand-built runs, as these tools keep them:
   that take no placements and the aisles and walkways that cross it, goes on after them and lists its gaps with what
   is in the way.
 - Heights are absolute, as items' y; left out, an item stands on the floor. Overhead items (lowest point 4.5 m or
-  more above the shell's floor, as the checks count) skip the floor checks and need no strip (rule 2). Nothing is put
-  between the floor and 4.5 m above it, where it would need something to stand on.
+  more above the shell's floor, as the checks count) skip the floor checks and need no strip (rule 2). Below that, an
+  item stands on a floor surface (or level ground) that holds it at its own height, a raised floor too; a point or
+  piece that nothing holds there is left out, with the reason.
 - Yaw-only, unit, unrounded quaternions (rule 6); building structure is placed locked, as Factory 02's was.
 """
 from __future__ import annotations
@@ -153,8 +154,9 @@ def tool_specs() -> list[dict]:
             "the item stands, seen walking from 'from' to 'to': center (on the line, the default), left or right "
             "(the line is an edge, a walkway's say, and the item stands just beside it, 5 cm clear). Barriers along "
             "a walkway: give each edge of the walkway zone as a line, side away from the walkway. elevationMeters "
-            "(absolute, as items' y): left out, the item stands on the floor; overhead items go 4.5 m or more "
-            "above the floor, 0.002 above whatever they rest on (touching items collide). A run stops 5 cm short "
+            "(absolute, as items' y): left out, the item stands on the floor; give a raised floor's height for "
+            "items on it; overhead items go 4.5 m or more above the floor, 0.002 above whatever they rest on "
+            "(touching items collide). A run stops 5 cm short "
             "of items, walls and clearance envelopes its "
             "height meets and, on the floor, of crosswalk, keep-clear and parking markings and zones that take no "
             "placements; it goes on after them and its gaps are listed with what is in the way. It may run beside "
@@ -177,8 +179,8 @@ def tool_specs() -> list[dict]:
             "running east-west, by their z (named A, B, ... from south to north). Give each as at (the positions) "
             "or as from, to and every; names replaces the default names. Points are named like A-1; skip leaves "
             "points out by name. The model is made and added to the library here. elevationMeters (absolute, as "
-            "items' y): left out, the item stands on the floor; overhead items go 4.5 m or more above the floor. "
-            "Points where the item would be in the "
+            "items' y): left out, the item stands on the floor; give a raised floor's height for items on it; "
+            "overhead items go 4.5 m or more above the floor. Points where the item would be in the "
             "way are left out and listed with the reason: each item " + GRID_KEEPS + " (overhead items: the items "
             "and walls their height meets). Floor items on unzoned floor get thin floor-coloured workcell strips, and a "
             "point in a zone whose rules it breaks is refused. planImage: true attaches a plan picture of the grid, the items placed, the points left out and "
@@ -361,20 +363,22 @@ def _parameters(arguments: Mapping, key: str = "parameters", *, without: str | N
 
 
 def _elevation(arguments: Mapping, floor: float) -> float:
-    """elevationMeters: an absolute height, as items' y (left out: the floor's elevation). An item stands on the
-    floor or hangs 4.5 m or more above it, as the checks count overhead (from the shell's floor elevation)."""
+    """elevationMeters: an absolute height, as items' y (left out: the shell's floor elevation). Whether something
+    holds an item there is checked where it stands (ObstacleMap.unsupported), as the mounting check does: a raised
+    floor surface or level ground at that height holds it. Overhead counts from the shell's floor."""
     given = arguments.get("elevationMeters")
     value = floor if given is None else float(given)
-    if abs(value - floor) <= 1e-6:
-        return floor
-    if value < floor:
-        raise ShapeError(f"elevationMeters {value:g} is below the floor, which is at {floor:g} m here: give "
-                         f"{floor:g} (or leave it out) for items on the floor")
-    if value < floor + OVERHEAD - 1e-9:
-        raise ShapeError(f"elevationMeters {value:g}: an item between the floor and {floor + OVERHEAD:g} m up would "
-                         f"need something to stand on. Give {floor:g} for the floor, or {floor + OVERHEAD:g} m or more "
-                         "for items hung from the roof (0.002 above whatever they rest on).")
-    return value
+    return floor if abs(value - floor) <= 1e-6 else value
+
+
+def _height_said(elevation: float, obstacles: ObstacleMap) -> str:
+    """Added when nothing could be placed: what a height means, unless it is the shell's floor or overhead."""
+    floor = obstacles.floor_elevation
+    if obstacles.overhead(elevation) or abs(elevation - floor) <= 1e-6:
+        return ""
+    return (f" (elevationMeters {elevation:g}: an item below {floor + OVERHEAD:g} m would need something to stand on "
+            f"at that height, a floor surface or level ground; leave it out for the floor at {floor:g} m, or give "
+            f"{floor + OVERHEAD:g} m or more for items hung from the roof)")
 
 
 def _validated(family: str, parameters: Mapping) -> dict:
@@ -499,6 +503,18 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
             if round(end - start, 3) < shortest:
                 dropped.append({"line": label, "meters": _round(end - start, 3),
                                 "reason": f"shorter than the shortest {record.label.lower()} ({shortest:g} m)"})
+        if floor:                       # a floor piece needs something that holds it at its height, as a point does
+            held = []
+            for start, end in kept:
+                middle = (start + end) / 2
+                center = (origin[0] + along[0] * middle, origin[1] + along[1] * middle)
+                reason = obstacles.unsupported(Polygon(_rectangle(center, along, (end - start) / 2, depth / 2)),
+                                               elevation)
+                if reason:
+                    dropped.append({"line": label, "meters": _round(end - start, 3), "reason": reason})
+                else:
+                    held.append((start, end))
+            kept = held
         if not kept and not any(d["line"] == label for d in dropped):
             dropped.append({"line": label, "meters": _round(length, 3), "reason": "blocked all along by "
                             + ", ".join(sorted({name for gap in line_gaps for name in gap[2]}))})
@@ -508,7 +524,8 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
             pieces.append({"label": piece_label, "length": round(end - start, 3), "along": along,
                            "center": (origin[0] + along[0] * middle, origin[1] + along[1] * middle)})
     if not pieces:
-        raise ShapeError("Nothing to place: " + "; ".join(f"{d['line']}: {d['reason']}" for d in dropped))
+        raise ShapeError("Nothing to place: " + "; ".join(f"{d['line']}: {d['reason']}" for d in dropped)
+                         + _height_said(elevation, obstacles))
     assets = {}
     for piece in pieces:
         if piece["length"] not in assets:
@@ -717,7 +734,7 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
         raise ShapeError("Something is in the way at every grid point: "
                          + "; ".join(f"{item['point']} {item['reasons'][0]}" for item in dropped[:6])
                          + (f"; and {len(dropped) - 6} more points" if len(dropped) > 6 else "")
-                         + ". Move the lines, or plan a smaller area.")
+                         + _height_said(elevation, obstacles) + ". Move the lines, or plan a smaller area.")
     placements, held = [], {}
     for name, x, z in standing:
         placements.append(_place(f"pl-grid-{namespace}-{name.lower()}", asset, {"x": x, "y": elevation, "z": z},

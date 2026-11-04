@@ -150,9 +150,21 @@ class FacilityEditGateway(FacilityReadGateway):
                 "review": "The app opens a review of the drawing's new placement or layer roles; nothing is saved "
                           "until the user approves it."}
 
+    def _obstacles(self, layout):
+        """The layout's obstacle map (BS4) from the spatial checks' own inputs: the items' asset definitions, the
+        effective shell with its walls and the evidence authority for clearance envelopes."""
+        from ai_inspector.facility_layout.errors import FacilityLayoutError
+        from ai_inspector.facility_layout.obstacle_map import ObstacleMap
+        try:
+            context = self.runtime.service._spatial_context(self.principal, self.reference["siteId"], layout)
+        except FacilityLayoutError as error:
+            raise PilotError(error.code, error.message, 409) from None
+        return ObstacleMap(layout, shell=context.shell, asset_definitions=context.asset_definitions,
+                           evidence_authority=context.evidence_authority)
+
     def _shapes(self, name, arguments):
-        """Basic shapes (docs/sage-basic-shapes-plan.md, BS3): one model into the shared library with its picture,
-        or a planned package of them for preview_planned_design."""
+        """Basic shapes (docs/sage-basic-shapes-plan.md, BS3-BS4): one model into the shared library with its
+        picture, or a planned package of them for preview_planned_design that keeps clear of what is in the way."""
         from copy import deepcopy
         from ai_inspector.facility_layout import sage_shapes
         from ai_inspector.facility_layout.errors import FacilityLayoutError
@@ -174,10 +186,14 @@ class FacilityEditGateway(FacilityReadGateway):
                 self.last_image = result.pop("_image")
                 return dict(result, identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=False)
             saved = read_bound_layout(self.runtime, self.principal, self.reference)
+            obstacles = self._obstacles(saved["layout"]) if name != sage_shapes.ROOF_TOOL else None
             result = sage_shapes.plan(name, saved["layout"], arguments, revision=self.reference["revision"],
-                                      author=make)
+                                      author=make, obstacles=obstacles)
         except ValueError as exc:
             raise PilotError("shape_plan_refused", str(exc), 422) from exc
+        image = result.pop("_image", None)
+        if image is not None:
+            self.last_image = image
         package = result.pop("operations")
         package_id = f"{sage_shapes.PREFIXES[name]}-{len(self.packages) + 1}"
         self.packages[package_id] = package

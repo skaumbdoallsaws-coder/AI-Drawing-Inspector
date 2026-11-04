@@ -1,6 +1,7 @@
-"""Basic shapes BS3 (docs/sage-basic-shapes-plan.md): Sage's tools. author_shape_asset adds one model to the shared
-library and returns its picture; place_along_line, place_grid and roof_frame plan packages that
-preview_planned_design stages, which the engine accepts and applies."""
+"""Basic shapes BS3 and BS4 (docs/sage-basic-shapes-plan.md): Sage's tools. author_shape_asset adds one model to the
+shared library and returns its picture; place_along_line, place_grid and roof_frame plan packages that
+preview_planned_design stages, which the engine accepts and applies. The grid leaves out points where its item would be
+in the way and says why, and runs stop short of what is in their way (obstacle_map.py)."""
 from __future__ import annotations
 
 import asyncio
@@ -12,12 +13,14 @@ import re
 
 import pytest
 from PIL import Image
+from shapely.geometry import Polygon, box
 
 from ai_inspector.codex_runtime.assisted_tools import FacilityEditGateway
 from ai_inspector.codex_runtime.facility_tools import FacilityReadGateway
 from ai_inspector.codex_runtime.progress import describe
 from ai_inspector.facility_layout import sage_shapes as shapes
 from ai_inspector.facility_layout.host import LOCAL_LAYOUT_ID, LOCAL_SITE_ID, LocalFacilityLayoutHost
+from ai_inspector.facility_layout.obstacle_map import GRID_CLEARANCES, ObstacleMap
 from ai_inspector.facility_layout.spatial import _rotate_vector
 from ai_inspector.industrial_assets import shape_families as families
 from ai_inspector.industrial_assets.primitives import size_of
@@ -166,7 +169,7 @@ def test_barriers_along_a_walkway_stop_at_the_aisle_and_get_strips(host):
         "barriers")
     assert data["placed"] == 4 and len(data["models"]) == 1          # one model for the four 16.95 m pieces
     assert data["models"][0]["dimensions"]["width"] == 16.95
-    assert [gap["zones"] for gap in data["gaps"]] == [["Cross aisle"], ["Cross aisle"]]
+    assert [gap["inTheWay"] for gap in data["gaps"]] == [["aisle zone 'Cross aisle'"]] * 2
     assert data["gaps"][0]["from"] == {"x": 17.95, "z": 16.17} and data["gaps"][0]["to"] == {"x": 22.05, "z": 16.17}
     assert data["pieces"][0]["label"] == "Walkway north edge (part 1 of 2)"
     assert data["zones"].startswith("4 thin floor-coloured workcell strips added (#a9adab)")
@@ -237,12 +240,12 @@ def test_the_summary_names_at_most_eight_zones_that_hold_items():
 
 
 def test_a_run_inside_a_walkway_and_a_grid_point_in_an_aisle_are_named():
-    with pytest.raises(shapes.ShapeError, match="Walkway: it runs inside Walkway all along"):
+    with pytest.raises(shapes.ShapeError, match="Walkway: blocked all along by aisle zone 'Walkway'"):
         plan(shapes.LINE_TOOL, {"family": "guard_rail", "lines": [
             {"from": {"x": 1, "z": 15}, "to": {"x": 15, "z": 15}, "label": "Walkway"}]})
     result = plan(shapes.GRID_TOOL, {"family": "bollard", "x": {"at": [10, 20]}, "z": {"at": [25]}})
-    assert result["standInNoPlacementZones"] == [{"point": "A-2", "zone": "Cross aisle"}]
-    assert "skip" in result["note"]
+    assert result["dropped"] == [{"point": "A-2", "x": 20.0, "z": 25.0, "reasons": ["in aisle zone 'Cross aisle'"]}]
+    assert result["placed"] == 1 and result["leftOut"] == 1
 
 
 def test_what_the_tools_refuse():
@@ -287,7 +290,6 @@ def test_the_chat_names_each_step():
         "Planned pedestrian barriers along 2 lines")
     assert describe(shapes.GRID_TOOL, {})["running"] == "Planning a grid of steel columns"
     assert describe(shapes.ROOF_TOOL, {})["running"] == "Planning the roof frame"
-
 
 
 def test_items_in_zones_whose_rules_they_break_are_refused_not_given_strips():
@@ -338,3 +340,166 @@ def test_a_summary_over_its_budget_is_shortened_longest_list_first(monkeypatch):
     assert len(result["pieces"]) + result.get("morePieces", 0) == 60
     assert len(result["models"]) + result.get("moreModels", 0) == 60
     assert len(json.dumps({key: value for key, value in result.items() if key != "operations"})) <= 4000
+
+
+# --- BS4: clearance-aware placement ---
+
+LATHE = {"assetId": "asset-test-lathe", "assetDefinitionRevision": "r1", "displayName": "Test lathe",
+         "geometry": {"obb": {"center": {"x": 0, "y": 1, "z": 0}, "size": {"x": 3, "y": 2, "z": 2}}},
+         "clearances": [{"clearanceId": "svc", "clearanceKind": "service",
+                         "geometry": {"minimum": {"x": -1.5, "z": 1.0}, "maximum": {"x": 1.5, "z": 2.5}}}]}
+LIGHT_ROW = {"assetId": "asset-test-light-row", "assetDefinitionRevision": "r1", "displayName": "Light row",
+             "geometry": {"obb": {"center": {"x": 0, "y": 0, "z": 0}, "size": {"x": 30, "y": 0.4, "z": 0.3}}}}
+
+
+def placed(placement_id, asset, x, y, z, label):
+    return {"placementId": placement_id, "assetId": asset["assetId"], "assetDefinitionRevision": "r1",
+            "transform": {"position": {"x": x, "y": y, "z": z}, "quaternion": {"x": 0, "y": 0, "z": 0, "w": 1},
+                          "scale": 1}, "metadata": {"instanceLabel": label}}
+
+
+def aisle(label, kind, points, width):
+    return {"routeId": "rt-" + label.lower(), "label": label, "corridorWidth": width,
+            "centerline": [{"x": x, "y": 0.0, "z": z} for x, z in points],
+            "extensions": {"facilityAisle": {"aisleKind": kind}}}
+
+
+def scene():
+    """On the 40 x 30 m floor: a lathe with a service envelope in the bay, a light row hanging at 8 m, a forklift
+    aisle along z 20, two walkways, the cross aisle zone, a keep-clear box and a 3 m interior wall."""
+    layout = {
+        "placements": [placed("pl-lathe", LATHE, 10, 0, 5, "Lathe 1"), placed("pl-lights", LIGHT_ROW, 20, 8, 25,
+                                                                               "Light row 1")],
+        "routes": [aisle("Boulevard", "forklift", [(0, 20), (40, 20)], 3.0),
+                   aisle("Footpath", "pedestrian", [(30, 0), (30, 12)], 1.2),
+                   aisle("Crossing", "pedestrian", [(28, 24), (28, 30)], 1.2)],
+        "zones": [zone_op(*ZONES[0])["zone"], zone_op(*ZONES[1])["zone"]],
+        "floorMarkings": [{"markingId": "fm-panel", "markingType": "keep_clear", "label": "Panel", "width": 2,
+                           "depth": 1, "transform": {"position": {"x": 2.5, "y": 0, "z": 25}, "rotationDegrees": 0}}],
+    }
+    floor = [{"x": 0, "z": 0}, {"x": 40, "z": 0}, {"x": 40, "z": 30}, {"x": 0, "z": 30}]
+    wall = [{"x": 35, "z": 0}, {"x": 35.2, "z": 0}, {"x": 35.2, "z": 8}, {"x": 35, "z": 8}]
+    shell = {"features": [
+        {"featureId": "floor-main", "featureKind": "floor_surface", "geometry": {"boundary": floor, "elevation": 0}},
+        {"featureId": "layout-interior-wall-iw-office-0", "featureKind": "wall",
+         "geometry": {"boundary": wall, "elevation": 0.0, "height": 3.0}}]}
+    definitions = {("asset-test-lathe", "r1"): LATHE, ("asset-test-light-row", "r1"): LIGHT_ROW}
+    return layout, ObstacleMap(layout, shell=shell, asset_definitions=definitions)
+
+
+def column(x, z, half=0.25):
+    return box(x - half, z - half, x + half, z + half)
+
+
+def test_the_obstacle_map_says_why_a_column_cannot_stand_somewhere():
+    _, obstacles = scene()
+    expected = {
+        (10, 5): ["on Lathe 1"],
+        (11.85, 5): ["0.10 m from Lathe 1 (keeps 0.25 m)"],
+        (12.1, 5): [],
+        (10, 6.8): ["in the service clearance of Lathe 1"],
+        (11.6, 6.1): ["on Lathe 1", "in the service clearance of Lathe 1"],
+        (5, 20): ["in forklift aisle 'Boulevard'"],
+        (5, 17.95): ["0.30 m from forklift aisle 'Boulevard' (keeps 0.5 m)"],
+        (5, 17.6): [],
+        (30, 6): ["in walkway 'Footpath'"],
+        (28.9, 6): [],                                  # walkways: out of them is enough
+        (20, 5): ["in aisle zone 'Cross aisle'"],
+        (2.5, 25): ["on keep clear marking 'Panel'"],
+        (35.1, 4): ["on interior wall iw-office"],
+        (34.65, 4): ["0.10 m from interior wall iw-office (keeps 0.25 m)"],
+        (39.9, 12): ["off the floor"],
+        (25, 25): ["on Light row 1"],                    # a 10 m column meets the light row at 8 m
+    }
+    for (x, z), reasons in expected.items():
+        assert obstacles.reasons(column(x, z), 0.0, 10.0, GRID_CLEARANCES) == reasons, (x, z)
+    assert obstacles.reasons(column(25, 25), 0.0, 1.2) == []                # a bollard passes under it
+    assert obstacles.reasons(column(5, 20), 9.0, 9.5) == []                  # overhead: no aisles, zones or floor
+    assert obstacles.reasons(column(39.9, 12), 9.0, 9.5) == []
+    assert obstacles.reasons(column(25, 25), 7.9, 8.4) == ["on Light row 1"]
+    assert obstacles.reasons(column(35.1, 4), 7.9, 8.4) == []                # above the 3 m wall
+
+
+def test_a_grid_leaves_out_points_in_the_way_and_its_strips_stop_at_walkways():
+    layout, obstacles = scene()
+    result = shapes.plan(shapes.GRID_TOOL, layout, {"x": {"at": [5, 10, 25, 30]}, "z": {"at": [5, 20, 27]},
+                                                    "planImage": True},
+                         revision="r1", author=fake_author, obstacles=obstacles)
+    assert result["points"] == 12 and result["placed"] == 6 and result["leftOut"] == 6
+    assert {item["point"]: item["reasons"] for item in result["dropped"]} == {
+        "A-2": ["on Lathe 1"], "A-4": ["in walkway 'Footpath'"],
+        **{f"B-{n}": ["in forklift aisle 'Boulevard'"] for n in range(1, 5)}}
+    assert [item["name"] for item in result["items"]] == ["A-1", "A-3", "C-1", "C-2", "C-3", "C-4"]
+    assert "0.5 m from forklift and material aisles" in result["clearances"]
+    strips = [op["zone"] for op in result["operations"] if op["op"] == "add_zone"]
+    assert [zone["label"] for zone in strips] == ["Column strip C (1)", "Column strip C (2)", "Column strip C (3)"]
+    crossing = box(27.4, 24, 28.6, 30)
+    for zone in strips:                                  # never across the walkway or the cross aisle
+        shape = Polygon([(point["x"], point["z"]) for point in zone["boundary"]])
+        assert not shape.intersects(crossing) and not shape.intersects(box(18, 0, 22, 30))
+    assert result["zones"].startswith("3 thin floor-coloured workcell strips") and "Bay (2)" in result["zones"]
+    image = result["_image"]
+    picture = Image.open(io.BytesIO(base64.b64decode(image["data"]))).convert("RGB")
+    assert image["mimeType"] == "image/png" and picture.size == (1100, 760)
+    colours = set(picture.getdata())
+    assert (31, 41, 51) in colours and any(r > 200 and g < 70 and b < 70 for r, g, b in colours)   # placed, left out
+    with pytest.raises(shapes.ShapeError, match="Something is in the way at every grid point: A-1 in forklift"):
+        shapes.plan(shapes.GRID_TOOL, layout, {"x": {"at": [5, 10]}, "z": {"at": [20]}}, revision="r1",
+                    author=fake_author, obstacles=obstacles)
+
+
+def test_runs_stop_short_of_items_and_overhead_runs_of_what_their_height_meets():
+    layout, obstacles = scene()
+    floor = shapes.plan(shapes.LINE_TOOL, layout, {"family": "pedestrian_barrier", "lines": [
+        {"from": {"x": 1, "z": 5}, "to": {"x": 30, "z": 5}, "label": "Bay barrier"}]},
+        revision="r1", author=fake_author, obstacles=obstacles)
+    assert [(gap["from"]["x"], gap["to"]["x"], gap["inTheWay"]) for gap in floor["gaps"]] == [
+        (8.45, 11.55, ["Lathe 1"]), (17.95, 22.05, ["aisle zone 'Cross aisle'"]),
+        (29.35, 30.0, ["walkway 'Footpath'"])]              # the walkway route at x 30 crosses the run's end
+    assert floor["placed"] == 3 and floor["pieces"][-1]["lengthMeters"] == 7.3
+    across = shapes.plan(shapes.LINE_TOOL, layout, {"family": "pedestrian_barrier", "lines": [
+        {"from": {"x": 24, "z": 5}, "to": {"x": 34, "z": 5}, "label": "Across the footpath"}]},
+        revision="r1", author=fake_author, obstacles=obstacles)   # an opening where the walkway crosses it
+    assert [(gap["from"]["x"], gap["to"]["x"], gap["inTheWay"]) for gap in across["gaps"]] == [
+        (29.35, 30.65, ["walkway 'Footpath'"])]
+    assert [piece["lengthMeters"] for piece in across["pieces"]] == [5.35, 3.35]
+    overhead = shapes.plan(shapes.LINE_TOOL, layout, {"family": "cable_tray", "elevationMeters": 7.6, "lines": [
+        {"from": {"x": 0.5, "z": 25}, "to": {"x": 39.5, "z": 25}, "label": "Tray"}]},
+        revision="r1", author=fake_author, obstacles=obstacles)
+    assert [(gap["from"]["x"], gap["to"]["x"], gap["inTheWay"]) for gap in overhead["gaps"]] == [
+        (4.95, 35.05, ["Light row 1"])]                   # the keep-clear box below does not count up there
+    assert [piece["lengthMeters"] for piece in overhead["pieces"]] == [4.45, 4.45]
+
+
+def test_a_column_grid_keeps_clear_of_items_and_aisles_on_a_live_host(host):
+    principal = host.principal()
+    bench = host.register_authored_asset("workbench", {})
+    host.service.apply_operations(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, saved(host)["revision"], [
+        {"op": "place_asset", "placement": {
+            "placementId": "pl-bench", "assetId": bench["assetId"],
+            "assetDefinitionRevision": bench["assetDefinitionRevision"],
+            "transform": {"position": {"x": 10.0, "y": 0.0, "z": 5.0},
+                          "quaternion": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}, "scale": 1},
+            "positionMode": "manual", "snapRelationship": None, "metadata": {"instanceLabel": "Bench 1"}}},
+        {"op": "add_aisle", "aisle": {"label": "Test boulevard", "aisleKind": "forklift", "direction": "two_way",
+                                      "color": "#d9a514", "corridorWidth": 3.0, "clearanceEvidenceStatus": "unverified",
+                                      "centerline": [{"x": 0.0, "y": 0.0, "z": 22.0}, {"x": 40.0, "y": 0.0, "z": 22.0}]}},
+        {"op": "add_aisle", "aisle": {"label": "Test walkway", "aisleKind": "pedestrian", "direction": "two_way",
+                                      "color": "#2f80ed", "corridorWidth": 1.2, "clearanceEvidenceStatus": "unverified",
+                                      "centerline": [{"x": 30.0, "y": 0.0, "z": 17.0}, {"x": 30.0, "y": 0.0, "z": 30.0}]}}])
+    sage = gateway(host, "bs4")
+    planned = asyncio.run(sage.call(shapes.GRID_TOOL, {"x": {"at": [5, 10, 30, 35]}, "z": {"at": [5, 22, 26]},
+                                                       "planImage": True}))
+    assert planned["ok"], planned
+    data = planned["data"]
+    assert {item["point"]: item["reasons"][0] for item in data["dropped"]} == {
+        "A-2": "on Bench 1", "C-3": "in walkway 'Test walkway'",
+        **{f"B-{n}": "in forklift aisle 'Test boulevard'" for n in range(1, 5)}}
+    assert data["placed"] == 6 and data["picture"].startswith("attached")
+    picture = sage.take_image()
+    assert picture["mimeType"] == "image/png" and sage.take_image() is None
+    staged = asyncio.run(sage.call("preview_planned_design", {"packageId": data["package"]["packageId"]}))
+    assert staged["ok"], staged
+    introduced = staged["data"]["validation"]["introduced"]["spatial"]
+    assert introduced["errorCount"] == 0 and introduced["obstructedAisleCount"] == 0, introduced
+    assert introduced["clearanceConflicts"] == 0 and introduced["placementCollisions"] == 0

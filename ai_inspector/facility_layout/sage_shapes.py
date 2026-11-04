@@ -19,9 +19,11 @@ The plan's rules from the hand-built runs, as these tools keep them:
   a strip of its own would get it past them.
 - A package is one apply (operations.MAX_OPERATION_BATCH, 500 operations); a bigger plan is refused, to be split. The
   summary stays well inside what one tool result may hold; the package keeps every operation.
-- A floor run stops 5 cm short of a zone that takes no placements (aisle, walkway, exclusion, safety, ...) and goes
-  on after it; the summary lists the gaps. A grid places every point it is given; one standing in such a zone is
-  named in the summary (BS4 adds the obstacle map that leaves such points out).
+- Clearance-aware placement (BS4, obstacle_map.py): a grid leaves out each point where its item would stand too
+  close to an item, a wall, an aisle or a keep-clear marking, or in a walkway, a zone that takes no placements or an
+  item's clearance envelope, and says why; a run stops 5 cm short of items, walls, envelopes, those markings, zones
+  that take no placements and the aisles and walkways that cross it, goes on after them and lists its gaps with what
+  is in the way.
 - Overhead items (lowest point 4.5 m up or more) skip the floor checks and need no strip (rule 2). Nothing is put
   between the floor and 4.5 m, where it would need something to stand on.
 - Yaw-only, unit, unrounded quaternions (rule 6); building structure is placed locked, as Factory 02's was.
@@ -43,6 +45,7 @@ from ai_inspector.industrial_assets.primitives import size_of
 
 from .asset_orientation import yaw_quaternion
 from .operations import MAX_OPERATION_BATCH
+from .obstacle_map import GRID_CLEARANCES, GRID_KEEPS, VEHICLE_AISLE, WALKWAY, ObstacleMap
 from .spatial import (_NON_PLACEMENT_ZONE_TYPES, OVERHEAD_MINIMUM_CLEARANCE, polygon_boundary_distance,
                       polygon_contains_polygon, polygons_intersect)
 
@@ -56,7 +59,7 @@ POINT_FAMILIES = ("steel_column", "bollard", "tank", "bin", "pallet_stack", "wor
 OVERHEAD = OVERHEAD_MINIMUM_CLEARANCE
 STRIP_COLOR = "#a9adab"
 STRIP_MARGIN = 0.03   # a strip reaches 3 cm past its item on every side
-CLEARANCE = 0.05      # a floor run stops 5 cm short of a zone that takes no placements
+CLEARANCE = 0.05      # an item beside a line stands 5 cm clear of it
 LAYER_GAP = 0.002     # touching volumes collide: each layer 2 mm above the one below (rule 1)
 MAX_OPERATIONS = MAX_OPERATION_BATCH   # what one apply takes (500): a bigger package could be staged but not applied
 MAX_LINES = 200
@@ -148,10 +151,11 @@ def tool_specs() -> list[dict]:
             "(the line is an edge, a walkway's say, and the item stands just beside it, 5 cm clear). Barriers along "
             "a walkway: give each edge of the walkway zone as a line, side away from the walkway. elevationMeters: "
             "0 (the default) stands on the floor; overhead items go 4.5 m up or more, 0.002 above whatever they "
-            "rest on (touching items collide). On the floor, a run stops short of aisles, walkways and other zones "
-            "that take no placements and goes on after them (its gaps are listed), and items on unzoned floor get thin "
-            "floor-coloured workcell strips; a plan that puts an item in a zone whose rules it breaks is refused. "
-            "Read-only: stage the returned packageId with "
+            "rest on (touching items collide). A run stops 5 cm short of items, walls and clearance envelopes its "
+            "height meets and, on the floor, of crosswalk, keep-clear and parking markings and zones that take no "
+            "placements; it goes on after them and its gaps are listed with what is in the way. It may run beside "
+            "an aisle or walkway, and leaves an opening where one crosses it. Items on unzoned floor get thin floor-coloured workcell strips; a plan that puts an item in a "
+            "zone whose rules it breaks is refused. Read-only: stage the returned packageId with "
             "preview_planned_design. Families, with their defaults (lengthMeters comes from each line): "
             + lines + "."),
          "input_schema": {"type": "object", "additionalProperties": False, "required": ["family", "lines"],
@@ -169,11 +173,12 @@ def tool_specs() -> list[dict]:
             "running east-west, by their z (named A, B, ... from south to north). Give each as at (the positions) "
             "or as from, to and every; names replaces the default names. Points are named like A-1; skip leaves "
             "points out by name. The model is made and added to the library here. elevationMeters: 0 (the default) "
-            "stands on the floor, or 4.5 m up or more for overhead items. Floor items on unzoned floor get thin "
-            "floor-coloured workcell strips, and a point in a zone whose rules it breaks is refused; points that "
-            "stand in an aisle, walkway or other zone that "
-            "takes no placements are named in the summary (skip them). Read-only: stage the returned packageId "
-            "with preview_planned_design. Families: " + points + "; their parameters are author_shape_asset's."),
+            "stands on the floor, or 4.5 m up or more for overhead items. Points where the item would be in the "
+            "way are left out and listed with the reason: each item " + GRID_KEEPS + " (overhead items: the items "
+            "and walls their height meets). Floor items on unzoned floor get thin floor-coloured workcell strips, and a "
+            "point in a zone whose rules it breaks is refused. planImage: true attaches a plan picture of the grid, the items placed, the points left out and "
+            "what is in the way. Read-only: stage the returned packageId with preview_planned_design. Families: "
+            + points + "; their parameters are author_shape_asset's."),
          "input_schema": {"type": "object", "additionalProperties": False, "required": ["x", "z"], "properties": {
              "family": {"enum": list(POINT_FAMILIES)}, "parameters": {"type": "object"},
              "x": {"type": "object", "additionalProperties": False, "properties": AXIS_PROPERTIES},
@@ -181,7 +186,7 @@ def tool_specs() -> list[dict]:
              "skip": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 20},
                       "maxItems": 2000},
              "yawDegrees": {"type": "number", "minimum": -360, "maximum": 360},
-             "elevationMeters": ELEVATION, "labelPrefix": LABEL}}},
+             "elevationMeters": ELEVATION, "labelPrefix": LABEL, "planImage": {"type": "boolean"}}}},
         {"name": ROOF_TOOL, "description": (
             "Plan a roof frame over an area: steel girders (I-beams) on lines and open-web joists across them at a "
             "spacing, centred in the area. area: its west, east, south and north edges in plan metres. "
@@ -232,18 +237,10 @@ class _Zones:
     def name(zone: Mapping) -> str:
         return str(zone.get("label") or zone.get("zoneId") or "a zone")
 
-    def closed(self):
-        return [(zone, polygon, box) for zone, polygon, box, closed in self.items if closed]
-
     def touching(self, polygon) -> list[Mapping]:
         box = _box(polygon)
         return [zone for zone, boundary, bounds, _ in self.items
                 if _boxes_meet(box, bounds) and polygons_intersect(boundary, polygon)]
-
-    def closed_touching(self, polygon) -> list[Mapping]:
-        box = _box(polygon)
-        return [zone for zone, boundary, bounds, closed in self.items
-                if closed and _boxes_meet(box, bounds) and polygons_intersect(boundary, polygon)]
 
     def holding(self, polygon, category: str, top: float) -> Mapping | None:
         """An operational zone that holds this footprint as the engine checks it: inside, past its edge setback,
@@ -307,21 +304,6 @@ def _rectangle(center, along, half_length: float, half_depth: float) -> tuple:
     return tuple((cx + dx * a + lx * b, cz + dz * a + lz * b) for a, b in
                  ((-half_length, -half_depth), (half_length, -half_depth), (half_length, half_depth),
                   (-half_length, half_depth)))
-
-
-def _clip(points, value):
-    """The part of a polygon where value(point) <= 0 (one Sutherland-Hodgman pass)."""
-    kept = []
-    for index, current in enumerate(points):
-        previous = points[index - 1]
-        a, b = value(previous), value(current)
-        if (a <= 0) != (b <= 0):
-            share = a / (a - b)
-            kept.append((previous[0] + (current[0] - previous[0]) * share,
-                         previous[1] + (current[1] - previous[1]) * share))
-        if b <= 0:
-            kept.append(current)
-    return kept
 
 
 def _strip(zone_id: str, label: str, corners) -> dict:
@@ -419,31 +401,8 @@ def author(make: Callable[[str, dict], Mapping], arguments: Mapping) -> dict:
 
 # --- place_along_line ---
 
-def _blocked(zones: _Zones, origin, along, length: float, half_width: float) -> list[tuple[float, float, str]]:
-    """Where along a run (0 to length) its band of half_width meets a zone that takes no placements, widened by
-    CLEARANCE at both ends: (start, end, zone name)."""
-    left = (-along[1], along[0])
-    band = _rectangle((origin[0] + along[0] * length / 2, origin[1] + along[1] * length / 2), along,
-                      length / 2 + CLEARANCE, half_width)
-    box = _box(band)
-    found = []
-    for zone, polygon, bounds in zones.closed():
-        if not _boxes_meet(box, bounds) or not polygons_intersect(polygon, band):
-            continue
-        local = [((x - origin[0]) * along[0] + (z - origin[1]) * along[1],
-                  (x - origin[0]) * left[0] + (z - origin[1]) * left[1]) for x, z in polygon]
-        local = _clip(local, lambda p: p[1] - half_width)
-        local = _clip(local, lambda p: -p[1] - half_width) if local else local
-        if not local:
-            continue
-        start, end = min(p[0] for p in local) - CLEARANCE, max(p[0] for p in local) + CLEARANCE
-        if end >= 0 and start <= length:
-            found.append((max(start, 0.0), min(end, length), _Zones.name(zone)))
-    return found
-
-
 def _free(length: float, blocked) -> tuple[list[tuple[float, float]], list[tuple[float, float, list[str]]]]:
-    """The stretches of 0..length left between the blocked ones, and the merged gaps with the zones in each."""
+    """The stretches of 0..length left between the blocked ones, and the merged gaps with what is in each."""
     gaps = []
     for start, end, name in sorted(blocked):
         if gaps and start <= gaps[-1][1]:
@@ -460,7 +419,8 @@ def _free(length: float, blocked) -> tuple[list[tuple[float, float]], list[tuple
     return free, gaps
 
 
-def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Callable) -> dict:
+def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Callable,
+              obstacles: ObstacleMap | None = None) -> dict:
     family = arguments["family"]
     if family not in LINE_FAMILIES:
         raise ShapeError(f"place_along_line takes {', '.join(LINE_FAMILIES)}; for {family} use place_grid or "
@@ -475,6 +435,7 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     depth, height = size["depth"], size["height"]
     zones = _Zones(layout)
     containment = _containment(zones, floor)
+    obstacles = obstacles or ObstacleMap(layout)
     runs, refused = [], []
     for number, line in enumerate(arguments["lines"], start=1):
         start = (float(line["from"]["x"]), float(line["from"]["z"]))
@@ -499,20 +460,20 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     namespace = _namespace(LINE_TOOL, arguments, revision)
     pieces, gaps, dropped = [], [], []
     for number, label, side, origin, along, length in runs:
-        stretches, line_gaps = ([(0.0, length)], []) if not floor else _free(
-            length, _blocked(zones, origin, along, length, depth / 2 + STRIP_MARGIN))
+        stretches, line_gaps = _free(length, obstacles.blocked_along(origin, along, length, depth / 2 + STRIP_MARGIN,
+                                                                     elevation, elevation + height))
         for start, end, names in line_gaps:
             gaps.append({"line": label, "from": _point(origin[0] + along[0] * start, origin[1] + along[1] * start),
                          "to": _point(origin[0] + along[0] * end, origin[1] + along[1] * end),
-                         "meters": _round(end - start, 2), "zones": names})
+                         "meters": _round(end - start, 2), "inTheWay": names})
         kept = [(start, end) for start, end in stretches if round(end - start, 3) >= shortest]
         for start, end in stretches:
             if round(end - start, 3) < shortest:
                 dropped.append({"line": label, "meters": _round(end - start, 3),
                                 "reason": f"shorter than the shortest {record.label.lower()} ({shortest:g} m)"})
         if not kept and not any(d["line"] == label for d in dropped):
-            dropped.append({"line": label, "meters": _round(length, 3), "reason": "it runs inside "
-                            + ", ".join(sorted({name for gap in line_gaps for name in gap[2]})) + " all along"})
+            dropped.append({"line": label, "meters": _round(length, 3), "reason": "blocked all along by "
+                            + ", ".join(sorted({name for gap in line_gaps for name in gap[2]}))})
         for part, (start, end) in enumerate(kept, start=1):
             piece_label = label if len(kept) == 1 else f"{label} (part {part} of {len(kept)})"
             middle = (start + end) / 2
@@ -684,7 +645,8 @@ def _skipped(points: Sequence[tuple[str, float, float]], skip: Sequence[str]) ->
     return chosen
 
 
-def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Callable) -> dict:
+def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Callable,
+              obstacles: ObstacleMap | None = None) -> dict:
     family = arguments.get("family", "steel_column")
     if family not in POINT_FAMILIES:
         raise ShapeError(f"place_grid takes {', '.join(POINT_FAMILIES)}; for {family} use place_along_line")
@@ -713,21 +675,32 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     reach_z = abs(along[1]) * width / 2 + abs(along[0]) * depth / 2
     namespace = _namespace(GRID_TOOL, arguments, revision)
     prefix = arguments.get("labelPrefix") or ("Column" if family == "steel_column" else record.label)
-    placements, inside, held = [], [], {}
+    obstacles = obstacles or ObstacleMap(layout)
+    standing, dropped = [], []
     for name, x, z in kept:
-        footprint = _rectangle((x, z), along, width / 2, depth / 2)
+        reasons = obstacles.reasons(Polygon(_rectangle((x, z), along, width / 2, depth / 2)), elevation,
+                                    elevation + height, GRID_CLEARANCES)
+        if not reasons:
+            standing.append((name, x, z))
+            continue
+        dropped.append({"point": name, **_point(x, z),
+                        "reasons": reasons[:3] + ([f"and {len(reasons) - 3} more"] if len(reasons) > 3 else [])})
+    if not standing:
+        raise ShapeError("Something is in the way at every grid point: "
+                         + "; ".join(f"{item['point']} {item['reasons'][0]}" for item in dropped[:6])
+                         + (f"; and {len(dropped) - 6} more points" if len(dropped) > 6 else "")
+                         + ". Move the lines, or plan a smaller area.")
+    placements, held = [], {}
+    for name, x, z in standing:
         placements.append(_place(f"pl-grid-{namespace}-{name.lower()}", asset, {"x": x, "y": elevation, "z": z},
                                  yaw, f"{prefix} {name}"))
-        if floor:
-            for zone in zones.closed_touching(footprint):
-                inside.append({"point": name, "zone": _Zones.name(zone)})
     strips, refused = [], []
     if containment == "strips":
         by_row = len(columns) >= len(rows)     # strips run along the lines with the most points
         lines = rows if by_row else columns
         for line_name, line_at in lines:
             run, count = [], 0
-            members = [p for p in kept if (p[2] == line_at if by_row else p[1] == line_at)]
+            members = [p for p in standing if (p[2] == line_at if by_row else p[1] == line_at)]
             members.sort(key=lambda p: p[1] if by_row else p[2])
             for point in members + [None]:
                 if point is not None:
@@ -741,8 +714,8 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
                         if broken:
                             refused.append(f"{prefix} {point[0]}: {broken[0]}")
                             point = "held"           # no strip; the plan is refused below
-                if point not in (None, "held") and (not run or not zones.touching(
-                        _box_corners(_grid_box(run[0], point, reach_x, reach_z)))):
+                if point not in (None, "held") and (not run or not _strip_meets(
+                        zones, obstacles, _box_corners(_grid_box(run[0], point, reach_x, reach_z)))):
                     run.append(point)
                     continue
                 if run:
@@ -752,28 +725,52 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
         named = {}
         for line_name, _, _ in strips:
             named[line_name] = named.get(line_name, 0) + 1
+        boxes = [box for _, _, box in strips]
         strips = [_strip(f"zn-grid-{namespace}-{index}",
                          f"{prefix} strip {line_name}" + (f" ({count})" if named[line_name] > 1 else ""),
                          _box_corners(box))
                   for index, (line_name, count, box) in enumerate(strips, start=1)]
+    else:
+        boxes = []
     _refuse_breaking(refused)
     operations = [*strips, *placements]
     _within_review(operations)
-    return _fit({
+    result = {
         "available": True, "family": family, "model": _asset_summary(asset),
         "elevationMeters": _round(elevation, 3), "yawDegrees": _round(yaw, 3),
         "lines": {"x": [{"name": name, "x": at} for name, at in columns],
                   "z": [{"name": name, "z": at} for name, at in rows]},
-        "points": len(points), "placed": len(placements), "skipped": sorted(skipped),
-        "items": [{"name": name, **_point(x, z)} for name, x, z in kept[:LISTED]],
-        **({"moreItems": len(kept) - LISTED} if len(kept) > LISTED else {}),
-        **({"standInNoPlacementZones": inside[:LISTED],
-            "note": "The preview refuses an item standing in an aisle, walkway or other zone that takes no "
-                    "placements: plan again with those points in skip."} if inside else {}),
+        "points": len(points), "placed": len(placements), "skipped": sorted(skipped), "leftOut": len(dropped),
+        "items": [{"name": name, **_point(x, z)} for name, x, z in standing[:LISTED]],
+        **({"moreItems": len(standing) - LISTED} if len(standing) > LISTED else {}),
+        "dropped": dropped[:LISTED], **({"moreDropped": len(dropped) - LISTED} if len(dropped) > LISTED else {}),
+        "clearances": "Each item " + GRID_KEEPS + ("." if floor else "; overhead, only the items and walls its "
+                                                   "height meets count."),
         "zones": _zones_said(containment, len(strips), held),
         "illustrative": record.disclaimer,
         "operations": operations,
-    })
+    }
+    if arguments.get("planImage"):
+        footprints = [Polygon(_rectangle((x, z), along, width / 2, depth / 2)) for _, x, z in standing]
+        xs = [at for _, at in columns]
+        zs = [at for _, at in rows]
+        margin = max(4.0, 0.08 * max(max(xs) - min(xs), max(zs) - min(zs)))
+        caption = (f"{prefix} grid: {len(placements)} placed (black), {len(dropped)} left out (red x)"
+                   + (f", {len(boxes)} new strip{'s' if len(boxes) != 1 else ''} (orange)" if boxes else "")
+                   + (f"; {len(skipped)} skipped by name, not drawn" if skipped else ""))
+        picture = obstacles.picture((min(xs) - margin, min(zs) - margin, max(xs) + margin, max(zs) + margin),
+                                    elevation, elevation + height, x_lines=columns, z_lines=rows, placed=footprints,
+                                    dropped=[(item["x"], item["z"]) for item in dropped],
+                                    strips=[Polygon(_box_corners(box)) for box in boxes], caption=caption)
+        result["picture"] = ("attached: a plan of the grid, north up, with what is in the way of the items "
+                             "(their height)")
+        result["_image"] = {"mimeType": "image/png", "data": base64.b64encode(picture).decode("ascii")}
+    return _fit(result)
+
+
+def _strip_meets(zones: _Zones, obstacles: ObstacleMap, corners) -> bool:
+    """A column strip stops at another zone, an aisle or a walkway (as Factory 02's did)."""
+    return bool(zones.touching(corners) or obstacles.touching(Polygon(corners), (VEHICLE_AISLE, WALKWAY)))
 
 
 def _grid_box(first, last, reach_x: float, reach_z: float) -> tuple[float, float, float, float]:
@@ -862,11 +859,14 @@ def plan_roof(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     }
 
 
-def plan(name: str, layout: Mapping, arguments: Mapping, *, revision: str, author: Callable) -> dict:
+def plan(name: str, layout: Mapping, arguments: Mapping, *, revision: str, author: Callable,
+         obstacles: ObstacleMap | None = None) -> dict:
+    """obstacles: the layout's obstacle map with its items and shell (the gateway builds it from the spatial checks'
+    inputs); without one, the planners see the layout's aisle routes, zones and markings only."""
     if name == LINE_TOOL:
-        return plan_line(layout, arguments, revision=revision, author=author)
+        return plan_line(layout, arguments, revision=revision, author=author, obstacles=obstacles)
     if name == GRID_TOOL:
-        return plan_grid(layout, arguments, revision=revision, author=author)
+        return plan_grid(layout, arguments, revision=revision, author=author, obstacles=obstacles)
     if name == ROOF_TOOL:
         return plan_roof(layout, arguments, revision=revision, author=author)
     raise ShapeError(f"unknown shape planner {name}")

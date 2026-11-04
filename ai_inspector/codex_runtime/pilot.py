@@ -133,8 +133,9 @@ For structure or simple equipment the library lacks (steel columns, beams, joist
 cable trays, pipes, sprinkler lines, high-bay lights, roof deck, fascia, tanks, bins, pallets, workbenches), build
 it from basic shapes: place_grid for a column grid, roof_frame for girders and joists, place_along_line for runs
 along lines, author_shape_asset for one model (it returns a picture). The planners make their own models; stage
-their packageId unchanged. Call the models illustrative, once. Say from the summary which floor strips were added
-and which gaps a run leaves.
+their packageId unchanged. Call the models illustrative, once. Say from the summary which floor strips were added,
+which gaps a run leaves and which grid points were left out and why (the grid keeps clear of items, walls and aisles
+by itself; never add them back).
 Before constructing unfamiliar operations, call inspect_facility_operation_contracts with the operation names.
 Follow the returned schema, including nested required fields and enums; do not discover it by trial and error.
 On schema rejection use the returned operationContract and findings to correct ALL fields together.

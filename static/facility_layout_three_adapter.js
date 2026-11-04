@@ -2494,6 +2494,9 @@
             needsRender: false,
             mountGeneration: 0,
             sceneGeneration: 0,
+            sceneRequest: 0,       // setScene calls so far (Sage's 3D shots, SV1 round 4: sceneState)
+            sceneInstalled: 0,     // the latest of them built into the scene
+            requestedInput: null,  // the latest setScene input: what a recovery replays (SV1 round 5)
             abortController: null,
             currentInput: null,
             ghostInput: null,
@@ -4239,7 +4242,10 @@
             return pathRoot;
         }
 
-        async function prepareNavigationPreviewVisual(validated) {
+        // ENSURE_CURRENT(group) throws once the view, the scene or the group the preview was asked for is gone: it
+        // runs before every load this starts and after it, so nothing is drawn into a view mounted since or a newer
+        // scene (final rounds 2 and 3).
+        async function prepareNavigationPreviewVisual(validated, ensureCurrent) {
             const placement = validated.placement;
             const key = placement.assetId + '|'
                 + placement.assetDefinitionRevision;
@@ -4252,6 +4258,7 @@
                 );
             }
             if (!group.resolved) {
+                ensureCurrent(group);
                 await resolveBaseGroup(
                     group,
                     state.sceneGeneration,
@@ -4259,11 +4266,13 @@
                 );
             }
             if (group.deferredVisual) {
+                ensureCurrent(group);
                 await loadDeferredGroup(
                     group,
                     'navigation_preview_exact_visual'
                 );
             }
+            ensureCurrent(group);
             const record = activityRenderRecord(placement.placementId);
             if (!usesOperatorAvatar(record)
                     && !['overview', 'detail'].includes(record.representation)) {
@@ -4276,21 +4285,45 @@
                     }
                 );
             }
+            ensureCurrent(null, record);
             return record;
         }
 
         async function loadNavigationPreview(payload, activeRevision) {
-            if (!state.mounted || state.disposed || !state.modelRoot) {
-                throw facilityMotionError(
+            const unavailable = function () {
+                return facilityMotionError(
                     'facility_navigation_preview_view_unavailable',
                     'Mount the Facility 3D view before previewing a path.'
                 );
-            }
+            };
+            if (!state.mounted || state.disposed || !state.modelRoot) throw unavailable();
+            const token = sceneToken();
+            // It remembers every group and prepared record it was given, so the last call, right before the records
+            // are used, checks them all: a finish-only regroup replaces groups and their records without a new scene,
+            // and a record may belong to a finished group the asset lookup does not name (final rounds 4 and 5).
+            const groupsUsed = [];
+            const recordsUsed = [];
+            const ensureCurrent = function (group, record) {
+                if (group && groupsUsed.indexOf(group) < 0) groupsUsed.push(group);
+                if (record && recordsUsed.indexOf(record) < 0) recordsUsed.push(record);
+                if (state.disposed || state.teardownCount !== token.teardowns || !state.modelRoot) {
+                    throw unavailable();
+                }
+                if (!tokenCurrent(token) || groupsUsed.some(function (used) { return !tokenCurrent(token, used); })
+                        || recordsUsed.some(function (used) { return !recordCurrent(used); })) {
+                    throw facilityMotionError(
+                        'facility_navigation_preview_scene_changed',
+                        'The layout changed while the path preview loaded; preview it again.'
+                    );
+                }
+            };
             let validated = validateNavigationPreviewPayload(
                 payload,
                 activeRevision
             );
-            const record = await prepareNavigationPreviewVisual(validated);
+            const record = await prepareNavigationPreviewVisual(validated, ensureCurrent);
+            // Only into the view, the scene and the actor group it was prepared for.
+            ensureCurrent();
             validated = validateNavigationPreviewPayload(
                 payload,
                 activeRevision
@@ -5668,7 +5701,10 @@
             };
         }
 
-        async function prepareActivityActorVisuals(validated) {
+        // ENSURE_CURRENT(group) throws once the view, the scene or a group the activity was asked for is gone: every
+        // worker runs it before each load it starts, so no actor model is drawn into a view mounted since or a newer
+        // scene (final rounds 2 and 3).
+        async function prepareActivityActorVisuals(validated, ensureCurrent) {
             const groups = new Map();
             validated.actors.forEach(function (value) {
                 const reference = value.actor.assetDefinitionRef;
@@ -5694,6 +5730,7 @@
                         const keyIndex = nextKeyIndex;
                         nextKeyIndex += 1;
                         const group = groups.get(keys[keyIndex]);
+                        ensureCurrent(group);
                         if (group.deferredVisual) {
                             await loadDeferredGroup(
                                 group,
@@ -5703,10 +5740,12 @@
                     }
                 }
             ));
+            groups.forEach(function (group) { ensureCurrent(group); });
             validated.actors.forEach(function (value) {
                 const record = activityRenderRecord(
                     value.actor.placementId
                 );
+                ensureCurrent(null, record);
                 if (!usesOperatorAvatar(record)
                         && !['overview', 'detail'].includes(record.representation)) {
                     throw facilityMotionError(
@@ -5723,17 +5762,40 @@
         }
 
         async function loadActivityScenario(payload, activeLayoutRevision) {
-            if (!state.mounted || state.disposed || !state.modelRoot) {
-                throw facilityMotionError(
+            const unavailable = function () {
+                return facilityMotionError(
                     'facility_activity_view_unavailable',
                     'Mount the Facility 3D view before loading activity.'
                 );
-            }
+            };
+            if (!state.mounted || state.disposed || !state.modelRoot) throw unavailable();
+            const token = sceneToken();
+            // It remembers every group and prepared record it was given, so the last call, right before the records
+            // are used, checks them all: a finish-only regroup replaces groups and their records without a new scene,
+            // and a record may belong to a finished group the asset lookup does not name (final rounds 4 and 5).
+            const groupsUsed = [];
+            const recordsUsed = [];
+            const ensureCurrent = function (group, record) {
+                if (group && groupsUsed.indexOf(group) < 0) groupsUsed.push(group);
+                if (record && recordsUsed.indexOf(record) < 0) recordsUsed.push(record);
+                if (state.disposed || state.teardownCount !== token.teardowns || !state.modelRoot) {
+                    throw unavailable();
+                }
+                if (!tokenCurrent(token) || groupsUsed.some(function (used) { return !tokenCurrent(token, used); })
+                        || recordsUsed.some(function (used) { return !recordCurrent(used); })) {
+                    throw facilityMotionError(
+                        'facility_activity_scene_changed',
+                        'The layout changed while the activity loaded; load it again.'
+                    );
+                }
+            };
             let validated = validateActivityPayload(
                 payload,
                 activeLayoutRevision
             );
-            await prepareActivityActorVisuals(validated);
+            await prepareActivityActorVisuals(validated, ensureCurrent);
+            // Only into the view, the scene and the actor groups it was prepared for.
+            ensureCurrent();
             validated = validateActivityPayload(
                 payload,
                 activeLayoutRevision
@@ -6816,10 +6878,13 @@
             state.contextRestoredHandler = function () {
                 state.contextLost = false;
                 state.degraded = false;
-                if (state.currentInput) {
-                    Promise.resolve(setScene(state.currentInput)).catch(
+                const latest = latestInput();
+                if (latest) {
+                    const restoring = Promise.resolve(setScene(latest));
+                    const token = sceneToken({ installs: true });
+                    restoring.catch(
                         function () {
-                            enterDegraded('webgl_restore_failed', false);
+                            if (tokenCurrent(token)) enterDegraded('webgl_restore_failed', false);
                         }
                     );
                     return;
@@ -12401,20 +12466,27 @@
             state.teardownCount += 1;
             state.disposed = Boolean(finalDispose);
             state.reloadOnResume = false;
-            if (finalDispose) {
-                state.parkedView = null;
-                state.currentInput = null;
-                state.ghostInput = null;
-                state.proposalInput = null;
-                state.placements = [];
-                state.baseGroups.clear();
-                state.selectedIds.clear();
-                state.loadTrace = [];
-                state.warnings = [];
-                state.lastFit = null;
-                state.worldBounds = null;
-            }
+            if (finalDispose) forgetScene();
             notifyStatus(finalDispose ? 'disposed' : 'unmounted', null);
+        }
+
+        // A final dispose forgets every scene input, the parked view with it, and drops every setScene still waiting
+        // (for the appearance library): it would otherwise install its layout into a disposed view, and a later mount
+        // would replay it. Whatever is mounted next starts empty until it is given a scene.
+        function forgetScene() {
+            state.sceneRequest += 1;
+            state.parkedView = null;
+            state.currentInput = null;
+            state.requestedInput = null;
+            state.ghostInput = null;
+            state.proposalInput = null;
+            state.placements = [];
+            state.baseGroups.clear();
+            state.selectedIds.clear();
+            state.loadTrace = [];
+            state.warnings = [];
+            state.lastFit = null;
+            state.worldBounds = null;
         }
 
         function mount(host) {
@@ -12425,9 +12497,10 @@
                 if (state.suspended) resume();
                 return api;
             }
-            const replayInput = state.currentInput ? {
-                layout: state.currentInput.layout,
-                assetCatalog: state.currentInput.assetCatalog,
+            const latest = latestInput();
+            const replayInput = latest ? {
+                layout: latest.layout,
+                assetCatalog: latest.assetCatalog,
             } : null;
             const replayGhost = state.ghostInput;
             if (state.mounted || state.renderer || state.canvas) teardownMount(false);
@@ -12509,10 +12582,12 @@
                 notifyStatus('ready', null);
                 resize();
                 if (replayInput) {
-                    setScene(replayInput).then(function () {
-                        if (replayGhost) setGhostPlacement(replayGhost);
+                    const replaying = setScene(replayInput);
+                    const token = sceneToken({ installs: true });
+                    replaying.then(function () {
+                        if (replayGhost && tokenCurrent(token)) setGhostPlacement(replayGhost);
                     }).catch(function (error) {
-                        reportError('scene_remount_failed', error);
+                        if (tokenCurrent(token)) reportError('scene_remount_failed', error);
                     });
                 } else {
                     renderProposalObjects();
@@ -12595,9 +12670,12 @@
             }
             notifyStatus('ready', null);
             resize();
-            if (state.reloadOnResume && state.currentInput) {
+            if (state.reloadOnResume && latestInput()) {
                 state.reloadOnResume = false;
-                Promise.resolve(setScene(state.currentInput)).catch(function (error) {
+                const reloading = Promise.resolve(setScene(latestInput()));
+                const token = sceneToken({ installs: true });
+                reloading.catch(function (error) {
+                    if (!tokenCurrent(token)) return;
                     reportError('scene_resume_failed', error);
                 });
             } else {
@@ -13358,9 +13436,12 @@
 
         function loadDeferredGroup(group, reason) {
             if (!group || !state.mounted) return Promise.resolve(false);
+            // A group the scene no longer has (its view was torn down, or a newer layout replaced it) is never
+            // drawn into the current scene (final rounds 2 and 3).
+            const token = sceneToken({ group: group });
+            if (!tokenCurrent(token)) return Promise.resolve(false);
             if (group.deferredPromise) return group.deferredPromise;
             if (!group.deferredVisual) return Promise.resolve(false);
-            const generation = state.sceneGeneration;
             const descriptor = group.deferredVisual;
             group.deferredLoading = true;
             state.pendingLoads += 1;
@@ -13372,12 +13453,13 @@
                         'overview',
                         group
                     );
-                    if (generation !== state.sceneGeneration || !state.mounted) {
+                    if (!tokenCurrent(token) || !state.mounted) {
                         disposeUnadoptedVisual(prototype);
                         return false;
                     }
                     if (!prototype) {
                         traceLoad(group, 'overview', 'skipped', reason);
+                        group.deferredFailed = true;
                         return false;
                     }
                     group.bounds = prototype.bounds || group.bounds;
@@ -13397,6 +13479,7 @@
                         'Deferred asset visual failed; its footprint remains available.',
                         group.assetId
                     );
+                    group.deferredFailed = true;
                     return false;
                 } finally {
                     group.deferredLoading = false;
@@ -13408,13 +13491,18 @@
             return promise;
         }
 
+        // One deferred load at a time. A load queued for one scene never starts in another, or for a group the scene no
+        // longer has: a stalled load and a layout change would otherwise draw the old models over the new ones. A
+        // model that failed stays a footprint: no camera move or shot queues it again (SV1 round 3).
         function queueDeferredGroup(group, reason) {
             if (!group || !group.deferredVisual || group.deferredLoading
-                    || group.deferredQueued) return false;
+                    || group.deferredQueued || group.deferredFailed) return false;
+            const token = sceneToken({ group: group });
             group.deferredQueued = true;
             state.deferredLoadQueue = state.deferredLoadQueue.then(
                 function () {
                     group.deferredQueued = false;
+                    if (!tokenCurrent(token)) return false;
                     return loadDeferredGroup(group, reason);
                 }
             ).catch(function (error) {
@@ -13425,13 +13513,29 @@
             return true;
         }
 
+        // Sage's 3D shots (docs/sage-basic-shapes-plan.md, SV1): a camera move loads one deferred model at a time, but
+        // a shot waits for every model drawn big enough on screen, so none is copied as its footprint. Queues each one
+        // not loading yet and returns how many are still to draw; one that failed stays a footprint, not retried here.
+        function loadVisibleDetail() {
+            if (!state.mounted || state.suspended || state.degraded) return 0;
+            let left = 0;
+            state.baseGroups.forEach(function (group) {
+                if (!group.deferredVisual || group.deferredFailed) return;
+                if (projectedGroupPixelSize(group) < deferredVisualPixelThreshold) return;
+                if (group.deferredLoading || group.deferredQueued
+                        || queueDeferredGroup(group, 'deferred_visible_for_shot')) left += 1;
+            });
+            return left;
+        }
+
         function loadDeferredVisibleGroups() {
             if (!state.mounted || state.suspended || state.degraded) return 0;
             const candidates = Array.from(state.baseGroups.values())
                 .filter(function (group) {
                     return group.deferredVisual
                         && !group.deferredLoading
-                        && !group.deferredQueued;
+                        && !group.deferredQueued
+                        && !group.deferredFailed;
                 })
                 .map(function (group) {
                     return {
@@ -13644,6 +13748,7 @@
                         deferredLoading: false,
                         deferredPromise: null,
                         deferredQueued: false,
+                        deferredFailed: false,
                         resolved: false,
                         resolvePromise: null,
                     });
@@ -14012,8 +14117,14 @@
             }());
         }
 
+        // Each call is a scene request. A request that waits for the appearance library is dropped if a newer one
+        // came meanwhile, so an older layout never replaces a newer one. A request is installed once installScene
+        // has built its layout into the scene, which it does before its first wait (footprints in place, models
+        // loading); until then the previous scene is still drawn, and reads as ready (SV1 round 4, sceneState).
         async function setScene(input) {
+            const request = state.sceneRequest += 1;
             const value = input && typeof input === 'object' ? input : {};
+            state.requestedInput = input && typeof input === 'object' ? input : null;
             // Library finishes and scenes resolve from the bundled manifests;
             // load them before grouping so the first build is already correct.
             if (layoutNeedsLibrary(value.layout) && facilityLibrary && typeof facilityLibrary.get === 'function'
@@ -14025,6 +14136,66 @@
                         'The appearance library could not be loaded; neutral finishes are shown.', null);
                 }
             }
+            if (request !== state.sceneRequest) return getDiagnostics();
+            const installing = installScene(value);
+            state.sceneInstalled = request;
+            return installing;
+        }
+
+        // The scene a recovery (context restored, remount, resume) rebuilds: the latest one asked for. It may still
+        // wait for the appearance library while an older one is drawn; replaying the drawn one would supersede it, and
+        // a capture would take the older scene as current (SV1 round 5).
+        function latestInput() {
+            return state.requestedInput || state.currentInput;
+        }
+
+        // The token of an async continuation: the mount, the scene and (when it loads one) the group it started with.
+        // It is checked after every await, before records are read or objects attached, and fails once the view was
+        // torn down or disposed, a newer scene was installed, or the group was replaced: nothing then comes back
+        // into a disposed view, a view mounted since or a newer scene. A continuation that installs a scene itself
+        // (a remount, resume or restore replay) takes its token right after asking for it, with installs: true;
+        // then only a newer scene request counts against it (final round 3).
+        function sceneToken(options) {
+            const value = options || {};
+            return {
+                teardowns: state.teardownCount,
+                generation: value.installs ? null : state.sceneGeneration,
+                request: value.installs ? state.sceneRequest : null,
+                group: value.group || null,
+            };
+        }
+
+        // A render record is current while it is still the drawn record of its own group (record.baseKey, with the
+        // finish or part suffix the asset lookup leaves out) and that group is still in the scene (final round 5).
+        function recordCurrent(record) {
+            return Boolean(record && state.baseGroups.get(record.baseKey)
+                && state.renderGroups.get(record.baseKey) === record);
+        }
+
+        function tokenCurrent(token, group) {
+            const owned = group || token.group;
+            return !state.disposed && state.teardownCount === token.teardowns
+                && (token.generation === null || state.sceneGeneration === token.generation)
+                && (token.request === null || state.sceneRequest === token.request)
+                && (!owned || state.baseGroups.get(baseGroupKey(owned)) === owned);
+        }
+
+        // Which scene the 3D view draws, for Sage's 3D shots: a shot is copied only from the scene it started on,
+        // installed with nothing newer asked for, in a live WebGL context.
+        function sceneState() {
+            return {
+                requested: state.sceneRequest,
+                installed: state.sceneInstalled,
+                status: state.status,
+                mounted: state.mounted,
+                suspended: state.suspended,
+                degraded: state.degraded,
+                contextLost: state.contextLost,
+                disposed: state.disposed,
+            };
+        }
+
+        async function installScene(value) {
             const previous = state.currentInput;
             if (state.mounted && !state.suspended && !state.degraded
                     && state.status !== 'degraded'
@@ -16476,7 +16647,9 @@
             const saved = libraryRuntime.layoutScene(currentLayout());
             const library = currentLibrary();
             if (saved && !library && facilityLibrary && typeof facilityLibrary.load === 'function') {
-                facilityLibrary.load().then(function () { syncViewportSceneFromLayout(); }).catch(function () {});
+                facilityLibrary.load().then(function () {
+                    if (!state.disposed) syncViewportSceneFromLayout();
+                }).catch(function () {});
                 return false;
             }
             const changed = applyViewportScene(libraryRuntime.resolveScene(library, saved));
@@ -16877,8 +17050,13 @@
         async function getComponentMaterials(placementId) {
             const group=Array.from(state.baseGroups.values()).find(g=>g.placements.some(p=>p.placementId===placementId));
             if(!group)throw new Error('The selected model is not loaded.');
+            // Read only from the view, the scene and the model it was asked of (final round 3).
+            const token=sceneToken({group});
+            const changed=()=>new Error('The model changed while it loaded; select it again.');
             await resolveBaseGroup(group,state.sceneGeneration,state.abortController?.signal);
+            if(!tokenCurrent(token))throw changed();
             if(group.deferredVisual)await loadDeferredGroup(group,'component_materials');
+            if(!tokenCurrent(token))throw changed();
             const record=state.renderGroups.get(baseGroupKey(group));
             if(!record || !['overview','detail'].includes(record.representation))throw new Error('Load the CAD model before editing its components.');
             return {representation:record.representation,slots:componentRuntime.slots(record.prototypeObject).map(item=>({
@@ -17748,7 +17926,11 @@
             disposeLightCoverage();
             state.lightCoverage.view = null;
             if (!state.mounted && !state.renderer && !state.canvas) {
+                // Parked or never mounted: nothing to tear down, but the inputs go all the same.
+                abortLoading();
                 state.disposed = true;
+                state.reloadOnResume = false;
+                forgetScene();
                 notifyStatus('disposed', null);
                 return false;
             }
@@ -17870,6 +18052,8 @@
             setCameraOrientationHandler: setCameraOrientationHandler,
             getRecordingCanvas: getRecordingCanvas,
             renderRecordingFrame: renderRecordingFrame,
+            loadVisibleDetail: loadVisibleDetail,
+            sceneState: sceneState,
             navigateWalkthroughToPlacement: navigateWalkthroughToPlacement,
             navigateWalkthroughToPoint: navigateWalkthroughToPoint,
             cancelWalkthroughNavigation: cancelWalkthroughNavigation,

@@ -5135,3 +5135,23 @@ select.ip-flw-site-input {
 .ip-flw-sage-view-back[hidden] {
     display: none;
 }
+
+/* Sage is taking its 3D shots (SV1). */
+.ip-flw-sage-shots {
+    position: absolute;
+    z-index: 14;
+    top: 76px;
+    left: 50%;
+    padding: 3px 14px;
+    border: 1px solid var(--ip-flw-accent);
+    border-radius: 13px;
+    color: var(--ip-flw-text);
+    background: color-mix(in srgb, var(--ip-flw-panel) 92%, transparent);
+    font-size: 12px;
+    pointer-events: none;
+    transform: translateX(-50%);
+}
+
+.ip-flw-sage-shots[hidden] {
+    display: none;
+}

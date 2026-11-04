@@ -2919,7 +2919,11 @@
         this.lastProposalRepaintOnly = false;
         this.lastThreeFitFingerprint = null;
         this.sageViewBack = null;     // the view, camera and roof layers before Sage moved the 3D view (Back)
+        this.sageViewLeft = null;     // where Sage's last move left the 3D view: one the user moved since is Back's
+        this.sageViewNext = null;     // that view, for Back once Sage's move changes the view (final round 7)
         this.sageGlide = null;        // Sage's glide while it runs
+        this.sageCapture = null;      // Sage's 3D shots while they are taken (SV1)
+        this.sageShotsOwner = null;   // the capture whose status pill shows
         this.commandStates = {};
         this.unsubscribe = null;
         // Listeners for anything that changes what the viewport represents.
@@ -10940,10 +10944,19 @@
             'aria-label': 'Back to your view before Sage moved it',
             hidden: true,
         }, 'Back');
+        // While Sage takes its 3D shots (SV1). aria-modal: the desktop app hides its in-app browser while it shows.
+        this.sageShotsStatus = element(this.document, 'div', {
+            className: 'ip-flw-sage-shots',
+            role: 'dialog',
+            'aria-modal': 'true',
+            'aria-label': 'Sage is taking 3D shots',
+            hidden: true,
+        }, '');
         append(this.threeView,
             this.threeNavigation,
             this.threeCompass,
             this.sageViewBackButton,
+            this.sageShotsStatus,
             this._buildThreeSettingsPanel(),
             this.threeWalkthroughHud,
             this.threeDroneHud,
@@ -14377,11 +14390,35 @@
     const SAGE_FARTHER = 0.8;          // and this much farther out than the view
     const SAGE_CLIMB = 0.25;           // crossing the plant it climbs this share of the way, up to SAGE_CLIMB_MAX m,
     const SAGE_CLIMB_MAX = 80;         // so it flies over the racks and walls between the two places
+    // Sage's 3D shots (SV1): at most this many, each at most SAGE_SHOT_WIDTH x SAGE_SHOT_HEIGHT, as JPEG.
+    const SAGE_SHOTS_MAX = 6;
+    const SAGE_SHOT_WIDTH = 1280;
+    const SAGE_SHOT_HEIGHT = 720;
+    const SAGE_SHOT_QUALITY = 0.85;
+    const SAGE_SHOT_SETTLE_MS = 1200;  // each view draws at least this long before its shot,
+    const SAGE_SHOT_WAIT_MS = 10000;   // and then until nothing is loading, up to this long
+    const SAGE_GLIDE_SPARE_MS = 3000;  // a glide not landed this long after its time is stopped where it is
+    // SV1 round 4: every wait of a capture ends. A 3D view opened for the first time gets readyMs to start, the
+    // window's layout sceneMs (counted in the capture's own 250 ms waits) to be built into the 3D scene, and each JPEG
+    // encodeMs; Back or the window closing ends any of them at once. Per window, so a test can shorten them.
+    const SAGE_LIMITS = Object.freeze({ readyMs: 15000, sceneMs: 20000, encodeMs: 10000 });
 
     function sagePoint(value) {
         if (!value || typeof value !== 'object') return null;
         const point = { x: Number(value.x), y: Number(value.y), z: Number(value.z) };
         return [point.x, point.y, point.z].every(Number.isFinite) ? point : null;
+    }
+
+    // SV3b: the user moved the 3D camera (orbit, pan, zoom, a view button) when it is this far from where Sage left it.
+    const SAGE_MOVED_M = 0.05;
+
+    function sageSameCamera(a, b) {
+        return ['position', 'target'].every(function (key) {
+            const p = sagePoint(a && a[key]);
+            const q = sagePoint(b && b[key]);
+            if (!p || !q) return !p && !q;
+            return Math.max(Math.abs(p.x - q.x), Math.abs(p.y - q.y), Math.abs(p.z - q.z)) <= SAGE_MOVED_M;
+        });
     }
 
     function sageCameraFrom(value) {
@@ -14391,6 +14428,26 @@
         const fov = Number(camera && camera.fov);
         if (!position || !target || !(fov > 1 && fov < 179) || position.y <= target.y) return null;
         return { position: position, target: target, fov: fov };
+    }
+
+    // A camera the orbit controls aim at its target: Sage's views carry no turn of their own.
+    // What the 3D view says it draws (the three adapter's sceneState), or null when it does not say.
+    function sageSceneState(adapter) {
+        if (!adapter || typeof adapter.sceneState !== 'function') return null;
+        try {
+            return adapter.sceneState() || { mounted: false };
+        } catch (_) {
+            return { mounted: false };
+        }
+    }
+
+    function sageSceneLive(scene) {
+        return Boolean(scene.mounted) && !scene.suspended && !scene.disposed && !scene.degraded && !scene.contextLost
+            && scene.status !== 'degraded';
+    }
+
+    function sageStill(camera) {
+        return Object.assign({}, camera, { quaternion: { x: 0, y: 0, z: 0, w: 1 } });
     }
 
     function easeInOut(u) {
@@ -14456,20 +14513,25 @@
         };
     }
 
-    Workspace.prototype.showSageView = async function (request) {
+    // CAPTURE: the capture that moves the view for its shots. While Sage takes shots, only that capture moves the
+    // view: any other request is refused, so it cannot glide away from the shots.
+    Workspace.prototype.showSageView = async function (request, capture) {
         const value = request && typeof request === 'object' ? request : {};
         const layout = this.state && this.state.layout;
         const end = sageCameraFrom(value);
         const adapter = this.threeAdapter;
-        if (this.destroyed || !layout || !end || !adapter
+        const owner = capture || null;
+        if (this.destroyed || !layout || !end || !adapter || this.sageCapture !== owner
                 || typeof adapter.applyCameraView !== 'function' || typeof adapter.getCameraView !== 'function'
                 || value.layoutId !== layout.layoutId
                 || value.siteId !== (layout.association && layout.association.siteId)) {
             return false;
         }
         this._stopSageGlide(false);
+        this.sageViewNext = null;
         const before = { viewMode: this.viewMode, layoutId: layout.layoutId, threeFit: this.lastThreeFitFingerprint,
             layers: { overhead: this.layerVisibility.overhead, roofSheeting: this.layerVisibility.roofSheeting } };
+        const switched = this.viewMode !== '3d';
         if (this.viewMode !== '3d') {
             this.lastThreeFitFingerprint = this.lastLayoutFitFingerprint;   // the glide places the camera, not a fit
             this._setViewMode('3d');
@@ -14477,14 +14539,27 @@
         }
         let start = adapter.getCameraView();
         if ((!start || !sagePoint(start.position)) && this.controller && typeof this.controller.ready === 'function') {
-            await this.controller.ready();                                  // a 3D view opened for the first time
-            if (this.destroyed) return false;
+            const controller = this.controller;                             // a 3D view opened for the first time
+            const ready = await this._sageWithin(owner, function () { return controller.ready(); },
+                this.sageLimits.readyMs);
+            if (!ready.done || this.destroyed || this.sageCapture !== owner || this.threeAdapter !== adapter
+                    || !this.state || this.state.layout !== layout) return false;
             start = adapter.getCameraView();
         }
         if (!start || !sagePoint(start.position)) return false;
-        if (!this.sageViewBack || this.sageViewBack.layoutId !== layout.layoutId) {
+        // Back returns to the view before Sage's moves in a row. Once the user moved the view since Sage's last move
+        // (another camera or view mode), it returns to the view right before this move, with the user's own roof:
+        // only Sage hides it (SV3b; SV5 found Back going to a view from turns before). That view becomes Back's only
+        // once this move changes the view (_sageViewMoved): one that ends before leaves Back as it was (final
+        // round 7). Switching to 3D already changed it.
+        const kept = this.sageViewBack && this.sageViewBack.layoutId === layout.layoutId ? this.sageViewBack : null;
+        const left = this.sageViewLeft && this.sageViewLeft.layoutId === layout.layoutId ? this.sageViewLeft : null;
+        if (!kept) {
             this.sageViewBack = Object.assign(before, { camera: start });
+        } else if (left && (left.viewMode !== before.viewMode || !sageSameCamera(left.camera, start))) {
+            this.sageViewNext = { owner: owner, back: Object.assign(before, { camera: start, layers: kept.layers }) };
         }
+        if (switched) this._sageViewMoved(owner);
         const roofHidden = value.roofHidden === true;
         const own = this.sageViewBack.layers;
         this._setSageRoof({ overhead: false, roofSheeting: false });
@@ -14501,26 +14576,76 @@
         } catch (_) { still = false; }
         const flight = sageFlight(Object.assign({}, start, { target: sagePoint(start.target) }), end);
         if (still || !view || typeof view.requestAnimationFrame !== 'function') {
-            adapter.applyCameraView(flight.at(1));
+            const jump = flight.at(1);
+            adapter.applyCameraView(jump);
+            if (!sageSameCamera(jump, start)) this._sageViewMoved(owner);
             landed();
+            this._noteSageViewLeft();
             return true;
         }
-        const glide = { began: null, frame: null, view: view, landed: landed };
+        const glide = { began: null, frame: null, view: view, landed: landed, seconds: flight.seconds, moved: false };
+        glide.done = new Promise(function (resolve) { glide.finish = resolve; });   // 'landed', 'stopped' or 'failed'
         const step = function (now) {
             if (this.sageGlide !== glide || this.destroyed) return;
-            if (glide.began === null) glide.began = now;
-            const u = Math.min(1, (now - glide.began) / (flight.seconds * 1000));
-            adapter.applyCameraView(flight.at(u));
-            if (u < 1) {
-                glide.frame = view.requestAnimationFrame(step);
-            } else {
+            try {
+                if (glide.began === null) glide.began = now;
+                const u = Math.min(1, (now - glide.began) / (flight.seconds * 1000));
+                const at = flight.at(u);
+                adapter.applyCameraView(at);
+                if (!glide.moved && !sageSameCamera(at, start)) {
+                    glide.moved = true;   // the first frame that moved the camera
+                    this._sageViewMoved(owner);
+                }
+                if (u < 1) {
+                    glide.frame = view.requestAnimationFrame(step);
+                    return;
+                }
                 this.sageGlide = null;
                 landed();
+                this._noteSageViewLeft();
+                glide.finish('landed');
+            } catch (error) {
+                // A frame that fails ends the glide where it is, with the user's roof, and tells whoever waits on it.
+                if (this.sageGlide === glide) this.sageGlide = null;
+                try {
+                    this._setSageRoof(own);
+                } catch (_) { /* the view is gone */ }
+                if (glide.moved) this._noteSageViewLeft();
+                glide.finish('failed');
+                if (typeof console !== 'undefined' && console.warn) console.warn('Sage\'s glide stopped.', error);
             }
         }.bind(this);
         this.sageGlide = glide;
         glide.frame = view.requestAnimationFrame(step);
         return true;
+    };
+
+    // Final round 7: the first time Sage's move changes the view (a frame moved the camera, a shot's camera was put
+    // on, or it switched to 3D), the view the user had moved to becomes Back's, and shots count as having moved the
+    // view. OWNER is the capture whose move it is, or null.
+    Workspace.prototype._sageViewMoved = function (owner) {
+        const next = this.sageViewNext;
+        const layout = this.state && this.state.layout;
+        if (next && next.owner === owner) {
+            this.sageViewNext = null;
+            if (layout && next.back.layoutId === layout.layoutId) this.sageViewBack = next.back;
+        }
+        if (owner) owner.moved = true;
+    };
+
+    // SV3b: where Sage left the 3D view when it stopped moving it (a glide landed or stopped, the shots ended). A
+    // later move that finds the camera or the view mode changed since (the user moved the view) takes it for Back.
+    Workspace.prototype._noteSageViewLeft = function () {
+        const layout = this.state && this.state.layout;
+        const adapter = this.threeAdapter;
+        let camera = null;
+        try {
+            camera = layout && adapter && typeof adapter.getCameraView === 'function' ? adapter.getCameraView() : null;
+        } catch (_) {
+            camera = null;   // the view is gone
+        }
+        this.sageViewLeft = camera && sagePoint(camera.position)
+            ? { layoutId: layout.layoutId, viewMode: this.viewMode, camera: camera } : null;
     };
 
     Workspace.prototype._setSageRoof = function (layers) {
@@ -14538,7 +14663,26 @@
             glide.view.cancelAnimationFrame(glide.frame);
         }
         if (land !== false && !this.destroyed) glide.landed();
+        if (glide.moved && !this.destroyed) this._noteSageViewLeft();   // only where Sage's frames put the camera
+        if (glide.finish) glide.finish('stopped');
         return true;
+    };
+
+    // How the glide ended: 'landed', 'stopped', 'failed', or 'late' when it has not landed SAGE_GLIDE_SPARE_MS after
+    // its time (animation frames paused in a hidden window, say).
+    Workspace.prototype._awaitSageGlide = function (glide) {
+        if (!glide || !glide.done) return Promise.resolve('landed');
+        const view = this.document && this.document.defaultView;
+        const timers = view && typeof view.setTimeout === 'function' ? view : globalThis;
+        let timer = null;
+        const late = new Promise(function (resolve) {
+            timer = timers.setTimeout(function () { resolve('late'); },
+                (Number(glide.seconds) || 0) * 1000 + SAGE_GLIDE_SPARE_MS);
+        });
+        return Promise.race([glide.done, late]).then(function (outcome) {
+            if (typeof timers.clearTimeout === 'function') timers.clearTimeout(timer);
+            return outcome;
+        });
     };
 
     Workspace.prototype._interruptSageGlide = function (event) {
@@ -14563,7 +14707,16 @@
         const back = this.sageViewBack;
         const layout = this.state && this.state.layout;
         this._stopSageGlide(false);
+        const capture = this.sageCapture;
+        if (capture) {
+            capture.stopped = true;            // Back wins: the capture ends where Back leaves the view
+            capture.end();                     // and whatever it waits for ends with it
+            this.sageCapture = null;
+            this._renderSageShotsStatus(0, 0, capture);
+        }
         this.sageViewBack = null;
+        this.sageViewLeft = null;
+        this.sageViewNext = null;
         if (!back || this.destroyed || !layout || back.layoutId !== layout.layoutId) {
             this._renderSageViewBack();
             return false;
@@ -14577,6 +14730,288 @@
         }
         this._renderSageViewBack();
         return true;
+    };
+
+    // Sage's 3D shots (docs/sage-basic-shapes-plan.md, SV1), taken in this window: the GPU draws the plant, so
+    // nothing renders on the server. The 3D view glides to the main view first (SV3b); then the status pill shows
+    // (aria-modal, so the desktop app hides its in-app browser meanwhile) and the roof is off. Each view is applied,
+    // drawn until the scene has settled, and copied from the 3D canvas as a JPEG of about 1280 x 720: the canvas
+    // only, so no pointer, cursor or panel is in it. It ends on the main view, not where the user was: Back keeps
+    // that. One capture at a time. Leaving the layout or the 3D view, Back, or a change to what the window draws
+    // stops it with the shots so far. The views were framed on the saved revision Sage read, so the window must draw
+    // that revision with no unsaved edit, review, candidate or ghost over it (_sageShowsRevision).
+    // SV1 rounds 3 and 4: every await is bounded, ends at once on Back or the window closing (capture.ended), and is
+    // followed by _sageCaptureOpen; anything it finds changed ends the capture as stopped or failed, never complete:
+    // - showSageView: a 3D view opened for the first time gets readyMs to start (_sageWithin);
+    // - the glide to the main view: done, stopped by Back, failed, or 'late' SAGE_GLIDE_SPARE_MS after its time;
+    // - _awaitSageScene: the window's layout built into the 3D scene, within sceneMs; that scene is the capture's;
+    // - each wait in _settleSageShot (the first draw, then each pass of the loads still drawing), up to
+    //   SAGE_SHOT_WAIT_MS;
+    // - the JPEG encode, within encodeMs: a shot counts only when the capture is still open after it.
+    // _sageCaptureOpen includes the 3D view's scene: still the capture's scene, nothing newer asked for, the WebGL
+    // context live and the renderer not degraded. Right before each copy the roof is off again and the view's camera
+    // is put back, whatever was clicked meanwhile.
+    Workspace.prototype.sageLimits = SAGE_LIMITS;
+
+    Workspace.prototype.captureSageViews = async function (request) {
+        const value = request && typeof request === 'object' ? request : {};
+        const views = Array.isArray(value.views) ? value.views.slice(0, SAGE_SHOTS_MAX) : [];
+        const cameras = views.map(sageCameraFrom);
+        const layout = this.state && this.state.layout;
+        const adapter = this.threeAdapter;
+        const result = { shots: [], complete: false, reason: null };
+        if (this.destroyed || !layout || !adapter || typeof adapter.renderRecordingFrame !== 'function'
+                || value.layoutId !== layout.layoutId
+                || value.siteId !== (layout.association && layout.association.siteId)) {
+            return Object.assign(result, { reason: 'layout_not_open' });
+        }
+        if (!views.length || cameras.some(function (camera) { return !camera; })) {
+            return Object.assign(result, { reason: 'no_views' });
+        }
+        if (this.sageCapture) return Object.assign(result, { reason: 'busy' });
+        if (!this._sageShowsRevision(value)) return Object.assign(result, { reason: 'revision_differs' });
+        const capture = { layoutId: layout.layoutId, siteId: value.siteId, revision: value.revision, adapter: adapter,
+            requestId: typeof value.requestId === 'string' ? value.requestId : null,
+            stopped: false, moved: false, glide: null, scene: null, end: null,
+            layers: { overhead: this.layerVisibility.overhead, roofSheeting: this.layerVisibility.roofSheeting } };
+        capture.ended = new Promise(function (resolve) { capture.end = resolve; });
+        this.sageCapture = capture;
+        const off = { overhead: false, roofSheeting: false };
+        try {
+            const main = Object.assign({}, views[0], { siteId: value.siteId, layoutId: value.layoutId });
+            if (!(await this.showSageView(main, capture))) {
+                return Object.assign(result, { reason: this.sageCapture === capture ? 'no_3d_view' : 'interrupted' });
+            }
+            capture.glide = this.sageGlide;
+            if (!this._sageCaptureOpen(capture)) return Object.assign(result, { reason: 'interrupted' });
+            if (capture.glide) {
+                const outcome = await this._awaitSageGlide(capture.glide);
+                if (outcome === 'failed') return Object.assign(result, { reason: 'no_3d_view' });
+                if (outcome === 'late' && this.sageGlide === capture.glide) this._stopSageGlide(false);
+                if (!this._sageCaptureOpen(capture)) {
+                    const lost = this._sageRendererLost(capture);
+                    return Object.assign(result, { reason: lost ? 'no_3d_view' : 'interrupted' });
+                }
+            }
+            if (!(await this._awaitSageScene(capture))) {
+                const failed = this._sageRendererLost(capture) || this._sageCaptureOpen(capture);   // or out of time
+                return Object.assign(result, { reason: failed ? 'no_3d_view' : 'interrupted' });
+            }
+            for (let index = 0; index < views.length; index += 1) {
+                const camera = sageStill(cameras[index]);
+                this._renderSageShotsStatus(index + 1, views.length, capture);
+                this._setSageRoof(off);
+                await this._settleSageShot(capture, camera);
+                if (!this._sageCaptureOpen(capture)) break;
+                this._setSageRoof(off);                          // a layer clicked on while it drew
+                adapter.applyCameraView(camera);
+                const canvas = adapter.renderRecordingFrame();   // in the same task as the camera and the check
+                let image = null;
+                if (canvas) {
+                    const encoded = await this._sageWithin(capture, function () { return this._encodeSageShot(canvas); }
+                        .bind(this), this.sageLimits.encodeMs);
+                    image = encoded.done ? encoded.value : null;  // one that comes late is dropped
+                }
+                if (!this._sageCaptureOpen(capture)) break;      // changed while it encoded: the shot does not count
+                if (!image) {
+                    result.reason = 'no_canvas';
+                    break;
+                }
+                const view = views[index];
+                result.shots.push({ index: index, label: String(view.label || ''), from: view.from || null,
+                    roofHidden: view.roofHidden === true, camera: cameras[index], image: image });
+            }
+            result.complete = result.shots.length === views.length && this._sageCaptureOpen(capture);
+            if (!result.complete && !result.reason) {
+                result.reason = this._sageRendererLost(capture) ? 'no_3d_view' : 'interrupted';
+            }
+        } finally {
+            this._endSageCapture(capture, result, views, cameras);
+        }
+        return result;
+    };
+
+    // The chat stopped waiting for the shots (Stop, or the end of the tool's wait): the capture ends at once, where
+    // the view is, with the user's own roof; Back still returns to their view. REQUEST_ID names the capture to stop.
+    Workspace.prototype.stopSageCapture = function (requestId) {
+        const capture = this.sageCapture;
+        if (!capture || (requestId && capture.requestId !== requestId)) return false;
+        this._stopSageGlide(false);
+        capture.stopped = true;
+        capture.end();
+        this.sageCapture = null;
+        this._renderSageShotsStatus(0, 0, capture);
+        const layout = this.state && this.state.layout;
+        const back = this.sageViewBack && layout && this.sageViewBack.layoutId === layout.layoutId
+            ? this.sageViewBack : null;
+        if (!this.destroyed) {
+            this._setSageRoof(back ? back.layers : capture.layers);
+            if (capture.moved) this._noteSageViewLeft();   // one that never moved the view leaves the user's
+        }
+        return true;
+    };
+
+    Workspace.prototype._endSageCapture = function (capture, result, views, cameras) {
+        if (this.sageViewNext && this.sageViewNext.owner === capture) this.sageViewNext = null;   // it never moved
+        const owner = this.sageCapture === capture;
+        const open = owner && this._sageCaptureOpen(capture);           // the same layout, revision and 3D view
+        if (owner) this.sageCapture = null;
+        if (capture.glide && this.sageGlide === capture.glide) this._stopSageGlide(false);
+        this._renderSageShotsStatus(0, 0, capture);                     // only this capture's pill
+        if (capture.stopped || !owner || this.destroyed) return;         // Back, or a newer capture, has the view
+        const back = this.sageViewBack && this.sageViewBack.layoutId === capture.layoutId ? this.sageViewBack : null;
+        if (result.complete && open) {
+            // The main view, with the roof as it looks down on it; the user's camera and layers stay for Back.
+            capture.adapter.applyCameraView(sageStill(cameras[0]));
+            if (views[0].roofHidden === true || !back) this._setSageRoof({ overhead: false, roofSheeting: false });
+            else this._setSageRoof(back.layers);
+            this._noteSageViewLeft();
+            return;
+        }
+        // Stopped part way or failed: the user's own roof layers come back, in any view; Back still keeps the camera.
+        this._setSageRoof(back ? back.layers : capture.layers);
+        if (capture.moved) this._noteSageViewLeft();      // one that never moved the view leaves the user's
+    };
+
+    // The window draws what the views were framed on: the saved revision Sage read, with no unsaved edit or staged
+    // change, no conflict, and nothing drawn over it or in its place: a generated or design draft, a review, placement
+    // alternatives, the placement ghost, a construction preview or a generation plan (SV1 round 3).
+    Workspace.prototype._sageShowsRevision = function (value) {
+        const state = this.state;
+        const layout = state && state.layout;
+        return Boolean(layout) && !state.dirty && !(state.operations || []).length && !state.conflict
+            && !state.generatedDraft && !state.designProposalDraft && !state.layoutProposal
+            && !state.placementAlternatives && !state.ghostPlacement && !this.constructionPreview
+            && !this.sitePreviewReadOnly && !(this.generationPlanningView && this.generationPlanningView.activeLayout())
+            && typeof value.revision === 'string' && value.revision === state.baseRevision
+            && value.layoutId === layout.layoutId && value.siteId === (layout.association && layout.association.siteId);
+    };
+
+    Workspace.prototype._sageCaptureOpen = function (capture) {
+        const scene = sageSceneState(capture.adapter);
+        const drawn = !scene || (sageSceneLive(scene) && (capture.scene === null
+            || (scene.requested === capture.scene && scene.installed === capture.scene)));
+        return this.sageCapture === capture && !capture.stopped && !this.destroyed && this.viewMode === '3d'
+            && this.threeAdapter === capture.adapter && drawn && this._sageShowsRevision(capture);
+    };
+
+    // The 3D view stopped drawing (WebGL context lost, renderer degraded, unmounted): the shots failed.
+    Workspace.prototype._sageRendererLost = function (capture) {
+        const scene = sageSceneState(capture.adapter);
+        return Boolean(scene) && !sageSceneLive(scene);
+    };
+
+    // The window's layout built into the 3D scene. A newer layout may still be on its way in (the 3D view waits for
+    // the appearance library before it builds it), and until then the old scene is drawn and reads as ready. The
+    // scene found here is the capture's: one asked for later stops it (_sageCaptureOpen).
+    Workspace.prototype._awaitSageScene = async function (capture) {
+        for (let waited = 0; ; waited += 250) {
+            if (!this._sageCaptureOpen(capture)) return false;
+            const scene = sageSceneState(capture.adapter);
+            if (!scene) return true;                                     // a 3D view that does not say
+            if (scene.installed === scene.requested) {
+                capture.scene = scene.installed;
+                return this._sageCaptureOpen(capture);
+            }
+            if (waited >= this.sageLimits.sceneMs) return false;
+            await this._sageCaptureWait(capture, 250);
+        }
+    };
+
+    // START() (a promise, or a value), raced against MILLISECONDS and against CAPTURE ending (Back, the window
+    // closing; none for a glide the user asked for). Resolves to { done: true, value } or { done: false, why:
+    // 'late' | 'stopped' | 'failed' }; a value that comes after that is dropped.
+    Workspace.prototype._sageWithin = function (capture, start, milliseconds) {
+        const view = this.document && this.document.defaultView;
+        const timers = view && typeof view.setTimeout === 'function' ? view : globalThis;
+        let timer = null;
+        let settled;
+        try {
+            settled = Promise.resolve(start());
+        } catch (error) {
+            settled = Promise.reject(error);
+        }
+        const racers = [
+            settled.then(function (value) { return { done: true, value: value }; },
+                function (error) { return { done: false, why: 'failed', error: error }; }),
+            new Promise(function (resolve) {
+                timer = timers.setTimeout(function () { resolve({ done: false, why: 'late' }); }, milliseconds);
+            }),
+        ];
+        if (capture && capture.ended) {
+            racers.push(capture.ended.then(function () { return { done: false, why: 'stopped' }; }));
+        }
+        return Promise.race(racers).then(function (outcome) {
+            if (typeof timers.clearTimeout === 'function') timers.clearTimeout(timer);
+            return outcome;
+        });
+    };
+
+    // A wait of the capture's own (each a few hundred ms), which Back or the window closing ends at once.
+    Workspace.prototype._sageCaptureWait = function (capture, milliseconds) {
+        const wait = this._sageShotWait(milliseconds);
+        return capture && capture.ended ? Promise.race([wait, capture.ended]) : wait;
+    };
+
+    // Rule 3 of the hand-made shots: the scene finishes drawing after a camera move (about 3 s on Factory 02). Each
+    // pass puts the camera back (a drag while it drew does not move the shot) and asks the 3D view to draw every model
+    // big enough on screen in full, including what that last camera queued; the shot is copied right after the pass
+    // that finds nothing left to draw, or at SAGE_SHOT_WAIT_MS with what is drawn by then.
+    Workspace.prototype._settleSageShot = async function (capture, camera) {
+        const adapter = capture.adapter;
+        adapter.applyCameraView(camera);
+        this._sageViewMoved(capture);
+        await this._sageCaptureWait(capture, SAGE_SHOT_SETTLE_MS);
+        for (let waited = SAGE_SHOT_SETTLE_MS; ; waited += 250) {
+            if (!this._sageCaptureOpen(capture)) return false;
+            adapter.applyCameraView(camera);
+            const left = typeof adapter.loadVisibleDetail === 'function' ? adapter.loadVisibleDetail() : 0;
+            const diagnostics = typeof adapter.getDiagnostics === 'function' ? adapter.getDiagnostics() : null;
+            const drawn = !left && (!diagnostics || (diagnostics.status === 'ready' && !diagnostics.pendingLoads));
+            if (drawn || waited >= SAGE_SHOT_WAIT_MS) return drawn;
+            await this._sageCaptureWait(capture, 250);
+        }
+    };
+
+    Workspace.prototype._sageShotWait = function (milliseconds) {
+        const view = this.document && this.document.defaultView;
+        const wait = view && typeof view.setTimeout === 'function' ? view.setTimeout.bind(view) : setTimeout;
+        return new Promise(function (resolve) { wait(resolve, milliseconds); });
+    };
+
+    // The frame just drawn, scaled to fit SAGE_SHOT_WIDTH x SAGE_SHOT_HEIGHT, as a JPEG. The 3D canvas keeps no
+    // drawing buffer, so it is copied in the same task as the frame.
+    Workspace.prototype._encodeSageShot = function (canvas) {
+        const doc = this.document;
+        const width = Number(canvas && canvas.width);
+        const height = Number(canvas && canvas.height);
+        if (!doc || !(width > 0) || !(height > 0)) return Promise.resolve(null);
+        const scale = Math.min(1, SAGE_SHOT_WIDTH / width, SAGE_SHOT_HEIGHT / height);
+        const out = doc.createElement('canvas');
+        out.width = Math.max(1, Math.round(width * scale));
+        out.height = Math.max(1, Math.round(height * scale));
+        const context = typeof out.getContext === 'function' ? out.getContext('2d') : null;
+        if (!context || typeof out.toBlob !== 'function') return Promise.resolve(null);
+        context.drawImage(canvas, 0, 0, out.width, out.height);
+        return new Promise(function (resolve) {
+            out.toBlob(function (blob) {
+                resolve(blob ? { blob: blob, width: out.width, height: out.height } : null);
+            }, 'image/jpeg', SAGE_SHOT_QUALITY);
+        });
+    };
+
+    // The pill belongs to the capture that shows it: an older capture winding down never hides a newer one's.
+    Workspace.prototype._renderSageShotsStatus = function (index, count, capture) {
+        const pill = this.sageShotsStatus;
+        if (!pill) return;
+        if (count > 0) {
+            this.sageShotsOwner = capture || null;
+        } else {
+            if (capture && this.sageShotsOwner !== capture) return;
+            this.sageShotsOwner = null;
+        }
+        pill.hidden = !(count > 0);
+        pill.textContent = count > 0 ? 'Sage is taking 3D shots: ' + index + ' of ' + count : '';
     };
 
     // The legend's Hide does what the Scenes pane's does; the pane's block follows.
@@ -18345,6 +18780,10 @@
         this.destroyed = true;
         this.lightAreaDraw = null;
         this._hideLightCoverage();
+        if (this.sageCapture) {
+            this.sageCapture.stopped = true;
+            this.sageCapture.end();
+        }
         this._stopSageGlide(false);
         if (this.walkCameraControl) this.walkCameraControl.dispose();
         this.walkCameraControl = null;

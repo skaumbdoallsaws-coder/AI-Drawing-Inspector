@@ -18,7 +18,14 @@ BLOCK_TYPES = frozenset({
     "entity_reference",
     "actions",
     "file",
+    "shots",
 })
+# Sage's 3D shots (docs/sage-basic-shapes-plan.md, SV2): saved in the app, one JPEG per view (sage_shots.py).
+# A saved 3D shot of Sage's: the site and layout ids (at most 128 characters each, every one at most 3 when
+# percent-encoded), then the request id and the view's number.
+SHOT_URL = re.compile(r"/api/facility-layouts/[A-Za-z0-9._~%-]{1,384}/[A-Za-z0-9._~%-]{1,384}/sage-shots/[0-9a-f]{32}"
+                      r"/[0-5]\.jpg")
+SHOT_URL_MAX = 841
 SOURCE_TYPES = frozenset({
     "manufacturer",
     "supplier",
@@ -315,6 +322,30 @@ def _normalize_table(raw: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
+def _shot_point(value: Any) -> Optional[Dict[str, float]]:
+    if not isinstance(value, Mapping):
+        return None
+    point = {}
+    for key in "xyz":
+        number = value.get(key)
+        # abs() first: a huge integer compares, where math.isfinite would raise; NaN and infinity fail it too.
+        if isinstance(number, bool) or not isinstance(number, (int, float)) or not abs(number) <= 1e6:
+            return None
+        point[key] = float(number)
+    return point
+
+
+def _shot_camera(value: Any) -> Optional[Dict[str, Any]]:
+    """A shot's camera, for the click that moves the 3D view there: plan metres, the camera above its target."""
+    if not isinstance(value, Mapping):
+        return None
+    position, target, fov = _shot_point(value.get("position")), _shot_point(value.get("target")), value.get("fov")
+    if position is None or target is None or isinstance(fov, bool) or not isinstance(fov, (int, float)) \
+            or not 1 < fov < 179 or position["y"] <= target["y"]:
+        return None
+    return {"position": position, "target": target, "fov": float(fov)}
+
+
 def normalize_chat_content_block(raw: Any) -> Optional[Dict[str, Any]]:
     """Return a bounded, presentation-only block or ``None`` when invalid."""
 
@@ -383,6 +414,27 @@ def normalize_chat_content_block(raw: Any) -> Optional[Dict[str, Any]]:
         mime = _text(raw.get("mimeType"), 80)
         return {"type": block_type, "fileName": name, "url": url,
                 "mimeType": mime if mime == "application/pdf" else "", "detail": _text(raw.get("detail"), 160)}
+    if block_type == "shots":
+        # Sage's 3D shots: pictures the app saved, opened from the app itself, each with the view it shows.
+        shots = []
+        items = raw.get("shots")
+        for item in (items if isinstance(items, list) else [])[:6]:
+            if not isinstance(item, Mapping):
+                continue
+            url, label = item.get("url"), _text(item.get("label"), 120)
+            if not label or not isinstance(url, str) or len(url) > SHOT_URL_MAX or not SHOT_URL.fullmatch(url):
+                continue
+            shot = {"label": label, "url": url, "from": _text(item.get("from"), 20),
+                    "roofHidden": item.get("roofHidden") is True, "camera": _shot_camera(item.get("camera"))}
+            for key in ("width", "height"):
+                value = item.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and 0 < value <= 4096:
+                    shot[key] = value
+            shots.append(shot)
+        if not shots:
+            return None
+        return {"type": block_type, "siteId": _text(raw.get("siteId"), 128), "layoutId": _text(raw.get("layoutId"), 128),
+                "revision": _text(raw.get("revision"), 160), "folded": raw.get("folded") is True, "shots": shots}
     if block_type == "visualization":
         spec = raw.get("spec") or raw.get("visualization") or raw
         if not isinstance(spec, Mapping):

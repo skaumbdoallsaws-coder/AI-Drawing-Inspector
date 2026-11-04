@@ -2387,6 +2387,649 @@ for (const navigation of ['camera-view', 'toolbar-zoom']) {
     });
 }
 
+test('a 3D shot draws every visible deferred model in full, not one per camera move, and skips a failed one '
+    + '(Sage SV1 round 2)', async () => {
+    const data = fixture({
+        largeLayoutDetailThreshold: 2,
+        largeLayoutHeavyVisualBytes: 100,
+        assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage === 'footprint') return prototype(data.THREE, request.stage);
+            if (request.stage === 'overview') {
+                if (request.assetId === 'asset-broken') return { byteSize: 101 };   // heavy, and no mesh in it
+                const visual = prototype(data.THREE, request.stage);
+                visual.byteSize = 101;
+                return visual;
+            }
+            return null;
+        },
+    });
+    data.adapter.mount(data.host);
+    const ids = ['asset-heavy-a', 'asset-heavy-b', 'asset-heavy-c', 'asset-broken'];
+    await data.adapter.setScene({
+        layout: { placements: ids.map((id, index) => placement('pl-' + index, id, REV_A, 1 + index, 0, 2)) },
+        assetCatalog: ids.map(id => asset(id, REV_A)),
+    });
+    const view = data.adapter.getCameraView();
+    view.position = { x: 2, y: 2, z: 100000 };
+    view.target = { x: 2, y: 0, z: 2 };
+    data.adapter.applyCameraView(view);
+    await settleAsync(20);
+    assert.strictEqual(data.adapter.getDiagnostics().rendering.deferredGroupCount, 4, 'too far: all footprints');
+    view.position = { x: 2, y: 2, z: 8 };
+    data.adapter.applyCameraView(view);
+    await settleAsync(20);
+    assert.ok(data.adapter.getDiagnostics().rendering.deferredGroupCount >= 2,
+        'a camera move loads one at a time');
+    let left = data.adapter.loadVisibleDetail();
+    assert.ok(left >= 1, 'the rest are queued for the shot');
+    for (let round = 0; round < 10 && left; round += 1) {
+        await settleAsync(20);
+        left = data.adapter.loadVisibleDetail();
+    }
+    assert.strictEqual(left, 0, 'nothing left to draw: the failed one stays a footprint, not retried');
+    const diagnostics = data.adapter.getDiagnostics();
+    assert.strictEqual(diagnostics.rendering.deferredGroupCount, 1, 'only the broken model is a footprint');
+    assert.strictEqual(diagnostics.loadTrace.filter(item => item.assetId === 'asset-broken'
+        && item.stage === 'overview' && item.status === 'started' && /^deferred_/.test(item.detail || '')).length, 1,
+    'its deferred load is tried once');
+    data.adapter.dispose();
+});
+
+// Heavy models that load from a URL, each held by the test until it lets it go (SV1 round 3).
+function heldModelsFixture() {
+    const held = new Map();
+    const data = fixture({
+        largeLayoutDetailThreshold: 2,
+        largeLayoutHeavyVisualBytes: 100,
+        GLTFLoader: { loadAsync: url => new Promise(resolve => {
+            held.set(url, () => resolve(prototype(data.THREE, url)));
+        }) },
+        assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage === 'footprint') return prototype(data.THREE, request.stage);
+            if (request.stage === 'overview') return { url: 'model://' + request.assetId, byteSize: 101 };
+            return null;
+        },
+    });
+    data.held = held;
+    data.near = async () => {
+        const view = data.adapter.getCameraView();
+        view.position = { x: 2, y: 2, z: 100000 };
+        view.target = { x: 2, y: 0, z: 2 };
+        data.adapter.applyCameraView(view);
+        await settleAsync(20);
+        view.position = { x: 2, y: 2, z: 8 };
+        data.adapter.applyCameraView(view);
+        await settleAsync(20);
+        return view;
+    };
+    return data;
+}
+
+test('a deferred model queued for one layout never loads into the next one (Sage SV1 round 3)', async () => {
+    const data = heldModelsFixture();
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: { placements: [placement('pl-old-0', 'asset-slow', REV_A, 1, 0, 2),
+            placement('pl-old-1', 'asset-shared', REV_A, 3, 0, 2)] },
+        assetCatalog: [asset('asset-slow', REV_A), asset('asset-shared', REV_A)],
+    });
+    await data.near();
+    data.adapter.loadVisibleDetail();
+    await settleAsync(20);
+    const held = Array.from(data.held.keys());
+    assert.strictEqual(held.length, 1, 'one load at a time, and it stalls');
+    const queued = held[0] === 'model://asset-slow' ? 'asset-shared' : 'asset-slow';   // queued behind it
+
+    // Another layout opens while it stalls, with the queued model somewhere else (a footprint there too).
+    await data.adapter.setScene({
+        layout: { placements: [placement('pl-new-1', queued, REV_A, 6, 0, 2),
+            placement('pl-new-2', queued, REV_A, 8, 0, 2)] },
+        assetCatalog: [asset(queued, REV_A)],
+    });
+    data.held.get(held[0])();
+    await settleAsync(40);
+    const started = data.held.has('model://' + queued);
+    if (started) {                                     // let it finish, to see what it would draw
+        data.held.get('model://' + queued)();
+        await settleAsync(40);
+    }
+    const groups = data.adapter.getDiagnostics().representationGroups;
+    assert.deepStrictEqual(groups.map(group => [group.assetId, group.placementIds, group.representation]),
+        [[queued, ['pl-new-1', 'pl-new-2'], 'footprint']],
+        'the new layout\'s models stay; nothing of the old one is drawn');
+    assert.strictEqual(started, false, 'the old layout\'s queued load never starts');
+    data.adapter.dispose();
+});
+
+test('a model that failed to load is not tried again on every camera move (Sage SV1 round 3)', async () => {
+    const data = fixture({
+        largeLayoutDetailThreshold: 2,
+        largeLayoutHeavyVisualBytes: 100,
+        assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage === 'footprint') return prototype(data.THREE, request.stage);
+            if (request.stage === 'overview') return { byteSize: 101 };   // heavy, and no mesh in it
+            return null;
+        },
+    });
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: { placements: [placement('pl-a', 'asset-broken', REV_A, 1, 0, 2),
+            placement('pl-b', 'asset-broken', REV_A, 4, 0, 2)] },
+        assetCatalog: [asset('asset-broken', REV_A)],
+    });
+    const view = data.adapter.getCameraView();
+    view.position = { x: 2, y: 2, z: 100000 };
+    view.target = { x: 2, y: 0, z: 2 };
+    data.adapter.applyCameraView(view);
+    await settleAsync(20);
+    for (let move = 0; move < 5; move += 1) {
+        view.position = { x: 2 + move * 0.1, y: 2, z: 8 };
+        data.adapter.applyCameraView(view);
+        await settleAsync(20);
+    }
+    data.adapter.zoomBy(2);
+    await settleAsync(20);
+    const started = data.adapter.getDiagnostics().loadTrace.filter(item => item.assetId === 'asset-broken'
+        && item.stage === 'overview' && item.status === 'started' && /^deferred_/.test(item.detail || ''));
+    assert.strictEqual(started.length, 1, 'tried once, then left a footprint');
+    assert.strictEqual(data.adapter.getDiagnostics().rendering.deferredGroupCount, 1);
+    data.adapter.dispose();
+});
+
+test('a layout still waiting for the appearance library is not yet the drawn scene, and one superseded while it '
+    + 'waits never replaces the newer one (Sage SV1 round 4)', async () => {
+    const store = libraryStore();
+    let release = null;
+    let loaded = false;
+    const held = new Promise(resolve => { release = resolve; });
+    const data = fixture({
+        facilityLibrary: { get: () => (loaded ? store.get() : null),
+            load: () => held.then(() => { loaded = true; return store.get(); }) },
+        assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage === 'footprint' || request.stage === 'overview') return prototype(data.THREE, request.stage);
+            return null;
+        },
+    });
+    data.adapter.mount(data.host);
+    const placed = () => data.adapter.getDiagnostics().representationGroups.flatMap(group => group.placementIds).sort();
+    await data.adapter.setScene({ layout: { placements: [placement('pl-old', 'asset-a', REV_A, 1, 0, 2)] },
+        assetCatalog: [asset('asset-a', REV_A)] });
+    let scene = data.adapter.sceneState();
+    assert.deepStrictEqual([scene.requested, scene.installed, scene.status], [1, 1, 'ready']);
+
+    // A layout with a facility scene waits for the library: the old scene is still drawn, and reads as ready.
+    const waiting = data.adapter.setScene({ layout: { placements: [placement('pl-scene', 'asset-a', REV_A, 2, 0, 2)],
+        extensions: { facilityScene: { version: 1, sceneId: 'evening' } } }, assetCatalog: [asset('asset-a', REV_A)] });
+    await settleAsync(5);
+    scene = data.adapter.sceneState();
+    assert.deepStrictEqual([scene.requested, scene.installed, scene.status], [2, 1, 'ready']);
+    assert.deepStrictEqual(placed(), ['pl-old']);
+
+    // A newer layout comes while it waits, and is built at once.
+    await data.adapter.setScene({ layout: { placements: [placement('pl-new', 'asset-a', REV_A, 3, 0, 2)] },
+        assetCatalog: [asset('asset-a', REV_A)] });
+    scene = data.adapter.sceneState();
+    assert.deepStrictEqual([scene.requested, scene.installed], [3, 3]);
+    release();
+    await waiting;
+    await settleAsync(10);
+    scene = data.adapter.sceneState();
+    assert.deepStrictEqual([scene.requested, scene.installed], [3, 3], 'the older request is dropped');
+    assert.deepStrictEqual(placed(), ['pl-new'], 'the newer layout stays drawn');
+    assert.deepStrictEqual([scene.mounted, scene.contextLost, scene.degraded, scene.disposed], [true, false, false, false]);
+    data.adapter.dispose();
+});
+
+// Scene A drawn, scene B asked for and waiting for the appearance library (held until release()).
+async function waitingSceneKit() {
+    const store = libraryStore();
+    let release = null;
+    let loaded = false;
+    const held = new Promise(resolve => { release = resolve; });
+    const data = fixture({
+        facilityLibrary: { get: () => (loaded ? store.get() : null),
+            load: () => held.then(() => { loaded = true; return store.get(); }) },
+        assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage === 'footprint' || request.stage === 'overview') return prototype(data.THREE, request.stage);
+            return null;
+        },
+    });
+    data.adapter.mount(data.host);
+    const show = (id, sceneId) => data.adapter.setScene({ layout: { placements: [placement(id, 'asset-a', REV_A, 1, 0, 2)],
+        extensions: sceneId ? { facilityScene: { version: 1, sceneId } } : {} }, assetCatalog: [asset('asset-a', REV_A)] });
+    const placed = () => data.adapter.getDiagnostics().representationGroups.flatMap(group => group.placementIds).sort();
+    // After the recovery, B still waits (A, if still drawn, is not current), and once the library comes B is drawn.
+    // A park tears the scene down, so nothing is drawn until B is.
+    const endsOnB = async (waiting, drawn = ['pl-a']) => {
+        await settleAsync(5);
+        let scene = data.adapter.sceneState();
+        assert.ok(scene.installed < scene.requested, 'the newer layout still waits: the drawn one is not current');
+        assert.deepStrictEqual(placed(), drawn);
+        release();
+        await waiting;
+        await settleAsync(10);
+        scene = data.adapter.sceneState();
+        assert.strictEqual(scene.installed, scene.requested);
+        assert.deepStrictEqual(placed(), ['pl-b'], 'the newest layout is drawn');
+        data.adapter.dispose();
+    };
+    return { data, show, endsOnB, placed, release: () => release() };
+}
+
+test('a WebGL context restored while a newer layout waits for the library rebuilds the newer one, not the drawn one '
+    + '(Sage SV1 round 5)', async () => {
+    const kit = await waitingSceneKit();
+    await kit.show('pl-a');
+    const waiting = kit.show('pl-b', 'evening');
+    await settleAsync(5);
+    const canvas = FakeRenderer.instances.at(-1).domElement;
+    canvas.dispatch('webglcontextlost');
+    canvas.dispatch('webglcontextrestored');
+    await kit.endsOnB(waiting);
+});
+
+test('a 3D view parked and remounted while a newer layout waits for the library replays the newer one '
+    + '(Sage SV1 round 5)', async () => {
+    const kit = await waitingSceneKit();
+    await kit.show('pl-a');
+    const waiting = kit.show('pl-b', 'evening');
+    await settleAsync(5);
+    assert.strictEqual(kit.data.adapter.park(), true);
+    assert.strictEqual(kit.data.adapter.resume(), true);
+    await kit.endsOnB(waiting, []);
+});
+
+test('a 3D view resumed while a newer layout waits for the library reloads the newer one (Sage SV1 round 5)',
+    async () => {
+        const kit = await waitingSceneKit();
+        await kit.show('pl-first');
+        assert.strictEqual(kit.data.adapter.suspend(), true);
+        await kit.show('pl-a');   // asked for while suspended: built on resume
+        const waiting = kit.show('pl-b', 'evening');
+        await settleAsync(5);
+        assert.strictEqual(kit.data.adapter.resume(), true);
+        await kit.endsOnB(waiting, ['pl-first']);
+    });
+
+test('a layout still waiting for the library when the 3D view is disposed is never installed, nor replayed by a '
+    + 'later mount (Sage SV1, dispose)', async () => {
+    const kit = await waitingSceneKit();
+    await kit.show('pl-a');
+    const waiting = kit.show('pl-b', 'evening');
+    await settleAsync(5);
+    kit.data.adapter.dispose();
+    kit.release();
+    await waiting;
+    await settleAsync(10);
+    let scene = kit.data.adapter.sceneState();
+    assert.deepStrictEqual([scene.disposed, scene.status], [true, 'disposed']);
+    assert.ok(scene.installed < scene.requested, 'nothing installed into the disposed view: no scene is current');
+    assert.deepStrictEqual(kit.placed(), [], 'B did not fill the disposed view');
+    kit.data.adapter.mount(kit.data.host);
+    await settleAsync(10);
+    assert.deepStrictEqual(kit.placed(), [], 'a later mount starts empty: nothing replayed');
+    scene = kit.data.adapter.sceneState();
+    assert.ok(scene.installed < scene.requested);
+    await kit.show('pl-c');
+    scene = kit.data.adapter.sceneState();
+    assert.deepStrictEqual([scene.installed === scene.requested, kit.placed()], [true, ['pl-c']]);
+    kit.data.adapter.dispose();
+});
+
+test('disposing a parked or never-mounted 3D view forgets its inputs: a later mount starts empty (Sage SV1, dispose)',
+    async () => {
+        const parked = await waitingSceneKit();
+        await parked.show('pl-a');
+        assert.strictEqual(parked.data.adapter.park(), true);
+        parked.data.adapter.dispose();
+        parked.data.adapter.mount(parked.data.host);
+        await settleAsync(10);
+        assert.deepStrictEqual(parked.placed(), [], 'A does not come back without a new setScene');
+        assert.strictEqual(parked.data.adapter.resume(), false, 'no parked view is kept');
+        const scene = parked.data.adapter.sceneState();
+        assert.ok(scene.installed < scene.requested, 'and no scene reads as current');
+        parked.data.adapter.dispose();
+
+        // Given a scene before it was ever mounted.
+        const store = libraryStore();
+        const data = fixture({ facilityLibrary: store, assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage === 'footprint' || request.stage === 'overview') return prototype(data.THREE, request.stage);
+            return null;
+        } });
+        await data.adapter.setScene({ layout: { placements: [placement('pl-early', 'asset-a', REV_A, 1, 0, 2)] },
+            assetCatalog: [asset('asset-a', REV_A)] });
+        data.adapter.dispose();
+        data.adapter.mount(data.host);
+        await settleAsync(10);
+        assert.deepStrictEqual(data.adapter.getDiagnostics().representationGroups.flatMap(group => group.placementIds),
+            [], 'the scene given before the mount is forgotten');
+        data.adapter.dispose();
+    });
+
+test('a remount\'s ghost never comes back after the view is disposed while the replayed layout waits for the '
+    + 'library (Sage SV1, final round)', async () => {
+    const kit = await waitingSceneKit();
+    await kit.show('pl-a');
+    const ghost = { assetId: 'asset-a', assetDefinitionRevision: REV_A, worldPosition: { x: 4, y: 0, z: 5 },
+        valid: true };
+    assert.strictEqual(kit.data.adapter.setGhostPlacement(ghost), true);
+    const waiting = kit.show('pl-b', 'evening');
+    await settleAsync(5);
+    assert.strictEqual(kit.data.adapter.park(), true);
+    assert.strictEqual(kit.data.adapter.resume(), true);   // replays B and, once it is in, the ghost
+    await settleAsync(5);
+    kit.data.adapter.dispose();
+    kit.release();
+    await waiting;
+    await settleAsync(10);
+    assert.strictEqual(kit.data.adapter.getDiagnostics().ghostActive, false, 'no ghost in the disposed view');
+    kit.data.adapter.mount(kit.data.host);
+    await settleAsync(10);
+    assert.strictEqual(kit.data.adapter.getDiagnostics().ghostActive, false, 'nor in a later mount');
+    kit.data.adapter.dispose();
+
+    // Without the dispose, the remount brings the ghost back once B is in.
+    const kept = await waitingSceneKit();
+    await kept.show('pl-a');
+    assert.strictEqual(kept.data.adapter.setGhostPlacement(ghost), true);
+    const later = kept.show('pl-b', 'evening');
+    await settleAsync(5);
+    kept.data.adapter.park();
+    kept.data.adapter.resume();
+    kept.release();
+    await later;
+    await settleAsync(10);
+    assert.deepStrictEqual([kept.data.adapter.getDiagnostics().ghostActive, kept.placed()], [true, ['pl-b']]);
+    kept.data.adapter.dispose();
+});
+
+test('an activity or path preview still loading when its view is disposed or remounted is not attached to any '
+    + 'view (Sage SV1, final round audit)', async () => {
+    const actorPlacement = placement('actor-placement', 'activity-asset', REV_A, 40, 0, 40);
+    const preview = {
+        previewId: 'nav-preview-stale', layoutRevision: REV_B, actorPlacementId: 'actor-placement',
+        actorClass: 'pedestrian', points: [{ x: 1, z: 2 }, { x: 3, z: 2 }], loopMode: 'one_way',
+        direction: 'forward', visualForwardAxis: '+X', validationStatus: 'validated', pathsVisible: true,
+    };
+    const loads = [
+        // Activity was already refused (its actor visuals go with the view); the path preview was attached to a view
+        // mounted since (c55c445 and before).
+        ['activity', adapter => adapter.activity.load(activityPayload(), REV_B), /^facility_activity_/,
+            'facilityActivityScenarioId'],
+        ['path preview', adapter => adapter.navigationPreview.load(preview, REV_B),
+            /^facility_navigation_preview_view_unavailable$/, 'facilityNavigationPreviewId'],
+    ];
+    for (const [name, load, code, marker] of loads) {
+        for (const ending of ['dispose', 'remount']) {
+            const data = fixture({
+                assetResolver: request => {
+                    if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+                    if (request.stage === 'overview') return prototype(data.THREE, request.assetId);
+                    return null;
+                },
+            });
+            data.adapter.mount(data.host);
+            await data.adapter.setScene({ layout: { placements: [actorPlacement], routes: [], floorMarkings: [] },
+                assetCatalog: [asset('activity-asset', REV_A)] });
+            while (data.scheduler.pendingCount) data.scheduler.flush();
+            const loading = load(data.adapter);
+            if (ending === 'dispose') {
+                data.adapter.dispose();
+            } else {
+                assert.strictEqual(data.adapter.park(), true);
+                assert.strictEqual(data.adapter.resume(), true);
+            }
+            await assert.rejects(loading, error => Boolean(error && code.test(String(error.code))),
+                name + ' after a ' + ending);
+            if (ending === 'remount') {
+                await settleAsync(10);
+                data.scheduler.flush(100);
+                let attached = 0;
+                FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+                    if (object.userData && object.userData[marker]) attached += 1;
+                });
+                assert.strictEqual(attached, 0, name + ': nothing in the view mounted since');
+                data.adapter.dispose();
+            }
+        }
+    }
+});
+
+test('an activity whose actor models are still loading draws none of them into a view mounted since (Sage SV1, '
+    + 'final round 2)', async () => {
+    const data = heldModelsFixture();
+    data.adapter.mount(data.host);
+    const ids = [0, 1, 2, 3, 4];
+    await data.adapter.setScene({
+        layout: { placements: ids.map(i => placement('pl-' + i, 'asset-heavy-' + i, REV_A, 1 + 4 * i, 0, 2)),
+            routes: [], floorMarkings: [] },
+        assetCatalog: ids.map(i => asset('asset-heavy-' + i, REV_A)),
+    });
+    const view = data.adapter.getCameraView();
+    view.position = { x: 2, y: 2, z: 100000 };
+    view.target = { x: 2, y: 0, z: 2 };
+    data.adapter.applyCameraView(view);
+    await settleAsync(20);
+    assert.strictEqual(data.adapter.getDiagnostics().rendering.deferredGroupCount, 5, 'five footprints');
+    const payload = activityPayload({ placementId: 'pl-0', assetId: 'asset-heavy-0' });
+    for (const i of ids.slice(1)) {
+        const motion = motionPayload({ packageId: 'fmp-actor-' + i, movementId: 'movement-actor-' + i,
+            routeId: 'route-actor-' + i, layoutRevision: REV_B, vehiclePlacementId: 'pl-' + i, duration: 5 });
+        motion.package.movement.poses = [
+            { x: 1 + 4 * i, z: 2, heading: 0, gear: 'forward' },
+            { x: 3 + 4 * i, z: 2, heading: 0, gear: 'forward' },
+        ];
+        motion.package.movement.cumulativeDistance = [0, 2];
+        motion.package.movement.distanceMeters = 2;
+        payload.actorPayloads[motion.package.packageId] = motion;
+        payload.scenario.actors.push(Object.assign({}, payload.scenario.actors[0], {
+            actorId: 'actor-' + i, label: 'Actor ' + i, motionPackageId: motion.package.packageId,
+            placementId: 'pl-' + i, routeId: 'route-actor-' + i,
+            assetDefinitionRef: { assetId: 'asset-heavy-' + i, assetDefinitionRevision: REV_A },
+        }));
+    }
+    const loading = data.adapter.activity.load(payload, REV_B);
+    loading.catch(() => {});
+    await settleAsync(10);
+    assert.strictEqual(data.held.size, 4, 'four workers wait for their models; the fifth is next');
+    assert.strictEqual(data.adapter.park(), true);
+    assert.strictEqual(data.adapter.resume(), true);
+    await data.adapter.setScene({ layout: { placements: [], routes: [], floorMarkings: [] }, assetCatalog: [] });
+    for (let round = 0; round < 5; round += 1) {
+        const waiting = Array.from(data.held.values());
+        data.held.clear();
+        waiting.forEach(release => release());
+        await settleAsync(20);
+    }
+    let failure = null;
+    await loading.catch(error => { failure = error; });
+    await settleAsync(10);
+    assert.deepStrictEqual(
+        data.adapter.getDiagnostics().representationGroups.flatMap(group => group.placementIds), [],
+        'the empty layout shows nothing (a82c4c6 drew pl-4)');
+    assert.strictEqual(failure && failure.code, 'facility_activity_view_unavailable');
+    data.adapter.dispose();
+});
+
+test('a path preview whose actor model loads while the layout is replaced in the same view is not attached '
+    + '(Sage SV1, final round 3)', async () => {
+    const data = heldModelsFixture();
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: { placements: [0, 1, 2].map(i => placement('pl-' + i, 'asset-heavy-' + i, REV_A, 1 + 4 * i, 0, 2)),
+            routes: [], floorMarkings: [] },
+        assetCatalog: [0, 1, 2].map(i => asset('asset-heavy-' + i, REV_A)),
+    });
+    const view = data.adapter.getCameraView();
+    view.position = { x: 2, y: 2, z: 100000 };
+    view.target = { x: 2, y: 0, z: 2 };
+    data.adapter.applyCameraView(view);
+    await settleAsync(20);
+    const loading = data.adapter.navigationPreview.load({
+        previewId: 'nav-preview-replaced', layoutRevision: REV_B, actorPlacementId: 'pl-0',
+        actorClass: 'pedestrian', points: [{ x: 1, z: 2 }, { x: 3, z: 2 }], loopMode: 'one_way',
+        direction: 'forward', visualForwardAxis: '+X', validationStatus: 'validated', pathsVisible: true,
+    }, REV_B);
+    let failure = null;
+    const settled = loading.catch(error => { failure = error; });
+    await settleAsync(10);
+    assert.ok(data.held.has('model://asset-heavy-0'), 'the preview waits for its actor model');
+    // The same view gets a new layout: pl-0 is now another model.
+    const replacing = data.adapter.setScene({
+        layout: { placements: [placement('pl-0', 'asset-heavy-9', REV_A, 30, 0, 2)], routes: [], floorMarkings: [] },
+        assetCatalog: [asset('asset-heavy-9', REV_A)],
+    });
+    for (let round = 0; round < 10 && !data.held.has('model://asset-heavy-9'); round += 1) await settleAsync(5);
+    data.held.get('model://asset-heavy-9')();
+    await replacing;
+    await settleAsync(20);
+    data.held.get('model://asset-heavy-0')();
+    await settled;
+    await settleAsync(10);
+    data.scheduler.flush(100);
+    let attached = 0;
+    FakeRenderer.instances.at(-1).lastRender.scene.traverse(object => {
+        if (object.userData && object.userData.facilityNavigationPreviewId) attached += 1;
+    });
+    assert.strictEqual(attached, 0, 'the old preview is not attached to the new layout (3ce0b30 attached it)');
+    assert.strictEqual(failure && failure.code, 'facility_navigation_preview_scene_changed');
+    data.adapter.dispose();
+});
+
+test('component materials asked for before a park/resume never come from the view mounted since (Sage SV1, final '
+    + 'round 3)', async () => {
+    const data = heldModelsFixture();
+    data.adapter.mount(data.host);
+    await data.adapter.setScene({
+        layout: { placements: [0, 1, 2].map(i => placement('pl-' + i, 'asset-heavy-' + i, REV_A, 1 + 4 * i, 0, 2)),
+            routes: [], floorMarkings: [] },
+        assetCatalog: [0, 1, 2].map(i => asset('asset-heavy-' + i, REV_A)),
+    });
+    const view = data.adapter.getCameraView();
+    view.position = { x: 2, y: 2, z: 100000 };
+    view.target = { x: 2, y: 0, z: 2 };
+    data.adapter.applyCameraView(view);
+    await settleAsync(20);
+    let failure = null;
+    const asking = data.adapter.getComponentMaterials('pl-0').catch(error => { failure = error; });
+    await settleAsync(10);
+    assert.ok(data.held.has('model://asset-heavy-0'), 'it waits for the model');
+    const first = data.held.get('model://asset-heavy-0');
+    data.held.clear();
+    assert.strictEqual(data.adapter.park(), true);
+    assert.strictEqual(data.adapter.resume(), true);
+    // The view mounted since loads the same model first.
+    await data.near();
+    data.adapter.loadVisibleDetail();
+    for (let round = 0; round < 10; round += 1) {
+        const waiting = Array.from(data.held.values());
+        data.held.clear();
+        waiting.forEach(release => release());
+        await settleAsync(20);
+        data.adapter.loadVisibleDetail();
+    }
+    assert.ok(data.adapter.getDiagnostics().representationGroups.some(group => group.placementIds.includes('pl-0')
+        && group.representation === 'overview'), 'the new view has the model');
+    first();
+    await asking;
+    assert.ok(failure, 'refused');
+    assert.strictEqual(failure.message, 'The model changed while it loaded; select it again.',
+        '3ce0b30 read the model of the view mounted since: ' + (failure && failure.message));
+    data.adapter.dispose();
+});
+
+test('a path preview prepared just before a finish-only regroup is not attached next to the regrouped actor '
+    + '(Sage SV1, final round 4)', async () => {
+    const data = await libraryFixture();
+    const input = { layout: { placements: [finishPlacement('one', 'rack', 0, null), finishPlacement('two', 'rack', 3, null)] },
+        assetCatalog: [asset('rack', REV_A)] };
+    await data.adapter.setScene(input);
+    await settleAsync();
+    data.scheduler.flush();
+    const generation = () => data.adapter.sceneState().installed;
+    const before = generation();
+    const loading = data.adapter.navigationPreview.load({
+        previewId: 'nav-preview-finish', layoutRevision: REV_B, actorPlacementId: 'two',
+        actorClass: 'pedestrian', points: [{ x: 3, z: 0 }, { x: 6, z: 0 }], loopMode: 'one_way',
+        direction: 'forward', visualForwardAxis: '+X', validationStatus: 'validated', pathsVisible: true,
+    }, REV_B);
+    let failure = null;
+    const settled = loading.catch(error => { failure = error; });
+    // A finish-only edit lands before the preview attaches: its actor's group is regrouped, not reloaded.
+    const finished = JSON.parse(JSON.stringify(input));
+    finished.layout.placements[1].appearance = { appearanceId: 'brass-brushed' };
+    await data.adapter.setScene(finished);
+    await settled;
+    await settleAsync(10);
+    data.scheduler.flush(100);
+    assert.strictEqual(data.adapter.getDiagnostics().appearanceLibrary.finishGroups, 1, 'regrouped');
+    assert.strictEqual(generation(), before + 1, 'one scene request, no reload');
+    let attached = 0;
+    renderedScene().traverse(object => {
+        if (object.userData && object.userData.facilityNavigationPreviewId) attached += 1;
+    });
+    assert.strictEqual(attached, 0, 'the old actor is not attached next to the regrouped one (5f7122d attached it)');
+    assert.strictEqual(failure && failure.code, 'facility_navigation_preview_scene_changed');
+    data.adapter.dispose();
+
+    // The same for an activity whose actor is regrouped while it attaches.
+    const other = await libraryFixture();
+    await other.adapter.setScene(input);
+    await settleAsync();
+    other.scheduler.flush();
+    let activityFailure = null;
+    const activity = other.adapter.activity.load(activityPayload({ placementId: 'two', assetId: 'rack' }), REV_B)
+        .catch(error => { activityFailure = error; });
+    await other.adapter.setScene(finished);
+    await activity;
+    await settleAsync(10);
+    other.scheduler.flush(100);
+    let actors = 0;
+    renderedScene().traverse(object => {
+        if (object.userData && object.userData.facilityActivityScenarioId) actors += 1;
+    });
+    assert.strictEqual(actors, 0, 'no activity attached next to the regrouped actor');
+    assert.strictEqual(activityFailure && activityFailure.code, 'facility_activity_scene_changed');
+    other.adapter.dispose();
+});
+
+test('a path preview of a finished actor whose finish changes before it attaches is not attached from the old '
+    + 'record (Sage SV1, final round 5)', async () => {
+    const data = await libraryFixture();
+    const input = { layout: { placements: [finishPlacement('plain', 'rack', 0, null),
+        finishPlacement('brass', 'rack', 3, { appearanceId: 'brass-brushed' })] }, assetCatalog: [asset('rack', REV_A)] };
+    await data.adapter.setScene(input);
+    await settleAsync();
+    data.scheduler.flush();
+    const loading = data.adapter.navigationPreview.load({
+        previewId: 'nav-preview-refinished', layoutRevision: REV_B, actorPlacementId: 'brass',
+        actorClass: 'pedestrian', points: [{ x: 3, z: 0 }, { x: 6, z: 0 }], loopMode: 'one_way',
+        direction: 'forward', visualForwardAxis: '+X', validationStatus: 'validated', pathsVisible: true,
+    }, REV_B);
+    let failure = null;
+    const settled = loading.catch(error => { failure = error; });
+    // Its finish changes before the preview attaches: the plain rack's group is kept, the brass one is replaced.
+    const changed = JSON.parse(JSON.stringify(input));
+    changed.layout.placements[1].appearance = { appearanceId: 'wood-oak', grain: 'length' };
+    await data.adapter.setScene(changed);
+    await settled;
+    await settleAsync(10);
+    data.scheduler.flush(100);
+    let attached = 0;
+    renderedScene().traverse(object => {
+        if (object.userData && object.userData.facilityNavigationPreviewId) attached += 1;
+    });
+    assert.strictEqual(attached, 0, 'not attached from the replaced record (996b2e3 attached it)');
+    assert.strictEqual(failure && failure.code, 'facility_navigation_preview_scene_changed');
+    data.adapter.dispose();
+});
+
 test('manual preview waits for an in-flight deferred exact visual', async () => {
     const data = fixture({
         largeLayoutDetailThreshold: 2,

@@ -82,6 +82,7 @@ class FacilityReadGateway:
         self.closed, self.calls = False, 0
         self.packages = {}  # whole planned designs, staged by preview_planned_design (assisted_tools.py)
         self.pdf, self.pdfs = None, []  # the PDFs prepared this turn, shown as file cards under the reply
+        self.shot_sets = []  # Sage's 3D shots this turn (SV2), shown as rows of pictures under the reply: (block, ids)
         self.credential_check = None
         self.receipts = []
         # Set by the pilot from what the app window sent with the turn: whether it has this layout open (Sage's
@@ -146,6 +147,8 @@ class FacilityReadGateway:
                         if not work.cancelled():
                             work.exception()
                     raise
+                if name == "show_facility_views":
+                    data = await self._take_shots(data, step)
                 self.check()
                 result = {"ok": True, "data": data}
                 if len(json.dumps(result, allow_nan=False).encode()) > 65536:
@@ -308,12 +311,113 @@ class FacilityReadGateway:
         except ValueError as exc:
             raise PilotError("show_views_refused", str(exc), 422) from exc
         result["liveView"] = sage_views.live_view(result["views"], bool(self.app_window))
-        result["pictures"] = "None: you have not seen these areas. Never describe how they look."
+        result["pictures"] = "None: you have not seen these areas. Never describe how they look."  # SV3: _take_shots
         if last:
             result["lastChange"] = True
         if matched:
             result["query"] = {"text": query, "matchedBy": matched, "idCount": len(ids)}
         return dict(result, identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=True)
+
+    async def _take_shots(self, data, step):
+        """Sage's show_facility_views, SV3 (docs/sage-basic-shapes-plan.md): the app window that has the layout open
+        takes a 3D shot of each view (SV1), asked through the running step; the tool waits up to 60 s for them. Sage
+        gets one contact sheet beside the JSON (pictures says what it got), and the chat a row of the full shots (SV2).
+        With no window, or no shots, the views come back without pictures, and pictures says so."""
+        import base64
+        from ai_inspector.facility_layout import sage_shots
+        views, live = data.get("views") or [], data.get("liveView") or {}
+        store = getattr(self.runtime, "sage_shots", None)
+        never = " You have not seen these areas: never describe how they look."
+        if live.get("moves") is not True or not views:
+            data["pictures"] = ("None: no app window has this layout open, so no shots were taken." + never
+                                + " Tell the user.")
+            return data
+        if store is None or step is None or self.progress is None:
+            data["pictures"] = "None: this chat cannot take 3D shots." + never
+            return data
+        # The turn keeps 15 s for the reply; with less than that left, the window is not asked (round 2).
+        wait = min(sage_shots.WAIT_SECONDS, self.deadline - time.monotonic() - 15)
+        if wait <= 0:
+            data["pictures"] = "None: this turn had no time left to take 3D shots." + never
+            return data
+        # Round 3: one cutoff for asking the window and waiting for it, and one way out. Every exit (no answer in
+        # time, a cancel, no shots, a picture that cannot be read or put on the contact sheet, an error) closes the
+        # request in the finally: a window that answers later is refused, and its stored shots are deleted. The shots
+        # are kept only at the very end, once Sage's picture and the chat's row are made, and before either is shown.
+        cutoff = time.monotonic() + wait
+        request_id, answer = store.open(self.principal, data["identity"], views, wait)
+        try:
+            async def ask():
+                await self.progress.tool_capture(step, store.capture_request(request_id))
+                return await answer
+            try:
+                got = await asyncio.wait_for(ask(), max(0.0, cutoff - time.monotonic()))
+            except TimeoutError:
+                got = {"complete": False, "reason": "timeout", "shots": []}
+            # The window glided to the main view before the shots, and only a complete capture ends there: then the
+            # done step does not move it again. Anything else (Back, a failure, no answer) says nothing about where
+            # it is.
+            live["captured"] = True
+            shots = [shot for shot in got.get("shots") or [] if 0 <= shot.get("index", -1) < len(views)]
+            reason = sage_shots.REASONS.get(got.get("reason")) or sage_shots.REASONS["failed"]
+            if got.get("complete") is not True:
+                live["moves"] = False
+                live.pop("to", None)
+                live["say"] = (f"The shots stopped: {reason}. Say so in one short sentence; do not say where the "
+                               f"user's 3D view is.")
+            if not shots:
+                data["pictures"] = f"None: {reason}." + never
+                return data
+            labels = [f"{shot['index'] + 1}  {views[shot['index']]['label']} (from the {views[shot['index']]['from']})"
+                      for shot in shots]
+            # Reading the shots and making the contact sheet count against the same cutoff, checked again right
+            # before anything is kept: past it, nothing is (final round).
+            async def picture():
+                images = await asyncio.to_thread(store.images, request_id, [shot["index"] for shot in shots])
+                return await asyncio.to_thread(sage_shots.contact_sheet, images, labels)
+            try:
+                sheet = await asyncio.wait_for(picture(), max(0.0, cutoff - time.monotonic()))
+            except TimeoutError:
+                sheet = None
+            if sheet is None or time.monotonic() > cutoff:
+                data["pictures"] = "None: the shots came too late to look at in this turn." + never
+                return data
+            ids = {identifier for shot in shots for identifier in views[shot["index"]].get("ids") or []}
+            block = sage_shots.chat_block(request_id, data["identity"], views, shots)
+            missing = [f"{index + 1} {view['label']}" for index, view in enumerate(views)
+                       if index not in {shot["index"] for shot in shots}]
+            data["shots"] = {"count": len(shots), "views": len(views),
+                             "shownInChat": "as a row of pictures under your reply; the user clicks one to go there"}
+            data["pictures"] = (
+                f"Attached: one contact sheet of {len(shots)} 3D shot{'s' if len(shots) != 1 else ''}, each under "
+                f"its view's number and label (the roof is hidden in every shot). Look at it before you reply, and "
+                f"describe only what a shot shows."
+                + (f" Views without a shot ({reason}): {', '.join(missing)}; you have not seen them." if missing
+                   else ""))
+            # Final round 6: nothing is shown before the set is kept, one rename out of .pending in the store's files
+            # thread, waited for within the cutoff. A keep that fails or comes too late shows nothing, and the store
+            # deletes its set. Final round 9: "kept" is final, so what is shown is what is kept. Final round 10: the
+            # keep waits until this cutoff itself and past it says "late", however its wait ended; nothing is awaited
+            # between its "kept" and showing the set.
+            kept = await store.keep(request_id, deadline=cutoff)
+            if kept != "kept":
+                data.pop("shots", None)
+                data["pictures"] = ("None: the shots came too late to look at in this turn." if kept == "late"
+                                    else "None: the shots could not be saved.") + never
+                return data
+            self.last_image = {"mimeType": "image/jpeg", "data": base64.b64encode(sheet).decode("ascii")}
+            self._keep_shots(block, ids)
+            return data
+        finally:
+            store.close(request_id)
+
+    def _keep_shots(self, block, ids):
+        """SV2: a later set in the same turn that retakes any of the same items folds the earlier set (the shots
+        before a fix); a set of another area stays open."""
+        for kept, kept_ids in self.shot_sets:
+            if kept_ids & ids:
+                kept["folded"] = True
+        self.shot_sets.append((block, ids))
 
     def _read_data(self, name, arguments):
         from .site_tools import CATALOG_TOOLS, NAMES as SITE_NAMES, STEP_TOOLS, read_site

@@ -57,6 +57,8 @@ function fixture(options = {}) {
         _trainFacilityLayoutAuthoringApp: app, _trainIsFacilityLayoutMode: () => true,
         _chatMemoryRuntime: memoryRuntime, _parseAgentStreamEventLine: runtime.parseEventLine,
         ensureAgentWorkingState: () => working, setWaiting() {}, removeTypingIndicator() {},
+        // What a step does in the facility view (Sage's glide and 3D shots) is tested on its own: here, nothing.
+        _trainFacilityShowFromStep() {}, _trainFacilityCaptureFromStep() {},
         createStreamingAssistantMessage: () => {
             const bubble = { message: { meta: {} }, text: '', discarded: false,
                 appendInitialText(text) { bubble.text += text; }, appendText(text) { bubble.text += text; },
@@ -363,3 +365,35 @@ test('partial answers display budget failures rather than mislabeling them as us
     assert.equal(f.requests.length, 1);
     f.assertClean();
 });
+
+// SV2/SV3 round 3: a 3D capture asked for in the turn is stopped however the stream ends, so it never moves the view
+// or posts shots after the turn.
+const captureStep = { event: 'agent_step', step: { id: 7, kind: 'tool', state: 'running', label: 'Taking 3D shots of A',
+    capture: { requestId: 'ab'.repeat(16), url: '/api/facility-layouts/site/gym/sage-shots/' + 'ab'.repeat(16) } } };
+for (const [name, events, after] of [
+    ['completed', [captureStep, { event: 'response_completed', final: { response: 'done', tool_calls: [] } }]],
+    ['response_error', [captureStep, { event: 'response_error', code: 'codex_runtime_stopped', retryable: false }]],
+    ['response_cancelled', [captureStep, { event: 'response_cancelled' }]],
+    ['reader failure', [captureStep], () => { throw new TypeError('read failed'); }],
+    ['Stop', [captureStep], 'stop'],
+]) {
+    test('the 3D capture of a turn is stopped when its stream ends: ' + name + ' (SV2/SV3 round 3)', async () => {
+        const f = fixture({ fetchStream: (request, stream) => stream(events,
+            after === 'stop' ? () => waitForAbort(request.signal) : after) });
+        const signals = [];
+        f.context._trainFacilityCaptureFromStep = (step, signal) => {
+            if (step.capture) signals.push(signal);
+        };
+        const sending = f.send().catch(error => error);
+        if (after === 'stop') {
+            for (let i = 0; i < 50 && !f.session.activeStream; i += 1) await tick();
+            for (let i = 0; i < 50 && !signals.length; i += 1) await tick();
+            assert.equal(signals[0].aborted, false, 'running while the turn runs');
+            f.session.activeStream.controller.abort();   // the user pressed Stop
+        }
+        await sending;
+        assert.equal(signals.length, 1);
+        assert.equal(signals[0].aborted, true, 'stopped at the end of the stream');
+        f.assertClean();
+    });
+}

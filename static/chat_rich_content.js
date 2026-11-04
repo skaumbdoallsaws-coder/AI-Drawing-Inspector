@@ -14,7 +14,13 @@
         'entity_reference',
         'actions',
         'file',
+        'shots',
     ]);
+    // Sage's 3D shots (docs/sage-basic-shapes-plan.md, SV2): saved in the app, one JPEG per view.
+    // A saved 3D shot of Sage's: the site and layout ids (at most 128 characters each, every one at most 3 when
+    // percent-encoded), then the request id and the view's number.
+    const SHOT_URL = /^\/api\/facility-layouts\/[A-Za-z0-9._~%-]{1,384}\/[A-Za-z0-9._~%-]{1,384}\/sage-shots\/[0-9a-f]{32}\/[0-5]\.jpg$/;
+    const SHOT_URL_MAX = 841;
     const SOURCE_TYPES = new Set([
         'manufacturer',
         'supplier',
@@ -497,6 +503,47 @@
         };
     }
 
+    function shotPoint(value) {
+        if (!value || typeof value !== 'object') return null;
+        const point = {};
+        for (const key of ['x', 'y', 'z']) {
+            const number = value[key];
+            if (typeof number !== 'number' || !Number.isFinite(number) || Math.abs(number) > 1e6) return null;
+            point[key] = number;
+        }
+        return point;
+    }
+
+    // A shot's camera, for the click that moves the 3D view there: plan metres, the camera above its target.
+    function shotCamera(value) {
+        if (!value || typeof value !== 'object') return null;
+        const position = shotPoint(value.position);
+        const target = shotPoint(value.target);
+        const fov = value.fov;
+        if (!position || !target || typeof fov !== 'number' || !(fov > 1 && fov < 179) || position.y <= target.y) {
+            return null;
+        }
+        return { position, target, fov };
+    }
+
+    function normalizeShots(raw) {
+        const shots = (Array.isArray(raw.shots) ? raw.shots : []).slice(0, 6).map(item => {
+            if (!item || typeof item !== 'object') return null;
+            const url = item.url;
+            const label = cleanText(item.label, 120);
+            if (!label || typeof url !== 'string' || url.length > SHOT_URL_MAX || !SHOT_URL.test(url)) return null;
+            const shot = { label, url, from: cleanText(item.from, 20), roofHidden: item.roofHidden === true,
+                camera: shotCamera(item.camera) };
+            for (const key of ['width', 'height']) {
+                if (Number.isInteger(item[key]) && item[key] > 0 && item[key] <= 4096) shot[key] = item[key];
+            }
+            return shot;
+        }).filter(Boolean);
+        if (!shots.length) return null;
+        return { type: 'shots', siteId: cleanText(raw.siteId, 128), layoutId: cleanText(raw.layoutId, 128),
+            revision: cleanText(raw.revision, 160), folded: raw.folded === true, shots };
+    }
+
     function normalizeBlock(raw) {
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
         const type = cleanText(raw.type, 40).toLowerCase();
@@ -505,6 +552,7 @@
             const text = cleanText(raw.text, 50000);
             return text ? { type, text } : null;
         }
+        if (type === 'shots') return normalizeShots(raw);
         if (type === 'file') {
             const url = cleanText(raw.url, 600);
             const fileName = cleanText(raw.fileName || raw.title, 160);
@@ -639,6 +687,89 @@
             + '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
         card.appendChild(save);
         return card;
+    }
+
+    // Sage's 3D shots (SV2): a row of labelled pictures under the reply. A click moves the user's 3D view there
+    // (options.onShotView, true when it could); a second click, or a click when the view cannot go there, opens the
+    // shot full size. A set Sage retook later in the turn (the shots before a fix) is folded.
+    function renderShots(documentRef, block, options) {
+        const section = element(documentRef, 'section', 'agent-rich-block agent-shots');
+        let holder = section;
+        if (block.folded) {
+            holder = element(documentRef, 'details', 'agent-shots-earlier');
+            holder.appendChild(element(documentRef, 'summary', 'agent-shots-summary',
+                'Earlier 3D shots (' + block.shots.length + ')'));
+            section.appendChild(holder);
+        }
+        const row = element(documentRef, 'div', 'agent-shots-row');
+        const buttons = [];
+        block.shots.forEach(shot => {
+            const button = element(documentRef, 'button', 'agent-shot');
+            button.type = 'button';
+            button.title = 'Show ' + shot.label + ' in 3D. Click again for full size.';
+            button.setAttribute('aria-pressed', 'false');
+            const image = documentRef.createElement('img');
+            image.src = shot.url;
+            image.alt = shot.label;
+            image.loading = 'lazy';
+            image.decoding = 'async';
+            button.appendChild(image);
+            button.appendChild(element(documentRef, 'span', 'agent-shot-label', shot.label));
+            button.addEventListener('click', () => {
+                if (button.getAttribute('aria-pressed') === 'true') {
+                    openShot(documentRef, shot);
+                    return;
+                }
+                const go = shot.camera && options && typeof options.onShotView === 'function';
+                const view = go ? { siteId: block.siteId, layoutId: block.layoutId, revision: block.revision,
+                    label: shot.label, from: shot.from, roofHidden: shot.roofHidden, camera: shot.camera } : null;
+                Promise.resolve(go ? options.onShotView(view) : false).then(moved => {
+                    if (!moved) {
+                        openShot(documentRef, shot);
+                        return;
+                    }
+                    buttons.forEach(other => other.setAttribute('aria-pressed', other === button ? 'true' : 'false'));
+                }, () => openShot(documentRef, shot));
+            });
+            buttons.push(button);
+            row.appendChild(button);
+        });
+        holder.appendChild(row);
+        return section;
+    }
+
+    // A shot full size, over the page; Close, Escape or a click beside it closes it.
+    function openShot(documentRef, shot) {
+        const body = documentRef.body;
+        if (!body) return null;
+        const overlay = element(documentRef, 'div', 'agent-shot-full');
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', shot.label);
+        const image = documentRef.createElement('img');
+        image.src = shot.url;
+        image.alt = shot.label;
+        const close = element(documentRef, 'button', 'agent-shot-full-close', 'Close');
+        close.type = 'button';
+        const view = documentRef.defaultView;
+        const onKey = event => {
+            if (event && event.key === 'Escape') shut();
+        };
+        const shut = () => {
+            if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            if (view && typeof view.removeEventListener === 'function') view.removeEventListener('keydown', onKey, true);
+        };
+        close.addEventListener('click', shut);
+        overlay.addEventListener('click', event => {
+            if (event && event.target === overlay) shut();
+        });
+        if (view && typeof view.addEventListener === 'function') view.addEventListener('keydown', onKey, true);
+        overlay.appendChild(image);
+        overlay.appendChild(element(documentRef, 'div', 'agent-shot-full-label', shot.label));
+        overlay.appendChild(close);
+        body.appendChild(overlay);
+        if (typeof close.focus === 'function') close.focus();
+        return overlay;
     }
 
     function renderSources(documentRef, block) {
@@ -1245,6 +1376,7 @@
         }
         if (block.type === 'sources') return renderSources(documentRef, block);
         if (block.type === 'file') return renderFile(documentRef, block);
+        if (block.type === 'shots') return renderShots(documentRef, block, options);
         if (block.type === 'facts') return renderFacts(documentRef, block);
         if (block.type === 'visualization') return renderVisualization(documentRef, block, options);
         if (block.type === 'table') return renderTable(documentRef, block, options);

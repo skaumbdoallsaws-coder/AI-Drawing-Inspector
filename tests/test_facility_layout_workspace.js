@@ -2325,6 +2325,66 @@ function catalog() {
     ];
 }
 
+// Sage's 3D shots (SV1) in the fixture: animation frames that run themselves (an error in one is caught, as a browser
+// reports it), a 3D view that is drawn and can be copied, waits that end at once or on a gate, and a JPEG encoder that
+// notes what each shot saw. kit.onWait(milliseconds, count) runs as each wait starts.
+function sageShotsFixture(options) {
+    const data = fixture();
+    const workspace = data.workspace;
+    const three = data.three;
+    let time = 0;
+    const kit = { data, workspace, three, waits: [], shots: [], frameErrors: [], gates: [], onWait: null };
+    data.documentRef.defaultView = Object.assign({
+        requestAnimationFrame(callback) {
+            setImmediate(() => {
+                try { callback(time += 100); } catch (error) { kit.frameErrors.push(error); }
+            });
+            return 1;
+        },
+        cancelAnimationFrame() {},
+        matchMedia() { return { matches: false }; },
+    }, options && options.view);
+    three.getDiagnostics = () => ({ mounted: true, status: 'ready', pendingLoads: 0 });
+    three.renderRecordingFrame = () => three.getRecordingCanvas();
+    workspace._sageShotWait = milliseconds => {
+        kit.waits.push(milliseconds);
+        if (kit.onWait) kit.onWait(milliseconds, kit.waits.length);
+        return kit.gates.length ? kit.gates.shift() : Promise.resolve();
+    };
+    workspace._encodeSageShot = async () => {
+        kit.shots.push({ camera: clone(three.cameraView), roof: workspace.layerVisibility.overhead });
+        return { blob: { type: 'image/jpeg' }, width: 1280, height: 720 };
+    };
+    kit.views = [
+        { label: 'Assembly Cell A06', from: 'south', roofHidden: false,
+            camera: { position: { x: 20, y: 5, z: 10 }, target: { x: 20, y: 0.7, z: 18 }, fov: 50 } },
+        { label: 'Dock Door S1', from: 'east', roofHidden: true,
+            camera: { position: { x: 60, y: 30, z: 0 }, target: { x: 40, y: 1, z: 0 }, fov: 50 } },
+    ];
+    kit.request = extra => Object.assign({ siteId: 'site-a', layoutId: 'fl-workspace', revision: 'rev-1',
+        views: kit.views }, extra);
+    kit.gate = () => {
+        let open = null;
+        kit.gates.push(new Promise(resolve => { open = resolve; }));
+        return open;
+    };
+    return kit;
+}
+
+// PROMISE, or a failure naming LABEL if it has not ended in MILLISECONDS (a capture stranded for good).
+function within(promise, label, milliseconds = 3000) {
+    let timer = null;
+    return Promise.race([promise, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label + ' never ended')), milliseconds);
+    })]).finally(() => clearTimeout(timer));
+}
+
+async function until(predicate, rounds = 400) {
+    for (let round = 0; round < rounds && !predicate(); round += 1) {
+        await new Promise(resolve => setImmediate(resolve));
+    }
+}
+
 function fixture(options) {
     const documentRef = new FakeDocument();
     const root = documentRef.createElement('div');
@@ -7655,6 +7715,806 @@ async function main() {
             const jumped = data.three.appliedCameraViews[data.three.appliedCameraViews.length - 1];
             assert.deepStrictEqual([jumped.position, jumped.target], [view.camera.position, view.camera.target]);
             assert.strictEqual(workspace.layerVisibility.overhead, true);
+            workspace.destroy();
+        });
+
+    await check('Sage takes its 3D shots in this window (SV1): a glide to the main view, each view settled and '
+        + 'copied with the roof off, it ends on the main view, and Back returns', async () => {
+            const data = fixture();
+            const workspace = data.workspace;
+            const three = data.three;
+            let time = 0;
+            data.documentRef.defaultView = {
+                requestAnimationFrame(callback) { setImmediate(() => callback(time += 100)); return 1; },
+                cancelAnimationFrame() {},
+                matchMedia() { return { matches: false }; },
+            };
+            let loading = 0;
+            const diagnostics = [];
+            three.getDiagnostics = () => {
+                diagnostics.push(loading);
+                const value = { mounted: true, status: loading ? 'loading' : 'ready', pendingLoads: loading };
+                if (loading) loading -= 1;
+                return value;
+            };
+            three.renderRecordingFrame = () => three.getRecordingCanvas();
+            let gate = null;
+            const waits = [];
+            workspace._sageShotWait = milliseconds => { waits.push(milliseconds); return gate || Promise.resolve(); };
+            const shot = [];
+            workspace._encodeSageShot = async canvas => {
+                const pill = workspace.sageShotsStatus;
+                shot.push({ camera: clone(three.cameraView), roof: workspace.layerVisibility.overhead,
+                    status: pill.hidden ? null : pill.textContent, modal: pill.getAttribute('aria-modal'),
+                    canvas: canvas === three.recordingCanvas });
+                return { blob: { type: 'image/jpeg' }, width: 1280, height: 720 };
+            };
+            workspace._setViewMode('plan');
+            const userCamera = clone(three.cameraView);
+            const userLayers = clone(workspace.layerVisibility);
+            const back = workspace.sageViewBackButton;
+            const base = { siteId: 'site-a', layoutId: 'fl-workspace', revision: 'rev-1' };
+            const views = [
+                { label: 'Assembly Cell A06', from: 'south', roofHidden: false,
+                    camera: { position: { x: 20, y: 5, z: 10 }, target: { x: 20, y: 0.7, z: 18 }, fov: 50 } },
+                { label: 'Dock Door S1', from: 'east', roofHidden: true,
+                    camera: { position: { x: 60, y: 30, z: 0 }, target: { x: 40, y: 1, z: 0 }, fov: 50 } },
+            ];
+            // Not this layout, or no usable view: no shots, and nothing moves.
+            for (const [other, reason] of [[{ layoutId: 'fl-other' }, 'layout_not_open'],
+                [{ siteId: 'site-b' }, 'layout_not_open'], [{ views: [] }, 'no_views'],
+                [{ views: [{ label: 'below', camera: { position: { x: 0, y: 0, z: 0 },
+                    target: { x: 0, y: 1, z: 0 }, fov: 50 } }] }, 'no_views']]) {
+                const refused = await workspace.captureSageViews(Object.assign({ views }, base, other));
+                assert.deepStrictEqual([refused.shots, refused.complete, refused.reason], [[], false, reason]);
+            }
+            assert.deepStrictEqual([workspace.viewMode, three.appliedCameraViews.length], ['plan', 0]);
+
+            loading = 3;   // the first view still loads models after it is applied
+            const result = await workspace.captureSageViews(Object.assign({ views }, base));
+            assert.deepStrictEqual([result.complete, result.reason, result.shots.length], [true, null, 2]);
+            assert.deepStrictEqual(result.shots.map(item => [item.index, item.label, item.from, item.roofHidden]),
+                [[0, 'Assembly Cell A06', 'south', false], [1, 'Dock Door S1', 'east', true]]);
+            assert.deepStrictEqual(result.shots.map(item => [item.image.width, item.image.height, item.image.blob.type]),
+                [[1280, 720, 'image/jpeg'], [1280, 720, 'image/jpeg']]);
+            assert.strictEqual(workspace.viewMode, '3d', 'from Plan it switches to 3D');
+            const applied = three.appliedCameraViews;
+            assert.deepStrictEqual(applied[0].position, userCamera.position, 'it glides from where the user was');
+            assert.ok(applied.length > 20, 'a glide in frames, not a jump');
+            assert.deepStrictEqual(shot.map(item => [item.camera.position, item.camera.target, item.camera.fov]),
+                views.map(view => [view.camera.position, view.camera.target, 50]), 'each shot is its view');
+            assert.deepStrictEqual(shot.map(item => [item.roof, item.status, item.modal, item.canvas]),
+                [[false, 'Sage is taking 3D shots: 1 of 2', 'true', true],
+                    [false, 'Sage is taking 3D shots: 2 of 2', 'true', true]],
+                'the roof is off and the pill (aria-modal: the in-app browser hides) shows for each shot');
+            assert.deepStrictEqual(waits.slice(0, 4), [1200, 250, 250, 250],
+                'it draws 1.2 s, then waits while models load');
+            assert.deepStrictEqual(waits.slice(4), [1200], 'a view with nothing loading draws 1.2 s');
+            const last = applied[applied.length - 1];
+            assert.deepStrictEqual([last.position, last.target], [views[0].camera.position, views[0].camera.target],
+                'it ends on the main view, not where the user was');
+            assert.deepStrictEqual([workspace.layerVisibility.overhead, workspace.sageShotsStatus.hidden, back.hidden],
+                [true, true, false], 'the roof as the main view needs it, the pill gone, Back shown');
+            back.dispatch('click');
+            assert.deepStrictEqual(applied[applied.length - 1], userCamera, 'Back returns to the user\'s camera');
+            assert.deepStrictEqual([workspace.viewMode, workspace.layerVisibility.overhead,
+                workspace.layerVisibility.roofSheeting], ['plan', userLayers.overhead, userLayers.roofSheeting]);
+
+            // A main view down through the roof leaves the roof off at the end.
+            const down = await workspace.captureSageViews(Object.assign({ views: [views[1], views[0]] }, base));
+            assert.deepStrictEqual([down.complete, workspace.layerVisibility.overhead], [true, false]);
+            back.dispatch('click');
+
+            // One at a time; Back during the shots stops them, and the view stays where Back put it.
+            let release = null;
+            gate = new Promise(resolve => { release = resolve; });
+            shot.length = 0;
+            const running = workspace.captureSageViews(Object.assign({ views }, base));
+            for (let i = 0; i < 200 && !waits.length; i += 1) await new Promise(resolve => setImmediate(resolve));
+            waits.length = 0;
+            for (let i = 0; i < 400 && !waits.length; i += 1) await new Promise(resolve => setImmediate(resolve));
+            assert.ok(waits.length, 'the first view is drawing');
+            assert.strictEqual((await workspace.captureSageViews(Object.assign({ views }, base))).reason, 'busy');
+            back.dispatch('click');
+            release();
+            gate = null;
+            const stopped = await running;
+            assert.deepStrictEqual([stopped.complete, stopped.reason, stopped.shots.length], [false, 'interrupted', 0]);
+            assert.deepStrictEqual(applied[applied.length - 1], userCamera, 'Back still wins');
+            assert.deepStrictEqual([workspace.viewMode, workspace.sageShotsStatus.hidden, workspace.sageCapture],
+                ['plan', true, null]);
+            workspace.destroy();
+        });
+
+    await check('Back returns to the view right before Sage\'s latest move once the user moved the view in between; '
+        + 'moves in a row keep the view before the first, and the roof comes back as the user had it (SV3b, SV5)',
+        async () => {
+            const data = fixture();
+            const workspace = data.workspace;
+            const three = data.three;
+            let time = 0;
+            data.documentRef.defaultView = {
+                requestAnimationFrame(callback) { setImmediate(() => callback(time += 100)); return 1; },
+                cancelAnimationFrame() {},
+                matchMedia() { return { matches: false }; },
+            };
+            three.getDiagnostics = () => ({ mounted: true, status: 'ready', pendingLoads: 0 });
+            three.renderRecordingFrame = () => three.getRecordingCanvas();
+            workspace._sageShotWait = () => Promise.resolve();
+            workspace._encodeSageShot = async () => ({ blob: { type: 'image/jpeg' }, width: 1280, height: 720 });
+            workspace._setViewMode('3d');
+            const userLayers = clone(workspace.layerVisibility);
+            assert.strictEqual(userLayers.overhead, true);
+            const back = workspace.sageViewBackButton;
+            const applied = three.appliedCameraViews;
+            const base = { siteId: 'site-a', layoutId: 'fl-workspace', revision: 'rev-1' };
+            const view = (label, x, z, roofHidden) => ({ label, from: 'south', roofHidden,
+                camera: { position: { x, y: roofHidden ? 40 : 5, z: z - 10 }, target: { x, y: 0.7, z }, fov: 50 } });
+            const shots = (...args) => workspace.captureSageViews(Object.assign({ views: [view(...args)] }, base));
+
+            // "show me what you changed", then "show me the dock doors": moves in a row keep the view before the first.
+            const first = clone(three.cameraView);
+            assert.strictEqual((await shots('Assembly Cell A06', 20, 18, false)).complete, true);
+            assert.strictEqual((await shots('Dock Wall + Door Openings', 60, 0, true)).complete, true);
+            assert.strictEqual(workspace.layerVisibility.overhead, false, 'the dock view looks down through the roof');
+            back.dispatch('click');
+            assert.deepStrictEqual(applied[applied.length - 1], first, 'Back: the view before the first move');
+            assert.strictEqual(workspace.layerVisibility.overhead, true, 'with the user\'s roof');
+
+            // SV5: a move down through the roof, then the user's own overview (the roof still off), then "show me
+            // Inspection Q04": Back returns to that overview, and the roof comes back.
+            assert.strictEqual((await shots('Dock Wall + Door Openings', 60, 0, true)).complete, true);
+            assert.strictEqual(workspace.layerVisibility.overhead, false);
+            const overview = Object.assign(clone(three.cameraView), { position: { x: 110, y: 160, z: -90 },
+                target: { x: 110, y: 0, z: 60 } });
+            three.cameraView = clone(overview);   // the user orbits and zooms out
+            assert.strictEqual((await shots('Inspection Q04', 213.5, 76, true)).complete, true);
+            const onQ04 = applied[applied.length - 1];
+            assert.deepStrictEqual([onQ04.target, workspace.layerVisibility.overhead], [{ x: 213.5, y: 0.7, z: 76 }, false],
+                'the view is left on Q04, looking down through the roof');
+            back.dispatch('click');
+            assert.deepStrictEqual(applied[applied.length - 1], overview, 'Back: the view right before Q04');
+            assert.deepStrictEqual([workspace.viewMode, workspace.layerVisibility.overhead, back.hidden],
+                ['3d', true, true], 'with the user\'s own roof, which only Sage had hidden');
+
+            // A click on a shot moves the view; the user goes to Plan; Sage's next shots: Back returns to Plan.
+            assert.strictEqual(await workspace.showSageView(Object.assign(view('Assembly Cell A02', 113, 17, false),
+                base)), true);
+            for (let i = 0; i < 400 && workspace.sageGlide; i += 1) await new Promise(resolve => setImmediate(resolve));
+            assert.strictEqual(workspace.sageGlide, null, 'the glide landed');
+            workspace._setViewMode('plan');
+            assert.strictEqual((await shots('Assembly Cell A02', 113, 17, false)).complete, true);
+            assert.strictEqual(workspace.viewMode, '3d');
+            back.dispatch('click');
+            assert.deepStrictEqual([workspace.viewMode, workspace.sageViewBack, back.hidden], ['plan', null, true],
+                'Back: Plan, where the user was right before');
+
+            // Sage's next move cuts into its own glide part way: still moves in a row, so Back keeps Plan.
+            const inPlan = clone(three.cameraView);
+            assert.strictEqual((await shots('Assembly Cell A06', 20, 18, false)).complete, true);
+            const fromA06 = clone(three.cameraView);
+            assert.strictEqual(await workspace.showSageView(Object.assign(view('Dock Wall + Door Openings', 60, 0,
+                true), base)), true);
+            for (let i = 0; i < 6; i += 1) await new Promise(resolve => setImmediate(resolve));
+            assert.ok(workspace.sageGlide && Math.hypot(three.cameraView.position.x - fromA06.position.x,
+                three.cameraView.position.z - fromA06.position.z) > 1, 'part way there');
+            assert.strictEqual((await shots('Inspection Q04', 213.5, 76, true)).complete, true);
+            back.dispatch('click');
+            assert.deepStrictEqual([workspace.viewMode, applied[applied.length - 1]], ['plan', inPlan],
+                'Back: Plan and the camera before the first of these moves');
+
+            // Shots that never moved the view (the 3D view could not take a camera) leave the user's move to count.
+            assert.strictEqual((await shots('Assembly Cell A06', 20, 18, false)).complete, true);
+            three.cameraView = clone(overview);   // the user orbits away again
+            three.applyCameraView = undefined;
+            const failed = await shots('Inspection Q04', 213.5, 76, true);
+            delete three.applyCameraView;
+            assert.deepStrictEqual([failed.complete, failed.reason, three.cameraView], [false, 'no_3d_view', overview]);
+            assert.strictEqual((await shots('Inspection Q04', 213.5, 76, true)).complete, true);
+            back.dispatch('click');
+            assert.deepStrictEqual([workspace.viewMode, applied[applied.length - 1]], ['3d', overview],
+                'Back: the overview the user went to, right before Q04');
+
+            // Shots that moved the view and stopped part way (the second could not be copied) end on Sage's view:
+            // the next move is still one in a row, and Back keeps the view before the stopped shots.
+            three.renderRecordingFrame = () => (three.cameraView.target.x === 60 ? null : three.getRecordingCanvas());
+            const partial = await workspace.captureSageViews(Object.assign({ views: [view('Assembly Cell A06', 20, 18,
+                false), view('Dock Wall + Door Openings', 60, 0, true)] }, base));
+            three.renderRecordingFrame = () => three.getRecordingCanvas();
+            assert.deepStrictEqual([partial.complete, partial.reason, partial.shots.length, three.cameraView.target.x],
+                [false, 'no_canvas', 1, 60], 'stopped on the second view');
+            assert.strictEqual((await shots('Inspection Q04', 213.5, 76, true)).complete, true);
+            back.dispatch('click');
+            assert.deepStrictEqual(applied[applied.length - 1], overview, 'Back: the view before the stopped shots');
+
+            // The chat stops the shots part way (Stop): the same, the view stays on Sage's second view.
+            let release = null;
+            const gate = new Promise(resolve => { release = resolve; });
+            workspace._sageShotWait = () => (three.cameraView.target.x === 60 ? gate : Promise.resolve());
+            const stopping = workspace.captureSageViews(Object.assign({ requestId: 'stop-me', views: [
+                view('Assembly Cell A06', 20, 18, false), view('Dock Wall + Door Openings', 60, 0, true)] }, base));
+            for (let i = 0; i < 400 && three.cameraView.target.x !== 60; i += 1) {
+                await new Promise(resolve => setImmediate(resolve));
+            }
+            assert.strictEqual(workspace.stopSageCapture('stop-me'), true);
+            release();
+            const stopped = await stopping;
+            workspace._sageShotWait = () => Promise.resolve();
+            assert.deepStrictEqual([stopped.complete, stopped.shots.length, three.cameraView.target.x], [false, 1, 60]);
+            assert.strictEqual((await shots('Inspection Q04', 213.5, 76, true)).complete, true);
+            back.dispatch('click');
+            assert.deepStrictEqual(applied[applied.length - 1], overview, 'Back: the view before the stopped shots');
+            workspace.destroy();
+        });
+
+    await check('Back stays as it was when Sage\'s next move ends before it changed the view, and the view the user '
+        + 'moved to still counts for the move after (final round 7)', async () => {
+            const data = fixture();
+            const workspace = data.workspace;
+            const three = data.three;
+            const frames = [];
+            data.documentRef.defaultView = {
+                requestAnimationFrame(callback) { frames.push(callback); return frames.length; },
+                cancelAnimationFrame() {},
+                matchMedia() { return { matches: false }; },
+            };
+            const run = () => {
+                for (let time = 1000; frames.length; time += 100) frames.shift()(time);
+            };
+            three.getDiagnostics = () => ({ mounted: true, status: 'ready', pendingLoads: 0 });
+            three.renderRecordingFrame = () => three.getRecordingCanvas();
+            workspace._sageShotWait = () => Promise.resolve();
+            workspace._encodeSageShot = async () => ({ blob: { type: 'image/jpeg' }, width: 1280, height: 720 });
+            workspace._setViewMode('3d');
+            const back = workspace.sageViewBackButton;
+            const applied = three.appliedCameraViews;
+            const base = { siteId: 'site-a', layoutId: 'fl-workspace', revision: 'rev-1' };
+            const view = (label, x, z) => Object.assign({ label, from: 'south', roofHidden: false,
+                camera: { position: { x, y: 5, z: z - 10 }, target: { x, y: 0.7, z }, fov: 50 } }, base);
+            const moved = (x, z) => Object.assign(clone(three.cameraView), { position: { x, y: 160, z: z - 150 },
+                target: { x, y: 0, z } });
+
+            // One move that lands, then the user's own view; Sage's next move is stopped before its first frame.
+            const first = clone(three.cameraView);
+            assert.strictEqual(await workspace.showSageView(view('Assembly Cell A06', 20, 18)), true);
+            run();
+            const overview = moved(110, 60);
+            three.cameraView = clone(overview);
+            const count = applied.length;
+            assert.strictEqual(await workspace.showSageView(view('Inspection Q04', 213.5, 76)), true);
+            workspace.threeView.dispatch('pointerdown');
+            frames.length = 0;
+            assert.deepStrictEqual([applied.length, three.cameraView], [count, overview], 'the view never moved');
+            assert.deepStrictEqual(workspace.sageViewBack.camera, first, 'Back keeps its view');
+            // The move after it moves the view: Back returns to the overview, the view right before it.
+            assert.strictEqual(await workspace.showSageView(view('Inspection Q04', 213.5, 76)), true);
+            run();
+            back.dispatch('click');
+            assert.deepStrictEqual(applied[applied.length - 1], overview, 'Back: the overview');
+
+            // The same with shots the chat stops before their glide's first frame.
+            assert.strictEqual(await workspace.showSageView(view('Assembly Cell A06', 20, 18)), true);
+            run();
+            const elsewhere = moved(40, 120);
+            three.cameraView = clone(elsewhere);
+            const taking = workspace.captureSageViews(Object.assign({ requestId: 'never-moved',
+                views: [view('Inspection Q04', 213.5, 76)] }, base));
+            await new Promise(resolve => setImmediate(resolve));
+            assert.strictEqual(workspace.stopSageCapture('never-moved'), true);
+            const stopped = await taking;
+            frames.length = 0;
+            assert.deepStrictEqual([stopped.complete, three.cameraView], [false, elsewhere], 'the shots never moved it');
+            assert.deepStrictEqual(workspace.sageViewBack.camera, overview, 'Back keeps its view');
+            assert.strictEqual(await workspace.showSageView(view('Inspection Q04', 213.5, 76)), true);
+            run();
+            back.dispatch('click');
+            assert.deepStrictEqual(applied[applied.length - 1], elsewhere, 'Back: the view right before the move');
+
+            // Shots whose glide never ran (animation frames paused in a hidden window) move the view with their
+            // first shot: from there, the view the user moved to is Back's.
+            const playing = data.documentRef.defaultView;
+            assert.strictEqual(await workspace.showSageView(view('Assembly Cell A06', 20, 18)), true);
+            run();
+            const third = moved(170, 30);
+            three.cameraView = clone(third);
+            data.documentRef.defaultView = {
+                requestAnimationFrame() { return 1; },
+                cancelAnimationFrame() {},
+                setTimeout(callback) { setImmediate(callback); return 9; },
+                clearTimeout() {},
+                matchMedia() { return { matches: false }; },
+            };
+            const paused = await workspace.captureSageViews(Object.assign({ views: [view('Inspection Q04', 213.5,
+                76)] }, base));
+            data.documentRef.defaultView = playing;
+            assert.deepStrictEqual([paused.complete, workspace.sageGlide], [true, null]);
+            back.dispatch('click');
+            assert.deepStrictEqual(applied[applied.length - 1], third, 'Back: the view right before the shots');
+
+            // From Plan, a move stopped before its first frame has already switched to 3D: Back returns to Plan.
+            assert.strictEqual(await workspace.showSageView(view('Assembly Cell A06', 20, 18)), true);
+            run();
+            workspace._setViewMode('plan');
+            assert.strictEqual(await workspace.showSageView(view('Inspection Q04', 213.5, 76)), true);
+            assert.strictEqual(workspace.viewMode, '3d');
+            workspace.threeView.dispatch('pointerdown');
+            frames.length = 0;
+            back.dispatch('click');
+            assert.deepStrictEqual([workspace.viewMode, back.hidden], ['plan', true], 'Back: Plan');
+            workspace.destroy();
+        });
+
+    await check('A 3D shot is the frame scaled to fit 1280 x 720, as a JPEG, copied at once', async () => {
+        const drawn = [];
+        const made = [];
+        const documentRef = {
+            createElement(tag) {
+                const node = {
+                    tag,
+                    getContext(kind) { return kind === '2d' ? { drawImage(...args) { drawn.push(args.slice(1)); } } : null; },
+                    toBlob(callback, type, quality) { made.push([this.width, this.height, type, quality]);
+                        callback({ type }); },
+                };
+                return node;
+            },
+        };
+        const encode = canvas => workspaceModule.Workspace.prototype._encodeSageShot.call(
+            { document: documentRef }, canvas);
+        const wide = await encode({ width: 2560, height: 1440 });
+        const narrow = await encode({ width: 1000, height: 700 });
+        const tall = await encode({ width: 1400, height: 1400 });
+        assert.deepStrictEqual([wide.width, wide.height, narrow.width, narrow.height, tall.width, tall.height],
+            [1280, 720, 1000, 700, 720, 720]);
+        assert.deepStrictEqual(made.map(item => item[2]), ['image/jpeg', 'image/jpeg', 'image/jpeg']);
+        assert.deepStrictEqual(drawn[0], [0, 0, 1280, 720]);
+        assert.strictEqual(await encode({ width: 0, height: 0 }), null);
+    });
+
+    await check('A Sage glide that fails or never lands ends the shots instead of leaving them busy (SV1 round 2)',
+        async () => {
+            // A glide frame that throws (a lost 3D context, say): the capture ends at once, and the next one runs.
+            const kit = sageShotsFixture();
+            const { workspace, three } = kit;
+            const own = clone(workspace.layerVisibility);
+            assert.strictEqual(own.overhead, true);
+            const apply = three.applyCameraView.bind(three);
+            let glideFrames = 0;
+            three.applyCameraView = value => {
+                if (workspace.sageGlide && ++glideFrames === 3) throw new Error('lost context');
+                return apply(value);
+            };
+            const failed = await within(workspace.captureSageViews(kit.request()), 'a capture whose glide failed');
+            assert.deepStrictEqual([failed.complete, failed.reason, failed.shots.length], [false, 'no_3d_view', 0]);
+            assert.deepStrictEqual([workspace.sageCapture, workspace.sageGlide, workspace.sageShotsStatus.hidden],
+                [null, null, true]);
+            assert.deepStrictEqual([workspace.layerVisibility.overhead, workspace.layerVisibility.roofSheeting],
+                [own.overhead, own.roofSheeting], 'the user\'s roof is back');
+            const next = await within(workspace.captureSageViews(kit.request()), 'the next capture');
+            assert.deepStrictEqual([next.complete, next.reason], [true, null], 'not left busy');
+            workspace.destroy();
+
+            // Animation frames that never come (a hidden window): the glide is stopped after its time, and the
+            // shots go on from each view's own camera.
+            const timeouts = [];
+            const paused = sageShotsFixture({ view: {
+                requestAnimationFrame() { return 1; },
+                setTimeout(callback, milliseconds) { timeouts.push(milliseconds); setImmediate(callback); return 9; },
+                clearTimeout() {},
+            } });
+            const done = await within(paused.workspace.captureSageViews(paused.request()),
+                'a capture whose glide never landed');
+            assert.deepStrictEqual([done.complete, done.shots.length, paused.workspace.sageGlide], [true, 2, null]);
+            assert.ok(timeouts[0] > 3000, 'it gave the glide its time and 3 s more');
+            assert.deepStrictEqual(timeouts.slice(1), [10000, 10000], 'each JPEG has its own limit (SV1 round 4)');
+            assert.deepStrictEqual(paused.shots.map(item => item.camera.position),
+                paused.views.map(view => view.camera.position));
+            paused.workspace.destroy();
+        });
+
+    await check('Each 3D shot waits until every model big enough on screen is drawn in full, as of its last camera '
+        + '(SV1 round 2)', async () => {
+            const kit = sageShotsFixture();
+            const { workspace, three } = kit;
+            const log = [];
+            const apply = three.applyCameraView.bind(three);
+            three.applyCameraView = value => { log.push('apply'); return apply(value); };
+            // The first view: 2 models still drawn as footprints after the settle, then 1, then none.
+            const left = [2, 1, 0];
+            three.loadVisibleDetail = () => {
+                const value = left.length ? left.shift() : 0;
+                log.push('detail ' + value);
+                return value;
+            };
+            three.renderRecordingFrame = () => { log.push('copy'); return three.getRecordingCanvas(); };
+            const result = await within(workspace.captureSageViews(kit.request()), 'the capture');
+            assert.deepStrictEqual([result.complete, result.reason], [true, null]);
+            assert.deepStrictEqual(kit.waits, [1200, 250, 250, 1200], 'it waits while models are left to draw');
+            const copies = log.reduce((found, item, index) => (item === 'copy' ? found.concat(index) : found), []);
+            assert.deepStrictEqual(copies.map(index => log.slice(index - 3, index)),
+                [['apply', 'detail 0', 'apply'], ['apply', 'detail 0', 'apply']],
+                'each copy follows a camera that left nothing to draw, put back once more right before it');
+            assert.ok(log.indexOf('detail 2') < log.indexOf('detail 1') && log.indexOf('detail 1') < copies[0]);
+            workspace.destroy();
+        });
+
+    await check('Shots that stop part way or fail give the user their own roof back, in any view (SV1 round 2)',
+        async () => {
+            // Plan, chosen while the first view draws.
+            const kit = sageShotsFixture();
+            const { workspace } = kit;
+            const own = clone(workspace.layerVisibility);
+            assert.strictEqual(own.overhead, true);
+            kit.onWait = (milliseconds, count) => { if (count === 1) workspace._setViewMode('plan'); };
+            const stopped = await within(workspace.captureSageViews(kit.request()), 'the capture');
+            assert.deepStrictEqual([stopped.complete, stopped.reason, workspace.viewMode], [false, 'interrupted', 'plan']);
+            assert.deepStrictEqual([workspace.layerVisibility.overhead, workspace.layerVisibility.roofSheeting],
+                [own.overhead, own.roofSheeting]);
+            workspace.destroy();
+
+            // A 3D view that cannot be copied, with a main view that looks down through the roof.
+            const broken = sageShotsFixture();
+            broken.three.renderRecordingFrame = () => null;
+            const before = clone(broken.workspace.layerVisibility);
+            const failed = await within(broken.workspace.captureSageViews(
+                broken.request({ views: [broken.views[1], broken.views[0]] })), 'the capture');
+            assert.deepStrictEqual([failed.complete, failed.reason], [false, 'no_canvas']);
+            assert.deepStrictEqual([broken.workspace.layerVisibility.overhead,
+                broken.workspace.layerVisibility.roofSheeting], [before.overhead, before.roofSheeting],
+                'not the main view\'s roof: that is for shots that all came out');
+            broken.workspace.destroy();
+        });
+
+    await check('An older capture winding down never hides a newer one\'s status pill (SV1 round 2)', async () => {
+        const kit = sageShotsFixture();
+        const { workspace } = kit;
+        const pill = workspace.sageShotsStatus;
+        const openA = kit.gate();
+        const runningA = workspace.captureSageViews(kit.request());
+        await until(() => kit.waits.length === 1);
+        assert.strictEqual(kit.waits.length, 1, 'A\'s first view is drawing');
+        workspace.sageViewBackButton.dispatch('click');
+        assert.strictEqual(pill.hidden, true, 'Back hides A\'s pill at once');
+        const openB = kit.gate();
+        const runningB = workspace.captureSageViews(kit.request());
+        await until(() => kit.waits.length === 2);
+        assert.deepStrictEqual([pill.hidden, pill.textContent], [false, 'Sage is taking 3D shots: 1 of 2']);
+        openA();
+        const a = await within(runningA, 'A');
+        assert.deepStrictEqual([a.complete, a.reason], [false, 'interrupted']);
+        assert.deepStrictEqual([pill.hidden, pill.textContent], [false, 'Sage is taking 3D shots: 1 of 2'],
+            'B\'s pill stays while B runs');
+        openB();
+        const b = await within(runningB, 'B');
+        assert.deepStrictEqual([b.complete, pill.hidden], [true, true]);
+        workspace.destroy();
+    });
+
+    await check('Shots stopped by a switch to another layout leave that layout\'s camera alone (SV1 round 2)',
+        async () => {
+            const kit = sageShotsFixture();
+            const { workspace, data, three } = kit;
+            let applied = null;
+            kit.onWait = (milliseconds, count) => {
+                if (count !== 1) return;
+                data.session.state.layout = Object.assign(clone(data.session.state.layout), { layoutId: 'fl-other' });
+                data.session._notify();
+                applied = three.appliedCameraViews.length;
+            };
+            const result = await within(workspace.captureSageViews(kit.request()), 'the capture');
+            assert.deepStrictEqual([result.complete, result.reason], [false, 'interrupted']);
+            await until(() => false, 40);
+            assert.strictEqual(three.appliedCameraViews.length, applied, 'no camera of the old layout on the new one');
+            workspace.destroy();
+        });
+
+    await check('While Sage takes shots no other request moves the 3D view, and after them it does (SV1 round 2)',
+        async () => {
+            const kit = sageShotsFixture();
+            const { workspace, three } = kit;
+            const open = kit.gate();
+            const running = workspace.captureSageViews(kit.request());
+            await until(() => kit.waits.length === 1);
+            const other = Object.assign({ siteId: 'site-a', layoutId: 'fl-workspace' }, kit.views[1]);
+            assert.strictEqual(await workspace.showSageView(other), false, 'refused while the shots are taken');
+            assert.strictEqual(workspace.sageGlide, null);
+            open();
+            const result = await within(running, 'the capture');
+            assert.strictEqual(result.complete, true);
+            await until(() => false, 40);   // a glide, had one started, would have moved on by now
+            assert.deepStrictEqual(three.appliedCameraViews.at(-1).position, kit.views[0].camera.position,
+                'it ends on its main view');
+            assert.strictEqual(await workspace.showSageView(other), true, 'after the shots the view moves again');
+            workspace.destroy();
+        });
+
+    await check('Shots are taken only of the saved revision Sage read, with nothing unsaved or staged over it '
+        + '(SV1 round 2)', async () => {
+            const kit = sageShotsFixture();
+            const { workspace, data } = kit;
+            const refused = async (extra, label) => {
+                const result = await within(workspace.captureSageViews(kit.request(extra)), label);
+                assert.deepStrictEqual([result.reason, result.shots.length, workspace.viewMode],
+                    ['revision_differs', 0, 'plan'], label);
+            };
+            workspace._setViewMode('plan');
+            await refused({ revision: 'rev-2' }, 'another revision');
+            await refused({ revision: undefined }, 'no revision');
+            data.session.state.dirty = true;
+            data.session._notify();
+            await workspace.whenIdle();
+            await refused({}, 'unsaved edits');
+            data.session.state.dirty = false;
+            const ghost = clone(data.session.state.layout);
+            data.session.state.layoutProposal = {
+                authority: 'server-authoritative', previewPure: true, baseRevision: 'rev-1', selectedIndex: 0,
+                alternatives: [{ proposalId: 'proposal-look', alternativeId: 'alternative-look', operations: [],
+                    ghostPreview: { layout: ghost, routeProposals: [] }, metrics: {}, findings: [],
+                    newHardFindingIds: [] }],
+            };
+            data.session._notify();
+            await workspace.whenIdle();
+            await refused({}, 'a review drawn in place of the saved layout');
+            data.session.state.layoutProposal = null;
+            data.session._notify();
+            await workspace.whenIdle();
+
+            // An edit while the first view draws stops the shots.
+            kit.onWait = (milliseconds, count) => {
+                if (count !== 1) return;
+                data.session.state.dirty = true;
+                data.session._notify();
+            };
+            const stopped = await within(workspace.captureSageViews(kit.request()), 'the capture');
+            assert.deepStrictEqual([stopped.complete, stopped.reason, stopped.shots.length], [false, 'interrupted', 0]);
+            workspace.destroy();
+        });
+
+    await check('No shots over placement alternatives or the placement ghost, and either one appearing stops them '
+        + '(SV1 round 3)', async () => {
+            const kit = sageShotsFixture();
+            const { workspace, data } = kit;
+            const refused = async label => {
+                await workspace.whenIdle();
+                const result = await within(workspace.captureSageViews(kit.request()), label);
+                assert.deepStrictEqual([result.reason, result.shots.length], ['revision_differs', 0], label);
+            };
+            data.session.beginGhostPlacement(catalog()[0]);
+            await refused('equipment being placed');
+            data.session.cancelGhostPlacement();
+            data.session.installPlacementAlternatives(SPATIAL_FIXTURE.candidateReceipt);
+            data.session.state.ghostPlacement = null;
+            data.session._notify();
+            await refused('placement alternatives');
+            data.session.dismissPlacementAlternatives();
+            await workspace.whenIdle();
+
+            // The ghost appears during the glide to the main view: no view is drawn.
+            const apply = kit.three.applyCameraView.bind(kit.three);
+            let frames = 0;
+            kit.three.applyCameraView = value => {
+                frames += 1;
+                if (frames === 2) data.session.beginGhostPlacement(catalog()[0]);
+                return apply(value);
+            };
+            const own = clone(workspace.layerVisibility);
+            const glided = await within(workspace.captureSageViews(kit.request()), 'the glide');
+            assert.deepStrictEqual([glided.complete, glided.reason, glided.shots.length, kit.waits.length],
+                [false, 'interrupted', 0, 0]);
+            assert.deepStrictEqual([workspace.layerVisibility.overhead, workspace.layerVisibility.roofSheeting],
+                [own.overhead, own.roofSheeting], 'the user\'s own roof comes back');
+            kit.three.applyCameraView = apply;
+            data.session.cancelGhostPlacement();
+            await workspace.whenIdle();
+
+            // Alternatives appear while the first view draws.
+            kit.onWait = (milliseconds, count) => {
+                if (count === 1) {   // the first wait of this kit: no capture before it drew
+                    data.session.installPlacementAlternatives(SPATIAL_FIXTURE.candidateReceipt);
+                }
+            };
+            const drawn = await within(workspace.captureSageViews(kit.request()), 'the capture');
+            assert.deepStrictEqual([drawn.complete, drawn.reason, drawn.shots.length], [false, 'interrupted', 0]);
+            workspace.destroy();
+        });
+
+    await check('A change or Back while the last shot is encoded ends the shots stopped, never complete '
+        + '(SV1 round 3)', async () => {
+            // A new revision saved while the second shot is encoded.
+            const kit = sageShotsFixture();
+            const { workspace, data, three } = kit;
+            const own = clone(workspace.layerVisibility);
+            const encode = workspace._encodeSageShot;
+            let applied = null;
+            workspace._encodeSageShot = async canvas => {
+                const image = await encode(canvas);
+                if (kit.shots.length === 2) {
+                    data.session.state.baseRevision = 'rev-2';
+                    data.session._notify();
+                    applied = three.appliedCameraViews.length;
+                }
+                return image;
+            };
+            const saved = await within(workspace.captureSageViews(kit.request()), 'the capture');
+            assert.deepStrictEqual([saved.complete, saved.reason, saved.shots.length], [false, 'interrupted', 1],
+                'the shot encoded across the change does not count');
+            await until(() => false, 40);
+            assert.strictEqual(three.appliedCameraViews.length, applied, 'no main view put on the new revision');
+            assert.deepStrictEqual([workspace.layerVisibility.overhead, workspace.layerVisibility.roofSheeting],
+                [own.overhead, own.roofSheeting]);
+            workspace.destroy();
+
+            // Back while the second shot is encoded.
+            const other = sageShotsFixture();
+            const otherEncode = other.workspace._encodeSageShot;
+            let backAt = null;
+            other.workspace._encodeSageShot = async canvas => {
+                const image = await otherEncode(canvas);
+                if (other.shots.length === 2) {
+                    other.workspace.sageViewBackButton.dispatch('click');
+                    backAt = other.three.appliedCameraViews.length;
+                }
+                return image;
+            };
+            const back = await within(other.workspace.captureSageViews(other.request()), 'the capture');
+            assert.deepStrictEqual([back.complete, back.reason], [false, 'interrupted']);
+            await until(() => false, 40);
+            assert.strictEqual(other.three.appliedCameraViews.length, backAt, 'Back leaves the view where it put it');
+            other.workspace.destroy();
+        });
+
+    await check('A roof turned on while a view draws is off again in the shot (SV1 round 3)', async () => {
+        const kit = sageShotsFixture();
+        const { workspace, three } = kit;
+        const copied = [];
+        three.renderRecordingFrame = () => {
+            copied.push([workspace.layerVisibility.overhead, three.layerVisibility.at(-1).overhead]);
+            return three.getRecordingCanvas();
+        };
+        kit.onWait = () => {   // the user ticks Roof in the layers panel while each view draws
+            const roof = workspace.layerPanel.querySelector('[data-facility-layer="overhead"]');
+            roof.checked = true;
+            roof.dispatch('change');
+            assert.strictEqual(three.layerVisibility.at(-1).overhead, true);
+        };
+        const result = await within(workspace.captureSageViews(kit.request()), 'the capture');
+        assert.strictEqual(result.complete, true);
+        assert.deepStrictEqual(copied, [[false, false], [false, false]]);
+        workspace.destroy();
+    });
+
+    // The 3D view's scene as the three adapter reports it (sceneState), for the round 4 checks.
+    const sageScene = (three, scene) => {
+        three.sceneState = () => ({ requested: scene.requested, installed: scene.installed,
+            status: scene.lost ? 'degraded' : 'ready', mounted: true, suspended: false, degraded: Boolean(scene.lost),
+            contextLost: Boolean(scene.lost), disposed: false });
+        return scene;
+    };
+
+    await check('Shots wait for the window\'s layout to be built into the 3D scene, and a newer scene stops them '
+        + '(SV1 round 4)', async () => {
+            // The new layout is still on its way in (the 3D view waits for the appearance library): the old scene is
+            // drawn and reads as ready.
+            const kit = sageShotsFixture();
+            const { workspace, three } = kit;
+            const scene = sageScene(three, { requested: 2, installed: 1 });
+            const copied = [];
+            three.renderRecordingFrame = () => {
+                copied.push(scene.installed);
+                return three.getRecordingCanvas();
+            };
+            kit.onWait = (milliseconds, count) => { if (count === 3) scene.installed = 2; };
+            const result = await within(workspace.captureSageViews(kit.request()), 'the capture');
+            assert.deepStrictEqual([result.complete, copied], [true, [2, 2]], 'both shots of the new scene');
+            assert.deepStrictEqual(kit.waits, [250, 250, 250, 1200, 1200], 'it waited for the scene first');
+            workspace.destroy();
+
+            // A newer scene asked for while a view draws (another layout on its way in): the shots stop.
+            const newer = sageShotsFixture();
+            const next = sageScene(newer.three, { requested: 1, installed: 1 });
+            newer.onWait = (milliseconds, count) => { if (count === 1) next.requested = 2; };
+            const stopped = await within(newer.workspace.captureSageViews(newer.request()), 'the capture');
+            assert.deepStrictEqual([stopped.complete, stopped.reason, stopped.shots.length], [false, 'interrupted', 0]);
+            newer.workspace.destroy();
+
+            // A scene that is never built: the shots end, and the window is not left busy.
+            const never = sageShotsFixture();
+            sageScene(never.three, { requested: 2, installed: 1 });
+            const own = clone(never.workspace.layerVisibility);
+            const failed = await within(never.workspace.captureSageViews(never.request()), 'the capture');
+            assert.deepStrictEqual([failed.complete, failed.reason, failed.shots.length], [false, 'no_3d_view', 0]);
+            assert.strictEqual(never.waits.length, 80, '20 s of the capture\'s own 250 ms waits');
+            assert.deepStrictEqual([never.workspace.sageCapture, never.workspace.sageShotsStatus.hidden,
+                never.workspace.layerVisibility.overhead], [null, true, own.overhead]);
+            never.workspace.destroy();
+        });
+
+    await check('Every wait of a capture ends: a held JPEG encoder or 3D start, or Back while one is held, ends the '
+        + 'shots (SV1 round 4)', async () => {
+            // A JPEG encoder that never answers.
+            const kit = sageShotsFixture();
+            const { workspace } = kit;
+            workspace.sageLimits = Object.assign({}, workspace.sageLimits, { encodeMs: 30 });
+            workspace._encodeSageShot = () => new Promise(() => {});
+            const held = await within(workspace.captureSageViews(kit.request()), 'a capture with a held encoder');
+            assert.deepStrictEqual([held.complete, held.reason, held.shots.length], [false, 'no_canvas', 0]);
+            assert.deepStrictEqual([workspace.sageCapture, workspace.sageShotsStatus.hidden], [null, true],
+                'the pill and the busy guard are released');
+            workspace.destroy();
+
+            // Back while the encoder is held: the capture ends at once, not when the encoder answers.
+            const back = sageShotsFixture();
+            back.workspace._encodeSageShot = () => {
+                setImmediate(() => back.workspace.sageViewBackButton.dispatch('click'));
+                return new Promise(() => {});
+            };
+            const stopped = await within(back.workspace.captureSageViews(back.request()), 'a capture stopped by Back');
+            assert.deepStrictEqual([stopped.complete, stopped.reason, stopped.shots.length], [false, 'interrupted', 0]);
+            back.workspace.destroy();
+
+            // A 3D view opened for the first time that never starts.
+            const start = sageShotsFixture();
+            start.workspace.sageLimits = Object.assign({}, start.workspace.sageLimits, { readyMs: 30 });
+            start.three.getCameraView = () => null;
+            start.workspace.controller.ready = () => new Promise(() => {});
+            const never = await within(start.workspace.captureSageViews(start.request()), 'a capture of a held 3D start');
+            assert.deepStrictEqual([never.complete, never.reason], [false, 'no_3d_view']);
+            assert.deepStrictEqual([start.workspace.sageCapture, start.workspace.sageShotsStatus.hidden], [null, true]);
+            start.workspace.destroy();
+
+            // The same with Back first: Back ends the wait.
+            const early = sageShotsFixture();
+            early.three.getCameraView = () => null;
+            early.workspace.controller.ready = () => {
+                setImmediate(() => early.workspace.sageViewBackButton.dispatch('click'));
+                return new Promise(() => {});
+            };
+            const left = await within(early.workspace.captureSageViews(early.request()), 'a held 3D start and Back');
+            assert.deepStrictEqual([left.complete, left.reason], [false, 'interrupted']);
+            early.workspace.destroy();
+        });
+
+    await check('A WebGL context lost while a shot encodes ends the shots failed, with the user\'s own roof '
+        + '(SV1 round 4)', async () => {
+            const kit = sageShotsFixture();
+            const { workspace, three } = kit;
+            const scene = sageScene(three, { requested: 1, installed: 1 });
+            const own = clone(workspace.layerVisibility);
+            const encode = workspace._encodeSageShot;
+            workspace._encodeSageShot = async canvas => {
+                const image = await encode(canvas);
+                if (kit.shots.length === 2) scene.lost = true;
+                return image;
+            };
+            // The main view looks down through the roof, so a finished capture would leave the roof off.
+            const result = await within(workspace.captureSageViews(kit.request({ views: [kit.views[1], kit.views[0]] })),
+                'the capture');
+            assert.deepStrictEqual([result.complete, result.reason, result.shots.length], [false, 'no_3d_view', 1]);
+            assert.deepStrictEqual([workspace.layerVisibility.overhead, workspace.layerVisibility.roofSheeting],
+                [own.overhead, own.roofSheeting], 'the user\'s own roof comes back');
+            workspace.destroy();
+        });
+
+    await check('The chat stops a capture it no longer waits for (Stop, or the tool\'s wait over): at once, with the '
+        + 'user\'s own roof, and the next capture is not busy (SV2/SV3 round 2)', async () => {
+            const kit = sageShotsFixture();
+            const { workspace } = kit;
+            const own = clone(workspace.layerVisibility);
+            const open = kit.gate();   // the first view's settle wait, held
+            const id = 'cd'.repeat(16);
+            const taking = workspace.captureSageViews(kit.request({ requestId: id }));
+            await until(() => kit.waits.length === 1);
+            assert.strictEqual(workspace.layerVisibility.overhead, false, 'the roof is off for the shot');
+            assert.strictEqual(workspace.stopSageCapture('ef'.repeat(16)), false, 'another request: not this one');
+            assert.strictEqual(workspace.stopSageCapture(id), true);
+            assert.deepStrictEqual([workspace.sageCapture, workspace.sageShotsStatus.hidden,
+                workspace.layerVisibility.overhead], [null, true, own.overhead], 'released at once, the user\'s roof');
+            const stopped = await within(taking, 'a stopped capture');
+            assert.deepStrictEqual([stopped.complete, stopped.reason, stopped.shots.length], [false, 'interrupted', 0]);
+            open();
+            assert.strictEqual(workspace.sageViewBackButton.hidden, false, 'Back still returns to the user\'s view');
+            const next = await within(workspace.captureSageViews(kit.request()), 'the next capture');
+            assert.deepStrictEqual([next.complete, next.reason], [true, null], 'not busy');
+            assert.strictEqual(workspace.stopSageCapture(id), false, 'nothing left to stop');
             workspace.destroy();
         });
 

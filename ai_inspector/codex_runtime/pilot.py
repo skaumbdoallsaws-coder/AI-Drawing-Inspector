@@ -39,7 +39,8 @@ dock doors", "show me what you changed"), call show_facility_views: query with w
 (the server resolves zone, floor-marking and equipment names; a zone brings what stands in it), targetIds when you
 already hold the ids, or target last_change. Do not look it up first. Then say in one sentence where the view went,
 from its liveView, or that nothing moved.
-You have not seen the area: never describe how it looks. Never call it unasked.
+Its pictures field says whether 3D shots of the views are attached: describe only what a shot shows, never
+an area without one. Never call it unasked.
 """
 
 EDIT_INSTRUCTIONS = """You are InspectorPro's engineering assistant. Inspect the bound saved layout with MCP tools.
@@ -84,7 +85,8 @@ dock doors", "show me what you changed"), call show_facility_views: query with w
 (the server resolves zone, floor-marking and equipment names; a zone brings what stands in it), targetIds when you
 already hold the ids, or target last_change. Do not look it up first. Then say in one sentence where the view went,
 from its liveView, or that nothing moved.
-You have not seen the area: never describe how it looks. Never call it unasked.
+Its pictures field says whether 3D shots of the views are attached: describe only what a shot shows, never
+an area without one. Never call it unasked.
 To repeat items in a row or a grid, call plan_facility_pattern (count includes the original: "5 more" is count
 6); kind mirror mirrors them across a line, circular repeats them round a centre and perimeter round a rectangle.
 For a row or grid the user gives no direction for, leave direction and rowDirection out and say which way the tool
@@ -420,6 +422,9 @@ async def inspect_facility(request, host, http_request, normalized, *, text_sink
         # The PDFs Sage prepared (layout plan, evacuation map, emergency map), as file cards under the reply.
         for card in getattr(gateway, "pdfs", None) or ([gateway.pdf] if getattr(gateway, "pdf", None) else []):
             result.setdefault("content_blocks", []).append(dict(card))
+        # Sage's 3D shots (docs/sage-basic-shapes-plan.md, SV2): each set a row of pictures; a retaken set folded.
+        for block, _ids in getattr(gateway, "shot_sets", None) or []:
+            result.setdefault("content_blocks", []).append(json.loads(json.dumps(block)))
         if editing and gateway.proposal:
             action_mode = "COMMIT" if edit_mode == "direct" else "PREVIEW"
             result.update(facility_action_mode=action_mode, facility_runtime_policy={

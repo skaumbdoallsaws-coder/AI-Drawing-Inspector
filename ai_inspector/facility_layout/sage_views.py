@@ -8,8 +8,9 @@ Framing, per the plan's rules from the hand-made shots:
   each named after its zone.
 - The camera looks at the centre of the area, a third of the way up its items, from 25-35 degrees above, with a 50
   degree field of view, as close as keeps the area's box in the frame with a margin (FILL, on a canvas ASPECT wide).
-- It tries 8 compass directions, south first, and keeps the first whose sight line, in plan, crosses no item or wall
-  taller than the line where it crosses (what is in the area itself never counts).
+- It tries 8 compass directions, south first, and keeps the first whose sight lines, in plan, to the area's middle
+  and to its floor corners cross no item or wall taller than the line where it crosses (what is in the area itself
+  never counts).
 - Inside the hall the camera stays below the overhead items (the lights, trays and roof members, less a margin), so
   the roof stays on. When no such view is clear, the next tier looks down through the roof with the roof layer
   hidden (overhead items no longer block), and last a high view from the south.
@@ -58,8 +59,11 @@ def tool_spec() -> dict:
         "the layout's last saved change). Give one of the three. The tool frames up to maxViews "
         "areas (default 4), largest first, each named after its zone; the app glides the user's 3D view to the "
         "first and shows a Back button that returns to their view before. liveView says whether the view moved: "
-        "say where it went in one sentence, or that nothing moved. There are no pictures: you have not seen these "
-        "areas, so never describe how they look."),
+        "say where it went in one sentence, or that nothing moved. When the app window has the layout open, it also "
+        "takes a 3D shot of each view (up to 60 s): you get them as one contact sheet beside this result, numbered "
+        "as the views are listed, with the roof hidden, and the user gets the full shots under your reply. pictures "
+        "says what you got: describe only what a shot shows; for a view without a shot you have not seen the area, "
+        "so never describe how they look."),
         "input_schema": {"type": "object", "properties": {
             "targetIds": {"type": "array", "minItems": 1, "maxItems": 240, "uniqueItems": True,
                           "items": {"type": "string", "minLength": 1, "maxLength": 128}},
@@ -341,6 +345,9 @@ def _frame(scene: _Scene, area: Mapping) -> dict:
     corners = [(x, y, z) for x in (minx, maxx) for y in (bottom, top) for z in (minz, maxz)]
     near = box(minx - EDGE, minz - EDGE, maxx + EDGE, maxz + EDGE)
     skip = set(area["ids"])
+    # The area's floor corners must be in sight too, not only its middle: something lower than the line to the
+    # middle can still hide the near edge (2026-11-03, Factory 02's Packing P01 shot over the hall's south wall).
+    sights = [target, *((x, bottom, z) for x in (minx, maxx) for z in (minz, maxz))]
     chosen = None
     for roof_hidden in (False, True):
         for name, heading in HEADINGS:
@@ -350,7 +357,7 @@ def _frame(scene: _Scene, area: Mapping) -> dict:
                 camera = tuple(target[i] + back[i] * distance for i in range(3))
                 if scene.looks_through_roof(camera, target) != roof_hidden:
                     continue  # first the views under the roof, then the ones that look down through it
-                if scene.clear(camera, target, near, skip, roof_hidden):
+                if all(scene.clear(camera, point, near, skip, roof_hidden) for point in sights):
                     chosen = (name, elevation, camera, roof_hidden, False)
                     break
             if chosen:

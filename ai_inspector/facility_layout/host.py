@@ -943,6 +943,11 @@ class LocalFacilityLayoutHost:
             capabilities_provider=self._agent_capabilities,
             generation_layout_provider=self._agent_generation_layout,
         )
+        # Sage's 3D shots (docs/sage-basic-shapes-plan.md, SV2 and SV3): show_facility_views waits here for the
+        # shots the app window takes, and the chat links to them.
+        from .sage_shots import SageShots
+        self.sage_shots = SageShots(self.root / "sage-shots")
+        self.agent_runtime.sage_shots = self.sage_shots
         self.construction_service = FacilityConstructionService(
             service=self.service, agent_runtime=self.agent_runtime,
             repository=self.design_repository, capability_gate=self.feature_flags.require,
@@ -997,8 +1002,11 @@ class LocalFacilityLayoutHost:
         return matches[0]
 
     def close(self) -> None:
-        """Release bounded background spatial workers."""
+        """Close every open Sage shots request first (whatever waits on one is answered, and a late upload is
+        refused), give queued shot deletes up to 2 s (what is left is swept on a later start), then release the
+        bounded background spatial workers."""
 
+        self.sage_shots.shutdown(2.0)
         self.service.spatial_executor.close(wait=True)
 
     def _agent_generation_layout(
@@ -4039,6 +4047,10 @@ class LocalFacilityLayoutHost:
                 principal_resolver=self.resolve_principal,
                 feature_gate=self.feature_flags.require,
             )
+        )
+        from .sage_shots import create_sage_shots_router
+        router.include_router(
+            create_sage_shots_router(shots=self.sage_shots, principal_resolver=self.resolve_principal)
         )
         return router
 

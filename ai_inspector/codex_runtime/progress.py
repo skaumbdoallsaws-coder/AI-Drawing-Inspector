@@ -528,6 +528,8 @@ def view_show(name, arguments, data):
         views, live = data.get("views"), data.get("liveView")
         if not isinstance(live, Mapping) or live.get("moves") is not True or not isinstance(views, list) or not views:
             return None
+        if live.get("captured") is True:
+            return None  # the window took the shots (SV1) and ended on the main view itself: no second glide
         return {"cameraView": {"siteId": identity["siteId"], "layoutId": identity["layoutId"],
                                "revision": identity["revision"],
                                **{key: deepcopy(views[0][key]) for key in CAMERA_KEYS if key in views[0]}}}
@@ -585,10 +587,23 @@ class TurnProgress:
         await self.step_sink({"id": step, "kind": "tool", "state": "running", "label": labels["running"]})
         return step, labels, name, arguments
 
+    async def tool_capture(self, started, capture):
+        """Sage's show_facility_views (docs/sage-basic-shapes-plan.md, SV3): the running step again, carrying the
+        request the app window takes the 3D shots for (it posts them to capture["url"])."""
+        step, labels, _name, _arguments = started
+        await self.step_sink({"id": step, "kind": "tool", "state": "running",
+                              "label": labels["running"].replace(FRAME[0], "Taking 3D shots of", 1),
+                              "capture": capture})
+
     async def tool_finished(self, started, result):
         step, labels, name, arguments = started
         if result.get("ok"):
             done = {"id": step, "kind": "tool", "state": "done", "label": labels["done"]}
+            shots = (result.get("data") or {}).get("shots") if name == "show_facility_views" else None
+            count = shots.get("count") if isinstance(shots, Mapping) else 0
+            if isinstance(count, int) and count > 0:
+                done["label"] = labels["done"].replace(
+                    FRAME[1], f"Took {count} 3D shot{'s' if count != 1 else ''} of", 1)
             show = view_show(name, arguments, result.get("data"))
             if show:
                 done["show"] = show

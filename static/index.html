@@ -16982,6 +16982,52 @@
             background: color-mix(in srgb, var(--bg-panel) 88%, var(--bg-main) 12%);
         }
         .agent-file-card:hover { border-color: color-mix(in srgb, var(--border) 40%, #3b82f6 60%); }
+        /* Sage's 3D shots (SV2): a row of labelled pictures; a click goes there, a second opens it full size. */
+        .agent-shots { margin: 10px 0 4px; }
+        .agent-shots-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+        .agent-shot {
+            flex: 0 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            width: 180px;
+            padding: 4px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--bg-panel) 88%, var(--bg-main) 12%);
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+        }
+        .agent-shot:hover, .agent-shot[aria-pressed="true"] {
+            border-color: color-mix(in srgb, var(--border) 40%, #3b82f6 60%);
+        }
+        .agent-shot img { display: block; width: 100%; height: auto; border-radius: 5px; }
+        .agent-shot-label { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .agent-shots-summary { cursor: pointer; font-size: 12px; opacity: .8; margin-bottom: 6px; }
+        .agent-shot-full {
+            position: fixed;
+            inset: 0;
+            z-index: 10050;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 24px;
+            background: rgba(0, 0, 0, .82);
+        }
+        .agent-shot-full img { max-width: 100%; max-height: calc(100% - 70px); object-fit: contain; border-radius: 6px; }
+        .agent-shot-full-label { color: #fff; font-size: 13px; }
+        .agent-shot-full-close {
+            padding: 6px 14px;
+            border: 1px solid rgba(255, 255, 255, .4);
+            border-radius: 6px;
+            background: transparent;
+            color: #fff;
+            cursor: pointer;
+        }
         .agent-file-open {
             display: flex;
             flex: 1;
@@ -20672,7 +20718,7 @@
         }
     };
     </script>
-    <link rel="stylesheet" href="/static/facility_layout_workspace.css?v=20261102-sage-view-1">
+    <link rel="stylesheet" href="/static/facility_layout_workspace.css?v=20261103-sage-shots-1">
     <link rel="stylesheet" href="/static/facility_layout_library_panel.css?v=20261101-cc3-2">
     <link rel="stylesheet" href="/static/walkthrough_camera_settings.css?v=20260927-1">
     <link rel="stylesheet" href="/static/facility_layout_sheets.css?v=20260929-open-layout-1">
@@ -21574,7 +21620,7 @@
     <script src="/static/ui_action_runtime.js"></script>
     <script src="/static/chat_stream_runtime.js?v=20261028-part-2"></script>
     <script src="/static/chat_memory_runtime.js"></script>
-    <script src="/static/chat_rich_content.js?v=20261029-file-download-1"></script>
+    <script src="/static/chat_rich_content.js?v=20261103-sage-shots-2"></script>
     <script src="/static/vendor/floating-ui/floating-ui.core.umd.min.js"></script>
     <script src="/static/vendor/floating-ui/floating-ui.dom.umd.min.js"></script>
     <script src="/static/floating_surface.js"></script>
@@ -21604,7 +21650,7 @@
     <script src="/static/facility_layout_light_pools.js?v=20261103-mask-9"></script>
     <script src="/static/facility_layout_light_areas.js?v=20261031-lights-7"></script>
     <script src="/static/facility_layout_light_coverage.js?v=20261101-cc3-1"></script>
-    <script src="/static/facility_layout_three_adapter.js?v=20261103-load-6"></script>
+    <script src="/static/facility_layout_three_adapter.js?v=20261103-sage-shots-12"></script>
     <script src="/static/facility_layout_recorder.js?v=20261021-site-1"></script>
     <script src="/static/facility_layout_structure.js?v=20260923-structure-tree"></script>
     <script src="/static/facility_layout_structure_tree.js?v=9c9992a02daa"></script>
@@ -21617,7 +21663,7 @@
     <script src="/static/facility_layout_session.js?v=20261103-workspace-install-1"></script>
     <script src="/static/facility_layout_transport.js?v=20261101-cc3-1"></script>
     <script src="/static/facility_layout_generation_view.js?v=20260917-generation-research"></script>
-    <script src="/static/facility_layout_workspace.js?v=20261103-workspace-install-1"></script>
+    <script src="/static/facility_layout_workspace.js?v=20261103-sage-back-2"></script>
     <script src="/static/facility_layout_app.js?v=20261101-cc3-1"></script>
     <script src="/static/desktop_workflow_observation.js?v=20260915-workflow-coverage"></script>
     <script src="/static/desktop_runtime_bridge.js?v=20260915-workflow-coverage"></script>
@@ -46682,6 +46728,69 @@
             workspace.showSageLightCoverage(coverage).catch(function (error) {
                 console.warn('The lighting estimate Sage checked could not be shown.', error);
             });
+        }
+
+        // Sage's show_facility_views (docs/sage-basic-shapes-plan.md, SV1 and SV3): its running step asks this window
+        // for a 3D shot of each view. The shots go to the server, which hands Sage a contact sheet and the chat a row of
+        // the shots (SV2). A window that cannot take them says why at once, so the tool does not wait for nothing.
+        // The capture is the turn's: Stop (SIGNAL) or the end of the tool's wait (waitMs) stops it, and nothing is sent.
+        const _trainFacilitySageCaptures = new Set();
+        function _trainFacilityCaptureFromStep(step, signal) {
+            const capture = step && step.state === 'running' && step.capture;
+            if (!capture || typeof capture !== 'object' || !/^[0-9a-f]{32}$/.test(String(capture.requestId || ''))
+                    || !/^\/api\/facility-layouts\/[A-Za-z0-9._~%-]+\/[A-Za-z0-9._~%-]+\/sage-shots\/[0-9a-f]{32}$/
+                        .test(String(capture.url || ''))
+                    || _trainFacilitySageCaptures.has(capture.requestId) || (signal && signal.aborted)) {
+                return;
+            }
+            _trainFacilitySageCaptures.add(capture.requestId);
+            const wait = Number(capture.waitMs);
+            let cut = null;
+            const cutOff = new Promise(function (resolve) { cut = resolve; });
+            const timer = setTimeout(function () { cut('late'); },
+                Number.isFinite(wait) && wait >= 0 ? Math.min(wait, 60000) : 60000);
+            const onAbort = function () { cut('stopped'); };
+            if (signal) signal.addEventListener('abort', onAbort);
+            const send = function (result) {
+                const shots = result && Array.isArray(result.shots) ? result.shots : [];
+                const form = new FormData();
+                form.append('report', JSON.stringify({ complete: Boolean(result && result.complete),
+                    reason: (result && result.reason) || null,
+                    shots: shots.map(function (shot) {
+                        return { index: shot.index, width: shot.image.width, height: shot.image.height };
+                    }) }));
+                shots.forEach(function (shot) { form.append('shot', shot.image.blob, 'shot-' + shot.index + '.jpg'); });
+                return fetch(capture.url, { method: 'POST', body: form, credentials: 'same-origin',
+                    signal: signal || undefined });
+            };
+            const workspace = _trainFacilityLayoutAuthoringApp && _trainFacilityLayoutAuthoringApp.workspace;
+            const taking = workspace && typeof workspace.captureSageViews === 'function'
+                ? Promise.resolve().then(function () { return workspace.captureSageViews(capture); })
+                : Promise.resolve({ shots: [], complete: false, reason: 'no_app' });
+            Promise.race([taking.catch(function (error) {
+                console.warn('Sage\'s 3D shots could not be taken.', error);
+                return { shots: [], complete: false, reason: 'failed' };
+            }), cutOff.then(function (why) { return { cut: why }; })]).then(function (result) {
+                clearTimeout(timer);
+                if (signal) signal.removeEventListener('abort', onAbort);
+                if (result.cut || (signal && signal.aborted)) {
+                    // Sage stopped waiting: the capture ends where it is (Back still returns), and nothing is sent.
+                    if (workspace && typeof workspace.stopSageCapture === 'function') {
+                        workspace.stopSageCapture(capture.requestId);
+                    }
+                    return null;
+                }
+                return send(result);
+            }).catch(function (error) {
+                if (!(error && error.name === 'AbortError')) console.warn('Sage\'s 3D shots could not be sent.', error);
+            });
+        }
+
+        // A 3D shot in the chat (SV2): the facility view glides there; false when this window cannot go there.
+        function _trainFacilityShowShot(view) {
+            const workspace = _trainFacilityLayoutAuthoringApp && _trainFacilityLayoutAuthoringApp.workspace;
+            if (!workspace || typeof workspace.showSageView !== 'function') return Promise.resolve(false);
+            return workspace.showSageView(view).catch(function () { return false; });
         }
 
         function _trainFacilityCommandStates() {
@@ -81581,6 +81690,7 @@
                             const rendered = runtime.renderBlock(document, block, {
                                 onAction: _handleChatRichAction,
                                 onEntitySelect: _handleChatEntitySelect,
+                                onShotView: _trainFacilityShowShot,
                             });
                             if (rendered) return rendered;
                         }
@@ -81597,7 +81707,7 @@
                 // system messages render as assistant rows for styling
                 row.className = 'agent-msg-row ' + (msg.role === 'system' ? 'assistant' : msg.role);
                 if (msg.role !== 'user' && (msg.blocks || []).some(block => block && [
-                    'sources', 'facts', 'visualization', 'entity_reference', 'actions',
+                    'sources', 'facts', 'visualization', 'entity_reference', 'actions', 'shots',
                 ].includes(block.type))) {
                     row.classList.add('agent-rich-message');
                 }
@@ -93783,6 +93893,10 @@
                 const stepMode = codexTurn;
                 if (stepMode) workingState.enableSteps();
                 const controller = new AbortController();
+                // Sage's 3D shots for this turn end with it, however it ends: completed, failed, cancelled or
+                // stopped (SV2/SV3 round 3). The capture hook gets this signal; the teardown below aborts it.
+                const captureStop = new AbortController();
+                controller.signal.addEventListener('abort', () => captureStop.abort(), { once: true });
                 const active = {
                     controller,
                     turnId,
@@ -93939,6 +94053,7 @@
                                     }
                                     workingState.step(event.step);
                                     _trainFacilityShowFromStep(event.step);
+                                    _trainFacilityCaptureFromStep(event.step, captureStop.signal);
                                     break;
                                 case 'text_delta': {
                                     const delta = String(event.text || '');
@@ -94023,6 +94138,7 @@
                     }
                     throw error;
                 } finally {
+                    captureStop.abort();
                     if (contextGuard) contextGuard.dispose();
                     if (originSession.activeStream === active) {
                         originSession.activeStream = null;

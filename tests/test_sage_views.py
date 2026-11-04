@@ -101,6 +101,18 @@ def test_a_view_blocked_by_something_taller_than_the_sight_line_is_taken_from_th
     assert camera["x"] > target["x"] and camera["z"] == target["z"] == 18.0
 
 
+def test_a_view_whose_near_edge_hides_behind_something_lower_than_the_line_to_its_middle_is_taken_elsewhere():
+    """2026-11-03, Factory 02's Packing P01: the line to the middle of the area cleared the hall's south wall, but the
+    wall hid the near third of the shot. A 1.5 m wall 2 m south of the machine: under the line to the machine's
+    middle (1.8 m there), over the lines to its near corners on the floor (0.9 m there)."""
+    layout = hall(rack=False)
+    layout["placements"].append(placed("pl-wall", "asset-low-wall", 20, 16, "Low wall"))
+    catalog = CATALOG + [record("asset-low-wall", (-6, 0, -0.1), (6, 1.5, 0.1))]
+    view, = sv.frame_views(layout, catalog, ["pl-machine"])["views"]
+    assert view["from"] not in ("south", "south-east", "south-west") and view["highView"] is False
+    assert view["roofHidden"] is False
+
+
 def test_a_large_area_is_seen_down_through_the_roof_with_the_roof_hidden():
     view, = frame(["zn-cell"])["views"]
     assert view["roofHidden"] is True and view["camera"]["position"]["y"] > 5.5

@@ -950,6 +950,8 @@ class LocalFacilityLayoutHost:
         from .sage_shots import SageShots
         self.sage_shots = SageShots(self.root / "sage-shots")
         self.agent_runtime.sage_shots = self.sage_shots
+        # Sage's basic-shape tools (docs/sage-basic-shapes-plan.md, BS3) add their models to the shared library here.
+        self.agent_runtime.author_shape = self.register_authored_asset
         self.construction_service = FacilityConstructionService(
             service=self.service, agent_runtime=self.agent_runtime,
             repository=self.design_repository, capability_gate=self.feature_flags.require,

@@ -365,9 +365,27 @@ def _stack(args, names):
     return f"a stack of {count} from {item}" if item else f"a stack of {count}"
 
 
+def _shape(name, args):
+    """Basic shapes (sage_shapes.py): "Building a bollard model", "Planning pedestrian barriers along 4 lines"."""
+    from ai_inspector.industrial_assets.shape_families import FAMILIES
+    family = FAMILIES.get(args.get("family") or ("steel_column" if name == "place_grid" else ""))
+    label = family.label[0].lower() + family.label[1:] if family else "basic shape"
+    plural = label if label.endswith("s") else label + "s"
+    if name == "author_shape_asset":
+        return BUILD, f"{'an' if label[0] in 'aeiou' else 'a'} {label} model"
+    if name == "roof_frame":
+        return PLAN, "the roof frame"
+    if name == "place_grid":
+        return PLAN, f"a grid of {plural}"
+    count = len(args.get("lines") or [])
+    return PLAN, f"{plural} along {count} line{'' if count == 1 else 's'}"
+
+
 def _step(name, args, names, edit_mode):
     if name in SIMPLE:
         return SIMPLE[name]
+    if name in ("author_shape_asset", "place_along_line", "place_grid", "roof_frame"):
+        return _shape(name, args)
     if name == "plan_facility_pattern":
         return PLAN, _pattern(args, names)
     if name == "plan_facility_cell":

@@ -129,6 +129,12 @@ support, or the rest of its stack).
 To stack an item ("a stack of 3 of these crates") or put items on another's surface ("put the vise on the bench"),
 call plan_facility_stack (mode stack or surface). To make items a named manufacturing cell, or to ungroup a cell
 (its items stay), call plan_facility_cell with action group or ungroup. Stage the packageId unchanged.
+For structure or simple equipment the library lacks (steel columns, beams, joists, barriers, bollards, guard rails,
+cable trays, pipes, sprinkler lines, high-bay lights, roof deck, fascia, tanks, bins, pallets, workbenches), build
+it from basic shapes: place_grid for a column grid, roof_frame for girders and joists, place_along_line for runs
+along lines, author_shape_asset for one model (it returns a picture). The planners make their own models; stage
+their packageId unchanged. Call the models illustrative, once. Say from the summary which floor strips were added
+and which gaps a run leaves.
 Before constructing unfamiliar operations, call inspect_facility_operation_contracts with the operation names.
 Follow the returned schema, including nested required fields and enums; do not discover it by trial and error.
 On schema rejection use the returned operationContract and findings to correct ALL fields together.

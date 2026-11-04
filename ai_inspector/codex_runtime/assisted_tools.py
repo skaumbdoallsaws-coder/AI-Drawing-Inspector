@@ -31,8 +31,8 @@ def edit_tool_specs():
          "Stage a whole package by its packageId, as one review: one build step (plan_warehouse_building, "
          "plan_warehouse_zones, plan_floor_markings, plan_storage_layout, plan_site_docks, plan_site_parking, "
          "plan_warehouse_contents), the paint plan_design_paint prepared, or a pattern, cell, position or stack "
-         "from plan_facility_pattern, plan_facility_cell, plan_facility_position or plan_facility_stack. The same "
-         "validation as "
+         "from plan_facility_pattern, plan_facility_cell, plan_facility_position or plan_facility_stack, or basic "
+         "shapes from place_along_line, place_grid or roof_frame. The same validation as "
          "preview_facility_operations; this tool never saves. In Apply Directly mode the app applies a package "
          "without findings after your turn (approvalRequired false); otherwise it opens a review. A package belongs "
          "to this turn and the saved layout it was planned on.", "input_schema": obj({"packageId": text(40)})},
@@ -50,7 +50,9 @@ class FacilityEditGateway(FacilityReadGateway):
         from jsonschema import Draft202012Validator
         editing = edit_tool_specs()
         self.operation_schema = editing[0]["input_schema"]
-        self.specs = [*tool_specs(), *editing, *artifact_specs(), contract_spec(self.operation_schema)]
+        from ai_inspector.facility_layout.sage_shapes import tool_specs as shape_tool_specs
+        self.specs = [*tool_specs(), *editing, *shape_tool_specs(), *artifact_specs(),
+                      contract_spec(self.operation_schema)]
         self.validators = {spec["name"]: Draft202012Validator(spec["input_schema"]) for spec in self.specs}
         self.proposal = None
         self.edit_mode = "preview"
@@ -94,14 +96,17 @@ class FacilityEditGateway(FacilityReadGateway):
             if package is None:
                 raise PilotError("codex_design_package_unknown",
                                  "Plan it first with a build step, plan_design_paint, plan_facility_pattern, "
-                                 "plan_facility_cell, plan_facility_position or plan_facility_stack and use the "
-                                 "packageId it returned.", 404)
+                                 "plan_facility_cell, plan_facility_position, plan_facility_stack, "
+                                 "place_along_line, place_grid or roof_frame and use the packageId it returned.", 404)
             result = create(self.runtime.service, self.principal, self.reference["siteId"], self.reference["layoutId"],
                             self.reference["revision"], operations=package, edit_mode=self.edit_mode, limits=PACKAGE_LIMITS,
                             planned=True)
             return self._staged(result)
         if name == FLOOR_PLAN_PREVIEW:
             return self._staged_for_review(*preview_floor_plan(self, arguments))
+        from ai_inspector.facility_layout import sage_shapes
+        if name in sage_shapes.NAMES:
+            return self._shapes(name, arguments)
         if name not in {"preview_facility_operations", "preview_facility_undo"}:
             return super()._read_data(name, arguments)
         operations = arguments.get("operations")
@@ -144,6 +149,42 @@ class FacilityEditGateway(FacilityReadGateway):
                 "diffHash": alternative["operationReceipt"]["diffHash"],
                 "review": "The app opens a review of the drawing's new placement or layer roles; nothing is saved "
                           "until the user approves it."}
+
+    def _shapes(self, name, arguments):
+        """Basic shapes (docs/sage-basic-shapes-plan.md, BS3): one model into the shared library with its picture,
+        or a planned package of them for preview_planned_design."""
+        from copy import deepcopy
+        from ai_inspector.facility_layout import sage_shapes
+        from ai_inspector.facility_layout.errors import FacilityLayoutError
+        from .facility_tools import read_bound_layout
+        register = getattr(self.runtime, "author_shape", None)
+        if register is None:
+            raise PilotError("authored_assets_unavailable",
+                             "Basic-shape models need the app's private asset library; it is off here.", 409)
+
+        def make(family, parameters):
+            try:
+                return register(family, parameters)
+            except FacilityLayoutError as error:
+                raise PilotError(error.code, error.message, 409 if error.status_code == 409 else 422) from None
+
+        try:
+            if name == sage_shapes.AUTHOR_TOOL:
+                result = sage_shapes.author(make, arguments)
+                self.last_image = result.pop("_image")
+                return dict(result, identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=False)
+            saved = read_bound_layout(self.runtime, self.principal, self.reference)
+            result = sage_shapes.plan(name, saved["layout"], arguments, revision=self.reference["revision"],
+                                      author=make)
+        except ValueError as exc:
+            raise PilotError("shape_plan_refused", str(exc), 422) from exc
+        package = result.pop("operations")
+        package_id = f"{sage_shapes.PREFIXES[name]}-{len(self.packages) + 1}"
+        self.packages[package_id] = package
+        result["package"] = {"packageId": package_id, "operations": len(package)}
+        result["staging"] = ("Stage it unchanged with preview_planned_design and this packageId: one review. "
+                             "Describe it from this summary; never rewrite its positions.")
+        return dict(result, identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=True)
 
     def _staged(self, result):
         self.proposal = {**self.reference, "proposalId": result["proposalId"]}

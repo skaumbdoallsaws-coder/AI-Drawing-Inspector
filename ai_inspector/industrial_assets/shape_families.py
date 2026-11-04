@@ -588,6 +588,13 @@ def _asset_id(family: Family, values: dict) -> str:
     return f"asset-authored-{family.name.replace('_', '-')}-{family.key(values)}-{digest[:10]}"
 
 
+def model(name: str, parameters: dict | None = None) -> list:
+    """The family's parts with these parameters, centred with the base at y = 0: what build_asset writes to the GLB
+    (shape_preview.py draws it)."""
+    family, values = resolve(name, parameters)
+    return on_floor(family.build(values))
+
+
 def build_asset(name: str, parameters: dict | None = None) -> dict:
     """The model and its catalog entry: {assetId, family, parameters, payload (GLB bytes), entry, dimensions,
     triangles}. Raises ValueError for parameters outside the family's limits."""

@@ -52,6 +52,10 @@ SIMPLE = {
     "suggest_site_references": (CHECK, "reference points for setting out the building"),
     "prepare_layout_pdf": (CHECK, "the printable layout sheets"),
     "suggest_emergency_teams": (CHECK, "emergency teams and meeting points"),
+    "inspect_floor_plan_import": (READ, "the imported floor plan drawing"),
+    "align_floor_plan_import": (MEASURE, "where the drawing sits on the plan"),
+    "plan_floor_plan_conversion": (CHECK, "the walls, doors and rooms in the drawing"),
+    "preview_floor_plan_import": (STAGE, "the drawing's change for your review"),  # a review in either mode
     "suggest_facility_light_positions": (CHECK, "clear spots for the light"),
     "check_lighting_coverage": (CHECK, "the lighting coverage"),
     "check_site_references": (CHECK, "how well the photo, map and reference points agree"),

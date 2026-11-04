@@ -125,7 +125,8 @@ def test_runtime_config_roundtrips_and_disables_general_tools():
         "inspect_site_context", "analyze_site_fit", "look_at_site_photo", "trace_site_feature",
         "plan_warehouse_building", "plan_warehouse_zones", "plan_floor_markings", "plan_storage_layout",
         "plan_site_docks", "plan_site_parking", "plan_warehouse_contents", "plan_design_paint",
-        "suggest_site_references", "check_site_references", "prepare_layout_pdf", "suggest_emergency_teams"}
+        "suggest_site_references", "check_site_references", "prepare_layout_pdf", "suggest_emergency_teams",
+        "inspect_floor_plan_import", "align_floor_plan_import", "plan_floor_plan_conversion"}
 
 
 def test_gateway_reads_real_backend_and_never_changes_revision(host):

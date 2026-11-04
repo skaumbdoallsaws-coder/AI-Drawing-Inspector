@@ -3978,6 +3978,13 @@ async function main() {
             assert.strictEqual(
                 data.workspace.proposalCheckText.getAttribute('data-check-status'), 'warning');
             assert.ok(data.workspace.proposalChangeText.textContent.includes('1 site edit'));
+            // A change to the floor-plan drawing (its placement or layer roles) is named, not hidden.
+            proposal.alternatives[0].operations = [{ op: 'upsert_floor_plan_reference' }];
+            data.session._notify();
+            await data.workspace.whenIdle();
+            assert.ok(data.workspace.proposalChangeText.textContent.includes('1 floor plan edit.'),
+                data.workspace.proposalChangeText.textContent);
+            proposal.alternatives[0].operations = [{ op: 'set_building_pose' }];
             delete proposal.alternatives[0].validationSummary;
             proposal.alternatives[0].metrics = {};
             data.session._notify();

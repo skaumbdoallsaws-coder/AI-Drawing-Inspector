@@ -2360,6 +2360,11 @@
                 'delete_site_area', 'upsert_site_reference', 'delete_site_reference'].includes(operation.op);
         }).length;
         if (siteEdits) parts.push(countPhrase(siteEdits, 'site edit', 'site edits'));
+        // Where the floor-plan drawing sits or what its layers show (Sage stages these for review).
+        const drawingEdits = ((alternative || {}).operations || []).filter(function (operation) {
+            return operation.op === 'upsert_floor_plan_reference' || operation.op === 'delete_floor_plan_reference';
+        }).length;
+        if (drawingEdits) parts.push(countPhrase(drawingEdits, 'floor plan edit', 'floor plan edits'));
         const repainted = ((alternative || {}).operations || []).filter(function (operation) {
             return operation.op === 'set_component_materials' || operation.op === 'set_appearance';
         }).length;

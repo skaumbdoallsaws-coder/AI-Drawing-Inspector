@@ -44,6 +44,7 @@ def tool_specs():
     from ai_inspector.facility_layout.workstation_review import tool_spec as workstation_tool_spec
     from .research_tools import tool_specs as research_tool_specs
     from .site_tools import tool_specs as site_tool_specs
+    from .floor_plan_tools import tool_specs as floor_plan_tool_specs
     return [{"name": "inspect_facility_context", "description":
              "Read the authorized saved layout summary and stable entity IDs. Call this before detailed inspection. No edits.",
              "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
@@ -52,7 +53,7 @@ def tool_specs():
             parking_tool_spec(), workstation_tool_spec(), light_positions_tool_spec(), light_coverage_tool_spec(),
             *pattern_tool_specs(), position_tool_spec(), stack_tool_spec(), views_tool_spec(),
             *research_tool_specs(),
-            *site_tool_specs()]
+            *site_tool_specs(), *floor_plan_tool_specs()]
 
 
 def read_bound_layout(runtime, principal, reference):
@@ -81,6 +82,8 @@ class FacilityReadGateway:
         self.progress = None  # TurnProgress when the chat pane shows steps
         self.closed, self.calls = False, 0
         self.packages = {}  # whole planned designs, staged by preview_planned_design (assisted_tools.py)
+        # A drawing's placement or conversion, staged only by preview_floor_plan_import (floor_plan_tools.py).
+        self.floor_plan_packages = {}
         self.pdf, self.pdfs = None, []  # the PDFs prepared this turn, shown as file cards under the reply
         self.shot_sets = []  # Sage's 3D shots this turn (SV2), shown as rows of pictures under the reply: (block, ids)
         self.credential_check = None
@@ -421,6 +424,9 @@ class FacilityReadGateway:
 
     def _read_data(self, name, arguments):
         from .site_tools import CATALOG_TOOLS, NAMES as SITE_NAMES, STEP_TOOLS, read_site
+        from .floor_plan_tools import NAMES as FLOOR_PLAN_NAMES, read as read_floor_plan
+        if name in FLOOR_PLAN_NAMES:
+            return read_floor_plan(self, name, arguments)
         if name == 'prepare_layout_pdf':
             return self._layout_pdf(arguments.get('kind') or 'layout')
         if name == 'suggest_emergency_teams':

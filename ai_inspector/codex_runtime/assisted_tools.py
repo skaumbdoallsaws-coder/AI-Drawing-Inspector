@@ -6,10 +6,12 @@ from .edit_schemas import obj, operation_batch_schema, text
 from .policy import PilotError
 
 PACKAGE_LIMITS = (1000, 600_000)  # a design package from the server's planner, not model-written operations
-PREVIEWS = {"preview_facility_operations", "preview_facility_undo", "preview_planned_design"}
+PREVIEWS = {"preview_facility_operations", "preview_facility_undo", "preview_planned_design",
+            "preview_floor_plan_import"}
 from .facility_tools import FacilityReadGateway, tool_specs
 from .authoring_artifacts import prepare_lettering, tool_specs as artifact_specs
 from .operation_contracts import contracts, tool_spec as contract_spec
+from .floor_plan_tools import PREVIEW as FLOOR_PLAN_PREVIEW, preview as preview_floor_plan, preview_spec
 
 
 def edit_tool_specs():
@@ -38,6 +40,7 @@ def edit_tool_specs():
          "Prepare an exact Undo preview for an approved commit receipt. Fails if the layout has changed since that commit. "
          "The app handles user authorization according to the selected edit mode; this tool never saves.",
          "input_schema": obj({"receiptId": text()})},
+        preview_spec(),
     ]
 
 
@@ -97,6 +100,8 @@ class FacilityEditGateway(FacilityReadGateway):
                             self.reference["revision"], operations=package, edit_mode=self.edit_mode, limits=PACKAGE_LIMITS,
                             planned=True)
             return self._staged(result)
+        if name == FLOOR_PLAN_PREVIEW:
+            return self._staged_for_review(*preview_floor_plan(self, arguments))
         if name not in {"preview_facility_operations", "preview_facility_undo"}:
             return super()._read_data(name, arguments)
         operations = arguments.get("operations")
@@ -118,6 +123,27 @@ class FacilityEditGateway(FacilityReadGateway):
             self.reference["revision"], operations=operations, undo_receipt_id=arguments.get("receiptId"),
             edit_mode=self.edit_mode)
         return self._staged(result)
+
+    def _staged_for_review(self, kind, result):
+        """A drawing's change staged (floor_plan_tools.preview): never applied directly, in any edit mode."""
+        if kind == "conversion":
+            proposal = result["proposal"]
+            self.proposal = {**self.reference, "proposalId": proposal["proposalId"]}
+            return {"proposalId": proposal["proposalId"], "baseRevision": proposal["baseRevision"], "saved": False,
+                    "approvalRequired": True, "editMode": "preview",
+                    "directApplyPolicy": proposal["directApplyPolicy"], "expiresAt": proposal["expiresAt"],
+                    "metrics": proposal["metrics"], "conversionId": result["conversionId"],
+                    "review": "The app opens a review of what the drawing converts to; nothing is saved until the "
+                              "user approves it."}
+        alternative = result["alternative"]
+        self.proposal = {**self.reference, "proposalId": result["proposalId"]}
+        return {"proposalId": result["proposalId"], "baseRevision": result["baseRevision"], "saved": False,
+                "approvalRequired": True, "editMode": "preview",
+                "directApplyPolicy": alternative["directApplyPolicy"], "expiresAt": result["expiresAt"],
+                "validation": alternative["validation"], "metrics": alternative["metrics"],
+                "diffHash": alternative["operationReceipt"]["diffHash"],
+                "review": "The app opens a review of the drawing's new placement or layer roles; nothing is saved "
+                          "until the user approves it."}
 
     def _staged(self, result):
         self.proposal = {**self.reference, "proposalId": result["proposalId"]}

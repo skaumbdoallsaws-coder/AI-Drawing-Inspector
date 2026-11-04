@@ -8210,6 +8210,80 @@ async function main() {
             workspace.destroy();
         });
 
+    const glidingFixture = () => {
+        const data = fixture();
+        const frames = [];
+        data.documentRef.defaultView = {
+            requestAnimationFrame(callback) { frames.push(callback); return frames.length; },
+            cancelAnimationFrame() {},
+            matchMedia() { return { matches: false }; },
+        };
+        data.workspace._setViewMode('3d');
+        const base = { siteId: 'site-a', layoutId: 'fl-workspace', revision: 'rev-1' };
+        return Object.assign(data, { frames,
+            run: () => { for (let time = 1000; frames.length; time += 100) frames.shift()(time); },
+            view: (label, x, z, roofHidden) => Object.assign({ label, from: 'south', roofHidden: roofHidden === true,
+                camera: { position: { x, y: 5, z: z - 10 }, target: { x, y: 0.7, z }, fov: 50 } }, base),
+            moved: (x, z) => Object.assign(clone(data.three.cameraView), { position: { x, y: 160, z: z - 150 },
+                target: { x, y: 0, z } }) });
+    };
+
+    await check('A first move stopped before it changed the view leaves no Back, and the move after takes the view '
+        + 'the user moved to (Sage 3D shots later list, Codex on 139b1e7)', async () => {
+            const data = glidingFixture();
+            const { workspace, three, view, moved, run, frames } = data;
+            const back = workspace.sageViewBackButton;
+            const applied = three.appliedCameraViews;
+            const first = clone(three.cameraView);
+            const count = applied.length;
+            assert.strictEqual(await workspace.showSageView(view('Assembly Cell A06', 20, 18)), true);
+            workspace.threeView.dispatch('pointerdown');
+            frames.length = 0;
+            assert.deepStrictEqual([applied.length, three.cameraView], [count, first], 'the view never moved');
+            assert.deepStrictEqual([workspace.sageViewBack, back.hidden], [null, true],
+                'no Back yet (139b1e7 kept the view before this move)');
+            // The user moves the view; Sage's next move lands: Back returns to the user's view, not the first.
+            const overview = moved(110, 60);
+            three.cameraView = clone(overview);
+            assert.strictEqual(await workspace.showSageView(view('Inspection Q04', 213.5, 76)), true);
+            assert.strictEqual(back.hidden, true, 'Back shows once the move changes the view');
+            run();
+            assert.strictEqual(back.hidden, false);
+            back.dispatch('click');
+            assert.deepStrictEqual(applied[applied.length - 1], overview, 'Back: the view the user moved to');
+            workspace.destroy();
+        });
+
+    await check('A roof layer the user switches between Sage\'s moves is the roof Back brings back; Sage\'s own '
+        + 'hiding never is (Sage 3D shots later list, Codex on 4c274e3)', async () => {
+            const data = glidingFixture();
+            const { workspace, three, view, moved, run } = data;
+            const back = workspace.sageViewBackButton;
+            const layer = key => workspace.layerPanel.querySelector('[data-facility-layer="' + key + '"]');
+            assert.strictEqual(workspace.layerVisibility.roofSheeting, false);
+            assert.strictEqual(await workspace.showSageView(view('Assembly Cell A06', 20, 18)), true);
+            run();
+            // The user switches roof sheeting on and moves the view; Sage's next move lands; then Back.
+            layer('roofSheeting').checked = true;
+            layer('roofSheeting').dispatch('change');
+            three.cameraView = clone(moved(110, 60));
+            assert.strictEqual(await workspace.showSageView(view('Inspection Q04', 213.5, 76)), true);
+            run();
+            back.dispatch('click');
+            assert.strictEqual(workspace.layerVisibility.roofSheeting, true,
+                'the user\'s roof sheeting (4c274e3 turned it off again)');
+            // A move that looks down lands with the roof off; the user switches another layer; Back: the user's roof.
+            assert.strictEqual(await workspace.showSageView(view('Assembly Cell A06', 20, 18, true)), true);
+            run();
+            assert.strictEqual(workspace.layerVisibility.roofSheeting, false, 'Sage looks down through the roof');
+            layer('routes').checked = false;
+            layer('routes').dispatch('change');
+            back.dispatch('click');
+            assert.deepStrictEqual([workspace.layerVisibility.roofSheeting, workspace.layerVisibility.routes],
+                [true, false], 'the user\'s roof, not Sage\'s hiding, and the routes as the user left them');
+            workspace.destroy();
+        });
+
     await check('A 3D shot is the frame scaled to fit 1280 x 720, as a JPEG, copied at once', async () => {
         const drawn = [];
         const made = [];

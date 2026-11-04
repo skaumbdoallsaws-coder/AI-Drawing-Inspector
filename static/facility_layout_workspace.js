@@ -5714,6 +5714,7 @@
             this.layerVisibility
         );
         this._applyLayerVisibility();
+        this._noteUserRoof([key]);
     };
 
     Workspace.prototype._handleLayerPanelClick = function (event) {
@@ -5733,6 +5734,7 @@
             DEFAULT_LAYER_VISIBILITY
         );
         this._applyLayerVisibility();
+        this._noteUserRoof(['overhead', 'roofSheeting']);
     };
 
     Workspace.prototype._buildAssetBrowser = function () {
@@ -14622,17 +14624,18 @@
         // (another camera or view mode), it returns to the view right before this move, with the user's own roof:
         // only Sage hides it (SV3b; SV5 found Back going to a view from turns before). That view becomes Back's only
         // once this move changes the view (_sageViewMoved): one that ends before leaves Back as it was (final
-        // round 7). Switching to 3D already changed it.
+        // round 7). Switching to 3D already changed it. The first move's view too: a first move stopped before it
+        // changed the view leaves no Back, so the move after takes the view the user moved to (Codex on 139b1e7).
         const kept = this.sageViewBack && this.sageViewBack.layoutId === layout.layoutId ? this.sageViewBack : null;
         const left = this.sageViewLeft && this.sageViewLeft.layoutId === layout.layoutId ? this.sageViewLeft : null;
         if (!kept) {
-            this.sageViewBack = Object.assign(before, { camera: start });
+            this.sageViewNext = { owner: owner, back: Object.assign(before, { camera: start }) };
         } else if (left && (left.viewMode !== before.viewMode || !sageSameCamera(left.camera, start))) {
             this.sageViewNext = { owner: owner, back: Object.assign(before, { camera: start, layers: kept.layers }) };
         }
         if (switched) this._sageViewMoved(owner);
         const roofHidden = value.roofHidden === true;
-        const own = this.sageViewBack.layers;
+        const own = (this.sageViewNext ? this.sageViewNext.back : this.sageViewBack).layers;   // Back's, once it moves
         this._setSageRoof({ overhead: false, roofSheeting: false });
         this._renderSageViewBack();
         const landed = function () {
@@ -14699,9 +14702,24 @@
         const layout = this.state && this.state.layout;
         if (next && next.owner === owner) {
             this.sageViewNext = null;
-            if (layout && next.back.layoutId === layout.layoutId) this.sageViewBack = next.back;
+            if (layout && next.back.layoutId === layout.layoutId) {
+                this.sageViewBack = next.back;
+                this._renderSageViewBack();
+            }
         }
         if (owner) owner.moved = true;
+    };
+
+    // The user's own roof for Back (Codex on 4c274e3): a roof layer the user switches in the layer panel is saved to
+    // Back, to a Back waiting for Sage's move to change the view, and to the capture's roof, so Back brings the roof
+    // back as the user left it. Sage's own hiding (_setSageRoof) and the other layers never are.
+    Workspace.prototype._noteUserRoof = function (keys) {
+        const roof = keys.filter(function (key) { return key === 'overhead' || key === 'roofSheeting'; });
+        const next = this.sageViewNext;
+        [this.sageViewBack, next && next.back, this.sageCapture].forEach(function (saved) {
+            if (!saved || !saved.layers) return;
+            roof.forEach(function (key) { saved.layers[key] = this.layerVisibility[key]; }, this);
+        }, this);
     };
 
     // SV3b: where Sage left the 3D view when it stopped moving it (a glide landed or stopped, the shots ended). A

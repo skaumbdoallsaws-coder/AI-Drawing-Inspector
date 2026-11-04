@@ -7,9 +7,10 @@ file's own style (compact, or indented with its own line endings), summary.total
 parse to the old catalog plus the entry before it replaces the file. The host then binds the entry the way a fresh
 start would (LocalFacilityLayoutHost.register_authored_asset), so no restart is needed.
 
-Other writers: one registration at a time across processes (an OS lock on a file beside the catalog, held from the
-first read to the replace), each write through its own temporary file, and the catalog compared with what was read
-once more just before the replace; a catalog changed by anyone else meanwhile is left as it is.
+Other writers: this module and tools/factory02_light_models.py hold CatalogLock (an OS lock on catalog.json.lock
+beside the catalog) from their read to their replace. Each write goes through its own temporary file (replace_file),
+and the catalog is compared with what was read once more just before the replace, so a catalog changed meanwhile by a
+writer that takes no lock is left as it is.
 """
 from __future__ import annotations
 
@@ -107,9 +108,10 @@ def appended(original: bytes, entry: dict) -> bytes:
     return bom + result.encode("utf-8")
 
 
-class _CatalogLock:
-    """The catalog's lock across processes: an exclusive OS lock on a file beside it (catalog.json.lock). The system
-    lets go of it when the process holding it stops, so a crash mid-write leaves nothing to clear; the file stays."""
+class CatalogLock:
+    """The catalog's lock across processes: an exclusive OS lock on a file beside it (catalog.json.lock), held by
+    the catalog's writers from their read to their replace. The system lets go of it when the process holding it
+    stops, so a crash mid-write leaves nothing to clear; the file stays."""
 
     def __init__(self, catalog: Path):
         self.path = catalog.with_name(catalog.name + ".lock")
@@ -172,7 +174,7 @@ def _temporary(path: Path, data: bytes) -> Path:
     return Path(name)
 
 
-def _write(path: Path, data: bytes, *, unchanged: bytes | None = None) -> None:
+def replace_file(path: Path, data: bytes, *, unchanged: bytes | None = None) -> None:
     """Replace PATH with DATA through a temporary file; with `unchanged`, only while PATH still holds those bytes,
     compared once more just before the replace."""
     temp = _temporary(path, data)
@@ -200,14 +202,14 @@ def install(root: str | Path, built: dict) -> dict:
     if root / FOLDER not in model.parents:
         raise ValueError("The model path leaves the authored folder")
     catalog = root / CATALOG
-    with LOCK, _CatalogLock(catalog):
+    with LOCK, CatalogLock(catalog):
         original = catalog.read_bytes()
         known = {item.get("assetId") for item in json.loads(original.decode("utf-8-sig"))["assets"]}
         written = False
         if entry["assetId"] not in known or not model.is_file():
             if not model.is_file() or model.read_bytes() != payload:
                 model.parent.mkdir(parents=True, exist_ok=True)
-                _write(model, payload)
+                replace_file(model, payload)
                 written = True
         if entry["assetId"] in known:
             return {"assetId": entry["assetId"], "added": False, "modelWritten": written, "backup": None}
@@ -218,6 +220,6 @@ def install(root: str | Path, built: dict) -> dict:
         backup.write_bytes(original)
         for old in sorted(backups.glob("catalog-*.json"))[:-KEEP_BACKUPS]:
             old.unlink()
-        _write(catalog, updated, unchanged=original)
+        replace_file(catalog, updated, unchanged=original)
     return {"assetId": entry["assetId"], "added": True, "modelWritten": written,
             "backup": backup.relative_to(root).as_posix()}

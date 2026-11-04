@@ -292,15 +292,19 @@ def test_the_chat_names_each_step():
     assert describe(shapes.ROOF_TOOL, {})["running"] == "Planning the roof frame"
 
 
-def test_items_in_zones_whose_rules_they_break_are_refused_not_given_strips():
-    """A strip of its own would get an item past a zone's height limit, categories or edge setback (Codex review)."""
-    def ruled(zone_id, label, box, **rules):
-        return dict(zone_op(zone_id, label, "workcell", box)["zone"], **rules)
+def ruled(zone_id, label, box, **rules):
+    return dict(zone_op(zone_id, label, "workcell", box)["zone"], **rules)
+
+
+@pytest.mark.parametrize("hall", [False, True])
+def test_items_in_zones_whose_rules_they_break_are_refused_not_given_strips(hall):
+    """A strip of its own would get an item past a zone's height limit, categories or edge setback (Codex review),
+    and so would a hall around the zones that takes anything (Codex review 2)."""
     layout = {"placements": [], "zones": [
         ruled("zn-low", "Mezzanine bay", (0, 20, 10, 30), heightLimit=3.0),
         ruled("zn-machines", "Machine cell", (20, 20, 30, 30), allowedAssetCategories=["Machines"]),
         ruled("zn-kept", "Kept bay", (32, 20, 40, 30), edgeSetbacks={"east": 1.0}),
-        zone_op(*ZONES[0])["zone"]]}
+        zone_op(*ZONES[0])["zone"], *([ruled("zn-hall", "Hall", (0, 18, 40, 30))] if hall else [])]}
     with pytest.raises(shapes.ShapeError, match=re.escape(
             "Column A-1: zone 'Mezzanine bay' has a 3 m height limit; the item is 10 m high")):
         shapes.plan(shapes.GRID_TOOL, layout, {"x": {"at": [5]}, "z": {"at": [25]}}, revision="r1", author=fake_author)
@@ -317,6 +321,10 @@ def test_items_in_zones_whose_rules_they_break_are_refused_not_given_strips():
     result = shapes.plan(shapes.GRID_TOOL, layout, {"x": {"at": [5, 15]}, "z": {"at": [10, 12]}}, revision="r1",
                          author=fake_author)     # row A straddles the Bay's edge, row B is unzoned
     assert result["placed"] == 4 and result["zones"].startswith("3 thin floor-coloured workcell strips added")
+    if hall:                                      # the hall holds what breaks no zone's rules
+        result = shapes.plan(shapes.GRID_TOOL, layout, {"x": {"at": [15]}, "z": {"at": [25]}}, revision="r1",
+                             author=fake_author)
+        assert result["placed"] == 1 and result["zones"] == "already inside Hall (1)"
 
 
 LONG_RUNS = [{"from": {"x": 0, "z": 0.5 * k}, "to": {"x": float(k), "z": 0.5 * k},
@@ -469,6 +477,70 @@ def test_runs_stop_short_of_items_and_overhead_runs_of_what_their_height_meets()
     assert [(gap["from"]["x"], gap["to"]["x"], gap["inTheWay"]) for gap in overhead["gaps"]] == [
         (4.95, 35.05, ["Light row 1"])]                   # the keep-clear box below does not count up there
     assert [piece["lengthMeters"] for piece in overhead["pieces"]] == [4.45, 4.45]
+
+
+def test_a_run_keeps_the_stretch_between_two_crossings_of_one_walkway():
+    """A U-shaped walkway crosses the run at x 3 and x 8: two openings, not one from 2.45 to 8.55 (Codex review 2)."""
+    layout = {"placements": [], "zones": [], "routes": [
+        aisle("Loop", "pedestrian", [(3, 6), (3, 2), (8, 2), (8, 6)], 1.0)]}
+    obstacles = ObstacleMap(layout)
+    blocked = obstacles.blocked_along((0.0, 5.0), (1.0, 0.0), 12.0, 0.1, 0.0, 1.0)
+    assert [(round(start, 2), round(end, 2), name) for start, end, name in blocked] == [
+        (2.45, 3.55, "walkway 'Loop'"), (7.45, 8.55, "walkway 'Loop'")]
+    result = shapes.plan(shapes.LINE_TOOL, layout, {"family": "pedestrian_barrier", "lines": [
+        {"from": {"x": 0, "z": 5}, "to": {"x": 12, "z": 5}, "label": "Rail"}]}, revision="r1", author=fake_author,
+        obstacles=obstacles)
+    assert [(gap["from"]["x"], gap["to"]["x"]) for gap in result["gaps"]] == [(2.45, 3.55), (7.45, 8.55)]
+    assert [piece["lengthMeters"] for piece in result["pieces"]] == [2.45, 3.9, 3.45]
+
+
+FLOOR = [{"x": 0, "z": 0}, {"x": 40, "z": 0}, {"x": 40, "z": 30}, {"x": 0, "z": 30}]
+
+
+def floor_surface(feature_id, x0, x1, elevation):
+    return {"featureId": feature_id, "featureKind": "floor_surface", "geometry": {"elevation": elevation, "boundary": [
+        {"x": x0, "z": 0}, {"x": x1, "z": 0}, {"x": x1, "z": 30}, {"x": x0, "z": 30}]}}
+
+
+def test_overhead_counts_from_the_shell_s_floor_and_so_do_the_planners_heights():
+    """With the floor at 1 m an item at 4.5 m is not overhead yet, as the checks count it (Codex review 2), and
+    elevationMeters and supportTopMeters count from the floor."""
+    layout = {"placements": [], "zones": [], "routes": [aisle("Boulevard", "forklift", [(0, 20), (40, 20)], 3.0)]}
+    shell = {"coordinateFrame": {"floorElevation": 1.0}, "features": [floor_surface("floor-main", 0, 40, 1.0)]}
+    obstacles = ObstacleMap(layout, shell=shell)
+    assert obstacles.reasons(column(5, 20), 4.5, 5.0) == ["the floor here is at 1 m, not 4.5 m",
+                                                          "in forklift aisle 'Boulevard'"]
+    assert obstacles.reasons(column(5, 20), 5.5, 6.0) == []
+    assert obstacles.reasons(column(5, 5), 1.0, 11.0) == []
+    grid = shapes.plan(shapes.GRID_TOOL, layout, {"x": {"at": [5]}, "z": {"at": [5, 20]}}, revision="r1",
+                       author=fake_author, obstacles=obstacles)
+    assert [item["name"] for item in grid["items"]] == ["A-1"] and grid["dropped"][0]["point"] == "B-1"
+    assert [op["placement"]["transform"]["position"]["y"] for op in grid["operations"]] == [1.0]
+    tray = shapes.plan(shapes.LINE_TOOL, layout, {"family": "cable_tray", "elevationMeters": 4.5, "lines": [
+        {"from": {"x": 1, "z": 20}, "to": {"x": 15, "z": 20}, "label": "Tray"}]}, revision="r1", author=fake_author,
+        obstacles=obstacles)                     # 5.5 m up: overhead, so the aisle below does not count
+    assert tray["gaps"] == [] and tray["zones"] == "overhead: no floor zone needed"
+    assert [op["placement"]["transform"]["position"]["y"] for op in tray["operations"]] == [5.5]
+    roof = shapes.plan(shapes.ROOF_TOOL, layout, {"area": {"west": 0, "east": 12, "south": 0, "north": 12},
+                                                  "supportTopMeters": 10, "girders": {"at": [0, 12]}},
+                       revision="r1", author=fake_author, obstacles=obstacles)
+    heights = {round(op["placement"]["transform"]["position"]["y"], 4) for op in roof["operations"]
+               if "girder" in op["placement"]["placementId"]}
+    assert heights == {11.002} and roof["girders"]["bottomMeters"] == 10.002
+
+
+def test_a_floor_item_stands_inside_one_floor_surface_at_its_elevation():
+    """As the mounting check sees it: two surfaces side by side do not hold what straddles them, and a raised one
+    holds only what stands at its height (Codex review 2)."""
+    shell = {"features": [floor_surface("floor-west", 0, 10, 0.0), floor_surface("floor-east", 10, 20, 0.0),
+                          floor_surface("floor-raised", 20, 30, 1.0)]}
+    obstacles = ObstacleMap({"placements": [], "zones": []}, shell=shell)
+    assert obstacles.reasons(column(5, 5), 0.0, 10.0) == []
+    assert obstacles.reasons(column(10, 5), 0.0, 10.0) == ["off the floor"]
+    assert obstacles.reasons(column(25, 5), 0.0, 10.0) == ["the floor here is at 1 m, not 0 m"]
+    assert obstacles.reasons(column(25, 5), 1.0, 11.0) == []
+    assert obstacles.reasons(column(35, 5), 0.0, 10.0) == ["off the floor"]
+    assert obstacles.reasons(column(10, 5), 9.0, 9.5) == []                  # overhead: no floor needed
 
 
 def test_a_column_grid_keeps_clear_of_items_and_aisles_on_a_live_host(host):

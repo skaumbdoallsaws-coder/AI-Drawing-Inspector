@@ -155,7 +155,7 @@ def test_a_catalog_changed_by_someone_else_meanwhile_is_left_alone(host, tmp_pat
     assert caught.value.code == "authored_asset_not_added"
     assert b'"total":5' in manifest.read_bytes() and b"asset-authored-bin" not in manifest.read_bytes()
     assert not list(manifest.parent.glob("*.tmp"))
-    with library._CatalogLock(manifest):          # and the lock was let go
+    with library.CatalogLock(manifest):          # and the lock was let go
         pass
     assert "asset-authored-bin" not in json.dumps(catalog_ids(host))
 
@@ -164,7 +164,7 @@ HOLD_THE_LOCK = """
 import sys
 from pathlib import Path
 from ai_inspector.industrial_assets import authored_library as library
-with library._CatalogLock(Path(sys.argv[1])):
+with library.CatalogLock(Path(sys.argv[1])):
     print("held", flush=True)
     sys.stdin.readline()
 """

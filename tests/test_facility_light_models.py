@@ -176,6 +176,22 @@ def _project(tmp_path):
     return tmp_path
 
 
+def test_install_waits_for_the_catalog_lock_the_app_s_authored_shapes_take(tmp_path, monkeypatch):
+    """The app adds authored shapes to the same catalog: while one is being added, the light models are not written
+    over it from a stale copy (Codex review 2)."""
+    from ai_inspector.industrial_assets import authored_library as library
+    root = _project(tmp_path)
+    catalog = root / models.CATALOG
+    before = catalog.read_bytes()
+    monkeypatch.setattr(library, "LOCK_WAIT", 0.2)
+    with library.CatalogLock(catalog):
+        with pytest.raises(ValueError, match="Another process is adding to the asset catalog"):
+            models.install(root)
+    assert catalog.read_bytes() == before
+    assert models.install(root)["catalogChanged"] is True
+    assert not list(catalog.parent.glob("*.tmp"))
+
+
 def test_install_adds_the_models_once_keeps_the_manifest_layout_and_the_host_reads_them(tmp_path):
     root = _project(tmp_path)
     first = models.install(root)

@@ -36,10 +36,13 @@ import argparse
 import json
 import math
 import struct
+import sys
 
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))   # run as a script: the app's packages, for the private catalog's lock
 FOLDER = "generated/industrial_assets/factory02_lights"
 CATALOG = Path("generated/industrial_assets/local_library/catalog.json")
 IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]
@@ -395,21 +398,23 @@ def install(root=ROOT):
         if not path.is_file() or path.read_bytes() != raw:
             path.write_bytes(raw)
             written.append(FOLDER + "/" + model["file"])
+    from ai_inspector.industrial_assets.authored_library import CatalogLock, replace_file
     catalog_path = root / CATALOG
-    original = catalog_path.read_bytes()
-    library = json.loads(original)
-    positions = {asset["assetId"]: index for index, asset in enumerate(library["assets"])}
-    for model in MODELS:
-        entry = catalog_entry(model)
-        if model["assetId"] in positions:
-            library["assets"][positions[model["assetId"]]] = entry
-        else:
-            library["assets"].append(entry)
-    if isinstance(library.get("summary"), dict):
-        library["summary"]["total"] = len(library["assets"])
-    updated = _dump_like(original, library)
-    if updated != original:
-        catalog_path.write_bytes(updated)
+    with CatalogLock(catalog_path):   # the app adds authored shapes to the same catalog: one writer at a time
+        original = catalog_path.read_bytes()
+        library = json.loads(original)
+        positions = {asset["assetId"]: index for index, asset in enumerate(library["assets"])}
+        for model in MODELS:
+            entry = catalog_entry(model)
+            if model["assetId"] in positions:
+                library["assets"][positions[model["assetId"]]] = entry
+            else:
+                library["assets"].append(entry)
+        if isinstance(library.get("summary"), dict):
+            library["summary"]["total"] = len(library["assets"])
+        updated = _dump_like(original, library)
+        if updated != original:
+            replace_file(catalog_path, updated, unchanged=original)
     return {"modelsWritten": written, "catalogChanged": updated != original,
             "assetIds": [model["assetId"] for model in MODELS]}
 

@@ -142,7 +142,8 @@ def tool_specs() -> list[dict]:
             "parameter's default (all optional; sizes in metres, colours '#rrggbb'): " + every + "."),
          "input_schema": {"type": "object", "additionalProperties": False, "required": ["family"], "properties": {
              "family": {"enum": list(families.FAMILIES)},
-             "parameters": {"type": "object", "description": "Only what differs from the defaults."}}}},
+             "parameters": {"type": "object", "description": "Only what differs from the defaults."}}},
+         "pictures": True},     # its picture rides beside the JSON, so it declares no output schema (mcp_bridge.py)
         {"name": LINE_TOOL, "description": (
             "Plan items along straight lines: barriers, guard rails, beams, cable trays, pipes, sprinkler lines. "
             "Each line gets one piece of its exact length (one model per distinct length, made and added to the "
@@ -186,7 +187,8 @@ def tool_specs() -> list[dict]:
              "skip": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 20},
                       "maxItems": 2000},
              "yawDegrees": {"type": "number", "minimum": -360, "maximum": 360},
-             "elevationMeters": ELEVATION, "labelPrefix": LABEL, "planImage": {"type": "boolean"}}}},
+             "elevationMeters": ELEVATION, "labelPrefix": LABEL, "planImage": {"type": "boolean"}}},
+         "pictures": True},     # the planImage rides beside the JSON, so it declares no output schema (mcp_bridge.py)
         {"name": ROOF_TOOL, "description": (
             "Plan a roof frame over an area: steel girders (I-beams) on lines and open-web joists across them at a "
             "spacing, centred in the area. area: its west, east, south and north edges in plan metres. "
@@ -242,9 +244,9 @@ class _Zones:
         return [zone for zone, boundary, bounds, _ in self.items
                 if _boxes_meet(box, bounds) and polygons_intersect(boundary, polygon)]
 
-    def holding(self, polygon, category: str, top: float) -> Mapping | None:
-        """An operational zone that holds this footprint as the engine checks it: inside, past its edge setback,
-        open to the category and under its height limit."""
+    def holding(self, polygon, category: str, low: float, top: float) -> Mapping | None:
+        """An operational zone that holds this footprint (an item from low to top) as the engine checks it: inside,
+        past its edge setback, open to the category and under its height limit."""
         box = _box(polygon)
         for zone, boundary, bounds, closed in self.items:
             if closed or not (bounds[0] <= box[0] and bounds[1] <= box[1] and box[2] <= bounds[2]
@@ -260,14 +262,15 @@ class _Zones:
             if isinstance(allowed, list) and allowed and category not in allowed:
                 continue
             limit = zone.get("heightLimit")
-            if limit is not None and top > float(zone.get("floorElevation", 0) or 0) + float(limit) + 1e-9:
+            if limit is not None and top > _zone_floor(zone, low) + float(limit) + 1e-9:
                 continue
             return zone
         return None
 
-    def breaking(self, polygon, category: str, top: float) -> list[str]:
-        """The rules this footprint breaks of the operational zones it stands in, wholly or partly: an item there
-        gets no strip of its own, which would get it past them."""
+    def breaking(self, polygon, category: str, low: float, top: float) -> list[str]:
+        """The rules this footprint breaks of the operational zones it stands in, wholly or partly. The planners ask
+        this first: neither a zone around those that takes anything (a hall) nor a strip of its own gets an item past
+        them."""
         shape, box = Polygon(polygon), _box(polygon)
         broken = []
         for zone, boundary, bounds, closed in self.items:
@@ -278,14 +281,21 @@ class _Zones:
             if isinstance(allowed, list) and allowed and category not in allowed:
                 broken.append(f"{name} takes only {', '.join(str(item) for item in allowed)}, not {category}")
             limit = zone.get("heightLimit")
-            if limit is not None and top > float(zone.get("floorElevation", 0) or 0) + float(limit) + 1e-9:
-                broken.append(f"{name} has a {float(limit):g} m height limit; the item is {top:g} m high")
+            if limit is not None and top > _zone_floor(zone, low) + float(limit) + 1e-9:
+                broken.append(f"{name} has a {float(limit):g} m height limit; the item is "
+                              f"{top - _zone_floor(zone, low):g} m high")
             setbacks = zone.get("edgeSetbacks")
             setback = max((float(v) for v in setbacks.values()), default=0.0) if isinstance(setbacks, Mapping) else 0
             if setback > 1e-9 and (not polygon_contains_polygon(boundary, polygon)
                                    or polygon_boundary_distance(polygon, boundary) + 1e-9 < setback):
                 broken.append(f"{name} keeps items {setback:g} m inside its edges")
         return broken
+
+
+def _zone_floor(zone: Mapping, low: float) -> float:
+    """Where a zone's height limit counts from: its floorElevation, or else the item's own base (spatial._zone_checks)."""
+    value = zone.get("floorElevation")
+    return low if value is None else float(value)
 
 
 def _box(polygon) -> tuple[float, float, float, float]:
@@ -428,14 +438,15 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     record = families.FAMILIES[family]
     parameters = _parameters(arguments, without="lengthMeters")
     elevation = _elevation(arguments)
-    floor = elevation < OVERHEAD
+    obstacles = obstacles or ObstacleMap(layout)
+    low = obstacles.floor_elevation + elevation      # elevationMeters counts from the shell's floor, as the checks do
+    floor = not obstacles.overhead(low)
     shortest, longest = float(record.params["lengthMeters"].low), float(record.params["lengthMeters"].high)
     _validated(family, {**parameters, "lengthMeters": record.params["lengthMeters"].default})
     size = size_of(families.model(family, {**parameters, "lengthMeters": record.params["lengthMeters"].default}))
     depth, height = size["depth"], size["height"]
     zones = _Zones(layout)
     containment = _containment(zones, floor)
-    obstacles = obstacles or ObstacleMap(layout)
     runs, refused = [], []
     for number, line in enumerate(arguments["lines"], start=1):
         start = (float(line["from"]["x"]), float(line["from"]["z"]))
@@ -461,7 +472,7 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     pieces, gaps, dropped = [], [], []
     for number, label, side, origin, along, length in runs:
         stretches, line_gaps = _free(length, obstacles.blocked_along(origin, along, length, depth / 2 + STRIP_MARGIN,
-                                                                     elevation, elevation + height))
+                                                                     low, low + height))
         for start, end, names in line_gaps:
             gaps.append({"line": label, "from": _point(origin[0] + along[0] * start, origin[1] + along[1] * start),
                          "to": _point(origin[0] + along[0] * end, origin[1] + along[1] * end),
@@ -489,18 +500,18 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     for index, piece in enumerate(pieces, start=1):
         asset = assets[piece["length"]]
         placement_id = f"pl-line-{namespace}-{index}"
-        position = {"x": piece["center"][0], "y": elevation, "z": piece["center"][1]}
+        position = {"x": piece["center"][0], "y": low, "z": piece["center"][1]}
         placements.append(_place(placement_id, asset, position, _yaw(piece["along"]), piece["label"]))
         stands = None
         if containment == "strips":
             footprint = _rectangle(piece["center"], piece["along"], piece["length"] / 2, depth / 2)
-            zone = zones.holding(footprint, asset["category"], elevation + height)
-            broken = zones.breaking(footprint, asset["category"], elevation + height) if zone is None else []
-            if zone is not None:
+            broken = zones.breaking(footprint, asset["category"], low, low + height)
+            zone = None if broken else zones.holding(footprint, asset["category"], low, low + height)
+            if broken:
+                in_rule_zones.append(f"{piece['label']}: {broken[0]}")
+            elif zone is not None:
                 stands = _Zones.name(zone)
                 held[stands] = held.get(stands, 0) + 1
-            elif broken:
-                in_rule_zones.append(f"{piece['label']}: {broken[0]}")
             else:
                 corners = _rectangle(piece["center"], piece["along"], piece["length"] / 2 + STRIP_MARGIN,
                                      depth / 2 + STRIP_MARGIN)
@@ -535,8 +546,8 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
 
 def _refuse_breaking(refused: Sequence[str]) -> None:
     if refused:
-        raise ShapeError("These would stand in zones whose rules they break, and a strip of their own would get "
-                         "them past those rules: " + "; ".join(refused[:6])
+        raise ShapeError("These would stand in zones whose rules they break (a strip of their own or a zone around "
+                         "them that takes anything does not get them past those rules): " + "; ".join(refused[:6])
                          + (f"; and {len(refused) - 6} more" if len(refused) > 6 else "")
                          + ". Leave them out (skip, or shorter lines), or choose an item the zone takes.")
 
@@ -654,7 +665,9 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     parameters = _parameters(arguments)
     _validated(family, parameters)
     elevation = _elevation(arguments)
-    floor = elevation < OVERHEAD
+    obstacles = obstacles or ObstacleMap(layout)
+    low = obstacles.floor_elevation + elevation      # elevationMeters counts from the shell's floor, as the checks do
+    floor = not obstacles.overhead(low)
     columns = _axis(arguments["x"], "x", lettered=False)
     rows = _axis(arguments["z"], "z", lettered=True)
     points = [(f"{row}-{column}", x, z) for row, z in rows for column, x in columns]
@@ -675,11 +688,10 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     reach_z = abs(along[1]) * width / 2 + abs(along[0]) * depth / 2
     namespace = _namespace(GRID_TOOL, arguments, revision)
     prefix = arguments.get("labelPrefix") or ("Column" if family == "steel_column" else record.label)
-    obstacles = obstacles or ObstacleMap(layout)
     standing, dropped = [], []
     for name, x, z in kept:
-        reasons = obstacles.reasons(Polygon(_rectangle((x, z), along, width / 2, depth / 2)), elevation,
-                                    elevation + height, GRID_CLEARANCES)
+        reasons = obstacles.reasons(Polygon(_rectangle((x, z), along, width / 2, depth / 2)), low, low + height,
+                                    GRID_CLEARANCES)
         if not reasons:
             standing.append((name, x, z))
             continue
@@ -692,7 +704,7 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
                          + ". Move the lines, or plan a smaller area.")
     placements, held = [], {}
     for name, x, z in standing:
-        placements.append(_place(f"pl-grid-{namespace}-{name.lower()}", asset, {"x": x, "y": elevation, "z": z},
+        placements.append(_place(f"pl-grid-{namespace}-{name.lower()}", asset, {"x": x, "y": low, "z": z},
                                  yaw, f"{prefix} {name}"))
     strips, refused = [], []
     if containment == "strips":
@@ -705,15 +717,14 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
             for point in members + [None]:
                 if point is not None:
                     footprint = _rectangle((point[1], point[2]), along, width / 2, depth / 2)
-                    zone = zones.holding(footprint, asset["category"], elevation + height)
-                    if zone is not None:
+                    broken = zones.breaking(footprint, asset["category"], low, low + height)
+                    zone = None if broken else zones.holding(footprint, asset["category"], low, low + height)
+                    if broken:
+                        refused.append(f"{prefix} {point[0]}: {broken[0]}")
+                        point = "held"               # no strip; the plan is refused below
+                    elif zone is not None:
                         held[_Zones.name(zone)] = held.get(_Zones.name(zone), 0) + 1
                         point = "held"
-                    else:
-                        broken = zones.breaking(footprint, asset["category"], elevation + height)
-                        if broken:
-                            refused.append(f"{prefix} {point[0]}: {broken[0]}")
-                            point = "held"           # no strip; the plan is refused below
                 if point not in (None, "held") and (not run or not _strip_meets(
                         zones, obstacles, _box_corners(_grid_box(run[0], point, reach_x, reach_z)))):
                     run.append(point)
@@ -759,7 +770,7 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
                    + (f", {len(boxes)} new strip{'s' if len(boxes) != 1 else ''} (orange)" if boxes else "")
                    + (f"; {len(skipped)} skipped by name, not drawn" if skipped else ""))
         picture = obstacles.picture((min(xs) - margin, min(zs) - margin, max(xs) + margin, max(zs) + margin),
-                                    elevation, elevation + height, x_lines=columns, z_lines=rows, placed=footprints,
+                                    low, low + height, x_lines=columns, z_lines=rows, placed=footprints,
                                     dropped=[(item["x"], item["z"]) for item in dropped],
                                     strips=[Polygon(_box_corners(box)) for box in boxes], caption=caption)
         result["picture"] = ("attached: a plan of the grid, north up, with what is in the way of the items "
@@ -786,11 +797,13 @@ def _box_corners(box) -> tuple:
 
 # --- roof_frame ---
 
-def plan_roof(layout: Mapping, arguments: Mapping, *, revision: str, author: Callable) -> dict:
+def plan_roof(layout: Mapping, arguments: Mapping, *, revision: str, author: Callable,
+              obstacles: ObstacleMap | None = None) -> dict:
     area = {side: float(arguments["area"][side]) for side in ("west", "east", "south", "north")}
     if area["east"] - area["west"] < 1 or area["north"] - area["south"] < 1:
         raise ShapeError("area: east must be at least 1 m past west and north at least 1 m past south")
     support = float(arguments["supportTopMeters"])
+    floor_y = obstacles.floor_elevation if obstacles is not None else 0.0   # heights count from the shell's floor
     base = support + LAYER_GAP
     if base < OVERHEAD:
         raise ShapeError(f"supportTopMeters {support:g}: a roof frame rests on columns or walls at least "
@@ -830,12 +843,13 @@ def plan_roof(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     middle_span, middle_across = (span[0] + span[1]) / 2, (across[0] + across[1]) / 2
     operations = []
     for name, at in lines:
-        position = ({"x": middle_span, "y": base, "z": at} if along_x else {"x": at, "y": base, "z": middle_span})
+        position = ({"x": middle_span, "y": floor_y + base, "z": at} if along_x else
+                    {"x": at, "y": floor_y + base, "z": middle_span})
         operations.append(_place(f"pl-roof-{namespace}-girder-{name.lower()}", girder, position, _yaw(girder_way),
                                  f"Roof girder {name}"))
     for number, at in enumerate(positions, start=1):
-        position = ({"x": at, "y": joist_base, "z": middle_across} if along_x else
-                    {"x": middle_across, "y": joist_base, "z": at})
+        position = ({"x": at, "y": floor_y + joist_base, "z": middle_across} if along_x else
+                    {"x": middle_across, "y": floor_y + joist_base, "z": at})
         operations.append(_place(f"pl-roof-{namespace}-joist-{number:03d}", joist, position, _yaw(joist_way),
                                  f"Roof joist {number}"))
     return {
@@ -868,6 +882,6 @@ def plan(name: str, layout: Mapping, arguments: Mapping, *, revision: str, autho
     if name == GRID_TOOL:
         return plan_grid(layout, arguments, revision=revision, author=author, obstacles=obstacles)
     if name == ROOF_TOOL:
-        return plan_roof(layout, arguments, revision=revision, author=author)
+        return plan_roof(layout, arguments, revision=revision, author=author, obstacles=obstacles)
     raise ShapeError(f"unknown shape planner {name}")
 

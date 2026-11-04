@@ -9,12 +9,13 @@ A grid point (place_grid) keeps GRID_CLEARANCES:
 - 0.5 m from forklift and material aisles (a route's corridor: its centre line and width);
 - out of walkways (pedestrian aisles), zones that take no placements and items' clearance envelopes (service,
   operator, door swing, ...); touching counts, as the checks count it;
-- on the floor.
+- on the floor, as the mounting check sees it: inside one floor surface and at its elevation (two surfaces side by
+  side do not hold what straddles them), or on one level stretch of site ground.
 A run (place_along_line) stops RUN_GAP short of the same things, aisle routes included: a run beside an aisle or
 walkway stays clear of its corridor, and where one crosses the line (the walkway through a door, say) the run leaves
 an opening, as the checks would otherwise warn of a blocked aisle.
-Overhead items (lowest point 4.5 m up or more) skip the aisles, zones, markings and floor, as the checks do; items,
-envelopes and walls count wherever their height meets the new item's.
+Overhead items (lowest point 4.5 m or more above the shell's floor elevation) skip the aisles, zones, markings and
+floor, as the checks do; items, envelopes and walls count wherever their height meets the new item's.
 """
 from __future__ import annotations
 
@@ -27,10 +28,10 @@ from shapely import STRtree
 from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
-from .spatial import (_NON_PLACEMENT_ZONE_TYPES, OVERHEAD_MINIMUM_CLEARANCE, _aisle_segment_polygon, _asset_catalog,
-                      _asset_field, _catalog_asset, _clearance_templates, _layout_placement_records,
+from .spatial import (_NON_PLACEMENT_ZONE_TYPES, GEOMETRY_EPSILON, OVERHEAD_MINIMUM_CLEARANCE, _aisle_segment_polygon,
+                      _asset_catalog, _asset_field, _catalog_asset, _clearance_templates, _layout_placement_records,
                       _normalized_authority, _placement_clearance_records_from_templates, _prepare_mounting_surfaces,
-                      _prepare_transform, oriented_box_polygon, shell_obstacle_records)
+                      _prepare_transform, oriented_box_polygon, polygon_contains_polygon, shell_obstacle_records)
 
 ITEM, WALL, ENVELOPE, MARKING, VEHICLE_AISLE, WALKWAY, ZONE = (
     "item", "wall", "envelope", "marking", "vehicle aisle", "walkway", "zone")
@@ -74,6 +75,33 @@ def _wall_name(feature_id: str) -> str:
     return f"wall {feature_id}"
 
 
+def _floor_elevation(shell) -> float:
+    """The shell's floor elevation (coordinateFrame.floorElevation): overhead counts from it, as the checks count."""
+    frame = shell.get("coordinateFrame") if isinstance(shell, Mapping) else None
+    try:
+        return float(frame.get("floorElevation", 0) or 0) if isinstance(frame, Mapping) else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _floors(shell, floor_elevation: float) -> list[tuple[tuple, float, Polygon]]:
+    """Each floor surface on its own, as the mounting check reads it: (boundary, elevation, shape)."""
+    if not isinstance(shell, Mapping):
+        return []
+    floors = []
+    for feature, kind, boundary in _prepare_mounting_surfaces(shell):
+        if kind != "floor" or not boundary:
+            continue
+        try:
+            elevation = float(feature["geometry"].get("elevation", floor_elevation))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
+        shape = _polygon(boundary)
+        if shape is not None:
+            floors.append((tuple(boundary), elevation, shape))
+    return floors
+
+
 class ObstacleMap:
     """The layout's obstacles, queried by footprint (grid points) or along a band (runs). Without asset definitions
     and a shell (a layout on its own, as in tests) it holds the aisle routes, zones and markings only."""
@@ -88,7 +116,9 @@ class ObstacleMap:
         self._zones(layout)
         self._markings(layout)
         self.tree = STRtree([obstacle.shape for obstacle in self.obstacles])
-        self.floor = self._floor(shell)
+        self.floor_elevation = _floor_elevation(shell)
+        self.floors = _floors(shell, self.floor_elevation)
+        self.floor = unary_union([shape for *_, shape in self.floors]) if self.floors else None   # as drawn
         extensions = shell.get("extensions") if isinstance(shell, Mapping) else None
         self.ground = extensions.get("facilityGround") if isinstance(extensions, Mapping) else None
 
@@ -187,15 +217,6 @@ class ObstacleMap:
                 self._add(MARKING, f"{marking['markingType'].replace('_', ' ')} marking '{label}'",
                           oriented_box_polygon(center, half, turn))
 
-    @staticmethod
-    def _floor(shell):
-        if not isinstance(shell, Mapping):
-            return None
-        floors = [_polygon(boundary) for _, kind, boundary in _prepare_mounting_surfaces(shell)
-                  if kind == "floor" and boundary]
-        floors = [shape for shape in floors if shape is not None]
-        return unary_union(floors) if floors else None
-
     # --- queries ---
 
     def _near(self, shape, reach: float) -> Iterable[Obstacle]:
@@ -205,10 +226,11 @@ class ObstacleMap:
     def reasons(self, footprint: Polygon, low: float, high: float,
                 clearances: Mapping[str, float] = GRID_CLEARANCES) -> list[str]:
         """Why an item with this footprint and height cannot stand here; empty when it can."""
-        overhead = low >= OVERHEAD_MINIMUM_CLEARANCE - EPSILON
+        overhead = self.overhead(low)
         found: dict[str, tuple] = {}
-        if not overhead and not self._on_floor(footprint, low):
-            found[OFF_FLOOR] = (-1, 0.0)
+        floor = None if overhead else self._floor_reason(footprint, low)
+        if floor:
+            found[floor] = (-1, 0.0)
         for obstacle in self._near(footprint, max(clearances.values(), default=0.0)):
             need = clearances.get(obstacle.kind)
             if need is None or (overhead and obstacle.kind in FLOOR_ONLY):
@@ -229,12 +251,27 @@ class ObstacleMap:
                 found[reason] = key
         return [reason for reason, _ in sorted(found.items(), key=lambda item: item[1])]
 
-    def _on_floor(self, footprint: Polygon, elevation: float) -> bool:
-        """As the mounting check sees a floor item: on one level stretch of site ground, or inside a floor."""
+    def overhead(self, low: float) -> bool:
+        """Whether an item whose lowest point is this high hangs clear of the floor, as the checks count it
+        (spatial._overhead_placement_ids): 4.5 m or more above the shell's floor elevation."""
+        return low >= self.floor_elevation + OVERHEAD_MINIMUM_CLEARANCE - GEOMETRY_EPSILON
+
+    def _floor_reason(self, footprint: Polygon, elevation: float) -> str | None:
+        """Why a floor item standing at this elevation has no floor under it, as the mounting check sees it, or None
+        when it has: one level stretch of site ground, or one floor surface that holds the whole footprint at the
+        surface's own elevation."""
+        points = [tuple(point) for point in footprint.exterior.coords][:-1]
         if self.ground is not None:
             from .ground import supports_footprint
-            return supports_footprint(self.ground, list(footprint.exterior.coords)[:-1], elevation)
-        return self.floor is None or self.floor.covers(footprint)
+            return None if supports_footprint(self.ground, points, elevation) else OFF_FLOOR
+        if not self.floors:
+            return None
+        heights = [height for boundary, height, _ in self.floors if polygon_contains_polygon(boundary, points)]
+        if not heights:
+            return OFF_FLOOR
+        if any(abs(elevation - height) <= 1e-6 for height in heights):
+            return None
+        return f"the floor here is at {heights[0]:g} m, not {elevation:g} m"
 
     def touching(self, shape: Polygon, kinds: Sequence[str]) -> list[str]:
         """The obstacles of these kinds a shape meets (a column strip may not cross an aisle route)."""
@@ -244,8 +281,9 @@ class ObstacleMap:
     def blocked_along(self, origin, along, length: float, half_width: float, low: float, high: float,
                       kinds: Sequence[str] = RUN_KINDS, gap: float = RUN_GAP) -> list[tuple[float, float, str]]:
         """Where along a run (0 to length) its band of half_width meets an obstacle, widened by `gap` at both ends:
-        (start, end, name)."""
-        overhead = low >= OVERHEAD_MINIMUM_CLEARANCE - EPSILON
+        (start, end, name), a stretch for each piece of the obstacle in the band (a walkway that crosses the run twice
+        blocks two stretches, not all between), with stretches that overlap merged."""
+        overhead = self.overhead(low)
         left = (-along[1], along[0])
         band = _polygon([(origin[0] + along[0] * a + left[0] * b, origin[1] + along[1] * a + left[1] * b)
                          for a, b in ((-gap, -half_width), (length + gap, -half_width), (length + gap, half_width),
@@ -258,13 +296,14 @@ class ObstacleMap:
                 continue
             if not obstacle.shape.intersects(band):
                 continue
-            part = obstacle.shape.intersection(band)
-            spans = [(x - origin[0]) * along[0] + (z - origin[1]) * along[1] for x, z in _coordinates(part)]
-            if not spans:
-                continue
-            start, end = min(spans) - gap, max(spans) + gap
-            if end >= 0 and start <= length:
-                found.append((max(start, 0.0), min(end, length), obstacle.name))
+            spans = []
+            for piece in _pieces(obstacle.shape.intersection(band)):
+                reach = [(x - origin[0]) * along[0] + (z - origin[1]) * along[1] for x, z in _coordinates(piece)]
+                if reach:
+                    spans.append((min(reach) - gap, max(reach) + gap))
+            for start, end in _merged(spans):
+                if end >= 0 and start <= length:
+                    found.append((max(start, 0.0), min(end, length), obstacle.name))
         return found
 
     # --- the plan picture ---
@@ -275,12 +314,32 @@ class ObstacleMap:
                 strips: Sequence[Polygon] = (), caption: str = "") -> bytes:
         """A plan (north up) of what is in the way of items from low to high, the grid lines, the placed items
         (black), the points left out (red x) and the new strips (orange), for Sage to check by eye: PNG bytes."""
-        overhead = low >= OVERHEAD_MINIMUM_CLEARANCE - EPSILON
+        overhead = self.overhead(low)
         shown = [obstacle for obstacle in self._near(box(*view), 0.0)
                  if not (overhead and obstacle.kind in FLOOR_ONLY)
                  and not (obstacle.high < low - EPSILON or high < obstacle.low - EPSILON)]
         return _draw(self.floor if not overhead else None, shown, view, x_lines, z_lines, placed, dropped, strips,
                      caption)
+
+
+def _pieces(shape) -> list:
+    """The connected pieces of a shape: each polygon, line or point of a collection on its own."""
+    if shape.is_empty:
+        return []
+    if hasattr(shape, "geoms"):
+        return [piece for part in shape.geoms for piece in _pieces(part)]
+    return [shape]
+
+
+def _merged(spans) -> list[tuple[float, float]]:
+    """(start, end) stretches with those that overlap or touch made one."""
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
 def _coordinates(shape) -> list[tuple[float, float]]:

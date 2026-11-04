@@ -219,19 +219,19 @@ test('agent switching synchronizes the composer placeholder', () => {
     assert(selection.includes('_syncAgentInputPlaceholder();'));
 });
 
-test('composer exposes UI-only reasoning levels instead of model names', () => {
+test('composer offers reasoning levels instead of model names', () => {
     const start = html.indexOf('<div id="agentModelMenu"');
     const end = html.indexOf('<button id="agentSendBtn"', start);
     const menu = html.slice(start, end);
     assert(start >= 0 && end > start);
     assert(menu.includes('Reasoning level'));
-    for (const level of ['High', 'Medium', 'Low']) {
+    // the levels Sage on Codex sends (codex_runtime/policy.py REASONING_EFFORTS), shown as High, Medium and Low
+    for (const level of ['high', 'medium', 'low']) {
         assert(menu.includes(`data-reasoning-level="${level}"`));
     }
     for (const model of ['Opus 4.7 Adaptive', 'Sonnet 4', 'GPT-5', 'GPT-5.4 Mini']) {
         assert(!menu.includes(model));
     }
-    assert(html.includes("let agentReasoningUiSelection = 'High'; // UI-only placeholder"));
 });
 
 test('Facility design context and closed tools share the live workspace', () => {
@@ -257,6 +257,34 @@ test('Facility design apply and Undo are executed through exact editor transacti
     assert(html.includes('context.workspace.undoDesignProposal()'));
     assert(html.includes('if (data.facility_design_action)'));
     assert(html.includes("name: 'undo_facility_design_proposal'"));
+});
+
+test('the reasoning selector shows the level each Codex turn sends', () => {
+    // Sage on Codex (codex_runtime/policy.py): the selected level when the server offers it, else its one default.
+    const page = html.replace(/\r\n/g, '\n');   // the slices below look for LF line ends, also in a CRLF checkout
+    const start = page.indexOf('function _agentReasoningEffort(');
+    const end = page.indexOf('\n            }\n', start) + '\n            }'.length;
+    const effort = new Function(page.slice(start, end) + '\nreturn _agentReasoningEffort;')();
+    const status = { reasoningEffort: { default: 'high', levels: ['low', 'medium', 'high'] } };
+    assert.strictEqual(effort(status, ''), 'high');
+    assert.strictEqual(effort(status, 'medium'), 'medium');
+    assert.strictEqual(effort(status, 'ultra'), 'high');
+    assert.strictEqual(effort(null, 'medium'), '');
+    assert.strictEqual(effort({ facilityRuntime: 'codex' }, 'medium'), '');
+    // a Codex turn sends that level and the selector is set to it first; other turns send none
+    const streamStart = page.indexOf('async function _requestAgentChatStream(');
+    const stream = page.slice(streamStart, page.indexOf('\n            async function ', streamStart + 10));
+    const chosen = stream.indexOf(
+        "const reasoningEffort = codexTurn ? _agentReasoningEffort(status, agentReasoningUiSelection) : '';");
+    const shown = stream.indexOf('if (reasoningEffort) setAgentReasoningUiSelection(reasoningEffort);');
+    const sent = stream.indexOf('? { ...payload, reasoning_effort: reasoningEffort } : payload');
+    assert(chosen > 0 && shown > chosen && sent > shown);
+    // the page has no level of its own: it shows the server's default until the user picks one
+    assert(html.includes('<span id="agentModelLabel"></span>'));
+    assert(!html.includes('UI-only placeholder'));
+    assert(!/data-reasoning-level="[A-Z]/.test(html));
+    assert(html.includes(
+        "if (!agentReasoningUiSelection) setAgentReasoningUiSelection(_agentReasoningEffort(status, ''));"));
 });
 
 console.log(passed + ' passed, ' + (process.exitCode ? 1 : 0) + ' failed');

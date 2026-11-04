@@ -554,6 +554,105 @@ def test_a_turn_returns_the_queued_workflow_with_a_receipt_and_replays(tmp_path,
         assert db.execute("SELECT status FROM turns").fetchone()[0] == "completed"
 
 
+@pytest.mark.parametrize("asked,sent", [(None, "high"), ("medium", "medium"), ("max", None)])
+def test_a_documentation_turn_sends_the_chats_reasoning_level_and_says_which(tmp_path, monkeypatch, asked, sent):
+    """The chat's reasoning selector governs Sage on Codex here too: Documentation, the Assembly and 3D Model tabs."""
+    monkeypatch.setenv(LIVE_FLAG, "1")
+    monkeypatch.setenv("INSPECTORPRO_CODEX_API_KEY", "synthetic-never-sent")
+    seen = {}
+
+    @asynccontextmanager
+    async def bridge(reader):
+        try:
+            yield "http://127.0.0.1:9/mcp", "test-capability"
+        finally:
+            reader.closed = True
+
+    class Transport:
+        def __init__(self, *_):
+            seen["started"] = True
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def inspect(self, **kwargs):
+            seen["effort"] = kwargs["effort"]
+            return "Done."
+
+    monkeypatch.setattr(documentation_pilot, "serve_gateway", bridge)
+    request = SimpleNamespace(agent_session_id="session", session_id=None, client_turn_id="turn",
+        conversation_id="conversation", message="What is in this manual?", context=None, reasoning_effort=asked,
+        inspection_context={"attachments": {"documentation": {"active_document_type": "illustrated_parts_manual"}}})
+    fake = Host()
+    host = SimpleNamespace(**{name: getattr(fake, name) for name in (
+        "library", "assembly", "state", "bom", "build_inspection_sheet", "provide_inspection_sheet_values")},
+        resolve_principal=lambda _: PRINCIPAL)
+    settings = PilotSettings(Path("unused"), tmp_path / "pilot", "test-model")
+
+    def invoke():
+        return asyncio.run(inspect_documentation(request, host, None, {"assembly_number": "tricycle"},
+                                                 settings=settings, transport_factory=Transport))
+    if sent is None:
+        with pytest.raises(PilotError) as caught:
+            invoke()
+        assert caught.value.code == "codex_effort_unsupported" and caught.value.status_code == 422 and not seen
+        return
+    result = invoke()
+    assert seen["effort"] == sent and result["codex_documentation"]["reasoningEffort"] == sent
+
+
+def test_a_documentation_turn_sent_again_at_another_level_is_a_conflict_not_the_old_answer(tmp_path, monkeypatch):
+    """Codex review of 81b2744 (finding 2), as for Facility Layout: the level is part of the request; the same level,
+    or none (the default), replays."""
+    monkeypatch.setenv(LIVE_FLAG, "1")
+    monkeypatch.setenv("INSPECTORPRO_CODEX_API_KEY", "synthetic-never-sent")
+    answered = []
+
+    @asynccontextmanager
+    async def bridge(reader):
+        try:
+            yield "http://127.0.0.1:9/mcp", "test-capability"
+        finally:
+            reader.closed = True
+
+    class Transport:
+        def __init__(self, *_):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def inspect(self, **kwargs):
+            answered.append(kwargs["effort"])
+            return f"Answered at {kwargs['effort']}."
+
+    monkeypatch.setattr(documentation_pilot, "serve_gateway", bridge)
+    fake = Host()
+    host = SimpleNamespace(**{name: getattr(fake, name) for name in (
+        "library", "assembly", "state", "bom", "build_inspection_sheet", "provide_inspection_sheet_values")},
+        resolve_principal=lambda _: PRINCIPAL)
+    settings = PilotSettings(Path("unused"), tmp_path / "pilot", "test-model")
+
+    def turn(turn_id, level):
+        request = SimpleNamespace(agent_session_id="session", session_id=None, client_turn_id=turn_id,
+            conversation_id="conversation", message="What is in this manual?", context=None, reasoning_effort=level,
+            inspection_context={"attachments": {"documentation": {"active_document_type": "illustrated_parts_manual"}}})
+        return asyncio.run(inspect_documentation(request, host, None, {"assembly_number": "tricycle"},
+                                                 settings=settings, transport_factory=Transport))["response"]
+    assert turn("turn-1", "low") == turn("turn-1", "low") == "Answered at low."
+    with pytest.raises(PilotError) as caught:
+        turn("turn-1", "high")
+    assert caught.value.code == "codex_duplicate_conflict" and caught.value.status_code == 409
+    assert turn("turn-2", None) == turn("turn-2", "high") == "Answered at high."
+    assert answered == ["low", "high"]
+
+
 @pytest.mark.parametrize("value, expected", [
     ("C", True), ("±0.05", True), ("0.05", True), ("+/- 0.05 mm", True), ("lot-0425", True),
     ("Ø30.02", True), ("30.02", True),

@@ -17,7 +17,7 @@ from .app_server import AppServer
 from .documentation_tools import DocumentationGateway, research_enabled
 from .mcp_bridge import serve_gateway
 from .pilot import Journal, digest
-from .policy import PilotError, PilotSettings, child_environment, live_allowed, runtime_config
+from .policy import PilotError, PilotSettings, child_environment, live_allowed, reasoning_effort, runtime_config
 
 
 INSTRUCTIONS = """You are Sage, InspectorPro's documentation assistant, in Workflows > Documentation, working on the
@@ -206,6 +206,7 @@ async def inspect_documentation(request, host, http_request, normalized, *, text
     settings = settings or PilotSettings.from_environment()
     if not live_allowed():
         raise PilotError("codex_paid_testing_disabled", "Codex live inference is disabled pending approval.")
+    effort = reasoning_effort(getattr(request, "reasoning_effort", None))   # the chat's reasoning level
     subscription = None
     if settings.auth_mode == "chatgpt_plan":
         from .chatgpt_accounts import subscription_credential
@@ -247,7 +248,9 @@ async def inspect_documentation(request, host, http_request, normalized, *, text
         "model": settings.model, "protocol": 2,
         "authMode": settings.auth_mode, "account": subscription.binding if subscription else None})
     journal = Journal(settings.root)
-    replay = journal.begin(binding, turn_id, digest({"message": request.message, "document": document}))
+    # The level is part of the request, not of the binding (as in pilot.py).
+    replay = journal.begin(binding, turn_id, digest({"message": request.message, "document": document,
+                                                     "effort": effort}))
     if replay is not None:
         gateway.check()
         gateway.closed = True
@@ -283,7 +286,8 @@ async def inspect_documentation(request, host, http_request, normalized, *, text
                             + f"\nThis turn allows {settings.max_calls} tool calls and {settings.timeout_seconds} seconds.\n",
                         on_thread=lambda value: journal.bind_thread(binding, value),
                         text_sink=progress.text if progress else text_sink,
-                        status_sink=progress.status if progress else documentation_status, check=gateway.check)
+                        status_sink=progress.status if progress else documentation_status, check=gateway.check,
+                        effort=effort)
                     if progress:
                         answer = await progress.finish(answer)
                     gateway.check()
@@ -303,7 +307,7 @@ async def inspect_documentation(request, host, http_request, normalized, *, text
                 "partsManualChanges": list(gateway.manual_changes),
                 "appearanceChanges": list(gateway.appearance_changes), "workspace": workspace,
                 "runtimeTimeline": getattr(runtime, "timeline", []),
-                "authMode": settings.auth_mode, "apiFallback": False}}
+                "authMode": settings.auth_mode, "apiFallback": False, "reasoningEffort": effort}}
         if warnings:
             result["tool_guardrail_warnings"] = warnings
         source_block = gateway.research.source_block()

@@ -1,5 +1,6 @@
 """Existing Sage endpoint integration. All inference is stubbed, never paid."""
 import asyncio
+import json
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -153,6 +154,85 @@ def test_sage_stream_transports_pilot_progress_and_response(monkeypatch):
     assert [e["phase"] for e in events if e.get("phase", "").startswith("codex_")] == ["codex_connecting", "codex_inspecting", "codex_researching"]
     assert events[-1]["event"] == "response_completed"
     assert events[-1]["final"]["content_blocks"][0]["sources"][0]["url"] == "https://www.access-board.gov/ada/"
+
+
+def test_the_chats_reasoning_level_reaches_the_pilot_and_the_page_learns_the_default(monkeypatch):
+    """The page shows and sends the server's default until the user picks a level (codex_runtime/policy.py)."""
+    monkeypatch.setenv(FLAG, "1")
+    monkeypatch.setenv("INSPECTORPRO_MEMORY_V1_MODE", "off")
+    seen = []
+    async def inspect(request, *_, **__):
+        seen.append(request.reasoning_effort)
+        return {"response": "Inspected.", "tool_calls": [], "tool_source": "codex_readonly_pilot",
+                "codex_inspection": {"reasoningEffort": request.reasoning_effort}}
+    monkeypatch.setattr(pilot, "inspect_facility", inspect)
+    client = TestClient(server.app)
+    status = client.get("/api/agent/chat/streaming-status").json()
+    assert status["reasoningEffort"] == {"default": "high", "levels": ["low", "medium", "high"]}
+    response = client.post("/api/agent/chat/v2/stream", json={**payload().model_dump(), "reasoning_effort": "medium"})
+    assert response.status_code == 200, response.text
+    assert seen == ["medium"]
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    assert events[-1]["final"]["codex_inspection"]["reasoningEffort"] == "medium"
+
+
+def answering_pilots(monkeypatch):
+    """Both Codex pilots stubbed to answer at once; returns the levels the turns they started asked for."""
+    from ai_inspector.codex_runtime import documentation_pilot
+    started = []
+
+    async def answer(request, *_, **__):
+        started.append(request.reasoning_effort)
+        return {"response": "Inspected.", "tool_calls": [], "tool_source": "codex_readonly_pilot"}
+    monkeypatch.setattr(pilot, "inspect_facility", answer)
+    monkeypatch.setattr(documentation_pilot, "inspect_documentation", answer)
+    return started
+
+
+@pytest.mark.parametrize("mode,level", [("facility_layout", "ultra"), ("facility_layout", "High"),
+                                        ("documentation", "max")])
+def test_a_level_sage_does_not_offer_is_a_422_before_the_stream_starts(monkeypatch, mode, level):
+    """Codex review of 81b2744 (finding 3): "ultra" passed the request check and got HTTP 200, then a response_error
+    event from inside the stream."""
+    monkeypatch.setenv(FLAG, "1")
+    monkeypatch.setenv("INSPECTORPRO_CODEX_DOCUMENTATION", "1")
+    monkeypatch.setenv("INSPECTORPRO_MEMORY_V1_MODE", "off")
+    started = answering_pilots(monkeypatch)
+    body = (payload() if mode == "facility_layout" else documentation_payload()).model_dump()
+    response = TestClient(server.app).post("/api/agent/chat/v2/stream", json={**body, "reasoning_effort": level})
+    assert response.status_code == 422, response.text[:300]
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "codex_effort_unsupported" and "Pick low, medium or high." in error["message"]
+    assert started == []
+
+
+def test_a_level_the_pinned_catalog_lacks_is_a_422_before_the_stream_once_a_turn_has_read_it(monkeypatch, tmp_path):
+    """Codex review of 81b2744 (finding 3): the catalog an earlier turn of this process read (app_server.CATALOGS) is
+    checked before the stream too. Until a turn has read it, the turn itself checks (AppServer.inspect)."""
+    from ai_inspector.codex_runtime import app_server
+    from ai_inspector.codex_runtime.policy import RUNTIME_VERSION
+    binary = tmp_path / "codex.exe"
+    binary.write_bytes(b"")
+    monkeypatch.setenv(FLAG, "1")
+    monkeypatch.setenv("INSPECTORPRO_MEMORY_V1_MODE", "off")
+    monkeypatch.setenv("INSPECTORPRO_CODEX_BINARY", str(binary))
+    monkeypatch.setenv("INSPECTORPRO_CODEX_PILOT_ROOT", str(tmp_path / "pilot"))
+    monkeypatch.setenv("INSPECTORPRO_CODEX_MODEL", "gpt-5.5")
+    monkeypatch.delenv("INSPECTORPRO_CODEX_AUTH_MODE", raising=False)
+    monkeypatch.setattr(app_server, "CATALOGS", {}, raising=False)
+    started = answering_pilots(monkeypatch)
+    client = TestClient(server.app)
+    body = payload().model_dump()
+    assert client.post("/api/agent/chat/v2/stream", json={**body, "reasoning_effort": "medium"}).status_code == 200
+    app_server.CATALOGS[(str(binary.resolve()), RUNTIME_VERSION, "gpt-5.5")] = app_server.parse_catalog(json.dumps(
+        {"models": [{"slug": "gpt-5.5", "supported_reasoning_levels": [{"effort": "low"}, {"effort": "high"}]}]}),
+        "gpt-5.5")
+    response = client.post("/api/agent/chat/v2/stream", json={**body, "reasoning_effort": "medium"})
+    assert response.status_code == 422, response.text[:300]
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "codex_effort_unsupported" and 'no reasoning level "medium" for gpt-5.5' in error["message"]
+    assert client.post("/api/agent/chat/v2/stream", json={**body, "reasoning_effort": "high"}).status_code == 200
+    assert started == ["medium", "high"]
 
 
 def test_sage_stream_carries_plain_language_steps_before_the_answer(monkeypatch):

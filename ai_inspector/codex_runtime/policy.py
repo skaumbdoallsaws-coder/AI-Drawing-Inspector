@@ -12,6 +12,12 @@ READONLY_PROFILE = "inspectorpro-readonly"
 VERIFIED_MODELS = frozenset({"gpt-5.5", "gpt-6.1-sol"})
 FLAG = "INSPECTORPRO_CODEX_READONLY_PILOT"
 LIVE_FLAG = "INSPECTORPRO_CODEX_ALLOW_PAID_INFERENCE"
+# Sage's reasoning level on Codex, sent on every turn (TurnStartParams.effort): the levels the chat's selector offers,
+# and the one a turn sends when the chat names none. The SV5 A/B (notes/sv5/README.md, 2026-11-03): Sage reported
+# the backwards chairs in its shot 0 of 4 times at "low" (the pinned catalog's default), 1 of 2 at "medium", 4 of 4
+# at "high". A level the pinned catalog lacks for the model is refused too (app_server.AppServer.inspect).
+REASONING_EFFORTS = ("low", "medium", "high")
+DEFAULT_REASONING_EFFORT = "high"
 DISABLED_FEATURES = (
     "shell_tool", "unified_exec", "shell_snapshot", "code_mode", "code_mode_host",
     "computer_use", "browser_use", "browser_use_external", "browser_use_full_cdp_access",
@@ -27,6 +33,17 @@ class PilotError(RuntimeError):
     def __init__(self, code: str, message: str, status_code: int = 503):
         super().__init__(message)
         self.code, self.status_code = code, status_code
+
+
+def reasoning_effort(requested) -> str:
+    """The reasoning level a Sage turn sends: the one the chat names, or the default when it names none."""
+    if requested is None:
+        return DEFAULT_REASONING_EFFORT
+    if requested not in REASONING_EFFORTS:
+        raise PilotError("codex_effort_unsupported", f'Sage has no reasoning level "{str(requested)[:20]}". Pick '
+                         f"{', '.join(REASONING_EFFORTS[:-1])} or {REASONING_EFFORTS[-1]}. Nothing was sent to "
+                         "Codex.", 422)
+    return requested
 
 
 def enabled() -> bool:

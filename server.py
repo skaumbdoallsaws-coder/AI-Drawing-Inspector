@@ -22506,6 +22506,8 @@ class AgentChatRequest(BaseModel):
     request_hash_version: Optional[int] = None
     request_context: Optional[Dict[str, Any]] = None
     action_parameters: Optional[Dict[str, Any]] = None
+    # Sage on Codex: the chat's reasoning level, sent as the turn's effort (codex_runtime/policy.py).
+    reasoning_effort: Optional[str] = None
 
 
 class AgentChatFeedbackRequest(BaseModel):
@@ -45698,7 +45700,8 @@ def _commit_stream_workflow_state(
 
 @app.get("/api/agent/chat/streaming-status")
 def agent_chat_streaming_status():
-    from ai_inspector.codex_runtime.policy import enabled as codex_pilot_enabled
+    from ai_inspector.codex_runtime.policy import (DEFAULT_REASONING_EFFORT, REASONING_EFFORTS,
+                                                   enabled as codex_pilot_enabled)
     settings = _chat_stream_settings()
     return {
         "contract_version": 1,
@@ -45708,6 +45711,8 @@ def agent_chat_streaming_status():
         "assemblyRuntime": "codex" if _codex_documentation_enabled() else "legacy",
         # The 3D Model tab's Sage: the part shown (codex_runtime/part_tools.py).
         "partRuntime": "codex" if _codex_documentation_enabled() else "legacy",
+        # Sage on Codex: the reasoning levels the chat offers, and the one it shows and sends until the user picks.
+        "reasoningEffort": {"default": DEFAULT_REASONING_EFFORT, "levels": list(REASONING_EFFORTS)},
         **settings,
     }
 
@@ -45735,6 +45740,15 @@ async def agent_chat_v2_stream(payload: AgentChatRequest, http_request: Request)
                       and active_mode == "facility_layout") or _codex_documentation_turn(payload)
     if not codex_facility and (not settings["enabled"] or agent_name not in set(settings["agents"])):
         raise HTTPException(status_code=404, detail="Chat streaming is not enabled for this agent")
+    if codex_facility:   # the chat's reasoning level: a level Sage cannot run at is a 422 here, not a stream event
+        from ai_inspector.codex_runtime.app_server import check_effort
+        from ai_inspector.codex_runtime.policy import PilotError
+        try:
+            check_effort(payload.reasoning_effort)
+        except PilotError as exc:
+            raise HTTPException(status_code=exc.status_code, detail={"error": {
+                "code": exc.code, "message": str(exc), "retryable": False,
+            }}) from None
 
     high_risk = active_mode in {"report", "report_fai"}
     if high_risk and not settings["high_risk_modes"]:

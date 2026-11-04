@@ -538,9 +538,9 @@ def event(method, **params):
     return {"method": method, "params": {"threadId": "thread", "turnId": "turn", **params}}
 
 
-def run_inspection(runtime):
+def run_inspection(runtime, **kwargs):
     return runtime.inspect(message="inspect", thread_id=None, instructions="read only", on_thread=lambda _: None,
-        text_sink=None, status_sink=None, check=lambda: None)
+        text_sink=None, status_sink=None, check=lambda: None, **kwargs)
 
 
 def test_protocol_ignores_other_threads_and_restricts_files(tmp_path):
@@ -554,6 +554,157 @@ def test_protocol_ignores_other_threads_and_restricts_files(tmp_path):
     turn = next(params for method, params in runtime.requests if method == "turn/start")
     assert turn["permissions"] == READONLY_PROFILE
     assert "sandboxPolicy" not in turn
+    assert "effort" not in turn   # none asked, none sent
+
+
+def test_turn_start_carries_the_reasoning_level_the_pinned_catalog_supports(tmp_path):
+    """TurnStartParams.effort: "Override the reasoning effort for this turn". A level the pinned catalog lacks for
+    the model is refused before any thread starts."""
+    runtime = ScriptedRuntime(tmp_path, [event("item/agentMessage/delta", delta="Inspected."),
+        event("turn/completed", turn={"id": "turn", "status": "completed"})])
+    runtime.efforts = ("low", "medium", "high", "xhigh")
+    assert asyncio.run(run_inspection(runtime, effort="medium")) == "Inspected."
+    turn = next(params for method, params in runtime.requests if method == "turn/start")
+    assert turn["effort"] == "medium"
+    lacking = ScriptedRuntime(tmp_path, [])
+    lacking.efforts = ("low", "medium")
+    with pytest.raises(PilotError) as caught:
+        asyncio.run(run_inspection(lacking, effort="high"))
+    assert caught.value.code == "codex_effort_unsupported" and caught.value.status_code == 422
+    assert lacking.requests == []
+
+
+class Stop(Exception):
+    """Raised at the app-server spawn: what comes before it is all the catalog tests need."""
+
+
+PINNED_LEVELS = {"gpt-6.1-sol": ("low", "medium", "high", "xhigh", "max", "ultra"),
+                 "gpt-5.5": ("low", "medium", "high", "xhigh")}
+
+
+def fake_codex(monkeypatch, *catalog_reads):
+    """The pinned runtime, as far as the catalog tests need it: `codex --version`, then `codex debug models --bundled`
+    answering each read in turn ("ok", "exit" 1, "timeout", or bytes it prints; the last one repeats), then the
+    app-server spawn raises Stop. No catalog is kept from before. Returns the commands spawned."""
+    from ai_inspector.codex_runtime import app_server
+    from ai_inspector.codex_runtime.policy import RUNTIME_VERSION
+    catalog = json.dumps({"models": [{"slug": slug, "supported_reasoning_levels": [
+        {"effort": level, "description": level} for level in efforts], "tool_mode": "forced"}
+        for slug, efforts in PINNED_LEVELS.items()]}).encode()
+    reads, spawned = list(catalog_reads or ["ok"]), []
+
+    class Probe:
+        def __init__(self, output, returncode=0):
+            self.output, self.returncode = output, returncode
+
+        async def communicate(self):
+            if self.output is None:
+                raise TimeoutError   # as asyncio.wait_for does after its 15 s
+            return self.output, b""
+
+        def kill(self):
+            self.returncode = -9
+
+        async def wait(self):
+            return self.returncode
+
+    async def spawn(*args, **_kwargs):
+        spawned.append(args[1:3])
+        if args[1:] == ("--version",):
+            return Probe(f"codex-cli {RUNTIME_VERSION}".encode())
+        if args[1:] == ("debug", "models", "--bundled"):
+            read = reads.pop(0) if len(reads) > 1 else reads[0]
+            if isinstance(read, bytes):
+                return Probe(read)
+            return {"ok": Probe(catalog), "exit": Probe(b"", 1), "timeout": Probe(None, None)}[read]
+        raise Stop   # the app-server itself, not needed here
+
+    monkeypatch.setattr(app_server.asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(app_server, "CATALOGS", {}, raising=False)
+    return spawned
+
+
+def start_runtime(tmp_path, model):
+    """An AppServer for MODEL started up to its app-server spawn (fake_codex)."""
+    (tmp_path / "home").mkdir(exist_ok=True)
+    runtime = AppServer(Path("codex"), tmp_path, {}, runtime_config("http://127.0.0.1:9/mcp", model, offline=True))
+    with pytest.raises(Stop):
+        asyncio.run(runtime.__aenter__())
+    return runtime
+
+
+@pytest.mark.parametrize("model", ["gpt-5.5", "gpt-6.1-sol"])
+def test_every_model_reads_its_reasoning_levels_from_the_pinned_catalog(tmp_path, monkeypatch, model):
+    spawned = fake_codex(monkeypatch)
+    runtime = start_runtime(tmp_path, model)
+    assert spawned[:2] == [("--version",), ("debug", "models")]
+    assert runtime.efforts == PINNED_LEVELS[model]
+    # only gpt-6.1-sol runs on a catalog of its own (its bundled metadata forces tools on)
+    assert ("model_catalog_json" in runtime.config) is (model == "gpt-6.1-sol")
+
+
+@pytest.mark.parametrize("read", ["exit", "timeout"])
+def test_a_gpt_5_5_turn_goes_on_when_the_pinned_catalog_cannot_be_read(tmp_path, monkeypatch, read):
+    """Codex review of 81b2744 (finding 1): reading the levels made `codex debug models --bundled` a step every gpt-5.5
+    turn needed (before, it had none), so a read that failed or hung stopped the turn. Now that turn goes on with
+    Sage's own levels. gpt-6.1-sol still stops: it runs on a catalog of its own."""
+    from ai_inspector.codex_runtime.policy import REASONING_EFFORTS
+    fake_codex(monkeypatch, read)
+    runtime = start_runtime(tmp_path, "gpt-5.5")   # it went on to the app-server spawn
+    assert runtime.efforts == REASONING_EFFORTS and "model_catalog_json" not in runtime.config
+    sol = AppServer(Path("codex"), tmp_path, {}, runtime_config("http://127.0.0.1:9/mcp", "gpt-6.1-sol", offline=True))
+    with pytest.raises(PilotError if read == "exit" else TimeoutError) as caught:
+        asyncio.run(sol.__aenter__())
+    assert read == "timeout" or caught.value.code == "codex_catalog_invalid"
+
+
+def test_the_pinned_catalog_is_read_once_per_runtime_and_model_and_kept(tmp_path, monkeypatch):
+    """Codex review of 81b2744 (finding 1): read once per pinned runtime (its binary at the pinned version) and model,
+    and kept for the process. A read that failed keeps nothing: the next turn reads again."""
+    spawned = fake_codex(monkeypatch, "exit", "ok")
+    start_runtime(tmp_path, "gpt-5.5")                                       # not read, nothing kept
+    assert start_runtime(tmp_path, "gpt-5.5").efforts == PINNED_LEVELS["gpt-5.5"]   # read, and kept
+    assert start_runtime(tmp_path, "gpt-5.5").efforts == PINNED_LEVELS["gpt-5.5"]   # not read again
+    sol = start_runtime(tmp_path, "gpt-6.1-sol")                             # its own entry, read once
+    assert sol.efforts == PINNED_LEVELS["gpt-6.1-sol"] and "model_catalog_json" in sol.config
+    assert spawned.count(("debug", "models")) == 3 and spawned.count(("--version",)) == 4
+
+
+def levels_for_both(levels=None):
+    """A catalog whose gpt-5.5 and gpt-6.1-sol entries both list LEVELS (None: no supported_reasoning_levels)."""
+    return {"models": [{"slug": slug, **({} if levels is None else {"supported_reasoning_levels": levels})}
+                       for slug in PINNED_LEVELS]}
+
+
+UNUSABLE_CATALOGS = {
+    "not_json": b"{not json",
+    "not_an_object": [1, 2],
+    "models_not_a_list": {"models": 123},
+    "an_entry_not_an_object": {"models": [123, *levels_for_both([{"effort": "high"}])["models"]]},
+    "levels_not_a_list": levels_for_both(123),
+    "levels_missing": levels_for_both(),
+    "levels_empty": levels_for_both([]),
+    "a_level_without_a_string_effort": levels_for_both([{"effort": "high"}, {"effort": 5}]),
+    "no_level_sage_offers": levels_for_both([{"effort": "xhigh"}]),
+}
+
+
+@pytest.mark.parametrize("output", list(UNUSABLE_CATALOGS.values()), ids=list(UNUSABLE_CATALOGS))
+def test_an_unusable_catalog_never_stops_a_gpt_5_5_turn_nor_fails_a_later_request(tmp_path, monkeypatch, output):
+    """Codex re-review of ba5d6f0 (2 findings): what the catalog read printed was kept unchecked ({"models": 123}
+    then made every later request an HTTP 500 in check_effort), and its levels were read outside the fallback
+    (levels 123 stopped a gpt-5.5 turn; none, or an empty list, refused every level). Now nothing unusable is kept:
+    the gpt-5.5 turn goes on with Sage's own levels, the check before a stream leaves it to the turn, and gpt-6.1-sol
+    still stops."""
+    from ai_inspector.codex_runtime import app_server
+    from ai_inspector.codex_runtime.policy import REASONING_EFFORTS
+    fake_codex(monkeypatch, output if isinstance(output, bytes) else json.dumps(output).encode())
+    assert start_runtime(tmp_path, "gpt-5.5").efforts == REASONING_EFFORTS and app_server.CATALOGS == {}
+    assert app_server.check_effort("medium", PilotSettings(Path("codex"), tmp_path, "gpt-5.5")) == "medium"
+    sol = AppServer(Path("codex"), tmp_path, {}, runtime_config("http://127.0.0.1:9/mcp", "gpt-6.1-sol", offline=True))
+    with pytest.raises(PilotError) as caught:
+        asyncio.run(sol.__aenter__())
+    assert caught.value.code == "codex_catalog_invalid" and app_server.CATALOGS == {}
 
 
 def test_revision_rechecked_at_boundaries_not_each_text_delta(tmp_path):
@@ -768,6 +919,102 @@ def test_facility_turn_carries_the_viewport_selection(host, tmp_path, monkeypatc
     assert '"placementIds": ["pl-guard-1", "pl-guard-2"]' in seen["message"]
     if not memory:
         assert "not a limit on items the request names" in seen["message"]
+
+
+@pytest.mark.parametrize("asked,sent", [(None, "high"), ("medium", "medium"), ("low", "low"), ("ultra", None),
+                                        ("High", None)])
+def test_a_facility_turn_sends_the_chats_reasoning_level_and_says_which(host, tmp_path, monkeypatch, asked, sent):
+    """The SV5 A/B (2026-11-03): at the pinned catalog's default ("low") Sage missed what its shots showed. Each turn
+    sends the chat's level, else the one default; a level Sage does not offer is refused before anything starts."""
+    from ai_inspector.codex_runtime import pilot
+    from ai_inspector.codex_runtime.policy import DEFAULT_REASONING_EFFORT
+    monkeypatch.setenv(LIVE_FLAG, "1")
+    monkeypatch.setenv("INSPECTORPRO_CODEX_API_KEY", "synthetic-never-sent")
+    seen = {}
+
+    @asynccontextmanager
+    async def bridge(reader):
+        try:
+            yield "http://127.0.0.1:9/mcp", "test-capability"
+        finally:
+            reader.closed = True
+
+    class Transport:
+        def __init__(self, *_):
+            seen["started"] = True
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def inspect(self, **kwargs):
+            seen["effort"] = kwargs["effort"]
+            return "Done."
+
+    monkeypatch.setattr(pilot, "serve_gateway", bridge)
+    request = SimpleNamespace(agent_session_id="session", session_id=None, client_turn_id="turn",
+        conversation_id="conversation", message="Show me the meeting table", reasoning_effort=asked)
+    settings = PilotSettings(Path("unused"), tmp_path / "pilot", "test-model")
+
+    def invoke():
+        return asyncio.run(inspect_facility(request, host, None, {"facility_layout_ref": gateway(host).reference},
+                                            settings=settings, transport_factory=Transport))
+    assert DEFAULT_REASONING_EFFORT == "high"   # medium caught 1 of 2 (notes/sv5/README.md, "Medium check")
+    if sent is None:
+        with pytest.raises(PilotError) as caught:
+            invoke()
+        assert caught.value.code == "codex_effort_unsupported" and caught.value.status_code == 422
+        assert "Pick low, medium or high." in str(caught.value) and not seen
+        return
+    result = invoke()
+    assert seen["effort"] == sent and result["codex_inspection"]["reasoningEffort"] == sent
+
+
+def test_a_turn_sent_again_at_another_reasoning_level_is_a_conflict_not_the_old_answer(host, tmp_path, monkeypatch):
+    """Codex review of 81b2744 (finding 2): the same turn ID and message at "high" after "low" got the low answer
+    back from the journal. The level is part of the request now; the same level, or none (the default), replays."""
+    from ai_inspector.codex_runtime import pilot
+    monkeypatch.setenv(LIVE_FLAG, "1")
+    monkeypatch.setenv("INSPECTORPRO_CODEX_API_KEY", "synthetic-never-sent")
+    answered = []
+
+    @asynccontextmanager
+    async def bridge(reader):
+        try:
+            yield "http://127.0.0.1:9/mcp", "test-capability"
+        finally:
+            reader.closed = True
+
+    class Transport:
+        def __init__(self, *_):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        async def inspect(self, **kwargs):
+            answered.append(kwargs["effort"])
+            return f"Answered at {kwargs['effort']}."
+
+    monkeypatch.setattr(pilot, "serve_gateway", bridge)
+    settings = PilotSettings(Path("unused"), tmp_path / "pilot", "test-model")
+
+    def turn(turn_id, level):
+        request = SimpleNamespace(agent_session_id="session", session_id=None, client_turn_id=turn_id,
+            conversation_id="conversation", message="Show me the meeting table", reasoning_effort=level)
+        return asyncio.run(inspect_facility(request, host, None, {"facility_layout_ref": gateway(host).reference},
+                                            settings=settings, transport_factory=Transport))["response"]
+    assert turn("turn-1", "low") == turn("turn-1", "low") == "Answered at low."
+    with pytest.raises(PilotError) as caught:
+        turn("turn-1", "high")
+    assert caught.value.code == "codex_duplicate_conflict" and caught.value.status_code == 409
+    assert turn("turn-2", None) == turn("turn-2", "high") == "Answered at high."
+    assert answered == ["low", "high"]
 
 
 def test_a_request_that_names_its_items_is_not_refused_over_the_selection():

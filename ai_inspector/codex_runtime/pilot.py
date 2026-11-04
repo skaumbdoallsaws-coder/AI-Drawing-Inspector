@@ -13,7 +13,8 @@ import time
 from .app_server import AppServer
 from .facility_tools import FacilityReadGateway
 from .mcp_bridge import serve_gateway
-from .policy import LIVE_FLAG, PilotError, PilotSettings, child_environment, runtime_config, live_allowed
+from .policy import (LIVE_FLAG, PilotError, PilotSettings, child_environment, runtime_config, live_allowed,
+                     reasoning_effort)
 
 
 INSTRUCTIONS = """You are InspectorPro's engineering assistant. This is a READ-ONLY facility inspection pilot.
@@ -335,6 +336,7 @@ async def inspect_facility(request, host, http_request, normalized, *, text_sink
     settings = settings or PilotSettings.from_environment()
     if not live_allowed():
         raise PilotError("codex_paid_testing_disabled", "Codex live inference is disabled pending approval. The existing manual tools remain available.")
+    effort = reasoning_effort(getattr(request, "reasoning_effort", None))   # the chat's reasoning level
     subscription = None
     if settings.auth_mode == "chatgpt_plan":
         from .chatgpt_accounts import subscription_credential
@@ -377,7 +379,10 @@ async def inspect_facility(request, host, http_request, normalized, *, text_sink
         "authMode": settings.auth_mode, "account": subscription.binding if subscription else None,
         **({"editPreviews": True, "editMode": edit_mode} if editing else {})})
     journal = Journal(settings.root)
-    replay = journal.begin(binding, turn_id, digest({"message": request.message, "document": reference}))
+    # The level is part of the request (the same turn sent again at another level is a conflict, not the old answer),
+    # not of the binding (changing it keeps the thread).
+    replay = journal.begin(binding, turn_id, digest({"message": request.message, "document": reference,
+                                                     "effort": effort}))
     if replay is not None:
         gateway.check()
         gateway.closed = True
@@ -416,7 +421,8 @@ async def inspect_facility(request, host, http_request, normalized, *, text_sink
                             + f"\nThis turn allows {settings.max_calls} tool calls and {settings.timeout_seconds} seconds.\n",
                         on_thread=lambda value: journal.bind_thread(binding, value),
                          text_sink=progress.text if progress else text_sink,
-                         status_sink=progress.status if progress else status_sink, check=gateway.check)
+                         status_sink=progress.status if progress else status_sink, check=gateway.check,
+                         effort=effort)
                     if progress:
                         answer = await progress.finish(answer)
                     gateway.check()
@@ -430,7 +436,7 @@ async def inspect_facility(request, host, http_request, normalized, *, text_sink
                 "checkedLayout": any(receipt["ok"] for receipt in gateway.receipts),
                 "runtimeTimeline": getattr(runtime, "timeline", []),
                 "engineeringChanges": 0, "completion": "inspection_response",
-                "authMode": settings.auth_mode, "apiFallback": False}}
+                "authMode": settings.auth_mode, "apiFallback": False, "reasoningEffort": effort}}
         source_block = gateway.research.source_block()
         if source_block:
             result["content_blocks"] = [source_block]

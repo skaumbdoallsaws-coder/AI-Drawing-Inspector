@@ -11,7 +11,72 @@ import time
 
 from anyio import CancelScope
 
-from .policy import PilotError, READONLY_PROFILE, RUNTIME_VERSION
+from .policy import PilotError, PilotSettings, READONLY_PROFILE, REASONING_EFFORTS, RUNTIME_VERSION, reasoning_effort
+
+class CatalogUnavailable(PilotError):
+    """The pinned catalog could not be read, or has no entry for the model that parse_catalog accepts."""
+
+    def __init__(self, message="The pinned model catalog could not be verified."):
+        super().__init__("codex_catalog_invalid", message)
+
+
+# For each (binary, pinned version, model): the model's entry in the pinned runtime's bundled catalog and the reasoning
+# levels it supports, as parse_catalog returns them. Read by the first turn of this process that starts that runtime
+# for the model, then kept; nothing is kept from a read that failed or that parse_catalog refused.
+CATALOGS = {}
+
+
+def parse_catalog(raw, model):
+    """MODEL's entry in RAW (the output of `codex debug models --bundled`) and the reasoning levels it supports.
+    CatalogUnavailable for anything malformed: not a JSON object, "models" not a list, an entry not an object, not
+    exactly one entry for MODEL, its levels not a non-empty list of levels with a string effort, or none of them one
+    Sage offers (policy.REASONING_EFFORTS). Other models' entries are not checked further."""
+    try:
+        catalog = json.loads(raw)
+    except (ValueError, RecursionError):
+        raise CatalogUnavailable() from None
+    models = catalog.get("models") if isinstance(catalog, dict) else None
+    if not isinstance(models, list) or not all(isinstance(item, dict) for item in models):
+        raise CatalogUnavailable()
+    entries = [item for item in models if item.get("slug") == model]
+    if len(entries) != 1:
+        raise CatalogUnavailable("The selected model is missing from the pinned catalog.")
+    levels = entries[0].get("supported_reasoning_levels")
+    if (not isinstance(levels, list) or not levels
+            or not all(isinstance(level, dict) and isinstance(level.get("effort"), str) for level in levels)):
+        raise CatalogUnavailable("The pinned model catalog lists no reasoning levels for the selected model.")
+    efforts = tuple(level["effort"] for level in levels)
+    if not set(efforts) & set(REASONING_EFFORTS):
+        raise CatalogUnavailable("The pinned model catalog lists no reasoning level Sage offers for the selected "
+                                 "model.")
+    return entries[0], efforts
+
+
+def pinned_efforts(binary, model):
+    """The reasoning levels MODEL's kept catalog entry (CATALOGS) supports; None until a turn of this process has read
+    one parse_catalog accepts from BINARY."""
+    kept = CATALOGS.get((str(binary), RUNTIME_VERSION, model))
+    return kept[1] if kept else None
+
+
+def unsupported_effort(effort, model):
+    return PilotError("codex_effort_unsupported", f'The pinned model catalog has no reasoning level "{effort}" for '
+                      f"{model}. Nothing was sent to Codex.", 422)
+
+
+def check_effort(requested, settings=None):
+    """The reasoning level a turn will run at, checked before its stream starts, so a refusal is an HTTP 422: one Sage
+    offers (policy.reasoning_effort) and, once a turn of this process has read the pinned catalog, one it supports
+    for the model. Until then the turn checks the catalog itself (AppServer.inspect)."""
+    effort = reasoning_effort(requested)
+    try:
+        settings = settings or PilotSettings.from_environment()
+    except PilotError:
+        return effort   # the turn says what is not configured, as before
+    supported = pinned_efforts(settings.binary, settings.model)
+    if supported is not None and effort not in supported:
+        raise unsupported_effort(effort, settings.model)
+    return effort
 
 
 def toml_value(value):
@@ -69,6 +134,7 @@ class AppServer:
         self.started_at = time.monotonic()
         self.timeline = []
         self._closing = None
+        self.efforts = ()   # the reasoning levels the pinned catalog supports for the model (read on start)
 
     def mark(self, phase):
         if len(self.timeline) < 64:
@@ -89,8 +155,7 @@ class AppServer:
             raise
         if probe.returncode != 0 or output.decode().strip() != "codex-cli " + RUNTIME_VERSION:
             raise PilotError("codex_version_mismatch", "The pilot requires its pinned Codex runtime.")
-        if self.config["model"] == "gpt-6.1-sol":
-            await self._restricted_catalog(flags)
+        await self._pinned_catalog(flags)
         args = [str(self.binary)]
         for key, value in self.config.items():
             args.extend(["-c", key + "=" + toml_value(value)])
@@ -126,9 +191,38 @@ class AppServer:
             await self.close()
             raise
 
-    async def _restricted_catalog(self, flags):
+    async def _pinned_catalog(self, flags):
+        """The pinned catalog's entry for the model: the reasoning levels it supports (self.efforts), and for
+        gpt-6.1-sol a catalog of that model alone with its tool settings off. gpt-6.1-sol needs it; for another model
+        a catalog that cannot be read or used leaves Sage's own levels (policy.REASONING_EFFORTS) and the turn goes on,
+        as before the levels were read."""
+        restricted = self.config["model"] == "gpt-6.1-sol"
+        try:
+            entry, self.efforts = await self._catalog_entry(flags)
+        except Exception:
+            if restricted:
+                raise
+            self.efforts = REASONING_EFFORTS
+            self.mark("catalog_unavailable")
+            return
+        if not restricted:
+            return
         # Bundled model metadata can force tools on after feature flags are read.
         # Preserve model identity/capabilities, but let our explicit tool policy win.
+        model = dict(entry, tool_mode=None, multi_agent_version=None,
+                     node_repl_disabled=True, use_responses_lite=False, experimental_supported_tools=[],
+                     supports_search_tool=False)
+        target = self.root / "home" / "inspectorpro-models.json"
+        target.write_text(json.dumps({"models": [model]}), encoding="utf-8")
+        self.config["model_catalog_json"] = str(target)
+
+    async def _catalog_entry(self, flags):
+        """The model's pinned catalog entry and the levels it supports (parse_catalog): read from `codex debug models
+        --bundled` by the first turn of this process that starts this binary for the model, then kept (CATALOGS).
+        Nothing is kept from a read that failed or that parse_catalog refused."""
+        key = (str(self.binary), RUNTIME_VERSION, self.config["model"])
+        if key in CATALOGS:
+            return CATALOGS[key]
         probe = await asyncio.create_subprocess_exec(str(self.binary), "debug", "models", "--bundled",
             env=self.environment, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             creationflags=flags)
@@ -140,16 +234,9 @@ class AppServer:
             await probe.wait()
             raise
         if probe.returncode or len(raw) > 2000000:
-            raise PilotError("codex_catalog_invalid", "The pinned model catalog could not be verified.")
-        models = [item for item in json.loads(raw)["models"] if item["slug"] == self.config["model"]]
-        if len(models) != 1:
-            raise PilotError("codex_catalog_invalid", "The selected model is missing from the pinned catalog.")
-        model = dict(models[0], tool_mode=None, multi_agent_version=None,
-                     node_repl_disabled=True, use_responses_lite=False, experimental_supported_tools=[],
-                     supports_search_tool=False)
-        target = self.root / "home" / "inspectorpro-models.json"
-        target.write_text(json.dumps({"models": [model]}), encoding="utf-8")
-        self.config["model_catalog_json"] = str(target)
+            raise CatalogUnavailable()
+        CATALOGS[key] = parse_catalog(raw, self.config["model"])
+        return CATALOGS[key]
 
     async def __aexit__(self, *_args):
         await self.close()
@@ -263,7 +350,11 @@ class AppServer:
             await asyncio.gather(*self.tasks, return_exceptions=True)
             self.mark("closed")
 
-    async def inspect(self, *, message, thread_id, instructions, on_thread, text_sink, status_sink, check):
+    async def inspect(self, *, message, thread_id, instructions, on_thread, text_sink, status_sink, check, effort=None):
+        """One turn. EFFORT, when given, is this turn's reasoning level (TurnStartParams.effort), one the pinned
+        catalog supports for the model."""
+        if effort is not None and effort not in self.efforts:
+            raise unsupported_effort(effort, self.config["model"])
         options = {"model": self.config["model"], "modelProvider": "inspectorpro",
             "cwd": str(self.root / "workspace"), "approvalPolicy": "never", "permissions": READONLY_PROFILE,
             "runtimeWorkspaceRoots": [str(self.root / "workspace")],
@@ -287,7 +378,7 @@ class AppServer:
         try:
             started = await self.request("turn/start", {"threadId": thread_id,
                 "input": [{"type": "text", "text": message}], "approvalPolicy": "never",
-                "permissions": READONLY_PROFILE})
+                "permissions": READONLY_PROFILE, **({"effort": effort} if effort is not None else {})})
             turn_id = started["turn"]["id"]
             answer = []
             while True:

@@ -21452,23 +21452,23 @@
                                 </select>
                                 <div class="agent-composer-actions">
                                     <div class="agent-model-select">
-                                        <button id="agentModelBtn" class="agent-model-btn" type="button" title="Reasoning level placeholder - does not change backend behavior" aria-label="Reasoning level">
-                                        <span id="agentModelLabel">High</span>
+                                        <button id="agentModelBtn" class="agent-model-btn" type="button" title="Reasoning level for Sage on Codex" aria-label="Reasoning level">
+                                        <span id="agentModelLabel"></span>
                                         <svg viewBox="0 0 12 12" fill="none" aria-hidden="true">
                                             <path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>
                                         </svg>
                                         </button>
                                         <div id="agentModelMenu" class="agent-model-menu" aria-hidden="true">
                                             <div class="agent-model-menu-header">Reasoning level</div>
-                                            <button class="agent-model-option active" type="button" data-reasoning-level="High">
+                                            <button class="agent-model-option" type="button" data-reasoning-level="high">
                                                 <span class="agent-model-option-title">High</span>
                                                 <span class="agent-model-option-note">More deliberate analysis</span>
                                             </button>
-                                            <button class="agent-model-option" type="button" data-reasoning-level="Medium">
+                                            <button class="agent-model-option" type="button" data-reasoning-level="medium">
                                                 <span class="agent-model-option-title">Medium</span>
                                                 <span class="agent-model-option-note">Balanced reasoning</span>
                                             </button>
-                                            <button class="agent-model-option" type="button" data-reasoning-level="Low">
+                                            <button class="agent-model-option" type="button" data-reasoning-level="low">
                                                 <span class="agent-model-option-title">Low</span>
                                                 <span class="agent-model-option-note">Faster responses</span>
                                             </button>
@@ -81156,7 +81156,8 @@
             let suggestionsVisible = false;
             let lastSuggestionsContext = null; // Track which results generated the suggestions
             let agentCapturedImage = null; // Base64 screenshot data URL
-            let agentReasoningUiSelection = 'High'; // UI-only placeholder; not wired to backend reasoning controls
+            // Sage's reasoning level on Codex: the user's pick, else the server's default (_agentReasoningEffort).
+            let agentReasoningUiSelection = '';
 
             // Feature #142: Cross-agent context (summaries + pendingCrossContext live in sessions)
             let crossContextReady = Promise.resolve(); // resolves when summarize completes
@@ -84759,13 +84760,16 @@
             }
 
             function setAgentReasoningUiSelection(level) {
-                agentReasoningUiSelection = level || 'High';
-                if (agentModelLabel) agentModelLabel.textContent = agentReasoningUiSelection;
+                agentReasoningUiSelection = level || '';
+                let title = '';
                 const options = agentModelMenu ? Array.from(agentModelMenu.querySelectorAll('.agent-model-option')) : [];
                 options.forEach(opt => {
                     const active = (opt.dataset.reasoningLevel || '') === agentReasoningUiSelection;
                     opt.classList.toggle('active', active);
+                    const name = opt.querySelector('.agent-model-option-title');
+                    if (active) title = name ? name.textContent.trim() : agentReasoningUiSelection;
                 });
+                if (agentModelLabel) agentModelLabel.textContent = title || agentReasoningUiSelection;
             }
 
             function closeAgentModelMenu() {
@@ -84786,10 +84790,6 @@
                 agentModelBtn.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
                 agentModelMenu.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
             }
-
-            setAgentReasoningUiSelection(
-                agentModelLabel ? agentModelLabel.textContent.trim() : agentReasoningUiSelection
-            );
 
             function updateSendButtonState() {
                 // Allow send if there's text OR a captured image
@@ -84969,7 +84969,7 @@
                 agentModelMenu.querySelectorAll('.agent-model-option').forEach(opt => {
                     opt.addEventListener('click', function(e) {
                         e.preventDefault();
-                        const nextLevel = opt.dataset.reasoningLevel || 'High';
+                        const nextLevel = opt.dataset.reasoningLevel || '';
                         setAgentReasoningUiSelection(nextLevel);
                         closeAgentModelMenu();
                     });
@@ -93754,6 +93754,19 @@
                 return _chatStreamingStatusPromise;
             }
 
+            // Sage's reasoning level on Codex (codex_runtime/policy.py): the selected level when the server offers it,
+            // else the server's default; '' when the server offers none.
+            function _agentReasoningEffort(status, selected) {
+                const offer = status && status.reasoningEffort;
+                if (!offer || !Array.isArray(offer.levels)) return '';
+                return offer.levels.includes(selected) ? selected : String(offer.default || '');
+            }
+
+            // The selector shows the server's default until the user picks a level.
+            _getChatStreamingStatus().then(status => {
+                if (!agentReasoningUiSelection) setAgentReasoningUiSelection(_agentReasoningEffort(status, ''));
+            });
+
             function _parseAgentStreamEventLine(line) {
                 if (window.InspectorProChatStreamRuntime) {
                     return window.InspectorProChatStreamRuntime.parseEventLine(line);
@@ -93867,6 +93880,9 @@
                     || (status?.partRuntime === 'codex'
                         && originAgent === 'deviation-analyst' && activeMode === '3dmodel');
                 const codexTurn = codexFacility || codexDocumentation;
+                // A Codex turn sends the level the selector shows, and the selector shows the level it sends.
+                const reasoningEffort = codexTurn ? _agentReasoningEffort(status, agentReasoningUiSelection) : '';
+                if (reasoningEffort) setAgentReasoningUiSelection(reasoningEffort);
                 const streamRequiredFailure = (error = new Error('Codex requires a cancellable stream')) =>
                     Object.assign(error, {
                         agentServiceFailure: true,
@@ -93928,7 +93944,8 @@
                     response = await fetch('/api/agent/chat/v2/stream', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload),
+                        body: JSON.stringify(reasoningEffort
+                            ? { ...payload, reasoning_effort: reasoningEffort } : payload),
                         signal: controller.signal,
                     });
                 } catch (error) {

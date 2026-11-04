@@ -33,7 +33,7 @@ ALLOWED_OPERATIONS = frozenset({
     "upsert_decal", "delete_decal", "edit_perimeter_walls", "upsert_wall_artwork", "delete_wall_artwork",
     "set_site_context", "set_building_pose", "upsert_site_area", "delete_site_area",
     "upsert_site_reference", "delete_site_reference", "set_emergency_plan", "set_zone_ceiling",
-    "set_zone_roof",
+    "set_zone_roof", "upsert_floor_plan_reference", "delete_floor_plan_reference",
 })
 # A package from the server's planner (a cell plan or its clear) may also remove the saved walks its own deletions
 # strand; the kernel allows nothing else (operations.py, delete_stranded_movements). Model-written batches may not.
@@ -298,6 +298,8 @@ def recheck(service, principal, site_id, layout_id, base_revision, operations, p
         raise FacilityConflictError("revision_conflict", "Facility Layout revision conflict.",
                                     details={"currentRevision": current["revision"]})
     document = prepared["document"]
+    # An underlay's drawing must still be stored when the change commits (floor_plan_store).
+    service._require_floor_plan_artifacts(principal, site_id, current["layout"], document)
     component_proofs = []
     if undo:
         saved = {item["placementId"]: item for item in current["layout"]["placements"]}

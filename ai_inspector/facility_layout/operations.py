@@ -1297,6 +1297,48 @@ def _op_delete_site_reference(document, operation, _index, _base_revision):
     return [], [operation["referenceId"]]
 
 
+def _op_upsert_floor_plan_reference(document, operation, _index, _base_revision):
+    """An imported drawing shown under the Plan view (floor_plan_references.py): create it or replace it whole."""
+    from .floor_plan_references import KEY, MAX_REFERENCES, normalize_floor_plan_references, normalize_reference
+    if set(operation) != {"op", "reference"}:
+        _fail("invalid_floor_plan_reference", "Expected reference")
+    try:
+        reference = normalize_reference(operation["reference"])
+    except ValueError as exc:
+        _fail("invalid_floor_plan_reference", str(exc))
+    existing = ((document.get("extensions") or {}).get(KEY) or {}).get("references", [])
+    created = not any(item.get("referenceId") == reference["referenceId"] for item in existing)
+    if created and len(existing) >= MAX_REFERENCES:
+        _fail("floor_plan_reference_limit", "This layout already shows a floor plan; remove it before adding another.")
+    references = [reference if item.get("referenceId") == reference["referenceId"] else item for item in existing]
+    if created:
+        references.append(reference)
+    try:
+        value = normalize_floor_plan_references({"version": 1, "references": references})
+    except ValueError as exc:
+        _fail("invalid_floor_plan_reference", str(exc))
+    document.setdefault("extensions", {})[KEY] = value
+    return [reference["referenceId"]] if created else [], [reference["referenceId"]]
+
+
+def _op_delete_floor_plan_reference(document, operation, _index, _base_revision):
+    """Remove the underlay. Walls, zones or anything else converted from the drawing stay as they are."""
+    from .floor_plan_references import KEY
+    if set(operation) != {"op", "referenceId"} or not isinstance(operation["referenceId"], str):
+        _fail("invalid_floor_plan_reference", "Expected referenceId")
+    value = (document.get("extensions") or {}).get(KEY) or {}
+    existing = value.get("references", [])
+    if not any(item.get("referenceId") == operation["referenceId"] for item in existing):
+        _fail("floor_plan_reference_missing", "That floor-plan underlay was not found.",
+              details={"targetId": operation["referenceId"]})
+    references = [item for item in existing if item.get("referenceId") != operation["referenceId"]]
+    if references:
+        document["extensions"][KEY] = {**value, "references": references}
+    else:
+        del document["extensions"][KEY]
+    return [], [operation["referenceId"]]
+
+
 def _op_delete_site_area(document, operation, _index, _base_revision):
     from .site_context import KEY, normalize_site_context
     if set(operation) != {"op", "areaId"} or not isinstance(operation["areaId"], str):
@@ -2972,6 +3014,8 @@ _HANDLERS: Dict[str, _Handler] = {
     "delete_site_area": _op_delete_site_area,
     "upsert_site_reference": _op_upsert_site_reference,
     "delete_site_reference": _op_delete_site_reference,
+    "upsert_floor_plan_reference": _op_upsert_floor_plan_reference,
+    "delete_floor_plan_reference": _op_delete_floor_plan_reference,
     "set_equipment_decals": _op_set_equipment_decals,
     "set_component_materials": _op_set_component_materials,
     "set_interior_walls": _op_set_interior_walls,

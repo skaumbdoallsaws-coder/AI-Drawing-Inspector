@@ -37,6 +37,7 @@ def ref(name):
 
 COLOR = text(7, 7, pattern=r"^#[0-9a-fA-F]{6}$")
 POINT = obj({key: number(-10000, 10000) for key in ("x", "z")})
+DRAWING_POINT = obj({key: number(-1e10, 1e10) for key in ("u", "v")})
 HEX_ID = text(64, 64, pattern="^[a-f0-9]{64}$")
 ART_ID = text(80, pattern="^[a-z0-9-]{1,80}$")
 LEGACY_IMAGE = text(100, pattern=r"^/generated/facility-wall-art/[a-f0-9]{64}\.png$")
@@ -112,6 +113,27 @@ def extension_definitions():
                                 "z": number(-10000, 10000), "widthMeters": number(.3, 60),
                                 "depthMeters": number(.3, 60), "rotationDegrees": number(-360, 360)}), 16)},
             ["schemaVersion", "surfaces"]),
+        # An imported DXF drawn under the Plan view (floor_plan_references.normalize_reference).
+        "floorPlanReference": obj({
+            "referenceId": text(63, 4, pattern="^fp-[a-z0-9-]{1,60}$"), "label": text(120),
+            "sourceName": text(120), "importId": text(36, 36, pattern="^fpi-[a-f0-9]{32}$"),
+            "sourceSha256": HEX_ID, "geometrySha256": HEX_ID,
+            "parserVersion": text(64, pattern="^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"),
+            "alignment": obj({"sourceOrigin": DRAWING_POINT, "metersPerDrawingUnit": number(1e-9, 1e4),
+                              "rotationDegrees": number(-360, 360),
+                              "translationMeters": obj({key: number(-1e6, 1e6) for key in ("x", "z")}),
+                              "unitSource": {"enum": ["header", "chosen", "calibrated"]},
+                              "confirmed": {"type": "boolean"},
+                              "controlPoints": array(obj({"source": DRAWING_POINT, "target": obj(
+                                  {key: number(-1e6, 1e6) for key in ("x", "z")})}), 16)}),
+            "layers": array(obj({"layerId": text(5, 2, pattern="^L(0|[1-9][0-9]{0,3})$"),
+                                 "visible": {"type": "boolean"},
+                                 "role": {"enum": ["reference", "wall_centerline", "wall_faces", "perimeter",
+                                                  "room_boundary", "column", "door", "text", "ignore"]}}), 512),
+            "opacity": number(.05, 1),
+            "showIn3D": {"type": "boolean", "description": "Plan view only for now: the server refuses true."}},
+            ["referenceId", "label", "importId", "sourceSha256", "geometrySha256", "parserVersion", "alignment",
+             "layers", "opacity", "showIn3D"]),
         "planSettings": obj({"widthMeters": number(.5, 10000), "depthMeters": number(.5, 10000),
                              "gridSpacingMeters": number(.05, 10000), "majorGridSpacingMeters": number(.05, 10000)}),
     }
@@ -201,6 +223,14 @@ def operation_batch_schema():
         'independently (a survey) for the fit check. Review required.')
     operation('delete_site_reference', {'referenceId':site['siteReferenceId']}, description=
         'Delete only the explicitly requested reference point. Review required.')
+
+    operation('upsert_floor_plan_reference', {'reference': ref('floorPlanReference')}, description=
+        'Create or replace the imported DXF drawn under the Plan view, by referenceId (fp-...). It must name a drawing '
+        'the user imported for this site (its importId, sourceSha256, geometrySha256 and parserVersion). The '
+        'alignment places drawing units (u, v) in layout metres; never guess units or alignment the user has not '
+        'confirmed. Moves or converts nothing. Review required.')
+    operation('delete_floor_plan_reference', {'referenceId': text(63, 4, pattern="^fp-[a-z0-9-]{1,60}$")},
+              description='Remove the floor-plan underlay only; walls or zones made from it stay. Review required.')
 
     entities = (("zone", "zoneId", "zone", "add_zone", "edit_zone", "delete_zone"),
         ("floorMarking", "markingId", "floorMarking", "add_floor_marking", "edit_floor_marking", "delete_floor_marking"),

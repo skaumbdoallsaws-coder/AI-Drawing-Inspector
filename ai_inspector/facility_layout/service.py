@@ -1732,6 +1732,7 @@ class FacilityLayoutService:
         self._require_spatially_valid(spatial)
         routing = self._diagnose_routing(principal, site_id, document)
         self._require_routing_valid(routing)
+        self._require_floor_plan_artifacts(principal, site_id, None, document)
         result = self.layout_repository.create_layout(
             principal,
             site_id,
@@ -1767,6 +1768,7 @@ class FacilityLayoutService:
             site_id,
             layout_id,
         )
+        self._require_floor_plan_artifacts(principal, site_id, current["layout"], document)
         baseline_routing = self._diagnose_routing(
             principal,
             site_id,
@@ -3031,6 +3033,15 @@ class FacilityLayoutService:
         ))
         return receipt.to_dict() if receipt is not None else None
 
+    def _require_floor_plan_artifacts(self, principal, site_id, before, after) -> None:
+        """A floor-plan underlay the change adds or repoints must name a drawing stored for this site
+        (floor_plan_store.require_reference_artifacts)."""
+        from .floor_plan_references import KEY
+        if KEY not in ((after or {}).get("extensions") or {}):
+            return
+        from .floor_plan_store import STORE_FOLDER, require_reference_artifacts
+        require_reference_artifacts(self.layout_repository.root / STORE_FOLDER, principal, site_id, before, after)
+
     def _prepare_operations(
         self,
         principal: FacilityPrincipal,
@@ -3086,6 +3097,7 @@ class FacilityLayoutService:
             operations,
             base_revision=base_revision,
         )
+        self._require_floor_plan_artifacts(principal, site_id, current["layout"], operation_result["document"])
         dependencies = self.validate_dependencies(
             principal,
             site_id,

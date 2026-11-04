@@ -1996,6 +1996,14 @@ def validate_layout(
             normalize_site_context(root_extensions["facilitySiteContext"], layout)
         except ValueError as exc:
             _fail("invalid_site_context", str(exc), "$.extensions.facilitySiteContext")
+    if isinstance(root_extensions, Mapping) and "facilityFloorPlanReferences" in root_extensions:
+        from .floor_plan_references import normalize_floor_plan_references
+        stored = root_extensions["facilityFloorPlanReferences"]
+        try:
+            if normalize_floor_plan_references(stored) != stored:
+                raise ValueError("The floor-plan underlay must be saved in its normalized form.")
+        except ValueError as exc:
+            _fail("invalid_floor_plan_references", str(exc), "$.extensions.facilityFloorPlanReferences")
     if isinstance(root_extensions, Mapping) and "facilityEquipmentDecals" in root_extensions:
         from .equipment_decals import normalize_equipment_decals
         try:

@@ -9,6 +9,7 @@ numpy                     # Array operations
 scipy                     # Hungarian matching for dimension verification
 pyyaml                    # YAML parsing for datasets
 shapely>=2.1               # Exact polygon unions and constrained wall triangulation
+ezdxf==1.4.5              # DXF floor-plan import (MIT; no extras); runs in a limited worker process
 
 # ---------- Web Server (InspectorPro UI) ----------
 fastapi                   # REST API framework

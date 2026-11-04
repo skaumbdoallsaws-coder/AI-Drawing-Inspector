@@ -1,0 +1,41 @@
+{
+  "description": "Drawing-to-layout alignment cases, computed by hand: layout = translation + metersPerDrawingUnit * R(rotationDegrees) * (drawing - sourceOrigin), drawing X -> layout X, drawing Y -> layout Z, R counter-clockwise: x = cos*du - sin*dv, z = sin*du + cos*dv. Shared by the Python (floor_plan_alignment.py) and browser (facility_layout_floor_plan.js) tests.",
+  "tolerance": 1e-9,
+  "cases": [
+    {
+      "name": "meters, no move",
+      "alignment": {"sourceOrigin": {"u": 0, "v": 0}, "metersPerDrawingUnit": 1, "rotationDegrees": 0, "translationMeters": {"x": 0, "z": 0}},
+      "points": [{"drawing": [3, 4], "layout": [3, 4]}, {"drawing": [-2.5, 0], "layout": [-2.5, 0]}]
+    },
+    {
+      "name": "millimeters, moved",
+      "alignment": {"sourceOrigin": {"u": 1000, "v": 2000}, "metersPerDrawingUnit": 0.001, "rotationDegrees": 0, "translationMeters": {"x": 5, "z": 6}},
+      "points": [{"drawing": [4000, 2000], "layout": [8, 6]}, {"drawing": [1000, 7000], "layout": [5, 11]}]
+    },
+    {
+      "name": "quarter turn counter-clockwise",
+      "alignment": {"sourceOrigin": {"u": 0, "v": 0}, "metersPerDrawingUnit": 1, "rotationDegrees": 90, "translationMeters": {"x": 10, "z": 0}},
+      "points": [{"drawing": [2, 0], "layout": [10, 2]}, {"drawing": [3, 1], "layout": [9, 3]}]
+    },
+    {
+      "name": "feet, turned -30 degrees",
+      "alignment": {"sourceOrigin": {"u": 100, "v": 50}, "metersPerDrawingUnit": 0.3048, "rotationDegrees": -30, "translationMeters": {"x": 1, "z": 2}},
+      "points": [{"drawing": [110, 50], "layout": [3.639645430734969, 0.476]}, {"drawing": [100, 60], "layout": [2.524, 4.639645430734969]}]
+    },
+    {
+      "name": "half turn, doubled",
+      "alignment": {"sourceOrigin": {"u": 0, "v": 0}, "metersPerDrawingUnit": 2, "rotationDegrees": 180, "translationMeters": {"x": 0, "z": 0}},
+      "points": [{"drawing": [1, 1], "layout": [-2, -2]}, {"drawing": [0, -3], "layout": [0, 6]}]
+    },
+    {
+      "name": "unitless, calibrated 10,000 units to 10 m",
+      "alignment": {"sourceOrigin": {"u": 0, "v": 0}, "metersPerDrawingUnit": 0.001, "rotationDegrees": 0, "translationMeters": {"x": 0, "z": 0}},
+      "points": [{"drawing": [10000, 0], "layout": [10, 0]}, {"drawing": [2500, 7500], "layout": [2.5, 7.5]}]
+    },
+    {
+      "name": "millimeters, quarter turn, moved",
+      "alignment": {"sourceOrigin": {"u": 500, "v": 500}, "metersPerDrawingUnit": 0.001, "rotationDegrees": 90, "translationMeters": {"x": 20, "z": 5}},
+      "points": [{"drawing": [1500, 500], "layout": [20, 6]}, {"drawing": [500, 2500], "layout": [18, 5]}]
+    }
+  ]
+}

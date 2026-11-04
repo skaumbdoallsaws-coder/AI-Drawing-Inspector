@@ -24,7 +24,15 @@ proposal the user reviews; a conversion is never applied directly (operation_pro
   is refused until they are left out.
 - Outline ("perimeter"): a closed loop becomes the plan's outer walls (a polygon boundary); two nested loops that
   stay one distance apart are the outer and inner faces of those walls. The floor stays the plan's rectangle.
-- Columns and doors ("column", "door") come in a later phase: listed, not converted.
+- Doors ("door", FP3): a swing (an arc turning 60 to 120 degrees) hinged at one jamb of a break 0.5 to 4 m wide
+  between two pieces of a wall and shut against the other jamb (or two of half the width hinged at both jambs, a
+  double door) joins the pieces into one wall with an opening there; interior openings are full height, and the door
+  leaf and its swing are not modelled. A swing drawn on both sides of one jamb (a door that swings both ways) is one
+  door. On the outer walls a swing hinged on an edge of the outline and shut along it is a door only with its leaf
+  drawn (an unbroken outline has no jambs to confirm it), and it waits for the door height. Swings that disagree
+  about a break, or one that fits two breaks, leave the door unclear and the break stays. A door drawn as one
+  polyline (its leaf and its swing) reads like one drawn as a line and an arc.
+- Columns ("column") come in a later phase: listed, not converted.
 
 Existing walls and zones are never changed: a candidate whose id is already in the layout is reported as there (or
 edited since) and left alone, and one that lands on a wall or zone already on the plan is refused. The outer walls
@@ -37,7 +45,7 @@ import json
 import math
 import re
 
-CONVERTER_VERSION = "fp-convert-1"
+CONVERTER_VERSION = "fp-convert-2"
 ANGLE_TOLERANCE = math.radians(1.0)  # parallel or collinear
 SIN_TOLERANCE = math.sin(ANGLE_TOLERANCE)
 GENTLE_BEND = math.radians(25.0)  # a turn below this between straight runs makes them part of a curve
@@ -61,6 +69,9 @@ MAX_LOOPS = 5000  # closed outlines on the room and outline layers
 MAX_SETTINGS_IDS = 2000
 MAX_LISTED = 200
 MAX_SOURCES = 50
+MIN_DOOR_WIDTH, MAX_DOOR_WIDTH = 0.5, 4.0  # meters between a door's jambs
+SWEEP_LIMITS = (math.radians(60.0), math.radians(120.0))  # a door swing turns about a right angle
+DOOR_SLACK = 0.05  # meters: how far a hinge or a shut leaf may sit off the wall's faces or its jamb
 SAME_ZONE_OVERLAP = 0.9  # a new room that shares this much (intersection over union) with a zone is that zone
 WALL_COLOR = "#45484b"
 ZONE_TYPES = ("workcell", "storage", "staging", "receiving", "shipping", "inspection", "aisle", "dock", "charging",
@@ -68,7 +79,7 @@ ZONE_TYPES = ("workcell", "storage", "staging", "receiving", "shipping", "inspec
 STRAIGHT_TYPES = frozenset({"LINE", "LWPOLYLINE", "POLYLINE"})
 WALL_ROLES = ("wall_centerline", "wall_faces")
 LOOP_ROLES = ("room_boundary", "perimeter")
-CANDIDATE_ID = re.compile(r"(iw|zn|ol)-fp-[a-f0-9]{16}")
+CANDIDATE_ID = re.compile(r"(iw|zn|ol|dr)-fp-[a-f0-9]{16}")
 
 MESSAGES = {
     # Candidates that are not added.
@@ -92,6 +103,10 @@ MESSAGES = {
     "too_many_corners": "It has more corners than the plan's outer walls take (128).",
     "replace_needed": "The plan already has outer walls; choose Replace to swap them.",
     "edited": "Changed since it was converted; left as it is.",
+    "door_host_left_out": "Its wall is left out.",
+    "door_settings": "Give the outer doors' height to add the outer walls with their doors, or leave the doors out.",
+    "door_ambiguous": "The door swings here disagree, or one fits another break too, so the door is unclear; the "
+                      "wall keeps its break.",
     # Drawn entities that are not converted.
     "curve": "A curve: it stays as drawing.",
     "no_matching_face": "No matching face line: not a wall.",
@@ -100,7 +115,11 @@ MESSAGES = {
     "crosses_itself": "It crosses itself.",
     "too_small": "Too small to be a room.",
     "too_many_vertices": "More corners than a zone takes (256).",
-    "later_phase": "Columns and doors are converted in a later step; it stays as drawing.",
+    "later_phase": "Columns are converted in a later step; it stays as drawing.",
+    "door_unmatched": "A door swing that fits no break in a wall and no edge of the outer walls: it stays drawing.",
+    "door_leaf_missing": "A door swing on the outer walls without its door leaf: an arc alone is not enough to cut a "
+                         "door there; it stays drawing.",
+    "door_part": "On a door layer but no part of a door found: it stays drawing.",
 }
 
 
@@ -132,8 +151,8 @@ def normalize_settings(value) -> dict:
     """The conversion request's settings, closed and checked (ConversionSettingsError). Each part is optional, and so
     are the wall and outer wall heights: what has no height is listed and not added, while the thicknesses and the
     outline chosen apply at once."""
-    source = _closed({} if value is None else value, "settings", {"walls", "rooms", "outline", "excluded"})
-    out = {"walls": None, "rooms": None, "outline": None, "excluded": []}
+    source = _closed({} if value is None else value, "settings", {"walls", "rooms", "outline", "doors", "excluded"})
+    out = {"walls": None, "rooms": None, "outline": None, "doors": None, "excluded": []}
     walls = source.get("walls")
     if walls is not None:
         walls = _closed(walls, "walls", {"heightMeters", "thicknessMeters", "maxThicknessMeters"})
@@ -175,6 +194,11 @@ def normalize_settings(value) -> dict:
             "loop": loop,
             "replace": outline.get("replace", False),
         }
+    doors = source.get("doors")
+    if doors is not None:
+        doors = _closed(doors, "doors", {"heightMeters"})
+        out["doors"] = {"heightMeters": None if doors.get("heightMeters") is None
+                        else _number(doors["heightMeters"], "Door height", MIN_HEIGHT, MAX_HEIGHT)}
     excluded = source.get("excluded", [])
     if not isinstance(excluded, list) or len(excluded) > MAX_SETTINGS_IDS:
         raise ConversionSettingsError(f"excluded lists at most {MAX_SETTINGS_IDS} candidate ids.")
@@ -337,11 +361,12 @@ def _straight_pieces(points, closed):
 
 
 class _Wall:
-    __slots__ = ("a", "b", "thickness", "sources", "layers", "kind", "flag")
+    __slots__ = ("a", "b", "thickness", "sources", "layers", "kind", "flag", "openings")
 
-    def __init__(self, a, b, thickness, sources, layers, kind, flag=None):
+    def __init__(self, a, b, thickness, sources, layers, kind, flag=None, openings=()):
         self.a, self.b, self.thickness = a, b, thickness
         self.sources, self.layers, self.kind, self.flag = set(sources), set(layers), kind, flag
+        self.openings = list(openings)  # [(p, q)]: door openings, their ends as points on the wall's line
 
     @property
     def length(self):
@@ -582,8 +607,8 @@ def _join_ends(walls):
                         best = lam
             if best is not None:
                 ends[i][wi] = _along(p, di, best)
-    return [_Wall(ends[i][0], ends[i][1], wall.thickness, wall.sources, wall.layers, wall.kind, wall.flag)
-            for i, wall in enumerate(walls)]
+    return [_Wall(ends[i][0], ends[i][1], wall.thickness, wall.sources, wall.layers, wall.kind, wall.flag,
+                  wall.openings) for i, wall in enumerate(walls)]
 
 
 def _flag_overlaps(walls):
@@ -623,6 +648,272 @@ def _wall_end(piece, walls, grid):
         if min(math.dist(middle, wall.a), math.dist(middle, wall.b)) <= wall.thickness / 2 + 2 * TOLERANCE:
             return True
     return False
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Doors.
+
+
+def _swing(points):
+    """A door swing: an open curve whose points (sampled on the true curve) lie on one circle and turn 60 to 120
+    degrees about it. (hinge, radius, (first end, last end)) or None."""
+    if len(points) < 3:
+        return None
+    a, m, b = points[0], points[len(points) // 2], points[-1]
+    bx, bz, cx, cz = m[0] - a[0], m[1] - a[1], b[0] - a[0], b[1] - a[1]
+    d = 2 * (bx * cz - bz * cx)
+    if abs(d) < 1e-12:
+        return None
+    hinge = (a[0] + (cz * (bx * bx + bz * bz) - bz * (cx * cx + cz * cz)) / d,
+             a[1] + (bx * (cx * cx + cz * cz) - cx * (bx * bx + bz * bz)) / d)
+    radius = math.dist(hinge, a)
+    if not MIN_DOOR_WIDTH / 2 - DOOR_SLACK <= radius <= MAX_DOOR_WIDTH + DOOR_SLACK:
+        return None
+    if any(abs(math.dist(hinge, point) - radius) > max(0.01, 0.01 * radius) for point in points):
+        return None
+    if not SWEEP_LIMITS[0] <= _turn(_unit(hinge, a), _unit(hinge, b)) <= SWEEP_LIMITS[1]:
+        return None
+    if _dot(_sub(m, hinge), _sub(((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), hinge)) <= 0:
+        return None  # the long way round: more than half a circle
+    return hinge, radius, (a, b)
+
+
+def _door_symbols(door_entities):
+    """The door layers' swings and straight pieces (a leaf is one), as dicts with the entity they come from. Each
+    curved stretch of an open polyline is tried as a swing and its straight runs are pieces, so a door drawn as one
+    polyline (leaf and swing) reads like one drawn as a line and an arc."""
+    swings, pieces = [], []
+
+    def swing_of(points, entity_id, layer):
+        fitted = _swing(points)
+        if fitted is not None:
+            swings.append({"hinge": fitted[0], "radius": fitted[1], "ends": fitted[2], "entity": entity_id,
+                           "layer": layer})
+
+    for entity, points in door_entities:
+        entity_id, layer, closed = str(entity.get("id")), str(entity.get("layer")), bool(entity.get("closed"))
+        if entity.get("type") not in STRAIGHT_TYPES:
+            if not closed:  # an arc (or an ellipse or spline drawn as one)
+                swing_of(points, entity_id, layer)
+            continue
+        stretch = []
+        for a, b, curved in _straight_pieces(points, closed):
+            if curved and not closed:
+                stretch = stretch or [a]
+                stretch.append(b)
+                continue
+            if len(stretch) >= 3:
+                swing_of(stretch, entity_id, layer)
+            stretch = []
+            if not curved:
+                pieces.append({"a": a, "b": b, "entity": entity_id, "layer": layer})
+        if len(stretch) >= 3:
+            swing_of(stretch, entity_id, layer)
+    return swings, pieces
+
+
+def _leaf(swing, pieces, grid):
+    """The piece drawn from the swing's hinge to one of its ends (the door leaf), or None."""
+    hinge, radius = swing["hinge"], swing["radius"]
+    slack = max(DOOR_SLACK, 0.1 * radius)
+    for index in sorted(grid.near(_box(hinge, hinge, slack))):
+        a, b = pieces[index]["a"], pieces[index]["b"]
+        for near, far in ((a, b), (b, a)):
+            if math.dist(near, hinge) <= max(DOOR_SLACK, 0.05 * radius) and any(
+                    math.dist(far, end) <= slack for end in swing["ends"]):
+                return index
+    return None
+
+
+def _door_gaps(walls):
+    """Breaks in a wall: two collinear pieces of one thickness whose facing ends lie MIN_DOOR_WIDTH to MAX_DOOR_WIDTH
+    apart, the nearer one beyond the other's end along their line. [(i, p, j, q)]: end P of walls[i] faces end Q of
+    walls[j]."""
+    grid = _Grid(max(1.0, MAX_DOOR_WIDTH))
+    for index, wall in enumerate(walls):
+        if not wall.flag:
+            grid.add(index, _box(wall.a, wall.b, MAX_DOOR_WIDTH))
+    found = {}
+    for i, first in enumerate(walls):
+        if first.flag:
+            continue
+        d = first.direction()
+        n = (-d[1], d[0])
+        for p, out in ((first.a, (-d[0], -d[1])), (first.b, d)):
+            best = None
+            for j in grid.near(_box(p, p)):
+                second = walls[j]
+                if j == i or not _parallel(d, second.direction()):
+                    continue
+                if max(abs(_dot(n, _sub(second.a, p))), abs(_dot(n, _sub(second.b, p)))) > TOLERANCE:
+                    continue
+                near = min((_dot(out, _sub(point, p)), point) for point in (second.a, second.b))
+                if near[0] > TOLERANCE and (best is None or near[0] < best[0]):
+                    best = (near[0], j, near[1])
+            if best is None or abs(walls[best[1]].thickness - first.thickness) > TOLERANCE:
+                continue
+            if MIN_DOOR_WIDTH - TOLERANCE <= best[0] <= MAX_DOOR_WIDTH + TOLERANCE:
+                found.setdefault((min(i, best[1]), max(i, best[1])), (i, p, best[1], best[2]))
+    return [found[key] for key in sorted(found)]
+
+
+def _gap_fits(gap, walls, swings, grid):
+    """The swings that fit a break: [(swing index, "single" or "half", the jamb it is hinged at: 0 at P, 1 at Q)]."""
+    i, p, _j, q = gap
+    thickness, width = walls[i].thickness, math.dist(p, q)
+    e = _unit(p, q)
+    n = (-e[1], e[0])
+    fits = []
+    for k in sorted(grid.near(_box(p, q, width))):
+        hinge, radius, ends = swings[k]["hinge"], swings[k]["radius"], swings[k]["ends"]
+        along, across = _dot(e, _sub(hinge, p)), _dot(n, _sub(hinge, p))
+        if abs(across) > thickness / 2 + DOOR_SLACK:
+            continue
+        for side, at in ((0, 0.0), (1, width)):
+            if abs(along - at) > max(DOOR_SLACK, 0.05 * width):
+                continue
+            for kind, leaf in (("single", width), ("half", width / 2)):
+                slack = max(DOOR_SLACK, 0.1 * leaf)
+                if abs(radius - leaf) > slack:
+                    continue
+                shut = at + leaf if side == 0 else at - leaf
+                if any(abs(_dot(n, _sub(end, p))) <= thickness / 2 + DOOR_SLACK
+                       and abs(_dot(e, _sub(end, p)) - shut) <= slack for end in ends):
+                    fits.append((k, kind, side))
+    return fits
+
+
+def _wall_doors(walls, swings, pieces, excluded, import_id):
+    """Doors in the breaks of walls (_door_gaps): one swing of the break's width hinged at one jamb and shut against
+    the other, or two of half its width hinged at both jambs (a double door). Swings that disagree about a break, or a
+    swing that fits more than one break, leave it unclear. Returns the doors (dicts; "join": the wall is joined across
+    the break), and the swings and pieces they use."""
+    gaps = _door_gaps(walls)
+    swing_grid, piece_grid = _Grid(max(1.0, MAX_DOOR_WIDTH)), _Grid(2.0)
+    for index, swing in enumerate(swings):
+        swing_grid.add(index, _box(swing["hinge"], swing["hinge"]))
+    for index, piece in enumerate(pieces):
+        piece_grid.add(index, _box(piece["a"], piece["b"]))
+    all_fits = [_gap_fits(gap, walls, swings, swing_grid) for gap in gaps]
+    uses = {}
+    for fits in all_fits:
+        for k in {fit[0] for fit in fits}:
+            uses[k] = uses.get(k, 0) + 1
+    doors, used_swings, used_pieces = [], set(), set()
+    for gap, fits in zip(gaps, all_fits):
+        if not fits:
+            continue
+        i, p, j, q = gap
+        # The jambs the swings are hinged at: full-width swings all at one jamb are one door (drawn on both sides
+        # when it swings both ways), half-width ones at both jambs a double door; anything else disagrees.
+        singles = {fit[2] for fit in fits if fit[1] == "single"}
+        halves = {fit[2] for fit in fits if fit[1] == "half"}
+        if any(uses[fit[0]] > 1 for fit in fits):
+            kind = "unclear"
+        elif len(singles) == 1 and not halves:
+            kind = "single"
+        elif halves == {0, 1} and not singles:
+            kind = "double"
+        else:
+            kind = "unclear"
+        chosen = sorted({fit[0] for fit in fits})
+        used_swings.update(chosen)
+        sources, layers = {swings[k]["entity"] for k in chosen}, {swings[k]["layer"] for k in chosen}
+        for k in chosen:
+            leaf = _leaf(swings[k], pieces, piece_grid)
+            if leaf is not None:
+                used_pieces.add(leaf)
+                sources.add(pieces[leaf]["entity"])
+                layers.add(pieces[leaf]["layer"])
+        ends = sorted((_xz(p), _xz(q)), key=lambda point: (point["x"], point["z"]))
+        door_id = "dr-fp-" + _digest(import_id, "door", ends)[:16]
+        doors.append({"candidateId": door_id, "kind": kind, "widthMeters": _r(math.dist(p, q), 4),
+                      "at": _xz(((p[0] + q[0]) / 2, (p[1] + q[1]) / 2)), "layers": sorted(layers),
+                      "sources": sorted(sources)[:MAX_SOURCES], "gap": gap,
+                      "join": kind != "unclear" and door_id not in excluded})
+    return doors, used_swings, used_pieces
+
+
+def _join_doors(walls, doors):
+    """WALLS joined across the breaks of the DOORS that join them, each with its openings. Returns the walls and where
+    each of the given walls went (index -> index)."""
+    parent = list(range(len(walls)))
+
+    def find(index):
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    for door in doors:
+        i, _p, j, _q = door["gap"]
+        root_i, root_j = find(i), find(j)
+        if root_i != root_j:
+            parent[max(root_i, root_j)] = min(root_i, root_j)
+    groups = {}
+    for index in range(len(walls)):
+        groups.setdefault(find(index), []).append(index)
+    joined, place = [], {}
+    for root in sorted(groups):
+        members = groups[root]
+        place.update({index: len(joined) for index in members})
+        if len(members) == 1:
+            joined.append(walls[members[0]])
+            continue
+        parts = [walls[index] for index in members]
+        base = max(parts, key=lambda wall: (wall.length, wall.a, wall.b))
+        d = base.direction()
+        ends = [_dot(d, _sub(point, base.a)) for wall in parts for point in (wall.a, wall.b)]
+        kinds = {wall.kind for wall in parts}
+        openings = [(door["gap"][1], door["gap"][3]) for door in doors if find(door["gap"][0]) == root]
+        joined.append(_Wall(_along(base.a, d, min(ends)), _along(base.a, d, max(ends)), base.thickness,
+                            set().union(*(wall.sources for wall in parts)), set().union(*(wall.layers for wall in parts)),
+                            kinds.pop() if len(kinds) == 1 else "mixed", None, openings))
+    return joined, place
+
+
+def _outline_doors(points, width, swings, pieces, free):
+    """Doors in the outer walls along the outline POINTS (a closed ring): a swing hinged on an edge and shut along it,
+    with its leaf drawn; two shut against each other are a double door. Returns ([(edge, start, end, kind, swing
+    indexes, piece indexes)], the swings that fit an edge but have no leaf)."""
+    piece_grid = _Grid(2.0)
+    for index, piece in enumerate(pieces):
+        piece_grid.add(index, _box(piece["a"], piece["b"]))
+    leaves, leafless = {}, set()
+    for k in free:
+        swing = swings[k]
+        hinge, radius = swing["hinge"], swing["radius"]
+        slack = max(DOOR_SLACK, 0.1 * radius)
+        fits = []
+        for edge in range(len(points)):
+            a, b = points[edge], points[(edge + 1) % len(points)]
+            length, e = math.dist(a, b), _unit(a, b)
+            n = (-e[1], e[0])
+            along, across = _dot(e, _sub(hinge, a)), _dot(n, _sub(hinge, a))
+            if abs(across) > width / 2 + DOOR_SLACK or not -DOOR_SLACK <= along <= length + DOOR_SLACK:
+                continue
+            for end in swing["ends"]:
+                shut = _dot(e, _sub(end, a))
+                if abs(_dot(n, _sub(end, a))) <= width / 2 + DOOR_SLACK and abs(abs(shut - along) - radius) <= slack:
+                    low, high = sorted((along, shut))
+                    if low >= -DOOR_SLACK and high <= length + DOOR_SLACK:
+                        # Rounded as stored, and never past the edge's ends (the outer walls refuse that).
+                        fits.append((edge, _r(max(0.0, low), 4), min(_r(high, 4), length)))
+        if len(fits) != 1:
+            continue
+        leaf = _leaf(swing, pieces, piece_grid)
+        if leaf is None:
+            leafless.add(k)
+            continue
+        leaves[k] = (fits[0], leaf)
+    found = []
+    for k, ((edge, low, high), leaf) in sorted(leaves.items(), key=lambda item: item[1][0]):
+        last = found[-1] if found else None
+        if last and last[0] == edge and last[3] == "single" and abs(low - last[2]) <= DOOR_SLACK:
+            found[-1] = (edge, last[1], high, "double", last[4] + [k], last[5] + [leaf])
+        else:
+            found.append((edge, low, high, "single", [k], [leaf]))
+    return found, leafless
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -763,6 +1054,7 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     pieces = {role: [] for role in WALL_ROLES}
     loops = {role: [] for role in LOOP_ROLES}
     texts = []
+    door_entities = []
     piece_count = loop_count = 0
     for entity in geometry.get("entities", []):
         role = roles.get(entity.get("layer"), "reference")
@@ -776,8 +1068,11 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         points = entity.get("points")
         if not isinstance(points, list) or len(points) < 2 or role == "text":
             continue
-        if role in ("column", "door"):
+        if role == "column":
             unconverted.add(entity, "later_phase")
+            continue
+        if role == "door":
+            door_entities.append((entity, [transform(point) for point in points]))
             continue
         if entity.get("type") not in STRAIGHT_TYPES:
             unconverted.add(entity, "curve")
@@ -831,7 +1126,10 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         if entity not in paired:
             unconverted.add_piece(entity, layer, "wall_end" if _wall_end((a, b), merged, ends_grid)
                                   else "no_matching_face")
-    walls = _join_ends(merged)
+    swings, door_pieces = _door_symbols(door_entities)
+    gap_doors, used_swings, used_pieces = _wall_doors(merged, swings, door_pieces, excluded, import_id)
+    joined, place = _join_doors(merged, [door for door in gap_doors if door["join"]])
+    walls = _join_ends(joined)
 
     existing_grid = _Grid(4.0)
     existing_lines = []
@@ -860,28 +1158,36 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         return False
 
     wall_rows, seen = [], set()
-    for wall in walls:
+    for index, wall in enumerate(walls):
         a, b = (wall.a, wall.b) if (wall.a[0], wall.a[1]) <= (wall.b[0], wall.b[1]) else (wall.b, wall.a)
         start, end = _xz(a), _xz(b)
-        wall_id = "iw-fp-" + _digest(import_id, CONVERTER_VERSION, "wall", start, end, wall.thickness)[:16]
+        d = _unit(a, b)
+        openings = sorted(({"startMeters": _r(min(s, t), 4), "endMeters": _r(max(s, t), 4)}
+                           for s, t in ((_dot(d, _sub(p, a)), _dot(d, _sub(q, a))) for p, q in wall.openings)),
+                          key=lambda item: item["startMeters"])
+        # Ids come from the drawing and the geometry only, so converting again (by any version) finds a wall there.
+        wall_id = "iw-fp-" + _digest(import_id, "wall", start, end, wall.thickness, openings)[:16]
         wall_rows.append({"candidateId": wall_id, "start": start, "end": end, "thicknessMeters": wall.thickness,
-                          "lengthMeters": _r(math.dist(a, b), 4), "from": wall.kind, "flag": wall.flag,
-                          "layers": sorted(wall.layers), "sources": sorted(wall.sources)[:MAX_SOURCES]})
+                          "lengthMeters": _r(math.dist(a, b), 4), "openings": openings, "from": wall.kind,
+                          "flag": wall.flag, "index": index, "layers": sorted(wall.layers),
+                          "sources": sorted(wall.sources)[:MAX_SOURCES]})
     wall_rows.sort(key=lambda row: (row["start"]["z"], row["start"]["x"], row["end"]["z"], row["end"]["x"],
                                     row["thicknessMeters"]))
+    row_of = {}
     for number, row in enumerate(wall_rows, 1):
         flag = row.pop("flag")
+        row_of[row.pop("index")] = row
         row["label"] = f"Drawing wall {number}"
         record = {"wallId": row["candidateId"], "label": row["label"], "start": row["start"], "end": row["end"],
                   "heightMeters": (wall_settings or {}).get("heightMeters"),
                   "thicknessMeters": row["thicknessMeters"], "baseElevation": floor, "color": WALL_COLOR,
-                  "openings": []}
+                  "openings": row["openings"]}
         row["heightMeters"] = record["heightMeters"]
         row["record"] = record
         wall_id = row["candidateId"]
         if wall_id in walls_by_id:
             kept = walls_by_id[wall_id]
-            same = all(kept.get(key) == record[key] for key in ("start", "end", "thicknessMeters"))
+            same = all(kept.get(key) == record[key] for key in ("start", "end", "thicknessMeters", "openings"))
             _state(row, "there" if same else "edited", None if same else "edited")
         elif wall_id in seen:
             _state(row, "refused", "duplicate")
@@ -906,6 +1212,24 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
                 _state(row, "refused", *_compile_problem(exc))
         seen.add(wall_id)
 
+    # Doors in the walls take the state of the wall they open.
+    door_rows = []
+    for door in gap_doors:
+        row = {key: door[key] for key in ("candidateId", "kind", "widthMeters", "at", "layers", "sources")}
+        row.update(wall=None, wallLabel=None, outline=None, edge=None)
+        if door["kind"] == "unclear":
+            _state(row, "refused", "door_ambiguous")
+        elif door["candidateId"] in excluded:
+            _state(row, "excluded")
+        else:
+            wall_row = row_of[place[door["gap"][0]]]
+            row.update(wall=wall_row["candidateId"], wallLabel=wall_row["label"])
+            if wall_row["state"] == "excluded":
+                _state(row, "refused", "door_host_left_out")
+            else:
+                _state(row, wall_row["state"], wall_row["reason"], wall_row["message"])
+        door_rows.append(row)
+
     # Rooms.
     room_settings = settings["rooms"]
     candidates = []
@@ -926,7 +1250,7 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
             continue
         candidates.append((boundary, rounded, entity))
     candidates.sort(key=lambda item: (item[0][0]["z"], item[0][0]["x"], -item[1].area, len(item[0])))
-    room_ids = ["zn-fp-" + _digest(import_id, CONVERTER_VERSION, "room", boundary)[:16]
+    room_ids = ["zn-fp-" + _digest(import_id, "room", boundary)[:16]
                 for boundary, _polygon, _entity in candidates]
     polygons = [polygon for _boundary, polygon, _entity in candidates]
     room_tree = STRtree(polygons) if polygons else None
@@ -1023,24 +1347,50 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         outline_candidates.append((ring, "line", None, [entity]))
     current = extensions.get("facilityPerimeterWalls")
     outline_rows = []
+    chosen = (outline_settings or {}).get("loop")
+    door_height = (settings["doors"] or {}).get("heightMeters")
+    free_swings = [k for k in range(len(swings)) if k not in used_swings]
+    leafless = set()
     for ring, kind, faces, entities in outline_candidates:
         boundary, rounded = _rounded_polygon(ring)
-        outline_id = "ol-fp-" + _digest(import_id, CONVERTER_VERSION, "outline", boundary)[:16]
+        outline_id = "ol-fp-" + _digest(import_id, "outline", boundary)[:16]
         width = faces if faces is not None else (outline_settings or {}).get(
             "thicknessMeters", DEFAULT_OUTLINE_THICKNESS)
         row = {"candidateId": outline_id, "boundary": boundary, "thicknessMeters": width, "from": kind,
                "areaSquareMeters": _r(rounded.area, 3) if rounded is not None else None,
                "layers": sorted({str(entity.get("layer")) for entity in entities}),
                "sources": sorted(str(entity.get("id")) for entity in entities), "replaces": None}
+        # Doors are looked for on the outline that can become the outer walls (the only one, or the one chosen).
+        here = []
+        if rounded is not None and (len(outline_candidates) == 1 or chosen == outline_id):
+            points = [(point["x"], point["z"]) for point in boundary]
+            found, missing = _outline_doors(points, width, swings, door_pieces, free_swings)
+            leafless |= missing
+            for edge, low, high, door_kind, ks, leaves in found:
+                used_swings.update(ks)
+                used_pieces.update(leaves)
+                a, e = points[edge], _unit(points[edge], points[(edge + 1) % len(points)])
+                ends = sorted((_xz(_along(a, e, low)), _xz(_along(a, e, high))), key=lambda p: (p["x"], p["z"]))
+                here.append({"candidateId": "dr-fp-" + _digest(import_id, "door", ends)[:16], "kind": door_kind,
+                             "widthMeters": _r(high - low, 4), "at": _xz(_along(a, e, (low + high) / 2)),
+                             "layers": sorted({swings[k]["layer"] for k in ks} | {door_pieces[i]["layer"]
+                                                                                  for i in leaves}),
+                             "sources": sorted({swings[k]["entity"] for k in ks} | {door_pieces[i]["entity"]
+                                                                                    for i in leaves}),
+                             "wall": None, "wallLabel": None, "outline": outline_id, "edge": edge,
+                             "opening": {"edge": edge, "startMeters": low, "endMeters": high}})
+        kept_doors = [door for door in here if door["candidateId"] not in excluded]
         value = None
         if outline_settings is not None and outline_settings["heightMeters"] is not None:
+            openings = [] if door_height is None else sorted(
+                (dict(door["opening"], heightMeters=door_height) for door in kept_doors),
+                key=lambda item: (item["edge"], item["startMeters"]))
             value = {"boundarySource": "polygon", "boundary": boundary,
-                     "heightMeters": outline_settings["heightMeters"], "thicknessMeters": width, "openings": []}
+                     "heightMeters": outline_settings["heightMeters"], "thicknessMeters": width, "openings": openings}
             settings_now = current.get("settings") if isinstance(current, dict) else None
             if isinstance(settings_now, dict) and "interiorColor" in settings_now:
                 value["interiorColor"] = settings_now["interiorColor"]
         row["record"] = value
-        chosen = (outline_settings or {}).get("loop")
         if outline_id in excluded:
             _state(row, "excluded")
         elif rounded is None:
@@ -1055,9 +1405,35 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
             _state(row, "refused", "outside_plan")
         elif outline_settings is None or outline_settings["heightMeters"] is None:
             _state(row, "waiting", "outline_settings")
+        elif kept_doors and door_height is None:
+            _state(row, "waiting", "door_settings")
         else:
             _outline_state(row, current, value, outline_settings, layout)
         outline_rows.append(row)
+        for door in here:
+            door.pop("opening")
+            if door["candidateId"] in excluded:
+                _state(door, "excluded")
+            elif row["state"] == "excluded":
+                _state(door, "refused", "door_host_left_out")
+            else:
+                _state(door, row["state"], row["reason"], row["message"])
+            door_rows.append(door)
+
+    # What is left on the door layers stays drawing, with the reason (once per entity and reason).
+    listed = set()
+    for index, swing in enumerate(swings):
+        reason = "door_leaf_missing" if index in leafless else "door_unmatched"
+        if index not in used_swings and (swing["entity"], reason) not in listed:
+            listed.add((swing["entity"], reason))
+            unconverted.add_piece(swing["entity"], swing["layer"], reason)
+    kept = {swing["entity"] for swing in swings} | {door_pieces[index]["entity"] for index in used_pieces}
+    for entity, _points in door_entities:
+        if str(entity.get("id")) not in kept:
+            unconverted.add(entity, "door_part")
+    door_rows.sort(key=lambda row: (row["at"]["z"], row["at"]["x"], row["candidateId"]))
+    for number, row in enumerate(door_rows, 1):
+        row["label"] = f"Drawing door {number}"
 
     # Operations, in a fixed order: the outer walls, then walls, then zones.
     operations = []
@@ -1092,7 +1468,7 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     # Every layer given a role is listed in the review, with the layers that gave or refused something.
     used_layers = {layer for layer, role in roles.items() if role not in ("reference", "ignore")}
     used_layers.update(row["layerId"] for row in unconverted.rows)
-    for rows in (wall_rows, room_rows, outline_rows):
+    for rows in (wall_rows, room_rows, outline_rows, door_rows):
         for row in rows:
             used_layers.update(row["layers"])
     return {
@@ -1103,11 +1479,13 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         "walls": public(wall_rows),
         "rooms": public(room_rows),
         "outlines": public(outline_rows),
+        "doors": public(door_rows),
         "unconverted": unconverted.rows,
         "unconvertedCounts": dict(sorted(unconverted.counts.items())),
         "layers": {layer: {"name": names.get(layer), "role": roles.get(layer, "reference")}
                    for layer in sorted(used_layers)},
         "summary": {"walls": counts(wall_rows), "rooms": counts(room_rows), "outlines": counts(outline_rows),
+                    "doors": counts(door_rows),
                     "operations": len(operations), "wallsOnPlan": len(existing_walls), "wallLimit": MAX_WALLS,
                     "blocked": blocked},
         "operations": [] if blocked else operations,

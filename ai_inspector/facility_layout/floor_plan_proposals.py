@@ -111,7 +111,7 @@ def conversion_for(service, principal, site_id, layout_id, import_id, base_revis
 
 def _candidates(result):
     rows = []
-    for kind, key in (("outline", "outlines"), ("wall", "walls"), ("room", "rooms")):
+    for kind, key in (("outline", "outlines"), ("wall", "walls"), ("room", "rooms"), ("door", "doors")):
         for row in result[key]:
             rows.append({"kind": kind, "candidateId": row["candidateId"], "state": row["state"],
                          "reason": row.get("reason"), "sources": row["sources"], "layers": row["layers"]})

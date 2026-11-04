@@ -69,11 +69,14 @@ def test_candidates_are_listed_and_nothing_is_stored_or_changed(tmp_path):
     body = response.json()
     assert body["stage"] == "candidates" and "proposal" not in body and "operations" not in body["conversion"]
     conversion = body["conversion"]
-    assert [(row["start"], row["end"], row["state"]) for row in conversion["walls"]] == [
-        ({"x": 15.1, "z": 5.0}, {"x": 15.1, "z": 9.0}, "new"), ({"x": 15.1, "z": 10.2}, {"x": 15.1, "z": 15.0}, "new")]
+    # The partition's two pieces are one wall with the door's opening (FP3).
+    assert [(row["start"], row["end"], row["openings"], row["state"]) for row in conversion["walls"]] == [
+        ({"x": 15.1, "z": 5.0}, {"x": 15.1, "z": 15.0}, [{"startMeters": 4.0, "endMeters": 5.2}], "new")]
+    assert [(row["kind"], row["wall"], row["state"]) for row in conversion["doors"]] == [
+        ("single", conversion["walls"][0]["candidateId"], "new")]
     assert [(row["label"], row["areaSquareMeters"]) for row in conversion["rooms"]] == [("Office", 20.0)]
-    assert conversion["summary"]["operations"] == 4 and conversion["summary"]["blocked"] is None
-    assert conversion["unconvertedCounts"] == {"later_phase": 2, "wall_end": 3}
+    assert conversion["summary"]["operations"] == 3 and conversion["summary"]["blocked"] is None
+    assert conversion["unconvertedCounts"] == {"later_phase": 1, "wall_end": 3}
     assert {layer["name"]: layer["role"] for layer in conversion["layers"].values()} == ROLES
     assert saved(service) == before
     assert not (store_folder(service) / "conversions").exists()
@@ -102,14 +105,14 @@ def test_a_conversion_is_reviewed_then_approved_and_applied_through_the_proposal
     assert revision(service) == base, "staging changes nothing"
     # The conversion's record: what it was made from, and where each candidate came from in the drawing.
     record = json.loads((store_folder(service) / "conversions" / (body["conversionId"] + ".json")).read_text())
-    assert (record["layoutId"], record["baseRevision"], record["operationCount"]) == ("fl-api-cell", base, 4)
+    assert (record["layoutId"], record["baseRevision"], record["operationCount"]) == ("fl-api-cell", base, 3)
     assert record["origin"]["importId"] == import_id and record["origin"]["kind"] == "floor-plan-conversion"
     assert record["alignment"] == saved(service)["extensions"]["facilityFloorPlanReferences"]["references"][0][
         "alignment"]
     kinds = {}
     for row in record["candidates"]:
         kinds.setdefault(row["kind"], []).append(row)
-    assert {kind: len(rows) for kind, rows in kinds.items()} == {"outline": 1, "wall": 2, "room": 1}
+    assert {kind: len(rows) for kind, rows in kinds.items()} == {"outline": 1, "wall": 1, "room": 1, "door": 1}
     assert all(row["sources"] and row["layers"] for row in record["candidates"])
     # The review: the server rebuilds it from the stored drawing's record and keeps its origin.
     opened = preview(client, proposal["proposalId"])
@@ -118,7 +121,7 @@ def test_a_conversion_is_reviewed_then_approved_and_applied_through_the_proposal
     assert alternative["origin"] == record["origin"]
     assert alternative["directApplyPolicy"]["eligible"] is False
     assert [op["op"] for op in alternative["operations"]] == ["set_perimeter_walls", "upsert_interior_wall",
-                                                              "upsert_interior_wall", "add_zone"]
+                                                              "add_zone"]
     approval = approve(client, alternative, proposal["proposalId"], "fp2-apply")
     assert approval.status_code == 200, approval.text
     applied = client.post(BASE + "/apply", headers=SESSION, json={
@@ -128,8 +131,8 @@ def test_a_conversion_is_reviewed_then_approved_and_applied_through_the_proposal
     after = saved(service)
     walls = after["extensions"]["facilityInteriorWalls"]["walls"]
     assert [wall["wallId"] for wall in walls] == [row["candidateId"] for row in body["conversion"]["walls"]]
-    assert [(wall["start"], wall["end"]) for wall in walls] == [
-        ({"x": 15.1, "z": 5.0}, {"x": 15.1, "z": 9.0}), ({"x": 15.1, "z": 10.2}, {"x": 15.1, "z": 15.0})]
+    assert [(wall["start"], wall["end"], wall["openings"]) for wall in walls] == [
+        ({"x": 15.1, "z": 5.0}, {"x": 15.1, "z": 15.0}, [{"startMeters": 4.0, "endMeters": 5.2}])]
     assert [(zone["zoneId"], zone["label"]) for zone in after["zones"]] == [
         (body["conversion"]["rooms"][0]["candidateId"], "Office")]
     assert after["extensions"]["facilityPerimeterWalls"]["settings"]["boundary"] == body["conversion"]["outlines"][0][
@@ -139,7 +142,7 @@ def test_a_conversion_is_reviewed_then_approved_and_applied_through_the_proposal
     # Converting again finds all of it there and stages nothing.
     again = client.post(conversion_url(import_id), json={"baseRevision": revision(service), "settings": SETTINGS})
     rows = again.json()["conversion"]
-    assert {row["state"] for row in rows["walls"] + rows["rooms"] + rows["outlines"]} == {"there"}
+    assert {row["state"] for row in rows["walls"] + rows["rooms"] + rows["outlines"] + rows["doors"]} == {"there"}
     refused = client.post(conversion_url(import_id), json={"baseRevision": revision(service), "settings": SETTINGS,
                                                            "stage": "proposal"})
     assert refused.status_code == 422 and code(refused) == "floor_plan_conversion_nothing_to_add"

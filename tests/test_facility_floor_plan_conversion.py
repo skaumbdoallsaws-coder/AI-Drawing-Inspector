@@ -1,5 +1,5 @@
-"""FP2 of the floor-plan import (docs/facility-floor-plan-import-plan.md, sections 7, 8 and 11): walls, rooms and the
-outline converted from a drawing's layers. Expected numbers are worked out by hand from the fixtures' documented
+"""FP2 and FP3 of the floor-plan import (docs/facility-floor-plan-import-plan.md, sections 7, 8 and 11): walls, rooms,
+the outline and doors converted from a drawing's layers. Expected numbers are worked out by hand from the fixtures' documented
 coordinates (tests/floor_plan_dxf_fixtures.py), never from the converter itself."""
 from __future__ import annotations
 
@@ -47,6 +47,13 @@ def poly(entity, layer, points, closed=True, kind="LWPOLYLINE"):
     return {"id": entity, "layer": layer, "type": kind, "closed": closed, "points": [list(p) for p in points]}
 
 
+def arc(entity, layer, center, radius, start, end, steps=8):
+    """An arc as the reader stores it: points on the true curve from START to END degrees."""
+    angles = [math.radians(start + (end - start) * index / steps) for index in range(steps + 1)]
+    return {"id": entity, "layer": layer, "type": "ARC", "closed": False,
+            "points": [[center[0] + radius * math.cos(t), center[1] + radius * math.sin(t)] for t in angles]}
+
+
 def text(entity, layer, at, value):
     return {"id": entity, "layer": layer, "type": "TEXT", "at": list(at), "text": value, "height": 0.3,
             "rotation": 0.0, "mirrored": False}
@@ -78,7 +85,11 @@ def near(a, b, tolerance=1e-9):
 
 
 def test_settings_are_closed_and_checked():
-    assert conversion.normalize_settings(None) == {"walls": None, "rooms": None, "outline": None, "excluded": []}
+    assert conversion.normalize_settings(None) == {"walls": None, "rooms": None, "outline": None, "doors": None,
+                                                   "excluded": []}
+    assert conversion.normalize_settings({"doors": {"heightMeters": 2.1}})["doors"] == {"heightMeters": 2.1}
+    assert conversion.normalize_settings({"doors": {}})["doors"] == {"heightMeters": None}
+    assert conversion.normalize_settings({"excluded": ["dr-fp-" + "3" * 16]})["excluded"] == ["dr-fp-" + "3" * 16]
     value = conversion.normalize_settings({"walls": {"heightMeters": 3}, "outline": {"heightMeters": 6},
                                            "rooms": {"zoneType": "storage"}, "excluded": ["iw-fp-" + "1" * 16] * 2})
     assert value["walls"] == {"heightMeters": 3.0, "thicknessMeters": 0.2, "maxThicknessMeters": 0.6}
@@ -95,7 +106,8 @@ def test_settings_are_closed_and_checked():
                 {"walls": {"heightMeters": 3, "thicknessMeters": 2.5}}, {"rooms": {"zoneType": "room"}},
                 {"rooms": {"types": {"zn-fp-" + "1" * 16: "office"}}}, {"rooms": {"types": {"zone-1": "storage"}}},
                 {"outline": {"heightMeters": 6, "replace": "yes"}}, {"outline": {"heightMeters": 6, "loop": "x"}},
-                {"excluded": ["pl-1"]}, {"excluded": "iw-fp-" + "1" * 16}, {"other": 1}, []):
+                {"excluded": ["pl-1"]}, {"excluded": "iw-fp-" + "1" * 16}, {"other": 1}, [],
+                {"doors": {"heightMeters": 0.2}}, {"doors": {"widthMeters": 1}}, {"doors": 2.1}):
         with pytest.raises(conversion.ConversionSettingsError):
             conversion.normalize_settings(bad)
 
@@ -134,11 +146,17 @@ FACTORY_SETTINGS = {"walls": {"heightMeters": 3}, "rooms": {"zoneType": "workcel
 def test_the_factory_converts_to_hand_worked_walls_room_and_outline(factory_geometry):
     geometry = factory_geometry["meters"]
     result = convert(geometry, factory_roles(geometry), FACTORY_SETTINGS)
-    # The partition: faces at x = 10 and 10.2, broken by the door from y = 4 to 5.2; moved by (5, 5).
-    assert segments(result) == [((15.1, 5.0), (15.1, 9.0), 0.2), ((15.1, 10.2), (15.1, 15.0), 0.2)]
-    assert [row["state"] for row in result["walls"]] == ["new", "new"]
-    assert [row["label"] for row in result["walls"]] == ["Drawing wall 1", "Drawing wall 2"]
-    assert all(row["from"] == "faces" and row["lengthMeters"] in (4.0, 4.8) for row in result["walls"])
+    # The partition: faces at x = 10 and 10.2, moved by (5, 5). The door swing (hinged at the jamb (10.2, 4), 1.2 m,
+    # shut against the jamb at y = 5.2) joins its two pieces into one wall with the door's opening, 4 to 5.2 m along.
+    assert segments(result) == [((15.1, 5.0), (15.1, 15.0), 0.2)]
+    (partition,) = result["walls"]
+    assert (partition["state"], partition["label"], partition["from"], partition["lengthMeters"]) == (
+        "new", "Drawing wall 1", "faces", 10.0)
+    assert partition["openings"] == [{"startMeters": 4.0, "endMeters": 5.2}]
+    (door,) = result["doors"]
+    assert {key: door[key] for key in ("kind", "widthMeters", "at", "wall", "wallLabel", "state", "label")} == {
+        "kind": "single", "widthMeters": 1.2, "at": {"x": 15.1, "z": 9.6}, "wall": partition["candidateId"],
+        "wallLabel": "Drawing wall 1", "state": "new", "label": "Drawing door 1"}
     # The 4 m x 5 m room, named by the text inside it.
     (room,) = result["rooms"]
     assert room["boundary"] == [{"x": 25.0, "z": 17.0}, {"x": 29.0, "z": 17.0}, {"x": 29.0, "z": 22.0},
@@ -150,15 +168,15 @@ def test_the_factory_converts_to_hand_worked_walls_room_and_outline(factory_geom
     assert outline["boundary"] == [{"x": 5.0, "z": 5.0}, {"x": 35.0, "z": 5.0}, {"x": 35.0, "z": 25.0},
                                    {"x": 5.0, "z": 25.0}]
     assert (outline["from"], outline["thicknessMeters"], outline["state"]) == ("line", 0.3, "new")
-    # The jambs and the end line close the wall ends; the column and the door wait for FP3.
-    assert result["unconvertedCounts"] == {"later_phase": 2, "wall_end": 3}
-    assert [op["op"] for op in result["operations"]] == ["set_perimeter_walls", "upsert_interior_wall",
-                                                         "upsert_interior_wall", "add_zone"]
-    assert result["summary"]["blocked"] is None
+    # The jambs and the end line close the wall ends; the column waits for a later step.
+    assert result["unconvertedCounts"] == {"later_phase": 1, "wall_end": 3}
+    assert [op["op"] for op in result["operations"]] == ["set_perimeter_walls", "upsert_interior_wall", "add_zone"]
+    assert result["summary"]["blocked"] is None and result["summary"]["doors"] == {"new": 1}
     wall = result["operations"][1]["wall"]
-    assert wall == {"wallId": result["walls"][0]["candidateId"], "label": "Drawing wall 1",
-                    "start": {"x": 15.1, "z": 5.0}, "end": {"x": 15.1, "z": 9.0}, "heightMeters": 3.0,
-                    "thicknessMeters": 0.2, "baseElevation": 0.0, "color": "#45484b", "openings": []}
+    assert wall == {"wallId": partition["candidateId"], "label": "Drawing wall 1",
+                    "start": {"x": 15.1, "z": 5.0}, "end": {"x": 15.1, "z": 15.0}, "heightMeters": 3.0,
+                    "thicknessMeters": 0.2, "baseElevation": 0.0, "color": "#45484b",
+                    "openings": [{"startMeters": 4.0, "endMeters": 5.2}]}
 
 
 def test_applying_the_factory_keeps_everything_else_and_converting_again_adds_nothing(factory_geometry):
@@ -176,7 +194,8 @@ def test_applying_the_factory_keeps_everything_else_and_converting_again_adds_no
         assert after[key] == before[key], key
     assert after["extensions"]["facilityPlan"] == before["extensions"]["facilityPlan"]
     again = convert(geometry, roles, FACTORY_SETTINGS, doc=after)
-    assert [row["state"] for row in again["walls"] + again["rooms"] + again["outlines"]] == ["there"] * 4
+    assert [row["state"] for row in again["walls"] + again["rooms"] + again["outlines"] + again["doors"]] == [
+        "there"] * 4
     assert again["operations"] == [] and again["summary"]["blocked"]["code"] == "nothing_to_add"
 
 
@@ -193,7 +212,7 @@ def test_converting_reads_the_drawing_and_never_changes_it(factory_geometry):
 def test_the_same_drawing_in_other_units_converts_to_the_same_meters(factory_geometry, unit, scale):
     meters = convert(factory_geometry["meters"], factory_roles(factory_geometry["meters"]), FACTORY_SETTINGS)
     other = convert(factory_geometry[unit], factory_roles(factory_geometry[unit]), FACTORY_SETTINGS, scale=scale)
-    for kind in ("walls", "rooms", "outlines"):
+    for kind in ("walls", "rooms", "outlines", "doors"):
         assert [row["candidateId"] for row in other[kind]] == [row["candidateId"] for row in meters[kind]], kind
     assert other["operations"] == meters["operations"]
 
@@ -202,8 +221,10 @@ def test_a_turned_drawing_lands_where_its_corners_project(factory_geometry):
     geometry = factory_geometry["meters"]
     # 90 degrees: x = 25 - v, z = u (the drawing's x axis runs along the plan's z).
     result = convert(geometry, factory_roles(geometry), FACTORY_SETTINGS, translate=(25.0, 0.0), rotation=90.0)
-    # The partition (u = 10.1, v 0..4 and 5.2..10) runs along x at z = 10.1.
-    assert segments(result) == [((15.0, 10.1), (19.8, 10.1), 0.2), ((21.0, 10.1), (25.0, 10.1), 0.2)]
+    # The partition (u = 10.1, v 0..10, its door v 4..5.2) runs along x at z = 10.1, from x = 15 to 25; the door is
+    # x = 21 down to 19.8, so 4.8 to 6 m along it.
+    assert segments(result) == [((15.0, 10.1), (25.0, 10.1), 0.2)]
+    assert result["walls"][0]["openings"] == [{"startMeters": 4.8, "endMeters": 6.0}]
     (room,) = result["rooms"]  # corners (20,12) (24,12) (24,17) (20,17), counter-clockwise from the lowest
     assert room["boundary"] == [{"x": 8.0, "z": 20.0}, {"x": 13.0, "z": 20.0}, {"x": 13.0, "z": 24.0},
                                 {"x": 8.0, "z": 24.0}]
@@ -463,12 +484,185 @@ def test_outer_walls_already_there_are_replaced_only_when_asked_and_the_review_s
     assert replaced["operations"][0]["wallSettings"]["interiorColor"] == "#aabbcc"
 
 
-def test_columns_and_doors_are_listed_for_a_later_step():
+def test_columns_are_listed_for_a_later_step_and_a_stray_door_line_stays_drawing():
     geometry = drawing(square("c1", 0, 0, 0.4, layer="L1"), line("d1", "L2", (0, 0), (1, 0)))
     result = convert(geometry, {"L1": "column", "L2": "door"})
-    assert result["unconvertedCounts"] == {"later_phase": 2}
+    assert result["unconvertedCounts"] == {"door_part": 1, "later_phase": 1}
     assert result["layers"] == {"L1": {"name": "layer L1", "role": "column"},
                                 "L2": {"name": "layer L2", "role": "door"}}
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Doors (FP3). Walls are centerlines on L1 and door symbols on L2, moved by (5, 5) into the 40 m x 30 m plan.
+
+
+DOORS = {"L1": "wall_centerline", "L2": "door"}
+BROKEN_WALL = (line("e1", "L1", (0, 0), (4, 0)), line("e2", "L1", (5, 0), (10, 0)))  # a 1 m break, x = 4 to 5
+
+
+def test_a_swing_in_a_wall_break_joins_the_wall_with_a_door_opening():
+    # Hinged at either jamb and opening to either side, it is the same door: one wall from (5, 5) to (15, 5) with
+    # a full-height opening 4 to 5 m along it.
+    ids = set()
+    for hinge, start, end in (((4, 0), 0, 90), ((4, 0), -90, 0), ((5, 0), 90, 180), ((5, 0), 180, 270)):
+        result = convert(drawing(*BROKEN_WALL, arc("d1", "L2", hinge, 1.0, start, end)), DOORS, WALLS)
+        (wall,) = result["walls"]
+        assert (xz(wall, "start"), xz(wall, "end"), wall["openings"], wall["state"]) == (
+            (5.0, 5.0), (15.0, 5.0), [{"startMeters": 4.0, "endMeters": 5.0}], "new"), (hinge, start)
+        assert wall["sources"] == ["e1", "e2"]
+        (door,) = result["doors"]
+        assert {key: door[key] for key in ("kind", "widthMeters", "at", "wall", "outline", "state", "sources")} == {
+            "kind": "single", "widthMeters": 1.0, "at": {"x": 9.5, "z": 5.0}, "wall": wall["candidateId"],
+            "outline": None, "state": "new", "sources": ["d1"]}
+        assert result["unconverted"] == []
+        (operation,) = result["operations"]
+        assert operation["wall"]["openings"] == [{"startMeters": 4.0, "endMeters": 5.0}]
+        ids.add(door["candidateId"])
+    assert len(ids) == 1
+    # Applied, the wall keeps its opening; converting again finds the wall and its door there.
+    doc = layout()
+    after = apply_facility_layout_operations(deepcopy(doc), result["operations"])["document"]
+    validate_layout(after)
+    assert after["extensions"]["facilityInteriorWalls"]["walls"][0]["openings"] == [
+        {"startMeters": 4.0, "endMeters": 5.0}]
+    again = convert(drawing(*BROKEN_WALL, arc("d1", "L2", (4, 0), 1.0, 0, 90)), DOORS, WALLS, doc=after)
+    assert [row["state"] for row in again["walls"] + again["doors"]] == ["there", "there"]
+
+
+def test_a_door_drawn_as_one_polyline_reads_like_a_line_and_an_arc():
+    # The leaf from the hinge (4, 0) to (4, 1), then the swing down to the jamb (5, 0), in one polyline.
+    swing = arc("x", "L2", (4, 0), 1.0, 90, 0)["points"]
+    geometry = drawing(*BROKEN_WALL, poly("p1", "L2", [(4, 0)] + swing, closed=False))
+    result = convert(geometry, DOORS, WALLS)
+    assert [row["openings"] for row in result["walls"]] == [[{"startMeters": 4.0, "endMeters": 5.0}]]
+    assert [(row["kind"], row["sources"]) for row in result["doors"]] == [("single", ["p1"])]
+    assert result["unconverted"] == []
+
+
+def test_two_half_swings_from_both_jambs_are_a_double_door_and_one_swinging_both_ways_is_one_door():
+    double = drawing(line("e1", "L1", (0, 0), (4, 0)), line("e2", "L1", (6, 0), (10, 0)),
+                     arc("d1", "L2", (4, 0), 1.0, 0, 90), arc("d2", "L2", (6, 0), 1.0, 90, 180))
+    result = convert(double, DOORS, WALLS)
+    assert [row["openings"] for row in result["walls"]] == [[{"startMeters": 4.0, "endMeters": 6.0}]]
+    assert [(row["kind"], row["widthMeters"], row["at"], row["sources"]) for row in result["doors"]] == [
+        ("double", 2.0, {"x": 10.0, "z": 5.0}, ["d1", "d2"])]
+    both_ways = drawing(*BROKEN_WALL, arc("d1", "L2", (4, 0), 1.0, 0, 90), arc("d2", "L2", (4, 0), 1.0, -90, 0))
+    result = convert(both_ways, DOORS, WALLS)
+    assert [row["openings"] for row in result["walls"]] == [[{"startMeters": 4.0, "endMeters": 5.0}]]
+    assert [(row["kind"], row["sources"]) for row in result["doors"]] == [("single", ["d1", "d2"])]
+
+
+def test_swings_that_disagree_or_fit_two_breaks_leave_the_door_unclear_and_the_break_open():
+    # A full-width swing at one jamb and a half-width one at the other.
+    mixed = drawing(*BROKEN_WALL, arc("d1", "L2", (4, 0), 1.0, 0, 90), arc("d2", "L2", (5, 0), 0.5, 90, 180))
+    result = convert(mixed, DOORS, WALLS)
+    assert segments(result) == [((5.0, 5.0), (9.0, 5.0), 0.2), ((10.0, 5.0), (15.0, 5.0), 0.2)]
+    assert [(row["kind"], row["state"], row["reason"], row["sources"]) for row in result["doors"]] == [
+        ("unclear", "refused", "door_ambiguous", ["d1", "d2"])]
+    # Two walls 0.28 m apart broken at the same place: a swing hinged between them fits both breaks.
+    twin = drawing(*BROKEN_WALL, line("e3", "L1", (0, 0.28), (4, 0.28)), line("e4", "L1", (5, 0.28), (10, 0.28)),
+                   arc("d1", "L2", (4, 0.14), 1.0, 0, 90))
+    result = convert(twin, DOORS, WALLS)
+    assert len(result["walls"]) == 4 and all(row["openings"] == [] for row in result["walls"])
+    assert [(row["kind"], row["reason"]) for row in result["doors"]] == [("unclear", "door_ambiguous")] * 2
+
+
+def test_an_excluded_door_keeps_the_break():
+    geometry = drawing(*BROKEN_WALL, arc("d1", "L2", (4, 0), 1.0, 0, 90))
+    door = convert(geometry, DOORS, WALLS)["doors"][0]["candidateId"]
+    result = convert(geometry, DOORS, {**WALLS, "excluded": [door]})
+    assert segments(result, "new") == [((5.0, 5.0), (9.0, 5.0), 0.2), ((10.0, 5.0), (15.0, 5.0), 0.2)]
+    assert [(row["candidateId"], row["state"]) for row in result["doors"]] == [(door, "excluded")]
+    assert result["unconverted"] == []
+    # The wall left out instead: the door goes with it.
+    wall = convert(geometry, DOORS, WALLS)["walls"][0]["candidateId"]
+    result = convert(geometry, DOORS, {**WALLS, "excluded": [wall]})
+    assert [(row["state"], row["reason"]) for row in result["walls"] + result["doors"]] == [
+        ("excluded", None), ("refused", "door_host_left_out")]
+
+
+def test_what_is_no_door_stays_drawing_with_its_reason():
+    geometry = drawing(
+        *BROKEN_WALL,
+        arc("d1", "L2", (4, 0), 1.5, 0, 90),  # wider than the break
+        arc("d2", "L2", (20, 10), 1.0, 0, 90),  # no wall near it
+        arc("d3", "L2", (30, 10), 1.0, 0, 180),  # half a circle is no swing
+        arc("d4", "L2", (30, 20), 1.0, 0, 270, steps=12),  # nor three quarters (its ends are a right angle apart)
+        line("d5", "L2", (30, 25), (31, 25)))
+    result = convert(geometry, DOORS, WALLS)
+    assert segments(result) == [((5.0, 5.0), (9.0, 5.0), 0.2), ((10.0, 5.0), (15.0, 5.0), 0.2)]
+    assert result["doors"] == []
+    assert result["unconvertedCounts"] == {"door_part": 3, "door_unmatched": 2}
+    assert {row["entityId"]: row["reason"] for row in result["unconverted"]} == {
+        "d1": "door_unmatched", "d2": "door_unmatched", "d3": "door_part", "d4": "door_part", "d5": "door_part"}
+
+
+OUTER = {"L3": "perimeter", "L2": "door"}
+
+
+def outer_doors():
+    """A 20 m x 15 m outline (layout (5, 5) to (25, 20); edge 0 runs along z = 5 from x = 5, edge 1 up x = 25 from
+    z = 5). Edge 0: a 1 m door hinged at x = 8 with its leaf. Edge 1: a double door, two 1 m leaves hinged at y = 5 and
+    y = 7 and shut at y = 6. Edge 2: a swing without its leaf."""
+    return drawing(
+        poly("o1", "L3", [(0, 0), (20, 0), (20, 15), (0, 15)]),
+        arc("dA", "L2", (8, 0), 1.0, -90, 0), line("lA", "L2", (8, 0), (8, -1)),
+        arc("dB1", "L2", (20, 5), 1.0, 0, 90), line("lB1", "L2", (20, 5), (21, 5)),
+        arc("dB2", "L2", (20, 7), 1.0, -90, 0), line("lB2", "L2", (20, 7), (21, 7)),
+        arc("dC", "L2", (10, 15), 1.0, 0, 90))
+
+
+def test_outer_doors_need_their_leaf_and_wait_for_their_height():
+    waiting = convert(outer_doors(), OUTER, {"outline": {"heightMeters": 6}})
+    (outline,) = waiting["outlines"]
+    assert (outline["state"], outline["reason"]) == ("waiting", "door_settings")
+    assert [(row["edge"], row["kind"], row["widthMeters"], row["at"], row["state"], row["sources"])
+            for row in waiting["doors"]] == [
+        (0, "single", 1.0, {"x": 13.5, "z": 5.0}, "waiting", ["dA", "lA"]),
+        (1, "double", 2.0, {"x": 25.0, "z": 11.0}, "waiting", ["dB1", "dB2", "lB1", "lB2"])]
+    assert all(row["outline"] == outline["candidateId"] and row["wall"] is None for row in waiting["doors"])
+    assert waiting["unconvertedCounts"] == {"door_leaf_missing": 1}
+    assert waiting["unconverted"][0]["entityId"] == "dC"
+    assert waiting["operations"] == []
+    result = convert(outer_doors(), OUTER, {"outline": {"heightMeters": 6}, "doors": {"heightMeters": 2.1}})
+    assert [row["state"] for row in result["outlines"] + result["doors"]] == ["new"] * 3
+    (operation,) = result["operations"]
+    assert operation["wallSettings"]["openings"] == [
+        {"edge": 0, "startMeters": 8.0, "endMeters": 9.0, "heightMeters": 2.1},
+        {"edge": 1, "startMeters": 5.0, "endMeters": 7.0, "heightMeters": 2.1}]
+    after = apply_facility_layout_operations(deepcopy(layout()), result["operations"])["document"]
+    validate_layout(after)
+    assert len(after["extensions"]["facilityPerimeterWalls"]["settings"]["openings"]) == 2
+    again = convert(outer_doors(), OUTER, {"outline": {"heightMeters": 6}, "doors": {"heightMeters": 2.1}},
+                    doc=after)
+    assert [row["state"] for row in again["outlines"] + again["doors"]] == ["there"] * 3
+    # Doors left out: the outer walls are added without them, and with none kept no door height is needed.
+    first, second = (row["candidateId"] for row in result["doors"])
+    one = convert(outer_doors(), OUTER, {"outline": {"heightMeters": 6}, "doors": {"heightMeters": 2.1},
+                                         "excluded": [first]})
+    assert [opening["edge"] for opening in one["operations"][0]["wallSettings"]["openings"]] == [1]
+    assert [row["state"] for row in one["doors"]] == ["excluded", "new"]
+    none = convert(outer_doors(), OUTER, {"outline": {"heightMeters": 6}, "excluded": [first, second]})
+    assert none["outlines"][0]["state"] == "new"
+    assert none["operations"][0]["wallSettings"]["openings"] == []
+    without = convert(outer_doors(), OUTER, {"outline": {"heightMeters": 6}, "excluded": [outline["candidateId"]]})
+    assert {(row["state"], row["reason"]) for row in without["doors"]} == {("refused", "door_host_left_out")}
+    # The order the drawing lists its entities in changes nothing.
+    backward = drawing(*reversed(outer_doors()["entities"]))
+    assert convert(backward, OUTER, {"outline": {"heightMeters": 6}, "doors": {"heightMeters": 2.1}}) == result
+
+
+def test_an_outer_door_at_a_corner_stays_within_its_edge_once_rounded():
+    # Edge 0 is 19.99996 m long and the door shuts at its far corner: rounded to 0.1 mm its end would be 20 m, past
+    # the edge, which the outer walls refuse; it stops at the corner instead.
+    end = 19.99996
+    geometry = drawing(poly("o1", "L3", [(0, 0), (end, 0), (end, 15), (0, 15)]),
+                       arc("d1", "L2", (end - 1, 0), 1.0, -90, 0), line("l1", "L2", (end - 1, 0), (end - 1, -1)))
+    result = convert(geometry, OUTER, {"outline": {"heightMeters": 6}, "doors": {"heightMeters": 2.1}})
+    (operation,) = result["operations"]
+    assert operation["wallSettings"]["openings"] == [
+        {"edge": 0, "startMeters": 19.0, "endMeters": end, "heightMeters": 2.1}]
+    validate_layout(apply_facility_layout_operations(deepcopy(layout()), result["operations"])["document"])
 
 
 def test_every_reason_keeps_a_listed_row_past_the_listing_limit():

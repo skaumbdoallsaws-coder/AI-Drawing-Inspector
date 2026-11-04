@@ -970,6 +970,8 @@ const WALL_B = 'iw-fp-' + '2'.repeat(16);
 const OUTLINE_A = 'ol-fp-' + 'a'.repeat(16);
 const OUTLINE_B = 'ol-fp-' + 'b'.repeat(16);
 const ROOM = 'zn-fp-' + 'c'.repeat(16);
+const DOOR_A = 'dr-fp-' + 'd'.repeat(16);
+const DOOR_B = 'dr-fp-' + 'e'.repeat(16);
 
 function wallsAnswer(settings) {
     const height = settings.walls && settings.walls.heightMeters;
@@ -1013,6 +1015,36 @@ function outlinesAnswer(settings) {
         walls: [], rooms: [room], outlines: [a, b], unconverted: [], unconvertedCounts: {}, layers: {},
         summary: { walls: {}, rooms: { [room.state]: 1 }, outlines: { waiting: 2 }, operations: 1, wallsOnPlan: 0,
             wallLimit: 128, blocked: null } };
+}
+
+// A wall with a door in it, and outer walls with a double door that waits for the doors' height.
+function doorsAnswer(settings) {
+    const height = settings.doors && settings.doors.heightMeters;
+    const left = (settings.excluded || []).includes(DOOR_A);
+    const wall = { candidateId: WALL_A, label: 'Drawing wall 1', start: { x: 0, z: 0 }, end: { x: 10, z: 0 },
+        thicknessMeters: 0.2, lengthMeters: 10, openings: left ? [] : [{ startMeters: 4, endMeters: 5 }],
+        from: 'centerline', layers: ['L1'], sources: ['e1', 'e2'], heightMeters: 3, state: 'new', reason: null,
+        message: null };
+    const outline = { candidateId: OUTLINE_A, boundary: [{ x: 0, z: 0 }, { x: 20, z: 0 }, { x: 20, z: 10 },
+        { x: 0, z: 10 }], thicknessMeters: 0.3, from: 'line', areaSquareMeters: 200, layers: ['L3'], sources: ['o1'],
+        replaces: null, state: height ? 'new' : 'waiting', reason: height ? null : 'door_settings',
+        message: height ? null : "Give the outer doors' height to add the outer walls with their doors, or leave the "
+            + 'doors out.' };
+    const inner = { candidateId: DOOR_A, kind: 'single', widthMeters: 1, at: { x: 4.5, z: 0 }, layers: ['L2'],
+        sources: ['d1'], wall: WALL_A, wallLabel: 'Drawing wall 1', outline: null, edge: null, label: 'Drawing door 1',
+        state: left ? 'excluded' : 'new', reason: null, message: null };
+    const outer = { candidateId: DOOR_B, kind: 'double', widthMeters: 2, at: { x: 20, z: 6 }, layers: ['L2'],
+        sources: ['d2', 'd3', 'l2', 'l3'], wall: null, wallLabel: null, outline: OUTLINE_A, edge: 1,
+        label: 'Drawing door 2', state: outline.state, reason: outline.reason, message: outline.message };
+    const doors = {};
+    [inner, outer].forEach(row => { doors[row.state] = (doors[row.state] || 0) + 1; });
+    return { converterVersion: 'fp-convert-2', importId: RECORD.importId, referenceId: 'fp-main', settings,
+        walls: [wall], rooms: [], outlines: [outline], doors: [inner, outer],
+        unconverted: [{ entityId: 'd9', layerId: 'L2', reason: 'door_leaf_missing', message: 'A door swing on the '
+            + 'outer walls without its door leaf: an arc alone is not enough to cut a door there; it stays drawing.' }],
+        unconvertedCounts: { door_leaf_missing: 1 }, layers: {},
+        summary: { walls: { new: 1 }, rooms: {}, outlines: { [outline.state]: 1 }, doors, operations: height ? 2 : 1,
+            wallsOnPlan: 0, wallLimit: 128, blocked: null } };
 }
 
 function converting(options) {
@@ -1112,6 +1144,44 @@ check('the settings sent are the fields the layers call for, heights optional', 
     assert.deepStrictEqual(floorPlan.conversionSettings(Object.assign({}, form, { maxThickness: '0.8' }),
         new Set(['wall_faces', 'text'])), { excluded: [WALL_A, WALL_B], walls: { heightMeters: 3,
         maxThicknessMeters: 0.8 } });
+    // Doors: those in the outer walls take a height; those in walls take nothing (they open the wall full height).
+    assert.deepStrictEqual(floorPlan.conversionSettings(Object.assign({}, form, { doorHeight: '2.1' }),
+        new Set(['wall_faces', 'perimeter', 'door'])), { excluded: [WALL_A, WALL_B], walls: { heightMeters: 3 },
+        outline: { replace: true, thicknessMeters: 0.3, loop: OUTLINE_B }, doors: { heightMeters: 2.1 } });
+    assert.deepStrictEqual(floorPlan.conversionSettings(form, new Set(['perimeter', 'door'])).doors, {});
+    assert.ok(!('doors' in floorPlan.conversionSettings(Object.assign({}, form, { doorHeight: '2.1' }),
+        new Set(['wall_centerline', 'door']))));
+});
+
+check('doors are listed with the wall they open; those in the outer walls wait for their height', async () => {
+    const h = converting({ roles: { L1: 'wall_centerline', L2: 'door', L3: 'perimeter' }, answer: doorsAnswer });
+    h.controller.open();
+    assert.ok(/Outer door height \(m\)/.test(h.panel().text()), h.panel().text());
+    fire(button(h, 'find'), 'click');
+    await settle();
+    let text = h.panel().text();
+    assert.ok(/Doors: 1 to add, 1 waiting\./.test(text), text);
+    assert.ok(/Drawing door 1: 1 m door in Drawing wall 1/.test(text), text);
+    assert.ok(/Drawing door 2: 2 m double door in the outer walls/.test(text), text);
+    assert.ok(/waiting: Give the outer doors' height/.test(text), text);
+    assert.ok(/1 - A door swing on the outer walls without its door leaf/.test(text), text);
+    // The door in the wall left out, and the outer doors' height given: both are sent with the next list.
+    const keep = h.panel().querySelector('[data-fp-keep="' + DOOR_A + '"]');
+    keep.checked = false;
+    fire(keep, 'change');
+    field(h, 'outlineHeight').value = '6';
+    fire(field(h, 'outlineHeight'), 'input');
+    field(h, 'doorHeight').value = '2.1';
+    fire(field(h, 'doorHeight'), 'input');
+    fire(button(h, 'find'), 'click');
+    await settle();
+    assert.deepStrictEqual(h.calls.filter(call => call[0] === 'convert').at(-1)[2].settings, {
+        excluded: [DOOR_A], walls: { thicknessMeters: 0.2 },
+        outline: { replace: false, heightMeters: 6, thicknessMeters: 0.3 }, doors: { heightMeters: 2.1 } });
+    text = h.panel().text();
+    assert.ok(/Doors: 1 left out, 1 to add\./.test(text), text);
+    assert.strictEqual(h.panel().querySelector('[data-fp-keep="' + DOOR_A + '"]').checked, false);
+    assert.strictEqual(button(h, 'review').disabled, false);
 });
 
 check('walls and rooms are found only for layers with a role, a known unit and a saved layout', async () => {

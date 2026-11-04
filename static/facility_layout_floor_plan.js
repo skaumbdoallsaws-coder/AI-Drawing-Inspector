@@ -42,7 +42,7 @@
     // the layer.
     const ROLE_OPTIONS = [['reference', 'Drawing only'], ['wall_centerline', 'Walls: center lines'],
         ['wall_faces', 'Walls: both faces'], ['perimeter', 'Building outline'], ['room_boundary', 'Room outlines'],
-        ['text', 'Room names'], ['column', 'Columns (later)'], ['door', 'Doors (later)'], ['ignore', 'Ignore']];
+        ['text', 'Room names'], ['column', 'Columns (later)'], ['door', 'Doors'], ['ignore', 'Ignore']];
     const WALL_ROLES = ['wall_centerline', 'wall_faces'];
     const CONVERTED_ROLES = ['wall_centerline', 'wall_faces', 'perimeter', 'room_boundary'];
     // The zone types a room can become (floor_plan_conversion.ZONE_TYPES), named as the zone properties name them.
@@ -58,7 +58,7 @@
     const LISTED_CANDIDATES = 300;
     const OUTDATED_NOTE = 'Changed since this list was made: Update the list to review the change.';
     const CONVERSION_FIELDS = ['wallHeight', 'wallThickness', 'maxThickness', 'outlineHeight', 'outlineThickness',
-        'zoneType'];
+        'doorHeight', 'zoneType'];
 
     function finite(value) {
         return typeof value === 'number' && Number.isFinite(value);
@@ -403,7 +403,7 @@
 
     function newConversionForm() {
         return { wallHeight: '', wallThickness: '0.2', maxThickness: '0.6', outlineHeight: '', outlineThickness: '0.3',
-            zoneType: '', types: {}, loop: null, replace: false, excluded: [] };
+            doorHeight: '', zoneType: '', types: {}, loop: null, replace: false, excluded: [] };
     }
 
     function rolesOf(reference) {
@@ -440,6 +440,11 @@
             put(settings.outline, 'heightMeters', form.outlineHeight);
             put(settings.outline, 'thicknessMeters', form.outlineThickness);
             if (form.loop) settings.outline.loop = form.loop;
+        }
+        // A door in a wall opens it full height; one in the outer walls needs its height (the wall closes above it).
+        if (roles.has('door') && roles.has('perimeter')) {
+            settings.doors = {};
+            put(settings.doors, 'heightMeters', form.doorHeight);
         }
         if (roles.has('room_boundary')) {
             settings.rooms = { zoneType: form.zoneType || null, types: Object.assign({}, form.types) };
@@ -1368,6 +1373,7 @@
         if (roles.has('perimeter')) {
             field('outlineHeight', 'Outer wall height (m)', '0.1');
             field('outlineThickness', 'Outer wall thickness (m)', '0.01');
+            if (roles.has('door')) field('doorHeight', 'Outer door height (m)', '0.1');
         }
         if (roles.has('room_boundary')) {
             const row = html(doc, 'label', { className: 'ip-flw-floor-plan-field' }, 'Rooms become zones of type');
@@ -1400,7 +1406,8 @@
         const summary = result.summary || {};
         section.appendChild(html(doc, 'p', { className: 'ip-flw-floor-plan-warning', 'data-fp-outdated': 'true',
             hidden: !outdated }, outdated ? OUTDATED_NOTE : ''));
-        [['Walls', summary.walls], ['Rooms', summary.rooms], ['Building outline', summary.outlines]].forEach(
+        [['Walls', summary.walls], ['Doors', summary.doors], ['Rooms', summary.rooms],
+            ['Building outline', summary.outlines]].forEach(
             function (part) {
                 const states = Object.keys(part[1] || {});
                 if (!states.length) return;
@@ -1422,6 +1429,7 @@
         const rows = [];
         outlines.forEach(function (row) { rows.push(['outline', row]); });
         (result.walls || []).forEach(function (row) { rows.push(['wall', row]); });
+        (result.doors || []).forEach(function (row) { rows.push(['door', row]); });
         (result.rooms || []).forEach(function (row) { rows.push(['room', row]); });
         if (!rows.length) {
             note('Nothing on those layers converts.');
@@ -1462,6 +1470,10 @@
         if (kind === 'wall') {
             text = row.label + ': ' + round(row.lengthMeters, 2) + ' m long, ' + round(row.thicknessMeters, 3)
                 + ' m thick';
+        } else if (kind === 'door') {
+            text = row.label + ': ' + round(row.widthMeters, 2) + ' m ' + ({ double: 'double door',
+                unclear: 'break, door unclear' }[row.kind] || 'door') + (row.wallLabel ? ' in ' + row.wallLabel
+                : row.outline ? ' in the outer walls' : '');
         } else if (kind === 'room') {
             text = row.label + ': ' + round(row.areaSquareMeters, 1) + ' m2';
         } else {

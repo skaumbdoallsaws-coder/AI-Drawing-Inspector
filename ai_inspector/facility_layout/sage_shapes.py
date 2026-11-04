@@ -24,8 +24,9 @@ The plan's rules from the hand-built runs, as these tools keep them:
   item's clearance envelope, and says why; a run stops 5 cm short of items, walls, envelopes, those markings, zones
   that take no placements and the aisles and walkways that cross it, goes on after them and lists its gaps with what
   is in the way.
-- Overhead items (lowest point 4.5 m up or more) skip the floor checks and need no strip (rule 2). Nothing is put
-  between the floor and 4.5 m, where it would need something to stand on.
+- Heights are absolute, as items' y; left out, an item stands on the floor. Overhead items (lowest point 4.5 m or
+  more above the shell's floor, as the checks count) skip the floor checks and need no strip (rule 2). Nothing is put
+  between the floor and 4.5 m above it, where it would need something to stand on.
 - Yaw-only, unit, unrounded quaternions (rule 6); building structure is placed locked, as Factory 02's was.
 """
 from __future__ import annotations
@@ -44,6 +45,7 @@ from ai_inspector.industrial_assets import shape_families as families
 from ai_inspector.industrial_assets.primitives import size_of
 
 from .asset_orientation import yaw_quaternion
+from .canonical import METER_DECIMAL_PLACES
 from .operations import MAX_OPERATION_BATCH
 from .obstacle_map import GRID_CLEARANCES, GRID_KEEPS, VEHICLE_AISLE, WALKWAY, ObstacleMap
 from .spatial import (_NON_PLACEMENT_ZONE_TYPES, OVERHEAD_MINIMUM_CLEARANCE, polygon_boundary_distance,
@@ -150,9 +152,10 @@ def tool_specs() -> list[dict]:
             "library here). lines: from and to in plan metres (x east, z north); label names the run. side: where "
             "the item stands, seen walking from 'from' to 'to': center (on the line, the default), left or right "
             "(the line is an edge, a walkway's say, and the item stands just beside it, 5 cm clear). Barriers along "
-            "a walkway: give each edge of the walkway zone as a line, side away from the walkway. elevationMeters: "
-            "0 (the default) stands on the floor; overhead items go 4.5 m up or more, 0.002 above whatever they "
-            "rest on (touching items collide). A run stops 5 cm short of items, walls and clearance envelopes its "
+            "a walkway: give each edge of the walkway zone as a line, side away from the walkway. elevationMeters "
+            "(absolute, as items' y): left out, the item stands on the floor; overhead items go 4.5 m or more "
+            "above the floor, 0.002 above whatever they rest on (touching items collide). A run stops 5 cm short "
+            "of items, walls and clearance envelopes its "
             "height meets and, on the floor, of crosswalk, keep-clear and parking markings and zones that take no "
             "placements; it goes on after them and its gaps are listed with what is in the way. It may run beside "
             "an aisle or walkway, and leaves an opening where one crosses it. Items on unzoned floor get thin floor-coloured workcell strips; a plan that puts an item in a "
@@ -173,8 +176,9 @@ def tool_specs() -> list[dict]:
             "high). x: the lines running north-south, by their x (named 1, 2, ... from west to east); z: the lines "
             "running east-west, by their z (named A, B, ... from south to north). Give each as at (the positions) "
             "or as from, to and every; names replaces the default names. Points are named like A-1; skip leaves "
-            "points out by name. The model is made and added to the library here. elevationMeters: 0 (the default) "
-            "stands on the floor, or 4.5 m up or more for overhead items. Points where the item would be in the "
+            "points out by name. The model is made and added to the library here. elevationMeters (absolute, as "
+            "items' y): left out, the item stands on the floor; overhead items go 4.5 m or more above the floor. "
+            "Points where the item would be in the "
             "way are left out and listed with the reason: each item " + GRID_KEEPS + " (overhead items: the items "
             "and walls their height meets). Floor items on unzoned floor get thin floor-coloured workcell strips, and a "
             "point in a zone whose rules it breaks is refused. planImage: true attaches a plan picture of the grid, the items placed, the points left out and "
@@ -192,7 +196,8 @@ def tool_specs() -> list[dict]:
         {"name": ROOF_TOOL, "description": (
             "Plan a roof frame over an area: steel girders (I-beams) on lines and open-web joists across them at a "
             "spacing, centred in the area. area: its west, east, south and north edges in plan metres. "
-            "supportTopMeters: the top of the columns or walls the frame rests on (at least 4.5 m); the girders "
+            "supportTopMeters: the top of the columns or walls the frame rests on (absolute, as items' y; at least "
+            "4.5 m above the floor); the girders "
             "sit 2 mm above it and the joists 2 mm above the girders, as touching items collide. girders: along x "
             "(the default: girders run east-west, on z lines named A, B, ... from south to north) or z (north-south, "
             "on x lines named 1, 2, ...), and their lines as at or as from, to and every; use the column lines. "
@@ -293,7 +298,8 @@ class _Zones:
 
 
 def _zone_floor(zone: Mapping, low: float) -> float:
-    """Where a zone's height limit counts from: its floorElevation, or else the item's own base (spatial._zone_checks)."""
+    """Where a zone's height limit counts from: its floorElevation, or else the item's own base
+    (spatial._zone_checks)."""
     value = zone.get("floorElevation")
     return low if value is None else float(value)
 
@@ -316,9 +322,11 @@ def _rectangle(center, along, half_length: float, half_depth: float) -> tuple:
                   (-half_length, half_depth)))
 
 
-def _strip(zone_id: str, label: str, corners) -> dict:
+def _strip(zone_id: str, label: str, corners, floor_elevation: float) -> dict:
+    """A thin workcell strip zone around floor items, lying at their floor's elevation."""
     return {"op": "add_zone", "zone": {
-        "zoneId": zone_id, "label": label, "zoneType": "workcell", "floorElevation": 0.0, "anchors": [],
+        "zoneId": zone_id, "label": label, "zoneType": "workcell",
+        "floorElevation": _round(floor_elevation, METER_DECIMAL_PLACES), "anchors": [],
         "evidence": [], "boundary": [{"x": _round(x), "z": _round(z)} for x, z in corners],
         "extensions": {"style": {"fillColor": STRIP_COLOR}}}}
 
@@ -327,8 +335,8 @@ def _place(placement_id: str, asset: Mapping, position: Mapping, yaw: float, lab
     return {"op": "place_asset", "placement": {
         "placementId": placement_id, "assetId": asset["assetId"],
         "assetDefinitionRevision": asset["assetDefinitionRevision"],
-        "transform": {"position": {"x": _round(position["x"]), "y": _round(position["y"]),
-                                   "z": _round(position["z"])},
+        "transform": {"position": {"x": _round(position["x"]), "y": _round(position["y"], METER_DECIMAL_PLACES),
+                                   "z": _round(position["z"])},     # y: as the layout keeps it, to meet its floor
                       "quaternion": yaw_quaternion(yaw), "scale": 1},
         "positionMode": "locked" if asset.get("category") == STRUCTURE else "manual", "snapRelationship": None,
         "metadata": {"instanceLabel": label, "inputMethod": METHOD}}}
@@ -352,12 +360,20 @@ def _parameters(arguments: Mapping, key: str = "parameters", *, without: str | N
     return dict(value)
 
 
-def _elevation(arguments: Mapping) -> float:
-    value = float(arguments.get("elevationMeters", 0) or 0)
-    if 0 < value < OVERHEAD:
-        raise ShapeError(f"elevationMeters {value:g}: an item between the floor and {OVERHEAD:g} m up would need "
-                         f"something to stand on. Give 0 for the floor, or {OVERHEAD:g} m or more for items hung "
-                         "from the roof (0.002 above whatever they rest on).")
+def _elevation(arguments: Mapping, floor: float) -> float:
+    """elevationMeters: an absolute height, as items' y (left out: the floor's elevation). An item stands on the
+    floor or hangs 4.5 m or more above it, as the checks count overhead (from the shell's floor elevation)."""
+    given = arguments.get("elevationMeters")
+    value = floor if given is None else float(given)
+    if abs(value - floor) <= 1e-6:
+        return floor
+    if value < floor:
+        raise ShapeError(f"elevationMeters {value:g} is below the floor, which is at {floor:g} m here: give "
+                         f"{floor:g} (or leave it out) for items on the floor")
+    if value < floor + OVERHEAD - 1e-9:
+        raise ShapeError(f"elevationMeters {value:g}: an item between the floor and {floor + OVERHEAD:g} m up would "
+                         f"need something to stand on. Give {floor:g} for the floor, or {floor + OVERHEAD:g} m or more "
+                         "for items hung from the roof (0.002 above whatever they rest on).")
     return value
 
 
@@ -401,10 +417,12 @@ def author(make: Callable[[str, dict], Mapping], arguments: Mapping) -> dict:
                     "already in the shared library (the same family and parameters): nothing new was added"),
         "picture": f"attached, {seen}",
         "illustrative": record.disclaimer,
-        "placing": ("A floor item stands at y 0 inside a workcell or other operational zone (on unzoned floor, add "
+        "placing": ("A floor item stands at the floor's elevation (y 0 in most layouts) inside a workcell or other "
+                    "operational zone (on unzoned floor, add "
                     f"a thin workcell strip zone, fill {STRIP_COLOR}, around it in the same batch; never one around "
                     "an item a zone's rules refuse); an overhead "
-                    f"item goes {OVERHEAD:g} m up or more. Its length runs along its x; turn it with yawDegrees."),
+                    f"item goes {OVERHEAD:g} m or more above the floor. Its length runs along its x; turn it with "
+                    "yawDegrees."),
         "_image": {"mimeType": "image/jpeg", "data": base64.b64encode(picture).decode("ascii")},
     }
 
@@ -437,10 +455,9 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
                          "author_shape_asset")
     record = families.FAMILIES[family]
     parameters = _parameters(arguments, without="lengthMeters")
-    elevation = _elevation(arguments)
     obstacles = obstacles or ObstacleMap(layout)
-    low = obstacles.floor_elevation + elevation      # elevationMeters counts from the shell's floor, as the checks do
-    floor = not obstacles.overhead(low)
+    elevation = _elevation(arguments, obstacles.floor_elevation)
+    floor = not obstacles.overhead(elevation)
     shortest, longest = float(record.params["lengthMeters"].low), float(record.params["lengthMeters"].high)
     _validated(family, {**parameters, "lengthMeters": record.params["lengthMeters"].default})
     size = size_of(families.model(family, {**parameters, "lengthMeters": record.params["lengthMeters"].default}))
@@ -472,7 +489,7 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     pieces, gaps, dropped = [], [], []
     for number, label, side, origin, along, length in runs:
         stretches, line_gaps = _free(length, obstacles.blocked_along(origin, along, length, depth / 2 + STRIP_MARGIN,
-                                                                     low, low + height))
+                                                                     elevation, elevation + height))
         for start, end, names in line_gaps:
             gaps.append({"line": label, "from": _point(origin[0] + along[0] * start, origin[1] + along[1] * start),
                          "to": _point(origin[0] + along[0] * end, origin[1] + along[1] * end),
@@ -500,13 +517,13 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     for index, piece in enumerate(pieces, start=1):
         asset = assets[piece["length"]]
         placement_id = f"pl-line-{namespace}-{index}"
-        position = {"x": piece["center"][0], "y": low, "z": piece["center"][1]}
+        position = {"x": piece["center"][0], "y": elevation, "z": piece["center"][1]}
         placements.append(_place(placement_id, asset, position, _yaw(piece["along"]), piece["label"]))
         stands = None
         if containment == "strips":
             footprint = _rectangle(piece["center"], piece["along"], piece["length"] / 2, depth / 2)
-            broken = zones.breaking(footprint, asset["category"], low, low + height)
-            zone = None if broken else zones.holding(footprint, asset["category"], low, low + height)
+            broken = zones.breaking(footprint, asset["category"], elevation, elevation + height)
+            zone = None if broken else zones.holding(footprint, asset["category"], elevation, elevation + height)
             if broken:
                 in_rule_zones.append(f"{piece['label']}: {broken[0]}")
             elif zone is not None:
@@ -516,7 +533,7 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
                 corners = _rectangle(piece["center"], piece["along"], piece["length"] / 2 + STRIP_MARGIN,
                                      depth / 2 + STRIP_MARGIN)
                 strips.append(_strip(f"zn-line-{namespace}-{len(strips) + 1}", f"Strip - {piece['label']}",
-                                     corners))
+                                     corners, elevation))
                 stands = "its own strip"
         half = piece["length"] / 2
         if len(listed) < LISTED:
@@ -531,7 +548,7 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     _within_review(operations)
     models = [_asset_summary(asset) for asset in assets.values()]
     return _fit({
-        "available": True, "family": family, "elevationMeters": _round(elevation, 3),
+        "available": True, "family": family, "elevationMeters": _round(elevation, METER_DECIMAL_PLACES),
         "placed": len(placements), "pieces": listed,
         **({"morePieces": len(placements) - len(listed)} if len(placements) > len(listed) else {}),
         "models": models[:MODELS_LISTED],
@@ -664,10 +681,9 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     record = families.FAMILIES[family]
     parameters = _parameters(arguments)
     _validated(family, parameters)
-    elevation = _elevation(arguments)
     obstacles = obstacles or ObstacleMap(layout)
-    low = obstacles.floor_elevation + elevation      # elevationMeters counts from the shell's floor, as the checks do
-    floor = not obstacles.overhead(low)
+    elevation = _elevation(arguments, obstacles.floor_elevation)
+    floor = not obstacles.overhead(elevation)
     columns = _axis(arguments["x"], "x", lettered=False)
     rows = _axis(arguments["z"], "z", lettered=True)
     points = [(f"{row}-{column}", x, z) for row, z in rows for column, x in columns]
@@ -690,8 +706,8 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     prefix = arguments.get("labelPrefix") or ("Column" if family == "steel_column" else record.label)
     standing, dropped = [], []
     for name, x, z in kept:
-        reasons = obstacles.reasons(Polygon(_rectangle((x, z), along, width / 2, depth / 2)), low, low + height,
-                                    GRID_CLEARANCES)
+        reasons = obstacles.reasons(Polygon(_rectangle((x, z), along, width / 2, depth / 2)), elevation,
+                                    elevation + height, GRID_CLEARANCES)
         if not reasons:
             standing.append((name, x, z))
             continue
@@ -704,7 +720,7 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
                          + ". Move the lines, or plan a smaller area.")
     placements, held = [], {}
     for name, x, z in standing:
-        placements.append(_place(f"pl-grid-{namespace}-{name.lower()}", asset, {"x": x, "y": low, "z": z},
+        placements.append(_place(f"pl-grid-{namespace}-{name.lower()}", asset, {"x": x, "y": elevation, "z": z},
                                  yaw, f"{prefix} {name}"))
     strips, refused = [], []
     if containment == "strips":
@@ -717,8 +733,9 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
             for point in members + [None]:
                 if point is not None:
                     footprint = _rectangle((point[1], point[2]), along, width / 2, depth / 2)
-                    broken = zones.breaking(footprint, asset["category"], low, low + height)
-                    zone = None if broken else zones.holding(footprint, asset["category"], low, low + height)
+                    broken = zones.breaking(footprint, asset["category"], elevation, elevation + height)
+                    zone = None if broken else zones.holding(footprint, asset["category"], elevation,
+                                                             elevation + height)
                     if broken:
                         refused.append(f"{prefix} {point[0]}: {broken[0]}")
                         point = "held"               # no strip; the plan is refused below
@@ -739,7 +756,7 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
         boxes = [box for _, _, box in strips]
         strips = [_strip(f"zn-grid-{namespace}-{index}",
                          f"{prefix} strip {line_name}" + (f" ({count})" if named[line_name] > 1 else ""),
-                         _box_corners(box))
+                         _box_corners(box), elevation)
                   for index, (line_name, count, box) in enumerate(strips, start=1)]
     else:
         boxes = []
@@ -748,7 +765,7 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     _within_review(operations)
     result = {
         "available": True, "family": family, "model": _asset_summary(asset),
-        "elevationMeters": _round(elevation, 3), "yawDegrees": _round(yaw, 3),
+        "elevationMeters": _round(elevation, METER_DECIMAL_PLACES), "yawDegrees": _round(yaw, 3),
         "lines": {"x": [{"name": name, "x": at} for name, at in columns],
                   "z": [{"name": name, "z": at} for name, at in rows]},
         "points": len(points), "placed": len(placements), "skipped": sorted(skipped), "leftOut": len(dropped),
@@ -770,7 +787,7 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
                    + (f", {len(boxes)} new strip{'s' if len(boxes) != 1 else ''} (orange)" if boxes else "")
                    + (f"; {len(skipped)} skipped by name, not drawn" if skipped else ""))
         picture = obstacles.picture((min(xs) - margin, min(zs) - margin, max(xs) + margin, max(zs) + margin),
-                                    low, low + height, x_lines=columns, z_lines=rows, placed=footprints,
+                                    elevation, elevation + height, x_lines=columns, z_lines=rows, placed=footprints,
                                     dropped=[(item["x"], item["z"]) for item in dropped],
                                     strips=[Polygon(_box_corners(box)) for box in boxes], caption=caption)
         result["picture"] = ("attached: a plan of the grid, north up, with what is in the way of the items "
@@ -803,11 +820,12 @@ def plan_roof(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     if area["east"] - area["west"] < 1 or area["north"] - area["south"] < 1:
         raise ShapeError("area: east must be at least 1 m past west and north at least 1 m past south")
     support = float(arguments["supportTopMeters"])
-    floor_y = obstacles.floor_elevation if obstacles is not None else 0.0   # heights count from the shell's floor
+    floor_y = obstacles.floor_elevation if obstacles is not None else 0.0
     base = support + LAYER_GAP
-    if base < OVERHEAD:
+    if base < floor_y + OVERHEAD - 1e-9:      # overhead, as the checks count it: 4.5 m above the shell's floor
         raise ShapeError(f"supportTopMeters {support:g}: a roof frame rests on columns or walls at least "
-                         f"{OVERHEAD:g} m high")
+                         f"{floor_y + OVERHEAD:g} m high"
+                         + (f" (4.5 m above the floor, which is at {floor_y:g} m)" if floor_y else ""))
     girders = arguments["girders"]
     along_x = girders.get("along", "x") == "x"
     span = (area["west"], area["east"]) if along_x else (area["south"], area["north"])
@@ -843,13 +861,12 @@ def plan_roof(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     middle_span, middle_across = (span[0] + span[1]) / 2, (across[0] + across[1]) / 2
     operations = []
     for name, at in lines:
-        position = ({"x": middle_span, "y": floor_y + base, "z": at} if along_x else
-                    {"x": at, "y": floor_y + base, "z": middle_span})
+        position = ({"x": middle_span, "y": base, "z": at} if along_x else {"x": at, "y": base, "z": middle_span})
         operations.append(_place(f"pl-roof-{namespace}-girder-{name.lower()}", girder, position, _yaw(girder_way),
                                  f"Roof girder {name}"))
     for number, at in enumerate(positions, start=1):
-        position = ({"x": at, "y": floor_y + joist_base, "z": middle_across} if along_x else
-                    {"x": middle_across, "y": floor_y + joist_base, "z": at})
+        position = ({"x": at, "y": joist_base, "z": middle_across} if along_x else
+                    {"x": middle_across, "y": joist_base, "z": at})
         operations.append(_place(f"pl-roof-{namespace}-joist-{number:03d}", joist, position, _yaw(joist_way),
                                  f"Roof joist {number}"))
     return {

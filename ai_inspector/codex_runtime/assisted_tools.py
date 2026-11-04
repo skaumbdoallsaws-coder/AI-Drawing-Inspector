@@ -186,7 +186,7 @@ class FacilityEditGateway(FacilityReadGateway):
                 self.last_image = result.pop("_image")
                 return dict(result, identity=deepcopy(self.reference), savedLayoutOnly=True, readOnly=False)
             saved = read_bound_layout(self.runtime, self.principal, self.reference)
-            obstacles = self._obstacles(saved["layout"])     # the roof frame reads only the floor elevation
+            obstacles = self._obstacles(saved["layout"])     # the roof frame reads only its floor elevation
             result = sage_shapes.plan(name, saved["layout"], arguments, revision=self.reference["revision"],
                                       author=make, obstacles=obstacles)
         except ValueError as exc:

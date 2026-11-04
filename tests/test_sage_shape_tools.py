@@ -502,10 +502,18 @@ def floor_surface(feature_id, x0, x1, elevation):
         {"x": x0, "z": 0}, {"x": x1, "z": 0}, {"x": x1, "z": 30}, {"x": x0, "z": 30}]}}
 
 
-def test_overhead_counts_from_the_shell_s_floor_and_so_do_the_planners_heights():
-    """With the floor at 1 m an item at 4.5 m is not overhead yet, as the checks count it (Codex review 2), and
-    elevationMeters and supportTopMeters count from the floor."""
-    layout = {"placements": [], "zones": [], "routes": [aisle("Boulevard", "forklift", [(0, 20), (40, 20)], 3.0)]}
+def heights(result):
+    """The y of each placement and the floorElevation of each strip in a plan's package."""
+    return ([op["placement"]["transform"]["position"]["y"] for op in result["operations"] if op["op"] == "place_asset"],
+            [op["zone"]["floorElevation"] for op in result["operations"] if op["op"] == "add_zone"])
+
+
+def test_overhead_counts_from_the_shell_s_floor_and_heights_stay_absolute():
+    """With the floor at 1 m an item at 4.5 m is not overhead yet, as the checks count it (Codex review 2). Heights
+    stay absolute, as items' y (Codex review 3): left out, an item stands on the floor and its strip lies at the
+    floor's elevation; a height below the floor, or between it and 4.5 m above it, is refused."""
+    cell = dict(zone_op("zn-cell", "Cell", "workcell", (30, 25, 40, 30))["zone"], floorElevation=1.0)
+    layout = {"placements": [], "zones": [cell], "routes": [aisle("Boulevard", "forklift", [(0, 20), (40, 20)], 3.0)]}
     shell = {"coordinateFrame": {"floorElevation": 1.0}, "features": [floor_surface("floor-main", 0, 40, 1.0)]}
     obstacles = ObstacleMap(layout, shell=shell)
     assert obstacles.reasons(column(5, 20), 4.5, 5.0) == ["the floor here is at 1 m, not 4.5 m",
@@ -515,18 +523,42 @@ def test_overhead_counts_from_the_shell_s_floor_and_so_do_the_planners_heights()
     grid = shapes.plan(shapes.GRID_TOOL, layout, {"x": {"at": [5]}, "z": {"at": [5, 20]}}, revision="r1",
                        author=fake_author, obstacles=obstacles)
     assert [item["name"] for item in grid["items"]] == ["A-1"] and grid["dropped"][0]["point"] == "B-1"
-    assert [op["placement"]["transform"]["position"]["y"] for op in grid["operations"]] == [1.0]
-    tray = shapes.plan(shapes.LINE_TOOL, layout, {"family": "cable_tray", "elevationMeters": 4.5, "lines": [
+    assert heights(grid) == ([1.0], [1.0]) and grid["elevationMeters"] == 1.0
+    rail = shapes.plan(shapes.LINE_TOOL, layout, {"family": "pedestrian_barrier", "lines": [
+        {"from": {"x": 1, "z": 5}, "to": {"x": 9, "z": 5}, "label": "Rail"}]}, revision="r1", author=fake_author,
+        obstacles=obstacles)
+    assert heights(rail) == ([1.0], [1.0])
+    for given, said in ((0, "elevationMeters 0 is below the floor, which is at 1 m here"),
+                        (4.5, "elevationMeters 4.5: an item between the floor and 5.5 m up would need something")):
+        with pytest.raises(shapes.ShapeError, match=re.escape(said)):
+            shapes.plan(shapes.LINE_TOOL, layout, {"family": "cable_tray", "elevationMeters": given, "lines": [
+                {"from": {"x": 1, "z": 20}, "to": {"x": 15, "z": 20}}]}, revision="r1", author=fake_author,
+                obstacles=obstacles)
+    tray = shapes.plan(shapes.LINE_TOOL, layout, {"family": "cable_tray", "elevationMeters": 5.5, "lines": [
         {"from": {"x": 1, "z": 20}, "to": {"x": 15, "z": 20}, "label": "Tray"}]}, revision="r1", author=fake_author,
-        obstacles=obstacles)                     # 5.5 m up: overhead, so the aisle below does not count
-    assert tray["gaps"] == [] and tray["zones"] == "overhead: no floor zone needed"
-    assert [op["placement"]["transform"]["position"]["y"] for op in tray["operations"]] == [5.5]
-    roof = shapes.plan(shapes.ROOF_TOOL, layout, {"area": {"west": 0, "east": 12, "south": 0, "north": 12},
-                                                  "supportTopMeters": 10, "girders": {"at": [0, 12]}},
+        obstacles=obstacles)                     # 4.5 m above the floor: overhead, so the aisle below does not count
+    assert tray["gaps"] == [] and tray["zones"] == "overhead: no floor zone needed" and heights(tray) == ([5.5], [])
+    area = {"west": 0, "east": 12, "south": 0, "north": 12}
+    roof = shapes.plan(shapes.ROOF_TOOL, layout, {"area": area, "supportTopMeters": 10, "girders": {"at": [0, 12]}},
                        revision="r1", author=fake_author, obstacles=obstacles)
-    heights = {round(op["placement"]["transform"]["position"]["y"], 4) for op in roof["operations"]
+    girders = {op["placement"]["transform"]["position"]["y"] for op in roof["operations"]
                if "girder" in op["placement"]["placementId"]}
-    assert heights == {11.002} and roof["girders"]["bottomMeters"] == 10.002
+    assert girders == {10.002} and roof["girders"]["bottomMeters"] == 10.002
+    with pytest.raises(shapes.ShapeError, match=re.escape("at least 5.5 m high (4.5 m above the floor, which is at 1")):
+        shapes.plan(shapes.ROOF_TOOL, layout, {"area": area, "supportTopMeters": 5, "girders": {"at": [0, 12]}},
+                    revision="r1", author=fake_author, obstacles=obstacles)
+
+
+def test_a_floor_item_keeps_the_floor_s_elevation_to_the_layout_s_6_decimals():
+    """A floor at 0.123456 m: the column stands at y 0.123456, not 0.1235, which the mounting check (1e-6) would
+    refuse, and its strip lies there too (Codex review 3)."""
+    cell = dict(zone_op("zn-cell", "Cell", "workcell", (30, 25, 40, 30))["zone"], floorElevation=0.123456)
+    shell = {"coordinateFrame": {"floorElevation": 0.123456},
+             "features": [floor_surface("floor-main", 0, 40, 0.123456)]}
+    layout = {"placements": [], "zones": [cell]}
+    grid = shapes.plan(shapes.GRID_TOOL, layout, {"x": {"at": [5]}, "z": {"at": [5]}}, revision="r1",
+                       author=fake_author, obstacles=ObstacleMap(layout, shell=shell))
+    assert heights(grid) == ([0.123456], [0.123456])
 
 
 def test_a_floor_item_stands_inside_one_floor_surface_at_its_elevation():

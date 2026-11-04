@@ -6,6 +6,10 @@ catalog (the last few are kept in authored/catalog-backups/). The catalog is nev
 file's own style (compact, or indented with its own line endings), summary.total is bumped, and the result must
 parse to the old catalog plus the entry before it replaces the file. The host then binds the entry the way a fresh
 start would (LocalFacilityLayoutHost.register_authored_asset), so no restart is needed.
+
+Other writers: one registration at a time across processes (an OS lock on a file beside the catalog, held from the
+first read to the replace), each write through its own temporary file, and the catalog compared with what was read
+once more just before the replace; a catalog changed by anyone else meanwhile is left as it is.
 """
 from __future__ import annotations
 
@@ -13,7 +17,10 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import stat
+import tempfile
 import threading
+import time
 
 from .primitives import verify
 from .shape_families import FOLDER
@@ -22,6 +29,7 @@ CATALOG = Path("generated/industrial_assets/local_library/catalog.json")   # the
 BACKUPS = Path(FOLDER) / "catalog-backups"
 KEEP_BACKUPS = 10
 LOCK = threading.Lock()   # one registration at a time in this process
+LOCK_WAIT = 10.0          # seconds to wait for another process's registration
 _WHITESPACE = " \t\r\n"
 
 
@@ -99,10 +107,82 @@ def appended(original: bytes, entry: dict) -> bytes:
     return bom + result.encode("utf-8")
 
 
-def _write(path: Path, data: bytes) -> None:
-    temp = path.with_name(path.name + ".tmp")
-    temp.write_bytes(data)
-    os.replace(temp, path)
+class _CatalogLock:
+    """The catalog's lock across processes: an exclusive OS lock on a file beside it (catalog.json.lock). The system
+    lets go of it when the process holding it stops, so a crash mid-write leaves nothing to clear; the file stays."""
+
+    def __init__(self, catalog: Path):
+        self.path = catalog.with_name(catalog.name + ".lock")
+        self.handle = None
+
+    def __enter__(self):
+        handle = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o644)
+        deadline = time.monotonic() + LOCK_WAIT
+        while True:
+            try:
+                _lock(handle)
+                break
+            except OSError:
+                if time.monotonic() > deadline:
+                    os.close(handle)
+                    raise ValueError("Another process is adding to the asset catalog; nothing was added. "
+                                     "Try again.") from None
+                time.sleep(0.05)
+        self.handle = handle
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        try:
+            _unlock(self.handle)
+        finally:
+            os.close(self.handle)
+            self.handle = None
+
+
+if os.name == "nt":
+    import msvcrt
+
+    def _lock(handle: int) -> None:
+        os.lseek(handle, 0, os.SEEK_SET)
+        msvcrt.locking(handle, msvcrt.LK_NBLCK, 1)      # the first byte; raises OSError while another holds it
+
+    def _unlock(handle: int) -> None:
+        os.lseek(handle, 0, os.SEEK_SET)
+        msvcrt.locking(handle, msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    def _lock(handle: int) -> None:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock(handle: int) -> None:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _temporary(path: Path, data: bytes) -> Path:
+    """DATA in a new temporary file of its own beside PATH, with PATH's permissions (mkstemp makes it 0600)."""
+    handle, name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(data)
+        os.chmod(name, stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644)
+    except BaseException:
+        os.unlink(name)
+        raise
+    return Path(name)
+
+
+def _write(path: Path, data: bytes, *, unchanged: bytes | None = None) -> None:
+    """Replace PATH with DATA through a temporary file; with `unchanged`, only while PATH still holds those bytes,
+    compared once more just before the replace."""
+    temp = _temporary(path, data)
+    try:
+        if unchanged is not None and path.read_bytes() != unchanged:
+            raise ValueError("The catalog changed while the asset was being added; nothing was added")
+        os.replace(temp, path)
+    finally:
+        if temp.exists():
+            temp.unlink()
 
 
 def install(root: str | Path, built: dict) -> dict:
@@ -120,7 +200,7 @@ def install(root: str | Path, built: dict) -> dict:
     if root / FOLDER not in model.parents:
         raise ValueError("The model path leaves the authored folder")
     catalog = root / CATALOG
-    with LOCK:
+    with LOCK, _CatalogLock(catalog):
         original = catalog.read_bytes()
         known = {item.get("assetId") for item in json.loads(original.decode("utf-8-sig"))["assets"]}
         written = False
@@ -138,8 +218,6 @@ def install(root: str | Path, built: dict) -> dict:
         backup.write_bytes(original)
         for old in sorted(backups.glob("catalog-*.json"))[:-KEEP_BACKUPS]:
             old.unlink()
-        if catalog.read_bytes() != original:
-            raise ValueError("The catalog changed while the asset was being added; nothing was added")
-        _write(catalog, updated)
+        _write(catalog, updated, unchanged=original)
     return {"assetId": entry["assetId"], "added": True, "modelWritten": written,
             "backup": backup.relative_to(root).as_posix()}

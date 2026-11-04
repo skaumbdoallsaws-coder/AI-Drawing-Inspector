@@ -147,3 +147,12 @@ def test_other_shapes_are_the_size_asked_for():
     # The bin is open at the top: outside and bottom 10 triangles, inside 10, rim 8.
     assert families.build_asset("bin")["triangles"] == 28
     assert "7 pendent heads at most 3 m apart" in families.build_asset("sprinkler_line")["entry"]["description"]
+
+
+def test_a_light_row_is_one_piece_of_at_most_400_m():
+    """count and spacingMeters pass one by one; the row they make may not be longer than any other piece."""
+    with pytest.raises(ValueError, match="a row of 100 lights 30 m apart is 2970.42 m long; one piece is at most 400"):
+        families.resolve("high_bay_lights", {"count": 100, "spacingMeters": 30})
+    with pytest.raises(ValueError, match="400.38 m long"):
+        families.resolve("high_bay_lights", {"count": 100, "spacingMeters": 4.04})
+    assert families.resolve("high_bay_lights", {"count": 100, "spacingMeters": 4.0})[1]["count"] == 100

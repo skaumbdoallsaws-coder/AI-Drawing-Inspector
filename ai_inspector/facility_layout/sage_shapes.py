@@ -13,8 +13,12 @@ writes itself may hold.
 - roof_frame: girders on lines and joists across them at a spacing, each layer 2 mm above the one below (rule 1).
 The plan's rules from the hand-built runs, as these tools keep them:
 - Floor items must stand in an operational zone (rule 3), once the layout has one (the engine asks for it then).
-  An item an existing zone already holds stays in it; the rest get thin floor-coloured workcell strips (#a9adab)
-  that the planner adds itself (decision 2), and the summary says which.
+  An item an existing zone already holds stays in it; an item in unzoned floor gets a thin floor-coloured workcell
+  strip (#a9adab) that the planner adds itself (decision 2), and the summary says which. An item that would stand in
+  a zone whose rules it breaks (its categories, height limit or edge setback) is refused with the zone and the rule:
+  a strip of its own would get it past them.
+- A package is one apply (operations.MAX_OPERATION_BATCH, 500 operations); a bigger plan is refused, to be split. The
+  summary stays well inside what one tool result may hold; the package keeps every operation.
 - A floor run stops 5 cm short of a zone that takes no placements (aisle, walkway, exclusion, safety, ...) and goes
   on after it; the summary lists the gaps. A grid places every point it is given; one standing in such a zone is
   named in the summary (BS4 adds the obstacle map that leaves such points out).
@@ -32,10 +36,13 @@ import re
 import string
 from typing import Callable, Mapping, Sequence
 
+from shapely.geometry import Polygon
+
 from ai_inspector.industrial_assets import shape_families as families
 from ai_inspector.industrial_assets.primitives import size_of
 
 from .asset_orientation import yaw_quaternion
+from .operations import MAX_OPERATION_BATCH
 from .spatial import (_NON_PLACEMENT_ZONE_TYPES, OVERHEAD_MINIMUM_CLEARANCE, polygon_boundary_distance,
                       polygon_contains_polygon, polygons_intersect)
 
@@ -51,9 +58,12 @@ STRIP_COLOR = "#a9adab"
 STRIP_MARGIN = 0.03   # a strip reaches 3 cm past its item on every side
 CLEARANCE = 0.05      # a floor run stops 5 cm short of a zone that takes no placements
 LAYER_GAP = 0.002     # touching volumes collide: each layer 2 mm above the one below (rule 1)
-MAX_OPERATIONS = 1000  # what one review of a planned package takes (codex_runtime/assisted_tools.PACKAGE_LIMITS)
+MAX_OPERATIONS = MAX_OPERATION_BATCH   # what one apply takes (500): a bigger package could be staged but not applied
 MAX_LINES = 200
 LISTED = 60
+MODELS_LISTED = 12
+RESULT_BUDGET = 48_000   # bytes of summary JSON; the gateway refuses results over 65,536 (codex_result_too_large)
+TRIMMED = ("pieces", "gaps", "dropped", "items", "models")   # lists shortened, longest first, when a summary is big
 HELD_LISTED = 8       # zones named in "already inside ...", then "and N more"
 METHOD = "sage-basic-shapes"
 STRUCTURE = "Building Structures"
@@ -139,8 +149,9 @@ def tool_specs() -> list[dict]:
             "a walkway: give each edge of the walkway zone as a line, side away from the walkway. elevationMeters: "
             "0 (the default) stands on the floor; overhead items go 4.5 m up or more, 0.002 above whatever they "
             "rest on (touching items collide). On the floor, a run stops short of aisles, walkways and other zones "
-            "that take no placements and goes on after them (its gaps are listed), and items get thin "
-            "floor-coloured workcell strips when no zone holds them. Read-only: stage the returned packageId with "
+            "that take no placements and goes on after them (its gaps are listed), and items on unzoned floor get thin "
+            "floor-coloured workcell strips; a plan that puts an item in a zone whose rules it breaks is refused. "
+            "Read-only: stage the returned packageId with "
             "preview_planned_design. Families, with their defaults (lengthMeters comes from each line): "
             + lines + "."),
          "input_schema": {"type": "object", "additionalProperties": False, "required": ["family", "lines"],
@@ -158,8 +169,9 @@ def tool_specs() -> list[dict]:
             "running east-west, by their z (named A, B, ... from south to north). Give each as at (the positions) "
             "or as from, to and every; names replaces the default names. Points are named like A-1; skip leaves "
             "points out by name. The model is made and added to the library here. elevationMeters: 0 (the default) "
-            "stands on the floor, or 4.5 m up or more for overhead items. Floor items get thin floor-coloured "
-            "workcell strips when no zone holds them; points that stand in an aisle, walkway or other zone that "
+            "stands on the floor, or 4.5 m up or more for overhead items. Floor items on unzoned floor get thin "
+            "floor-coloured workcell strips, and a point in a zone whose rules it breaks is refused; points that "
+            "stand in an aisle, walkway or other zone that "
             "takes no placements are named in the summary (skip them). Read-only: stage the returned packageId "
             "with preview_planned_design. Families: " + points + "; their parameters are author_shape_asset's."),
          "input_schema": {"type": "object", "additionalProperties": False, "required": ["x", "z"], "properties": {
@@ -255,6 +267,28 @@ class _Zones:
                 continue
             return zone
         return None
+
+    def breaking(self, polygon, category: str, top: float) -> list[str]:
+        """The rules this footprint breaks of the operational zones it stands in, wholly or partly: an item there
+        gets no strip of its own, which would get it past them."""
+        shape, box = Polygon(polygon), _box(polygon)
+        broken = []
+        for zone, boundary, bounds, closed in self.items:
+            if closed or not _boxes_meet(box, bounds) or Polygon(boundary).intersection(shape).area <= 1e-9:
+                continue
+            name = f"zone '{self.name(zone)}'"
+            allowed = zone.get("allowedAssetCategories")
+            if isinstance(allowed, list) and allowed and category not in allowed:
+                broken.append(f"{name} takes only {', '.join(str(item) for item in allowed)}, not {category}")
+            limit = zone.get("heightLimit")
+            if limit is not None and top > float(zone.get("floorElevation", 0) or 0) + float(limit) + 1e-9:
+                broken.append(f"{name} has a {float(limit):g} m height limit; the item is {top:g} m high")
+            setbacks = zone.get("edgeSetbacks")
+            setback = max((float(v) for v in setbacks.values()), default=0.0) if isinstance(setbacks, Mapping) else 0
+            if setback > 1e-9 and (not polygon_contains_polygon(boundary, polygon)
+                                   or polygon_boundary_distance(polygon, boundary) + 1e-9 < setback):
+                broken.append(f"{name} keeps items {setback:g} m inside its edges")
+        return broken
 
 
 def _box(polygon) -> tuple[float, float, float, float]:
@@ -375,8 +409,9 @@ def author(make: Callable[[str, dict], Mapping], arguments: Mapping) -> dict:
                     "already in the shared library (the same family and parameters): nothing new was added"),
         "picture": f"attached, {seen}",
         "illustrative": record.disclaimer,
-        "placing": ("A floor item stands at y 0 inside a workcell or other operational zone (add a thin workcell "
-                    f"strip zone, fill {STRIP_COLOR}, around it in the same batch when none holds it); an overhead "
+        "placing": ("A floor item stands at y 0 inside a workcell or other operational zone (on unzoned floor, add "
+                    f"a thin workcell strip zone, fill {STRIP_COLOR}, around it in the same batch; never one around "
+                    "an item a zone's rules refuse); an overhead "
                     f"item goes {OVERHEAD:g} m up or more. Its length runs along its x; turn it with yawDegrees."),
         "_image": {"mimeType": "image/jpeg", "data": base64.b64encode(picture).decode("ascii")},
     }
@@ -489,7 +524,7 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
     for piece in pieces:
         if piece["length"] not in assets:
             assets[piece["length"]] = author(family, {**parameters, "lengthMeters": piece["length"]})
-    strips, placements, held, listed = [], [], {}, []
+    strips, placements, held, listed, in_rule_zones = [], [], {}, [], []
     for index, piece in enumerate(pieces, start=1):
         asset = assets[piece["length"]]
         placement_id = f"pl-line-{namespace}-{index}"
@@ -499,9 +534,12 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
         if containment == "strips":
             footprint = _rectangle(piece["center"], piece["along"], piece["length"] / 2, depth / 2)
             zone = zones.holding(footprint, asset["category"], elevation + height)
+            broken = zones.breaking(footprint, asset["category"], elevation + height) if zone is None else []
             if zone is not None:
                 stands = _Zones.name(zone)
                 held[stands] = held.get(stands, 0) + 1
+            elif broken:
+                in_rule_zones.append(f"{piece['label']}: {broken[0]}")
             else:
                 corners = _rectangle(piece["center"], piece["along"], piece["length"] / 2 + STRIP_MARGIN,
                                      depth / 2 + STRIP_MARGIN)
@@ -516,18 +554,47 @@ def plan_line(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
                            "to": _point(piece["center"][0] + piece["along"][0] * half,
                                         piece["center"][1] + piece["along"][1] * half),
                            **({"standsIn": stands} if stands else {})})
+    _refuse_breaking(in_rule_zones)
     operations = [*strips, *placements]
     _within_review(operations)
-    return {
+    models = [_asset_summary(asset) for asset in assets.values()]
+    return _fit({
         "available": True, "family": family, "elevationMeters": _round(elevation, 3),
         "placed": len(placements), "pieces": listed,
         **({"morePieces": len(placements) - len(listed)} if len(placements) > len(listed) else {}),
-        "models": [_asset_summary(asset) for asset in assets.values()],
-        "gaps": gaps[:LISTED], "dropped": dropped[:LISTED],
+        "models": models[:MODELS_LISTED],
+        **({"moreModels": len(models) - MODELS_LISTED} if len(models) > MODELS_LISTED else {}),
+        "gaps": gaps[:LISTED], **({"moreGaps": len(gaps) - LISTED} if len(gaps) > LISTED else {}),
+        "dropped": dropped[:LISTED], **({"moreDropped": len(dropped) - LISTED} if len(dropped) > LISTED else {}),
         "zones": _zones_said(containment, len(strips), held),
         "illustrative": record.disclaimer,
         "operations": operations,
-    }
+    })
+
+
+def _refuse_breaking(refused: Sequence[str]) -> None:
+    if refused:
+        raise ShapeError("These would stand in zones whose rules they break, and a strip of their own would get "
+                         "them past those rules: " + "; ".join(refused[:6])
+                         + (f"; and {len(refused) - 6} more" if len(refused) > 6 else "")
+                         + ". Leave them out (skip, or shorter lines), or choose an item the zone takes.")
+
+
+def _fit(result: dict) -> dict:
+    """The summary within RESULT_BUDGET: the longest of its lists is halved until it fits, its "more..." count
+    raised to match. The operations (the package) are never shortened."""
+    def size() -> int:
+        return len(json.dumps({key: value for key, value in result.items() if key not in ("operations", "_image")}))
+    while size() > RESULT_BUDGET:
+        lists = [key for key in TRIMMED if isinstance(result.get(key), list) and result[key]]
+        if not lists:
+            break
+        key = max(lists, key=lambda name: len(json.dumps(result[name])))
+        keep = len(result[key]) // 2
+        more = "more" + key[0].upper() + key[1:]
+        result[more] = result.get(more, 0) + len(result[key]) - keep
+        result[key] = result[key][:keep]
+    return result
 
 
 def _zones_said(containment: str, strips: int, held: Mapping[str, int]) -> str:
@@ -549,7 +616,7 @@ def _zones_said(containment: str, strips: int, held: Mapping[str, int]) -> str:
 
 def _within_review(operations: Sequence) -> None:
     if len(operations) > MAX_OPERATIONS:
-        raise ShapeError(f"That is {len(operations)} operations; one review takes at most {MAX_OPERATIONS}. Split it "
+        raise ShapeError(f"That is {len(operations)} operations; one apply takes at most {MAX_OPERATIONS}. Split it "
                          "into parts (fewer lines, or the grid area by area) and stage each.")
 
 
@@ -585,6 +652,12 @@ def _axis(spec: Mapping, axis: str, *, lettered: bool) -> list[tuple[str, float]
              for index, (name, position) in enumerate(pairs)]
     if len({name for name, _ in named}) != len(named):
         raise ShapeError(f"{axis}: the names must differ")
+    seen = {}
+    for name, _ in named:                       # placement ids take the names in lower case
+        if name.lower() in seen:
+            raise ShapeError(f"{axis}: the names {seen[name.lower()]!r} and {name!r} differ only in case; "
+                             "give names that differ otherwise")
+        seen[name.lower()] = name
     return [(name, _round(position)) for name, position in named]
 
 
@@ -648,7 +721,7 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
         if floor:
             for zone in zones.closed_touching(footprint):
                 inside.append({"point": name, "zone": _Zones.name(zone)})
-    strips = []
+    strips, refused = [], []
     if containment == "strips":
         by_row = len(columns) >= len(rows)     # strips run along the lines with the most points
         lines = rows if by_row else columns
@@ -663,6 +736,11 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
                     if zone is not None:
                         held[_Zones.name(zone)] = held.get(_Zones.name(zone), 0) + 1
                         point = "held"
+                    else:
+                        broken = zones.breaking(footprint, asset["category"], elevation + height)
+                        if broken:
+                            refused.append(f"{prefix} {point[0]}: {broken[0]}")
+                            point = "held"           # no strip; the plan is refused below
                 if point not in (None, "held") and (not run or not zones.touching(
                         _box_corners(_grid_box(run[0], point, reach_x, reach_z)))):
                     run.append(point)
@@ -678,9 +756,10 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
                          f"{prefix} strip {line_name}" + (f" ({count})" if named[line_name] > 1 else ""),
                          _box_corners(box))
                   for index, (line_name, count, box) in enumerate(strips, start=1)]
+    _refuse_breaking(refused)
     operations = [*strips, *placements]
     _within_review(operations)
-    return {
+    return _fit({
         "available": True, "family": family, "model": _asset_summary(asset),
         "elevationMeters": _round(elevation, 3), "yawDegrees": _round(yaw, 3),
         "lines": {"x": [{"name": name, "x": at} for name, at in columns],
@@ -694,7 +773,7 @@ def plan_grid(layout: Mapping, arguments: Mapping, *, revision: str, author: Cal
         "zones": _zones_said(containment, len(strips), held),
         "illustrative": record.disclaimer,
         "operations": operations,
-    }
+    })
 
 
 def _grid_box(first, last, reach_x: float, reach_z: float) -> tuple[float, float, float, float]:

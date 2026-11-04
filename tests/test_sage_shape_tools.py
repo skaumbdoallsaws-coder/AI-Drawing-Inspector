@@ -6,7 +6,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import json
 import math
+import re
 
 import pytest
 from PIL import Image
@@ -260,7 +262,13 @@ def test_what_the_tools_refuse():
         (shapes.GRID_TOOL, {"x": {"at": [1, 1.001]}, "z": {"at": [1]}}, "two lines"),
         (shapes.GRID_TOOL, {"x": {"at": [1], "from": 0, "to": 5, "every": 1}, "z": {"at": [1]}}, "not both"),
         (shapes.GRID_TOOL, {"x": {"from": 0, "to": 39, "every": 1}, "z": {"from": 0, "to": 39, "every": 1},
-                            "elevationMeters": 8, "family": "high_bay_lights"}, "one review takes at most 1000"),
+                            "elevationMeters": 8, "family": "high_bay_lights"}, "one apply takes at most 500"),
+        (shapes.GRID_TOOL, {"family": "bollard", "x": {"from": 1, "to": 25, "every": 1},
+                            "z": {"from": 1, "to": 21, "every": 1}}, "That is 525 operations; one apply takes at most 500"),
+        (shapes.GRID_TOOL, {"x": {"at": [1, 2], "names": ["A", "a"]}, "z": {"at": [1]}},
+         "the names 'A' and 'a' differ only in case"),
+        (shapes.ROOF_TOOL, {"area": {"west": 0, "east": 40, "south": 0, "north": 30}, "supportTopMeters": 10,
+                            "girders": {"at": [5, 10], "names": ["G", "g"]}}, "differ only in case"),
         (shapes.ROOF_TOOL, {"area": {"west": 0, "east": 40, "south": 0, "north": 30}, "supportTopMeters": 3,
                             "girders": {"at": [5]}}, "at least 4.5 m high"),
         (shapes.ROOF_TOOL, {"area": {"west": 0, "east": 40, "south": 0, "north": 30}, "supportTopMeters": 10,
@@ -279,3 +287,54 @@ def test_the_chat_names_each_step():
         "Planned pedestrian barriers along 2 lines")
     assert describe(shapes.GRID_TOOL, {})["running"] == "Planning a grid of steel columns"
     assert describe(shapes.ROOF_TOOL, {})["running"] == "Planning the roof frame"
+
+
+
+def test_items_in_zones_whose_rules_they_break_are_refused_not_given_strips():
+    """A strip of its own would get an item past a zone's height limit, categories or edge setback (Codex review)."""
+    def ruled(zone_id, label, box, **rules):
+        return dict(zone_op(zone_id, label, "workcell", box)["zone"], **rules)
+    layout = {"placements": [], "zones": [
+        ruled("zn-low", "Mezzanine bay", (0, 20, 10, 30), heightLimit=3.0),
+        ruled("zn-machines", "Machine cell", (20, 20, 30, 30), allowedAssetCategories=["Machines"]),
+        ruled("zn-kept", "Kept bay", (32, 20, 40, 30), edgeSetbacks={"east": 1.0}),
+        zone_op(*ZONES[0])["zone"]]}
+    with pytest.raises(shapes.ShapeError, match=re.escape(
+            "Column A-1: zone 'Mezzanine bay' has a 3 m height limit; the item is 10 m high")):
+        shapes.plan(shapes.GRID_TOOL, layout, {"x": {"at": [5]}, "z": {"at": [25]}}, revision="r1", author=fake_author)
+    category = families.FAMILIES["pedestrian_barrier"].category
+    with pytest.raises(shapes.ShapeError, match=re.escape(f"Rail: zone 'Machine cell' takes only Machines, not "
+                                                          f"{category}")):
+        shapes.plan(shapes.LINE_TOOL, layout, {"family": "pedestrian_barrier", "lines": [
+            {"from": {"x": 21, "z": 25}, "to": {"x": 29, "z": 25}, "label": "Rail"}]}, revision="r1",
+            author=fake_author)
+    with pytest.raises(shapes.ShapeError, match=re.escape("Bollard A-1: zone 'Kept bay' keeps items 1 m inside")):
+        shapes.plan(shapes.GRID_TOOL, layout, {"family": "bollard", "x": {"at": [39.5]}, "z": {"at": [25]}},
+                    revision="r1", author=fake_author)
+    # Unzoned floor, and a zone without rules an item only partly stands in, still get strips.
+    result = shapes.plan(shapes.GRID_TOOL, layout, {"x": {"at": [5, 15]}, "z": {"at": [10, 12]}}, revision="r1",
+                         author=fake_author)     # row A straddles the Bay's edge, row B is unzoned
+    assert result["placed"] == 4 and result["zones"].startswith("3 thin floor-coloured workcell strips added")
+
+
+LONG_RUNS = [{"from": {"x": 0, "z": 0.5 * k}, "to": {"x": float(k), "z": 0.5 * k},
+              "label": f"Barrier run number {k:03d} along the north side of the hall"} for k in range(1, 201)]
+
+
+def test_a_big_plan_s_summary_fits_in_one_tool_result_and_its_package_keeps_everything():
+    """200 lines of 200 lengths make 200 models; the summary lists a few and counts the rest (Codex review)."""
+    result = plan(shapes.LINE_TOOL, {"family": "pedestrian_barrier", "lines": LONG_RUNS}, zones=[])
+    assert len(result["operations"]) == 200
+    assert len(result["models"]) == shapes.MODELS_LISTED and result["moreModels"] == 200 - shapes.MODELS_LISTED
+    assert len(result["pieces"]) + result["morePieces"] == 200
+    summary = {key: value for key, value in result.items() if key != "operations"}
+    assert len(json.dumps(summary)) <= shapes.RESULT_BUDGET
+
+
+def test_a_summary_over_its_budget_is_shortened_longest_list_first(monkeypatch):
+    monkeypatch.setattr(shapes, "RESULT_BUDGET", 4000)
+    result = plan(shapes.LINE_TOOL, {"family": "pedestrian_barrier", "lines": LONG_RUNS[:60]}, zones=[])
+    assert len(result["operations"]) == 60
+    assert len(result["pieces"]) + result.get("morePieces", 0) == 60
+    assert len(result["models"]) + result.get("moreModels", 0) == 60
+    assert len(json.dumps({key: value for key, value in result.items() if key != "operations"})) <= 4000

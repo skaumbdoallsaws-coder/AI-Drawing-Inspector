@@ -243,6 +243,10 @@ def _sprinkler_heads(p):
     return max(0, len(_hangers(p["lengthMeters"], p["headSpacingMeters"])) - 1)
 
 
+LIGHT_HOUSING_RADIUS = 0.21
+LONGEST = 400.0          # one piece is at most 400 m long, as every length parameter says
+
+
 def _high_bay_lights(p):
     count, spacing, pendant = p["count"], p["spacingMeters"], p["pendantMeters"]
     lens_h, housing_h = 0.015, 0.09
@@ -250,7 +254,7 @@ def _high_bay_lights(p):
     for k in range(count):
         x = (k - (count - 1) / 2) * spacing
         lenses.prism("y", (x, 0.0), 0.19, 0.0, lens_h, sides=16, smooth=True)
-        housings.prism("y", (x, 0.0), 0.21, lens_h, lens_h + housing_h, sides=16, smooth=True)
+        housings.prism("y", (x, 0.0), LIGHT_HOUSING_RADIUS, lens_h, lens_h + housing_h, sides=16, smooth=True)
         rods.bar((x, lens_h + housing_h, 0.0), (x, lens_h + housing_h + pendant, 0.0), 0.016)
     lens = Finish("#ffffff", fields={"emissiveFactor": [1.0, 0.97, 0.9]}, extras={"facilityDefaultFinish": LIT_LENS})
     return [("housing", housings, Finish(p["housingColor"])), ("rod", rods, Finish(p["rodColor"])),
@@ -573,6 +577,11 @@ def resolve(name: str, parameters: dict | None = None) -> tuple[Family, dict]:
         else:
             value = value.lower()
         values[key] = value
+    if family.name == "high_bay_lights":       # count and spacing pass one by one; the row they make may not
+        span = (values["count"] - 1) * values["spacingMeters"] + 2 * LIGHT_HOUSING_RADIUS
+        if span > LONGEST + 1e-9:
+            raise ValueError(f"count, spacingMeters: a row of {values['count']} lights {_g(values['spacingMeters'])} "
+                             f"m apart is {_g(round(span, 3))} m long; one piece is at most {_g(LONGEST)} m")
     return family, values
 
 

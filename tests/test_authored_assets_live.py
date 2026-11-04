@@ -4,6 +4,10 @@ and into the running host: its revision is the one a fresh start computes, and a
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -136,26 +140,53 @@ def test_bad_shapes_and_a_host_without_the_private_library_are_refused(host, tmp
 
 
 def test_a_catalog_changed_by_someone_else_meanwhile_is_left_alone(host, tmp_path, monkeypatch):
+    """Another writer edits the catalog while the new one is in its temporary file: the edit stays."""
     manifest = tmp_path / "project" / library.CATALOG
-    real_write = library._write
+    real_temporary = library._temporary
 
-    def meddle(path, data):
+    def meanwhile(path, data):
+        temp = real_temporary(path, data)
         if path == manifest:
-            raise AssertionError("the catalog was written after it changed")
-        real_write(path, data)
-    monkeypatch.setattr(library, "_write", meddle)
-    real_read = type(manifest).read_bytes
-    reads = []
-
-    def read_bytes(path):
-        data = real_read(path)
-        if path == manifest:
-            reads.append(path)
-            if len(reads) == 2:      # the check just before writing: another tool got there first
-                return data.replace(b'"total":0', b'"total":5')
-        return data
-    monkeypatch.setattr(type(manifest), "read_bytes", read_bytes)
+            manifest.write_bytes(manifest.read_bytes().replace(b'"total":0', b'"total":5'))
+        return temp
+    monkeypatch.setattr(library, "_temporary", meanwhile)
     with pytest.raises(FacilityLayoutError, match="The catalog changed while the asset was being added") as caught:
         host.register_authored_asset("bin")
     assert caught.value.code == "authored_asset_not_added"
+    assert b'"total":5' in manifest.read_bytes() and b"asset-authored-bin" not in manifest.read_bytes()
+    assert not list(manifest.parent.glob("*.tmp"))
+    with library._CatalogLock(manifest):          # and the lock was let go
+        pass
     assert "asset-authored-bin" not in json.dumps(catalog_ids(host))
+
+
+HOLD_THE_LOCK = """
+import sys
+from pathlib import Path
+from ai_inspector.industrial_assets import authored_library as library
+with library._CatalogLock(Path(sys.argv[1])):
+    print("held", flush=True)
+    sys.stdin.readline()
+"""
+
+
+def test_one_registration_at_a_time_across_processes(host, tmp_path, monkeypatch):
+    """Another process holds the catalog's lock: nothing is added. It stops without letting go (a crash): the system
+    frees the lock and the next registration goes through. Each write has a temporary file of its own."""
+    manifest = tmp_path / "project" / library.CATALOG
+    other = subprocess.Popen([sys.executable, "-c", HOLD_THE_LOCK, str(manifest)], cwd=Path(__file__).parents[1],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                             creationflags=0x08000000 if os.name == "nt" else 0)
+    try:
+        assert other.stdout.readline().strip() == "held"
+        monkeypatch.setattr(library, "LOCK_WAIT", 0.3)
+        with pytest.raises(FacilityLayoutError, match="Another process is adding to the asset catalog"):
+            host.register_authored_asset("bin")
+        assert b"asset-authored-bin" not in manifest.read_bytes()
+    finally:
+        other.kill()
+        other.wait()
+    monkeypatch.setattr(library, "LOCK_WAIT", 5.0)
+    manifest.with_name(manifest.name + ".tmp").mkdir()          # the old shared temporary name is not used
+    made = host.register_authored_asset("bin")
+    assert made["added"] and b"asset-authored-bin" in manifest.read_bytes()

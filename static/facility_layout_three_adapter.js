@@ -3629,6 +3629,18 @@
             });
         }
 
+        // The group that draws a placement, found by the placement itself: its key carries the finish or part suffix
+        // (baseGroupKey) that an asset|revision lookup leaves out, so an actor placed only with a finish or finished
+        // parts still finds its group, and a finished actor next to plain ones loads its own model (Codex on 5bb9252).
+        function baseGroupOfPlacement(placementId) {
+            for (const group of state.baseGroups.values()) {
+                if (group && Array.isArray(group.placements) && group.placements.some(function (item) {
+                    return item && item.placementId === placementId;
+                })) return group;
+            }
+            return null;
+        }
+
         function activityRenderRecord(placementId) {
             for (const record of state.renderGroups.values()) {
                 if (record && Array.isArray(record.placementIds)
@@ -4247,9 +4259,7 @@
         // scene (final rounds 2 and 3).
         async function prepareNavigationPreviewVisual(validated, ensureCurrent) {
             const placement = validated.placement;
-            const key = placement.assetId + '|'
-                + placement.assetDefinitionRevision;
-            const group = state.baseGroups.get(key);
+            const group = baseGroupOfPlacement(placement.placementId);
             if (!group) {
                 throw facilityMotionError(
                     'facility_navigation_preview_visual_unavailable',
@@ -4300,7 +4310,7 @@
             const token = sceneToken();
             // It remembers every group and prepared record it was given, so the last call, right before the records
             // are used, checks them all: a finish-only regroup replaces groups and their records without a new scene,
-            // and a record may belong to a finished group the asset lookup does not name (final rounds 4 and 5).
+            // and each record is checked against its own drawn group (final rounds 4 and 5).
             const groupsUsed = [];
             const recordsUsed = [];
             const ensureCurrent = function (group, record) {
@@ -5707,10 +5717,8 @@
         async function prepareActivityActorVisuals(validated, ensureCurrent) {
             const groups = new Map();
             validated.actors.forEach(function (value) {
-                const reference = value.actor.assetDefinitionRef;
-                const key = reference.assetId + '|'
-                    + reference.assetDefinitionRevision;
-                const group = state.baseGroups.get(key);
+                // The validator matched the actor's placement to its assetDefinitionRef exactly.
+                const group = baseGroupOfPlacement(value.actor.placementId);
                 if (!group) {
                     throw facilityMotionError(
                         'facility_activity_actor_visual_unavailable',
@@ -5718,7 +5726,7 @@
                         { actorId: value.actor.actorId }
                     );
                 }
-                groups.set(key, group);
+                groups.set(baseGroupKey(group), group);
             });
             const keys = Array.from(groups.keys()).sort();
             let nextKeyIndex = 0;
@@ -5772,7 +5780,7 @@
             const token = sceneToken();
             // It remembers every group and prepared record it was given, so the last call, right before the records
             // are used, checks them all: a finish-only regroup replaces groups and their records without a new scene,
-            // and a record may belong to a finished group the asset lookup does not name (final rounds 4 and 5).
+            // and each record is checked against its own drawn group (final rounds 4 and 5).
             const groupsUsed = [];
             const recordsUsed = [];
             const ensureCurrent = function (group, record) {

@@ -3030,6 +3030,82 @@ test('a path preview of a finished actor whose finish changes before it attaches
     data.adapter.dispose();
 });
 
+test('a path preview and an activity of an actor placed only with a finish or finished parts use its own group '
+    + '(Sage 3D shots later list, Codex on 5bb9252)', async () => {
+    const actors = {
+        finish: finishPlacement('actor-placement', 'activity-asset', 3, { appearanceId: 'brass-brushed' }),
+        parts: Object.assign(placement('actor-placement', 'activity-asset', REV_A, 3, 0, 0), { componentMaterials: {
+            representation: 'overview', overrides: [{ key: 'p:Body#0', appearanceId: 'wood-walnut' }] } }),
+    };
+    const shown = key => {
+        let count = 0;
+        renderedScene().traverse(object => { if (object.userData && object.userData[key]) count += 1; });
+        return count;
+    };
+    for (const [name, actor] of Object.entries(actors)) {
+        for (const kind of ['preview', 'activity']) {
+            const data = await libraryFixture();
+            await data.adapter.setScene({ layout: { placements: [actor], routes: [], floorMarkings: [] },
+                assetCatalog: [asset('activity-asset', REV_A)] });
+            await settleAsync();
+            while (data.scheduler.pendingCount) data.scheduler.flush();
+            if (kind === 'preview') {
+                // 5bb9252: facility_navigation_preview_visual_unavailable (no plain group to look up).
+                const loaded = await data.adapter.navigationPreview.load({
+                    previewId: 'nav-preview-' + name, layoutRevision: REV_B, actorPlacementId: 'actor-placement',
+                    actorClass: 'pedestrian', points: [{ x: 3, z: 0 }, { x: 6, z: 0 }], loopMode: 'one_way',
+                    direction: 'forward', visualForwardAxis: '+X', validationStatus: 'validated', pathsVisible: true,
+                }, REV_B);
+                assert.strictEqual(loaded.exactCatalogVisual, true, name);
+                data.scheduler.flush(100);
+                assert.ok(shown('facilityNavigationPreviewId') > 0, name + ': the preview is on screen');
+            } else {
+                // 5bb9252: facility_activity_actor_visual_unavailable.
+                await data.adapter.activity.load(activityPayload(), REV_B);
+                data.scheduler.flush(1000);
+                assert.ok(shown('facilityActivityActorId') > 0, name + ': the actor is on screen');
+            }
+            data.adapter.dispose();
+        }
+    }
+});
+
+test('a path preview of a finished actor next to plain ones loads the finished actor\'s deferred model '
+    + '(Sage 3D shots later list, Codex on 5bb9252)', async () => {
+    const THREE = await libraryThree();
+    const data = await libraryFixture({
+        largeLayoutDetailThreshold: 2,
+        largeLayoutHeavyVisualBytes: 100,
+        assetResolver: request => {
+            if (request.stage === 'manifest') return asset(request.assetId, request.assetDefinitionRevision);
+            if (request.stage === 'footprint') return prototype(THREE, request.stage);
+            if (request.stage === 'overview') {
+                const overview = prototype(THREE, request.stage);
+                overview.byteSize = 101;
+                return overview;
+            }
+            return null;
+        },
+    });
+    await data.adapter.setScene({ layout: { placements: [
+        finishPlacement('plain-1', 'rack', 0, null), finishPlacement('plain-2', 'rack', 3, null),
+        finishPlacement('brass', 'rack', 6, { appearanceId: 'brass-brushed' })], routes: [], floorMarkings: [] },
+    assetCatalog: [asset('rack', REV_A)] });
+    const representation = id => data.adapter.getDiagnostics().representationGroups
+        .find(group => group.placementIds.includes(id)).representation;
+    assert.notStrictEqual(representation('brass'), 'overview', 'the heavy model waits until something asks for it');
+    // 5bb9252 loaded the plain racks' model and then refused: facility_navigation_preview_exact_visual_unavailable.
+    const loaded = await data.adapter.navigationPreview.load({
+        previewId: 'nav-preview-brass', layoutRevision: REV_B, actorPlacementId: 'brass',
+        actorClass: 'pedestrian', points: [{ x: 6, z: 0 }, { x: 9, z: 0 }], loopMode: 'one_way',
+        direction: 'forward', visualForwardAxis: '+X', validationStatus: 'validated', pathsVisible: true,
+    }, REV_B);
+    assert.strictEqual(loaded.exactCatalogVisual, true);
+    assert.strictEqual(representation('brass'), 'overview', 'the finished actor\'s own model');
+    assert.notStrictEqual(representation('plain-1'), 'overview', 'the plain racks are left as they were');
+    data.adapter.dispose();
+});
+
 test('manual preview waits for an in-flight deferred exact visual', async () => {
     const data = fixture({
         largeLayoutDetailThreshold: 2,

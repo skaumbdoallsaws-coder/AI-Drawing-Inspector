@@ -447,14 +447,19 @@ def compute_alignment(manifest: dict, body) -> dict:
 
     {"controlPoints": [{"source": {"u", "v"}, "target": {"x", "z"}}, ...], "scale": "declared" | "fit"}: drawing
     points (absolute drawing units) and where they belong (layout meters). "declared" (the default when the drawing
-    declares its unit) holds the unit's scale: a rigid fit. "fit" lets the points set the scale.
+    declares its unit) holds the unit's scale: a rigid fit. "fit" lets the points set the scale. Instead of "scale",
+    "metersPerDrawingUnit": n holds that scale (a unit the user chose, or one calibrated earlier).
     {"distance": {"a": {"u", "v"}, "b": {"u", "v"}, "meters": n}}: the scale that makes A to B that long."""
     from . import floor_plan_alignment as alignment
 
-    if not isinstance(body, dict) or not body or not set(body) <= {"controlPoints", "scale", "distance"} \
-            or ("distance" in body) == ("controlPoints" in body):
+    if not isinstance(body, dict) or not body \
+            or not set(body) <= {"controlPoints", "scale", "metersPerDrawingUnit", "distance"} \
+            or ("distance" in body) == ("controlPoints" in body) \
+            or ("scale" in body and "metersPerDrawingUnit" in body) \
+            or ("distance" in body and len(body) > 1):
         raise FacilityValidationError("invalid_floor_plan_alignment",
-                                      "Send controlPoints (with an optional scale) or one distance.")
+                                      "Send controlPoints (with a scale or a held metersPerDrawingUnit) or one "
+                                      "distance.")
     declared = (manifest.get("units") or {}).get("metersPerUnit")
     try:
         if "distance" in body:
@@ -478,15 +483,18 @@ def compute_alignment(manifest: dict, body) -> dict:
                                               f"controlPoints[{index}] must have exactly source and target.")
             pairs.append((_point(control["source"], ("u", "v"), f"controlPoints[{index}].source"),
                           _point(control["target"], ("x", "z"), f"controlPoints[{index}].target")))
-        mode = body.get("scale", "declared" if declared else "fit")
-        if mode not in ("declared", "fit"):
-            raise FacilityValidationError("invalid_floor_plan_alignment", "scale must be declared or fit.")
-        if mode == "declared" and not declared:
-            raise FacilityValidationError("floor_plan_units_unresolved", "The drawing does not declare its unit; fit "
-                                                                         "the scale from the points instead.")
+        if "metersPerDrawingUnit" in body:
+            mode, held = "held", _number(body["metersPerDrawingUnit"], "metersPerDrawingUnit")
+        else:
+            mode = body.get("scale", "declared" if declared else "fit")
+            if mode not in ("declared", "fit"):
+                raise FacilityValidationError("invalid_floor_plan_alignment", "scale must be declared or fit.")
+            if mode == "declared" and not declared:
+                raise FacilityValidationError("floor_plan_units_unresolved", "The drawing does not declare its unit; "
+                                                                             "fit the scale from the points instead.")
+            held = declared if mode == "declared" else None
         origin = manifest.get("origin") or [0.0, 0.0]
-        fitted = alignment.fit(pairs, source_origin=(float(origin[0]), float(origin[1])),
-                               meters_per_unit=declared if mode == "declared" else None)
+        fitted = alignment.fit(pairs, source_origin=(float(origin[0]), float(origin[1])), meters_per_unit=held)
     except ValueError as exc:
         raise FacilityValidationError("invalid_floor_plan_alignment", str(exc)) from None
     return {

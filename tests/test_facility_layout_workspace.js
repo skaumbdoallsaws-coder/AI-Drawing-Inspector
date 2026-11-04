@@ -67,6 +67,7 @@ class FakeElement {
         this.attributes = {};
         this.dataset = {};
         this.listeners = new Map();
+        this.captureListeners = new Map();
         this.className = '';
         this.textContent = '';
         this.hidden = false;
@@ -137,14 +138,17 @@ class FakeElement {
         if (name === 'hidden') this.hidden = false;
     }
 
-    addEventListener(type, handler) {
-        if (!this.listeners.has(type)) this.listeners.set(type, new Set());
-        this.listeners.get(type).add(handler);
+    addEventListener(type, handler, options) {
+        const capture = options === true || Boolean(options && options.capture);
+        const map = capture ? this.captureListeners : this.listeners;
+        if (!map.has(type)) map.set(type, new Set());
+        map.get(type).add(handler);
         FakeElement.listenerCount += 1;
     }
 
-    removeEventListener(type, handler) {
-        const handlers = this.listeners.get(type);
+    removeEventListener(type, handler, options) {
+        const capture = options === true || Boolean(options && options.capture);
+        const handlers = (capture ? this.captureListeners : this.listeners).get(type);
         if (handlers && handlers.delete(handler)) FakeElement.listenerCount -= 1;
     }
 
@@ -213,17 +217,30 @@ class FakeElement {
             shiftKey: false,
             defaultPrevented: false,
             propagationStopped: false,
+            immediateStopped: false,
             preventDefault() { this.defaultPrevented = true; },
             stopPropagation() { this.propagationStopped = true; },
+            stopImmediatePropagation() { this.propagationStopped = true; this.immediateStopped = true; },
         }, source);
         if (!event.target) event.target = this;
-        let current = this;
-        while (current) {
-            event.currentTarget = current;
-            const handlers = current.listeners.get(type);
-            if (handlers) Array.from(handlers).forEach(handler => handler(event));
-            if (event.propagationStopped) break;
-            current = current.parentNode;
+        const path = [];
+        for (let current = this; current; current = current.parentNode) path.push(current);
+        const run = (node, map) => {
+            event.currentTarget = node;
+            const handlers = map.get(type);
+            if (!handlers) return;
+            for (const handler of Array.from(handlers)) {
+                handler(event);
+                if (event.immediateStopped) return;
+            }
+        };
+        // As the DOM does: capturing listeners from the top down (at the target before its other listeners), then
+        // the target's and its ancestors' own.
+        for (let index = path.length - 1; index >= 0 && !event.propagationStopped; index -= 1) {
+            run(path[index], path[index].captureListeners);
+        }
+        for (let index = 0; index < path.length && !event.propagationStopped; index += 1) {
+            run(path[index], path[index].listeners);
         }
         return event;
     }
@@ -6017,6 +6034,114 @@ async function main() {
             data.top.transientZonePreviews.at(-1),
             { points: [], options: {} }
         );
+        data.workspace.destroy();
+    });
+
+    await check('clicks that belong to floor-plan picks never reach the polygon zone tool', async () => {
+        const data = fixture();
+        await data.workspace.executeCommand('polygon-zone');
+        let owned = true;
+        const synced = [];
+        const told = [];
+        data.workspace.floorPlan = {
+            picking: null,
+            ownsClick() { return owned; },
+            ownsDoubleClick() { return owned; },
+            forgetPress() { told.push('press'); },
+            toolChosen() { told.push('tool'); },
+            cancelPicking() { told.push('cancel'); this.picking = null; },
+            handlePointerDown() { return false; },
+            handlePointerMove() { return false; },
+            sync(layout, options) { synced.push(options); },
+            dispose() {},
+        };
+        const before = data.top.transientZonePreviews.length;
+        [{ x: 0, y: 0, z: 0 }, { x: 3, y: 0, z: 0 }].forEach(world => data.workspace.planView.dispatch('click',
+            { world }));
+        data.workspace.planView.dispatch('dblclick', { world: { x: 3, y: 0, z: 0 } });
+        await data.workspace.whenIdle();
+        assert.strictEqual(data.top.transientZonePreviews.length, before, 'no corner was added');
+        assert.strictEqual(data.session.calls.filter(call => call[0] === 'createPolygonZone').length, 0);
+        owned = false;  // a later click is the tool's again
+        data.workspace.planView.dispatch('click', { world: { x: 1, y: 0, z: 1 } });
+        assert.deepStrictEqual(data.top.transientZonePreviews.at(-1).points, [{ x: 1, y: 0, z: 1 }]);
+        data.workspace._updateController();
+        assert.deepStrictEqual(synced.at(-1), { preview: false }, 'the plan says whether it shows a preview');
+        // Every press is announced; a tool the user chooses, and Escape, are the user's choice.
+        told.length = 0;
+        data.workspace.planView.dispatch('pointerdown', { button: 0, world: { x: 2, y: 0, z: 2 } });
+        assert.strictEqual(told[0], 'press');
+        data.workspace._cancelPointerGesture();
+        told.length = 0;
+        await data.workspace.executeCommand('select');
+        assert.deepStrictEqual(told, ['tool']);
+        // Escape ends floor-plan picks first, and leaves the tool as it is.
+        told.length = 0;
+        data.workspace.floorPlan.picking = { mode: 'align', points: [] };
+        await data.workspace.executeCommand('polygon-zone');
+        told.length = 0;
+        data.root.dispatch('keydown', { key: 'Escape', target: data.root });
+        assert.deepStrictEqual(told, ['cancel']);
+        assert.strictEqual(data.workspace.toolMode, 'polygon-zone');
+        // Before any panel: with Motion path's panel open, the first Escape ends the picks and leaves the panel.
+        told.length = 0;
+        data.workspace.floorPlan.picking = { mode: 'measure', points: [] };
+        data.workspace.navigationState.open = true;
+        data.root.dispatch('keydown', { key: 'Escape', target: data.root });
+        assert.deepStrictEqual(told, ['cancel']);
+        assert.strictEqual(data.workspace.navigationState.open, true);
+        data.workspace.navigationState.open = false;
+        data.root.dispatch('keydown', { key: 'Escape', target: data.root });
+        assert.deepStrictEqual(told, ['cancel', 'tool']);
+        assert.strictEqual(data.workspace.toolMode, 'select');
+        // From a field in a workspace panel (the Motion path one) too: the picks end before the panel or the field
+        // sees the key.
+        await data.workspace.executeCommand('polygon-zone');
+        data.workspace.floorPlan.picking = { mode: 'align', points: [] };
+        const field = data.workspace.document.createElement('input');
+        data.workspace.navigationDialog.appendChild(field);
+        const seen = [];
+        const panelSaw = () => seen.push('panel');
+        data.workspace.navigationDialog.addEventListener('keydown', panelSaw);
+        told.length = 0;
+        const escape = field.dispatch('keydown', { key: 'Escape' });
+        assert.deepStrictEqual(told, ['cancel']);
+        assert.deepStrictEqual(seen, [], 'the panel never saw it');
+        assert.strictEqual(escape.defaultPrevented, true);
+        assert.strictEqual(data.workspace.toolMode, 'polygon-zone', 'the tool stays');
+        field.dispatch('keydown', { key: 'Escape' });
+        assert.deepStrictEqual(seen, ['panel'], 'the next Escape is the panel one');
+        data.workspace.navigationDialog.removeEventListener('keydown', panelSaw);
+        data.workspace.navigationDialog.removeChild(field);
+        data.workspace.closeNavigationDialog(true);
+        // Every way of choosing a tool reaches the picks: a key (M opens Floor marking), a panel's Draw, a light
+        // area. Only the picks' own switches and a tool put back on resume do not.
+        const picksSee = async (label, act, expected) => {
+            data.workspace.floorPlan.picking = { mode: 'measure', points: [] };
+            told.length = 0;
+            await act();
+            assert.deepStrictEqual(told, expected, label);
+        };
+        await picksSee('M', () => data.root.dispatch('keydown', { key: 'm', target: data.root }), ['tool']);
+        assert.strictEqual(data.workspace.toolMode, 'floor-marking');
+        data.workspace.closeFloorMarkingPalette(true);
+        await picksSee('a panel switching its tool on', () => data.workspace._setToolMode('aisle'), ['tool']);
+        await picksSee('the picks\' own switch', () => data.workspace._setToolMode('select', { keepPicks: true }), []);
+        await picksSee('a light area', () => data.workspace._drawLightArea(() => {}), ['tool']);
+        data.workspace._endLightAreaDraw(null, false);
+        await picksSee('a tool put back on resume', () => {
+            data.workspace.suspend();
+            data.workspace.resume();
+        }, []);
+        // Picks are points on the plan: leaving it ends them, and Escape elsewhere is not theirs.
+        await picksSee('the 3D view', () => data.workspace._setViewMode('3d'), ['cancel']);
+        data.workspace.floorPlan.picking = { mode: 'measure', points: [] };
+        told.length = 0;
+        const elsewhere = data.root.dispatch('keydown', { key: 'Escape', target: data.root });
+        assert.ok(!told.includes('cancel'), 'Escape in the 3D view is not the picks\'');
+        assert.strictEqual(elsewhere.defaultPrevented, true, 'the 3D view handles it as before');
+        data.workspace.floorPlan.picking = null;
+        data.workspace._setViewMode('plan');
         data.workspace.destroy();
     });
 

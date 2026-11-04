@@ -31,6 +31,8 @@
         ? require('./facility_layout_generation_view.js') : root.InspectorProGenerationPlanningView;
     const siteRuntime = typeof module === 'object' && module.exports
         ? require('./facility_layout_site.js') : root.InspectorProFacilitySite;
+    const floorPlanRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_floor_plan.js') : root.InspectorProFacilityFloorPlan;
     const ASSET_MIME = 'application/x-inspectorpro-facility-asset';
     const DEFAULT_GRID_SIZE = 0.5;
     const DEFAULT_DUPLICATE_OFFSET = Object.freeze({ x: 1, y: 0, z: 1 });
@@ -10554,6 +10556,7 @@
             ['component-materials', 'Component Materials', ''],
             ['interior-walls', 'Interior Walls', ''],
             ['floor-surfaces', 'Floor Surfaces', ''],
+            ['floor-plan', 'Floor Plan (DXF)', ''],
             ['replace-asset', 'Replace Asset', ''],
             ['align', 'Align', ''],
             ['distribute', 'Distribute', ''],
@@ -11973,7 +11976,22 @@
             }
         }.bind(this));
         this._listen(this.propertiesBody, 'change', this._handlePropertyChange.bind(this));
+        // Capturing, so floor-plan picks end on Escape before any panel, dialog or field in the workspace sees it.
+        this._listen(this.root, 'keydown', this._handlePickingEscape.bind(this), true);
         this._listen(this.root, 'keydown', this._handleKeyDown.bind(this));
+    };
+
+    // Floor-plan picks take every press on the plan, so Escape ends them first, wherever the focus is (a field in the
+    // Motion path panel, say); the next Escape goes where it went before.
+    Workspace.prototype._handlePickingEscape = function (event) {
+        if (!event || String(event.key || '') !== 'Escape' || !this.floorPlan || !this.floorPlan.picking
+                || this.viewMode !== 'plan') return;
+        if (!this.pickingEscapes) this.pickingEscapes = new WeakSet();
+        this.pickingEscapes.add(event);
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+        else if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        this.floorPlan.cancelPicking();
     };
 
     Workspace.prototype.openPrecisionDialog = function (mode) {
@@ -13713,6 +13731,7 @@
     };
 
     Workspace.prototype._handlePlanPointerDown = function (event) {
+        if (this.floorPlan) this.floorPlan.forgetPress();  // a click this press ends is no floor-plan pick's
         if (this.generationPlanningView && this.generationPlanningView.activeLayout()) {
             this.pointerGesture = {kind: 'pan', clientX: finite(event.clientX, 0), clientY: finite(event.clientY, 0)};
             this._beginPointerCapture(event);
@@ -13724,6 +13743,11 @@
             this.planView
         )) return;
         if (this._handleMirrorAxisPick(event)) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            if (typeof event.stopPropagation === 'function') event.stopPropagation();
+            return;
+        }
+        if (this.floorPlan && this.floorPlan.handlePointerDown(event)) {
             if (typeof event.preventDefault === 'function') event.preventDefault();
             if (typeof event.stopPropagation === 'function') event.stopPropagation();
             return;
@@ -13985,6 +14009,7 @@
             this.pointerGesture.clientY = clientY;
             return;
         }
+        if (this.floorPlan && this.floorPlan.picking) this.floorPlan.handlePointerMove(event);
         let world;
         try {
             world = this._eventWorld(event);
@@ -14297,6 +14322,7 @@
     Workspace.prototype._drawLightArea = function (done) {
         if (typeof done !== 'function' || this.destroyed || !this.planView) return false;
         this._endLightAreaDraw(null, false);
+        if (this.floorPlan) this.floorPlan.toolChosen();  // the area is drawn with presses on the plan
         if (this.toolMode !== 'select') this._setToolMode('select');
         this._setViewMode('plan');
         if (this.viewMode !== 'plan') return false;
@@ -15077,6 +15103,8 @@
     };
 
     Workspace.prototype._handlePlanClick = function (event) {
+        // The click after a floor-plan pick is the pick's, never a polygon corner.
+        if (this.floorPlan && this.floorPlan.ownsClick(event)) return;
         if (this.toolMode !== 'polygon-zone') return;
         if (targetDataId(event.target, 'data-placement-id', this.planView)) return;
         const world = this._eventWorld(event);
@@ -15090,6 +15118,10 @@
 
     Workspace.prototype._handlePlanDoubleClick = function (event) {
         if (this.generationPlanningView && this.generationPlanningView.activeLayout()) return;
+        if (this.floorPlan && this.floorPlan.ownsDoubleClick(event)) {
+            if (typeof event.preventDefault === 'function') event.preventDefault();
+            return;
+        }
         const trigger = targetDataId(
             event.target,
             'data-plan-settings-trigger',
@@ -16877,6 +16909,19 @@
         return adapter.execute(request);
     };
 
+    // The floor-plan underlay: its panel, its picks and its reference edits (static/facility_layout_floor_plan.js).
+    Workspace.prototype._floorPlanController = function () {
+        if (!this.floorPlan && floorPlanRuntime && !this.destroyed) this.floorPlan = floorPlanRuntime.attach(this);
+        return this.floorPlan || null;
+    };
+
+    Workspace.prototype.openFloorPlan = function () {
+        const floorPlan = this._floorPlanController();
+        if (!floorPlan) throw new Error('Floor-plan import is unavailable.');
+        floorPlan.open();
+        return true;
+    };
+
     Workspace.prototype.executeCommand = function (command) {
         // With the Appearances, Scenes and Decals panel available, the ribbon's
         // appearance commands open it at the matching place; the original
@@ -16891,6 +16936,7 @@
         if (command === 'component-materials') return componentMaterialsRuntime.open(this);
         if (command === 'interior-walls') return Promise.resolve(interiorWallsRuntime.open(this));
         if (command === 'floor-surfaces') return Promise.resolve(floorSurfacesRuntime.open(this));
+        if (command === 'floor-plan') return Promise.resolve(this.openFloorPlan());
         if (command === 'replace-asset') return Promise.resolve(replaceAssetRuntime.open(this));
         if (command === 'appearance') return Promise.resolve(this.openAppearanceDialog());
         if (this.generationPlanningView && this.generationPlanningView.activeLayout()
@@ -17126,6 +17172,8 @@
         if (mode === '3d' && !this.threeAdapter) mode = 'plan';
         if (mode === 'site' && !this.siteView) mode = 'plan';
         if (this.lightAreaDraw && mode !== 'plan') this._endLightAreaDraw(null, false);
+        // Floor-plan picks are points on the plan: leaving it ends them.
+        if (mode !== 'plan' && this.floorPlan && this.floorPlan.picking) this.floorPlan.cancelPicking();
         if (mode !== '3d') {
             this._cancelRecordingCountdown();
             if (this.recordingController
@@ -17211,8 +17259,12 @@
         return this.topAdapter.fitBuilding();
     };
 
-    Workspace.prototype._setToolMode = function (mode) {
+    // OPTIONS.keepPicks: not a tool the user chose (floor-plan picks setting a tool aside or giving it back, or the
+    // workspace putting its tool back on resume). Any other switch, from a button, a key, a panel or a dialog, ends
+    // floor-plan picks first.
+    Workspace.prototype._setToolMode = function (mode, options) {
         if (!TOOL_MODES.includes(mode)) throw new TypeError('invalid tool mode');
+        if (this.floorPlan && !(options && options.keepPicks)) this.floorPlan.toolChosen();
         if (this.lightAreaDraw) this._endLightAreaDraw(null, false);
         this.toolMode = mode;
         if (mode !== 'floor-marking' && this.floorMarkingPalette) {
@@ -17980,6 +18032,8 @@
                 : !componentMaterialsRuntime || !wallsRuntime.canEdit(this) || this._selectedPlacementRecords().length !== 1,
             'interior-walls': !interiorWallsRuntime || !wallsRuntime.canEdit(this),
             'floor-surfaces': !floorSurfacesRuntime || !wallsRuntime.canEdit(this),
+            'floor-plan': !floorPlanRuntime || !wallsRuntime.canEdit(this)
+                || typeof this.session.importFloorPlan !== 'function',
             'replace-asset': !replaceAssetRuntime || !wallsRuntime.canEdit(this) || this._selectedPlacementRecords().length !== 1,
             align: manualEditingBlocked
                 || selectedPlacements.length < 2,
@@ -18238,6 +18292,8 @@
             : this.state.layout);
         this.siteRepresentedLayout = renderedLayout;
         this.sitePreviewReadOnly = Boolean(generationLayout || activeConstruction || layoutAlternative);
+        const floorPlan = this._floorPlanController();
+        if (floorPlan) floorPlan.sync(renderedLayout, { preview: this.sitePreviewReadOnly });
         if (this.siteView) this.siteView.render(renderedLayout, { readOnly: this.sitePreviewReadOnly });
         const layoutFingerprint = JSON.stringify(renderedLayout);
         if (layoutFingerprint !== this.lastLayoutFingerprint) {
@@ -18458,6 +18514,7 @@
 
     Workspace.prototype._handleKeyDown = function (event) {
         if (!event || isTypingTarget(event.target)) return;
+        if (this.pickingEscapes && this.pickingEscapes.has(event)) return;  // it ended floor-plan picks
         if (this.assetBrowserState.open) return;
         const key = String(event.key || '').toLowerCase();
         const modifier = Boolean(event.ctrlKey || event.metaKey);
@@ -18729,7 +18786,7 @@
                 }
             );
         }
-        this._setToolMode(this.toolMode);
+        this._setToolMode(this.toolMode, { keepPicks: true });
         this._setViewMode(this.viewMode);
         if (this.assetBrowserState.open) {
             this.root.setAttribute('data-asset-browser-open', 'true');
@@ -18780,6 +18837,8 @@
         this.destroyed = true;
         this.lightAreaDraw = null;
         this._hideLightCoverage();
+        if (this.floorPlan) this.floorPlan.dispose();
+        this.floorPlan = null;
         if (this.sageCapture) {
             this.sageCapture.stopped = true;
             this.sageCapture.end();

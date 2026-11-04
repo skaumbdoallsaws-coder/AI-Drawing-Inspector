@@ -31,6 +31,7 @@ _CREATE_NO_WINDOW = 0x08000000
 # inside its job object, so not a byte of the DXF is read without the memory cap.
 _BOOTSTRAP = (
     "import sys\n"
+    "sys.path[:] = [entry for entry in sys.path if entry]\n"  # -c puts the job folder ('') first: never import from it
     "if sys.stdin.buffer.read(1) != b'1':\n"
     "    raise SystemExit(5)\n"
     "import importlib.util\n"
@@ -239,10 +240,7 @@ def parse_dxf(dxf_path: str | os.PathLike, work_dir: str | os.PathLike, *, sourc
             return {"geometryPath": str(work / "geometry.json"), "manifestPath": str(work / "manifest.json"),
                     "manifest": manifest, "seconds": seconds, "peakMemoryBytes": peak}
     if error and isinstance(error.get("code"), str) and isinstance(error.get("message"), str):
-        status = 413 if error["code"] in ("too_large", "too_many_entities", "too_many_vertices",
-                                          "too_many_layers") else 422
-        raise FloorPlanParseError(error["code"][:64], error["message"][:500], status_code=status,
-                                  details={"seconds": seconds, "peakMemoryBytes": peak})
+        raise worker_error(error, {"seconds": seconds, "peakMemoryBytes": peak})
     tail = _tail(stderr_path)
     if (peak is not None and peak >= memory_bytes * 0.9) or "MemoryError" in tail:
         raise FloorPlanParseError("too_large", f"Reading the drawing needed more than {memory_mb} MiB of memory, "
@@ -251,6 +249,17 @@ def parse_dxf(dxf_path: str | os.PathLike, work_dir: str | os.PathLike, *, sourc
     # stderrTail is for the server log only; the API never returns it (it can hold local paths).
     raise FloorPlanParseError("parse_failed", "The drawing reader stopped unexpectedly.",
                               details={"seconds": seconds, "exitCode": process.returncode, "stderrTail": tail})
+
+
+_TOO_LARGE = ("too_large", "too_many_entities", "too_many_vertices", "too_many_layers")
+
+
+def worker_error(error: dict, details: dict) -> FloorPlanParseError:
+    """The API error for the worker's error.json ({code, message}): too big is 413, a reader that is not installed
+    is 503 (the server's fault, not the drawing's), anything else the drawing's own problem, 422."""
+    code = error["code"]
+    status = 413 if code in _TOO_LARGE else 503 if code == "reader_unavailable" else 422
+    return FloorPlanParseError(code[:64], error["message"][:500], status_code=status, details=details)
 
 
 def _tail(path: Path, limit: int = 2000) -> str:

@@ -13,6 +13,8 @@
         ? require('./facility_layout_ground.js') : root.InspectorProFacilityGround;
     const wallsRuntime = typeof module === 'object' && module.exports
         ? require('./facility_layout_walls.js') : root.InspectorProFacilityWalls;
+    const floorPlanRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_floor_plan.js') : root.InspectorProFacilityFloorPlan;
     const DEFAULT_VIEW_PADDING = 24;
     const DEFAULT_PLAN_GRID_SPACING = 1;
     const DEFAULT_PLAN_MAJOR_GRID_SPACING = 5;
@@ -1558,6 +1560,10 @@
         this.transientAislePreview = null;
         this.transientPatternPreview = null;
         this.lightCoverage = null;
+        this.floorPlanUnderlay = null;
+        this.floorPlanContent = null;
+        this.floorPlanHover = null;
+        this.floorPlanHoverNode = null;
         this.navigationAuthoringPreview = null;
         this.navigationPathsVisible = true;
         this.navigationMarker = null;
@@ -2428,6 +2434,7 @@
             floorSurfaceLayer.appendChild(polygon);
         });
         this.svg.appendChild(floorSurfaceLayer);
+        this._appendFloorPlanUnderlay();
 
         const zoneLayer = svgElement(this.document, 'g');
         zoneLayer.setAttribute('data-layer', 'zones');
@@ -3179,6 +3186,7 @@
         this._appendMotionOverlay();
         this._appendActivityOverlay();
         this._appendLightCoverageSpots();
+        this._appendFloorPlanMarkers();
         this.renderProjection = Object.freeze(Object.assign(
             {},
             this.projection
@@ -3210,6 +3218,7 @@
             }
         });
         updatePlanCardDetailLevels(this.svg, scale);
+        this._sizeFloorPlanMarkers(scale);
         this.renderCount += 1;
         return true;
     };
@@ -4120,6 +4129,171 @@
         return true;
     };
 
+    // The imported floor plan under the plan (static/facility_layout_floor_plan.js), or null: {key (what the drawn
+    // content depends on), reference (the underlay record: alignment, layers, opacity), geometry (the stored
+    // drawing), markers ([{x, z, label, kind}], picked alignment points), picking}. It is the workspace's; the plan
+    // only draws it, never hit-tests it. Zone fills are translucent, so the drawing shows through them.
+    TopPlanAdapter.prototype.setFloorPlanUnderlay = function (underlay) {
+        if (this.disposed) return false;
+        this.floorPlanUnderlay = underlay || null;
+        if (!this.floorPlanUnderlay) this.floorPlanContent = null;
+        if (!this.suspended) this._render();
+        return true;
+    };
+
+    // A strength being dragged on the slider, before it is saved: only the drawn layer's opacity changes.
+    TopPlanAdapter.prototype.setFloorPlanOpacity = function (opacity) {
+        if (this.disposed || !this.svg || !finite(opacity)) return false;
+        const layer = Array.prototype.find.call(this.svg.children || [], function (child) {
+            return child && typeof child.getAttribute === 'function'
+                && child.getAttribute('data-layer') === 'floor-plan';
+        });
+        if (!layer) return false;
+        layer.setAttribute('opacity', String(Math.min(1, Math.max(0.05, opacity))));
+        return true;
+    };
+
+    // Where the next pick would land while points are being picked ({x, z, snapped}), or null; moved in place, so
+    // following the pointer never rebuilds the plan.
+    TopPlanAdapter.prototype.setFloorPlanHover = function (point) {
+        if (this.disposed) return false;
+        this.floorPlanHover = point && finite(point.x) && finite(point.z)
+            ? { x: point.x, z: point.z, snapped: point.snapped === true } : null;
+        this._placeFloorPlanHover();
+        return true;
+    };
+
+    // The plan point (meters) under a pointer event, without snapping or ground checks: picks on the drawing may be
+    // outside the floor.
+    TopPlanAdapter.prototype.planPointAt = function (input) {
+        if (this.disposed || !this.layout) return null;
+        if (!this.projection) this.fit();
+        const planPoint = clientPlanPoint(input, this.svg, this.projection);
+        return planPoint ? unprojectTopPlanPoint(planPoint, this.projection) : null;
+    };
+
+    // Screen pixels per meter at the current zoom.
+    TopPlanAdapter.prototype.planScale = function () {
+        return this.projection && finite(this.projection.scale) ? this.projection.scale : null;
+    };
+
+    // Above the floor and its finishes, under zones, walls and equipment. The drawing is built once per content key
+    // and moved by one matrix, so panning, zooming or re-aligning it never rebuilds its paths.
+    TopPlanAdapter.prototype._appendFloorPlanUnderlay = function () {
+        const underlay = this.floorPlanUnderlay;
+        if (!underlay || !floorPlanRuntime || !underlay.reference || !underlay.geometry || !this.projection) return;
+        const matrix = floorPlanRuntime.screenMatrix(underlay.reference.alignment,
+            Array.isArray(underlay.geometry.origin) ? underlay.geometry.origin : [0, 0], this.projection);
+        if (!matrix) return;
+        let content = this.floorPlanContent;
+        if (!content || content.key !== underlay.key || content.geometry !== underlay.geometry) {
+            content = {
+                key: underlay.key,
+                geometry: underlay.geometry,
+                node: floorPlanRuntime.buildUnderlayContent(this.document, underlay.geometry, underlay.reference),
+            };
+            this.floorPlanContent = content;
+        }
+        const layer = svgElement(this.document, 'g');
+        setAttributes(layer, {
+            'data-layer': 'floor-plan',
+            'pointer-events': 'none',
+            'aria-hidden': 'true',
+            opacity: String(underlay.reference.opacity),
+        });
+        content.node.setAttribute('transform', 'matrix(' + matrix.join(' ') + ')');
+        layer.appendChild(content.node);
+        this.svg.appendChild(layer);
+    };
+
+    function floorPlanMarker(documentRef, marker, at) {
+        const group = svgElement(documentRef, 'g');
+        setAttributes(group, {
+            'data-floor-plan-marker': marker.label,
+            'data-floor-plan-at': at.x + ' ' + at.y,
+            transform: 'translate(' + at.x + ' ' + at.y + ')',
+        });
+        const color = marker.kind === 'drawing' ? '#ea580c' : '#2563eb';
+        const dot = svgElement(documentRef, 'circle');
+        setAttributes(dot, { r: 5, fill: color, stroke: '#ffffff', 'stroke-width': 2 });
+        const label = svgElement(documentRef, 'text');
+        setAttributes(label, {
+            x: 8, y: -8, 'font-size': 12, 'font-weight': 700, fill: color,
+            stroke: '#ffffff', 'stroke-width': 3, 'paint-order': 'stroke',
+        });
+        label.textContent = marker.label;
+        group.appendChild(dot);
+        group.appendChild(label);
+        return group;
+    }
+
+    // Picked alignment points (orange on the drawing, blue on the plan) and, while picking, the pointer's target.
+    // They keep their screen size while the view zooms (_sizeFloorPlanMarkers).
+    TopPlanAdapter.prototype._appendFloorPlanMarkers = function () {
+        this.floorPlanHoverNode = null;
+        const underlay = this.floorPlanUnderlay;
+        const markers = underlay && Array.isArray(underlay.markers) ? underlay.markers : [];
+        if (!underlay || !this.projection || (!markers.length && !underlay.picking)) return;
+        const layer = svgElement(this.document, 'g');
+        setAttributes(layer, { 'data-layer': 'floor-plan-markers', 'pointer-events': 'none', 'aria-hidden': 'true' });
+        markers.forEach(function (marker) {
+            if (!finite(marker.x) || !finite(marker.z)) return;
+            layer.appendChild(floorPlanMarker(this.document, marker, projectTopPlanPoint(marker, this.projection)));
+        }, this);
+        if (underlay.picking) {
+            const hover = svgElement(this.document, 'g');
+            setAttributes(hover, { 'data-floor-plan-hover': 'true', visibility: 'hidden' });
+            const ring = svgElement(this.document, 'circle');
+            setAttributes(ring, { r: 7, fill: 'none', stroke: '#ea580c', 'stroke-width': 2 });
+            const cross = svgElement(this.document, 'path');
+            setAttributes(cross, { d: 'M-11 0H11M0 -11V11', stroke: '#ea580c', 'stroke-width': 1 });
+            hover.appendChild(ring);
+            hover.appendChild(cross);
+            layer.appendChild(hover);
+            this.floorPlanHoverNode = hover;
+        }
+        this.svg.appendChild(layer);
+        this._placeFloorPlanHover();
+    };
+
+    TopPlanAdapter.prototype._floorPlanZoom = function () {
+        const current = this.projection;
+        const rendered = this.renderProjection;
+        const zoom = current && rendered && rendered.scale > 0 ? current.scale / rendered.scale : 1;
+        return finite(zoom) && zoom > 0 ? zoom : 1;
+    };
+
+    TopPlanAdapter.prototype._placeFloorPlanHover = function () {
+        const node = this.floorPlanHoverNode;
+        if (!node) return;
+        const point = this.floorPlanHover;
+        const rendered = this.renderProjection || this.projection;
+        if (!point || !rendered) {
+            node.setAttribute('visibility', 'hidden');
+            return;
+        }
+        const at = projectTopPlanPoint(point, rendered);
+        node.setAttribute('transform', 'translate(' + at.x + ' ' + at.y + ') scale(' + (1 / this._floorPlanZoom()) + ')');
+        node.setAttribute('data-snapped', point.snapped ? 'true' : 'false');
+        node.setAttribute('visibility', 'visible');
+    };
+
+    TopPlanAdapter.prototype._sizeFloorPlanMarkers = function (zoom) {
+        if (!this.svg || !this.floorPlanUnderlay) return;
+        const layer = Array.prototype.find.call(this.svg.children || [], function (child) {
+            return child && typeof child.getAttribute === 'function'
+                && child.getAttribute('data-layer') === 'floor-plan-markers';
+        });
+        if (!layer) return;
+        const shrink = finite(zoom) && zoom > 0 ? 1 / zoom : 1;
+        Array.prototype.forEach.call(layer.children || [], function (marker) {
+            const at = marker && typeof marker.getAttribute === 'function'
+                ? marker.getAttribute('data-floor-plan-at') : null;
+            if (at) marker.setAttribute('transform', 'translate(' + at + ') scale(' + shrink + ')');
+        });
+        this._placeFloorPlanHover();
+    };
+
     // Over the floor and what is drawn on it (zones, routes, markings: a car park's paint covers the whole lot) and
     // over walls where they cross the area; under the equipment that stands on the floor.
     TopPlanAdapter.prototype._appendLightCoverage = function () {
@@ -4636,6 +4810,10 @@
         this.activityPresentation = null;
         this.activitySnapshot = null;
         this.activityMarkers.clear();
+        this.floorPlanUnderlay = null;
+        this.floorPlanContent = null;
+        this.floorPlanHover = null;
+        this.floorPlanHoverNode = null;
     };
 
     function parseControllerArguments(layoutOrOptions, maybeOptions) {

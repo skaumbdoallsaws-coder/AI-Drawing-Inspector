@@ -11,6 +11,14 @@ const { performance } = require('node:perf_hooks');
 const { createHash } = require('node:crypto');
 const ROOT = path.resolve(__dirname, '..');
 const BASELINE = 'c476a2f'; // These three modules are unchanged through fb59e2c.
+// Ribbon commands added since the baseline: it cannot report them, so neither side's snapshot does.
+const COMMANDS_SINCE_BASELINE = ['floor-plan'];
+const withoutNewCommands = states => {
+    if (!states || typeof states !== 'object') return states;
+    const kept = { ...states };
+    COMMANDS_SINCE_BASELINE.forEach(command => { delete kept[command]; });
+    return kept;
+};
 const clone = value => JSON.parse(JSON.stringify(value));
 
 function testDocument() {
@@ -189,7 +197,7 @@ async function fixture(baseline = false, count = 2250, capture = false) {
         root: document.createElement('div'), session, layoutRuntime: runtime.editor,
         assetCatalog: catalog, threeAdapter: three, externalCommandSurface: true,
         onStateChange(state) { if (capture) events.push(captureValue(state)); },
-        onCommandStateChange(state) { if (capture) commands.push(captureValue(state)); },
+        onCommandStateChange(state) { if (capture) commands.push(captureValue(withoutNewCommands(state))); },
     });
     workspace.subscribeStructure(() => { if (capture) structureEvents.push(captureValue(workspace.structureSource())); });
     const top = workspace.topAdapter;
@@ -206,7 +214,8 @@ async function fixture(baseline = false, count = 2250, capture = false) {
             planLayout: top.layout, planSelection: [top.selection, Array.from(top.selections)],
             threeScene: three.scene, threeSelection: three.selection, threePreview: three.preview,
             status: workspace.statusText.textContent, busy: workspace.root.getAttribute('aria-busy'),
-            commands: workspace.commandStates, events, scenes, selections, structureEvents, commandEvents: commands };
+            commands: withoutNewCommands(workspace.commandStates), events, scenes, selections, structureEvents,
+            commandEvents: commands };
         return capture === 'digest' ? Object.fromEntries(Object.entries(value).map(([key, item]) =>
             [key, captureValue(item)])) : clone(value);
     }

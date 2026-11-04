@@ -5155,3 +5155,126 @@ select.ip-flw-site-input {
 .ip-flw-sage-shots[hidden] {
     display: none;
 }
+
+/* Floor-plan underlay (docs/facility-floor-plan-import-plan.md, section 6): import, units, alignment, layers. */
+.ip-flw-floor-plan-panel {
+    position: absolute;
+    z-index: 18;
+    top: 44px;
+    left: 14px;
+    width: 250px;
+    max-height: calc(100% - 96px);
+    overflow-y: auto;
+    padding: 9px 10px 10px;
+    border: 1px solid var(--ip-flw-border-strong);
+    border-radius: 6px;
+    color: var(--ip-flw-text);
+    background: color-mix(in srgb, var(--ip-flw-panel) 96%, transparent);
+    box-shadow: 0 5px 16px rgb(0 0 0 / 24%);
+    backdrop-filter: blur(8px);
+    font-size: 11px;
+}
+
+.ip-flw-floor-plan-panel[hidden] {
+    display: none;
+}
+
+.ip-flw-floor-plan-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.ip-flw-floor-plan-header .ip-flw-layer-panel-title {
+    margin-bottom: 0;
+}
+
+.ip-flw-floor-plan-close {
+    min-height: 22px;
+    padding: 0 8px;
+    border: 1px solid var(--ip-flw-border);
+    border-radius: 3px;
+    color: var(--ip-flw-text);
+    background: var(--ip-flw-panel-alt);
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.ip-flw-floor-plan-name {
+    margin-top: 7px;
+    overflow: hidden;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ip-flw-floor-plan-panel p {
+    margin: 6px 0 0;
+    line-height: 1.35;
+}
+
+.ip-flw-floor-plan-units,
+.ip-flw-floor-plan-note {
+    color: var(--ip-flw-text-muted);
+}
+
+.ip-flw-floor-plan-prompt {
+    color: var(--ip-flw-text);
+    font-weight: 700;
+}
+
+.ip-flw-floor-plan-warning {
+    color: #b45309;
+}
+
+.ip-flw-floor-plan-error {
+    color: #b91c1c;
+}
+
+.ip-flw-floor-plan-panel select,
+.ip-flw-floor-plan-panel input[type="number"] {
+    width: 100%;
+    min-height: 26px;
+    margin-top: 6px;
+    box-sizing: border-box;
+    font: inherit;
+}
+
+.ip-flw-floor-plan-layers {
+    max-height: 168px;
+    margin-top: 7px;
+    overflow-y: auto;
+}
+
+.ip-flw-floor-plan-opacity {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 7px;
+    color: var(--ip-flw-text-muted);
+}
+
+.ip-flw-floor-plan-opacity input {
+    flex: 1;
+    accent-color: var(--ip-flw-accent);
+}
+
+/* The drawing's ink follows the theme; the stroke and fill set in facility_layout_floor_plan.js are the fallback. */
+.ip-flw-root {
+    --ip-flw-floor-plan-ink: #475569;
+}
+
+html[data-theme="dark"] .ip-flw-root {
+    --ip-flw-floor-plan-ink: #cbd5e1;
+}
+
+.ip-flw-floor-plan-drawing {
+    stroke: var(--ip-flw-floor-plan-ink);
+}
+
+.ip-flw-floor-plan-drawing .ip-flw-floor-plan-labels {
+    fill: var(--ip-flw-floor-plan-ink);
+    stroke: none;
+}

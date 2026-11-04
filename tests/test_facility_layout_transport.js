@@ -1493,6 +1493,48 @@ test('generation selection and destination retain exact references without impli
     assert.ok(calls.every(call => !/\/apply|\/save/.test(call.url)));
 });
 
+test('sends a floor-plan DXF as it is and reaches its routes only by a well-formed import id', async () => {
+    const calls = [];
+    const transport = Transport.createHttpTransport({
+        siteId: 'site a',
+        layoutId: 'layout/one',
+        sessionId: 'session-fp',
+        fetch: async (url, init) => {
+            calls.push({ url, init });
+            return response(200, { ok: true });
+        },
+    });
+    const file = { name: 'Plant 2 (rev B) \u00e9.dxf', size: 1234 };
+    await transport.importFloorPlan(file);
+    const base = '/api/facility-layouts/site%20a/layout%2Fone/floor-plan-imports';
+    assert.strictEqual(calls[0].url, base);
+    assert.strictEqual(calls[0].init.method, 'POST');
+    assert.strictEqual(calls[0].init.body, file, 'the file itself, not JSON');
+    assert.strictEqual(calls[0].init.headers['Content-Type'], 'application/dxf');
+    assert.strictEqual(calls[0].init.headers['X-InspectorPro-Session'], 'session-fp');
+    assert.ok(/^[\x20-\x7e]+$/.test(calls[0].init.headers['X-Floor-Plan-Name']), 'an ASCII header');
+    assert.strictEqual(decodeURIComponent(calls[0].init.headers['X-Floor-Plan-Name']), file.name);
+    await assert.rejects(transport.importFloorPlan({ name: 'big.dxf', size: 25 * 1024 * 1024 + 1 }),
+        /larger than 25 MB/);
+    await assert.rejects(transport.importFloorPlan(null), /Choose a DXF file/);
+    assert.strictEqual(calls.length, 1, 'refused before sending');
+
+    const id = 'fpi-' + 'b'.repeat(32);
+    await transport.floorPlanGeometry(id);
+    const body = { distance: { a: { u: 0, v: 0 }, b: { u: 1, v: 0 }, meters: 2 } };
+    await transport.alignFloorPlan(id, body);
+    assert.strictEqual(calls[1].url, base + '/' + id + '/geometry');
+    assert.strictEqual(calls[1].init.method, 'GET');
+    assert.strictEqual(calls[2].url, base + '/' + id + '/alignment');
+    assert.strictEqual(calls[2].init.method, 'POST');
+    assert.deepStrictEqual(JSON.parse(calls[2].init.body), body);
+    ['../geometry', 'fpi-' + 'B'.repeat(32), 'fpi-' + 'b'.repeat(31), '', null].forEach(bad => {
+        assert.throws(() => transport.floorPlanGeometry(bad), TypeError, String(bad));
+        assert.throws(() => transport.alignFloorPlan(bad, body), TypeError, String(bad));
+    });
+    assert.strictEqual(calls.length, 3);
+});
+
 (async () => {
     let passed = 0;
     for (const item of tests) {

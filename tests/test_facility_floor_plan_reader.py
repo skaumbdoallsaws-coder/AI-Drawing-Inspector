@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -491,6 +492,29 @@ def test_worker_that_needs_more_memory_than_allowed_is_refused(tmp_path):
         worker.parse_dxf(big, folder, memory_mb=120)
     assert (caught.value.code, caught.value.status_code) == ("too_large", 413)
     assert not (folder / "geometry.json").exists()
+
+
+def test_a_reader_that_is_not_installed_says_so(tmp_path, monkeypatch):
+    path = fixtures.factory(tmp_path)
+    out = job_folder(tmp_path, "out")
+    monkeypatch.setitem(sys.modules, "ezdxf", None)  # as if ezdxf were not installed
+    with pytest.raises(reader.FloorPlanReadError) as caught:
+        reader.read_dxf(str(path))
+    assert caught.value.code == "reader_unavailable" and "ezdxf" in caught.value.message
+    assert reader.worker_main([str(path), str(out), "", ""]) == 3
+    error = json.loads((out / "error.json").read_text(encoding="utf-8"))
+    assert error["code"] == "reader_unavailable"
+    parsed = worker.worker_error(error, {"seconds": 0.1})
+    assert (parsed.code, parsed.status_code, parsed.details) == ("reader_unavailable", 503, {"seconds": 0.1})
+    assert worker.worker_error({"code": "too_many_layers", "message": "m"}, {}).status_code == 413
+    assert worker.worker_error({"code": "not_dxf", "message": "m"}, {}).status_code == 422
+
+
+def test_worker_never_imports_from_its_job_folder(tmp_path):
+    folder = job_folder(tmp_path)
+    (folder / "ezdxf.py").write_text("raise SystemExit(42)\n", encoding="ascii")  # would shadow the real library
+    result = worker.parse_dxf(fixtures.factory(tmp_path), folder)
+    assert result["manifest"]["units"]["metersPerUnit"] == 1.0
 
 
 def test_worker_that_cannot_start_says_so(tmp_path):

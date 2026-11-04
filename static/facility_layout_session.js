@@ -4704,6 +4704,52 @@
             return options.importDecalImage(file, requestOptions);
         }
 
+        // Floor-plan import: reading a DXF stores it for the site and changes no layout; the underlay itself is the
+        // reference record (extensions.facilityFloorPlanReferences), added, changed and removed as undoable edits.
+        function floorPlanCall(name) {
+            if (typeof options[name] !== 'function') throw new Error('Floor-plan import is unavailable.');
+            return options[name];
+        }
+
+        function assertNoFloorPlanPreview(action) {
+            if (generatedDraft || designProposalDraft || layoutProposal || placementAlternatives) {
+                throw new Error('Finish the active preview before ' + action + '.');
+            }
+        }
+
+        async function importFloorPlan(file, requestOptions) {
+            requireLoaded();
+            assertIdle();
+            assertNoFloorPlanPreview('importing a floor plan');
+            return floorPlanCall('importFloorPlan')(file, requestOptions);
+        }
+
+        async function floorPlanGeometry(importId, requestOptions) {
+            requireLoaded();
+            return floorPlanCall('floorPlanGeometry')(importId, requestOptions);
+        }
+
+        async function alignFloorPlan(importId, body, requestOptions) {
+            requireLoaded();
+            return floorPlanCall('alignFloorPlan')(importId, body, requestOptions);
+        }
+
+        async function upsertFloorPlanReference(reference) {
+            requireLoaded();
+            assertNoFloorPlanPreview('changing the floor plan');
+            return commitGesture('Floor plan underlay', [{
+                op: 'upsert_floor_plan_reference', reference: clone(object(reference, 'floor plan reference')),
+            }], 'preserve');
+        }
+
+        async function deleteFloorPlanReference(referenceId) {
+            requireLoaded();
+            assertNoFloorPlanPreview('removing the floor plan');
+            return commitGesture('Remove floor plan', [{
+                op: 'delete_floor_plan_reference', referenceId: nonEmptyString(referenceId, 'floor plan reference id'),
+            }], 'preserve');
+        }
+
         async function setPlanSettings(settings) {
             requireLoaded();
             const value = object(settings, 'plan settings');
@@ -5542,6 +5588,11 @@
             setPerimeterWalls: setPerimeterWalls,
             setDecals: setDecals,
             importDecalImage: importDecalImage,
+            importFloorPlan: importFloorPlan,
+            floorPlanGeometry: floorPlanGeometry,
+            alignFloorPlan: alignFloorPlan,
+            upsertFloorPlanReference: upsertFloorPlanReference,
+            deleteFloorPlanReference: deleteFloorPlanReference,
             clearLayout: clearLayout,
             deleteSelected: deleteSelected,
             lockSelected: function () { return setSelectedLocked(true); },

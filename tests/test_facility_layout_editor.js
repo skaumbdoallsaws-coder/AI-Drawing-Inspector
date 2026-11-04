@@ -2384,6 +2384,64 @@ check('top plan draws the lighting coverage over the floor and its markings, und
     adapter.dispose();
 });
 
+check('top plan draws an imported floor plan above the floor and under the zones, its picks on top', () => {
+    FakeResizeObserver.reset();
+    const floorPlan = require(path.join(ROOT, 'static', 'facility_layout_floor_plan.js'));
+    const { documentRef, host } = makeHost();
+    const adapter = facility.createTopPlanAdapter(host, {
+        document: documentRef,
+        ResizeObserver: FakeResizeObserver,
+        worldBounds: { minX: 0, minZ: 0, maxX: 40, maxZ: 30 },
+        getSize: () => ({ width: 900, height: 650 }),
+    });
+    adapter.setLayout(layout());
+    const geometry = { origin: [1000, 2000], entities: [
+        { id: 'e1', layer: 'L1', type: 'LINE', closed: false, points: [[0, 0], [10000, 0]] }] };
+    const reference = { importId: 'fpi-' + 'a'.repeat(32), geometrySha256: 'c'.repeat(64), opacity: 0.4,
+        layers: [{ layerId: 'L1', visible: true, role: 'reference' }],
+        alignment: { sourceOrigin: { u: 1000, v: 2000 }, metersPerDrawingUnit: 0.001, rotationDegrees: 0,
+            translationMeters: { x: 2, z: 3 } } };
+    const underlay = { key: floorPlan.contentKey(reference), reference, geometry, picking: true,
+        markers: [{ x: 2, z: 3, label: 'A', kind: 'drawing' }] };
+    assert.strictEqual(adapter.setFloorPlanUnderlay(underlay), true);
+    const layer = host.findByAttribute('data-layer', 'floor-plan')[0];
+    const order = layer.parentNode.children.map(child => child.getAttribute('data-layer'));
+    assert.ok(order.indexOf('floor-surfaces') < order.indexOf('floor-plan'), order.join());
+    assert.ok(order.indexOf('floor-plan') < order.indexOf('zones'), order.join());
+    assert.strictEqual(order[order.length - 1], 'floor-plan-markers', order.join());
+    assert.strictEqual(layer.getAttribute('pointer-events'), 'none');
+    assert.strictEqual(layer.getAttribute('opacity'), '0.4');
+    const content = layer.children[0];
+    assert.strictEqual(content.getAttribute('transform'), 'matrix('
+        + floorPlan.screenMatrix(reference.alignment, geometry.origin, adapter.projection).join(' ') + ')');
+    const projection = adapter.projection;
+    const at = { x: projection.offsetX + (2 - projection.minX) * projection.scale,
+        y: projection.offsetY + (projection.maxZ - 3) * projection.scale };
+    const marker = host.findByAttribute('data-floor-plan-marker', 'A')[0];
+    assert.strictEqual(marker.getAttribute('transform'), 'translate(' + at.x + ' ' + at.y + ')');
+    const hover = host.findByAttribute('data-floor-plan-hover', 'true')[0];
+    assert.strictEqual(hover.getAttribute('visibility'), 'hidden');
+    adapter.setFloorPlanHover({ x: 2, z: 3, snapped: true });
+    assert.deepStrictEqual([hover.getAttribute('visibility'), hover.getAttribute('data-snapped'),
+        hover.getAttribute('transform')], ['visible', 'true', 'translate(' + at.x + ' ' + at.y + ') scale(1)']);
+    // Zooming keeps the picks the same size on screen until the plan is drawn again.
+    assert.strictEqual(adapter.zoomAt({ clientX: at.x, clientY: at.y }, 2), true);
+    assert.strictEqual(marker.getAttribute('transform'), 'translate(' + at.x + ' ' + at.y + ') scale(0.5)');
+    assert.strictEqual(hover.getAttribute('transform'), 'translate(' + at.x + ' ' + at.y + ') scale(0.5)');
+    const picked = adapter.planPointAt({ clientX: at.x, clientY: at.y });
+    assert.ok(Math.abs(picked.x - 2) < 1e-9 && Math.abs(picked.z - 3) < 1e-9, JSON.stringify(picked));
+    assert.strictEqual(adapter.planScale(), projection.scale * 2);
+    adapter.setFloorPlanOpacity(0.8);
+    assert.strictEqual(layer.getAttribute('opacity'), '0.8');
+    // Drawn again (picks done): the drawing itself is not rebuilt.
+    adapter.setFloorPlanUnderlay(Object.assign({}, underlay, { markers: [], picking: false }));
+    assert.strictEqual(host.findByAttribute('data-layer', 'floor-plan')[0].children[0], content);
+    assert.strictEqual(host.findByAttribute('data-layer', 'floor-plan-markers').length, 0);
+    adapter.setFloorPlanUnderlay(null);
+    assert.strictEqual(host.findByAttribute('data-layer', 'floor-plan').length, 0);
+    adapter.dispose();
+});
+
 Promise.all(pendingChecks).then(() => {
     process.stdout.write(
         `${checks}/${checks} facility layout editor checks passed\n`

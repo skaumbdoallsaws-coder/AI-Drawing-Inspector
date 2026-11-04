@@ -175,6 +175,9 @@ def test_alignment_is_calculated_from_points_or_a_distance_and_not_saved(tmp_pat
         x, z = to_layout(alignment, control["source"]["u"], control["source"]["v"])
         assert (x, z) == pytest.approx((control["target"]["x"], control["target"]["z"]), abs=1e-6)
 
+    held = client.post(url, json={"controlPoints": controls[:2], "metersPerDrawingUnit": 0.002}).json()
+    assert held["scale"] == "held" and held["alignment"]["metersPerDrawingUnit"] == 0.002
+    assert held["scaleRatio"] == pytest.approx(0.5) and held["maxResidualMeters"] > 1
     free = client.post(url, json={"controlPoints": controls[:2], "scale": "fit"}).json()
     assert free["alignment"]["metersPerDrawingUnit"] == pytest.approx(0.001)
     assert free["scaleRatio"] == pytest.approx(1)
@@ -182,6 +185,10 @@ def test_alignment_is_calculated_from_points_or_a_distance_and_not_saved(tmp_pat
                                                    "meters": 30}}).json()
     assert distance["metersPerDrawingUnit"] == pytest.approx(0.001) and distance["scaleRatio"] == pytest.approx(1)
     for body in ({}, {"controlPoints": controls[:1]}, {"controlPoints": controls, "distance": {}},
+                 {"controlPoints": controls, "scale": "fit", "metersPerDrawingUnit": 0.001},
+                 {"controlPoints": controls, "metersPerDrawingUnit": 0},
+                 {"controlPoints": controls, "metersPerDrawingUnit": "0.001"},
+                 {"distance": {"a": {"u": 0, "v": 0}, "b": {"u": 1, "v": 0}, "meters": 3}, "scale": "fit"},
                  {"controlPoints": controls, "scale": "guess"}, {"controlPoints": "nope"},
                  {"distance": {"a": {"u": 0, "v": 0}, "b": {"u": 0, "v": 0}, "meters": 3}},
                  {"controlPoints": [{"source": {"u": 0, "v": 0}, "target": {"x": 0, "z": 0}, "extra": 1}] * 2}):

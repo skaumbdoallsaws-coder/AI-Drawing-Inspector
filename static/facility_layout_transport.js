@@ -587,6 +587,8 @@
         return result;
     }
 
+    const FLOOR_PLAN_MAX_BYTES = 25 * 1024 * 1024;
+
     function errorFromResponse(response, body) {
         const envelope = body && typeof body === 'object'
             ? (
@@ -691,6 +693,33 @@
             const result = await response.json().catch(function () { return {}; });
             if (!response.ok) throw errorFromResponse(response, result);
             return result;
+        }
+
+        // Floor-plan import (docs/facility-floor-plan-import-plan.md): the DXF goes up as it is, its display name
+        // percent-encoded in a header. A drawing the site already has comes back without being read again.
+        async function importFloorPlan(file, requestOptions) {
+            if (!file || typeof file.size !== 'number') throw new TypeError('Choose a DXF file.');
+            if (file.size > FLOOR_PLAN_MAX_BYTES) {
+                throw new TypeError('The drawing is larger than 25 MB, more than the import supports.');
+            }
+            const response = await fetchImpl(layoutUrl + '/floor-plan-imports', {
+                method: 'POST', cache: 'no-store', credentials: options.credentials || 'same-origin',
+                headers: Object.assign({}, headers, {
+                    'Content-Type': 'application/dxf',
+                    'X-InspectorPro-Session': sessionId,
+                    'X-Floor-Plan-Name': encodeURIComponent(String(file.name || 'drawing.dxf').slice(0, 240)),
+                }),
+                body: file, signal: requestOptions && requestOptions.signal,
+            });
+            const result = await response.json().catch(function () { return {}; });
+            if (!response.ok) throw errorFromResponse(response, result);
+            return result;
+        }
+
+        function floorPlanPath(importId, suffix) {
+            const id = String(importId || '');
+            if (!/^fpi-[a-f0-9]{32}$/.test(id)) throw new TypeError('A floor-plan import id is required.');
+            return '/floor-plan-imports/' + id + (suffix || '');
         }
 
         async function generationRequest(path, method, body, requestOptions) {
@@ -1370,6 +1399,14 @@
                 return request('', 'GET');
             },
             importDecalImage: importDecalImage,
+            importFloorPlan: importFloorPlan,
+            floorPlanGeometry: function (importId, requestOptions) {
+                return request(floorPlanPath(importId, '/geometry'), 'GET', undefined, requestOptions);
+            },
+            alignFloorPlan: function (importId, body, requestOptions) {
+                return request(floorPlanPath(importId, '/alignment'), 'POST', object(body, 'alignment request'),
+                    requestOptions);
+            },
             // Site context: the server fetches public USGS imagery and stores it per site.
             fetchSiteParcel: function (payload, requestOptions) {
                 const value = object(payload, 'site parcel request');

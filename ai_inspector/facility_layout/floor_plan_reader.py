@@ -636,7 +636,11 @@ def curve_tolerance(doc, units: dict) -> float:
 
 def read_dxf(path: str, *, limits: dict | None = None, source_sha256: str | None = None) -> dict:
     """The normalized geometry artifact of the DXF at PATH (see the module docstring). Raises FloorPlanReadError."""
-    import ezdxf
+    try:
+        import ezdxf
+    except ImportError:
+        raise FloorPlanReadError("reader_unavailable", "The DXF reader (ezdxf) is not installed for the Python that "
+                                 "runs the app. Install the app's requirements, then restart it.") from None
 
     limits = {**DEFAULT_LIMITS, **(limits or {})}
     size = os.path.getsize(path)
@@ -755,8 +759,10 @@ def read_dxf(path: str, *, limits: dict | None = None, source_sha256: str | None
         reader.warn("block_units", "Some blocks carry their own unit setting; their insert scales are used as stored "
                     "(the block unit is not applied a second time).")
     if units["status"] != "declared":
-        reader.warn("units_unresolved", f"The drawing's unit is {units['name']}: choose the unit or calibrate with a "
-                    "known distance before aligning it.")
+        said = ("The drawing does not say what unit it is drawn in" if units["name"] == "unitless"
+                else f"The drawing's unit ({units['name']}) is not a building unit")
+        reader.warn("units_unresolved", said + ": choose the unit or calibrate with a known distance before aligning "
+                    "it.")
     if not entities:
         reader.warn("empty", "The drawing has nothing the import can show in model space.")
     unsupported = [{"type": kind, "layer": layer_id, "reason": reason, "count": count}

@@ -1,0 +1,972 @@
+'use strict';
+
+// Floor-plan import, the Plan view side (docs/facility-floor-plan-import-plan.md, sections 5 and 6):
+// static/facility_layout_floor_plan.js. Run with: node tests/test_facility_layout_floor_plan.js
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.resolve(__dirname, '..');
+const floorPlan = require(path.join(ROOT, 'static', 'facility_layout_floor_plan.js'));
+const CASES = JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'tests', 'fixtures', 'facility_layout', 'floor_plan', 'alignment_cases.json'), 'utf8'));
+
+let checks = 0;
+const pending = [];
+function check(name, fn) {
+    const result = fn();
+    const done = () => {
+        checks += 1;
+        process.stdout.write(`PASS ${name}\n`);
+    };
+    if (result && typeof result.then === 'function') pending.push(result.then(done));
+    else done();
+}
+
+// A small DOM: enough for the panel (HTML) and the drawing (SVG).
+class Node {
+    constructor(documentRef, name) {
+        this.ownerDocument = documentRef;
+        this.nodeName = String(name).toUpperCase();
+        this.parentNode = null;
+        this.children = [];
+        this.attributes = {};
+        this.listeners = {};
+        this.className = '';
+        this.textContent = '';
+        this.hidden = false;
+        this.disabled = false;
+        this.checked = false;
+        this.value = '';
+        this.clicks = 0;
+    }
+
+    appendChild(child) {
+        if (child.parentNode) child.parentNode.removeChild(child);
+        child.parentNode = this;
+        this.children.push(child);
+        return child;
+    }
+
+    removeChild(child) {
+        const index = this.children.indexOf(child);
+        if (index >= 0) this.children.splice(index, 1);
+        child.parentNode = null;
+        return child;
+    }
+
+    get firstChild() {
+        return this.children[0] || null;
+    }
+
+    setAttribute(name, value) {
+        this.attributes[name] = String(value);
+        if (name === 'hidden') this.hidden = true;
+        if (name === 'disabled') this.disabled = true;
+    }
+
+    getAttribute(name) {
+        return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null;
+    }
+
+    hasAttribute(name) {
+        return Object.prototype.hasOwnProperty.call(this.attributes, name);
+    }
+
+    addEventListener(type, handler) {
+        (this.listeners[type] = this.listeners[type] || []).push(handler);
+    }
+
+    matches(selector) {
+        const match = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(selector);
+        if (!match) throw new Error('unsupported selector ' + selector);
+        return this.hasAttribute(match[1]) && (match[2] === undefined || this.getAttribute(match[1]) === match[2]);
+    }
+
+    closest(selector) {
+        for (let node = this; node; node = node.parentNode) if (node.matches(selector)) return node;
+        return null;
+    }
+
+    all() {
+        const out = [];
+        this.children.forEach(child => out.push(child, ...child.all()));
+        return out;
+    }
+
+    querySelector(selector) {
+        return this.all().find(node => node.matches(selector)) || null;
+    }
+
+    click() {
+        this.clicks += 1;
+    }
+
+    text() {
+        return [this.textContent].concat(this.children.map(child => child.text())).join(' ').replace(/\s+/g, ' ');
+    }
+}
+
+class FakeDocument {
+    createElement(name) { return new Node(this, name); }
+    createElementNS(namespace, name) {
+        assert.strictEqual(namespace, 'http://www.w3.org/2000/svg');
+        return new Node(this, name);
+    }
+}
+
+function fire(target, type) {
+    const event = { type, target, preventDefault() {} };
+    for (let node = target; node; node = node.parentNode) (node.listeners[type] || []).forEach(fn => fn(event));
+    return event;
+}
+
+function flush() {
+    return new Promise(resolve => setImmediate(resolve));
+}
+
+function near(actual, expected, tolerance, label) {
+    assert.ok(Math.abs(actual - expected) <= tolerance, `${label}: ${actual} != ${expected}`);
+}
+
+// A stored drawing as the server returns it: millimeters, its lowest corner at (1000, 2000).
+const ORIGIN = [1000, 2000];
+const MANIFEST = {
+    origin: ORIGIN,
+    units: { name: 'millimeters', metersPerUnit: 0.001 },
+    layers: [
+        { layerId: 'L0', name: '0', on: true, frozen: false, entities: 1, texts: 0 },
+        { layerId: 'L1', name: 'WALLS', on: true, frozen: false, entities: 2, texts: 0 },
+        { layerId: 'L2', name: 'TEXT', on: true, frozen: false, entities: 0, texts: 2 },
+        { layerId: 'L3', name: 'OFF', on: false, frozen: false, entities: 1, texts: 0 },
+        { layerId: 'L4', name: 'Defpoints', on: true, frozen: false, entities: 0, texts: 0 },
+    ],
+    warnings: [{ code: 'proxy_entities', message: 'Two proxy objects were left out.' }],
+};
+const GEOMETRY = Object.assign({}, MANIFEST, {
+    entities: [
+        { id: 'e1', layer: 'L1', type: 'LWPOLYLINE', closed: true,
+            points: [[0, 0], [10000, 0], [10000, 8000], [0, 8000]] },
+        { id: 'e2', layer: 'L1', type: 'LINE', closed: false, points: [[5000, 0], [5000, 8000]] },
+        { id: 'e3', layer: 'L0', type: 'LINE', closed: false, points: [[0, -500], [10000, -500]] },
+        { id: 'e4', layer: 'L3', type: 'LINE', closed: false, points: [[0, 0], [1, 1]] },
+        { id: 't1', layer: 'L2', type: 'TEXT', at: [2000, 3000], height: 250, rotation: 90, align: 'MIDDLE_CENTER',
+            mirrored: false, text: 'OFFICE' },
+        { id: 't2', layer: 'L2', type: 'MTEXT', at: [7000, 3000], height: 200, rotation: 0, align: 'TOP_LEFT',
+            mirrored: false, text: 'STORE\nROOM' },
+    ],
+});
+const RECORD = {
+    importId: 'fpi-' + 'a'.repeat(32), sourceSha256: 'b'.repeat(64), geometrySha256: 'c'.repeat(64),
+    parserVersion: 'ezdxf-1.4.5+a1', sourceName: 'Plant 2.dxf', bytes: 1234,
+};
+
+check('the browser transform matches every shared alignment case and inverts', () => {
+    assert.ok(CASES.cases.length >= 5);
+    CASES.cases.forEach(item => {
+        item.points.forEach(point => {
+            const layout = floorPlan.toLayout(item.alignment, point.drawing[0], point.drawing[1]);
+            near(layout.x, point.layout[0], CASES.tolerance, item.name + ' x');
+            near(layout.z, point.layout[1], CASES.tolerance, item.name + ' z');
+            const drawing = floorPlan.toDrawing(item.alignment, point.layout[0], point.layout[1]);
+            near(drawing.u, point.drawing[0], 1e-6, item.name + ' u');
+            near(drawing.v, point.drawing[1], 1e-6, item.name + ' v');
+        });
+    });
+});
+
+check('the screen matrix puts each stored point where the plan projects its layout point', () => {
+    const projection = { scale: 20, offsetX: 30, offsetY: 40, minX: -5, maxZ: 25 };
+    const alignment = { sourceOrigin: { u: 900, v: 1500 }, metersPerDrawingUnit: 0.001, rotationDegrees: 30,
+        translationMeters: { x: 2, z: 3 } };
+    const m = floorPlan.screenMatrix(alignment, ORIGIN, projection);
+    [[0, 0], [10000, 0], [10000, 8000], [-250, 4321]].forEach(([p, q]) => {
+        const layout = floorPlan.toLayout(alignment, p + ORIGIN[0], q + ORIGIN[1]);
+        near(m[0] * p + m[2] * q + m[4], projection.offsetX + (layout.x - projection.minX) * projection.scale, 1e-9,
+            'X of ' + p + ',' + q);
+        near(m[1] * p + m[3] * q + m[5], projection.offsetY + (projection.maxZ - layout.z) * projection.scale, 1e-9,
+            'Y of ' + p + ',' + q);
+    });
+    assert.strictEqual(floorPlan.screenMatrix(alignment, ORIGIN, null), null);
+    assert.strictEqual(floorPlan.screenMatrix(Object.assign({}, alignment, { metersPerDrawingUnit: NaN }), ORIGIN,
+        projection), null);
+});
+
+check('the drawing is one path per visible layer and labels that read upright', () => {
+    const reference = floorPlan.newReference(RECORD, MANIFEST);
+    const group = floorPlan.buildUnderlayContent(new FakeDocument(), GEOMETRY, reference);
+    const paths = group.all().filter(node => node.nodeName === 'PATH');
+    assert.deepStrictEqual(paths.map(node => node.getAttribute('data-floor-plan-layer')), ['L1', 'L0'],
+        'the layer the file turns off stays hidden');
+    assert.strictEqual(paths[0].getAttribute('d'), 'M0 0 10000 0 10000 8000 0 8000Z M5000 0 5000 8000');
+    assert.strictEqual(paths[0].getAttribute('vector-effect'), 'non-scaling-stroke');
+    const labels = group.all().filter(node => node.nodeName === 'TEXT');
+    assert.deepStrictEqual(labels.map(node => node.getAttribute('transform')),
+        ['translate(2000 3000) rotate(90) scale(1 -1)', 'translate(7000 3000) rotate(0) scale(1 -1)']);
+    assert.deepStrictEqual(labels.map(node => [node.getAttribute('text-anchor'),
+        node.getAttribute('dominant-baseline'), node.getAttribute('font-size')]),
+    [['middle', 'central', '250'], ['start', 'hanging', '200']]);
+    assert.strictEqual(labels[0].textContent, 'OFFICE');
+    assert.deepStrictEqual(labels[1].children.map(span => [span.textContent, span.getAttribute('dy')]),
+        [['STORE', '0em'], ['ROOM', '1.25em']]);
+    // Hiding a layer is a different drawing; moving or fading it is not.
+    const hidden = JSON.parse(JSON.stringify(reference));
+    hidden.layers[1].visible = false;
+    assert.notStrictEqual(floorPlan.contentKey(hidden), floorPlan.contentKey(reference));
+    const moved = JSON.parse(JSON.stringify(reference));
+    moved.alignment.translationMeters.x = 9;
+    moved.opacity = 0.2;
+    assert.strictEqual(floorPlan.contentKey(moved), floorPlan.contentKey(reference));
+    const shown = floorPlan.buildUnderlayContent(new FakeDocument(), GEOMETRY, hidden);
+    assert.deepStrictEqual(shown.all().filter(node => node.nodeName === 'PATH')
+        .map(node => node.getAttribute('data-floor-plan-layer')), ['L0']);
+});
+
+check('labels stop at the cap and say how many were left out', () => {
+    const entities = [];
+    for (let index = 0; index < floorPlan.MAX_LABELS + 5; index += 1) {
+        entities.push({ id: 't' + index, layer: 'L2', type: 'TEXT', at: [index, 0], height: 1, rotation: 0,
+            align: 'LEFT', mirrored: false, text: 'x' });
+    }
+    const group = floorPlan.buildUnderlayContent(new FakeDocument(), { origin: [0, 0], entities },
+        { layers: [] });
+    assert.strictEqual(group.getAttribute('data-floor-plan-labels'), String(floorPlan.MAX_LABELS));
+    assert.strictEqual(group.getAttribute('data-floor-plan-labels-skipped'), '5');
+});
+
+check('a label draws a few lines at most, and the drawing a bounded number in all', () => {
+    const long = Array.from({ length: 2048 }, (_, index) => 'line ' + index).join('\n');
+    const entities = [];
+    for (let index = 0; index < 1000; index += 1) {
+        entities.push({ id: 't' + index, layer: 'L2', type: 'MTEXT', at: [index, 0], height: 1, rotation: 0,
+            align: 'TOP_LEFT', mirrored: false, text: long });
+    }
+    const group = floorPlan.buildUnderlayContent(new FakeDocument(), { origin: [0, 0], entities }, { layers: [] });
+    const each = floorPlan.MAX_LINES_PER_LABEL;
+    const kept = Math.floor(floorPlan.MAX_LABEL_LINES / each);
+    assert.ok(kept < 1000, 'the line budget binds before the label cap');
+    assert.strictEqual(group.getAttribute('data-floor-plan-labels'), String(kept));
+    assert.strictEqual(group.getAttribute('data-floor-plan-label-lines'), String(kept * each));
+    assert.strictEqual(group.getAttribute('data-floor-plan-labels-skipped'), String(1000 - kept));
+    const spans = group.all().filter(node => node.nodeName === 'TSPAN');
+    assert.strictEqual(spans.length, kept * each);
+    const first = group.all().find(node => node.nodeName === 'TEXT');
+    assert.deepStrictEqual(first.children.map(span => span.textContent), ['line 0', 'line 1', 'line 2', 'line 3',
+        'line 4', 'line 5', 'line 6', 'line 7 ...']);
+    // A label exactly the per-label size keeps every line, with no mark.
+    const exact = Array.from({ length: each }, (_, index) => 'row ' + index).join('\n');
+    const one = floorPlan.buildUnderlayContent(new FakeDocument(), { origin: [0, 0], entities: [
+        { id: 'x', layer: 'L2', type: 'MTEXT', at: [0, 0], height: 1, rotation: 0, align: 'TOP_LEFT', text: exact }] },
+    { layers: [] });
+    assert.deepStrictEqual(one.all().filter(node => node.nodeName === 'TSPAN').map(span => span.textContent),
+        exact.split('\n'));
+});
+
+check('snapping finds the nearest vertex within the radius, like a full search', () => {
+    let seed = 7;
+    const random = () => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed / 2147483648;
+    };
+    const entities = [];
+    for (let line = 0; line < 400; line += 1) {
+        entities.push({ layer: 'L1', points: [[random() * 50000, random() * 30000], [random() * 50000,
+            random() * 30000]] });
+    }
+    entities.push({ layer: 'L1', points: [[60000, -2000], [60000.5, -2000]] });  // two points almost together
+    const index = floorPlan.createSnapIndex({ entities });
+    const all = entities.flatMap(entity => entity.points);
+    assert.strictEqual(index.count, all.length);
+    for (let query = 0; query < 300; query += 1) {
+        const u = random() * 64000 - 2000;
+        const v = random() * 36000 - 4000;
+        const radius = [50, 400, 2500][query % 3];
+        let best = null;
+        all.forEach(point => {
+            const distance = Math.hypot(point[0] - u, point[1] - v);
+            if (distance <= radius && (!best || distance < best.distance)) best = { distance };
+        });
+        const found = floorPlan.nearestVertex(index, u, v, radius);
+        if (!best) assert.strictEqual(found, null, `no vertex within ${radius} of ${u},${v}`);
+        else near(found.distance, best.distance, 1e-9, `nearest to ${u},${v}`);
+    }
+    const close = floorPlan.nearestVertex(index, 60000.4, -2000, 1);
+    assert.deepStrictEqual([close.u, close.v], [60000.5, -2000]);
+    near(close.distance, 0.1, 1e-9, 'the nearer of two points almost together');
+    assert.strictEqual(floorPlan.nearestVertex(floorPlan.createSnapIndex({ entities: [] }), 0, 0, 10), null);
+    // Hidden layers are not snapped to.
+    const shown = floorPlan.createSnapIndex(GEOMETRY, new Set(['L3']));
+    assert.strictEqual(shown.count, 8);
+    assert.deepStrictEqual(floorPlan.nearestVertex(shown, 1.2, 1.1, 5), { u: 0, v: 0, distance: Math.hypot(1.2, 1.1) });
+    assert.strictEqual(floorPlan.nearestVertex(index, NaN, 0, 10), null);
+    // A long thin drawing far zoomed out: the radius spans hundreds of cells and the answer is still exact.
+    const line = [];
+    for (let k = 0; k < 10000; k += 1) line.push([k * 0.01, 0]);
+    const thin = floorPlan.createSnapIndex({ entities: [{ layer: 'L1', points: line }] });
+    const above = floorPlan.nearestVertex(thin, 50, 5, 12);
+    near(above.u, 50, 1e-9, 'the vertex below');
+    assert.strictEqual(above.v, 0);
+    near(above.distance, 5, 1e-9, 'five meters above a vertex of a 100 m line');
+    assert.strictEqual(floorPlan.nearestVertex(thin, 50, 13, 12), null);
+    const beyond = floorPlan.nearestVertex(thin, 105, 3, 12);  // past the end and outside the grid
+    assert.deepStrictEqual([beyond.u, beyond.v], line[9999]);
+    for (let query = 0; query < 200; query += 1) {
+        const u = random() * 140 - 20;
+        const v = random() * 40 - 20;
+        const radius = [0.05, 3, 12, 40][query % 4];
+        let best = null;
+        line.forEach(point => {
+            const distance = Math.hypot(point[0] - u, point[1] - v);
+            if (distance <= radius && (!best || distance < best.distance)) best = { distance };
+        });
+        const found = floorPlan.nearestVertex(thin, u, v, radius);
+        if (!best) assert.strictEqual(found, null, `no vertex within ${radius} of ${u},${v}`);
+        else near(found.distance, best.distance, 1e-9, `nearest to ${u},${v} on the thin drawing`);
+    }
+});
+
+check('a new underlay keeps the declared unit, hides what the file hides and sits at the plan origin', () => {
+    const reference = floorPlan.newReference(RECORD, MANIFEST);
+    assert.deepStrictEqual(Object.keys(reference).sort(), ['alignment', 'geometrySha256', 'importId', 'label',
+        'layers', 'opacity', 'parserVersion', 'referenceId', 'showIn3D', 'sourceName', 'sourceSha256']);
+    assert.strictEqual(reference.label, 'Plant 2');
+    assert.deepStrictEqual(reference.alignment, { sourceOrigin: { u: 1000, v: 2000 }, metersPerDrawingUnit: 0.001,
+        rotationDegrees: 0, translationMeters: { x: 0, z: 0 }, unitSource: 'header', confirmed: true,
+        controlPoints: [] });
+    assert.deepStrictEqual(reference.layers.map(layer => [layer.layerId, layer.visible]),
+        [['L0', true], ['L1', true], ['L2', true], ['L3', false], ['L4', true]]);
+    const unitless = floorPlan.newReference(RECORD, Object.assign({}, MANIFEST, { units: { name: null,
+        metersPerUnit: null } }));
+    assert.deepStrictEqual([unitless.alignment.metersPerDrawingUnit, unitless.alignment.unitSource,
+        unitless.alignment.confirmed], [1, 'chosen', false]);
+});
+
+// The controller with a stand-in workspace: a session that records calls and keeps the layout, and a plan
+// adapter that records what it is asked to draw.
+function harness(options) {
+    const settings = options || {};
+    const documentRef = new FakeDocument();
+    const calls = [];
+    const adapter = {
+        underlays: [], hovers: [], opacities: [],
+        setFloorPlanUnderlay(value) { this.underlays.push(value); },
+        setFloorPlanHover(value) { this.hovers.push(value); },
+        setFloorPlanOpacity(value) { this.opacities.push(value); },
+        planPointAt(event) { return { x: event.worldX, z: event.worldZ }; },
+        planScale() { return 20; },
+    };
+    const workspace = {
+        document: documentRef,
+        viewportStack: documentRef.createElement('div'),
+        topAdapter: adapter,
+        viewMode: 'plan',
+        state: { layout: { extensions: {} } },
+        _eventWorld(event) {
+            return { x: Math.round(event.worldX), y: 0, z: Math.round(event.worldZ) };
+        },
+    };
+    let controller = null;
+    const keep = function (reference) {
+        const layout = { extensions: {} };
+        if (reference) layout.extensions[floorPlan.KEY] = { version: 1, references: [reference] };
+        workspace.state = { layout };
+        controller.sync(layout);
+    };
+    workspace.session = {
+        async importFloorPlan(file) {
+            calls.push(['import', file.name]);
+            if (settings.importGate) await settings.importGate;
+            return { import: RECORD, manifest: settings.manifest || MANIFEST, reused: false };
+        },
+        async floorPlanGeometry(importId) {
+            calls.push(['geometry', importId]);
+            if (settings.missing) throw new Error('not found');
+            return settings.geometry || GEOMETRY;
+        },
+        async alignFloorPlan(importId, body) {
+            calls.push(['align', importId, JSON.parse(JSON.stringify(body))]);
+            if (settings.alignGate) await settings.alignGate;
+            return settings.alignResponse(body);
+        },
+        async upsertFloorPlanReference(reference) {
+            calls.push(['upsert', JSON.parse(JSON.stringify(reference))]);
+            keep(JSON.parse(JSON.stringify(reference)));
+        },
+        async deleteFloorPlanReference(referenceId) {
+            calls.push(['delete', referenceId]);
+            keep(null);
+        },
+    };
+    controller = floorPlan.attach(workspace);
+    return { controller, workspace, adapter, calls, keep, panel: () => controller.panel, documentRef };
+}
+
+function button(h, action) {
+    const node = h.panel().querySelector('[data-fp-action="' + action + '"]');
+    assert.ok(node, 'no ' + action + ' button in: ' + h.panel().text());
+    return node;
+}
+
+async function importDrawing(h) {
+    h.controller.open();
+    const input = h.panel().querySelector('[data-fp-file]');
+    input.files = [{ name: 'Plant 2.dxf', size: 1234 }];
+    fire(input, 'change');
+    await flush();
+    await flush();
+}
+
+check('importing shows the drawing as a draft; cancel changes nothing', async () => {
+    const h = harness();
+    h.controller.sync(h.workspace.state.layout);
+    assert.deepStrictEqual(h.adapter.underlays, [], 'nothing to draw, nothing redrawn');
+    h.controller.open();
+    assert.ok(/Import DXF/.test(h.panel().text()));
+    fire(button(h, 'choose'), 'click');
+    assert.strictEqual(h.panel().querySelector('[data-fp-file]').clicks, 1);
+    await importDrawing(h);
+    assert.deepStrictEqual(h.calls.map(call => call[0]), ['import', 'geometry']);
+    const shown = h.adapter.underlays[h.adapter.underlays.length - 1];
+    assert.strictEqual(shown.reference.importId, RECORD.importId);
+    assert.strictEqual(shown.geometry, GEOMETRY);
+    assert.strictEqual(shown.key, floorPlan.contentKey(shown.reference));
+    const text = h.panel().text();
+    assert.ok(/Plant 2\.dxf/.test(text) && /millimeters \(from the file\)/.test(text), text);
+    assert.ok(/Two proxy objects were left out/.test(text), text);
+    assert.ok(/WALLS \(2\)/.test(text) && /OFF \(1\)/.test(text), text);
+    fire(button(h, 'cancel-draft'), 'click');
+    assert.strictEqual(h.adapter.underlays[h.adapter.underlays.length - 1], null);
+    assert.strictEqual(h.panel().hidden, true);
+    assert.ok(!h.calls.some(call => call[0] === 'upsert'), 'cancel saves nothing');
+});
+
+check('adding saves the reference once; layers, strength and removal are edits of it', async () => {
+    const h = harness();
+    await importDrawing(h);
+    fire(button(h, 'add'), 'click');
+    await flush();
+    const upserts = h.calls.filter(call => call[0] === 'upsert');
+    assert.strictEqual(upserts.length, 1);
+    assert.deepStrictEqual(upserts[0][1], floorPlan.newReference(RECORD, MANIFEST));
+    assert.ok(/Undo removes it again/.test(h.panel().text()));
+    // A layer turned off. Layers that draw nothing are not listed.
+    assert.strictEqual(h.panel().querySelector('[data-fp-layer="L4"]'), null);
+    assert.ok(h.panel().querySelector('[data-fp-layer="L3"]'), 'a layer off in the file is listed, unticked');
+    const walls = h.panel().querySelector('[data-fp-layer="L1"]');
+    assert.strictEqual(walls.checked, true);
+    walls.checked = false;
+    fire(walls, 'change');
+    await flush();
+    const hidden = h.calls[h.calls.length - 1];
+    assert.strictEqual(hidden[0], 'upsert');
+    assert.deepStrictEqual(hidden[1].layers.map(layer => layer.visible), [true, false, true, false, true]);
+    // Dragging the strength fades the drawing at once; letting go saves it.
+    const slider = h.panel().querySelector('[data-fp-opacity]');
+    slider.value = '35';
+    fire(slider, 'input');
+    assert.deepStrictEqual(h.adapter.opacities, [0.35]);
+    fire(slider, 'change');
+    await flush();
+    assert.strictEqual(h.calls[h.calls.length - 1][1].opacity, 0.35);
+    // Hidden for now: nothing drawn, nothing saved.
+    const before = h.calls.length;
+    const show = h.panel().querySelector('[data-fp-show]');
+    show.checked = false;
+    fire(show, 'change');
+    assert.strictEqual(h.adapter.underlays[h.adapter.underlays.length - 1], null);
+    const again = h.panel().querySelector('[data-fp-show]');
+    assert.strictEqual(again.checked, false);
+    again.checked = true;
+    fire(again, 'change');
+    assert.strictEqual(h.adapter.underlays[h.adapter.underlays.length - 1].reference.opacity, 0.35);
+    assert.strictEqual(h.calls.length, before);
+    fire(button(h, 'remove'), 'click');
+    await flush();
+    assert.deepStrictEqual(h.calls[h.calls.length - 1], ['delete', 'fp-main']);
+    assert.strictEqual(h.adapter.underlays[h.adapter.underlays.length - 1], null);
+});
+
+check('two picks on the drawing and two on the plan align it, holding a confirmed unit', async () => {
+    const response = { alignment: { sourceOrigin: { u: 1000, v: 2000 }, metersPerDrawingUnit: 0.001,
+        rotationDegrees: 0, translationMeters: { x: 5, z: 6 } }, scale: 'held', residualsMeters: [0, 0],
+    rmsMeters: 0, maxResidualMeters: 0, impliedMetersPerDrawingUnit: 0.001, scaleRatio: 1 };
+    const h = harness({ alignResponse: () => response });
+    await importDrawing(h);
+    fire(button(h, 'add'), 'click');
+    await flush();
+    fire(button(h, 'align'), 'click');
+    assert.ok(/Click point A on the drawing/.test(h.panel().text()));
+    assert.strictEqual(h.controller.handlePointerDown({ button: 1, worldX: 0, worldZ: 0 }), false,
+        'the middle button still pans');
+    h.controller.handlePointerMove({ worldX: 0.1, worldZ: 0.05 });
+    assert.deepStrictEqual(h.adapter.hovers[h.adapter.hovers.length - 1], { x: 0, z: 0, snapped: true });
+    // 12 px at 20 px/m is 0.6 m: (0.1, 0.05) snaps to the corner at drawing (1000, 2000), plan (0, 0).
+    assert.strictEqual(h.controller.handlePointerDown({ button: 0, worldX: 0.1, worldZ: 0.05 }), true);
+    let drawn = h.adapter.underlays[h.adapter.underlays.length - 1];
+    assert.deepStrictEqual(drawn.markers, [{ x: 0, z: 0, label: 'A', kind: 'drawing' }]);
+    assert.strictEqual(drawn.picking, true);
+    h.controller.handlePointerDown({ button: 0, worldX: 4.8, worldZ: 6.2 });  // the plan's own snap: (5, 6)
+    h.controller.handlePointerDown({ button: 0, worldX: 10.2, worldZ: 0.1 });  // snaps to drawing (11000, 2000)
+    h.controller.handlePointerDown({ button: 0, worldX: 15, worldZ: 6 });
+    await flush();
+    const align = h.calls.find(call => call[0] === 'align');
+    assert.deepStrictEqual(align[2], { controlPoints: [
+        { source: { u: 1000, v: 2000 }, target: { x: 5, z: 6 } },
+        { source: { u: 11000, v: 2000 }, target: { x: 15, z: 6 } },
+    ], metersPerDrawingUnit: 0.001 });
+    drawn = h.adapter.underlays[h.adapter.underlays.length - 1];
+    assert.deepStrictEqual(drawn.markers.map(marker => marker.label), ['A', 'A\'', 'B', 'B\'']);
+    assert.ok(/Points off by up to 0 m/.test(h.panel().text()), h.panel().text());
+    fire(button(h, 'apply-alignment'), 'click');
+    await flush();
+    const saved = h.calls[h.calls.length - 1];
+    assert.strictEqual(saved[0], 'upsert');
+    assert.deepStrictEqual(saved[1].alignment, { sourceOrigin: { u: 1000, v: 2000 }, metersPerDrawingUnit: 0.001,
+        rotationDegrees: 0, translationMeters: { x: 5, z: 6 }, unitSource: 'header', confirmed: true,
+        controlPoints: align[2].controlPoints });
+    assert.deepStrictEqual(h.adapter.underlays[h.adapter.underlays.length - 1].markers, []);
+});
+
+check('a drawing without a unit is scaled from a known length, or by choosing the unit', async () => {
+    const manifest = Object.assign({}, MANIFEST, { units: { name: null, metersPerUnit: null } });
+    const geometry = Object.assign({}, GEOMETRY, { units: manifest.units });
+    const h = harness({ manifest, geometry, alignResponse: body => ({ metersPerDrawingUnit:
+        body.distance.meters / Math.hypot(body.distance.b.u - body.distance.a.u, body.distance.b.v - body.distance.a.v)
+    }) });
+    await importDrawing(h);
+    assert.ok(/does not say what unit/.test(h.panel().text()));
+    fire(button(h, 'measure'), 'click');
+    // Unconfirmed, the drawing is shown at 1 m per unit: drawing (1000, 2000) and (11000, 2000) are at x 0 and
+    // 10000. 12 px at 20 px/m is 0.6 m, so 0.6 units.
+    h.controller.handlePointerDown({ button: 0, worldX: 0.1, worldZ: 0.05 });
+    h.controller.handlePointerDown({ button: 0, worldX: 9999.8, worldZ: -0.3 });
+    assert.deepStrictEqual(h.adapter.underlays[h.adapter.underlays.length - 1].markers.map(marker => marker.label),
+        ['A', 'B']);
+    assert.ok(/Drawing length: 10000 units/.test(h.panel().text()), h.panel().text());
+    h.panel().querySelector('[data-fp-distance]').value = '12';
+    fire(button(h, 'apply-distance'), 'click');
+    await flush();
+    await flush();
+    assert.deepStrictEqual(h.calls.find(call => call[0] === 'align')[2], { distance: {
+        a: { u: 1000, v: 2000 }, b: { u: 11000, v: 2000 }, meters: 12 } });
+    let draft = h.controller.currentReference();
+    assert.deepStrictEqual([draft.alignment.metersPerDrawingUnit, draft.alignment.unitSource,
+        draft.alignment.confirmed], [0.0012, 'calibrated', true]);
+    assert.ok(!h.calls.some(call => call[0] === 'upsert'), 'a draft is changed in place, not saved');
+    // Choosing the unit instead.
+    const h2 = harness({ manifest, geometry });
+    await importDrawing(h2);
+    const select = h2.panel().querySelector('[data-fp-unit]');
+    select.value = 'feet';
+    fire(select, 'change');
+    draft = h2.controller.currentReference();
+    assert.deepStrictEqual([draft.alignment.metersPerDrawingUnit, draft.alignment.unitSource,
+        draft.alignment.confirmed], [0.3048, 'chosen', true]);
+});
+
+check('an underlay whose drawing is not stored says so and draws nothing', async () => {
+    const h = harness({ missing: true });
+    h.keep(floorPlan.newReference(RECORD, MANIFEST));
+    await flush();
+    await flush();
+    assert.ok(!h.adapter.underlays.some(Boolean));
+    h.controller.open();
+    await flush();
+    await flush();
+    assert.ok(/not stored here/.test(h.panel().text()), h.panel().text());
+    assert.strictEqual(button(h, 'align').disabled, true);
+});
+
+check('closing while a drawing is read drops it; a length being typed survives unrelated updates', async () => {
+    let release;
+    const h = harness({ importGate: new Promise(resolve => { release = resolve; }),
+        alignResponse: () => ({ metersPerDrawingUnit: 0.001 }) });
+    h.controller.open();
+    const input = h.panel().querySelector('[data-fp-file]');
+    input.files = [{ name: 'Plant 2.dxf', size: 1234 }];
+    fire(input, 'change');
+    assert.ok(/Reading Plant 2\.dxf/.test(h.panel().text()));
+    fire(button(h, 'close'), 'click');  // allowed while busy
+    release();
+    await flush();
+    await flush();
+    assert.strictEqual(h.controller.draft, null);
+    assert.ok(!h.adapter.underlays.some(Boolean), 'nothing is drawn');
+    h.controller.open();
+    assert.ok(/Import DXF/.test(h.panel().text()), 'the panel is ready for another file');
+    assert.strictEqual(button(h, 'choose').disabled, false);
+    // A saved underlay, a length measured, a value half typed, then an update that changes no underlay.
+    h.keep(floorPlan.newReference(RECORD, MANIFEST));
+    await flush();
+    await flush();
+    fire(button(h, 'measure'), 'click');
+    h.controller.handlePointerDown({ button: 0, worldX: 0.01, worldZ: 0 });
+    h.controller.handlePointerDown({ button: 0, worldX: 9.99, worldZ: 0 });
+    const length = h.panel().querySelector('[data-fp-distance]');
+    length.value = '1';
+    fire(length, 'input');
+    h.controller.sync(h.workspace.state.layout);
+    assert.strictEqual(h.panel().querySelector('[data-fp-distance]'), length, 'not drawn again');
+    h.controller.render();
+    assert.strictEqual(h.panel().querySelector('[data-fp-distance]').value, '1', 'kept when it is');
+});
+
+check('a preview without an underlay hides the saved one; picks wait for the Plan view', async () => {
+    const h = harness();
+    h.keep(floorPlan.newReference(RECORD, MANIFEST));
+    await flush();
+    await flush();
+    assert.ok(h.adapter.underlays[h.adapter.underlays.length - 1]);
+    h.controller.sync({ extensions: {} });  // a candidate layout without the underlay
+    assert.strictEqual(h.adapter.underlays[h.adapter.underlays.length - 1], null);
+    h.controller.sync(h.workspace.state.layout);
+    h.workspace.viewMode = '3d';
+    h.controller.open();
+    fire(button(h, 'align'), 'click');
+    assert.ok(/Switch to the Plan view/.test(h.panel().text()));
+    assert.strictEqual(h.controller.handlePointerDown({ button: 0, worldX: 0, worldZ: 0 }), false);
+});
+
+// A held alignment answer: the drawing moved 5 m along x and 6 m along z.
+const HELD = { alignment: { sourceOrigin: { u: 1000, v: 2000 }, metersPerDrawingUnit: 0.001, rotationDegrees: 0,
+    translationMeters: { x: 5, z: 6 } }, scale: 'held', residualsMeters: [0, 0], rmsMeters: 0, maxResidualMeters: 0,
+impliedMetersPerDrawingUnit: 0.001, scaleRatio: 1 };
+
+function pickAll(h, picks) {
+    picks.forEach(([x, z, at]) => h.controller.handlePointerDown({ button: 0, worldX: x, worldZ: z,
+        timeStamp: at }));
+}
+
+async function measured(h) {
+    h.keep(floorPlan.newReference(RECORD, MANIFEST));
+    await flush();
+    await flush();
+    h.controller.open();
+    fire(button(h, 'measure'), 'click');
+    pickAll(h, [[0.01, 0], [9.99, 0]]);
+    h.panel().querySelector('[data-fp-distance]').value = '12';
+    fire(button(h, 'apply-distance'), 'click');
+}
+
+check('an undo while the scale is worked out drops the answer: it never puts the underlay back', async () => {
+    let release;
+    const h = harness({ alignGate: new Promise(resolve => { release = resolve; }),
+        alignResponse: () => ({ metersPerDrawingUnit: 0.0012 }) });
+    await measured(h);
+    assert.strictEqual(h.controller.busy, true);
+    h.keep(null);  // Undo of adding the underlay, while the scale is worked out
+    release();
+    await flush();
+    await flush();
+    assert.ok(!h.calls.some(call => call[0] === 'upsert'), 'the answer does not put the underlay back');
+    assert.strictEqual(h.controller.busy, false);
+    assert.strictEqual(h.controller.result, null);
+    assert.ok(/changed while the scale was worked out/.test(h.panel().text()), h.panel().text());
+});
+
+check('an alignment worked out for one drawing is dropped when an undo brings back another', async () => {
+    const h = harness({ alignResponse: () => HELD });
+    const first = floorPlan.newReference(RECORD, MANIFEST);
+    const second = Object.assign(JSON.parse(JSON.stringify(first)), { importId: 'fpi-' + 'd'.repeat(32) });
+    h.keep(second);
+    await flush();
+    await flush();
+    h.controller.open();
+    fire(button(h, 'align'), 'click');
+    pickAll(h, [[0.1, 0.05], [5, 6], [10.2, 0.1], [15, 6]]);
+    await flush();
+    assert.ok(h.panel().querySelector('[data-fp-action="apply-alignment"]'));
+    // Showing or hiding a layer keeps the result.
+    const layerOff = JSON.parse(JSON.stringify(second));
+    layerOff.layers[1].visible = false;
+    h.keep(layerOff);
+    assert.ok(h.panel().querySelector('[data-fp-action="apply-alignment"]'), 'kept over a layer change');
+    h.keep(first);  // Undo of the replacement brings the first drawing back
+    assert.strictEqual(h.panel().querySelector('[data-fp-action="apply-alignment"]'), null);
+    assert.strictEqual(h.controller.result, null);
+    assert.ok(/points picked on it were dropped/.test(h.panel().text()), h.panel().text());
+    h.controller.applyAlignment();
+    assert.ok(!h.calls.some(call => call[0] === 'upsert'), 'nothing is applied to the other drawing');
+});
+
+check('a workspace going away drops answers still on their way', async () => {
+    let release;
+    const h = harness({ alignGate: new Promise(resolve => { release = resolve; }),
+        alignResponse: () => ({ metersPerDrawingUnit: 0.0012 }) });
+    await measured(h);
+    const drawn = h.adapter.underlays.length;
+    h.controller.dispose();
+    assert.strictEqual(h.controller.panel, null);
+    release();
+    await flush();
+    await flush();
+    assert.ok(!h.calls.some(call => call[0] === 'upsert'), 'nothing is saved after');
+    assert.strictEqual(h.adapter.underlays.length, drawn, 'nothing is drawn after');
+});
+
+check('a preview shows its own underlay, never the draft, and holds the picks', async () => {
+    const h = harness();
+    await importDrawing(h);  // a draft, not yet added
+    assert.strictEqual(h.adapter.underlays[h.adapter.underlays.length - 1].reference.importId, RECORD.importId);
+    fire(button(h, 'align'), 'click');
+    pickAll(h, [[0.1, 0.05]]);
+    h.controller.sync({ extensions: {} }, { preview: true });  // a candidate without an underlay
+    assert.strictEqual(h.adapter.underlays[h.adapter.underlays.length - 1], null, 'the draft is not drawn under it');
+    assert.strictEqual(h.controller.picking, null);
+    assert.ok(/A preview is showing/.test(h.panel().text()), h.panel().text());
+    fire(button(h, 'align'), 'click');
+    assert.ok(/Close it to pick points/.test(h.panel().text()), h.panel().text());
+    assert.strictEqual(h.controller.picking, null);
+    h.controller.sync(h.workspace.state.layout);  // the preview closed
+    assert.strictEqual(h.adapter.underlays[h.adapter.underlays.length - 1].reference.importId, RECORD.importId,
+        'the draft shows again');
+    assert.ok(h.controller.draft, 'and is still there to add');
+});
+
+function toolHarness(options) {
+    const h = harness(options);
+    h.modes = [];
+    h.toolOptions = [];
+    h.workspace.toolMode = 'polygon-zone';
+    h.workspace._setToolMode = function (mode, options) {
+        h.modes.push(mode);
+        h.toolOptions.push(options);
+        this.toolMode = mode;
+    };
+    return h;
+}
+
+async function keptAndOpen(h) {
+    h.keep(floorPlan.newReference(RECORD, MANIFEST));
+    await flush();
+    await flush();
+    h.controller.open();
+}
+
+check('picks set the drawing tool aside and own the clicks of their presses, however long held', async () => {
+    const h = toolHarness({ alignResponse: () => HELD });
+    await keptAndOpen(h);
+    fire(button(h, 'align'), 'click');
+    assert.deepStrictEqual(h.modes, ['select']);
+    assert.strictEqual(h.controller.ownsClick({ detail: 1 }), true, 'while picking');
+    pickAll(h, [[0.1, 0.05], [5, 6], [10.2, 0.1], [15, 6]]);
+    assert.deepStrictEqual(h.modes, ['select', 'polygon-zone'], 'given back after the last pick');
+    assert.deepStrictEqual(h.toolOptions, [{ keepPicks: true }, { keepPicks: true }],
+        'setting the tool aside and giving it back are the picks\' own switches, not a tool chosen');
+    // The last press, held as long as you like: the click that ends it is the pick's.
+    assert.strictEqual(h.controller.ownsClick({ detail: 1 }), true, 'the click that ends the last press');
+    // A double click on the last point: its second press is the picks' too (the tool given back never sees it), and
+    // so are its clicks. It picks nothing.
+    h.controller.forgetPress();
+    assert.strictEqual(h.controller.handlePointerDown({ button: 0, worldX: 15, worldZ: 6 }), true);
+    assert.strictEqual(h.controller.picking, null, 'no new pick');
+    assert.strictEqual(h.controller.ownsClick({ detail: 2 }), true, 'the second click of a double click on it');
+    assert.strictEqual(h.controller.ownsDoubleClick({}), true, 'and the double click');
+    // A new click straight after is the tool's.
+    h.controller.forgetPress();
+    h.controller.handlePointerDown({ button: 0, worldX: 3, worldZ: 3 });
+    assert.strictEqual(h.controller.ownsClick({ detail: 1 }), false, 'a new click is the tool one');
+    assert.strictEqual(h.controller.ownsDoubleClick({}), false);
+    await flush();
+    fire(button(h, 'cancel-pick'), 'click');  // the result discarded
+    // A tool the user chose while picking is left alone.
+    h.workspace.toolMode = 'polygon-zone';
+    fire(button(h, 'align'), 'click');
+    h.workspace.toolMode = 'aisle';
+    fire(button(h, 'cancel-pick'), 'click');
+    assert.deepStrictEqual(h.modes, ['select', 'polygon-zone', 'select']);
+    assert.strictEqual(h.workspace.toolMode, 'aisle');
+});
+
+check('picks do not begin while a tool that runs its own panel, or a light area, is drawing', async () => {
+    for (const [mode, name] of [['motion-path', 'Motion path'], ['aisle', 'Aisle'], ['floor-marking', 'Floor marking']]) {
+        const h = toolHarness();
+        h.workspace.toolMode = mode;
+        await keptAndOpen(h);
+        fire(button(h, 'measure'), 'click');
+        assert.strictEqual(h.controller.picking, null, mode);
+        assert.deepStrictEqual(h.modes, [], mode + ' is left as it is');
+        assert.ok(h.panel().text().includes('Choose Select first. The ' + name + ' tool is using the clicks on the '
+            + 'plan.'), h.panel().text());
+    }
+    const lit = toolHarness();
+    lit.workspace.toolMode = 'select';
+    lit.workspace.lightAreaDraw = { kind: 'light-area' };
+    await keptAndOpen(lit);
+    fire(button(lit, 'align'), 'click');
+    assert.strictEqual(lit.controller.picking, null);
+    assert.ok(/Finish drawing the light area first/.test(lit.panel().text()), lit.panel().text());
+});
+
+check('while picking, a press of another button picks nothing and reaches no tool; the middle one pans', async () => {
+    const h = toolHarness();
+    await keptAndOpen(h);
+    fire(button(h, 'measure'), 'click');
+    assert.strictEqual(h.controller.handlePointerDown({ button: 2, worldX: 1, worldZ: 1 }), true, 'right');
+    assert.strictEqual(h.controller.ownsClick({ detail: 1 }), true, 'and whatever click it ends in');
+    assert.strictEqual(h.controller.handlePointerDown({ button: 1, worldX: 1, worldZ: 1 }), false, 'middle pans');
+    assert.strictEqual(h.controller.picking.points.length, 0);
+    pickAll(h, [[0.01, 0]]);
+    assert.strictEqual(h.controller.picking.points.length, 1);
+    fire(button(h, 'cancel-pick'), 'click');
+});
+
+check('a tool chosen right after the last pick takes the next press there', async () => {
+    const h = toolHarness({ alignResponse: () => HELD });
+    await keptAndOpen(h);
+    fire(button(h, 'align'), 'click');
+    pickAll(h, [[0.1, 0.05], [5, 6], [10.2, 0.1]]);
+    h.controller.handlePointerDown({ button: 0, worldX: 15, worldZ: 6, timeStamp: 1000, clientX: 100, clientY: 100 });
+    assert.strictEqual(h.controller.picking, null, 'the picks ended');
+    h.controller.forgetPress();
+    h.controller.toolChosen();  // the user pressed H for the hand tool
+    const press = { button: 0, worldX: 15, worldZ: 6, timeStamp: 1200, clientX: 100, clientY: 100 };
+    assert.strictEqual(h.controller.handlePointerDown(press), false, 'the hand tool has it');
+    assert.strictEqual(h.controller.ownsClick({ detail: 2 }), false);
+    await flush();
+    await flush();
+});
+
+check('only a double click on the last point is held back from the tool given back', async () => {
+    const cases = [
+        ['the second press there', { timeStamp: 1400, clientX: 102, clientY: 98 }, true],
+        ['a press 600 ms after', { timeStamp: 1600, clientX: 100, clientY: 100 }, false],
+        ['a press 10 px away', { timeStamp: 1200, clientX: 110, clientY: 100 }, false],
+        ['a right press there', { timeStamp: 1200, clientX: 100, clientY: 100, button: 2 }, false],
+    ];
+    for (const [label, press, expected] of cases) {
+        const h = toolHarness({ alignResponse: () => HELD });
+        await keptAndOpen(h);
+        fire(button(h, 'align'), 'click');
+        pickAll(h, [[0.1, 0.05], [5, 6], [10.2, 0.1]]);
+        h.controller.handlePointerDown({ button: 0, worldX: 15, worldZ: 6, timeStamp: 1000, clientX: 100,
+            clientY: 100 });
+        assert.strictEqual(h.controller.picking, null, label + ': the picks ended');
+        h.controller.forgetPress();
+        const next = Object.assign({ button: 0, worldX: 15, worldZ: 6 }, press);
+        assert.strictEqual(h.controller.handlePointerDown(next), expected, label);
+        assert.strictEqual(h.controller.ownsClick({ detail: 1 }), expected, label + ': its click');
+        // Asked once: a third press there is the tool's.
+        h.controller.forgetPress();
+        assert.strictEqual(h.controller.handlePointerDown(Object.assign({}, next, { timeStamp: 1450 })), false,
+            label + ': the press after');
+        await flush();
+        await flush();
+    }
+});
+
+check('a pick press that ends off the plan leaves no claim on the next click', async () => {
+    const h = toolHarness({ alignResponse: () => HELD });
+    await keptAndOpen(h);
+    fire(button(h, 'align'), 'click');
+    pickAll(h, [[0.1, 0.05], [5, 6], [10.2, 0.1], [15, 6]]);  // the last press released over the panel: no click
+    h.controller.forgetPress();  // the next press on the plan
+    assert.strictEqual(h.controller.ownsClick({ detail: 1 }), false);
+    assert.strictEqual(h.controller.ownsDoubleClick({}), false);
+    await flush();
+});
+
+check('a tool chosen while picking ends the picks, and the tool set aside is not put back', async () => {
+    const h = toolHarness();
+    await keptAndOpen(h);
+    fire(button(h, 'align'), 'click');
+    pickAll(h, [[0.1, 0.05]]);
+    assert.strictEqual(h.workspace.toolMode, 'select');
+    h.controller.toolChosen();  // the user chose a tool (the workspace says so before setting it)
+    assert.strictEqual(h.controller.picking, null, 'the picks end');
+    assert.deepStrictEqual(h.modes, ['select'], 'Polygon zone is not put back');
+    assert.strictEqual(h.workspace.toolMode, 'select');
+    assert.deepStrictEqual(h.adapter.hovers[h.adapter.hovers.length - 1], null, 'the hover ring goes');
+    assert.strictEqual(h.panel().querySelector('[data-fp-action="cancel-pick"]'), null);
+});
+
+check('removing or replacing the drawing while picking ends the picks and gives the tool back', async () => {
+    const h = toolHarness();
+    await keptAndOpen(h);
+    fire(button(h, 'measure'), 'click');
+    assert.strictEqual(h.workspace.toolMode, 'select');
+    fire(button(h, 'remove'), 'click');
+    assert.strictEqual(h.controller.picking, null);
+    assert.strictEqual(h.workspace.toolMode, 'polygon-zone', 'given back when the drawing is removed');
+    await flush();
+    await keptAndOpen(h);
+    fire(button(h, 'measure'), 'click');
+    pickAll(h, [[0.01, 0]]);
+    assert.strictEqual(h.workspace.toolMode, 'select');
+    const input = h.panel().querySelector('[data-fp-file]');
+    input.files = [{ name: 'Plant 3.dxf', size: 99 }];
+    fire(input, 'change');
+    assert.strictEqual(h.controller.picking, null);
+    assert.strictEqual(h.workspace.toolMode, 'polygon-zone', 'given back when another drawing is chosen');
+    assert.deepStrictEqual(h.adapter.hovers[h.adapter.hovers.length - 1], null, 'the hover ring goes');
+    await flush();
+    await flush();
+});
+
+check('an answer on its way is dropped after an undo and a redo, or a preview opened, even once it closed',
+    async () => {
+        // Set scale; Undo then Redo bring the same drawing back before the answer.
+        let release;
+        const h = harness({ alignGate: new Promise(resolve => { release = resolve; }),
+            alignResponse: () => ({ metersPerDrawingUnit: 0.0012 }) });
+        await measured(h);
+        assert.strictEqual(h.controller.busy, true);
+        const reference = JSON.parse(JSON.stringify(floorPlan.referenceOf(h.workspace.state.layout)));
+        h.keep(null);
+        h.keep(reference);
+        release();
+        await flush();
+        await flush();
+        assert.ok(!h.calls.some(call => call[0] === 'upsert'), 'the scale is not saved');
+        assert.strictEqual(h.controller.busy, false);
+        assert.ok(/changed while the scale was worked out/.test(h.panel().text()), h.panel().text());
+
+        // Align; a preview opens and closes before the answer.
+        let releaseAlign;
+        const g = harness({ alignGate: new Promise(resolve => { releaseAlign = resolve; }),
+            alignResponse: () => HELD });
+        await keptAndOpen(g);
+        fire(button(g, 'align'), 'click');
+        pickAll(g, [[0.1, 0.05], [5, 6], [10.2, 0.1], [15, 6]]);
+        assert.strictEqual(g.controller.busy, true);
+        g.controller.sync({ extensions: {} }, { preview: true });
+        g.controller.sync(g.workspace.state.layout);
+        releaseAlign();
+        await flush();
+        await flush();
+        assert.strictEqual(g.controller.result, null, 'no alignment comes back to apply');
+        assert.strictEqual(g.panel().querySelector('[data-fp-action="apply-alignment"]'), null);
+
+        // Set scale; a preview is still showing when the answer comes.
+        let releaseScale;
+        const k = harness({ alignGate: new Promise(resolve => { releaseScale = resolve; }),
+            alignResponse: () => ({ metersPerDrawingUnit: 0.0012 }) });
+        await measured(k);
+        k.controller.sync({ extensions: {} }, { preview: true });
+        releaseScale();
+        await flush();
+        await flush();
+        assert.ok(!k.calls.some(call => call[0] === 'upsert'), 'nothing is saved under a preview');
+        assert.ok(/A preview opened while the scale was worked out/.test(k.panel().text()), k.panel().text());
+    });
+
+check('a drawing imported as a draft keeps its first alignment answer through unrelated updates', async () => {
+    let release;
+    const h = harness({ alignGate: new Promise(resolve => { release = resolve; }), alignResponse: () => HELD });
+    await importDrawing(h);  // a draft: the drawing the picks are on changed without an undo
+    fire(button(h, 'align'), 'click');
+    pickAll(h, [[0.1, 0.05], [5, 6], [10.2, 0.1], [15, 6]]);
+    h.controller.sync(h.workspace.state.layout);  // an unrelated render while it is worked out
+    release();
+    await flush();
+    await flush();
+    assert.strictEqual(h.controller.result && h.controller.result.kind, 'align', h.panel().text());
+});
+
+Promise.all(pending).then(() => {
+    process.stdout.write(`${checks}/${checks} floor plan checks passed\n`);
+}).catch(error => {
+    console.error(error && error.stack ? error.stack : error);
+    process.exitCode = 1;
+});

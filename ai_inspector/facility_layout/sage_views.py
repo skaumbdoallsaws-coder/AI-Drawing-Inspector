@@ -70,7 +70,8 @@ def tool_spec() -> dict:
             "target": {"enum": ["last_change"]},
             "query": {"type": "string", "minLength": 1, "maxLength": 120},
             "maxViews": {"type": "integer", "minimum": 1, "maximum": MAX_VIEWS}},
-            "additionalProperties": False}}
+            "additionalProperties": False},
+        "pictures": True}   # the contact sheet rides beside the JSON: no output schema (mcp_bridge.py, SV5)
 
 
 # ---------------------------------------------------------------- the layout's shapes

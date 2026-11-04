@@ -182,7 +182,8 @@ def tool_specs():
         'images, the photo also comes back with these outlines and a 50 m grid labelled in property metres (x east, '
         'z north). Use it to find the feature the user means, then trace_site_feature with a box around just that '
         'part. Lots and flat roofs can look alike in numbers: ask the user when unsure. No edits.',
-        'input_schema':obj({'minAreaSquareMeters':number(200,100000)},[])},
+        'input_schema':obj({'minAreaSquareMeters':number(200,100000)},[]),
+        'pictures':True},   # the outlined photo rides beside the JSON: no output schema (mcp_bridge.py, SV5)
         {'name':'trace_site_feature','description':
         'Trace one paved feature on the stored photo: at a property-frame point inside it (x, z), or the largest '
         'paved region inside a box (minX, maxX, minZ, maxZ) that keeps only the part meant, or withinProperty '

@@ -89,6 +89,13 @@ def explicit_types(schema, inherited=None):
     return result
 
 
+def output_schema(spec):
+    """The output schema tools/list declares for SPEC. A tool that can attach a picture ("pictures") declares none
+    (SV5): its result with a picture carries no structured content (call_tool), and MCP asks every tool that
+    declares an output schema for structured content."""
+    return None if spec.get("pictures") else spec.get("output_schema", OUTPUT_SCHEMA)
+
+
 def make_application(gateway, token: str, host: str):
     from mcp import types
     from mcp.server.lowlevel import Server
@@ -97,7 +104,7 @@ def make_application(gateway, token: str, host: str):
 
     async def list_tools(_context, _params):
         return types.ListToolsResult(tools=[types.Tool(name=spec["name"], description=spec["description"],
-            input_schema=explicit_types(spec["input_schema"]), output_schema=spec.get("output_schema", OUTPUT_SCHEMA),
+            input_schema=explicit_types(spec["input_schema"]), output_schema=output_schema(spec),
             annotations=types.ToolAnnotations(read_only_hint=spec.get("read_only", True), destructive_hint=False,
                                                idempotent_hint=True, open_world_hint=False)) for spec in getattr(gateway, "specs", tool_specs())])
 
@@ -106,7 +113,10 @@ def make_application(gateway, token: str, host: str):
         content = [types.TextContent(type="text", text=json.dumps(result))]
         image = gateway.take_image() if hasattr(gateway, "take_image") else None
         if image and result["ok"]:
+            # SV5: the pinned Codex (0.162.1) gives the model only the structured content of a result that has it,
+            # so the picture beside it never reached Sage. A result with a picture is its JSON text and the picture.
             content.append(types.ImageContent(type="image", data=image["data"], mimeType=image["mimeType"]))
+            return types.CallToolResult(content=content, is_error=False)
         return types.CallToolResult(content=content, structured_content=result, is_error=not result["ok"])
 
     server = Server("inspectorpro-readonly", version="1", on_list_tools=list_tools, on_call_tool=call_tool,

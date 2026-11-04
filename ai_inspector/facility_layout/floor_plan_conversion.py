@@ -11,8 +11,10 @@ proposal the user reviews; a conversion is never applied directly (operation_pro
 - Wall faces ("wall_faces"): two parallel straight lines between 5 cm and the largest wall thickness apart that
   overlap by 10 cm or more, with no other parallel line between them, are the faces of one wall: its centerline runs
   halfway between them over their overlap and its thickness is their distance. A line that pairs on both of its
-  sides over the same stretch makes those walls ambiguous (refused, never guessed). A line without a partner (a
-  jamb, the end of a wall, furniture) is listed, not converted.
+  sides over the same stretch makes those walls ambiguous (refused, never guessed). Two lines that close the ends
+  of other walls are not a wall: the jambs of a doorway between two walls, or a wall's end line and a wall beyond
+  it; a box drawn closed is one wall along its longer sides. A line without a partner (a jamb, the end of a wall,
+  furniture) is listed, not converted.
 - Pieces of one wall are joined where they touch or overlap, and across a gap exactly as wide as a wall that ends in
   it (a T drawn with faces); any other gap is an opening and stays. Two walls whose ends meet at a corner both reach
   past it by half the other's thickness (an L, so the corner is filled); a wall end that stops short of another
@@ -20,8 +22,8 @@ proposal the user reviews; a conversion is never applied directly (operation_pro
 - Curves stay drawing: arcs, circles, ellipses, splines, and polyline runs that bend gently or bow.
 - Rooms ("room_boundary"): each closed outline is a zone of the type the user chooses (there is no "room" type, and
   a label never sets one); exactly one text inside it (on a "text" or "room_boundary" layer) names it. Outlines
-  that are open, cross themselves, are tiny or repeat another are listed, not converted; one that holds other rooms
-  is refused until they are left out.
+  that are open, cross themselves, are tiny or repeat another are listed, not converted; one that holds rooms that
+  can still be added is refused until they are left out, and one around zones already on the plan says so.
 - Outline ("perimeter"): a closed loop becomes the plan's outer walls (a polygon boundary); two nested loops that
   stay one distance apart are the outer and inner faces of those walls. The floor stays the plan's rectangle.
 - Doors ("door", FP3): a swing (an arc turning 60 to 120 degrees) hinged at one jamb of a break 0.5 to 4 m wide
@@ -29,7 +31,8 @@ proposal the user reviews; a conversion is never applied directly (operation_pro
   double door) joins the pieces into one wall with an opening there; interior openings are full height, and the door
   leaf and its swing are not modelled. A swing drawn on both sides of one jamb (a door that swings both ways) is one
   door. On the outer walls a swing hinged on an edge of the outline and shut along it is a door only with its leaf
-  drawn (an unbroken outline has no jambs to confirm it), and it waits for the door height. Swings that disagree
+  drawn (an unbroken outline has no jambs to confirm it), and it waits for the door height; one drawn twice or
+  swinging both ways is one door, and swings there that overlap without matching stay drawing. Swings that disagree
   about a break, or one that fits two breaks, leave the door unclear and the break stays. A door drawn as one
   polyline (its leaf and its swing) reads like one drawn as a line and an arc.
 - Columns ("column") come in a later phase: listed, not converted.
@@ -37,15 +40,20 @@ proposal the user reviews; a conversion is never applied directly (operation_pro
 Existing walls and zones are never changed: a candidate whose id is already in the layout is reported as there (or
 edited since) and left alone, and one that lands on a wall or zone already on the plan is refused. The outer walls
 are replaced only when the user says so, and the review says what the replacement drops.
+
+The work is bounded: the pieces, outlines and door symbols read, and the grid cells and neighbors visited (lines are
+kept in the cells along them). A drawing past a limit is refused as too large (ConversionTooLargeError), and changes
+past what one review holds block the conversion.
 """
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import math
 import re
 
-CONVERTER_VERSION = "fp-convert-2"
+CONVERTER_VERSION = "fp-convert-3"
 ANGLE_TOLERANCE = math.radians(1.0)  # parallel or collinear
 SIN_TOLERANCE = math.sin(ANGLE_TOLERANCE)
 GENTLE_BEND = math.radians(25.0)  # a turn below this between straight runs makes them part of a curve
@@ -66,6 +74,9 @@ MAX_WALLS = 128  # the layout's interior-wall limit, walls already there and new
 MAX_OPERATIONS = 500  # the operation kernel's transaction limit
 MAX_PIECES = 20000  # straight pieces on the wall layers
 MAX_LOOPS = 5000  # closed outlines on the room and outline layers
+MAX_DOOR_SYMBOLS = 20000  # swings and straight pieces on the door layers
+MAX_WORK = 6_000_000  # grid cells and neighbors one conversion may visit (_Work): a few seconds at most
+MAX_PACKAGE_BYTES = 600_000  # the changes one review holds (floor_plan_proposals.PACKAGE_LIMITS)
 MAX_SETTINGS_IDS = 2000
 MAX_LISTED = 200
 MAX_SOURCES = 50
@@ -93,8 +104,9 @@ MESSAGES = {
     "outside_plan": "Outside the plan.",
     "plan_size": "Set the plan size first.",
     "invalid": "The plan does not accept it.",
-    "duplicate": "The same outline is drawn twice.",
+    "duplicate": "Drawn twice; the first one is listed.",
     "holds_rooms": "Other rooms lie inside it; leave them out to keep this one.",
+    "holds_zones": "Rooms inside it are already zones on the plan.",
     "zone_type": "Choose its zone type.",
     "zone_there": "A zone already covers this room.",
     "outline_settings": "Give the outer wall height to add the outer walls.",
@@ -120,11 +132,17 @@ MESSAGES = {
     "door_leaf_missing": "A door swing on the outer walls without its door leaf: an arc alone is not enough to cut a "
                          "door there; it stays drawing.",
     "door_part": "On a door layer but no part of a door found: it stays drawing.",
+    "door_overlap": "Door swings on the outer walls that overlap without matching: the door is unclear, so they stay "
+                    "drawing.",
 }
 
 
 class ConversionSettingsError(ValueError):
     pass
+
+
+class ConversionTooLargeError(ValueError):
+    """More drawing than one conversion reads: too many pieces, outlines or door symbols, or too much work."""
 
 
 def _number(value, name: str, low: float, high: float) -> float:
@@ -270,36 +288,88 @@ def _transformer(alignment: dict, origin):
     return apply
 
 
-class _Grid:
-    """A uniform grid over boxes, for neighbor searches in a bounded number of cells."""
+class _Work:
+    """The neighbor searches one conversion may make (MAX_WORK grid cells and neighbors visited): a drawing whose lines
+    lie too densely or reach too far is refused as too large instead of keeping the server busy."""
 
-    def __init__(self, cell: float):
+    def __init__(self):
+        self.left = MAX_WORK
+
+    def spend(self, amount):
+        self.left -= amount
+        if self.left < 0:
+            raise ConversionTooLargeError(
+                "The drawing is too large to convert in one go: the lines on the layers given roles lie too densely "
+                "(hatching, say) or reach too far. Give the wall, room, outline and door roles to fewer layers.")
+
+
+class _Grid:
+    """A uniform grid for neighbor searches. A segment widened by a margin is kept in the cells along it, not in every
+    cell of the box around it, so a long diagonal line costs its length; every cell and neighbor visited is spent from
+    the conversion's work."""
+
+    def __init__(self, cell: float, work: _Work):
         self.cell = cell
         self.cells = {}
+        self.work = work
 
-    def _span(self, box):
+    def _along(self, a, b, margin):
+        """The cells within MARGIN (in x and in z) of the segment A-B, walking the columns of its longer axis."""
+        swap = abs(b[0] - a[0]) < abs(b[1] - a[1])
+        (u0, v0), (u1, v1) = ((a[1], a[0]), (b[1], b[0])) if swap else (a, b)
+        if u0 > u1:
+            u0, v0, u1, v1 = u1, v1, u0, v0
+        slope = (v1 - v0) / (u1 - u0) if u1 > u0 else 0.0
         cell = self.cell
-        return (range(math.floor(box[0] / cell), math.floor(box[2] / cell) + 1),
-                range(math.floor(box[1] / cell), math.floor(box[3] / cell) + 1))
+        first, last = math.floor((u0 - margin) / cell), math.floor((u1 + margin) / cell)
+        rows = math.ceil((abs(slope) * (cell + 2 * margin) + 2 * margin) / cell) + 1  # the most one column takes
+        self.work.spend((last - first + 1) * rows)
+        for i in range(first, last + 1):
+            # The stretch of the segment within this column widened by the margin, and where it runs across.
+            low, high = min(max(i * cell - margin, u0), u1), min(max((i + 1) * cell + margin, u0), u1)
+            va, vb = v0 + slope * (low - u0), v0 + slope * (high - u0)
+            for j in range(math.floor((min(va, vb) - margin) / cell), math.floor((max(va, vb) + margin) / cell) + 1):
+                yield (j, i) if swap else (i, j)
 
-    def add(self, key, box):
-        columns, rows = self._span(box)
-        for i in columns:
-            for j in rows:
-                self.cells.setdefault((i, j), []).append(key)
+    def add(self, key, a, b, margin=0.0):
+        for cell in self._along(a, b, margin):
+            self.cells.setdefault(cell, []).append(key)
 
-    def near(self, box):
-        columns, rows = self._span(box)
+    def near(self, a, b, margin=0.0):
+        """The keys of the segments whose cells the segment A-B (A == B: a point), widened by MARGIN, reaches."""
         found = set()
-        for i in columns:
-            for j in rows:
-                found.update(self.cells.get((i, j), ()))
+        for cell in self._along(a, b, margin):
+            keys = self.cells.get(cell)
+            if keys:
+                self.work.spend(len(keys))
+                found.update(keys)
         return found
 
 
-def _box(a, b, margin=0.0):
-    return (min(a[0], b[0]) - margin, min(a[1], b[1]) - margin, max(a[0], b[0]) + margin,
-            max(a[1], b[1]) + margin)
+class _Cover:
+    """Stretches along a line, joined where they meet: how much of another stretch one of them covers."""
+
+    def __init__(self, work: _Work):
+        self.starts, self.ends, self.work = [], [], work
+
+    def add(self, low, high):
+        first = bisect.bisect_left(self.starts, low)
+        if first > 0 and self.ends[first - 1] >= low:
+            first -= 1
+        last = first
+        while last < len(self.starts) and self.starts[last] <= high:
+            low, high = min(low, self.starts[last]), max(high, self.ends[last])
+            last += 1
+        self.starts[first:last] = [low]
+        self.ends[first:last] = [high]
+        self.work.spend(last - first + 1)
+
+    def overlap(self, low, high) -> float:
+        """The longest part of LOW..HIGH that one joined stretch covers."""
+        first = max(0, bisect.bisect_right(self.starts, low) - 1)
+        last = bisect.bisect_right(self.starts, high)
+        self.work.spend(last - first + 1)
+        return max((min(high, self.ends[k]) - max(low, self.starts[k]) for k in range(first, last)), default=0.0)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -376,17 +446,18 @@ class _Wall:
         return _unit(self.a, self.b)
 
 
-def _face_walls(pieces, max_gap):
+def _face_walls(pieces, max_gap, work):
     """Walls from pairs of parallel face lines. PIECES: [(a, b, entity_id, layer)]. Returns (walls, ids of the
-    pieces that pair)."""
+    pieces that pair). Each line pairs with the parallel lines on either side of it that no other line lies between,
+    nearest first; a pair whose lines close the ends of other walls is not a wall (_without_end_pairs)."""
     info = []
     for a, b, entity, layer in pieces:
         d = _unit(a, b)
         info.append((a, b, d, (-d[1], d[0]), math.dist(a, b), entity, layer))
     reach = max_gap + TOLERANCE
-    grid = _Grid(max(1.0, 2 * reach))
+    grid = _Grid(max(1.0, 2 * reach), work)
     for index, item in enumerate(info):
-        grid.add(index, _box(item[0], item[1], reach))
+        grid.add(index, item[0], item[1], reach)
 
     def relation(i, j):
         """(side, gap, low, high) of piece j seen from piece i's line (low..high: their overlap along i), or None when
@@ -403,20 +474,26 @@ def _face_walls(pieces, max_gap):
 
     pairs = []
     for i in range(len(info)):
-        related = {}
-        for j in grid.near(_box(info[i][0], info[i][1])):
+        sides = {1: [], -1: []}
+        for j in grid.near(info[i][0], info[i][1]):
             if j != i:
                 value = relation(i, j)
                 if value is not None:
-                    related[j] = value
-        for j, (side, gap, low, high) in related.items():
-            if j < i or not MIN_THICKNESS - TOLERANCE <= gap <= reach or high - low < MIN_OVERLAP:
-                continue
-            # Another parallel line between them over their overlap would be the partner instead.
-            if any(k != j and other[0] == side and TOLERANCE < other[1] < gap - TOLERANCE
-                   and min(high, other[3]) - max(low, other[2]) > TOLERANCE for k, other in related.items()):
-                continue
-            pairs.append((i, j, side, gap, low, high))
+                    sides[value[0]].append(value[1:] + (j,))
+        for side, rows in sides.items():
+            # Nearest first: a parallel line (or several end to end) between two lines over their overlap is the
+            # partner instead. Lines within TOLERANCE of one distance lie side by side, not between.
+            rows.sort()
+            between, closer = _Cover(work), 0
+            for gap, low, high, j in rows:
+                while closer < len(rows) and rows[closer][0] < gap - TOLERANCE:
+                    if rows[closer][0] > TOLERANCE and rows[closer][2] - rows[closer][1] > TOLERANCE:
+                        between.add(rows[closer][1], rows[closer][2])
+                    closer += 1
+                if j > i and MIN_THICKNESS - TOLERANCE <= gap <= reach and high - low >= MIN_OVERLAP \
+                        and between.overlap(low, high) <= TOLERANCE:
+                    pairs.append((i, j, side, gap, low, high))
+    pairs = _without_end_pairs(pairs, info, work)
     walls = []
     uses = {}  # piece -> [(side of the wall from the piece, low, high along the piece, wall index)]
     for i, j, side, gap, low, high in pairs:
@@ -433,6 +510,7 @@ def _face_walls(pieces, max_gap):
             uses.setdefault(piece, []).append((1 if _dot(pn, _sub(middle, pa)) > 0 else -1, min(s1, s2),
                                                max(s1, s2), index))
     for rows in uses.values():
+        work.spend(len(rows) * (len(rows) - 1) // 2)
         for first in range(len(rows)):
             for second in range(first + 1, len(rows)):
                 one, two = rows[first], rows[second]
@@ -442,12 +520,45 @@ def _face_walls(pieces, max_gap):
     return walls, paired
 
 
+def _without_end_pairs(pairs, info, work):
+    """PAIRS less the ones that are not walls. A line closes the end of a pair when it is not parallel to the pair's
+    lines and its two ends are ends of those lines (a jamb, or a wall's end line). Two lines that each close another
+    wall are the jambs of an opening between two walls; a pair one of whose lines closes another wall, and that is no
+    longer than it is wide, is the ends of a box drawn closed (its longer sides are the faces) or a wall's end line
+    and a wall beyond it."""
+    near = 2 * TOLERANCE
+    ends = _Grid(1.0, work)
+    for index, item in enumerate(info):
+        for point in item[:2]:
+            ends.add(index, point, point, near)
+    closes = {}  # line -> the pairs whose end it closes
+    for number, (i, j, *_rest) in enumerate(pairs):
+        for corner in info[i][:2]:
+            for k in ends.near(corner, corner):
+                if k in (i, j) or _parallel(info[i][2], info[k][2]):
+                    continue
+                a, b = info[k][:2]
+                if any(math.dist(one, corner) <= near and any(math.dist(other, end) <= near for end in info[j][:2])
+                       for one, other in ((a, b), (b, a))):
+                    closes.setdefault(k, set()).add(number)
+    kept = []
+    for pair in pairs:
+        i, j, _side, gap, low, high = pair
+        by_i, by_j = closes.get(i, set()), closes.get(j, set())
+        if by_i and by_j and not by_i & by_j:
+            continue
+        if (by_i or by_j) and high - low <= gap:
+            continue
+        kept.append(pair)
+    return kept
+
+
 def _gap_filled(first, d, n, low, high, grid, walls, skip):
     """Whether a wall ends in the gap LOW..HIGH along FIRST (direction D, normal N) and is as wide as it: the gap is
     the T a wall drawn with faces leaves in the wall it meets."""
     width = high - low
     middle = _along(first.a, d, (low + high) / 2)
-    for index in grid.near(_box(middle, middle, width + first.thickness)):
+    for index in grid.near(middle, middle, width + first.thickness):
         other = walls[index]
         if index in skip or other.flag:
             continue
@@ -464,7 +575,7 @@ def _gap_filled(first, d, n, low, high, grid, walls, skip):
     return False
 
 
-def _merge_collinear(walls):
+def _merge_collinear(walls, work):
     """Joins pieces of one wall: collinear walls of one thickness that overlap or touch, or whose gap a wall ending
     in it fills (_gap_filled). Any other gap is an opening and stays. Pairs are found through a grid and joined by
     union-find, so this is near linear."""
@@ -473,9 +584,9 @@ def _merge_collinear(walls):
         return list(walls)
     widest = max(wall.thickness for wall in walls)
     margin = widest / math.sin(GENTLE_BEND) + 2 * TOLERANCE
-    grid = _Grid(max(1.0, 4 * margin))
+    grid = _Grid(max(1.0, 4 * margin), work)
     for index, wall in enumerate(walls):
-        grid.add(index, _box(wall.a, wall.b, margin))
+        grid.add(index, wall.a, wall.b, margin)
     parent = list(range(count))
 
     def find(index):
@@ -487,7 +598,7 @@ def _merge_collinear(walls):
     for i, first in enumerate(walls):
         d = first.direction()
         n = (-d[1], d[0])
-        for j in grid.near(_box(first.a, first.b, margin)):
+        for j in grid.near(first.a, first.b, margin):
             if j <= i:
                 continue
             second = walls[j]
@@ -536,7 +647,7 @@ def _line_intersection(p, d, q, e):
     return _cross(w, e) / denominator, _cross(w, d) / denominator
 
 
-def _join_ends(walls):
+def _join_ends(walls, work):
     """Closes junctions. L: two walls whose ends meet at a corner both reach past it by half the other's thickness,
     so the corner is filled. T: a wall end that stops short of another wall's centerline by no more than their half
     thicknesses is carried to it. Ambiguous walls are left as they are."""
@@ -546,9 +657,9 @@ def _join_ends(walls):
     ends = [[wall.a, wall.b] for wall in walls]
     widest = max(wall.thickness for wall in walls)
     reach = widest + 2 * TOLERANCE
-    grid = _Grid(max(1.0, 4 * reach))
+    grid = _Grid(max(1.0, 4 * reach), work)
     for index, wall in enumerate(walls):
-        grid.add(index, _box(wall.a, wall.b, 2 * reach))
+        grid.add(index, wall.a, wall.b, 2 * reach)
 
     def outward(index, which):
         a, b = walls[index].a, walls[index].b
@@ -560,7 +671,7 @@ def _join_ends(walls):
             continue
         for wi in (0, 1):
             p = ends[i][wi]
-            for j in grid.near(_box(p, p)):
+            for j in grid.near(p, p):
                 if j <= i or walls[j].flag:
                     continue
                 angle = _turn(walls[i].direction(), walls[j].direction())
@@ -591,7 +702,7 @@ def _join_ends(walls):
                 continue
             p, di = ends[i][wi], outward(i, wi)
             best = None
-            for j in grid.near(_box(p, p)):
+            for j in grid.near(p, p):
                 if j == i or walls[j].flag:
                     continue
                 q, e = ends[j][0], _unit(ends[j][0], ends[j][1])
@@ -611,19 +722,19 @@ def _join_ends(walls):
                   wall.openings) for i, wall in enumerate(walls)]
 
 
-def _flag_overlaps(walls):
+def _flag_overlaps(walls, work):
     """Marks parallel walls that are not one wall but lie closer than their half thicknesses (a layer of faces given
     the centerline role draws each wall twice)."""
     if len(walls) < 2:
         return
     widest = max(wall.thickness for wall in walls)
-    grid = _Grid(max(1.0, 4 * widest))
+    grid = _Grid(max(1.0, 4 * widest), work)
     for index, wall in enumerate(walls):
-        grid.add(index, _box(wall.a, wall.b, widest))
+        grid.add(index, wall.a, wall.b, widest)
     for i, first in enumerate(walls):
         d = first.direction()
         n = (-d[1], d[0])
-        for j in grid.near(_box(first.a, first.b, widest)):
+        for j in grid.near(first.a, first.b, widest):
             second = walls[j]
             if j <= i or not _parallel(d, second.direction()):
                 continue
@@ -641,7 +752,7 @@ def _wall_end(piece, walls, grid):
     a, b = piece[0], piece[1]
     middle = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
     d = _unit(a, b)
-    for index in grid.near(_box(middle, middle)):
+    for index in grid.near(middle, middle):
         wall = walls[index]
         if abs(_dot(d, wall.direction())) > 0.05:
             continue
@@ -716,7 +827,7 @@ def _leaf(swing, pieces, grid):
     """The piece drawn from the swing's hinge to one of its ends (the door leaf), or None."""
     hinge, radius = swing["hinge"], swing["radius"]
     slack = max(DOOR_SLACK, 0.1 * radius)
-    for index in sorted(grid.near(_box(hinge, hinge, slack))):
+    for index in sorted(grid.near(hinge, hinge, slack)):
         a, b = pieces[index]["a"], pieces[index]["b"]
         for near, far in ((a, b), (b, a)):
             if math.dist(near, hinge) <= max(DOOR_SLACK, 0.05 * radius) and any(
@@ -725,14 +836,14 @@ def _leaf(swing, pieces, grid):
     return None
 
 
-def _door_gaps(walls):
+def _door_gaps(walls, work):
     """Breaks in a wall: two collinear pieces of one thickness whose facing ends lie MIN_DOOR_WIDTH to MAX_DOOR_WIDTH
     apart, the nearer one beyond the other's end along their line. [(i, p, j, q)]: end P of walls[i] faces end Q of
     walls[j]."""
-    grid = _Grid(max(1.0, MAX_DOOR_WIDTH))
+    grid = _Grid(max(1.0, MAX_DOOR_WIDTH), work)
     for index, wall in enumerate(walls):
         if not wall.flag:
-            grid.add(index, _box(wall.a, wall.b, MAX_DOOR_WIDTH))
+            grid.add(index, wall.a, wall.b, MAX_DOOR_WIDTH)
     found = {}
     for i, first in enumerate(walls):
         if first.flag:
@@ -741,7 +852,7 @@ def _door_gaps(walls):
         n = (-d[1], d[0])
         for p, out in ((first.a, (-d[0], -d[1])), (first.b, d)):
             best = None
-            for j in grid.near(_box(p, p)):
+            for j in grid.near(p, p):
                 second = walls[j]
                 if j == i or not _parallel(d, second.direction()):
                     continue
@@ -764,7 +875,7 @@ def _gap_fits(gap, walls, swings, grid):
     e = _unit(p, q)
     n = (-e[1], e[0])
     fits = []
-    for k in sorted(grid.near(_box(p, q, width))):
+    for k in sorted(grid.near(p, q, width)):
         hinge, radius, ends = swings[k]["hinge"], swings[k]["radius"], swings[k]["ends"]
         along, across = _dot(e, _sub(hinge, p)), _dot(n, _sub(hinge, p))
         if abs(across) > thickness / 2 + DOOR_SLACK:
@@ -783,17 +894,17 @@ def _gap_fits(gap, walls, swings, grid):
     return fits
 
 
-def _wall_doors(walls, swings, pieces, excluded, import_id):
+def _wall_doors(walls, swings, pieces, excluded, import_id, work):
     """Doors in the breaks of walls (_door_gaps): one swing of the break's width hinged at one jamb and shut against
     the other, or two of half its width hinged at both jambs (a double door). Swings that disagree about a break, or a
     swing that fits more than one break, leave it unclear. Returns the doors (dicts; "join": the wall is joined across
     the break), and the swings and pieces they use."""
-    gaps = _door_gaps(walls)
-    swing_grid, piece_grid = _Grid(max(1.0, MAX_DOOR_WIDTH)), _Grid(2.0)
+    gaps = _door_gaps(walls, work)
+    swing_grid, piece_grid = _Grid(max(1.0, MAX_DOOR_WIDTH), work), _Grid(2.0, work)
     for index, swing in enumerate(swings):
-        swing_grid.add(index, _box(swing["hinge"], swing["hinge"]))
+        swing_grid.add(index, swing["hinge"], swing["hinge"])
     for index, piece in enumerate(pieces):
-        piece_grid.add(index, _box(piece["a"], piece["b"]))
+        piece_grid.add(index, piece["a"], piece["b"])
     all_fits = [_gap_fits(gap, walls, swings, swing_grid) for gap in gaps]
     uses = {}
     for fits in all_fits:
@@ -872,20 +983,23 @@ def _join_doors(walls, doors):
     return joined, place
 
 
-def _outline_doors(points, width, swings, pieces, free):
+def _outline_doors(points, width, swings, pieces, free, work):
     """Doors in the outer walls along the outline POINTS (a closed ring): a swing hinged on an edge and shut along it,
-    with its leaf drawn; two shut against each other are a double door. Returns ([(edge, start, end, kind, swing
-    indexes, piece indexes)], the swings that fit an edge but have no leaf)."""
-    piece_grid = _Grid(2.0)
+    with its leaf drawn; two shut against each other are a double door, and one drawn twice, or on both sides of the
+    edge (a door that swings both ways), is one door. Returns ([(edge, start, end, kind, swing indexes, piece
+    indexes)], the swings that fit an edge but have no leaf, the swings whose doors overlap without matching)."""
+    piece_grid, edge_grid = _Grid(2.0, work), _Grid(max(1.0, MAX_DOOR_WIDTH), work)
     for index, piece in enumerate(pieces):
-        piece_grid.add(index, _box(piece["a"], piece["b"]))
+        piece_grid.add(index, piece["a"], piece["b"])
+    for edge in range(len(points)):
+        edge_grid.add(edge, points[edge], points[(edge + 1) % len(points)], width / 2 + 2 * DOOR_SLACK)
     leaves, leafless = {}, set()
     for k in free:
         swing = swings[k]
         hinge, radius = swing["hinge"], swing["radius"]
         slack = max(DOOR_SLACK, 0.1 * radius)
         fits = []
-        for edge in range(len(points)):
+        for edge in sorted(edge_grid.near(hinge, hinge)):
             a, b = points[edge], points[(edge + 1) % len(points)]
             length, e = math.dist(a, b), _unit(a, b)
             n = (-e[1], e[0])
@@ -906,14 +1020,36 @@ def _outline_doors(points, width, swings, pieces, free):
             leafless.add(k)
             continue
         leaves[k] = (fits[0], leaf)
+    # One door per stretch of an edge, however many swings draw it.
+    spans = []  # [edge, start, end, swing indexes, piece indexes]
+    for k, ((edge, low, high), leaf) in sorted(leaves.items(), key=lambda item: (item[1][0], item[0])):
+        last = spans[-1] if spans else None
+        if last and last[0] == edge and abs(last[1] - low) <= DOOR_SLACK and abs(last[2] - high) <= DOOR_SLACK:
+            last[3].append(k)
+            last[4].append(leaf)
+        else:
+            spans.append([edge, low, high, [k], [leaf]])
+    # Stretches that overlap without matching disagree: their swings stay drawing. Sorted along each edge, a stretch
+    # overlaps a later one when it overlaps the next, and an earlier one when it starts before the furthest end so far.
+    overlapping, furthest = set(), None
+    for index, (edge, low, high, ks, _used) in enumerate(spans):
+        if index == 0 or spans[index - 1][0] != edge:
+            furthest = None
+        following = spans[index + 1] if index + 1 < len(spans) else None
+        if (furthest is not None and low < furthest - DOOR_SLACK) or (
+                following is not None and following[0] == edge and following[1] < high - DOOR_SLACK):
+            overlapping.update(ks)
+        furthest = high if furthest is None else max(furthest, high)
     found = []
-    for k, ((edge, low, high), leaf) in sorted(leaves.items(), key=lambda item: item[1][0]):
+    for edge, low, high, ks, used in spans:
+        if overlapping.intersection(ks):
+            continue
         last = found[-1] if found else None
         if last and last[0] == edge and last[3] == "single" and abs(low - last[2]) <= DOOR_SLACK:
-            found[-1] = (edge, last[1], high, "double", last[4] + [k], last[5] + [leaf])
+            found[-1] = (edge, last[1], high, "double", last[4] + ks, last[5] + used)
         else:
-            found.append((edge, low, high, "single", [k], [leaf]))
-    return found, leafless
+            found.append((edge, low, high, "single", ks, used))
+    return found, leafless, overlapping
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -921,7 +1057,9 @@ def _outline_doors(points, width, swings, pieces, free):
 
 
 def _loop(points, closed):
-    """A closed loop's distinct vertices without collinear middle points, or (None, reason)."""
+    """A closed loop's distinct vertices without straight middle points (each on the line between its neighbors,
+    going on), never fewer than three, or (None, reason). Linear: a point taken out has its neighbors looked at
+    again."""
     points = _dedupe(points, closed)
     if not closed:
         if len(points) > 3 and math.dist(points[0], points[-1]) <= CLOSE_GAP:
@@ -930,19 +1068,23 @@ def _loop(points, closed):
             return None, "open_outline"
     if len(points) < 3:
         return None, "too_small"
-    kept = list(points)
-    changed = True
-    while changed and len(kept) > 3:
-        changed = False
-        for index in range(len(kept)):
-            before, here, after = kept[index - 1], kept[index], kept[(index + 1) % len(kept)]
-            direction = _unit(before, after)
-            if direction != (0.0, 0.0) and abs(_cross(direction, _sub(here, before))) <= 1e-6 \
-                    and _dot(_sub(here, before), _sub(after, here)) >= 0:
-                del kept[index]
-                changed = True
-                break
-    return kept, None
+    count = len(points)
+    before, after = [(index - 1) % count for index in range(count)], [(index + 1) % count for index in range(count)]
+    kept, left = [True] * count, count
+    waiting = list(range(count - 1, -1, -1))  # the first point first
+    while waiting and left > 3:
+        here = waiting.pop()
+        if not kept[here]:
+            continue
+        start, point, end = points[before[here]], points[here], points[after[here]]
+        direction = _unit(start, end)
+        if direction != (0.0, 0.0) and abs(_cross(direction, _sub(point, start))) <= 1e-6 \
+                and _dot(_sub(point, start), _sub(end, point)) >= 0:
+            kept[here] = False
+            left -= 1
+            after[before[here]], before[after[here]] = after[here], before[here]
+            waiting.extend((after[here], before[here]))
+    return [point for index, point in enumerate(points) if kept[index]], None
 
 
 def _canonical_ring(points):
@@ -1031,7 +1173,7 @@ def _state(row, state, reason=None, message=None):
 
 def _compile_problem(error: ValueError) -> tuple[str, str]:
     text = str(error)
-    if "outside the facility plan" in text:
+    if "outside the facility plan" in text or "between -10000 and 10000" in text:  # far off any plan
         return "outside_plan", MESSAGES["outside_plan"]
     if "plan dimensions" in text:
         return "plan_size", MESSAGES["plan_size"]
@@ -1050,6 +1192,7 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     transform = _transformer(reference["alignment"], geometry.get("origin") or [0.0, 0.0])
     excluded = set(settings["excluded"])
     unconverted = _Unconverted()
+    work = _Work()
 
     pieces = {role: [] for role in WALL_ROLES}
     loops = {role: [] for role in LOOP_ROLES}
@@ -1095,9 +1238,14 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
             else:
                 loops[role].append((ring, entity))
         if piece_count > MAX_PIECES or loop_count > MAX_LOOPS:
-            raise ConversionSettingsError(
+            raise ConversionTooLargeError(
                 f"The layers given wall, room or outline roles hold more than {MAX_PIECES:,} straight pieces or "
                 f"{MAX_LOOPS:,} outlines, more than one conversion reads. Give those roles to fewer layers.")
+    swings, door_pieces = _door_symbols(door_entities)
+    if len(swings) + len(door_pieces) > MAX_DOOR_SYMBOLS:
+        raise ConversionTooLargeError(
+            f"The layers given the door role hold more than {MAX_DOOR_SYMBOLS:,} door swings and lines, more than "
+            "one conversion reads. Give the door role to fewer layers.")
 
     plan = _plan(layout)
     plan_box = shapely_box(0, 0, plan["widthMeters"], plan["depthMeters"]) if plan else None
@@ -1116,22 +1264,21 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     thickness = wall_settings["thicknessMeters"] if wall_settings else DEFAULT_THICKNESS
     raw = [_Wall(a, b, round(thickness, 4), {entity}, {layer}, "centerline")
            for a, b, entity, layer in pieces["wall_centerline"]]
-    faced, paired = _face_walls(pieces["wall_faces"], max_gap)
-    merged = _merge_collinear(raw + faced)
-    _flag_overlaps(merged)
-    ends_grid = _Grid(max(1.0, 4 * max((wall.thickness for wall in merged), default=1.0)))
+    faced, paired = _face_walls(pieces["wall_faces"], max_gap, work)
+    merged = _merge_collinear(raw + faced, work)
+    _flag_overlaps(merged, work)
+    ends_grid = _Grid(max(1.0, 4 * max((wall.thickness for wall in merged), default=1.0)), work)
     for index, wall in enumerate(merged):
-        ends_grid.add(index, _box(wall.a, wall.b, wall.thickness))
+        ends_grid.add(index, wall.a, wall.b, wall.thickness)
     for a, b, entity, layer in pieces["wall_faces"]:
         if entity not in paired:
             unconverted.add_piece(entity, layer, "wall_end" if _wall_end((a, b), merged, ends_grid)
                                   else "no_matching_face")
-    swings, door_pieces = _door_symbols(door_entities)
-    gap_doors, used_swings, used_pieces = _wall_doors(merged, swings, door_pieces, excluded, import_id)
+    gap_doors, used_swings, used_pieces = _wall_doors(merged, swings, door_pieces, excluded, import_id, work)
     joined, place = _join_doors(merged, [door for door in gap_doors if door["join"]])
-    walls = _join_ends(joined)
+    walls = _join_ends(joined, work)
 
-    existing_grid = _Grid(4.0)
+    existing_grid = _Grid(4.0, work)
     existing_lines = []
     for wall in existing_walls:
         try:
@@ -1140,13 +1287,13 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
             width = float(wall["thicknessMeters"])
         except (KeyError, TypeError, ValueError):
             continue
-        existing_grid.add(len(existing_lines), _box(a, b, width))
+        existing_grid.add(len(existing_lines), a, b, width)
         existing_lines.append((a, b, width, wall.get("wallId")))
 
     def wall_there(a, b, width, wall_id):
         d = _unit(a, b)
         n = (-d[1], d[0])
-        for index in existing_grid.near(_box(a, b, width)):
+        for index in existing_grid.near(a, b, width):
             ea, eb, ewidth, eid = existing_lines[index]
             if eid == wall_id or not _parallel(d, _unit(ea, eb)):
                 continue
@@ -1268,7 +1415,7 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     first_of = {}
     for index, room_id in enumerate(room_ids):
         first_of.setdefault(room_id, index)
-    room_rows = []
+    room_rows, checks = [], []
     for index, (boundary, polygon, entity) in enumerate(candidates):
         room_id = room_ids[index]
         inside = [] if text_tree is None else sorted(int(i) for i in text_tree.query(polygon, predicate="contains"))
@@ -1298,16 +1445,27 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
                         and zone_ids[int(j)] != room_id:
                     same_zone = zone_ids[int(j)]
                     break
+        room_rows.append(row)
+        checks.append((row, holds, same_zone, kind))
+    # The states, inner rooms first: a room holds the rooms inside it that can still be added (or that wait on rooms
+    # inside them), which the review can leave out; one around zones already on the plan says so instead.
+    inner_states = {}
+    for index in sorted(range(len(candidates)), key=lambda k: (polygons[k].area, k)):
+        row, holds, same_zone, kind = checks[index]
+        room_id, polygon = room_ids[index], polygons[index]
+        inner = [inner_states.get(j) for j in holds]  # None: not decided yet (two rooms of one area)
         if room_id in zones_by_id:
-            kept = zones_by_id[room_id]
-            same = kept.get("boundary") == boundary
+            same = zones_by_id[room_id].get("boundary") == row["boundary"]
             _state(row, "there" if same else "edited", None if same else "edited")
         elif first_of[room_id] != index:
             _state(row, "refused", "duplicate")
         elif room_id in excluded:
             _state(row, "excluded")
-        elif holds:
+        elif any(state is None or state[0] in ("new", "waiting") or state == ("refused", "holds_rooms")
+                 for state in inner):
             _state(row, "refused", "holds_rooms")
+        elif any(state[0] in ("there", "edited") or state == ("refused", "zone_there") for state in inner):
+            _state(row, "refused", "holds_zones")
         elif plan_box is None:
             _state(row, "refused", "plan_size")
         elif not plan_box.buffer(1e-6).covers(polygon):
@@ -1318,7 +1476,7 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
             _state(row, "waiting", "zone_type")
         else:
             _state(row, "new")
-        room_rows.append(row)
+        inner_states[index] = (row["state"], row["reason"])
 
     # The outline.
     outline_settings = settings["outline"]
@@ -1347,13 +1505,18 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         outline_candidates.append((ring, "line", None, [entity]))
     current = extensions.get("facilityPerimeterWalls")
     outline_rows = []
-    chosen = (outline_settings or {}).get("loop")
-    door_height = (settings["doors"] or {}).get("heightMeters")
-    free_swings = [k for k in range(len(swings)) if k not in used_swings]
-    leafless = set()
+    prepared = []
     for ring, kind, faces, entities in outline_candidates:
         boundary, rounded = _rounded_polygon(ring)
-        outline_id = "ol-fp-" + _digest(import_id, "outline", boundary)[:16]
+        prepared.append((kind, faces, entities, boundary, rounded,
+                         "ol-fp-" + _digest(import_id, "outline", boundary)[:16]))
+    chosen = (outline_settings or {}).get("loop")
+    if chosen not in {item[-1] for item in prepared}:
+        chosen = None  # a choice made on another drawing or reading names none of these
+    door_height = (settings["doors"] or {}).get("heightMeters")
+    free_swings = [k for k in range(len(swings)) if k not in used_swings]
+    leafless, overlapping = set(), set()
+    for kind, faces, entities, boundary, rounded, outline_id in prepared:
         width = faces if faces is not None else (outline_settings or {}).get(
             "thicknessMeters", DEFAULT_OUTLINE_THICKNESS)
         row = {"candidateId": outline_id, "boundary": boundary, "thicknessMeters": width, "from": kind,
@@ -1362,10 +1525,12 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
                "sources": sorted(str(entity.get("id")) for entity in entities), "replaces": None}
         # Doors are looked for on the outline that can become the outer walls (the only one, or the one chosen).
         here = []
-        if rounded is not None and (len(outline_candidates) == 1 or chosen == outline_id):
+        if rounded is not None and len(boundary) <= MAX_OUTLINE_VERTICES and (
+                len(prepared) == 1 or chosen == outline_id):
             points = [(point["x"], point["z"]) for point in boundary]
-            found, missing = _outline_doors(points, width, swings, door_pieces, free_swings)
+            found, missing, unclear = _outline_doors(points, width, swings, door_pieces, free_swings, work)
             leafless |= missing
+            overlapping |= unclear
             for edge, low, high, door_kind, ks, leaves in found:
                 used_swings.update(ks)
                 used_pieces.update(leaves)
@@ -1423,7 +1588,8 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     # What is left on the door layers stays drawing, with the reason (once per entity and reason).
     listed = set()
     for index, swing in enumerate(swings):
-        reason = "door_leaf_missing" if index in leafless else "door_unmatched"
+        reason = ("door_leaf_missing" if index in leafless else "door_overlap" if index in overlapping
+                  else "door_unmatched")
         if index not in used_swings and (swing["entity"], reason) not in listed:
             listed.add((swing["entity"], reason))
             unconverted.add_piece(swing["entity"], swing["layer"], reason)
@@ -1453,6 +1619,10 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         blocked = {"code": "too_many_changes",
                    "message": f"{len(operations)} changes are more than one review holds ({MAX_OPERATIONS}). "
                               f"Convert fewer layers at a time."}
+    elif len(json.dumps(operations, allow_nan=False).encode()) > MAX_PACKAGE_BYTES:
+        blocked = {"code": "changes_too_large",
+                   "message": f"These changes are more than one review holds ({MAX_PACKAGE_BYTES // 1000:,} KB). "
+                              "Convert fewer layers at a time."}
     elif not operations:
         blocked = {"code": "nothing_to_add", "message": "Nothing new to add."}
 

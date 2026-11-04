@@ -5,7 +5,8 @@ import shutil
 
 import pytest
 
-from ai_inspector.facility_layout import floor_plan_proposals
+from ai_inspector.facility_layout import floor_plan_conversion as converter, floor_plan_proposals, operation_proposals
+from ai_inspector.facility_layout.errors import FacilityValidationError
 from ai_inspector.facility_layout.operation_proposals import create
 from ai_inspector.facility_layout.plan_settings import default_plan_settings
 from tests.floor_plan_dxf_fixtures import factory
@@ -256,3 +257,29 @@ def test_a_drawing_whose_unit_is_open_is_not_converted(tmp_path):
     assert apply(client, service, {"op": "upsert_floor_plan_reference", "reference": open_unit}).status_code == 200
     refused = client.post(conversion_url(import_id), json={"baseRevision": revision(service), "settings": SETTINGS})
     assert refused.status_code == 422 and code(refused) == "floor_plan_unit_unconfirmed"
+
+
+def test_a_drawing_too_large_to_convert_is_refused_with_why(tmp_path, monkeypatch):
+    client, service, import_id = underlay(tmp_path)
+    monkeypatch.setattr(converter, "MAX_PIECES", 2)
+    refused = client.post(conversion_url(import_id), json={"baseRevision": revision(service), "settings": SETTINGS})
+    assert refused.status_code == 422 and code(refused) == "floor_plan_conversion_too_large", refused.text
+    assert "more than 2 straight pieces" in refused.json()["error"]["message"]
+
+
+def test_a_conversion_record_is_kept_only_for_a_proposal_that_was_made(tmp_path, monkeypatch):
+    client, service, import_id = underlay(tmp_path)
+    kept = stage(client, service, import_id)
+    folder = store_folder(service) / "conversions"
+    assert [path.stem for path in folder.glob("*.json")] == [kept["conversionId"]]
+
+    def refused(*_args, **_kwargs):
+        raise FacilityValidationError("operation_proposal_denied", "Not now.")
+    monkeypatch.setattr(operation_proposals, "create", refused)
+    # Staged again as it was (its record already stored), then with another height (a new record): both fail.
+    for settings in (SETTINGS, dict(SETTINGS, walls={"heightMeters": 4})):
+        response = client.post(conversion_url(import_id), json={"baseRevision": revision(service),
+                                                                "settings": settings, "stage": "proposal"})
+        assert response.status_code == 422 and code(response) == "operation_proposal_denied", response.text
+    # The record of the proposal that was made stays; the failed one's is not left behind.
+    assert [path.stem for path in folder.glob("*.json")] == [kept["conversionId"]]

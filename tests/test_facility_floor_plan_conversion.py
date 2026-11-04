@@ -276,6 +276,51 @@ def test_three_parallel_lines_are_ambiguous_and_never_guessed():
     assert result["operations"] == [] and result["summary"]["blocked"]["code"] == "nothing_to_add"
 
 
+def box(prefix, x0, x1, z0=0.0, z1=0.2):
+    """A box drawn as four lines: bottom, right, top, left."""
+    corners = ((x0, z0), (x1, z0), (x1, z1), (x0, z1))
+    return [line(f"{prefix}{side}", "L1", corners[side], corners[(side + 1) % 4]) for side in range(4)]
+
+
+WIDE = {"walls": {"heightMeters": 3, "maxThicknessMeters": 1}}
+
+
+def test_jamb_lines_across_a_doorway_never_pair_into_a_wall():
+    # Faces 0.25 m apart, broken by a 0.9 m doorway with its jamb lines, and a door hinged at (4, 0.25). With walls up
+    # to 1 m thick the two jambs are parallel lines close enough to pair: that wall would fill the doorway.
+    geometry = drawing(line("f1", "L1", (0, 0), (4, 0)), line("f2", "L1", (4.9, 0), (10, 0)),
+                       line("f3", "L1", (0, 0.25), (4, 0.25)), line("f4", "L1", (4.9, 0.25), (10, 0.25)),
+                       line("j1", "L1", (4, 0), (4, 0.25)), line("j2", "L1", (4.9, 0), (4.9, 0.25)),
+                       arc("d1", "L2", (4, 0.25), 0.9, 0, 90))
+    result = convert(geometry, {"L1": "wall_faces", "L2": "door"}, WIDE)
+    (wall,) = result["walls"]
+    assert (xz(wall, "start"), xz(wall, "end"), wall["thicknessMeters"], wall["openings"], wall["state"]) == (
+        (5.0, 5.125), (15.0, 5.125), 0.25, [{"startMeters": 4.0, "endMeters": 4.9}], "new")
+    assert [(row["kind"], row["widthMeters"], row["state"]) for row in result["doors"]] == [("single", 0.9, "new")]
+    assert result["unconvertedCounts"] == {"wall_end": 2}
+
+
+def test_a_wall_s_end_line_never_pairs_with_a_wall_beyond_it():
+    # A wall closed by an end line 0.5 m short of a cross wall: the end line and the cross wall's near face are close
+    # enough to pair, and that face, pairing on both of its sides, would leave the cross wall ambiguous.
+    geometry = drawing(line("e1", "L1", (0, 0), (5, 0)), line("e2", "L1", (0, 0.2), (5, 0.2)),
+                       line("e3", "L1", (5, 0), (5, 0.2)),
+                       line("e4", "L1", (5.5, -3), (5.5, 3)), line("e5", "L1", (5.7, -3), (5.7, 3)))
+    result = convert(geometry, FACES, WALLS)
+    assert segments(result) == [((5.0, 5.1), (10.0, 5.1), 0.2), ((10.6, 2.0), (10.6, 8.0), 0.2)]
+    assert {row["state"] for row in result["walls"]} == {"new"}
+    assert result["unconvertedCounts"] == {"wall_end": 1}
+
+
+def test_a_short_box_is_one_wall_along_its_long_sides_and_the_gap_to_the_next_stays_open():
+    # Two piers 0.6 m x 0.2 m drawn as boxes 0.3 m apart. With walls up to 1 m thick each box's ends pair across it,
+    # and the facing ends of the two pair across the gap between them.
+    result = convert(drawing(*box("a", 0, 0.6), *box("b", 0.9, 1.5)), FACES, WIDE)
+    assert segments(result) == [((5.0, 5.1), (5.6, 5.1), 0.2), ((5.9, 5.1), (6.5, 5.1), 0.2)]
+    assert {row["state"] for row in result["walls"]} == {"new"}
+    assert result["unconvertedCounts"] == {"wall_end": 4}
+
+
 def test_the_largest_thickness_applies_before_the_height_is_given():
     # Faces 0.9 m apart pair only when the largest thickness allows it; without a height the wall waits for one.
     geometry = drawing(line("e1", "L1", (0, 0), (10, 0)), line("e2", "L1", (0, 0.9), (10, 0.9)))
@@ -354,6 +399,16 @@ def test_more_walls_than_a_plan_holds_block_the_whole_conversion():
     assert result["operations"] == []
 
 
+def test_changes_larger_than_a_review_holds_block_the_whole_conversion(factory_geometry, monkeypatch):
+    from ai_inspector.facility_layout.floor_plan_proposals import PACKAGE_LIMITS
+    assert PACKAGE_LIMITS == (conversion.MAX_OPERATIONS, conversion.MAX_PACKAGE_BYTES)
+    geometry = factory_geometry["meters"]
+    monkeypatch.setattr(conversion, "MAX_PACKAGE_BYTES", 500)
+    result = convert(geometry, factory_roles(geometry), FACTORY_SETTINGS)
+    assert result["summary"]["operations"] == 3
+    assert result["summary"]["blocked"]["code"] == "changes_too_large"
+
+
 def test_the_result_does_not_depend_on_the_drawing_s_entity_order():
     entities = [line("e1", "L1", (0, 0), (10, 0)), line("e2", "L1", (0, 0.2), (4.9, 0.2)),
                 line("e3", "L1", (5.1, 0.2), (10, 0.2)), line("e4", "L1", (4.9, 0.2), (4.9, 5)),
@@ -376,6 +431,44 @@ def test_thousands_of_face_lines_convert_in_seconds():
     assert time.perf_counter() - started < 20
     assert result["summary"]["walls"] == {"new": 1350}
     assert result["summary"]["blocked"]["code"] == "too_many_walls"
+
+
+def test_a_line_kilometers_long_and_a_room_of_thousands_of_corners_convert_in_seconds():
+    # The work follows a line's length, not the box around it, and a loop's straight points go in one pass.
+    long_wall = (line("e1", "L1", (0, 0), (40000, 30000)), line("e2", "L1", (0.25, 0), (40000.25, 30000)))
+    teeth = [(0.5 * k, 0.25 * (k % 2)) for k in range(4001)]  # 4000 corners along the bottom
+    top = [(2000 - 0.5 * k, 10) for k in range(4001)]  # then 4000 points on one straight line along the top
+    started = time.perf_counter()
+    result = convert(drawing(*long_wall, poly("r1", "L2", teeth + top)), {"L1": "wall_faces", "L2": "room_boundary"},
+                     {"walls": {"heightMeters": 3}, "rooms": {"zoneType": "storage"}})
+    assert time.perf_counter() - started < 5
+    assert [(row["thicknessMeters"], row["reason"]) for row in result["walls"]] == [(0.15, "outside_plan")]
+    assert result["unconvertedCounts"] == {"too_many_vertices": 1}
+
+
+def test_an_outline_with_too_many_corners_is_never_searched_for_doors():
+    teeth = [(0.05 * k, 0.025 * (k % 2)) for k in range(3001)]  # 3000 corners along the bottom
+    swings = [arc(f"d{k}", "L2", (1 + 0.05 * k, 20), 1.0, 0, 90) for k in range(1500)]  # hinged on the top edge
+    started = time.perf_counter()
+    result = convert(drawing(poly("o1", "L3", teeth + [(150, 20), (0, 20)]), *swings),
+                     {"L3": "perimeter", "L2": "door"}, {"outline": {"heightMeters": 6}})
+    assert time.perf_counter() - started < 5
+    assert [(row["state"], row["reason"]) for row in result["outlines"]] == [("refused", "too_many_corners")]
+    assert result["doors"] == [] and result["unconvertedCounts"] == {"door_unmatched": 1500}
+
+
+def test_a_conversion_past_its_limits_is_refused_as_too_large(monkeypatch):
+    stacked = drawing(*(line(f"e{k}", "L1", (0, 0), (10, 0)) for k in range(300)))
+    monkeypatch.setattr(conversion, "MAX_WORK", 50_000)
+    with pytest.raises(conversion.ConversionTooLargeError, match="too large"):
+        convert(stacked, FACES, WALLS)
+    monkeypatch.setattr(conversion, "MAX_PIECES", 100)
+    with pytest.raises(conversion.ConversionTooLargeError, match="100 straight pieces"):
+        convert(stacked, FACES, WALLS)
+    monkeypatch.setattr(conversion, "MAX_DOOR_SYMBOLS", 2)
+    swings = drawing(*BROKEN_WALL, *(arc(f"d{k}", "L2", (4, 0), 1.0, 0, 90) for k in range(3)))
+    with pytest.raises(conversion.ConversionTooLargeError, match="door"):
+        convert(swings, DOORS, WALLS)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -419,6 +512,30 @@ def test_nested_and_repeated_rooms_are_resolved_explicitly():
     kept = convert(geometry, ROOMS, {"rooms": {"zoneType": "workcell"}, "excluded": [rows["inner"]["candidateId"]]})
     states = {row["sources"][0]: row["state"] for row in kept["rooms"]}
     assert states == {"big": "new", "inner": "excluded", "copy": "refused"}
+
+
+def test_only_rooms_that_can_still_be_added_hold_a_room_and_zones_already_there_say_so():
+    geometry = drawing(square("big", 0, 0, 10), square("inner", 2, 2, 3))
+    settings = {"rooms": {"zoneType": "workcell"}}
+    first = convert(geometry, ROOMS, settings)
+    # The inner room added: the outer one now holds a zone already on the plan, which no review can leave out.
+    doc = apply_facility_layout_operations(layout(), first["operations"])["document"]
+    again = convert(geometry, ROOMS, settings, doc=doc)
+    assert {row["sources"][0]: (row["state"], row["reason"]) for row in again["rooms"]} == {
+        "big": ("refused", "holds_zones"), "inner": ("there", None)}
+    assert again["rooms"][0]["message"] == conversion.MESSAGES["holds_zones"]
+    # A room inside that cannot be added either holds nothing: the outer one gets its own reason.
+    outside = drawing(square("big", 30, 0, 10), square("inner", 33, 2, 3))  # past the plan's 40 m width
+    assert {row["sources"][0]: (row["state"], row["reason"]) for row in convert(outside, ROOMS, settings)["rooms"]} \
+        == {"big": ("refused", "outside_plan"), "inner": ("refused", "outside_plan")}
+    # Three deep: each room waits on the ones inside it until they are left out.
+    nested = drawing(square("a", 0, 0, 12), square("b", 1, 1, 8), square("c", 2, 2, 3))
+    ids = {row["sources"][0]: row["candidateId"] for row in convert(nested, ROOMS, settings)["rooms"]}
+    for excluded, expected in (([], {"a": "refused", "b": "refused", "c": "new"}),
+                               (["c"], {"a": "refused", "b": "new", "c": "excluded"}),
+                               (["b", "c"], {"a": "new", "b": "excluded", "c": "excluded"})):
+        rows = convert(nested, ROOMS, dict(settings, excluded=[ids[name] for name in excluded]))["rooms"]
+        assert {row["sources"][0]: row["state"] for row in rows} == expected, excluded
 
 
 def test_rooms_wait_for_a_zone_type_and_a_zone_already_there_is_kept():
@@ -466,6 +583,12 @@ def test_several_outlines_wait_for_the_user_to_choose_one():
     assert {row["candidateId"]: (row["state"], row["reason"]) for row in early["outlines"]} == {
         chosen: ("waiting", "outline_settings"), result["outlines"][0]["candidateId"]: ("refused", "other_outline")}
     assert early["operations"] == []
+
+
+def test_an_outline_choice_that_names_none_of_the_outlines_chooses_none():
+    geometry = drawing(square("a", 0, 0, 10, layer="L4"), square("b", 15, 0, 5, layer="L4"))
+    result = convert(geometry, OUTLINE, {"outline": {"heightMeters": 6, "loop": "ol-fp-" + "9" * 16}})
+    assert {(row["state"], row["reason"]) for row in result["outlines"]} == {("waiting", "choose_outline")}
 
 
 def test_outer_walls_already_there_are_replaced_only_when_asked_and_the_review_says_what_goes():
@@ -663,6 +786,32 @@ def test_an_outer_door_at_a_corner_stays_within_its_edge_once_rounded():
     assert operation["wallSettings"]["openings"] == [
         {"edge": 0, "startMeters": 19.0, "endMeters": end, "heightMeters": 2.1}]
     validate_layout(apply_facility_layout_operations(deepcopy(layout()), result["operations"])["document"])
+
+
+def test_an_outer_door_drawn_twice_or_swinging_both_ways_is_one_door():
+    outline = poly("o1", "L3", [(0, 0), (20, 0), (20, 15), (0, 15)])
+    leaf = line("lA", "L2", (8, 0), (8, -1))
+    twice = drawing(outline, arc("dA", "L2", (8, 0), 1.0, -90, 0), arc("dA2", "L2", (8, 0), 1.0, -90, 0), leaf)
+    both = drawing(outline, arc("dA", "L2", (8, 0), 1.0, -90, 0), leaf,
+                   arc("dB", "L2", (8, 0), 1.0, 90, 0), line("lB", "L2", (8, 0), (8, 1)))
+    settings = {"outline": {"heightMeters": 6}, "doors": {"heightMeters": 2.1}}
+    for geometry, sources in ((twice, ["dA", "dA2", "lA"]), (both, ["dA", "dB", "lA", "lB"])):
+        result = convert(geometry, OUTER, settings)
+        assert [(row["kind"], row["widthMeters"], row["sources"], row["state"]) for row in result["doors"]] == [
+            ("single", 1.0, sources, "new")]
+        (operation,) = result["operations"]
+        assert operation["wallSettings"]["openings"] == [
+            {"edge": 0, "startMeters": 8.0, "endMeters": 9.0, "heightMeters": 2.1}]
+        validate_layout(apply_facility_layout_operations(deepcopy(layout()), result["operations"])["document"])
+        assert result["unconverted"] == []
+    # Swings that overlap without matching disagree: the door is unclear and stays drawing; the outline has no door.
+    unclear = drawing(outline, arc("dA", "L2", (8, 0), 1.0, -90, 0), leaf,
+                      arc("dC", "L2", (8, 0), 1.5, -90, 0), line("lC", "L2", (8, 0), (8, -1.5)))
+    result = convert(unclear, OUTER, settings)
+    assert result["doors"] == [] and [row["state"] for row in result["outlines"]] == ["new"]
+    assert result["operations"][0]["wallSettings"]["openings"] == []
+    assert {row["entityId"]: row["reason"] for row in result["unconverted"]} == {
+        "dA": "door_overlap", "dC": "door_overlap", "lA": "door_part", "lC": "door_part"}
 
 
 def test_every_reason_keeps_a_listed_row_past_the_listing_limit():

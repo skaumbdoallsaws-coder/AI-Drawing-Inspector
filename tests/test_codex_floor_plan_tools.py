@@ -11,6 +11,7 @@ import pytest
 from ai_inspector.codex_runtime.assisted_tools import FacilityEditGateway, edit_tool_specs
 from ai_inspector.codex_runtime.facility_tools import FacilityReadGateway, tool_specs
 from ai_inspector.codex_runtime.progress import describe
+from ai_inspector.facility_layout import floor_plan_conversion as converter
 from tests.test_facility_floor_plan_import import BASE, revision, saved, started
 from tests.test_facility_floor_plan_review import SESSION, SETTINGS, approve, preview, underlay
 from tests.test_facility_layout_api import _principal
@@ -226,3 +227,31 @@ def test_a_package_belongs_to_the_turn_and_revision_it_was_planned_on(tmp_path):
     assert stale["ok"] is False and stale["error"]["code"] == "codex_document_unavailable"
     (other_turn,) = calls(gateway(service), ("preview_floor_plan_import", {"packageId": package}))
     assert other_turn["ok"] is False and other_turn["error"]["code"] == "floor_plan_package_unknown"
+
+
+def test_a_drawing_too_large_to_convert_is_named_to_sage(tmp_path, monkeypatch):
+    _client, service, _import_id = underlay(tmp_path)
+    monkeypatch.setattr(converter, "MAX_PIECES", 2)
+    (refused,) = calls(gateway(service, FacilityReadGateway), ("plan_floor_plan_conversion", SETTINGS))
+    assert refused["ok"] is False and refused["error"]["code"] == "floor_plan_conversion_too_large", refused
+    assert "more than 2 straight pieces" in refused["error"]["message"]
+
+
+def test_in_apply_directly_mode_a_drawing_s_change_still_opens_a_review(tmp_path):
+    client, service, _import_id = underlay(tmp_path)
+    before = revision(service)
+    gate = gateway(service)
+    gate.edit_mode = "direct"
+    points = [{"drawing": {"u": 0, "v": 0}, "plan": {"x": 6, "z": 5}},
+              {"drawing": {"u": 30, "v": 0}, "plan": {"x": 36, "z": 5}}]
+    placed, converted = calls(
+        gate, ("align_floor_plan_import", {"points": points}),
+        ("plan_floor_plan_conversion", SETTINGS))
+    for package in (placed["data"]["package"]["packageId"], converted["data"]["package"]["packageId"]):
+        (staged,) = calls(gate, ("preview_floor_plan_import", {"packageId": package}))
+        assert staged["ok"], staged
+        assert (staged["data"]["approvalRequired"], staged["data"]["editMode"]) == (True, "preview")
+        assert "editMode" not in gate.proposal, "the app applies directly only a proposal marked direct"
+        shown = preview(client, staged["data"]["proposalId"])
+        assert shown.status_code == 200 and shown.json()["alternative"]["editMode"] == "preview", shown.text
+    assert revision(service) == before, "staging saves nothing"

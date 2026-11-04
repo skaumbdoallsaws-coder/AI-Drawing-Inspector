@@ -413,10 +413,11 @@ def _parse_and_store(folder, parse, upload_path, source_sha256, size, source_nam
             shutil.rmtree(job, ignore_errors=True)
 
 
-def store_conversion(root, principal, site_id, record: dict) -> None:
-    """Keep a staged conversion's record. Its id is a digest of everything it was made from, so the same conversion
-    writes the same bytes and a stored record is left as it is; a record that differs is replaced (a proposal bound to
-    the old one then fails its check and is converted again, never applied from a record that does not match)."""
+def store_conversion(root, principal, site_id, record: dict) -> bool:
+    """Keep a staged conversion's record; True when this call wrote it. Its id is a digest of everything it was made
+    from, so the same conversion writes the same bytes and a stored record is left as it is; a record that differs is
+    replaced (a proposal bound to the old one then fails its check and is converted again, never applied from a
+    record that does not match)."""
     conversion_id = record.get("conversionId")
     if not isinstance(conversion_id, str) or not CONVERSION_ID.fullmatch(conversion_id):
         raise ValueError("A conversion record needs its fpc- id.")
@@ -424,11 +425,22 @@ def store_conversion(root, principal, site_id, record: dict) -> None:
     data = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     try:
         if target.read_bytes() == data:
-            return
+            return False
         LOGGER.warning("Floor-plan conversion %s: the stored record differs and is replaced", conversion_id)
     except OSError:
         pass
     _write_atomic(target, data)
+    return True
+
+
+def delete_conversion(root, principal, site_id, conversion_id) -> None:
+    """Remove a staged conversion's record that no proposal was made from."""
+    if not isinstance(conversion_id, str) or not CONVERSION_ID.fullmatch(conversion_id):
+        return
+    try:
+        conversion_path(scope_folder(root, principal, site_id), conversion_id).unlink()
+    except FileNotFoundError:
+        pass
 
 
 def load_conversion(root, principal, site_id, conversion_id) -> dict | None:

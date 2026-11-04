@@ -180,6 +180,44 @@ def test_the_tool_is_registered_with_a_closed_schema_a_label_and_the_only_when_a
     assert not pilot.app_window_open({}) and not pilot.app_window_open({"facility_layout_live_state": {}})
 
 
+def test_sage_looks_at_its_shots_first_fixes_only_its_own_work_and_at_most_twice_sv4():
+    """SV4 (docs/sage-basic-shapes-plan.md), built to option 1: Sage's edits are saved after its reply, so a fix
+    spans turns: no second set of shots in the same turn (user to confirm)."""
+    for text in (pilot.INSTRUCTIONS, pilot.EDIT_INSTRUCTIONS):
+        assert "look at the contact sheet before you reply" in text
+        for check in ("overlaps", "items facing the wrong way", "things in an aisle or walkway",
+                      "duplicates of what was already there", "anything floating or buried"):
+            assert check in text, check
+    edit, read_only = pilot.EDIT_INSTRUCTIONS, pilot.INSTRUCTIONS
+    assert "Your own changes from this conversation that look wrong: fix them in this turn with the edit tools" in edit
+    assert "(they follow\n  the user's apply mode), and say what looked wrong and what you changed." in edit
+    assert "Do not call show_facility_views again\n  this turn" in edit
+    assert "take the shots again and look once more" in edit
+    assert "At most two fix rounds for the same problem" in edit and "show the shots and ask" in edit
+    assert "Anything you did not change in this conversation: report it and offer a fix; never change it unasked" \
+        in edit
+    assert "Report what\nlooks wrong and offer a fix; this pilot cannot make it." in read_only
+    assert "fix them in this turn" not in read_only
+    spec = next(item for item in gateway_tool_specs() if item["name"] == sv.TOOL)
+    assert "The tool only reads: make any fix with the edit tools." in spec["description"]
+
+
+def test_sage_may_remove_only_its_own_accidental_duplicate_unasked_and_says_so_sv4_review():
+    """SV4 review: fixing a duplicate Sage added means deleting it, which the general rule forbids unasked. Both
+    places name the same single exception, under the user's apply mode, and Sage must say so; anything else still
+    needs a specific request. The read-only pilot deletes nothing."""
+    edit = " ".join(pilot.EDIT_INSTRUCTIONS.split())
+    read_only = " ".join(pilot.INSTRUCTIONS.split())
+    duplicate = "an accidental duplicate you added yourself in this conversation"
+    terms = "(it follows the user's apply mode); say in your reply that you removed it."
+    assert edit.count(duplicate) == 2 and edit.count(terms) == 2, "the shots rules and the deletion rule agree"
+    assert ("Removing " + duplicate + " is the one deletion you may stage without being asked " + terms) in edit
+    assert ("Deletion must be specifically requested. The only exception: removing " + duplicate + " " + terms
+            + " Anything else still needs a specific request. Summarize removals in the preview.") in edit
+    assert "Anything you did not change in this conversation: report it and offer a fix; never change it unasked"         in edit
+    assert duplicate not in read_only
+
+
 @pytest.fixture
 def host(tmp_path):
     host = LocalFacilityLayoutHost(tmp_path / "facility", private_assets=False)

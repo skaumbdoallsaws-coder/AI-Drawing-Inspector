@@ -63,7 +63,7 @@ def tool_spec() -> dict:
         "takes a 3D shot of each view (up to 60 s): you get them as one contact sheet beside this result, numbered "
         "as the views are listed, with the roof hidden, and the user gets the full shots under your reply. pictures "
         "says what you got: describe only what a shot shows; for a view without a shot you have not seen the area, "
-        "so never describe how they look."),
+        "so never describe how they look. The tool only reads: make any fix with the edit tools."),
         "input_schema": {"type": "object", "properties": {
             "targetIds": {"type": "array", "minItems": 1, "maxItems": 240, "uniqueItems": True,
                           "items": {"type": "string", "minLength": 1, "maxLength": 128}},

@@ -5248,6 +5248,66 @@ select.ip-flw-site-input {
     overflow-y: auto;
 }
 
+.ip-flw-floor-plan-layer-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ip-flw-floor-plan-panel .ip-flw-floor-plan-role {
+    flex: 0 0 104px;
+    width: 104px;
+    min-height: 20px;
+    margin-top: 0;
+    font-size: 10px;
+}
+
+.ip-flw-floor-plan-convert {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--ip-flw-border);
+}
+
+.ip-flw-floor-plan-heading {
+    font-weight: 700;
+}
+
+.ip-flw-floor-plan-field {
+    display: block;
+    margin-top: 7px;
+    color: var(--ip-flw-text-muted);
+}
+
+.ip-flw-floor-plan-candidates {
+    max-height: 220px;
+    margin-top: 7px;
+    padding: 0 6px;
+    overflow-y: auto;
+    border: 1px solid var(--ip-flw-border);
+    border-radius: 3px;
+}
+
+.ip-flw-floor-plan-candidate {
+    padding: 4px 0;
+    border-bottom: 1px solid var(--ip-flw-border);
+}
+
+.ip-flw-floor-plan-candidate:last-child {
+    border-bottom: 0;
+}
+
+.ip-flw-floor-plan-state {
+    margin-left: 21px;
+    color: var(--ip-flw-text-muted);
+    font-size: 10px;
+}
+
+.ip-flw-floor-plan-candidate[data-state="refused"] .ip-flw-floor-plan-state {
+    color: #b45309;
+}
+
 .ip-flw-floor-plan-opacity {
     display: flex;
     align-items: center;

@@ -38,6 +38,27 @@
             'Click point B on the drawing, well away from A.', 'Click where point B belongs on the plan.'],
         measure: ['Click one end of a length you know on the drawing.', 'Click the other end.'],
     };
+    // What a layer shows (floor_plan_references.ROLES). Converting the drawing reads these; "Drawing only" just shows
+    // the layer.
+    const ROLE_OPTIONS = [['reference', 'Drawing only'], ['wall_centerline', 'Walls: center lines'],
+        ['wall_faces', 'Walls: both faces'], ['perimeter', 'Building outline'], ['room_boundary', 'Room outlines'],
+        ['text', 'Room names'], ['column', 'Columns (later)'], ['door', 'Doors (later)'], ['ignore', 'Ignore']];
+    const WALL_ROLES = ['wall_centerline', 'wall_faces'];
+    const CONVERTED_ROLES = ['wall_centerline', 'wall_faces', 'perimeter', 'room_boundary'];
+    // The zone types a room can become (floor_plan_conversion.ZONE_TYPES), named as the zone properties name them.
+    const ZONE_TYPE_OPTIONS = [['workcell', 'Department / equipment area'], ['receiving', 'Receiving'],
+        ['storage', 'Storage'], ['staging', 'Staging'], ['shipping', 'Shipping'], ['inspection', 'Inspection'],
+        ['dock', 'Dock'], ['charging', 'Charging'], ['service', 'Service clearance - no equipment'],
+        ['operator', 'Operator clearance - no equipment'], ['safety', 'Safety zone - no equipment'],
+        ['exclusion', 'Exclusion zone - no equipment'], ['utility', 'Utility corridor - no equipment'],
+        ['aisle', 'Aisle - no equipment']];
+    // A candidate's state (floor_plan_conversion), in the panel's words.
+    const CANDIDATE_STATES = { new: 'to add', there: 'already on the plan', edited: 'changed on the plan since',
+        waiting: 'waiting', refused: 'not added', excluded: 'left out' };
+    const LISTED_CANDIDATES = 300;
+    const OUTDATED_NOTE = 'Changed since this list was made: Update the list to review the change.';
+    const CONVERSION_FIELDS = ['wallHeight', 'wallThickness', 'maxThickness', 'outlineHeight', 'outlineThickness',
+        'zoneType'];
 
     function finite(value) {
         return typeof value === 'number' && Number.isFinite(value);
@@ -375,6 +396,57 @@
         return match ? match[0] : null;
     }
 
+    function actionButton(documentRef, action, label, disabled) {
+        return html(documentRef, 'button', { type: 'button', className: 'ip-flw-layer-show-all',
+            'data-fp-action': action, disabled: Boolean(disabled) }, label);
+    }
+
+    function newConversionForm() {
+        return { wallHeight: '', wallThickness: '0.2', maxThickness: '0.6', outlineHeight: '', outlineThickness: '0.3',
+            zoneType: '', types: {}, loop: null, replace: false, excluded: [] };
+    }
+
+    function rolesOf(reference) {
+        const roles = new Set();
+        (reference && Array.isArray(reference.layers) ? reference.layers : []).forEach(function (layer) {
+            roles.add(layer.role);
+        });
+        return roles;
+    }
+
+    function typedNumber(text) {
+        const trimmed = String(text === undefined || text === null ? '' : text).trim();
+        const value = trimmed ? Number(trimmed) : NaN;
+        return Number.isFinite(value) ? value : null;
+    }
+
+    // The settings the conversion takes (floor_plan_conversion.normalize_settings), from the panel's fields (FORM) and
+    // the layer roles saved with the underlay (ROLES): a part no layer has is left out, and a part without its height
+    // is listed but not added.
+    function conversionSettings(form, roles) {
+        const settings = { excluded: form.excluded.slice().sort() };
+        const put = function (target, key, text) {
+            const value = typedNumber(text);
+            if (value !== null) target[key] = value;
+        };
+        if (WALL_ROLES.some(function (role) { return roles.has(role); })) {
+            settings.walls = {};
+            put(settings.walls, 'heightMeters', form.wallHeight);
+            if (roles.has('wall_centerline')) put(settings.walls, 'thicknessMeters', form.wallThickness);
+            if (roles.has('wall_faces')) put(settings.walls, 'maxThicknessMeters', form.maxThickness);
+        }
+        if (roles.has('perimeter')) {
+            settings.outline = { replace: form.replace === true };
+            put(settings.outline, 'heightMeters', form.outlineHeight);
+            put(settings.outline, 'thicknessMeters', form.outlineThickness);
+            if (form.loop) settings.outline.loop = form.loop;
+        }
+        if (roles.has('room_boundary')) {
+            settings.rooms = { zoneType: form.zoneType || null, types: Object.assign({}, form.types) };
+        }
+        return settings;
+    }
+
     // The import panel and everything the workspace delegates to it: which underlay the plan shows, picks while
     // aligning, and the reference operations (each an undoable gesture through the session).
     function FloorPlanController(workspace) {
@@ -409,6 +481,11 @@
         this.generation = 0;
         this.watchedToken = null;
         this.watchedPreview = false;
+        // Converting the saved underlay to walls, rooms and the building outline (FP2): the panel's fields for its
+        // drawing, the server's latest answer, and a change staged for review until its preview closes.
+        this.conversion = null;
+        this.conversionSequence = 0;
+        this.conversionReview = null;
     }
 
     FloorPlanController.prototype._adapter = function () {
@@ -618,10 +695,29 @@
         const dropped = this._dropStale();
         this._refresh();
         const state = this.workspace.state;
-        const shown = JSON.stringify([referenceOf(this.layout), referenceOf(state && state.layout), this.preview]);
-        if (shown === this.syncedReferences && !dropped) return;
+        const reported = this._noteReviewClosed(state);
+        // The saved revision and unsaved edits decide what the Walls and rooms section offers.
+        const shown = JSON.stringify([referenceOf(this.layout), referenceOf(state && state.layout), this.preview,
+            state && state.baseRevision, Boolean(state && state.dirty)]);
+        if (shown === this.syncedReferences && !dropped && !reported) return;
         this.syncedReferences = shown;
         if (this.isOpen) this.render();
+    };
+
+    // A conversion staged for review: once its preview has shown and closed, the panel says whether it was approved.
+    FloorPlanController.prototype._noteReviewClosed = function (state) {
+        const review = this.conversionReview;
+        if (!review) return false;
+        if (this.preview) {
+            review.shown = true;
+            return false;
+        }
+        if (!review.shown) return false;
+        this.conversionReview = null;
+        this.message = state && state.baseRevision !== review.revision
+            ? 'Approved: the walls and rooms from the drawing are in the layout.'
+            : 'The review closed without a change: the layout is as it was.';
+        return true;
     };
 
     FloorPlanController.prototype.open = function () {
@@ -641,6 +737,8 @@
         this.busy = false;
         this.isOpen = false;
         this.draft = null;
+        if (this.conversion) this.conversion.answer = null;
+        this.conversionReview = null;
         this._clearPicks();
         this.message = '';
         this.error = '';
@@ -1058,6 +1156,346 @@
         this._change(next);
     };
 
+    // What a layer shows (ROLE_OPTIONS): kept in the draft, else one undoable edit like the others.
+    FloorPlanController.prototype.setLayerRole = function (layerId, role) {
+        const reference = this.currentReference();
+        if (!reference || !ROLE_OPTIONS.some(function (option) { return option[0] === role; })) return;
+        const next = clone(reference);
+        let found = false;
+        next.layers.forEach(function (layer) {
+            if (layer.layerId === layerId) {
+                layer.role = role;
+                found = true;
+            }
+        });
+        if (!found) next.layers.push({ layerId: layerId, visible: true, role: role });
+        this._change(next);
+    };
+
+    FloorPlanController.prototype._roleSelect = function (layer, reference) {
+        const doc = this.document;
+        const kept = (reference.layers || []).find(function (item) { return item.layerId === layer.layerId; });
+        const role = kept && kept.role || 'reference';
+        const select = html(doc, 'select', { className: 'ip-flw-floor-plan-role', 'data-fp-role': layer.layerId,
+            'aria-label': 'What ' + layer.name + ' shows', title: 'What this layer shows', disabled: this.busy });
+        ROLE_OPTIONS.forEach(function (option) {
+            select.appendChild(html(doc, 'option', { value: option[0], selected: option[0] === role }, option[1]));
+        });
+        select.value = role;
+        return select;
+    };
+
+    // The saved underlay's conversion: the panel's fields for its drawing (kept while it stays the same drawing).
+    FloorPlanController.prototype._conversion = function () {
+        const saved = this.draft ? null : this._savedReference();
+        if (!saved) return null;
+        if (!this.conversion || this.conversion.importId !== saved.importId) {
+            this.conversion = { importId: saved.importId, form: newConversionForm(), answer: null };
+        }
+        return this.conversion;
+    };
+
+    // The server's answer for the saved layout as it is now: none once the layout was saved again or changed.
+    FloorPlanController.prototype._conversionAnswer = function () {
+        const conversion = this.conversion;
+        const answer = conversion && conversion.answer;
+        const state = this.workspace.state || {};
+        return answer && answer.importId === conversion.importId && answer.baseRevision === state.baseRevision
+            ? answer : null;
+    };
+
+    // Why the drawing cannot be converted just now ('' when it can). The server converts the saved layout.
+    FloorPlanController.prototype._conversionProblem = function () {
+        const state = this.workspace.state || {};
+        const saved = this._savedReference();
+        if (this.preview) return 'A preview is showing. Approve or dismiss it first.';
+        if (!saved) return 'Add the drawing to the plan first.';
+        if (!saved.alignment || saved.alignment.confirmed !== true) {
+            return 'Choose the drawing\'s unit, or set its scale from a known length, first.';
+        }
+        if (state.dirty || !state.baseRevision) {
+            return 'Save the layout first: the walls and rooms are found in the saved layout.';
+        }
+        return '';
+    };
+
+    // TARGET, a field of the Walls and rooms section, changed: the form keeps it, and a list on show is marked as made
+    // before the change. Returns whether TARGET was one of those fields.
+    FloorPlanController.prototype._editConversion = function (target) {
+        const conversion = this._conversion();
+        if (!conversion || !target || typeof target.hasAttribute !== 'function') return false;
+        const form = conversion.form;
+        if (target.hasAttribute('data-fp-setting')) {
+            const name = target.getAttribute('data-fp-setting');
+            if (name === 'replace') form.replace = target.checked === true;
+            else if (CONVERSION_FIELDS.indexOf(name) >= 0) form[name] = String(target.value);
+            else return false;
+        } else if (target.hasAttribute('data-fp-outline')) {
+            if (target.checked !== true) return true;
+            form.loop = target.getAttribute('data-fp-outline');
+        } else if (target.hasAttribute('data-fp-keep')) {
+            const id = target.getAttribute('data-fp-keep');
+            const rest = form.excluded.filter(function (item) { return item !== id; });
+            form.excluded = target.checked === true ? rest : rest.concat([id]);
+        } else if (target.hasAttribute('data-fp-room-type')) {
+            const id = target.getAttribute('data-fp-room-type');
+            if (target.value) form.types[id] = String(target.value);
+            else delete form.types[id];
+        } else {
+            return false;
+        }
+        this._noteSettingsChanged();
+        return true;
+    };
+
+    // Whether the list on show (ANSWER) can be staged for review: it is current, adds something and is not refused.
+    FloorPlanController.prototype._reviewReady = function (answer, outdated) {
+        const summary = answer && answer.conversion && answer.conversion.summary || {};
+        return !this.busy && !this._conversionProblem() && !outdated && summary.operations > 0 && !summary.blocked;
+    };
+
+    FloorPlanController.prototype._outdated = function (answer) {
+        const roles = rolesOf(this._savedReference());
+        return answer.settingsKey !== JSON.stringify(conversionSettings(this.conversion.form, roles));
+    };
+
+    // A field changed while a list is on show: the list is marked as made before the change, and the review (which
+    // stages the list on show) waits for it to be updated. In place, so the field keeps its focus.
+    FloorPlanController.prototype._noteSettingsChanged = function () {
+        const answer = this._conversionAnswer();
+        if (!this.panel || !answer) return;
+        const outdated = this._outdated(answer);
+        const note = this.panel.querySelector('[data-fp-outdated]');
+        if (note) {
+            note.hidden = !outdated;
+            note.textContent = outdated ? OUTDATED_NOTE : '';
+        }
+        const review = this.panel.querySelector('[data-fp-action="review"]');
+        if (review) review.disabled = !this._reviewReady(answer, outdated);
+    };
+
+    // Asks the server what the saved underlay converts to (STAGE "candidates"), or stages that as a change and shows it
+    // on the plan for review (STAGE "proposal"): Approve adds it to the layout, Dismiss leaves the layout as it is.
+    FloorPlanController.prototype.convert = async function (stage) {
+        const conversion = this._conversion();
+        if (!conversion) return;
+        const problem = this._conversionProblem();
+        if (problem) {
+            this.error = problem;
+            this.render();
+            return;
+        }
+        const session = this.workspace.session;
+        if (!session || typeof session.convertFloorPlan !== 'function'
+                || (stage === 'proposal' && typeof session.fetchAndInstallOperationProposal !== 'function')) {
+            this._fail(new Error('Converting the drawing is unavailable.'));
+            return;
+        }
+        const state = this.workspace.state;
+        const layout = state.layout || {};
+        const revision = state.baseRevision;
+        const settings = conversionSettings(conversion.form, rolesOf(this._savedReference()));
+        const epoch = this.epoch;
+        this.conversionSequence += 1;
+        const sequence = this.conversionSequence;
+        const current = function () {
+            return !this.disposed && epoch === this.epoch && sequence === this.conversionSequence;
+        }.bind(this);
+        this.busy = true;
+        this.error = '';
+        this.message = stage === 'proposal' ? 'Preparing the change for review...' : 'Finding walls and rooms...';
+        this.render();
+        try {
+            const answer = await session.convertFloorPlan(conversion.importId,
+                { baseRevision: revision, settings: settings, stage: stage });
+            if (!current()) return;
+            conversion.answer = { importId: conversion.importId, baseRevision: revision,
+                settingsKey: JSON.stringify(settings), conversion: answer.conversion };
+            if (stage === 'proposal') {
+                await session.fetchAndInstallOperationProposal({
+                    siteId: layout.association && layout.association.siteId,
+                    layoutId: layout.layoutId,
+                    revision: revision,
+                    proposalId: answer.proposal && answer.proposal.proposalId,
+                }, { applyDirectly: false });
+                if (!current()) return;
+                this.conversionReview = { revision: revision, shown: this.preview };
+                this.message = 'The walls and rooms are on the plan to review. Approve adds them to the layout; '
+                    + 'Dismiss leaves it as it is.';
+            } else {
+                this.message = '';
+            }
+            this.busy = false;
+            this.render();
+        } catch (error) {
+            if (!current()) return;
+            this.message = '';
+            this._fail(error);
+        }
+    };
+
+    // The Walls and rooms section: the settings the layers' roles call for, the list of what the drawing converts to,
+    // and the review.
+    FloorPlanController.prototype._renderConversion = function (panel) {
+        const conversion = this._conversion();
+        if (!conversion) return;
+        const doc = this.document;
+        const roles = rolesOf(this._savedReference());
+        const section = html(doc, 'div', { className: 'ip-flw-floor-plan-convert', role: 'group',
+            'aria-label': 'Walls and rooms from the drawing', 'data-fp-convert': 'true' });
+        panel.appendChild(section);
+        section.appendChild(html(doc, 'div', { className: 'ip-flw-floor-plan-heading' }, 'Walls and rooms'));
+        if (!CONVERTED_ROLES.some(function (role) { return roles.has(role); })) {
+            section.appendChild(html(doc, 'p', { className: 'ip-flw-floor-plan-note' }, 'To turn the drawing into '
+                + 'walls and rooms, choose above what its layers show: walls, room outlines or the building outline.'));
+            return;
+        }
+        const form = conversion.form;
+        const busy = this.busy;
+        const field = function (name, label, step) {
+            const row = html(doc, 'label', { className: 'ip-flw-floor-plan-field' }, label);
+            const input = html(doc, 'input', { type: 'number', min: '0', step: step, 'data-fp-setting': name,
+                disabled: busy });
+            input.value = form[name];
+            row.appendChild(input);
+            section.appendChild(row);
+        };
+        if (WALL_ROLES.some(function (role) { return roles.has(role); })) {
+            field('wallHeight', 'Wall height (m)', '0.1');
+            if (roles.has('wall_centerline')) field('wallThickness', 'Wall thickness for center lines (m)', '0.01');
+            if (roles.has('wall_faces')) field('maxThickness', 'Thickest wall drawn as two faces (m)', '0.01');
+        }
+        if (roles.has('perimeter')) {
+            field('outlineHeight', 'Outer wall height (m)', '0.1');
+            field('outlineThickness', 'Outer wall thickness (m)', '0.01');
+        }
+        if (roles.has('room_boundary')) {
+            const row = html(doc, 'label', { className: 'ip-flw-floor-plan-field' }, 'Rooms become zones of type');
+            const select = html(doc, 'select', { 'data-fp-setting': 'zoneType', disabled: busy });
+            select.appendChild(html(doc, 'option', { value: '', selected: !form.zoneType }, 'Choose...'));
+            ZONE_TYPE_OPTIONS.forEach(function (option) {
+                select.appendChild(html(doc, 'option', { value: option[0], selected: option[0] === form.zoneType },
+                    option[1]));
+            });
+            select.value = form.zoneType;
+            row.appendChild(select);
+            section.appendChild(row);
+        }
+        const problem = this._conversionProblem();
+        if (problem) section.appendChild(html(doc, 'p', { className: 'ip-flw-floor-plan-warning' }, problem));
+        const answer = this._conversionAnswer();
+        section.appendChild(actionButton(doc, 'find', answer ? 'Update the list' : 'Find walls and rooms',
+            busy || Boolean(problem)));
+        if (!answer) return;
+        const outdated = this._outdated(answer);
+        this._renderCandidates(section, answer.conversion, form, outdated);
+        section.appendChild(actionButton(doc, 'review', 'Review the change', !this._reviewReady(answer, outdated)));
+    };
+
+    FloorPlanController.prototype._renderCandidates = function (section, result, form, outdated) {
+        const doc = this.document;
+        const note = function (text, className) {
+            section.appendChild(html(doc, 'p', { className: className || 'ip-flw-floor-plan-note' }, text));
+        };
+        const summary = result.summary || {};
+        section.appendChild(html(doc, 'p', { className: 'ip-flw-floor-plan-warning', 'data-fp-outdated': 'true',
+            hidden: !outdated }, outdated ? OUTDATED_NOTE : ''));
+        [['Walls', summary.walls], ['Rooms', summary.rooms], ['Building outline', summary.outlines]].forEach(
+            function (part) {
+                const states = Object.keys(part[1] || {});
+                if (!states.length) return;
+                note(part[0] + ': ' + states.map(function (state) {
+                    return part[1][state] + ' ' + (CANDIDATE_STATES[state] || state);
+                }).join(', ') + '.');
+            });
+        if (summary.blocked) note(summary.blocked.message, 'ip-flw-floor-plan-warning');
+        const outlines = Array.isArray(result.outlines) ? result.outlines : [];
+        if (outlines.some(function (row) { return row.reason === 'replace_needed' || row.replaces; })) {
+            const row = html(doc, 'div', { className: 'ip-flw-layer-check' });
+            const input = html(doc, 'input', { id: 'ip-flw-fp-replace', type: 'checkbox', 'data-fp-setting': 'replace',
+                disabled: this.busy });
+            input.checked = form.replace === true;
+            row.appendChild(input);
+            row.appendChild(html(doc, 'label', { for: 'ip-flw-fp-replace' }, 'Replace the outer walls on the plan'));
+            section.appendChild(row);
+        }
+        const rows = [];
+        outlines.forEach(function (row) { rows.push(['outline', row]); });
+        (result.walls || []).forEach(function (row) { rows.push(['wall', row]); });
+        (result.rooms || []).forEach(function (row) { rows.push(['room', row]); });
+        if (!rows.length) {
+            note('Nothing on those layers converts.');
+        } else {
+            const list = html(doc, 'div', { className: 'ip-flw-floor-plan-candidates', 'data-fp-candidates': 'true',
+                role: 'group', 'aria-label': 'What the drawing converts to' });
+            rows.slice(0, LISTED_CANDIDATES).forEach(function (item) {
+                list.appendChild(this._candidateRow(item[0], item[1], form, outlines.length > 1));
+            }, this);
+            section.appendChild(list);
+            if (rows.length > LISTED_CANDIDATES) {
+                note('The first ' + LISTED_CANDIDATES + ' of ' + rows.length + ' are listed.');
+            }
+        }
+        const left = result.unconvertedCounts || {};
+        const reasons = Object.keys(left);
+        if (reasons.length) {
+            const messages = {};
+            (result.unconverted || []).forEach(function (row) {
+                if (!messages[row.reason]) messages[row.reason] = row.message;
+            });
+            note('Left as drawing:');
+            reasons.forEach(function (reason) { note(left[reason] + ' - ' + (messages[reason] || reason)); });
+        }
+    };
+
+    // One candidate: what it is, how it stands, a box to leave it out (or, among several outlines, the choice of the
+    // building), and a room's own zone type.
+    FloorPlanController.prototype._candidateRow = function (kind, row, form, choosing) {
+        const doc = this.document;
+        const busy = this.busy;
+        const line = html(doc, 'div', { className: 'ip-flw-floor-plan-candidate', 'data-fp-candidate': row.candidateId,
+            'data-state': row.state });
+        const head = html(doc, 'div', { className: 'ip-flw-layer-check' });
+        const id = 'ip-flw-fp-c-' + row.candidateId;
+        const open = row.state === 'new' || row.state === 'waiting' || row.state === 'excluded';
+        let text;
+        if (kind === 'wall') {
+            text = row.label + ': ' + round(row.lengthMeters, 2) + ' m long, ' + round(row.thicknessMeters, 3)
+                + ' m thick';
+        } else if (kind === 'room') {
+            text = row.label + ': ' + round(row.areaSquareMeters, 1) + ' m2';
+        } else {
+            text = 'Outline: ' + (finite(row.areaSquareMeters) ? round(row.areaSquareMeters, 1) + ' m2, ' : '')
+                + (row.boundary || []).length + ' corners, walls ' + round(row.thicknessMeters, 3) + ' m thick';
+        }
+        let input = null;
+        if (kind === 'outline' && choosing) {
+            input = html(doc, 'input', { id: id, type: 'radio', name: 'ip-flw-fp-outline',
+                'data-fp-outline': row.candidateId, disabled: busy });
+            input.checked = form.loop === row.candidateId;
+        } else if (open) {
+            input = html(doc, 'input', { id: id, type: 'checkbox', 'data-fp-keep': row.candidateId, disabled: busy });
+            input.checked = form.excluded.indexOf(row.candidateId) < 0;
+        }
+        if (input) head.appendChild(input);
+        head.appendChild(html(doc, 'label', input ? { for: id } : {}, text));
+        line.appendChild(head);
+        line.appendChild(html(doc, 'div', { className: 'ip-flw-floor-plan-state' },
+            (CANDIDATE_STATES[row.state] || row.state) + (row.message ? ': ' + row.message : '')));
+        if (kind === 'room' && open) {
+            const select = html(doc, 'select', { 'data-fp-room-type': row.candidateId,
+                'aria-label': 'Zone type for ' + row.label, disabled: busy });
+            const own = form.types[row.candidateId] || '';
+            select.appendChild(html(doc, 'option', { value: '', selected: !own }, 'Zone type: as above'));
+            ZONE_TYPE_OPTIONS.forEach(function (option) {
+                select.appendChild(html(doc, 'option', { value: option[0], selected: option[0] === own }, option[1]));
+            });
+            select.value = own;
+            line.appendChild(select);
+        }
+        return line;
+    };
+
     FloorPlanController.prototype.previewOpacity = function (opacity) {
         const adapter = this._adapter();
         if (adapter && typeof adapter.setFloorPlanOpacity === 'function') adapter.setFloorPlanOpacity(opacity);
@@ -1103,6 +1541,8 @@
         else if (action === 'measure') this.startPicking('measure');
         else if (action === 'cancel-pick') this.cancelPicking();
         else if (action === 'apply-alignment') this.applyAlignment();
+        else if (action === 'find') this.convert('candidates');
+        else if (action === 'review') this.convert('proposal');
         else if (action === 'apply-distance') {
             const input = this.panel.querySelector('[data-fp-distance]');
             this.applyDistance(input ? input.value : NaN);
@@ -1126,6 +1566,10 @@
             this.hidden = target.checked !== true;
             this._refresh();
             this.render();
+        } else if (target.hasAttribute('data-fp-role')) {
+            this.setLayerRole(target.getAttribute('data-fp-role'), String(target.value));
+        } else {
+            this._editConversion(target);
         }
     };
 
@@ -1133,6 +1577,7 @@
         const target = event.target;
         if (target && target.hasAttribute('data-fp-opacity')) this.previewOpacity(Number(target.value) / 100);
         if (target && target.hasAttribute('data-fp-distance')) this.distanceText = String(target.value);
+        if (target && target.hasAttribute('data-fp-setting') && !this.busy) this._editConversion(target);
     };
 
     FloorPlanController.prototype.render = function () {
@@ -1141,6 +1586,8 @@
         panel.hidden = !this.isOpen;
         if (!this.isOpen) return;
         const doc = this.document;
+        const oldList = panel.querySelector('[data-fp-candidates]');
+        const scroll = { panel: panel.scrollTop || 0, list: oldList ? oldList.scrollTop || 0 : 0 };
         while (panel.firstChild) panel.removeChild(panel.firstChild);
         const header = html(doc, 'div', { className: 'ip-flw-floor-plan-header' });
         header.appendChild(html(doc, 'div', { className: 'ip-flw-layer-panel-title' }, 'Floor plan'));
@@ -1247,7 +1694,9 @@
                 input.checked = !hidden.has(layer.layerId);
                 const count = (layer.entities || 0) + (layer.texts || 0);
                 row.appendChild(input);
-                row.appendChild(html(doc, 'label', { for: id }, layer.name + ' (' + count + ')'));
+                row.appendChild(html(doc, 'label', { for: id, className: 'ip-flw-floor-plan-layer-name',
+                    title: layer.name }, layer.name + ' (' + count + ')'));
+                row.appendChild(this._roleSelect(layer, reference));
                 list.appendChild(row);
             }, this);
             panel.appendChild(list);
@@ -1275,7 +1724,11 @@
         } else {
             panel.appendChild(button('choose', 'Replace with another DXF...', this.busy));
             panel.appendChild(button('remove', 'Remove from plan', this.busy));
+            if (!this.picking && !this.result) this._renderConversion(panel);
         }
+        panel.scrollTop = scroll.panel;
+        const list = panel.querySelector('[data-fp-candidates]');
+        if (list) list.scrollTop = scroll.list;
     };
 
     // The workspace is going away: answers still on their way are dropped and nothing is drawn or saved again.
@@ -1291,6 +1744,8 @@
         this.pressOwned = false;
         this.sequenceOwned = false;
         this.finishingPress = null;
+        this.conversion = null;
+        this.conversionReview = null;
         if (this.panel && this.panel.parentNode) this.panel.parentNode.removeChild(this.panel);
         this.panel = null;
     };
@@ -1305,6 +1760,9 @@
         MAX_LINES_PER_LABEL: MAX_LINES_PER_LABEL,
         MAX_LABEL_LINES: MAX_LABEL_LINES,
         UNITS: UNITS,
+        ROLE_OPTIONS: ROLE_OPTIONS,
+        ZONE_TYPE_OPTIONS: ZONE_TYPE_OPTIONS,
+        conversionSettings: conversionSettings,
         referenceOf: referenceOf,
         toLayout: toLayout,
         toDrawing: toDrawing,

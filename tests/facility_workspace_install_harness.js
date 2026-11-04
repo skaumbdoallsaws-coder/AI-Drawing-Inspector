@@ -19,6 +19,20 @@ const withoutNewCommands = states => {
     COMMANDS_SINCE_BASELINE.forEach(command => { delete kept[command]; });
     return kept;
 };
+// Proposal review fields added since the baseline (walls in the change summary, floor-plan FP2): it cannot report
+// them, so neither side's snapshot does. Only review objects (those with zoneChanges) lose them; the workspace suite
+// checks the fields themselves.
+const REVIEW_FIELDS_SINCE_BASELINE = ['wallChanges', 'outerWallChange'];
+const withoutNewReviewFields = value => {
+    if (Array.isArray(value)) return value.map(withoutNewReviewFields);
+    if (!value || typeof value !== 'object') return value;
+    const review = Object.prototype.hasOwnProperty.call(value, 'zoneChanges');
+    const kept = {};
+    Object.keys(value).forEach(key => {
+        if (!(review && REVIEW_FIELDS_SINCE_BASELINE.includes(key))) kept[key] = withoutNewReviewFields(value[key]);
+    });
+    return kept;
+};
 const clone = value => JSON.parse(JSON.stringify(value));
 
 function testDocument() {
@@ -216,8 +230,9 @@ async function fixture(baseline = false, count = 2250, capture = false) {
             status: workspace.statusText.textContent, busy: workspace.root.getAttribute('aria-busy'),
             commands: withoutNewCommands(workspace.commandStates), events, scenes, selections, structureEvents,
             commandEvents: commands };
-        return capture === 'digest' ? Object.fromEntries(Object.entries(value).map(([key, item]) =>
-            [key, captureValue(item)])) : clone(value);
+        const plain = withoutNewReviewFields(clone(value));
+        return capture === 'digest' ? Object.fromEntries(Object.entries(plain).map(([key, item]) =>
+            [key, captureValue(item)])) : plain;
     }
     async function measure(action) {
         const renders = top.renderCount;

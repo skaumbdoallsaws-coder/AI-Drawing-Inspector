@@ -273,24 +273,27 @@ def _memo(service):
         return memo
 
 
-def _memo_key(principal, site_id, layout_id, base_revision, request, undo, edit_mode, limits, planned):
+def _memo_key(principal, site_id, layout_id, base_revision, request, undo, edit_mode, limits, planned, origin=None):
     try:
         return fingerprint({"tenant": principal.tenant_id, "principal": principal.principal_id,
             "roles": sorted(principal.roles), "sites": sorted(principal.allowed_site_ids), "site": site_id,
             "layout": layout_id, "base": base_revision, "request": request, "undo": bool(undo), "editMode": edit_mode,
-            "limits": list(limits) if limits else None, "planned": bool(planned)})
+            "limits": list(limits) if limits else None, "planned": bool(planned), "origin": origin})
     except (AttributeError, TypeError, ValueError):
         return None  # prepare itself says what is wrong with the request
 
 
-def _dependency_hash(dependencies, prepared, component_proofs):
+def _dependency_hash(dependencies, prepared, component_proofs, origin=None):
+    # A package's origin (a floor-plan conversion: its drawing, alignment, layer roles, settings and converter) is a
+    # dependency too, so the same operations from elsewhere are never the same binding.
     return fingerprint({"schemaVersion": 1, "dependencies": dependencies.to_dict(),
         "spatialEngineVersion": prepared["spatialDiagnostics"].get("spatialEngineVersion"),
         "routingEngineVersion": prepared["routingDiagnostics"].get("routingEngineVersion"),
-        **({"componentVisuals": component_proofs} if component_proofs else {})})
+        **({"componentVisuals": component_proofs} if component_proofs else {}),
+        **({"origin": origin} if origin is not None else {})})
 
 
-def recheck(service, principal, site_id, layout_id, base_revision, operations, prepared, *, undo=False):
+def recheck(service, principal, site_id, layout_id, base_revision, operations, prepared, *, undo=False, origin=None):
     """A prepared result checked again: the layout is still at its base revision, and what can change outside its
     bytes still passes. Raises as prepare would; returns the dependency fingerprint to compare with the binding."""
     current = service.get_layout(principal, site_id, layout_id)
@@ -315,12 +318,25 @@ def recheck(service, principal, site_id, layout_id, base_revision, operations, p
     service._validate_current_proposal_asset_revisions(principal, site_id, {"assetSet": [
         {"assetId": item["assetId"], "assetDefinitionRevision": item["assetDefinitionRevision"]} for item in checked]})
     dependencies = service.validate_dependencies(principal, site_id, document)
-    return _dependency_hash(dependencies, prepared, component_proofs)
+    return _dependency_hash(dependencies, prepared, component_proofs, origin)
+
+
+def _check_origin(service, principal, site_id, layout_id, base_revision, request, undo, origin):
+    """A package with an origin is checked against it every time it is prepared (staged, opened, approved, applied):
+    a floor-plan conversion's drawing, conversion record, underlay and converter must still be the ones it was made
+    from (floor_plan_proposals.verify_origin). Returns the origin's stored form, or None."""
+    if origin is None:
+        return None
+    if undo:
+        raise FacilityValidationError("operation_proposal_origin_invalid", "An undo has no origin.")
+    from .floor_plan_proposals import verify_origin
+    return verify_origin(service, principal, site_id, layout_id, base_revision, origin, request.get("operations"))
 
 
 def prepare(service, principal, site_id, layout_id, base_revision, request, *, undo=False, edit_mode="preview",
-            limits=None, planned=False):
-    key = _memo_key(principal, site_id, layout_id, base_revision, request, undo, edit_mode, limits, planned)
+            limits=None, planned=False, origin=None):
+    origin = _check_origin(service, principal, site_id, layout_id, base_revision, request, undo, origin)
+    key = _memo_key(principal, site_id, layout_id, base_revision, request, undo, edit_mode, limits, planned, origin)
     memo = _memo(service) if key else None
     blob = memo.get(key) if memo else None
     if blob is not None:
@@ -328,13 +344,13 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
         alternative, binding, prepared, _ = kept
         try:
             if recheck(service, principal, site_id, layout_id, base_revision, alternative["operations"], prepared,
-                       undo=undo) == binding.dependency_fingerprint:
+                       undo=undo, origin=origin) == binding.dependency_fingerprint:
                 return kept
         except Exception:  # noqa: BLE001 - the rebuild below raises the real reason
             pass
         memo.drop(key)
     result = _prepare(service, principal, site_id, layout_id, base_revision, request, undo=undo,
-                      edit_mode=edit_mode, limits=limits, planned=planned)
+                      edit_mode=edit_mode, limits=limits, planned=planned, origin=origin)
     if memo:
         try:
             memo.put(key, pickle.dumps(result, protocol=pickle.HIGHEST_PROTOCOL))
@@ -344,7 +360,7 @@ def prepare(service, principal, site_id, layout_id, base_revision, request, *, u
 
 
 def _prepare(service, principal, site_id, layout_id, base_revision, request, *, undo=False, edit_mode="preview",
-             limits=None, planned=False):
+             limits=None, planned=False, origin=None):
     component_proofs = []
     design_review = None
     cleared_lights = {}
@@ -423,7 +439,7 @@ def _prepare(service, principal, site_id, layout_id, base_revision, request, *, 
             site_review['findingCount'] = len(site_review['findings'])
             site_review['findingsTruncated'] = len(site_review['findings']) > 40
             site_review['findings'] = site_review['findings'][:40]
-    dependency_hash = _dependency_hash(dependencies, prepared, component_proofs)
+    dependency_hash = _dependency_hash(dependencies, prepared, component_proofs, origin)
     binding = facility_layout_binding(tenant_id=principal.tenant_id, site_id=site_id, layout_id=layout_id,
         base_revision=base_revision, diff_hash=prepared["diffHash"], dependency_fingerprint=dependency_hash)
     introduced = _introduced_problems(service, baseline, prepared)
@@ -463,11 +479,20 @@ def _prepare(service, principal, site_id, layout_id, base_revision, request, *, 
     elif obstruction_review is not None:
         alternative["directApplyPolicy"].update(eligible=False,
             reason="Review the equipment placed inside aisles before applying.")
+    if origin is not None:
+        # A change made from an imported drawing is always reviewed, even with Apply directly on (the approval
+        # refuses direct consent for it as well: service.approve_layout_proposal).
+        alternative["origin"] = deepcopy(origin)
+        alternative["directApplyPolicy"].update(eligible=False,
+            reason="Review a change converted from a drawing before applying it.")
     return alternative, binding, prepared, dependencies
 
 
 def create(service, principal, site_id, layout_id, base_revision, *, operations=None, undo_receipt_id=None, edit_mode="preview",
-           limits=None, planned=False):
+           limits=None, planned=False, origin=None):
+    """ORIGIN: where a server-built package came from (a floor-plan conversion, floor_plan_proposals). It is kept with
+    the proposal, bound into its id and binding, checked again whenever the proposal is prepared, and makes the
+    proposal review-only."""
     require_facility_action(principal, tenant_id=principal.tenant_id, site_id=site_id, action="proposal.create")
     service._require_capability("agent_preview")
     if edit_mode not in {"direct", "preview"}:
@@ -475,7 +500,8 @@ def create(service, principal, site_id, layout_id, base_revision, *, operations=
     undo = undo_receipt_id is not None
     request = {"receiptId": undo_receipt_id} if undo else {"operations": deepcopy(operations)}
     alternative, binding, prepared, _ = prepare(service, principal, site_id, layout_id, base_revision, request,
-        undo=undo, edit_mode=edit_mode, limits=limits, planned=planned)
+        undo=undo, edit_mode=edit_mode, limits=limits, planned=planned, origin=origin)
+    origin = alternative.get("origin")
     if not prepared["changed"]:
         raise FacilityValidationError("operation_proposal_no_change", "The proposal makes no change to the saved layout.")
     # A preview is never permission to commit, even when another writer races it.
@@ -484,13 +510,15 @@ def create(service, principal, site_id, layout_id, base_revision, *, operations=
     proposal_type = UNDO_TYPE if undo else PROPOSAL_TYPE
     proposal_id = deterministic_facility_proposal_id(layout_id=layout_id, base_revision=base_revision,
         proposal_type=proposal_type, semantic_plan_hash=fingerprint({"request": request, "editMode": edit_mode,
-                                                                     **({"planned": True} if planned else {})}),
+                                                                     **({"planned": True} if planned else {}),
+                                                                     **({"origin": origin} if origin else {})}),
         dependency_fingerprint=binding.dependency_fingerprint)
     proposal = service.transaction_runtime.propose(tenant_id=principal.tenant_id, principal_id=principal.principal_id,
         proposal_id=proposal_id, binding=binding, payload={"tenantId": principal.tenant_id,
             "siteId": site_id, "layoutId": layout_id, "baseRevision": base_revision,
             "proposalType": proposal_type, "request": request, "editMode": edit_mode,
-            **({"limits": list(limits)} if limits else {}), **({"planned": True} if planned else {})},
+            **({"limits": list(limits)} if limits else {}), **({"planned": True} if planned else {}),
+            **({"origin": deepcopy(origin)} if origin else {})},
         public_summary={**alternative["metrics"], "directApplyPolicy": alternative["directApplyPolicy"]})
     alternative.update(proposalId=proposal.proposal_id, createdAt=proposal.created_at, expiresAt=proposal.expires_at)
     return {"proposalId": proposal.proposal_id, "baseRevision": base_revision, "layoutRevision": base_revision,
@@ -504,4 +532,4 @@ def regenerate(service, principal, site_id, layout_id, payload):
     # Opening the review and approving it rebuild the proposal; a planner package keeps the limits it was staged under.
     return prepare(service, principal, site_id, layout_id, payload["baseRevision"], payload["request"],
         undo=payload["proposalType"] == UNDO_TYPE, edit_mode=payload.get("editMode", "preview"),
-        limits=payload.get("limits"), planned=bool(payload.get("planned")))
+        limits=payload.get("limits"), planned=bool(payload.get("planned")), origin=payload.get("origin"))

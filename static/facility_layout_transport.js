@@ -1407,6 +1407,11 @@
                 return request(floorPlanPath(importId, '/alignment'), 'POST', object(body, 'alignment request'),
                     requestOptions);
             },
+            // The walls, rooms and outline the saved underlay converts to, or those staged as a change to review.
+            convertFloorPlan: function (importId, body, requestOptions) {
+                return request(floorPlanPath(importId, '/conversion'), 'POST', object(body, 'conversion request'),
+                    requestOptions);
+            },
             // Site context: the server fetches public USGS imagery and stores it per site.
             fetchSiteParcel: function (payload, requestOptions) {
                 const value = object(payload, 'site parcel request');

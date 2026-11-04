@@ -2680,8 +2680,10 @@ class FacilityLayoutService:
                 proposal = self.transaction_runtime.get_proposal(proposal_id,
                     tenant_id=principal.tenant_id, site_id=site_id, layout_id=layout_id,
                     principal_id=principal.principal_id)
+                # A package with an origin (a conversion from an imported drawing) is never applied directly.
                 if (proposal.payload.get("editMode") != "direct"
                         or proposal.payload.get("proposalType") not in {"exact-operations-v1", "exact-undo-v1"}
+                        or proposal.payload.get("origin") is not None
                         or not proposal.public_summary.get("directApplyPolicy", {}).get("eligible")):
                     raise FacilityValidationError("direct_review_required", "This change requires preview and approval.")
                 if self.get_layout(principal, site_id, layout_id)["revision"] != proposal.binding.base_revision:
@@ -2781,7 +2783,8 @@ class FacilityLayoutService:
                     # the referenced dependencies).
                     if recheck(service, principal, site_id, layout_id,
                                plan.binding.base_revision, operations, prepared,
-                               undo=alternative["strategy"] == UNDO_TYPE
+                               undo=alternative["strategy"] == UNDO_TYPE,
+                               origin=alternative.get("origin")
                                ) != plan.binding.dependency_fingerprint:
                         raise TransactionBindingError(
                             "transaction_binding_mismatch",

@@ -2038,6 +2038,22 @@
         return names;
     }
 
+    function interiorWallsOf(layout) {
+        const extensions = layout && layout.extensions;
+        const value = extensions && extensions.facilityInteriorWalls;
+        return value && Array.isArray(value.walls) ? value.walls : [];
+    }
+
+    // How a proposal changes the plan's outer walls (one record per layout): 'added', 'changed', 'removed' or ''.
+    function outerWallChange(savedLayout, proposedLayout) {
+        const was = savedLayout && savedLayout.extensions && savedLayout.extensions.facilityPerimeterWalls;
+        const now = proposedLayout && proposedLayout.extensions && proposedLayout.extensions.facilityPerimeterWalls;
+        if (!was && !now) return '';
+        if (!was) return 'added';
+        if (!now) return 'removed';
+        return JSON.stringify(was) === JSON.stringify(now) ? '' : 'changed';
+    }
+
     function buildLayoutProposalReview(savedLayout, proposedLayout) {
         const before = savedLayout && typeof savedLayout === 'object'
             ? savedLayout : {};
@@ -2111,6 +2127,14 @@
                 after.floorMarkings,
                 'markingId'
             ),
+            // Walls, which a drawing converted to walls and rooms mostly is: interior walls by id, the outer walls
+            // as one.
+            wallChanges: collectionChangeCounts(
+                interiorWallsOf(before),
+                interiorWallsOf(after),
+                'wallId'
+            ),
+            outerWallChange: outerWallChange(before, after),
             removedNames: removedRecordNames(before, after),
             removedWalks: removedWalkNames(before, after),
         };
@@ -2302,11 +2326,25 @@
         const zones = source.zoneChanges || {};
         const routes = source.routeChanges || {};
         const markings = source.markingChanges || {};
+        const walls = source.wallChanges || {};
+        const outer = { added: 'new outer walls', changed: 'changed outer walls',
+            removed: 'removed outer walls' }[source.outerWallChange];
         const parts = [];
-        [
+        const counted = function (rows) {
+            rows.forEach(function (item) {
+                if (item[0] > 0) parts.push(countPhrase(item[0], item[1], item[2]));
+            });
+        };
+        counted([
             [(source.newPlacementIds || []).length, 'new item', 'new items'],
             [(source.movedPlacementIds || []).length, 'moved item', 'moved items'],
             [(source.removedPlacementIds || []).length, 'removed item', 'removed items'],
+        ]);
+        if (outer) parts.push(outer);
+        counted([
+            [finite(walls.added, 0), 'new wall', 'new walls'],
+            [finite(walls.changed, 0), 'changed wall', 'changed walls'],
+            [finite(walls.removed, 0), 'removed wall', 'removed walls'],
             [finite(zones.added, 0), 'new zone', 'new zones'],
             [finite(zones.changed, 0), 'changed zone', 'changed zones'],
             [finite(zones.removed, 0), 'removed zone', 'removed zones'],
@@ -2316,9 +2354,7 @@
             [finite(markings.added, 0), 'new floor marking', 'new floor markings'],
             [finite(markings.changed, 0), 'changed floor marking', 'changed floor markings'],
             [finite(markings.removed, 0), 'removed floor marking', 'removed floor markings'],
-        ].forEach(function (item) {
-            if (item[0] > 0) parts.push(countPhrase(item[0], item[1], item[2]));
-        });
+        ]);
         const siteEdits = ((alternative || {}).operations || []).filter(function (operation) {
             return ['set_site_context', 'set_building_pose', 'upsert_site_area',
                 'delete_site_area', 'upsert_site_reference', 'delete_site_reference'].includes(operation.op);
@@ -2336,7 +2372,7 @@
         const also = walks.length ? ' Also removes ' + listedNames(walks, walks.length) + '.' : '';
         return (parts.length
             ? 'Changes: ' + parts.join(', ') + '.'
-            : 'No items, zones or aisles change.') + removes + also;
+            : 'No items, walls, zones or aisles change.') + removes + also;
     }
 
     function proposalPlainCheckSummary(alternative) {

@@ -162,6 +162,7 @@
                 importFloorPlan: transport.importFloorPlan,
                 floorPlanGeometry: transport.floorPlanGeometry,
                 alignFloorPlan: transport.alignFloorPlan,
+                convertFloorPlan: transport.convertFloorPlan,
                 fetchSiteImagery: transport.fetchSiteImagery,
                 fetchSiteParcel: transport.fetchSiteParcel,
                 fetchSiteRoads: transport.fetchSiteRoads,

@@ -1528,11 +1528,18 @@ test('sends a floor-plan DXF as it is and reaches its routes only by a well-form
     assert.strictEqual(calls[2].url, base + '/' + id + '/alignment');
     assert.strictEqual(calls[2].init.method, 'POST');
     assert.deepStrictEqual(JSON.parse(calls[2].init.body), body);
+    const conversion = { baseRevision: 'r1', settings: { walls: { heightMeters: 3 } }, stage: 'proposal' };
+    await transport.convertFloorPlan(id, conversion);
+    assert.strictEqual(calls[3].url, base + '/' + id + '/conversion');
+    assert.strictEqual(calls[3].init.method, 'POST');
+    assert.strictEqual(calls[3].init.headers['X-InspectorPro-Session'], 'session-fp', 'the review is the session\'s');
+    assert.deepStrictEqual(JSON.parse(calls[3].init.body), conversion);
     ['../geometry', 'fpi-' + 'B'.repeat(32), 'fpi-' + 'b'.repeat(31), '', null].forEach(bad => {
         assert.throws(() => transport.floorPlanGeometry(bad), TypeError, String(bad));
         assert.throws(() => transport.alignFloorPlan(bad, body), TypeError, String(bad));
+        assert.throws(() => transport.convertFloorPlan(bad, conversion), TypeError, String(bad));
     });
-    assert.strictEqual(calls.length, 3);
+    assert.strictEqual(calls.length, 4);
 });
 
 (async () => {

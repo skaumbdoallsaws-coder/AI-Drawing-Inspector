@@ -4734,6 +4734,14 @@
             return floorPlanCall('alignFloorPlan')(importId, body, requestOptions);
         }
 
+        // What the saved layout's underlay converts to (body.stage "candidates"), or those walls, rooms and outline
+        // staged on the server as a change to review (stage "proposal"; fetchAndInstallOperationProposal then shows
+        // it). The server converts the saved layout at body.baseRevision and changes nothing here.
+        async function convertFloorPlan(importId, body, requestOptions) {
+            requireLoaded();
+            return floorPlanCall('convertFloorPlan')(importId, body, requestOptions);
+        }
+
         async function upsertFloorPlanReference(reference) {
             requireLoaded();
             assertNoFloorPlanPreview('changing the floor plan');
@@ -5591,6 +5599,7 @@
             importFloorPlan: importFloorPlan,
             floorPlanGeometry: floorPlanGeometry,
             alignFloorPlan: alignFloorPlan,
+            convertFloorPlan: convertFloorPlan,
             upsertFloorPlanReference: upsertFloorPlanReference,
             deleteFloorPlanReference: deleteFloorPlanReference,
             clearLayout: clearLayout,

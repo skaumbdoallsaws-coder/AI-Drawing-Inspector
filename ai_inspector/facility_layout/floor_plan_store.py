@@ -6,6 +6,9 @@ Per tenant and site (decal_images.scope_directory), under <layout root>/floor-pl
     geometry/<sha256>.json            the reader's geometry (floor_plan_reader), named by its own digest
     geometry/<sha256>.manifest.json   the same without the entities: what the import panel shows first
     imports/<importId>.json           which source, which geometry, which reader; display name and size
+    conversions/<conversionId>.json   a conversion staged for review (floor_plan_proposals): its drawing, alignment,
+                                      layer roles and settings, each candidate with the drawing entities it came from
+                                      and the native id it gets, and the digest of the operations proposed
     uploads/, jobs/                   an upload or a parse in progress (removed when it ends, swept after an hour)
 
 Every artifact is written atomically and never rewritten: a digest names one content for good, and the same file
@@ -44,6 +47,7 @@ MAX_WAITING_PARSES = 4
 QUEUE_WAIT_SECONDS = 60.0
 STALE_SECONDS = 3600.0
 IMPORT_ID = re.compile(r"fpi-[a-f0-9]{32}")
+CONVERSION_ID = re.compile(r"fpc-[a-f0-9]{32}")
 
 
 def _too_large() -> FacilityLayoutError:
@@ -73,6 +77,10 @@ def manifest_path(folder, digest: str) -> Path:
 
 def record_path(folder, import_id: str) -> Path:
     return _path(folder, "imports", import_id + ".json")
+
+
+def conversion_path(folder, conversion_id: str) -> Path:
+    return _path(folder, "conversions", conversion_id + ".json")
 
 
 def parser_version() -> str:
@@ -403,6 +411,37 @@ def _parse_and_store(folder, parse, upload_path, source_sha256, size, source_nam
     finally:
         if job is not None:
             shutil.rmtree(job, ignore_errors=True)
+
+
+def store_conversion(root, principal, site_id, record: dict) -> None:
+    """Keep a staged conversion's record. Its id is a digest of everything it was made from, so the same conversion
+    writes the same bytes and a stored record is left as it is; a record that differs is replaced (a proposal bound to
+    the old one then fails its check and is converted again, never applied from a record that does not match)."""
+    conversion_id = record.get("conversionId")
+    if not isinstance(conversion_id, str) or not CONVERSION_ID.fullmatch(conversion_id):
+        raise ValueError("A conversion record needs its fpc- id.")
+    target = conversion_path(scope_folder(root, principal, site_id), conversion_id)
+    data = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    try:
+        if target.read_bytes() == data:
+            return
+        LOGGER.warning("Floor-plan conversion %s: the stored record differs and is replaced", conversion_id)
+    except OSError:
+        pass
+    _write_atomic(target, data)
+
+
+def load_conversion(root, principal, site_id, conversion_id) -> dict | None:
+    """A staged conversion's record of this principal's tenant and site, or None."""
+    if not isinstance(conversion_id, str) or not CONVERSION_ID.fullmatch(conversion_id):
+        return None
+    value = _read_json(conversion_path(scope_folder(root, principal, site_id), conversion_id))
+    return value if isinstance(value, dict) and value.get("conversionId") == conversion_id else None
+
+
+def stored_import(root, principal, site_id, import_id) -> dict | None:
+    """The import record if it and its geometry are stored for this principal's tenant and site, else None."""
+    return _complete_record(scope_folder(root, principal, site_id), import_id)
 
 
 def require_reference_artifacts(root, principal, site_id, before, after) -> None:

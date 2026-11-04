@@ -964,6 +964,335 @@ check('a drawing imported as a draft keeps its first alignment answer through un
     assert.strictEqual(h.controller.result && h.controller.result.kind, 'align', h.panel().text());
 });
 
+// FP2: the Walls and rooms section. A saved underlay whose layers carry ROLES, on a layout saved at revision r1.
+const WALL_A = 'iw-fp-' + '1'.repeat(16);
+const WALL_B = 'iw-fp-' + '2'.repeat(16);
+const OUTLINE_A = 'ol-fp-' + 'a'.repeat(16);
+const OUTLINE_B = 'ol-fp-' + 'b'.repeat(16);
+const ROOM = 'zn-fp-' + 'c'.repeat(16);
+
+function wallsAnswer(settings) {
+    const height = settings.walls && settings.walls.heightMeters;
+    const left = (settings.excluded || []).includes(WALL_A);
+    const first = { candidateId: WALL_A, label: 'Drawing wall 1', start: { x: 0, z: 0 }, end: { x: 10, z: 0 },
+        thicknessMeters: 0.2, lengthMeters: 10, from: 'faces', layers: ['L1'], sources: ['e1'],
+        heightMeters: height || null, state: left ? 'excluded' : height ? 'new' : 'waiting',
+        reason: left || height ? null : 'wall_settings',
+        message: left || height ? null : 'Give the wall height to add the walls.' };
+    const second = { candidateId: WALL_B, label: 'Drawing wall 2', start: { x: 5, z: 0 }, end: { x: 5, z: 8 },
+        thicknessMeters: 0.2, lengthMeters: 8, from: 'faces', layers: ['L1'], sources: ['e2'], heightMeters: null,
+        state: 'refused', reason: 'wall_there', message: 'A wall is already on the plan here.' };
+    const operations = first.state === 'new' ? 1 : 0;
+    return { converterVersion: 'fp-convert-1', importId: RECORD.importId, referenceId: 'fp-main', settings,
+        walls: [first, second], rooms: [], outlines: [],
+        unconverted: [{ entityId: 'e9', layerId: 'L1', reason: 'curve', message: 'A curve: it stays as drawing.' }],
+        unconvertedCounts: { curve: 3 }, layers: { L1: { name: 'WALLS', role: 'wall_faces' } },
+        summary: { walls: first.state === 'waiting' ? { refused: 1, waiting: 1 } : { [first.state]: 1, refused: 1 },
+            rooms: {}, outlines: {}, operations, wallsOnPlan: 1, wallLimit: 128,
+            blocked: operations ? null : { code: 'nothing_to_add', message: 'Nothing new to add.' } } };
+}
+
+function outlinesAnswer(settings) {
+    const loop = settings.outline && settings.outline.loop;
+    const outline = (id, area) => ({ candidateId: id, boundary: [{ x: 0, z: 0 }, { x: 20, z: 0 }, { x: 20, z: 10 },
+        { x: 0, z: 10 }], thicknessMeters: 0.3, from: 'line', areaSquareMeters: area, layers: ['L1'], sources: ['e1'],
+        replaces: loop ? { boundarySource: 'plan', openings: 1, exteriorFinish: false } : null });
+    const a = Object.assign(outline(OUTLINE_A, 200), loop === OUTLINE_A
+        ? { state: settings.outline.replace ? 'new' : 'waiting', reason: settings.outline.replace ? null : 'replace_needed',
+            message: settings.outline.replace ? null : 'The plan already has outer walls; choose Replace to swap them.' }
+        : { state: loop ? 'refused' : 'waiting', reason: loop ? 'other_outline' : 'choose_outline',
+            message: loop ? 'Another outline was chosen.' : 'Choose which outline is the building.' });
+    const b = Object.assign(outline(OUTLINE_B, 50), loop === OUTLINE_B ? { state: 'new', reason: null, message: null }
+        : { state: loop ? 'refused' : 'waiting', reason: loop ? 'other_outline' : 'choose_outline',
+            message: loop ? 'Another outline was chosen.' : 'Choose which outline is the building.' });
+    const kind = settings.rooms && (settings.rooms.types[ROOM] || settings.rooms.zoneType);
+    const room = { candidateId: ROOM, boundary: [], areaSquareMeters: 20, label: 'Office', labelFrom: 'text',
+        zoneType: kind || null, layers: ['L3'], sources: ['r1'], state: kind ? 'new' : 'waiting',
+        reason: kind ? null : 'zone_type', message: kind ? null : 'Choose its zone type.' };
+    return { converterVersion: 'fp-convert-1', importId: RECORD.importId, referenceId: 'fp-main', settings,
+        walls: [], rooms: [room], outlines: [a, b], unconverted: [], unconvertedCounts: {}, layers: {},
+        summary: { walls: {}, rooms: { [room.state]: 1 }, outlines: { waiting: 2 }, operations: 1, wallsOnPlan: 0,
+            wallLimit: 128, blocked: null } };
+}
+
+function converting(options) {
+    const settings = options || {};
+    const h = harness();
+    const reference = floorPlan.newReference(RECORD, MANIFEST);
+    const roles = settings.roles || { L1: 'wall_faces', L2: 'text' };
+    reference.layers.forEach(layer => { layer.role = roles[layer.layerId] || 'reference'; });
+    if (settings.unitOpen) Object.assign(reference.alignment, { unitSource: 'chosen', confirmed: false });
+    h.keep(reference);
+    h.save = function (revision) {
+        h.workspace.state = Object.assign({}, h.workspace.state, { baseRevision: revision, dirty: false });
+    };
+    h.workspace.state.layout.layoutId = 'fl-1';
+    h.workspace.state.layout.association = { siteId: 'site-1' };
+    h.save('r1');
+    h.workspace.state.dirty = Boolean(settings.dirty);
+    h.workspace.session.convertFloorPlan = async (importId, body) => {
+        h.calls.push(['convert', importId, JSON.parse(JSON.stringify(body))]);
+        if (settings.convertGate) await settings.convertGate;
+        if (settings.convertError) throw settings.convertError;
+        const answer = { baseRevision: body.baseRevision, stage: body.stage,
+            conversion: (settings.answer || wallsAnswer)(body.settings) };
+        if (body.stage === 'proposal') answer.proposal = { proposalId: 'flp-1', approvalRequired: true };
+        return answer;
+    };
+    h.workspace.session.fetchAndInstallOperationProposal = async (reference, options) => {
+        h.calls.push(['install', reference, options]);
+        h.controller.sync(h.workspace.state.layout, { preview: true });  // the workspace shows the change
+    };
+    return h;
+}
+
+async function settle() {
+    await flush();
+    await flush();
+}
+
+function field(h, name) {
+    const node = h.panel().querySelector('[data-fp-setting="' + name + '"]');
+    assert.ok(node, 'no ' + name + ' field in: ' + h.panel().text());
+    return node;
+}
+
+check('each layer says what it shows; a role is kept in a draft, else one undoable edit', async () => {
+    const h = harness();
+    await keptAndOpen(h);
+    const select = h.panel().querySelector('[data-fp-role="L1"]');
+    assert.ok(select, h.panel().text());
+    assert.strictEqual(select.value, 'reference');
+    assert.deepStrictEqual(select.children.map(option => option.getAttribute('value')),
+        floorPlan.ROLE_OPTIONS.map(option => option[0]));
+    select.value = 'wall_faces';
+    fire(select, 'change');
+    await settle();
+    const upserts = h.calls.filter(call => call[0] === 'upsert');
+    assert.strictEqual(upserts.length, 1);
+    assert.deepStrictEqual(upserts[0][1].layers.find(layer => layer.layerId === 'L1'),
+        { layerId: 'L1', visible: true, role: 'wall_faces' });
+    assert.strictEqual(h.panel().querySelector('[data-fp-role="L1"]').value, 'wall_faces');
+    const d = harness();
+    await importDrawing(d);
+    const draftRole = d.panel().querySelector('[data-fp-role="L2"]');
+    draftRole.value = 'text';
+    fire(draftRole, 'change');
+    assert.ok(!d.calls.some(call => call[0] === 'upsert'), 'a draft saves nothing');
+    assert.strictEqual(d.controller.draft.reference.layers.find(layer => layer.layerId === 'L2').role, 'text');
+});
+
+check('the panel offers exactly the roles and zone types the server takes, named as the zones name them', () => {
+    const python = fs.readFileSync(path.join(ROOT, 'ai_inspector', 'facility_layout', 'floor_plan_references.py'),
+        'utf8');
+    const roles = /^ROLES = \(([^)]*)\)/m.exec(python)[1].match(/"([a-z_]+)"/g).map(item => item.slice(1, -1));
+    // Listed in the panel's own order (room names beside room outlines); the same roles as the server's.
+    assert.deepStrictEqual(floorPlan.ROLE_OPTIONS.map(option => option[0]).sort(), roles.slice().sort());
+    const converter = fs.readFileSync(path.join(ROOT, 'ai_inspector', 'facility_layout', 'floor_plan_conversion.py'),
+        'utf8');
+    const zones = /^ZONE_TYPES = \(([^)]*)\)/m.exec(converter)[1].match(/"([a-z_]+)"/g).map(item => item.slice(1, -1));
+    assert.deepStrictEqual(floorPlan.ZONE_TYPE_OPTIONS.map(option => option[0]).sort(), zones.slice().sort());
+    const workspace = fs.readFileSync(path.join(ROOT, 'static', 'facility_layout_workspace.js'), 'utf8');
+    const block = /const ZONE_PURPOSE_OPTIONS = Object\.freeze\(\[([\s\S]*?)\]\);/.exec(workspace)[1];
+    const named = [...block.matchAll(/value: '([a-z_]+)', label: '([^']*)'/g)].map(match => [match[1], match[2]]);
+    assert.deepStrictEqual(floorPlan.ZONE_TYPE_OPTIONS, named);
+});
+
+check('the settings sent are the fields the layers call for, heights optional', () => {
+    const form = { wallHeight: ' 3 ', wallThickness: '0.25', maxThickness: '', outlineHeight: 'abc',
+        outlineThickness: '0.3', zoneType: '', types: { [ROOM]: 'storage' }, loop: OUTLINE_B, replace: true,
+        excluded: [WALL_B, WALL_A] };
+    assert.deepStrictEqual(floorPlan.conversionSettings(form, new Set(['wall_centerline', 'perimeter',
+        'room_boundary'])), {
+        excluded: [WALL_A, WALL_B],
+        walls: { heightMeters: 3, thicknessMeters: 0.25 },
+        outline: { replace: true, thicknessMeters: 0.3, loop: OUTLINE_B },
+        rooms: { zoneType: null, types: { [ROOM]: 'storage' } },
+    });
+    assert.deepStrictEqual(floorPlan.conversionSettings(Object.assign({}, form, { maxThickness: '0.8' }),
+        new Set(['wall_faces', 'text'])), { excluded: [WALL_A, WALL_B], walls: { heightMeters: 3,
+        maxThicknessMeters: 0.8 } });
+});
+
+check('walls and rooms are found only for layers with a role, a known unit and a saved layout', async () => {
+    const none = converting({ roles: {} });
+    none.controller.open();
+    assert.ok(/choose above what its layers show/.test(none.panel().text()), none.panel().text());
+    assert.strictEqual(none.panel().querySelector('[data-fp-action="find"]'), null);
+    const dirty = converting({ dirty: true });
+    dirty.controller.open();
+    assert.ok(/Save the layout first/.test(dirty.panel().text()), dirty.panel().text());
+    assert.strictEqual(button(dirty, 'find').disabled, true);
+    const unit = converting({ unitOpen: true });
+    unit.controller.open();
+    assert.ok(/Choose the drawing's unit/.test(unit.panel().text()), unit.panel().text());
+    assert.strictEqual(button(unit, 'find').disabled, true);
+    await unit.controller.convert('candidates');  // a click that got through anyway
+    assert.ok(!unit.calls.some(call => call[0] === 'convert'), 'nothing is sent');
+    assert.ok(/Choose the drawing's unit/.test(unit.panel().text()));
+    // A draft has no Walls and rooms section: it is not on the plan yet.
+    const d = harness();
+    await importDrawing(d);
+    assert.strictEqual(d.panel().querySelector('[data-fp-convert]'), null);
+});
+
+check('the list shows what the drawing converts to; the review is staged with the settings shown', async () => {
+    const h = converting();
+    h.controller.open();
+    let text = h.panel().text();
+    assert.ok(/Wall height \(m\)/.test(text) && /Thickest wall drawn as two faces \(m\)/.test(text), text);
+    assert.ok(!/Wall thickness for center lines/.test(text) && !/Outer wall height/.test(text), text);
+    fire(button(h, 'find'), 'click');
+    await settle();
+    assert.deepStrictEqual(h.calls.filter(call => call[0] === 'convert')[0], ['convert', RECORD.importId,
+        { baseRevision: 'r1', settings: { excluded: [], walls: { maxThicknessMeters: 0.6 } }, stage: 'candidates' }]);
+    text = h.panel().text();
+    assert.ok(/Walls: 1 not added, 1 waiting\./.test(text), text);
+    assert.ok(/Drawing wall 1: 10 m long, 0\.2 m thick/.test(text) && /waiting: Give the wall height/.test(text), text);
+    assert.ok(/not added: A wall is already on the plan here\./.test(text), text);
+    assert.ok(/Left as drawing:/.test(text) && /3 - A curve: it stays as drawing\./.test(text), text);
+    assert.ok(/Nothing new to add\./.test(text), text);
+    assert.ok(h.panel().querySelector('[data-fp-keep="' + WALL_A + '"]'), 'a waiting wall can be left out');
+    assert.strictEqual(h.panel().querySelector('[data-fp-keep="' + WALL_B + '"]'), null, 'a refused one cannot');
+    assert.strictEqual(button(h, 'review').disabled, true, 'nothing to add yet');
+    assert.ok(!/Changed since this list was made/.test(text), text);
+    // The height typed: the list is now older than the fields (marked in place: the field keeps its focus), and the
+    // review, which stages the list on show, waits for the list to be updated.
+    const height = field(h, 'wallHeight');
+    height.value = '3';
+    fire(height, 'input');
+    assert.strictEqual(field(h, 'wallHeight'), height, 'the field is not rebuilt while typed in');
+    assert.ok(/Changed since this list was made: Update the list/.test(h.panel().text()), h.panel().text());
+    assert.strictEqual(button(h, 'review').disabled, true);
+    assert.strictEqual(button(h, 'find').textContent, 'Update the list');
+    fire(button(h, 'find'), 'click');
+    await settle();
+    text = h.panel().text();
+    assert.ok(/Walls: 1 to add, 1 not added\./.test(text) && !/Changed since/.test(text), text);
+    assert.strictEqual(field(h, 'wallHeight').value, '3', 'the field keeps what was typed');
+    assert.strictEqual(button(h, 'review').disabled, false);
+    // Leaving the wall out marks the list as outdated; putting it back makes it current again.
+    const keep = h.panel().querySelector('[data-fp-keep="' + WALL_A + '"]');
+    keep.checked = false;
+    fire(keep, 'change');
+    assert.strictEqual(h.panel().querySelector('[data-fp-keep="' + WALL_A + '"]'), keep, 'the box keeps its focus');
+    assert.ok(/Changed since this list was made/.test(h.panel().text()), h.panel().text());
+    assert.strictEqual(button(h, 'review').disabled, true);
+    h.controller.render();
+    const again = h.panel().querySelector('[data-fp-keep="' + WALL_A + '"]');
+    assert.strictEqual(again.checked, false, 'the choice is kept through a render');
+    assert.ok(/Changed since this list was made/.test(h.panel().text()), h.panel().text());
+    again.checked = true;
+    fire(again, 'change');
+    assert.ok(!/Changed since this list was made/.test(h.panel().text()), h.panel().text());
+    assert.strictEqual(button(h, 'review').disabled, false);
+    fire(button(h, 'review'), 'click');
+    await settle();
+    const staged = h.calls.filter(call => call[0] === 'convert').at(-1);
+    assert.deepStrictEqual(staged[2], { baseRevision: 'r1', stage: 'proposal',
+        settings: { excluded: [], walls: { heightMeters: 3, maxThicknessMeters: 0.6 } } });
+    assert.deepStrictEqual(h.calls.filter(call => call[0] === 'install')[0].slice(1), [
+        { siteId: 'site-1', layoutId: 'fl-1', revision: 'r1', proposalId: 'flp-1' }, { applyDirectly: false }]);
+    assert.ok(/on the plan to review\. Approve adds them/.test(h.panel().text()), h.panel().text());
+    // Approved: the layout moved on to a new revision; the list belonged to the old one.
+    h.save('r2');
+    h.controller.sync(h.workspace.state.layout, { preview: false });
+    text = h.panel().text();
+    assert.ok(/Approved: the walls and rooms from the drawing are in the layout\./.test(text), text);
+    assert.strictEqual(button(h, 'find').textContent, 'Find walls and rooms', 'the old list is gone');
+    assert.strictEqual(h.panel().querySelector('[data-fp-candidates]'), null);
+});
+
+check('a review dismissed leaves the layout as it was, and says so', async () => {
+    const h = converting();
+    h.controller.open();
+    field(h, 'wallHeight').value = '3';
+    fire(field(h, 'wallHeight'), 'input');
+    fire(button(h, 'find'), 'click');
+    await settle();
+    fire(button(h, 'review'), 'click');
+    await settle();
+    assert.ok(/Approve or dismiss it first/.test(h.panel().text()), 'no second conversion under the preview');
+    h.controller.sync(h.workspace.state.layout, { preview: false });
+    assert.ok(/The review closed without a change: the layout is as it was\./.test(h.panel().text()),
+        h.panel().text());
+    assert.ok(h.panel().querySelector('[data-fp-candidates]'), 'the list still holds for the same layout');
+});
+
+check('among several outlines one is chosen; outer walls are replaced only when asked; rooms get zone types',
+    async () => {
+        const h = converting({ roles: { L1: 'perimeter', L3: 'room_boundary' }, answer: outlinesAnswer });
+        h.controller.open();
+        assert.ok(/Outer wall height \(m\)/.test(h.panel().text()) && /Rooms become zones of type/.test(
+            h.panel().text()), h.panel().text());
+        field(h, 'outlineHeight').value = '6';
+        fire(field(h, 'outlineHeight'), 'input');
+        fire(button(h, 'find'), 'click');
+        await settle();
+        assert.strictEqual(h.panel().querySelector('[data-fp-keep="' + OUTLINE_A + '"]'), null);
+        const choice = h.panel().querySelector('[data-fp-outline="' + OUTLINE_A + '"]');
+        assert.ok(choice && h.panel().querySelector('[data-fp-outline="' + OUTLINE_B + '"]'), h.panel().text());
+        assert.ok(/Choose which outline is the building\./.test(h.panel().text()));
+        choice.checked = true;
+        fire(choice, 'change');
+        const zone = field(h, 'zoneType');
+        zone.value = 'workcell';
+        fire(zone, 'change');
+        const own = h.panel().querySelector('[data-fp-room-type="' + ROOM + '"]');
+        assert.ok(own, 'a waiting room has its own zone type');
+        own.value = 'storage';
+        fire(own, 'change');
+        fire(button(h, 'find'), 'click');
+        await settle();
+        assert.deepStrictEqual(h.calls.filter(call => call[0] === 'convert').at(-1)[2].settings, {
+            excluded: [], outline: { replace: false, heightMeters: 6, thicknessMeters: 0.3, loop: OUTLINE_A },
+            rooms: { zoneType: 'workcell', types: { [ROOM]: 'storage' } } });
+        let text = h.panel().text();
+        assert.ok(/The plan already has outer walls; choose Replace/.test(text), text);
+        assert.strictEqual(h.panel().querySelector('[data-fp-outline="' + OUTLINE_A + '"]').checked, true);
+        const replace = field(h, 'replace');
+        assert.strictEqual(replace.checked, false);
+        replace.checked = true;
+        fire(replace, 'change');
+        fire(button(h, 'review'), 'click');
+        await settle();
+        assert.strictEqual(h.calls.filter(call => call[0] === 'convert').at(-1)[2].settings.outline.replace, true);
+        assert.strictEqual(h.calls.filter(call => call[0] === 'install').length, 1);
+    });
+
+check('an answer from the server is dropped when the panel closed meanwhile; a refusal is shown', async () => {
+    let release;
+    const h = converting({ convertGate: new Promise(resolve => { release = resolve; }) });
+    h.controller.open();
+    fire(button(h, 'find'), 'click');
+    assert.strictEqual(button(h, 'find').disabled, true, 'busy');
+    h.controller.close();
+    release();
+    await settle();
+    h.controller.open();
+    assert.strictEqual(h.panel().querySelector('[data-fp-candidates]'), null, 'nothing from before the close');
+    const refused = new Error('The layout changed. Convert again from the saved layout.');
+    const e = converting({ convertError: refused });
+    e.controller.open();
+    fire(button(e, 'find'), 'click');
+    await settle();
+    assert.ok(/The layout changed\. Convert again/.test(e.panel().text()), e.panel().text());
+    assert.strictEqual(e.controller.busy, false);
+    assert.ok(!e.calls.some(call => call[0] === 'install'));
+});
+
+check('a list on show keeps its scroll through a render', async () => {
+    const h = converting();
+    h.controller.open();
+    fire(button(h, 'find'), 'click');
+    await settle();
+    h.panel().querySelector('[data-fp-candidates]').scrollTop = 120;
+    h.panel().scrollTop = 40;
+    h.controller.render();
+    assert.strictEqual(h.panel().querySelector('[data-fp-candidates]').scrollTop, 120);
+    assert.strictEqual(h.panel().scrollTop, 40);
+});
+
 Promise.all(pending).then(() => {
     process.stdout.write(`${checks}/${checks} floor plan checks passed\n`);
 }).catch(error => {

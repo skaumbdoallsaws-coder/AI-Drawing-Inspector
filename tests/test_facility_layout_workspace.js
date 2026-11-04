@@ -2902,6 +2902,39 @@ async function main() {
             ));
         });
 
+    await check('a proposal that adds walls says so: interior walls by id, the outer walls as one', async () => {
+        const wall = (id, x) => ({ wallId: id, start: { x, z: 5 }, end: { x, z: 9 }, thicknessMeters: 0.2,
+            heightMeters: 3 });
+        const outline = { settings: { boundary: [{ x: 5, z: 5 }, { x: 35, z: 5 }, { x: 35, z: 25 }],
+            heightMeters: 6, thicknessMeters: 0.3 } };
+        const saved = layout();
+        const converted = clone(saved);
+        converted.extensions = Object.assign({}, converted.extensions, {
+            facilityInteriorWalls: { version: 1, walls: [wall('iw-a', 15), wall('iw-b', 20)] },
+            facilityPerimeterWalls: clone(outline),
+        });
+        converted.zones = (converted.zones || []).concat([{ zoneId: 'zn-office', label: 'Office' }]);
+        const added = workspaceModule.buildLayoutProposalReview(saved, converted);
+        assert.deepStrictEqual([added.wallChanges, added.outerWallChange],
+            [{ added: 2, changed: 0, removed: 0 }, 'added']);
+        assert.strictEqual(workspaceModule.proposalPlainChangeSummary(added, {}),
+            'Changes: new outer walls, 2 new walls, 1 new zone.');
+        const moved = clone(converted);
+        moved.extensions.facilityInteriorWalls.walls[0].end.z = 10;
+        moved.extensions.facilityPerimeterWalls.settings.heightMeters = 7;
+        moved.extensions.facilityInteriorWalls.walls.pop();
+        assert.strictEqual(workspaceModule.proposalPlainChangeSummary(
+            workspaceModule.buildLayoutProposalReview(converted, moved), {}),
+        'Changes: changed outer walls, 1 changed wall, 1 removed wall.');
+        const bare = clone(moved);
+        delete bare.extensions.facilityPerimeterWalls;
+        assert.strictEqual(workspaceModule.proposalPlainChangeSummary(
+            workspaceModule.buildLayoutProposalReview(moved, bare), {}), 'Changes: removed outer walls.');
+        assert.strictEqual(workspaceModule.proposalPlainChangeSummary(
+            workspaceModule.buildLayoutProposalReview(saved, clone(saved)), {}),
+        'No items, walls, zones or aisles change.');
+    });
+
     await check('proposal review diff is stable-ID based and remains pure',
         async () => {
             const saved = layout();

@@ -13,7 +13,11 @@ const streamStart = html.indexOf('async function _requestAgentChatStream(');
 const streamEnd = html.indexOf('window.__agentChatStreamV1 =', streamStart);
 const sendStart = html.lastIndexOf('let data = null;', html.indexOf('const streamedReply = await _requestAgentChatStream('));
 const sendEnd = html.indexOf('terminalResponseData = data;', sendStart);
-assert(streamStart >= 0 && streamEnd > streamStart && sendStart >= 0 && sendEnd > sendStart);
+// The reasoning selector's level for a Codex turn (the effort selector, 81b2744): the page's own helper.
+const effortStart = html.indexOf('function _agentReasoningEffort(status, selected) {');
+const effortEnd = html.indexOf("// The selector shows the server's default", effortStart);
+assert(streamStart >= 0 && streamEnd > streamStart && sendStart >= 0 && sendEnd > sendStart
+    && effortStart >= 0 && effortEnd > effortStart);
 const nativePrompt = 'Walk me through the saved layout facts: inspect the zones and equipment in this gym. Keep it brief and do not change anything.';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
@@ -57,6 +61,9 @@ function fixture(options = {}) {
         _trainFacilityLayoutAuthoringApp: app, _trainIsFacilityLayoutMode: () => true,
         _chatMemoryRuntime: memoryRuntime, _parseAgentStreamEventLine: runtime.parseEventLine,
         ensureAgentWorkingState: () => working, setWaiting() {}, removeTypingIndicator() {},
+        // The level the reasoning selector shows, which a Codex turn sends (index.html setAgentReasoningUiSelection).
+        agentReasoningUiSelection: options.selected || '',
+        setAgentReasoningUiSelection(level) { context.agentReasoningUiSelection = level || ''; },
         // What a step does in the facility view (Sage's glide and 3D shots) is tested on its own: here, nothing.
         _trainFacilityShowFromStep() {}, _trainFacilityCaptureFromStep() {},
         createStreamingAssistantMessage: () => {
@@ -89,7 +96,7 @@ function fixture(options = {}) {
         }) } };
     }
     vm.createContext(context);
-    vm.runInContext(html.slice(streamStart, streamEnd) + '\n' +
+    vm.runInContext(html.slice(effortStart, effortEnd) + '\n' + html.slice(streamStart, streamEnd) + '\n' +
         'async function send(payload, originAgent, originSession, turnId, workingAssistant) {' +
         'let streamingAssistant, streamTrace;\n' + html.slice(sendStart, sendEnd) + '\nreturn data;\n}', context);
     return { state, session, context, requests, payload, working, calls, bubbles,
@@ -118,6 +125,22 @@ test('native walkthrough wording uses cancellable SSE and disposes the saved-con
     assert(f.requests[0].signal instanceof AbortSignal);
     assert.equal(f.released(), 1);
     f.assertClean();
+});
+
+test('a Codex turn sends the level the selector shows, the server\'s default until the user picks one', async () => {
+    const reasoningEffort = { levels: ['low', 'medium', 'high'], default: 'high' };
+    for (const [selected, sent] of [['', 'high'], ['low', 'low'], ['max', 'high']]) {
+        const f = fixture({ selected, status: { facilityRuntime: 'codex', enabled: true, agents: ['sage'],
+            reasoningEffort } });
+        assert.equal((await f.send()).response, 'saved facts');
+        assert.equal(JSON.parse(f.requests[0].body).reasoning_effort, sent, 'picked: ' + (selected || 'none'));
+        assert.equal(f.context.agentReasoningUiSelection, sent, 'the selector shows the level sent');
+        f.assertClean();
+    }
+    const plain = fixture();                // a server that offers no levels: none is sent
+    await plain.send();
+    assert.equal(JSON.parse(plain.requests[0].body).reasoning_effort, undefined);
+    plain.assertClean();
 });
 
 for (const status of [

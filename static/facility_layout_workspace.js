@@ -14601,9 +14601,11 @@
             return false;
         }
         this._stopSageGlide(false);
-        this.sageViewNext = null;
+        // A move of Sage's replaced before it changed the view left the roof hidden: the user's roof is the one saved
+        // with that move (Codex on 5ee9b3c).
         const before = { viewMode: this.viewMode, layoutId: layout.layoutId, threeFit: this.lastThreeFitFingerprint,
-            layers: { overhead: this.layerVisibility.overhead, roofSheeting: this.layerVisibility.roofSheeting } };
+            layers: this._sageUserRoof(layout.layoutId) };
+        this.sageViewNext = null;
         const switched = this.viewMode !== '3d';
         if (this.viewMode !== '3d') {
             this.lastThreeFitFingerprint = this.lastLayoutFitFingerprint;   // the glide places the camera, not a fit
@@ -14657,7 +14659,10 @@
             this._noteSageViewLeft();
             return true;
         }
-        const glide = { began: null, frame: null, view: view, landed: landed, seconds: flight.seconds, moved: false };
+        // Stopped before it moved the camera, it gives the user their roof back; Back waits for a move that changes
+        // the view (Codex on 5ee9b3c).
+        const glide = { began: null, frame: null, view: view, landed: landed, seconds: flight.seconds, moved: false,
+            unmoved: function () { this._setSageRoof(own); }.bind(this) };
         glide.done = new Promise(function (resolve) { glide.finish = resolve; });   // 'landed', 'stopped' or 'failed'
         const step = function (now) {
             if (this.sageGlide !== glide || this.destroyed) return;
@@ -14737,13 +14742,22 @@
             ? { layoutId: layout.layoutId, viewMode: this.viewMode, camera: camera } : null;
     };
 
+    // The user's own roof layers. Sage hides the roof shown while it moves the view, so while a move of Sage's waits
+    // to change the view (sageViewNext), they are the ones saved with it (Codex on 5ee9b3c).
+    Workspace.prototype._sageUserRoof = function (layoutId) {
+        const next = this.sageViewNext;
+        const layers = next && next.back.layoutId === layoutId ? next.back.layers : this.layerVisibility;
+        return { overhead: layers.overhead, roofSheeting: layers.roofSheeting };
+    };
+
     Workspace.prototype._setSageRoof = function (layers) {
         this.layerVisibility = normalizeLayerVisibility(Object.assign({}, this.layerVisibility, {
             overhead: layers.overhead !== false, roofSheeting: layers.roofSheeting === true }));
         this._applyLayerVisibility();
     };
 
-    // Stops a glide where it is; LAND (the default) still settles the roof as the glide would have.
+    // Stops a glide where it is; LAND (the default) still settles the roof as the glide would have, or gives the user
+    // their roof back when it never moved the camera.
     Workspace.prototype._stopSageGlide = function (land) {
         const glide = this.sageGlide;
         if (!glide) return false;
@@ -14751,7 +14765,7 @@
         if (glide.frame !== null && typeof glide.view.cancelAnimationFrame === 'function') {
             glide.view.cancelAnimationFrame(glide.frame);
         }
-        if (land !== false && !this.destroyed) glide.landed();
+        if (land !== false && !this.destroyed) (glide.moved ? glide.landed : glide.unmoved)();
         if (glide.moved && !this.destroyed) this._noteSageViewLeft();   // only where Sage's frames put the camera
         if (glide.finish) glide.finish('stopped');
         return true;
@@ -14862,7 +14876,7 @@
         const capture = { layoutId: layout.layoutId, siteId: value.siteId, revision: value.revision, adapter: adapter,
             requestId: typeof value.requestId === 'string' ? value.requestId : null,
             stopped: false, moved: false, glide: null, scene: null, end: null,
-            layers: { overhead: this.layerVisibility.overhead, roofSheeting: this.layerVisibility.roofSheeting } };
+            layers: this._sageUserRoof(layout.layoutId) };
         capture.ended = new Promise(function (resolve) { capture.end = resolve; });
         this.sageCapture = capture;
         const off = { overhead: false, roofSheeting: false };

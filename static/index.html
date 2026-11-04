@@ -21642,7 +21642,7 @@
     <script src="/static/facility_layout_replace_asset.js?v=20261013-authoring-1"></script>
     <script src="/static/facility_layout_decals.js?v=20261019-library-1"></script>
     <script src="/static/facility_layout_floor_plan.js?v=20261104-floor-plan-8"></script>
-    <script src="/static/facility_layout_editor.js?v=20261104-floor-plan-1"></script>
+    <script src="/static/facility_layout_editor.js?v=20261104-fp-authored-1"></script>
     <script src="/static/facility_layout_avatar.js?v=20260928-motion-operators-1"></script>
     <script src="/static/process_operator.js?v=20260927-1"></script>
     <script src="/static/walkthrough_camera_settings.js?v=20260927-1"></script>
@@ -21664,8 +21664,8 @@
     <script src="/static/facility_layout_session.js?v=20261104-floor-plan-2"></script>
     <script src="/static/facility_layout_transport.js?v=20261104-floor-plan-2"></script>
     <script src="/static/facility_layout_generation_view.js?v=20260917-generation-research"></script>
-    <script src="/static/facility_layout_workspace.js?v=20261104-floor-plan-8"></script>
-    <script src="/static/facility_layout_app.js?v=20261104-floor-plan-2"></script>
+    <script src="/static/facility_layout_workspace.js?v=20261104-fp-authored-1"></script>
+    <script src="/static/facility_layout_app.js?v=20261104-fp-authored-1"></script>
     <script src="/static/desktop_workflow_observation.js?v=20260915-workflow-coverage"></script>
     <script src="/static/desktop_runtime_bridge.js?v=20260915-workflow-coverage"></script>
     <script>
@@ -58946,6 +58946,20 @@
                         layoutId: activeLayoutId,
                         initialReceipt: initialLayoutReceipt,
                         assetCatalog: bootstrap.assetCatalog || [],
+                        // Sage's basic shapes (docs/sage-basic-shapes-plan.md, BS2): the workspace asks again when a
+                        // layout places an asset added since the page opened.
+                        loadAssetCatalog: async function () {
+                            const response = await fetch('/api/industrial-assets?siteId='
+                                + encodeURIComponent(bootstrap.siteId), { cache: 'no-store' });
+                            if (!response.ok) {
+                                throw new Error('Asset catalog request failed (' + response.status + ')');
+                            }
+                            const body = await response.json();
+                            if (!body || body.siteId !== bootstrap.siteId || !Array.isArray(body.assets)) {
+                                throw new Error('The asset catalog answer is not for this site');
+                            }
+                            return body.assets;
+                        },
                         capabilities: bootstrap.capabilities || {},
                         externalCommandSurface: true,
                         gridSize: facilityGrid.snapSpacing,

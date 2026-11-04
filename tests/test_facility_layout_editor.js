@@ -2442,6 +2442,31 @@ check('top plan draws an imported floor plan above the floor and under the zones
     adapter.dispose();
 });
 
+check('a new asset catalog reaches the plan through the controller, which draws the new asset at its size (BS2)',
+    () => {
+        FakeResizeObserver.reset();
+        const { documentRef, host } = makeHost();
+        const input = layout([placement('pl-new', 'asset-new', 4, 4)]);
+        const plan = facility.createTopPlanAdapter(host, { document: documentRef, ResizeObserver: FakeResizeObserver });
+        const scenes = [];
+        const three = { id: 'three', type: 'three', mounted: true, setScene(scene) { scenes.push(scene); },
+            setSelectionHandler() {}, setSelection() {}, getDiagnostics() { return {}; }, dispose() {} };
+        const controller = facility.createEditor({ layout: input, assetCatalog: [], adapters: [plan, three] });
+        const width = () => {
+            const points = host.findByAttribute('class', 'ip-flw-plan-card-body')[0].getAttribute('points')
+                .split(' ').map(value => Number(value.split(',')[0]));
+            return Math.max(...points) - Math.min(...points);
+        };
+        const before = width();
+        const entry = { assetId: 'asset-new', assetDefinitionRevision: input.placements[0].assetDefinitionRevision,
+            width: 6, depth: 1 };
+        controller.setAssetCatalog([entry]);
+        assert.deepStrictEqual(plan.options.assetCatalog, [entry]);
+        assert.deepStrictEqual(scenes[scenes.length - 1].assetCatalog, [entry]);
+        assert.ok(width() > 2 * before, `${width()} vs ${before}`);
+        controller.dispose();
+    });
+
 Promise.all(pendingChecks).then(() => {
     process.stdout.write(
         `${checks}/${checks} facility layout editor checks passed\n`

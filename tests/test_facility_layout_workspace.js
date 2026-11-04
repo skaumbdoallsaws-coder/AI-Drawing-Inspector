@@ -2437,6 +2437,7 @@ function fixture(options) {
         recordingCountdownSeconds: options
             && options.recordingCountdownSeconds,
         assetCatalog: options && options.assetCatalog || catalog(),
+        loadAssetCatalog: options && options.loadAssetCatalog,
         externalCommandSurface: Boolean(
             options && options.externalCommandSurface
         ),
@@ -8681,6 +8682,71 @@ async function main() {
             assert.deepStrictEqual([next.complete, next.reason], [true, null], 'not busy');
             assert.strictEqual(workspace.stopSageCapture(id), false, 'nothing left to stop');
             workspace.destroy();
+        });
+
+    await check('a layout placing an asset this page has not heard of loads the catalog again, once per asset '
+        + '(basic shapes BS2)', async () => {
+            const bollard = { assetId: 'asset-authored-bollard-1200mm-0123456789',
+                assetDefinitionRevision: 'revision-asset-authored-bollard-1200mm-0123456789',
+                displayName: 'Bollard 1.2 m', category: 'Safety' };
+            const tank = { assetId: 'asset-authored-tank-2000mm-0123456789',
+                assetDefinitionRevision: 'revision-asset-authored-tank-2000mm-0123456789',
+                displayName: 'Tank 2 m', category: 'Utilities' };
+            const loads = [];
+            const data = fixture({
+                loadAssetCatalog() {
+                    return new Promise((resolve, reject) => loads.push({ resolve, reject }));
+                },
+            });
+            const show = function (...placements) {
+                const next = clone(data.session.state.layout);
+                next.placements = next.placements.concat(placements);
+                data.session.state.layout = next;
+                data.session._notify();
+            };
+            const cards = () => data.workspace.assetGrid.querySelectorAll('.ip-flw-asset-card')
+                .map(card => card.getAttribute('data-asset-id'));
+            const older = Object.assign(placement('pl-rack-old', 'asset-rack', 3, 3),
+                { assetDefinitionRevision: 'revision-older' });
+            show(older);
+            await until(() => data.workspace.assetCatalogRefresh === null);
+            assert.strictEqual(loads.length, 0, 'a known asset at an older revision is no reason to load');
+            show(placement('pl-bollard-1', bollard.assetId, 6, 1));
+            await until(() => loads.length === 1);
+            show(placement('pl-tank-1', tank.assetId, 8, 1));
+            show(placement('pl-bollard-2', bollard.assetId, 6, 2));
+            await Promise.resolve();
+            assert.strictEqual(loads.length, 1, 'one load at a time');
+            loads[0].resolve(catalog().concat([bollard]));
+            await until(() => loads.length === 2);
+            assert.ok(data.workspace.assetCatalog.some(record => record.assetId === bollard.assetId));
+            assert.deepStrictEqual(data.controller.catalogs[data.controller.catalogs.length - 1].map(row => row.assetId),
+                ['asset-rack', 'asset-forklift', 'asset-machine', bollard.assetId], 'the 2D and 3D views have it');
+            assert.ok(cards().includes(bollard.assetId), 'and so has the asset browser');
+            const warnings = [];
+            const warn = console.warn;
+            console.warn = (...args) => warnings.push(args.join(' '));
+            try {
+                loads[1].reject(new Error('offline'));
+                await until(() => data.workspace.assetCatalogRefresh === null);
+            } finally {
+                console.warn = warn;
+            }
+            assert.deepStrictEqual(warnings, ['The asset catalog could not be loaded again: Error: offline']);
+            assert.ok(!data.workspace.assetCatalog.some(record => record.assetId === tank.assetId));
+            show(placement('pl-bollard-3', bollard.assetId, 6, 3));
+            await until(() => loads.length === 3);
+            loads[2].resolve(catalog().concat([bollard, tank]));
+            await until(() => data.workspace.assetCatalogRefresh === null);
+            assert.ok(cards().includes(tank.assetId), 'a failed load is tried again with the next layout');
+            show(placement('pl-gone', 'asset-removed-from-the-library', 9, 9));
+            await until(() => loads.length === 4);
+            loads[3].resolve(catalog().concat([bollard, tank]));
+            await until(() => data.workspace.assetCatalogRefresh === null);
+            show(placement('pl-gone-2', 'asset-removed-from-the-library', 9, 8));
+            await until(() => data.workspace.assetCatalogRefresh === null);
+            assert.strictEqual(loads.length, 4, 'an asset the server does not have either is asked for once');
+            data.workspace.destroy();
         });
 
     process.stdout.write(`${checks}/${checks} facility layout workspace checks passed\n`);

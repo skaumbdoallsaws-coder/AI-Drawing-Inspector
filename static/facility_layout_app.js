@@ -255,6 +255,7 @@
                 designTransport: transport,
                 layoutRuntime: Layout,
                 assetCatalog: options.assetCatalog || [],
+                loadAssetCatalog: options.loadAssetCatalog,
                 capabilities: options.capabilities || {},
                 externalCommandSurface:
                     options.externalCommandSurface === true,

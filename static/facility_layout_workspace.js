@@ -2593,6 +2593,10 @@
             throw new TypeError('FacilityLayout runtime or controller is required');
         }
         this.assetCatalog = normalizeCatalog(options.assetCatalog || []);
+        this.assetCatalogLoader = typeof options.loadAssetCatalog === 'function' ? options.loadAssetCatalog : null;
+        this.assetCatalogLookups = new Set();
+        this.assetCatalogRefresh = null;
+        this.assetCatalogRefreshAgain = false;
         this.capabilities = Object.assign({
             assetLibrary: true,
             manualAuthoring: true,
@@ -18316,6 +18320,55 @@
         if (this.state.layout && this.controller) this._notifyStructure();
     };
 
+    // A new asset catalog: the asset browser, the 2D plan and the 3D view all take it.
+    Workspace.prototype.setAssetCatalog = function (catalog) {
+        if (this.destroyed) return;
+        this.assetCatalog = normalizeCatalog(catalog || []);
+        if (this.controller && typeof this.controller.setAssetCatalog === 'function') {
+            this.controller.setAssetCatalog(catalog || []);
+        }
+        this._renderAssetBrowser();
+    };
+
+    // Assets added while the page is open (Sage's basic shapes, docs/sage-basic-shapes-plan.md BS2): a layout that
+    // places an asset this page has not heard of fetches the catalog again, once for each such asset. One fetch at a
+    // time; a layout that comes during it is checked again after. A failed fetch is tried again with the next layout.
+    Workspace.prototype._refreshAssetCatalogFor = function (layout) {
+        if (!this.assetCatalogLoader || this.destroyed || !layout || !Array.isArray(layout.placements)) return;
+        const known = new Set(this.assetCatalog.map(function (record) { return record.assetId; }));
+        const unknown = [];
+        layout.placements.forEach(function (placement) {
+            const assetId = placement && placement.assetId;
+            if (assetId && !known.has(assetId) && !this.assetCatalogLookups.has(assetId)
+                    && unknown.indexOf(assetId) < 0) {
+                unknown.push(assetId);
+            }
+        }, this);
+        if (!unknown.length) return;
+        if (this.assetCatalogRefresh) {
+            this.assetCatalogRefreshAgain = true;
+            return;
+        }
+        unknown.forEach(function (assetId) { this.assetCatalogLookups.add(assetId); }, this);
+        const self = this;
+        this.assetCatalogRefresh = Promise.resolve().then(function () {
+            return self.assetCatalogLoader();
+        }).then(function (catalog) {
+            if (!self.destroyed && Array.isArray(catalog)) self.setAssetCatalog(catalog);
+        }, function (error) {
+            unknown.forEach(function (assetId) { self.assetCatalogLookups.delete(assetId); });
+            if (root && root.console && typeof root.console.warn === 'function') {
+                root.console.warn('The asset catalog could not be loaded again:', error);
+            }
+        }).then(function () {
+            self.assetCatalogRefresh = null;
+            if (self.assetCatalogRefreshAgain && !self.destroyed) {
+                self.assetCatalogRefreshAgain = false;
+                self._refreshAssetCatalogFor(self.siteRepresentedLayout);
+            }
+        });
+    };
+
     Workspace.prototype._updateController = function () {
         if (!this.state.layout || !this.controller) return;
         const layoutAlternative = activeLayoutAlternative(this.state);
@@ -18341,6 +18394,7 @@
             this.controller.setLayout(renderedLayout, { returnState: false });
             this.lastLayoutFingerprint = layoutFingerprint;
             this.lastLayoutFitFingerprint = fitFingerprintOf(renderedLayout);
+            this._refreshAssetCatalogFor(renderedLayout);
         }
         const commit = this.state.lastApprovedOperationCommit;
         if (commit && commit.directApply && commit.receiptId && commit.receiptId !== this.lastDirectApplyReceiptId) {

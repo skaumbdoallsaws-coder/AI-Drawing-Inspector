@@ -3841,6 +3841,14 @@
         return true;
     };
 
+    // A catalog with assets added since the page opened (Sage's basic shapes, docs/sage-basic-shapes-plan.md BS2):
+    // footprints and the overhead test read it. The controller redraws after it hands the catalog round.
+    TopPlanAdapter.prototype.setAssetCatalog = function (catalog) {
+        if (this.disposed) return false;
+        this.options.assetCatalog = clone(catalog || []);
+        return true;
+    };
+
     TopPlanAdapter.prototype.setLayerVisibility = function (visibility) {
         if (this.disposed) return false;
         const next = normalizeLayerVisibility(
@@ -4935,6 +4943,11 @@
     FacilityLayoutEditorController.prototype.setAssetCatalog = function (catalog) {
         this._assertActive();
         this.assetCatalog = clone(catalog || []);
+        this.views.forEach(function (entry) {
+            if (typeof entry.adapter.setAssetCatalog === 'function') {
+                entry.adapter.setAssetCatalog(clone(this.assetCatalog));
+            }
+        }, this);
         if (this.layout) this._notifyLayout();
         return this.getState();
     };

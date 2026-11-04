@@ -893,6 +893,8 @@ class LocalFacilityLayoutHost:
             if use_private_assets
             else LOCAL_ASSET_CATALOG
         )
+        self._private_assets_enabled = bool(use_private_assets)
+        self._authoring_lock = threading.Lock()
         # Model-space data (footprints, support surfaces, reviewed sides and
         # seats) is authored in each model file's own axes; the catalog carries
         # it in the layout's model space, mirrored once across x = 0 (model_axes).
@@ -1158,6 +1160,49 @@ class LocalFacilityLayoutHost:
         """Return revision-bound asset definitions for server-side analysis."""
 
         return deepcopy(list(self._asset_versions.values()))
+
+    def register_authored_asset(self, family: str, parameters: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Build a basic shape (shape_families) and add it to the shared private library and to this running host,
+        so placements of it bind at once (docs/sage-basic-shapes-plan.md, BS2).
+
+        The model and its catalog entry are written first (authored_library.install, after a catalog backup). The
+        entry is then bound by build_private_local_asset_catalog, as a fresh start binds it, and swapped into the
+        live catalogs. The same family and parameters give the same asset; asking again changes nothing.
+        """
+        from ai_inspector.industrial_assets.authored_library import install
+        from ai_inspector.industrial_assets.shape_families import build_asset
+
+        if not self._private_assets_enabled:
+            raise FacilityLayoutError(
+                "authored_assets_unavailable",
+                "Authored assets need the private asset library; it is off in this app.",
+                status_code=409,
+            )
+        try:
+            built = build_asset(family, dict(parameters or {}))
+        except ValueError as error:
+            raise FacilityLayoutError("authored_asset_invalid", str(error)) from None
+        asset_id = built["assetId"]
+        with self._authoring_lock:
+            try:
+                result = install(self._component_visual_root, built)
+            except ValueError as error:
+                raise FacilityLayoutError("authored_asset_not_added", str(error), status_code=409) from None
+            if result["added"] or asset_id not in self._catalog:
+                fresh = next((item for item in build_private_local_asset_catalog(self._component_visual_root)
+                              if item["assetId"] == asset_id), None)
+                if fresh is None:
+                    raise FacilityLayoutError(
+                        "authored_asset_unbound", f"{asset_id} is not in the private catalog after it was added.")
+                # New dicts, not edits: a request already reading the old ones finishes with them.
+                self._catalog = {**self._catalog,
+                                 asset_id: mirror_catalog_record(attach_registered_semantics(fresh))}
+                self._asset_versions = {**self._asset_versions,
+                                        (asset_id, fresh["assetDefinitionRevision"]): mirror_catalog_record(fresh)}
+            entry = self._catalog[asset_id]
+        return {"assetId": asset_id, "assetDefinitionRevision": entry["assetDefinitionRevision"],
+                "displayName": entry["displayName"], "category": entry["category"], "tags": list(entry.get("tags", [])),
+                "dimensions": dict(built["dimensions"]), "triangles": built["triangles"], "added": result["added"]}
 
     def _agent_process_catalog(
         self,

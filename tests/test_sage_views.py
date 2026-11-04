@@ -77,6 +77,67 @@ def test_a_name_the_user_said_resolves_to_ids_whole_name_first_then_every_word_z
         sv.resolve_query(layout, "bin")
 
 
+def test_x_in_zone_y_is_the_x_that_stands_in_y_and_an_x_not_there_is_said_plainly():
+    """The SV5 A/B (2026-11-03): every run first passed the user's words, "the meeting table in Assembly Cell A02",
+    and they matched nothing, as no name holds "in"."""
+    layout = hall()
+    layout["zones"].append(zone("zn-a02", "Assembly Cell A02", 80, 5, 100, 25))
+    layout["placements"] += [placed("pl-table-a02", "asset-machine", 90, 15, "Meeting table"),
+                             placed("pl-table-a06", "asset-machine", 10, 10, "Meeting table"),
+                             placed("pl-chair-a02", "asset-machine", 92, 15, "Chair")]
+    assert sv.resolve_query(layout, "meeting table") == (["pl-table-a02", "pl-table-a06"], "name")
+    # X in zone Y: only the X that stands in Y; Y by its whole name or every word, with or without "the"
+    assert sv.resolve_query(layout, "the meeting table in Assembly Cell A02") == (["pl-table-a02"], "in zone")
+    assert sv.resolve_query(layout, "meeting tables in the A02") == (["pl-table-a02"], "in zone")
+    assert sv.resolve_query(layout, "the kit cart bay in Assembly Cell A06") == (["fm-bay"], "in zone")
+    # a zone alone is as before
+    assert sv.resolve_query(layout, "Assembly Cell A02") == (["zn-a02"], "name")
+    # an X that is not in Y is said plainly
+    with pytest.raises(ValueError, match='^Nothing named like "chair" is in Assembly Cell A06. Tell the user'):
+        sv.resolve_query(layout, "the chair in Assembly Cell A06")
+    # a Y that is no zone is as before
+    with pytest.raises(ValueError, match="Nothing in the saved layout is named like"):
+        sv.resolve_query(layout, "the meeting table in the paint shop")
+
+
+def test_x_in_zone_y_never_changes_what_a_query_that_matched_before_matches():
+    """Codex review of 3875993 (finding 1): a name that holds every word of the query still wins over "X in zone Y",
+    and with nothing named X in the zone the query still finds it."""
+    layout = hall()
+    layout["zones"].append(zone("zn-a02", "Assembly Cell A02", 80, 5, 100, 25))
+    layout["placements"] += [
+        placed("pl-table-west", "asset-machine", 60, 15, "Meeting table in Assembly Cell A02 west"),
+        placed("pl-table-a02", "asset-machine", 90, 15, "Meeting table")]
+    assert sv.resolve_query(layout, "meeting table in Assembly Cell A02") == (["pl-table-west"], "words")
+    layout["placements"] = [item for item in layout["placements"] if item["placementId"] != "pl-table-a02"]
+    assert sv.resolve_query(layout, "meeting table in Assembly Cell A02") == (["pl-table-west"], "words")
+
+
+def test_x_in_zone_y_tries_every_in_before_saying_nothing_named_x_is_there():
+    """Codex review of 3875993 (finding 2): a zone whose name holds "in"."""
+    layout = hall()
+    layout["zones"].append(zone("zn-store", "Storage in Workshop", 80, 5, 100, 25))
+    layout["placements"].append(placed("pl-table", "asset-machine", 90, 15, "Meeting table"))
+    assert sv.resolve_query(layout, "meeting table in Storage in Workshop") == (["pl-table"], "in zone")
+    with pytest.raises(ValueError, match='^Nothing named like "chair" is in Storage in Workshop. Tell the user'):
+        sv.resolve_query(layout, "the chair in Storage in Workshop")
+
+
+def test_x_in_zone_y_checks_where_things_stand_only_for_those_named_like_x(monkeypatch):
+    """Codex review of 3875993 (finding 3): 2,000 placements, 100 zones and one chair took 2.7 s, as every placement
+    was checked against every zone. Now only what is named like X is, and only until a zone holds it."""
+    layout = hall()
+    layout["zones"] += [zone(f"zn-row-{index}", f"Assembly Cell B{index:02d}", 100 + 10 * index, 0, 108 + 10 * index, 8)
+                        for index in range(20)]
+    layout["placements"] += [placed(f"pl-bin-{index}", "asset-machine", 101 + 10 * (index % 20), 4, f"Bin {index}")
+                             for index in range(300)]
+    layout["placements"].append(placed("pl-chair", "asset-machine", 154, 4, "Chair"))
+    checks, inside = [], sv.lp.point_in_polygon
+    monkeypatch.setattr(sv.lp, "point_in_polygon", lambda *args: checks.append(args) or inside(*args))
+    assert sv.resolve_query(layout, "chairs in assembly cells") == (["pl-chair"], "in zone")
+    assert 1 <= len(checks) <= 21   # the chair against the cells, up to the one that holds it
+
+
 def test_a_view_looks_at_the_middle_a_third_of_the_way_up_from_the_south_under_the_roof():
     view, = frame(["pl-machine"], hall(rack=False))["views"]
     camera = view["camera"]
@@ -280,6 +341,19 @@ def test_show_facility_views_takes_the_name_the_user_said(host):
         "message"]
     both = asyncio.run(gateway.call(sv.TOOL, {"query": "old mill 1", "targetIds": ["zn-a06"]}))
     assert both["error"]["code"] == "show_views_refused" and "one of" in both["error"]["message"]
+
+
+def test_show_facility_views_takes_x_in_zone_y(host):
+    """The user's words "the X in Y" frame the X in zone Y, and the tool says how it matched."""
+    gateway, _ = gateway_for(host, "in-zone-turn")
+    result = asyncio.run(gateway.call(sv.TOOL, {"query": "the old mill 1 in Assembly Cell A06"}))
+    assert result["ok"], result
+    assert result["data"]["views"][0]["ids"] == ["pl-old-1"]
+    assert result["data"]["query"] == {"text": "the old mill 1 in Assembly Cell A06", "matchedBy": "in zone",
+                                       "idCount": 1}
+    elsewhere = asyncio.run(gateway.call(sv.TOOL, {"query": "the robot in Assembly Cell A06"}))
+    assert elsewhere["error"]["code"] == "show_views_refused"
+    assert elsewhere["error"]["message"].startswith('Nothing named like "robot" is in Assembly Cell A06.')
 
 
 def apply_directly(host, operations, turn):

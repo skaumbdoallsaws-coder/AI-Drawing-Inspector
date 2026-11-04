@@ -461,11 +461,58 @@ def _words(text: Any) -> list:
     return words
 
 
+def _named_like(named: Sequence[tuple], wanted: Sequence[str]) -> tuple:
+    """Of NAMED ((kind, id, name words)), those whose name is WANTED, else whose name holds every word of it."""
+    whole = [(kind, key) for kind, key, words in named if words and words == list(wanted)]
+    return ("name", whole) if whole else ("words", [(kind, key) for kind, key, words in named
+                                                    if words and set(wanted) <= set(words)])
+
+
+def _in_zone(layout: Mapping, named: Sequence[tuple], wanted: Sequence[str]) -> list | None:
+    """"X in Y" ("the meeting table in Assembly Cell A02"), Y a zone's name: the placements and floor markings named
+    like X that stand in it (as a zone brings what stands in it), trying every "in", the last first. Only what is named
+    like X is checked for where it stands, and a whole name still wins among what stands there. None when no "in" is
+    followed by a zone's name; ValueError, said plainly, when nothing named like X stands in the zone (for the
+    earliest "in" followed by a zone's name)."""
+    zones = [item for item in layout.get("zones") or [] if isinstance(item, Mapping)]
+    zone_names = [("zone", index, _words(zone.get("label"))) for index, zone in enumerate(zones)]
+    positions = {}
+    for collection, key in (("placements", "placementId"), ("floorMarkings", "markingId")):
+        for entity in layout.get(collection) or []:
+            if isinstance(entity, Mapping):
+                positions.setdefault(entity.get(key), (entity.get("transform") or {}).get("position"))
+    refused = None
+    for at in reversed([index for index, word in enumerate(wanted) if word == "in"]):
+        item, place = list(wanted[:at]), list(wanted[at + 1:])
+        place = place[1:] if place[:1] == ["the"] else place
+        if not item or not place:
+            continue
+        found = [zones[index] for _kind, index in _named_like(zone_names, place)[1]]
+        if not found:
+            continue
+        candidates = [entry for entry in named if entry[0] != "zone" and entry[2] and set(item) <= set(entry[2])]
+        inside = {}
+        for _kind, key, _name_words in candidates:
+            if key not in inside:
+                inside[key] = any(lp.point_in_polygon(positions.get(key), zone.get("boundary")) for zone in found)
+        matches = _named_like([entry for entry in candidates if inside[entry[1]]], item)[1]
+        if matches:
+            return matches
+        refused = (item, found)
+    if refused:
+        item, found = refused
+        places = " or ".join(_name(zone, str(zone.get("zoneId"))) for zone in found)
+        raise ValueError(f'Nothing named like "{" ".join(item)}" is in {places}. Tell the user, or ask what they '
+                         "meant.")
+    return None
+
+
 def resolve_query(layout: Mapping, query: str) -> tuple:
     """The ids QUERY names ("R03 robot", "Assembly Cell A06", "the dock doors"): zones, floor markings and placements
-    whose name is the query (ignoring case, spacing, plurals and a leading "the"), else whose name holds every word
-    of it, zones only when a zone matches (a zone brings what stands in it). Returns (ids, "name" or "words");
-    raises ValueError when nothing or too much matches."""
+    whose name is the query (ignoring case, spacing, plurals and a leading "the"); else those whose name holds every
+    word of it, zones only when a zone matches (a zone brings what stands in it); else, for "X in Y" with Y a zone's
+    name, the X that stands in that zone. Returns (ids, "name", "words" or "in zone"); raises ValueError when nothing
+    or too much matches, or nothing named like X is in zone Y."""
     wanted = _words(query)
     if wanted[:1] == ["the"]:
         wanted = wanted[1:]
@@ -486,6 +533,9 @@ def resolve_query(layout: Mapping, query: str) -> tuple:
         matches = [(kind, key) for kind, key, words in named if words and set(wanted) <= set(words)]
         if any(kind == "zone" for kind, _ in matches):
             matches = [(kind, key) for kind, key in matches if kind == "zone"]
+    inside = None if matches else _in_zone(layout, named, wanted)   # only where nothing else matches
+    if inside is not None:
+        how, matches = "in zone", inside
     ids = sorted({key for _, key in matches if isinstance(key, str) and key})
     if not ids:
         raise ValueError(f'Nothing in the saved layout is named like "{query}". Find it with inspect_facility_context '

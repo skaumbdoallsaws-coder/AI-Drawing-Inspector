@@ -270,9 +270,9 @@ class _ChangeSuccess(Closed):
 
 
 _TOOLS = {
-    "inspect_packaging": (InspectArguments, _InspectSuccess, "Inspect the bound saved packaging document, paged by package."),
+    "inspect_packaging": (InspectArguments, _InspectSuccess, "Inspect the bound saved packaging document. package_limit must be 1 or 2, not a findings limit. Follow next_package_offset to read further pages."),
     "validate_packaging": (ValidateArguments, _ValidateSuccess, "Assess saved or proposed design envelopes and provenance without saving. Not transport certification."),
-    "propose_packaging": (ProposeArguments, _ProposeSuccess, "Propose bounded orthogonal arrangements of the saved product without saving or requesting rates. Existing pads are not preserved."),
+    "propose_packaging": (ProposeArguments, _ProposeSuccess, "Propose bounded orthogonal arrangements of the saved product without saving or requesting rates. Dimensions are numeric metre arrays, e.g. inner_m: [0.3, 0.2, 0.1], never quoted numbers or unit strings. Existing pads are not preserved."),
     "edit_packaging": (EditArguments, _ChangeSuccess, "Replace the complete saved design at the expected revision, using a unique request_id. Read all package pages first. Requires admitted direct-edit authority."),
     "undo_packaging": (HistoryArguments, _ChangeSuccess, "Undo the latest saved packaging edit at the expected revision. May undo a human edit; requires direct-edit authority."),
     "redo_packaging": (HistoryArguments, _ChangeSuccess, "Redo the latest undone packaging edit at the expected revision. Requires direct-edit authority."),

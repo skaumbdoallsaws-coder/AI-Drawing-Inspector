@@ -321,6 +321,18 @@ def test_a_short_box_is_one_wall_along_its_long_sides_and_the_gap_to_the_next_st
     assert result["unconvertedCounts"] == {"wall_end": 4}
 
 
+def test_a_square_pier_drawn_with_four_faces_is_one_wall_whichever_way_round():
+    # A 0.4 m square: each pair of its sides closes the other pair's ends, and neither is longer. One of them is the
+    # wall, the one along x, in any order and either way along each line; the other two sides are its ends.
+    sides = box("p", 0, 0.4, 0, 0.4)  # bottom, right, top, left
+    flipped = [line(row["id"], "L1", row["points"][1], row["points"][0]) for row in sides]
+    for order in (sides, sides[::-1], [sides[2], sides[0], sides[3], sides[1]], flipped):
+        result = convert(drawing(*order), FACES, WALLS)
+        assert segments(result) == [((5.0, 5.2), (5.4, 5.2), 0.4)], [row["id"] for row in order]
+        assert [row["state"] for row in result["walls"]] == ["new"]
+        assert result["unconvertedCounts"] == {"wall_end": 2}
+
+
 def test_the_largest_thickness_applies_before_the_height_is_given():
     # Faces 0.9 m apart pair only when the largest thickness allows it; without a height the wall waits for one.
     geometry = drawing(line("e1", "L1", (0, 0), (10, 0)), line("e2", "L1", (0, 0.9), (10, 0.9)))
@@ -381,6 +393,18 @@ def test_walls_wait_for_their_height_and_never_land_on_a_wall_already_there():
     assert [(row["state"], row["reason"]) for row in result["walls"]] == [("refused", "wall_there")]
 
 
+def test_a_wall_beside_one_already_there_is_there_while_they_overlap_and_new_once_they_only_touch():
+    # Two 0.2 m walls side by side overlap while their center lines are less than 0.1 + 0.1 m apart; an overlap
+    # within TOLERANCE (5 mm) is walls drawn touching.
+    doc = apply_facility_layout_operations(layout(), [{"op": "upsert_interior_wall", "wall": {
+        "wallId": "iw-office", "label": "Office", "start": {"x": 7, "z": 5}, "end": {"x": 12, "z": 5},
+        "heightMeters": 3, "thicknessMeters": 0.2, "baseElevation": 0, "color": "#45484b", "openings": []}}])["document"]
+    for apart, expected in ((0.15, ("refused", "wall_there")), (0.19, ("refused", "wall_there")),
+                            (0.197, ("new", None)), (0.2, ("new", None))):
+        result = convert(drawing(line("e1", "L1", (0, apart), (10, apart))), CENTER, WALLS, doc=doc)
+        assert [(row["state"], row["reason"]) for row in result["walls"]] == [expected], apart
+
+
 def test_walls_outside_the_plan_are_refused_and_excluded_ones_left_out():
     geometry = drawing(line("e1", "L1", (0, 0), (10, 0)), line("e2", "L1", (0, 30), (10, 30)))
     result = convert(geometry, CENTER, WALLS)
@@ -433,6 +457,27 @@ def test_thousands_of_face_lines_convert_in_seconds():
     assert result["summary"]["blocked"]["code"] == "too_many_walls"
 
 
+def test_copies_of_face_lines_pair_once_and_the_wall_keeps_every_copy_as_a_source():
+    # 200 copies of each face, half of one face drawn the other way: one wall (before, 40,000 pairs, refused as too
+    # large to convert).
+    copies = []
+    for k in range(200):
+        a, b = ((0, 0), (10, 0)) if k % 2 else ((10, 0), (0, 0))
+        copies += [line(f"a{k:03d}", "L1", a, b), line(f"b{k:03d}", "L1", (0, 0.2), (10, 0.2))]
+    started = time.perf_counter()
+    result = convert(drawing(*copies), FACES, WALLS)
+    assert time.perf_counter() - started < 5
+    assert segments(result) == [((5.0, 5.1), (15.0, 5.1), 0.2)]
+    (wall,) = result["walls"]
+    assert wall["state"] == "new"
+    assert wall["sources"] == sorted(row["id"] for row in copies)[:conversion.MAX_SOURCES]
+    assert result["unconverted"] == []
+    # A copy of a line that pairs with nothing is listed for each entity drawn.
+    lone = convert(drawing(line("c1", "L1", (0, 5), (4, 5)), line("c2", "L1", (4, 5), (0, 5))), FACES, WALLS)
+    assert lone["walls"] == [] and [row["entityId"] for row in lone["unconverted"]] == ["c1", "c2"]
+    assert lone["unconvertedCounts"] == {"no_matching_face": 2}
+
+
 def test_a_line_kilometers_long_and_a_room_of_thousands_of_corners_convert_in_seconds():
     # The work follows a line's length, not the box around it, and a loop's straight points go in one pass.
     long_wall = (line("e1", "L1", (0, 0), (40000, 30000)), line("e2", "L1", (0.25, 0), (40000.25, 30000)))
@@ -458,10 +503,11 @@ def test_an_outline_with_too_many_corners_is_never_searched_for_doors():
 
 
 def test_a_conversion_past_its_limits_is_refused_as_too_large(monkeypatch):
+    hatched = drawing(*(line(f"e{k}", "L1", (0, 0.01 * k), (10, 0.01 * k)) for k in range(300)))  # 1 cm apart
     stacked = drawing(*(line(f"e{k}", "L1", (0, 0), (10, 0)) for k in range(300)))
     monkeypatch.setattr(conversion, "MAX_WORK", 50_000)
     with pytest.raises(conversion.ConversionTooLargeError, match="too large"):
-        convert(stacked, FACES, WALLS)
+        convert(hatched, FACES, WALLS)
     monkeypatch.setattr(conversion, "MAX_PIECES", 100)
     with pytest.raises(conversion.ConversionTooLargeError, match="100 straight pieces"):
         convert(stacked, FACES, WALLS)
@@ -512,6 +558,39 @@ def test_nested_and_repeated_rooms_are_resolved_explicitly():
     kept = convert(geometry, ROOMS, {"rooms": {"zoneType": "workcell"}, "excluded": [rows["inner"]["candidateId"]]})
     states = {row["sources"][0]: row["state"] for row in kept["rooms"]}
     assert states == {"big": "new", "inner": "excluded", "copy": "refused"}
+
+
+def test_copies_of_a_room_are_searched_once_and_each_label_is_read_once(monkeypatch):
+    # 100 copies of one room around 1,000 labels: the copies are duplicates before any search, and a label is read
+    # once however many rooms hold it (before, every copy read every label: 100,000 reads).
+    reads = []
+    real = conversion._label
+    monkeypatch.setattr(conversion, "_label", lambda value: reads.append(value) or real(value))
+    labels = [text(f"t{k}", "L3", (1 + 0.008 * k, 5), f"Bay {k}") for k in range(1000)]
+    started = time.perf_counter()
+    result = convert(drawing(*(square(f"r{k}", 0, 0, 10) for k in range(100)), *labels), ROOMS,
+                     {"rooms": {"zoneType": "storage"}})
+    assert time.perf_counter() - started < 5
+    states = [(row["state"], row["reason"]) for row in result["rooms"]]
+    assert states.count(("refused", "duplicate")) == 99 and states.count(("new", None)) == 1
+    assert len(reads) == 1000
+    assert {row["labelFrom"] for row in result["rooms"]} == {"several"}
+
+
+def test_room_searches_are_charged_to_the_conversion_s_work(monkeypatch):
+    # 40 rooms one inside the next around 2,000 labels: each room's search meets every label, 80,000 in all. A
+    # drawing like that is refused as too large once that passes the conversion's work, never searched for minutes.
+    labels = [text(f"t{k}", "L3", (20 + 0.001 * k, 15), f"Bay {k}") for k in range(2000)]
+    rooms = [square(f"r{k}", 21 - (1.5 + 0.1 * k), 15 - (1.5 + 0.1 * k), 2 * (1.5 + 0.1 * k)) for k in range(40)]
+    geometry = drawing(*rooms, *labels)
+    settings = {"rooms": {"zoneType": "storage"}}
+    monkeypatch.setattr(conversion, "MAX_WORK", 60_000)
+    with pytest.raises(conversion.ConversionTooLargeError, match="too large"):
+        convert(geometry, ROOMS, settings, translate=(0, 0))
+    monkeypatch.setattr(conversion, "MAX_WORK", 100_000)
+    result = convert(geometry, ROOMS, settings, translate=(0, 0))
+    states = [(row["state"], row["reason"]) for row in result["rooms"]]
+    assert states.count(("new", None)) == 1 and states.count(("refused", "holds_rooms")) == 39
 
 
 def test_only_rooms_that_can_still_be_added_hold_a_room_and_zones_already_there_say_so():
@@ -660,6 +739,17 @@ def test_a_door_drawn_as_one_polyline_reads_like_a_line_and_an_arc():
     assert [row["openings"] for row in result["walls"]] == [[{"startMeters": 4.0, "endMeters": 5.0}]]
     assert [(row["kind"], row["sources"]) for row in result["doors"]] == [("single", ["p1"])]
     assert result["unconverted"] == []
+
+
+def test_a_swing_drawn_in_steps_of_under_a_degree_is_a_door_like_the_arc():
+    # A quarter circle in 176 steps of half a degree (as a drawing in millimeters may store its curves) is one
+    # straight run by the one-degree rule; its points still make it a swing, with its leaf or without.
+    swing = arc("x", "L2", (4, 0), 1.0, 90, 0, steps=176)["points"]
+    for door in (poly("p1", "L2", [(4, 0)] + swing, closed=False), poly("p2", "L2", swing, closed=False)):
+        result = convert(drawing(*BROKEN_WALL, door), DOORS, WALLS)
+        assert [row["openings"] for row in result["walls"]] == [[{"startMeters": 4.0, "endMeters": 5.0}]], door["id"]
+        assert [(row["kind"], row["sources"]) for row in result["doors"]] == [("single", [door["id"]])]
+        assert result["unconverted"] == []
 
 
 def test_two_half_swings_from_both_jambs_are_a_double_door_and_one_swinging_both_ways_is_one_door():

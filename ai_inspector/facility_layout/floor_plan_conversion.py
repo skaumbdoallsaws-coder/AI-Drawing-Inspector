@@ -53,7 +53,7 @@ import json
 import math
 import re
 
-CONVERTER_VERSION = "fp-convert-3"
+CONVERTER_VERSION = "fp-convert-4"
 ANGLE_TOLERANCE = math.radians(1.0)  # parallel or collinear
 SIN_TOLERANCE = math.sin(ANGLE_TOLERANCE)
 GENTLE_BEND = math.radians(25.0)  # a turn below this between straight runs makes them part of a curve
@@ -76,6 +76,7 @@ MAX_PIECES = 20000  # straight pieces on the wall layers
 MAX_LOOPS = 5000  # closed outlines on the room and outline layers
 MAX_DOOR_SYMBOLS = 20000  # swings and straight pieces on the door layers
 MAX_WORK = 6_000_000  # grid cells and neighbors one conversion may visit (_Work): a few seconds at most
+OVERLAP_WORK = 50  # the work of one overlap of two outlines worked out (a room and a zone), in those units
 MAX_PACKAGE_BYTES = 600_000  # the changes one review holds (floor_plan_proposals.PACKAGE_LIMITS)
 MAX_SETTINGS_IDS = 2000
 MAX_LISTED = 200
@@ -386,10 +387,11 @@ def _dedupe(points, closed):
     return out
 
 
-def _straight_pieces(points, closed):
+def _straight_pieces(points, closed, with_points=False):
     """[(a, b, curved)]: the straight runs of a polyline. Consecutive segments that turn by less than a degree are one
     run; a run whose points stray more than TOLERANCE from its chord bows (a curve drawn in short steps), and runs that
-    meet at less than GENTLE_BEND belong to one curve. Linear in the number of points."""
+    meet at less than GENTLE_BEND belong to one curve. WITH_POINTS adds each run's points, from a to b: a curve drawn
+    in steps of less than a degree is one run, and its points keep its shape. Linear in the number of points."""
     points = _dedupe(points, closed)
     if len(points) < 2:
         return []
@@ -422,7 +424,12 @@ def _straight_pieces(points, closed):
         right = segments[runs[following][0] % len(segments)]
         if _turn(_unit(*left), _unit(*right)) < GENTLE_BEND:
             curved[index] = curved[following] = True
-    return [(segments[first % len(segments)][0], segments[last % len(segments)][1], curved[index])
+    total = len(segments)
+    if with_points:
+        return [(segments[first % total][0], segments[last % total][1], curved[index],
+                 [segments[first % total][0]] + [segments[step % total][1] for step in range(first, last + 1)])
+                for index, (first, last) in enumerate(runs)]
+    return [(segments[first % total][0], segments[last % total][1], curved[index])
             for index, (first, last) in enumerate(runs)]
 
 
@@ -446,14 +453,36 @@ class _Wall:
         return _unit(self.a, self.b)
 
 
-def _face_walls(pieces, max_gap, work):
-    """Walls from pairs of parallel face lines. PIECES: [(a, b, entity_id, layer)]. Returns (walls, ids of the
-    pieces that pair). Each line pairs with the parallel lines on either side of it that no other line lies between,
-    nearest first; a pair whose lines close the ends of other walls is not a wall (_without_end_pairs)."""
-    info = []
+def _single_faces(pieces, work):
+    """The face pieces with each line once: copies of a line (both ends within TOLERANCE of its ends, either way round)
+    are one piece that keeps every entity and layer they come from, so a line drawn twice pairs once. The copy that
+    sorts first stands for them all. PIECES: [(a, b, entity_id, layer)]; returns [(a, b, {(entity_id, layer)})]."""
+    grid = _Grid(1.0, work)
+    groups = []  # [(the first copy's ends, the copies, their sources)]
     for a, b, entity, layer in pieces:
+        for index in sorted(grid.near(a, a, TOLERANCE)):
+            first_a, first_b = groups[index][0]
+            if (math.dist(a, first_a) <= TOLERANCE and math.dist(b, first_b) <= TOLERANCE) or (
+                    math.dist(a, first_b) <= TOLERANCE and math.dist(b, first_a) <= TOLERANCE):
+                groups[index][1].append((a, b))
+                groups[index][2].add((entity, layer))
+                break
+        else:
+            grid.add(len(groups), a, a)
+            grid.add(len(groups), b, b)
+            groups.append(((a, b), [(a, b)], {(entity, layer)}))
+    return [(*min(copies, key=sorted), sources) for _first, copies, sources in groups]
+
+
+def _face_walls(pieces, max_gap, work):
+    """Walls from pairs of parallel face lines. PIECES: [(a, b, {(entity_id, layer)})], each line once
+    (_single_faces). Returns (walls, ids of the entities whose pieces pair). Each line pairs with the parallel lines on
+    either side of it that no other line lies between, nearest first; a pair whose lines close the ends of other
+    walls is not a wall (_without_end_pairs)."""
+    info = []
+    for a, b, sources in pieces:
         d = _unit(a, b)
-        info.append((a, b, d, (-d[1], d[0]), math.dist(a, b), entity, layer))
+        info.append((a, b, d, (-d[1], d[0]), math.dist(a, b), sources))
     reach = max_gap + TOLERANCE
     grid = _Grid(max(1.0, 2 * reach), work)
     for index, item in enumerate(info):
@@ -502,7 +531,9 @@ def _face_walls(pieces, max_gap, work):
         start = (a[0] + d[0] * low + n[0] * offset, a[1] + d[1] * low + n[1] * offset)
         end = (a[0] + d[0] * high + n[0] * offset, a[1] + d[1] * high + n[1] * offset)
         index = len(walls)
-        walls.append(_Wall(start, end, round(gap, 4), {info[i][5], info[j][5]}, {info[i][6], info[j][6]}, "faces"))
+        sources = info[i][5] | info[j][5]
+        walls.append(_Wall(start, end, round(gap, 4), {entity for entity, _layer in sources},
+                           {layer for _entity, layer in sources}, "faces"))
         middle = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)
         for piece in (i, j):
             pa, _pb, pd, pn = info[piece][:4]
@@ -516,7 +547,7 @@ def _face_walls(pieces, max_gap, work):
                 one, two = rows[first], rows[second]
                 if one[0] != two[0] and min(one[2], two[2]) - max(one[1], two[1]) > TOLERANCE:
                     walls[one[3]].flag = walls[two[3]].flag = "ambiguous_faces"
-    paired = {info[piece][5] for piece in uses}
+    paired = {entity for piece in uses for entity, _layer in info[piece][5]}
     return walls, paired
 
 
@@ -525,7 +556,8 @@ def _without_end_pairs(pairs, info, work):
     lines and its two ends are ends of those lines (a jamb, or a wall's end line). Two lines that each close another
     wall are the jambs of an opening between two walls; a pair one of whose lines closes another wall, and that is no
     longer than it is wide, is the ends of a box drawn closed (its longer sides are the faces) or a wall's end line
-    and a wall beyond it."""
+    and a wall beyond it. A square box (a pier) has no longer sides: each of its pairs is the other's ends, and the
+    one more nearly along x is kept, so it is one wall whichever way round it is drawn."""
     near = 2 * TOLERANCE
     ends = _Grid(1.0, work)
     for index, item in enumerate(info):
@@ -541,16 +573,35 @@ def _without_end_pairs(pairs, info, work):
                 if any(math.dist(one, corner) <= near and any(math.dist(other, end) <= near for end in info[j][:2])
                        for one, other in ((a, b), (b, a))):
                     closes.setdefault(k, set()).add(number)
-    kept = []
-    for pair in pairs:
-        i, j, _side, gap, low, high = pair
+    kept, ends_only = set(), set()
+    for number, (i, j, _side, gap, low, high) in enumerate(pairs):
         by_i, by_j = closes.get(i, set()), closes.get(j, set())
         if by_i and by_j and not by_i & by_j:
             continue
         if (by_i or by_j) and high - low <= gap:
+            ends_only.add(number)
             continue
-        kept.append(pair)
-    return kept
+        kept.add(number)
+
+    def square(number):
+        _i, _j, _side, gap, low, high = pairs[number]
+        return abs(high - low - gap) <= TOLERANCE
+
+    for number in sorted(ends_only):
+        i, j = pairs[number][:2]
+        if not square(number):
+            continue
+        for other in sorted(closes.get(i, set()) & closes.get(j, set())):
+            if other > number and other in ends_only and square(other) and all(
+                    number in closes.get(line, ()) for line in pairs[other][:2]):
+                kept.add(min(number, other, key=lambda pair: _axis_angle(info[pairs[pair][0]][2])))
+    return [pairs[number] for number in sorted(kept)]
+
+
+def _axis_angle(d) -> float:
+    """The angle of direction D from the x axis, 0 up to 180 degrees (in radians): either way along a line."""
+    angle = math.atan2(d[1], d[0]) % math.pi
+    return 0.0 if math.pi - angle < 1e-9 else angle
 
 
 def _gap_filled(first, d, n, low, high, grid, walls, skip):
@@ -791,8 +842,9 @@ def _swing(points):
 
 def _door_symbols(door_entities):
     """The door layers' swings and straight pieces (a leaf is one), as dicts with the entity they come from. Each
-    curved stretch of an open polyline is tried as a swing and its straight runs are pieces, so a door drawn as one
-    polyline (leaf and swing) reads like one drawn as a line and an arc."""
+    curved stretch of an open polyline is tried as a swing, with every point it was drawn with, and its straight runs
+    are pieces, so a door drawn as one polyline (leaf and swing, in steps of any size) reads like one drawn as a line
+    and an arc."""
     swings, pieces = [], []
 
     def swing_of(points, entity_id, layer):
@@ -808,10 +860,10 @@ def _door_symbols(door_entities):
                 swing_of(points, entity_id, layer)
             continue
         stretch = []
-        for a, b, curved in _straight_pieces(points, closed):
+        for a, b, curved, run in _straight_pieces(points, closed, with_points=True):
             if curved and not closed:
-                stretch = stretch or [a]
-                stretch.append(b)
+                stretch = stretch or [run[0]]
+                stretch.extend(run[1:])  # consecutive runs share their end
                 continue
             if len(stretch) >= 3:
                 swing_of(stretch, entity_id, layer)
@@ -1183,6 +1235,7 @@ def _compile_problem(error: ValueError) -> tuple[str, str]:
 def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, import_id: str) -> dict:
     """The conversion of GEOMETRY (the stored drawing) placed by REFERENCE (the saved underlay: its alignment and layer
     roles) into LAYOUT, with SETTINGS (normalize_settings). Pure: reads nothing else and changes nothing."""
+    import shapely
     from shapely.geometry import Point, Polygon, box as shapely_box
     from shapely.strtree import STRtree
     from .interior_walls import compile_interior_walls
@@ -1264,16 +1317,19 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     thickness = wall_settings["thicknessMeters"] if wall_settings else DEFAULT_THICKNESS
     raw = [_Wall(a, b, round(thickness, 4), {entity}, {layer}, "centerline")
            for a, b, entity, layer in pieces["wall_centerline"]]
-    faced, paired = _face_walls(pieces["wall_faces"], max_gap, work)
+    faces = _single_faces(pieces["wall_faces"], work)
+    faced, paired = _face_walls(faces, max_gap, work)
     merged = _merge_collinear(raw + faced, work)
     _flag_overlaps(merged, work)
     ends_grid = _Grid(max(1.0, 4 * max((wall.thickness for wall in merged), default=1.0)), work)
     for index, wall in enumerate(merged):
         ends_grid.add(index, wall.a, wall.b, wall.thickness)
-    for a, b, entity, layer in pieces["wall_faces"]:
-        if entity not in paired:
-            unconverted.add_piece(entity, layer, "wall_end" if _wall_end((a, b), merged, ends_grid)
-                                  else "no_matching_face")
+    for a, b, sources in faces:
+        left = sorted(source for source in sources if source[0] not in paired)
+        if left:
+            reason = "wall_end" if _wall_end((a, b), merged, ends_grid) else "no_matching_face"
+            for entity, layer in left:
+                unconverted.add_piece(entity, layer, reason)
     gap_doors, used_swings, used_pieces = _wall_doors(merged, swings, door_pieces, excluded, import_id, work)
     joined, place = _join_doors(merged, [door for door in gap_doors if door["join"]])
     walls = _join_ends(joined, work)
@@ -1297,7 +1353,8 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
             ea, eb, ewidth, eid = existing_lines[index]
             if eid == wall_id or not _parallel(d, _unit(ea, eb)):
                 continue
-            if abs(_dot(n, _sub(ea, a)) + _dot(n, _sub(eb, a))) / 2 > max(width, ewidth) / 2:
+            # Side by side, they overlap when their center lines are closer than half of each one's thickness.
+            if abs(_dot(n, _sub(ea, a)) + _dot(n, _sub(eb, a))) / 2 > (width + ewidth) / 2 - TOLERANCE:
                 continue
             t = sorted((_dot(d, _sub(ea, a)), _dot(d, _sub(eb, a))))
             if min(math.dist(a, b), t[1]) - max(0.0, t[0]) >= MIN_OVERLAP:
@@ -1412,14 +1469,37 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
             zone_polygons.append(shape)
             zone_ids.append(zone.get("zoneId"))
     zone_tree = STRtree(zone_polygons) if zone_polygons else None
+
+    def search(tree, polygon, test):
+        """The indexes, in order, of TREE's shapes for which TEST (shapely.contains, covers or intersects) holds
+        with POLYGON first. Each shape whose box meets the polygon's is spent from the work before any is tested."""
+        if tree is None:
+            return []
+        near = tree.query(polygon)
+        work.spend(len(near))
+        if not len(near):
+            return []
+        return sorted(int(i) for i in near[test(polygon, tree.geometries.take(near))])
+
+    labels_of = {}  # text -> its label (None: none), worked out once however many rooms hold it
+
+    def label_of(i):
+        if i not in labels_of:
+            labels_of[i] = _label(texts[i][1])
+        return labels_of[i]
+
     first_of = {}
     for index, room_id in enumerate(room_ids):
         first_of.setdefault(room_id, index)
+    named_of = {}  # room id -> the texts inside it that name it: a room drawn again is not searched again
     room_rows, checks = [], []
     for index, (boundary, polygon, entity) in enumerate(candidates):
         room_id = room_ids[index]
-        inside = [] if text_tree is None else sorted(int(i) for i in text_tree.query(polygon, predicate="contains"))
-        named = [(label, texts[i]) for label, i in ((_label(texts[i][1]), i) for i in inside) if label]
+        first = first_of[room_id] == index
+        if first:
+            named_of[room_id] = [(label_of(i), texts[i]) for i in search(text_tree, polygon, shapely.contains)
+                                 if label_of(i)]
+        named = named_of[room_id]
         labels = [label for label, _text in named]
         number = len(room_rows) + 1
         # A room named by its one text keeps that text as a source too.
@@ -1433,18 +1513,18 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         row["zoneType"] = kind
         row["record"] = {"zoneId": room_id, "zoneType": kind, "label": row["label"], "boundary": boundary,
                          "floorElevation": floor, "anchors": [], "evidence": []}
-        holds = [] if room_tree is None else [
-            int(j) for j in room_tree.query(polygon, predicate="covers")
-            if int(j) != index and room_ids[int(j)] != room_id and room_ids[int(j)] not in excluded]
+        # A copy of a room is refused as a duplicate before its rooms and zones count: only the first is searched.
+        holds = [] if not first else [j for j in search(room_tree, polygon, shapely.covers)
+                                      if j != index and room_ids[j] != room_id and room_ids[j] not in excluded]
         same_zone = None
-        if zone_tree is not None:
-            for j in zone_tree.query(polygon, predicate="intersects"):
-                other = zone_polygons[int(j)]
-                union = polygon.union(other).area
-                if union > 0 and polygon.intersection(other).area / union >= SAME_ZONE_OVERLAP \
-                        and zone_ids[int(j)] != room_id:
-                    same_zone = zone_ids[int(j)]
-                    break
+        for j in (search(zone_tree, polygon, shapely.intersects) if first else ()):
+            other = zone_polygons[j]
+            work.spend(OVERLAP_WORK)
+            common = polygon.intersection(other).area
+            union = polygon.area + other.area - common
+            if union > 0 and common / union >= SAME_ZONE_OVERLAP and zone_ids[j] != room_id:
+                same_zone = zone_ids[j]
+                break
         room_rows.append(row)
         checks.append((row, holds, same_zone, kind))
     # The states, inner rooms first: a room holds the rooms inside it that can still be added (or that wait on rooms

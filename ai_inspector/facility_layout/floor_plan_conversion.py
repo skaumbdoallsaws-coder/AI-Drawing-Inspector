@@ -559,9 +559,10 @@ def _without_end_pairs(pairs, info, work):
     lines and its two ends are ends of those lines (a jamb, or a wall's end line). Two lines that each close another
     wall are the jambs of an opening between two walls; a pair one of whose lines closes another wall, and that is no
     longer than it is wide, is the ends of a box drawn closed (its longer sides are the faces) or a wall's end line
-    and a wall beyond it. "No longer than wide" allows only rounding for the two pairs of a box drawn closed (each
-    pair's lines close the other's ends), so a box even 1 mm longer than wide is one wall along its longer sides, and
-    TOLERANCE for an end line and a wall beyond it. A square box (a pier) has no longer sides: each of its pairs is
+    and a wall beyond it. "No longer than wide" allows only rounding for a side of a box drawn closed (the pair's
+    lines and two parallel lines closing its ends make a closed loop, whether or not those two pair: a box's short
+    sides may be too short to), so a box even 1 mm longer than wide is one wall along its longer sides, and TOLERANCE
+    for an end line and a wall beyond it. A square box (a pier) has no longer sides: each of its pairs is
     the other's ends, and the one whose lines make the smaller angle with x (counted from 0 up to 180 degrees) is
     kept, so it is one wall whichever way round it is drawn, turned or not."""
     near = 2 * TOLERANCE
@@ -570,6 +571,7 @@ def _without_end_pairs(pairs, info, work):
         for point in item[:2]:
             ends.add(index, point, point, near)
     closes = {}  # line -> the pairs whose end it closes
+    enders = {}  # pair -> the lines that close its ends
     for number, (i, j, *_rest) in enumerate(pairs):
         for corner in info[i][:2]:
             for k in ends.near(corner, corner):
@@ -579,10 +581,18 @@ def _without_end_pairs(pairs, info, work):
                 if any(math.dist(one, corner) <= near and any(math.dist(other, end) <= near for end in info[j][:2])
                        for one, other in ((a, b), (b, a))):
                     closes.setdefault(k, set()).add(number)
-    def boxed(number):  # both its lines close one other pair whose lines both close it: two sides of a closed box
+                    enders.setdefault(number, set()).add(k)
+
+    def joins(line, k, m):  # LINE runs from an end of K to an end of M
+        a, b = info[line][:2]
+        return any(any(math.dist(one, end) <= near for end in info[k][:2])
+                   and any(math.dist(other, end) <= near for end in info[m][:2]) for one, other in ((a, b), (b, a)))
+
+    def boxed(number):  # its lines and two parallel lines closing its ends make a closed box, paired or not
         i, j = pairs[number][:2]
-        return any(all(number in closes.get(line, ()) for line in pairs[other][:2])
-                   for other in closes.get(i, set()) & closes.get(j, set()))
+        lines = sorted(enders.get(number, ()))
+        return any(_parallel(info[k][2], info[m][2]) and joins(i, k, m) and joins(j, k, m)
+                   for index, k in enumerate(lines) for m in lines[index + 1:])
 
     kept, ends_only = set(), set()
     for number, (i, j, _side, gap, low, high) in enumerate(pairs):

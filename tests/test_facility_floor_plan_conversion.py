@@ -404,6 +404,27 @@ def test_an_end_line_about_as_long_as_its_gap_to_a_cross_wall_beyond_is_not_a_wa
             assert result["unconvertedCounts"] == {"wall_end": 1}, (gap, turned)
 
 
+def test_a_box_whose_short_sides_are_too_short_to_pair_is_still_a_box_at_a_wall_end():
+    # A 0.102 m by 0.098 m box drawn closed at the end of a 0.102 m wall: its 0.098 m sides overlap too little to pair,
+    # yet it is a box, so only rounding counts as "no longer than wide" and it is one wall along its longer sides; the
+    # wall runs into it (to its far side) as it would into any wall it meets. Taken for an end line and a wall beyond
+    # it (5 mm of slack), it was dropped and its lines left over.
+    for angle in (0, 30, 90, 135):
+        c, s = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+
+        def at(x, y):
+            return (2 + x * c - y * s, 3 + x * s + y * c)
+        box = [at(0, 0), at(0.102, 0), at(0.102, 0.098), at(0, 0.098)]
+        wall = [line("w1", "L1", at(0, -4), at(0, 0)), line("w2", "L1", at(0.102, -4), at(0.102, 0))]
+        for form, entities, left in (
+                ("polyline", [poly("box", "L1", box)], {}),
+                ("lines", [line(f"b{k}", "L1", box[k], box[(k + 1) % 4]) for k in range(4)], {"wall_end": 2})):
+            result = convert(drawing(*wall, *entities), FACES, WALLS)
+            walls = sorted((row["state"], row["thicknessMeters"], row["lengthMeters"]) for row in result["walls"])
+            assert walls == [("new", 0.098, 0.102), ("new", 0.102, 4.098)], (angle, form, walls)
+            assert result["unconvertedCounts"] == left, (angle, form)
+
+
 def test_lines_close_to_a_face_but_not_copies_of_it_pair_as_they_did():
     # Only the same line drawn again is folded into one. A line within 5 mm of a face but turned, or a few mm
     # shorter, is a line of its own: the wall and its id are the ones the converter gave before copies were folded.

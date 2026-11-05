@@ -79,6 +79,7 @@ MAX_LOOPS = 5000  # closed outlines on the room and outline layers
 MAX_DOOR_SYMBOLS = 20000  # swings and straight pieces on the door layers
 MAX_WORK = 6_000_000  # grid cells and neighbors one conversion may visit (_Work): a few seconds at most
 OVERLAP_WORK = 50  # the work of one overlap of two outlines worked out (a room and a zone), in those units
+BOX_WORK = 4  # the work of checking that two lines closing a pair's two ends make a box with it, in those units
 MAX_PACKAGE_BYTES = 600_000  # the changes one review holds (floor_plan_proposals.PACKAGE_LIMITS)
 MAX_SETTINGS_IDS = 2000
 MAX_LISTED = 200
@@ -562,7 +563,9 @@ def _without_end_pairs(pairs, info, work):
     and a wall beyond it. "No longer than wide" allows only rounding for a side of a box drawn closed (the pair's
     lines and two parallel lines closing its ends make a closed loop, whether or not those two pair: a box's short
     sides may be too short to), so a box even 1 mm longer than wide is one wall along its longer sides, and TOLERANCE
-    for an end line and a wall beyond it. A square box (a pier) has no longer sides: each of its pairs is
+    for an end line and a wall beyond it. Only a line closing one end and a line closing the other are tried as a
+    box's two short sides, and only where the allowance matters; each try is charged to the work budget. A square box
+    (a pier) has no longer sides: each of its pairs is
     the other's ends, and the one whose lines make the smaller angle with x (counted from 0 up to 180 degrees) is
     kept, so it is one wall whichever way round it is drawn, turned or not."""
     near = 2 * TOLERANCE
@@ -571,9 +574,9 @@ def _without_end_pairs(pairs, info, work):
         for point in item[:2]:
             ends.add(index, point, point, near)
     closes = {}  # line -> the pairs whose end it closes
-    enders = {}  # pair -> the lines that close its ends
+    enders = {}  # pair -> the lines that close its ends: (at its first line's start, at that line's other end)
     for number, (i, j, *_rest) in enumerate(pairs):
-        for corner in info[i][:2]:
+        for which, corner in enumerate(info[i][:2]):
             for k in ends.near(corner, corner):
                 if k in (i, j) or _parallel(info[i][2], info[k][2]):
                     continue
@@ -581,25 +584,27 @@ def _without_end_pairs(pairs, info, work):
                 if any(math.dist(one, corner) <= near and any(math.dist(other, end) <= near for end in info[j][:2])
                        for one, other in ((a, b), (b, a))):
                     closes.setdefault(k, set()).add(number)
-                    enders.setdefault(number, set()).add(k)
+                    enders.setdefault(number, (set(), set()))[which].add(k)
 
     def joins(line, k, m):  # LINE runs from an end of K to an end of M
         a, b = info[line][:2]
         return any(any(math.dist(one, end) <= near for end in info[k][:2])
                    and any(math.dist(other, end) <= near for end in info[m][:2]) for one, other in ((a, b), (b, a)))
 
-    def boxed(number):  # its lines and two parallel lines closing its ends make a closed box, paired or not
+    def boxed(number):  # its lines and two parallel lines closing its two ends make a closed box, paired or not
         i, j = pairs[number][:2]
-        lines = sorted(enders.get(number, ()))
+        first, other = enders.get(number, ((), ()))
+        work.spend(BOX_WORK * len(first) * len(other))
         return any(_parallel(info[k][2], info[m][2]) and joins(i, k, m) and joins(j, k, m)
-                   for index, k in enumerate(lines) for m in lines[index + 1:])
+                   for k in first for m in other)
 
     kept, ends_only = set(), set()
     for number, (i, j, _side, gap, low, high) in enumerate(pairs):
         by_i, by_j = closes.get(i, set()), closes.get(j, set())
         if by_i and by_j and not by_i & by_j:
             continue
-        if (by_i or by_j) and high - low <= gap + (ROUNDING if boxed(number) else TOLERANCE):  # no longer than wide
+        length = high - low  # no longer than wide: rounding allowed for a box's side, TOLERANCE otherwise
+        if (by_i or by_j) and (length <= gap + ROUNDING or length <= gap + TOLERANCE and not boxed(number)):
             ends_only.add(number)
             continue
         kept.add(number)

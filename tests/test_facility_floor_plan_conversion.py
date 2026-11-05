@@ -611,6 +611,36 @@ def test_an_outline_with_too_many_corners_is_never_searched_for_doors():
     assert result["doors"] == [] and result["unconvertedCounts"] == {"door_unmatched": 1500}
 
 
+def test_lines_closing_one_end_of_many_pairs_do_not_slow_the_box_check():
+    # 30 lines a hair apart facing 30 more 0.2 m away, 200 lines a hair apart across their tops and a wall's two faces
+    # meeting them: every line closing a pair's top end was tried against every other as a box's two short sides
+    # (half a minute). A box needs one at each end.
+    lines = [line(f"a{i}", "L1", (0.000005 * i, 0), (0.000005 * i, 0.203)) for i in range(30)]
+    lines += [line(f"b{i}", "L1", (0.2 + 0.000005 * i, 0), (0.2 + 0.000005 * i, 0.203)) for i in range(30)]
+    lines += [line(f"h{k}", "L1", (0, 0.203 + 0.000005 * k), (0.2, 0.203 + 0.000005 * k)) for k in range(200)]
+    lines += [line("x1", "L1", (-2, 0), (0, 0)), line("x2", "L1", (-2, 0.203), (0, 0.203))]
+    started = time.perf_counter()
+    result = convert(drawing(*lines), FACES, WALLS)
+    assert time.perf_counter() - started < 5
+    assert [(row["state"], row["thicknessMeters"], row["lengthMeters"]) for row in result["walls"]] == [
+        ("new", 0.203, 2.0)]
+    assert result["unconvertedCounts"] == {"no_matching_face": 230, "wall_end": 30}
+
+
+def test_each_try_at_a_box_is_charged_to_the_work_budget(monkeypatch):
+    # A box 0.2 m wide and 0.203 m long with five lines closing each end: 25 tries at its two short sides.
+    lines = [line("a", "L1", (0, 0), (0, 0.203)), line("b", "L1", (0.2, 0), (0.2, 0.203))]
+    lines += [line(f"h{k}", "L1", (0, 0.203 + 0.0005 * k), (0.2, 0.203 + 0.0005 * k)) for k in range(5)]
+    lines += [line(f"g{k}", "L1", (0, -0.0005 * k), (0.2, -0.0005 * k)) for k in range(5)]
+    monkeypatch.setattr(conversion, "BOX_WORK", conversion.MAX_WORK)
+    with pytest.raises(conversion.ConversionTooLargeError, match="too large"):
+        convert(drawing(*lines), FACES, WALLS)
+    monkeypatch.setattr(conversion, "BOX_WORK", 0)
+    result = convert(drawing(*lines), FACES, WALLS)
+    assert [(row["state"], row["thicknessMeters"], row["lengthMeters"]) for row in result["walls"]] == [
+        ("new", 0.2, 0.203)]
+
+
 def test_a_conversion_past_its_limits_is_refused_as_too_large(monkeypatch):
     hatched = drawing(*(line(f"e{k}", "L1", (0, 0.01 * k), (10, 0.01 * k)) for k in range(300)))  # 1 cm apart
     stacked = drawing(*(line(f"e{k}", "L1", (0, 0), (10, 0)) for k in range(300)))

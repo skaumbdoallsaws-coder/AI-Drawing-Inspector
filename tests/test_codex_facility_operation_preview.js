@@ -214,6 +214,33 @@ test('busy fetch blocks editor mutation and rejects a changed active context', a
     assertNoWrites(f);
 });
 
+test('a caller that moves on cancels its preview: nothing is installed and no error is left to show', async () => {
+    const f = fixture();
+    const pending = deferred();
+    f.server.getPreview = () => pending.promise;
+    let current = true;
+    const errors = [];
+    f.session.subscribe(state => errors.push(state.lastError));
+    const request = f.session.fetchAndInstallOperationProposal(reference, { isCurrent: () => current });
+    current = false;
+    pending.resolve(preview());
+    await assert.rejects(request, error => error.code === 'layout_proposal_stale' && error.cancelled === true);
+    const state = f.session.getState();
+    assert.equal(state.layoutProposal, null);
+    assert.equal(state.busy, false);
+    assert.equal(state.lastError, null);
+    assert.ok(errors.length > 0 && errors.every(error => error === null));
+    // Any other failure of a current caller's preview is still an error to show.
+    const failing = deferred();
+    f.server.getPreview = () => failing.promise;
+    const failed = f.session.fetchAndInstallOperationProposal(reference, { isCurrent: () => true });
+    failing.reject(new Error('Network unavailable'));
+    await assert.rejects(failed, /Network unavailable/);
+    assert.match(String(f.session.getState().lastError && f.session.getState().lastError.message),
+        /Network unavailable/);
+    assertNoWrites(f);
+});
+
 test('existing preview survives busy notifications and a failed fetch', async () => {
     const f = fixture();
     await f.session.fetchAndInstallOperationProposal(reference);

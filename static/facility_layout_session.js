@@ -2722,6 +2722,12 @@
         function assertOperationProposalCurrent(reference, generation, isCurrent) {
             requireLoaded();
             assertDesktopMutable();
+            if (isCurrent && !isCurrent()) {
+                // The caller moved on (its panel closed): the preview is cancelled, not an error to show.
+                const cancelled = layoutProposalStale('The operation preview no longer matches the active editor');
+                cancelled.cancelled = true;
+                throw cancelled;
+            }
             const siteId = baseLayout.association && baseLayout.association.siteId;
             if (reference.siteId !== siteId || reference.layoutId !== baseLayout.layoutId
                     || (config.siteId && config.siteId !== reference.siteId)
@@ -2729,8 +2735,7 @@
                     || reference.revision !== baseRevision || draftRevision !== baseRevision
                     || (generation && generation !== editorGenerationId)
                     || (typeof config.isOperationProposalContextCurrent === 'function'
-                        && !config.isOperationProposalContextCurrent())
-                    || (isCurrent && !isCurrent())) {
+                        && !config.isOperationProposalContextCurrent())) {
                 throw layoutProposalStale('The operation preview no longer matches the active editor');
             }
             if (cursor > 0 || generatedDraft || designProposalDraft
@@ -2781,8 +2786,9 @@
                 ghost = null;
                 lastError = null;
             } catch (error) {
-                // Keep an existing preview visible through busy/error status updates.
-                lastError = error;
+                // Keep an existing preview visible through busy/error status updates. A cancelled preview (its
+                // caller moved on) leaves the error as it was.
+                if (!error.cancelled) lastError = error;
                 throw error;
             } finally {
                 setBusy(false);

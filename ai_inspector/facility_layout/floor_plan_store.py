@@ -8,7 +8,9 @@ Per tenant and site (decal_images.scope_directory), under <layout root>/floor-pl
     imports/<importId>.json           which source, which geometry, which reader; display name and size
     conversions/<conversionId>.json   a conversion staged for review (floor_plan_proposals): its drawing, alignment,
                                       layer roles and settings, each candidate with the drawing entities it came from
-                                      and the native id it gets, and the digest of the operations proposed
+                                      and the native id it gets, and the digest of the operations proposed. Kept for
+                                      good once applied (<conversionId>.applied.json says to which layout and
+                                      revision); removed two hours after it was last staged if it never was
     uploads/, jobs/                   an upload or a parse in progress (removed when it ends, swept after an hour)
 
 Every artifact is written atomically and never rewritten: a digest names one content for good, and the same file
@@ -46,6 +48,9 @@ MAX_PARALLEL_PARSES = 2
 MAX_WAITING_PARSES = 4
 QUEUE_WAIT_SECONDS = 60.0
 STALE_SECONDS = 3600.0
+# A staged conversion that was never applied is removed this long after it was last staged (sweep_conversions): well
+# past a proposal's life (15 minutes, then 5 to apply an approval).
+CONVERSION_KEEP_SECONDS = 2 * 3600.0
 IMPORT_ID = re.compile(r"fpi-[a-f0-9]{32}")
 CONVERSION_ID = re.compile(r"fpc-[a-f0-9]{32}")
 
@@ -81,6 +86,10 @@ def record_path(folder, import_id: str) -> Path:
 
 def conversion_path(folder, conversion_id: str) -> Path:
     return _path(folder, "conversions", conversion_id + ".json")
+
+
+def applied_path(folder, conversion_id: str) -> Path:
+    return _path(folder, "conversions", conversion_id + ".applied.json")
 
 
 def parser_version() -> str:
@@ -230,14 +239,14 @@ class _SourceLocks:
         self.held: dict[tuple[str, str], list] = {}  # key -> [lock, requests using it]
 
     @contextmanager
-    def hold(self, folder: Path, digest: str):
+    def hold(self, folder: Path, digest: str, timeout: float = QUEUE_WAIT_SECONDS, busy=None):
         key = (str(folder), digest)
         with self.lock:
             entry = self.held.setdefault(key, [threading.Lock(), 0])
             entry[1] += 1
         try:
-            if not entry[0].acquire(timeout=QUEUE_WAIT_SECONDS):
-                raise _queue_full()
+            if not entry[0].acquire(timeout=timeout):
+                raise (busy or _queue_full)()
             try:
                 yield
             finally:
@@ -250,6 +259,21 @@ class _SourceLocks:
 
 
 _SOURCES = _SourceLocks()
+# One request at a time stores a staged conversion's record and makes its proposal, or removes the record.
+_CONVERSIONS = _SourceLocks()
+
+
+def _conversion_busy() -> FacilityLayoutError:
+    return FacilityLayoutError("floor_plan_conversion_busy", "This conversion is being staged by another request; try "
+                               "again in a minute.", status_code=503)
+
+
+@contextmanager
+def conversion_held(root, principal, site_id, conversion_id):
+    """Hold one staged conversion of this tenant and site while its record is stored and its proposal made, so a
+    request whose proposal fails never removes a record another request's proposal is bound to."""
+    with _CONVERSIONS.hold(scope_folder(root, principal, site_id), conversion_id, busy=_conversion_busy):
+        yield
 
 
 def _sweep(folder: Path) -> None:
@@ -415,9 +439,9 @@ def _parse_and_store(folder, parse, upload_path, source_sha256, size, source_nam
 
 def store_conversion(root, principal, site_id, record: dict) -> bool:
     """Keep a staged conversion's record; True when this call wrote it. Its id is a digest of everything it was made
-    from, so the same conversion writes the same bytes and a stored record is left as it is; a record that differs is
-    replaced (a proposal bound to the old one then fails its check and is converted again, never applied from a
-    record that does not match)."""
+    from, so the same conversion writes the same bytes and a stored record is left as it is (staged again, it counts
+    as new for sweep_conversions); a record that differs is replaced (a proposal bound to the old one then fails its
+    check and is converted again, never applied from a record that does not match). Call it in conversion_held."""
     conversion_id = record.get("conversionId")
     if not isinstance(conversion_id, str) or not CONVERSION_ID.fullmatch(conversion_id):
         raise ValueError("A conversion record needs its fpc- id.")
@@ -425,6 +449,7 @@ def store_conversion(root, principal, site_id, record: dict) -> bool:
     data = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     try:
         if target.read_bytes() == data:
+            os.utime(target)
             return False
         LOGGER.warning("Floor-plan conversion %s: the stored record differs and is replaced", conversion_id)
     except OSError:
@@ -434,13 +459,56 @@ def store_conversion(root, principal, site_id, record: dict) -> bool:
 
 
 def delete_conversion(root, principal, site_id, conversion_id) -> None:
-    """Remove a staged conversion's record that no proposal was made from."""
+    """Remove a staged conversion's record that no proposal was made from. Call it in conversion_held."""
     if not isinstance(conversion_id, str) or not CONVERSION_ID.fullmatch(conversion_id):
         return
     try:
         conversion_path(scope_folder(root, principal, site_id), conversion_id).unlink()
     except FileNotFoundError:
         pass
+
+
+def note_conversion_applied(root, principal, site_id, conversion_id, layout_id, revision) -> None:
+    """A staged conversion was applied to LAYOUT_ID (giving REVISION): its record is kept for good, as the manifest
+    of where that layout's walls, rooms and doors came from."""
+    if not isinstance(conversion_id, str) or not CONVERSION_ID.fullmatch(conversion_id):
+        return
+    data = json.dumps({"conversionId": conversion_id, "layoutId": layout_id, "revision": revision,
+                       "appliedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")},
+                      sort_keys=True, separators=(",", ":")).encode("utf-8")
+    _write_atomic(applied_path(scope_folder(root, principal, site_id), conversion_id), data)
+
+
+def sweep_conversions(root, principal, site_id) -> int:
+    """Remove this tenant and site's staged conversions that were never applied, CONVERSION_KEEP_SECONDS after they
+    were last staged: a proposal lives 15 minutes, so a dismissed or expired review leaves nothing for good. Each is
+    removed in conversion_held, and skipped while a request holds it. Returns how many were removed."""
+    folder = scope_folder(root, principal, site_id)
+    parent = _path(folder, "conversions")
+    if not parent.is_dir():
+        return 0
+    cutoff = time.time() - CONVERSION_KEEP_SECONDS
+    removed = 0
+    for entry in parent.iterdir():
+        name = entry.name
+        try:
+            if name.startswith("fp-") and name.endswith(".tmp"):  # a write a stopped server left behind
+                if entry.stat().st_mtime < cutoff:
+                    entry.unlink()
+                continue
+            conversion_id = name[:-len(".json")]
+            if not name.endswith(".json") or not CONVERSION_ID.fullmatch(conversion_id):
+                continue
+            if entry.stat().st_mtime >= cutoff or applied_path(folder, conversion_id).exists():
+                continue
+            with _CONVERSIONS.hold(folder, conversion_id, timeout=0, busy=_conversion_busy):
+                # Checked again in the hold: another request may have staged it again or applied it meanwhile.
+                if entry.stat().st_mtime < cutoff and not applied_path(folder, conversion_id).exists():
+                    entry.unlink()
+                    removed += 1
+        except (OSError, FacilityLayoutError):
+            continue
+    return removed
 
 
 def load_conversion(root, principal, site_id, conversion_id) -> dict | None:

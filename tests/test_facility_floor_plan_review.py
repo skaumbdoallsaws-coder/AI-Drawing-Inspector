@@ -1,11 +1,15 @@
 """Floor-plan import, FP2: a drawing converted, reviewed and applied through the routes
 (docs/facility-floor-plan-import-plan.md, section 8 and section 11's integration and refusal checks)."""
 import json
+import os
 import shutil
+import threading
+import time
 
 import pytest
 
 from ai_inspector.facility_layout import floor_plan_conversion as converter, floor_plan_proposals, operation_proposals
+from ai_inspector.facility_layout import floor_plan_store as store
 from ai_inspector.facility_layout.errors import FacilityValidationError
 from ai_inspector.facility_layout.operation_proposals import create
 from ai_inspector.facility_layout.plan_settings import default_plan_settings
@@ -283,3 +287,95 @@ def test_a_conversion_record_is_kept_only_for_a_proposal_that_was_made(tmp_path,
         assert response.status_code == 422 and code(response) == "operation_proposal_denied", response.text
     # The record of the proposal that was made stays; the failed one's is not left behind.
     assert [path.stem for path in folder.glob("*.json")] == [kept["conversionId"]]
+
+
+def test_two_requests_staging_one_conversion_take_turns_so_a_failure_keeps_the_other_s_record(tmp_path,
+                                                                                               monkeypatch):
+    # A writes the record and its proposal fails slowly; B stages the same conversion meanwhile. B waits for A, so
+    # A's clean-up never removes the record B's proposal is bound to.
+    client, service, import_id = underlay(tmp_path)
+    real, inside, release, made_by = operation_proposals.create, threading.Event(), threading.Event(), []
+
+    def first_fails(*args, **kwargs):
+        made_by.append(threading.current_thread().name)
+        if len(made_by) == 1:
+            inside.set()
+            release.wait(10)
+            raise FacilityValidationError("operation_proposal_denied", "Not now.")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(operation_proposals, "create", first_fails)
+    body = {"baseRevision": revision(service), "settings": SETTINGS, "stage": "proposal"}
+    results = {}
+
+    def staging():
+        name = threading.current_thread().name
+        try:
+            results[name] = floor_plan_proposals.stage_conversion(service, _principal(), "site-a", "fl-api-cell",
+                                                                  import_id, dict(body))
+        except Exception as error:  # noqa: BLE001 - the test reads it
+            results[name] = error
+
+    first, second = threading.Thread(target=staging, name="A"), threading.Thread(target=staging, name="B")
+    first.start()
+    assert inside.wait(10)
+    second.start()
+    second.join(0.5)
+    assert second.is_alive(), "B waits while A holds the conversion"
+    release.set()
+    first.join(10)
+    second.join(60)
+    assert isinstance(results["A"], FacilityValidationError) and made_by == ["A", "B"]
+    staged = results["B"]
+    assert (store_folder(service) / "conversions" / (staged["conversionId"] + ".json")).is_file()
+    opened = preview(client, staged["proposal"]["proposalId"])
+    assert opened.status_code == 200, opened.text
+
+
+def test_an_applied_conversion_s_record_is_kept_and_reviews_never_applied_are_swept(tmp_path):
+    client, service, import_id = underlay(tmp_path)
+    folder = store_folder(service) / "conversions"
+    dismissed = stage(client, service, import_id, dict(SETTINGS, walls={"heightMeters": 4}))
+    kept = stage(client, service, import_id)
+    proposal_id = kept["proposal"]["proposalId"]
+    alternative = preview(client, proposal_id).json()["alternative"]
+    approval = approve(client, alternative, proposal_id, "fp-keep-applied")
+    assert approval.status_code == 200, approval.text
+    applied = client.post(BASE + "/apply", headers=SESSION, json={
+        "approvalToken": approval.json()["approvalToken"], "binding": alternative["transactionBinding"],
+        "idempotencyKey": "fp-keep-applied"})
+    assert applied.status_code == 200, applied.text
+    marker = json.loads((folder / (kept["conversionId"] + ".applied.json")).read_text())
+    assert (marker["conversionId"], marker["layoutId"], marker["revision"]) == (
+        kept["conversionId"], "fl-api-cell", revision(service))
+    root, principal = floor_plan_proposals._store_root(service), _principal()
+    assert store.sweep_conversions(root, principal, "site-a") == 0, "both are new"
+    # Three hours on, the review that was never applied goes; the applied conversion stays, as its manifest.
+    old = time.time() - 3 * 3600
+    for conversion in (dismissed["conversionId"], kept["conversionId"]):
+        os.utime(folder / (conversion + ".json"), (old, old))
+    (folder / "fp-left.tmp").write_bytes(b"{")
+    os.utime(folder / "fp-left.tmp", (old, old))
+    assert store.sweep_conversions(root, principal, "site-a") == 1
+    assert sorted(path.name for path in folder.iterdir()) == [kept["conversionId"] + ".applied.json",
+                                                             kept["conversionId"] + ".json"]
+
+
+def test_a_record_staged_again_counts_as_new_and_one_a_request_holds_is_never_swept(tmp_path):
+    client, service, import_id = underlay(tmp_path)
+    body = stage(client, service, import_id)
+    record_file = store_folder(service) / "conversions" / (body["conversionId"] + ".json")
+    root, principal = floor_plan_proposals._store_root(service), _principal()
+    old = time.time() - 3 * 3600
+    os.utime(record_file, (old, old))
+    with store.conversion_held(root, principal, "site-a", body["conversionId"]):
+        assert store.sweep_conversions(root, principal, "site-a") == 0, "a request is staging it"
+    # Staged again as it was: the same bytes, kept as they are, and new again.
+    assert store.store_conversion(root, principal, "site-a", json.loads(record_file.read_text())) is False
+    assert record_file.stat().st_mtime > old + 3600
+    assert store.sweep_conversions(root, principal, "site-a") == 0
+    os.utime(record_file, (old, old))
+    assert store.sweep_conversions(root, principal, "site-a") == 1 and not record_file.exists()
+    # Its proposal can no longer be applied: the review says to convert again.
+    opened = preview(client, body["proposal"]["proposalId"])
+    assert opened.status_code == 409 and code(opened) == "floor_plan_conversion_missing", opened.text

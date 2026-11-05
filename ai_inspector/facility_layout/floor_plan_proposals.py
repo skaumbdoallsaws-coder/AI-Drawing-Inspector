@@ -7,7 +7,8 @@
   alignment, layer roles and settings, each candidate with the drawing entities it came from and the native id it
   gets, and the digest of the operations) and the operations are proposed with that record as their origin
   (operation_proposals.create). Approving and applying go through the existing proposal routes. A record written
-  for a proposal that could not be made is removed again.
+  for a proposal that could not be made is removed again; one applied is kept for good (note_applied), and one never
+  applied is swept two hours after it was last staged (floor_plan_store.sweep_conversions).
 
 The origin makes the proposal review-only: it is never direct-applicable, and the approval refuses direct consent for
 it. It is bound into the proposal's id and binding, and every time the proposal is prepared again (opened, approved,
@@ -17,6 +18,7 @@ the converter are still the ones it was made from, so a stale or altered convers
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from collections import OrderedDict
 
@@ -26,9 +28,11 @@ from .floor_plan_conversion import (CONVERTER_VERSION, MAX_OPERATIONS, MAX_PACKA
                                     ConversionTooLargeError, _digest, conversion_id, convert, normalize_settings,
                                     origin_for)
 from .floor_plan_references import DIGEST, REFERENCE_ID, layout_references
-from .floor_plan_store import (CONVERSION_ID, IMPORT_ID, STORE_FOLDER, artifact_file, delete_conversion,
-                               load_conversion, store_conversion, stored_import)
+from .floor_plan_store import (CONVERSION_ID, IMPORT_ID, STORE_FOLDER, artifact_file, conversion_held,
+                               delete_conversion, load_conversion, note_conversion_applied, store_conversion,
+                               stored_import, sweep_conversions)
 
+LOGGER = logging.getLogger(__name__)
 STAGES = ("candidates", "proposal")
 # A conversion is a server-built package: up to the kernel's transaction limit, like a planner's package.
 PACKAGE_LIMITS = (MAX_OPERATIONS, MAX_PACKAGE_BYTES)
@@ -141,19 +145,24 @@ def stage_conversion(service, principal, site_id, layout_id, import_id, body):
     require_facility_action(principal, tenant_id=principal.tenant_id, site_id=site_id, action="proposal.create")
     conversion = conversion_id(import_id, reference, layout_id, base_revision, settings)
     origin = origin_for(conversion, reference, record, settings)
-    written = store_conversion(_store_root(service), principal, site_id, {
-        "schema": RECORD_SCHEMA, "schemaVersion": 1, "conversionId": conversion, "layoutId": layout_id,
-        "baseRevision": base_revision, "origin": origin, "sourceName": record.get("sourceName"),
-        "alignment": reference["alignment"], "layers": reference["layers"], "settings": settings,
-        "operationsSha256": fingerprint(operations), "operationCount": len(operations),
-        "candidates": _candidates(result), "unconvertedCounts": result["unconvertedCounts"]})
-    try:
-        proposal = create(service, principal, site_id, layout_id, base_revision, operations=operations,
-                          edit_mode="preview", limits=PACKAGE_LIMITS, origin=origin)
-    except Exception:
-        if written:  # an earlier proposal may be bound to a record this call found stored
-            delete_conversion(_store_root(service), principal, site_id, conversion)
-        raise
+    root = _store_root(service)
+    sweep_conversions(root, principal, site_id)  # reviews dismissed or expired hours ago
+    # Held while the record is stored, the proposal made and, if that fails, the record removed: two requests
+    # staging the same conversion take turns, so a failure never removes a record the other's proposal is bound to.
+    with conversion_held(root, principal, site_id, conversion):
+        written = store_conversion(root, principal, site_id, {
+            "schema": RECORD_SCHEMA, "schemaVersion": 1, "conversionId": conversion, "layoutId": layout_id,
+            "baseRevision": base_revision, "origin": origin, "sourceName": record.get("sourceName"),
+            "alignment": reference["alignment"], "layers": reference["layers"], "settings": settings,
+            "operationsSha256": fingerprint(operations), "operationCount": len(operations),
+            "candidates": _candidates(result), "unconvertedCounts": result["unconvertedCounts"]})
+        try:
+            proposal = create(service, principal, site_id, layout_id, base_revision, operations=operations,
+                              edit_mode="preview", limits=PACKAGE_LIMITS, origin=origin)
+        except Exception:
+            if written:  # an earlier proposal may be bound to a record this call found stored
+                delete_conversion(root, principal, site_id, conversion)
+            raise
     alternative = proposal["alternative"]
     response["conversionId"] = conversion
     response["proposal"] = {"proposalId": proposal["proposalId"], "baseRevision": base_revision,
@@ -161,6 +170,17 @@ def stage_conversion(service, principal, site_id, layout_id, import_id, body):
                             "directApplyPolicy": alternative["directApplyPolicy"],
                             "metrics": alternative["metrics"]}
     return response
+
+
+def note_applied(service, principal, site_id, layout_id, origin, revision) -> None:
+    """A conversion's proposal was applied (the layout is saved at REVISION): its record is kept for good. Never
+    fails the apply that already happened; a record left unmarked is only swept with the unapplied ones."""
+    try:
+        note_conversion_applied(_store_root(service), principal, site_id, origin["conversionId"], layout_id,
+                                revision)
+    except (OSError, KeyError, TypeError, ValueError):
+        LOGGER.warning("Floor-plan conversion applied to %s but its record could not be marked as kept", layout_id,
+                       exc_info=True)
 
 
 def normalize_origin(value) -> dict:

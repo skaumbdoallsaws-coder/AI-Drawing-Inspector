@@ -2820,6 +2820,12 @@ class FacilityLayoutService:
                     prepared["document"],
                     plan.binding.base_revision,
                 )
+                if alternative.get("origin") is not None:
+                    # A conversion from an imported drawing: its record is
+                    # kept for good (the unapplied ones are swept).
+                    from .floor_plan_proposals import note_applied
+                    note_applied(service, principal, site_id, layout_id,
+                                 alternative["origin"], saved["revision"])
                 commit_payload = (
                     deepcopy(dict(plan.recovery["commitPayload"])) if exact
                     else service._proposal_commit_payload(

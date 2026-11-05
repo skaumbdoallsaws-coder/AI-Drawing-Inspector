@@ -4,6 +4,7 @@ saves anything; the user approves through the same review as the panel's. Expect
 documented coordinates (tests/floor_plan_dxf_fixtures.py) moved by (5, 5), as tests/test_facility_floor_plan_review.py
 places it."""
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +13,8 @@ from ai_inspector.codex_runtime.assisted_tools import FacilityEditGateway, edit_
 from ai_inspector.codex_runtime.facility_tools import FacilityReadGateway, tool_specs
 from ai_inspector.codex_runtime.progress import describe
 from ai_inspector.facility_layout import floor_plan_conversion as converter
-from tests.test_facility_floor_plan_import import BASE, revision, saved, started
+from ai_inspector.facility_layout.plan_settings import default_plan_settings
+from tests.test_facility_floor_plan_import import BASE, apply, made, reference, revision, saved, started, upload
 from tests.test_facility_floor_plan_review import SESSION, SETTINGS, approve, preview, underlay
 from tests.test_facility_layout_api import _principal
 
@@ -101,6 +103,62 @@ def test_sage_reads_the_drawing_its_layers_and_a_page_of_one_layer(tmp_path):
     assert office["onPlan"] == {"minX": 26.0, "minZ": 19.0, "maxX": 26.0, "maxZ": 19.0}
     assert unknown["ok"] is False and unknown["error"]["code"] == "floor_plan_layer_unknown"
     assert revision(service) == before
+
+
+def test_an_inspection_stays_under_the_result_cap_with_its_layers_and_entities_a_page_at_a_time(tmp_path):
+    # 200 layers named with 255 characters each (the longest a DXF name takes) and 50 labels of 200 accented
+    # characters: a tool's result takes at most 64 KB, so the layers come in pages and a layer's entities as many
+    # as fit (before, the layers alone made every inspection too large to return).
+    import ezdxf
+    doc = ezdxf.new("R2010", units=6)
+    space = doc.modelspace()
+    names = [f"L{index:03d}-" + "x" * 250 for index in range(200)]
+    for index, name in enumerate(names):
+        doc.layers.add(name)
+        space.add_line((index, 0), (index, 1), dxfattribs={"layer": name})
+    doc.layers.add("NOTES")
+    for index in range(50):
+        space.add_text("é" * 200, dxfattribs={"layer": "NOTES", "insert": (index, 5), "height": 0.2})
+    path = made(tmp_path) / "layers.dxf"
+    doc.saveas(path)
+    client, service = started(tmp_path)
+    response = upload(client, path)
+    assert response.status_code == 200, response.text
+    imported = response.json()
+    response = apply(client, service, {"op": "set_plan_settings", "planSettings": default_plan_settings()},
+                     {"op": "upsert_floor_plan_reference", "reference": reference(imported)})
+    assert response.status_code == 200, response.text
+    gate = gateway(service, FacilityReadGateway)
+    seen, offset, pages = [], 0, 0
+    while True:
+        (answer,) = calls(gate, ("inspect_floor_plan_import", {"layersOffset": offset}))
+        assert answer["ok"], answer
+        assert len(json.dumps(answer).encode()) <= 65536
+        data = answer["data"]
+        assert (data["layersTotal"], data["layersOffset"]) == (201, offset)
+        seen += [row["name"] for row in data["layers"]]
+        pages += 1
+        if "layersNextOffset" not in data:
+            break
+        assert data["layersNextOffset"] == offset + len(data["layers"]) > offset
+        offset = data["layersNextOffset"]
+    assert pages > 1 and sorted(seen) == sorted(names + ["NOTES"])
+    notes = next(layer["layerId"] for layer in imported["manifest"]["layers"] if layer["name"] == "NOTES")
+    shown, offset = [], 0
+    while True:
+        (answer,) = calls(gate, ("inspect_floor_plan_import", {"layerId": notes, "limit": 50, "offset": offset}))
+        assert answer["ok"], answer
+        assert len(json.dumps(answer).encode()) <= 65536
+        entities = answer["data"]["entities"]
+        assert entities["total"] == 50 and entities["rows"]
+        shown += [row["entityId"] for row in entities["rows"]]
+        if not entities["more"]:
+            assert "nextOffset" not in entities
+            break
+        assert entities["nextOffset"] == offset + len(entities["rows"])
+        offset = entities["nextOffset"]
+    assert offset > 0 and len(shown) == len(set(shown)) == 50
+    assert {row["text"] for row in entities["rows"]} == {"é" * 200}
 
 
 def test_a_placement_fitted_to_the_user_s_points_is_reviewed_then_saved(tmp_path):

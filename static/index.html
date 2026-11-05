@@ -23727,7 +23727,7 @@
         function switchTab(tab) {
             const previousTab = state.activeTab;
             if (previousTab === 'training' && tab !== 'training'
-                    && !_packagingConfirmLeave()) return false;
+                    && !_packagingConfirmLeave(() => switchTab(tab))) return false;
             if (previousTab === 'training' && tab !== 'training' && _trainIsPlantProcessMode()) {
                 _trainExitPlantSpatialWalkthrough('tab_changed');
                 _stopPlantWalkthrough();
@@ -48144,10 +48144,81 @@
             }
         }
 
-        function _packagingConfirmLeave() {
+        let _packagingBridgePromise = null;
+        let _packagingActiveTurn = null;
+        let _packagingReleasePromise = null;
+
+        function _packagingBridge() {
+            if (!_packagingBridgePromise) {
+                _packagingBridgePromise = import('/static/packaging.js').then(({ PackagingHostBridge }) =>
+                    new PackagingHostBridge({
+                        hostWindow: window,
+                        frame: () => document.getElementById('packagingWorkspaceFrame'),
+                        invalidate: () => window.InspectorProPackagingHost.release().catch(error => {
+                            if (window._toast) window._toast(error.message, 'error');
+                        }),
+                    }));
+            }
+            return _packagingBridgePromise;
+        }
+
+        window.InspectorProPackagingHost = {
+            async prepare(identity) {
+                if (_packagingReleasePromise) throw new Error('Wait for packaging reconciliation before sending.');
+                if (state.activeTab !== 'training' || trainingState.type !== 'packaging_shipping') {
+                    throw new Error('Open the packaging editor before sending.');
+                }
+                const bridge = await _packagingBridge();
+                return bridge.prepare(identity || window._packagingChatIdentity?.());
+            },
+            async finish(terminal) {
+                const bridge = await _packagingBridge();
+                return bridge.finish(terminal?.codex_packaging || terminal || {});
+            },
+            release() {
+                if (_packagingReleasePromise) return _packagingReleasePromise;
+                _packagingReleasePromise = (async () => {
+                    const turn = _packagingActiveTurn;
+                    if (turn) {
+                        turn.cancelled = true;
+                        turn.controller?.abort();
+                        await turn.done;
+                    }
+                    const bridge = await _packagingBridge();
+                    return bridge.release();
+                })().finally(() => { _packagingReleasePromise = null; });
+                return _packagingReleasePromise;
+            },
+        };
+
+        function _packagingConfirmLeave(resume) {
             const frame = document.getElementById('packagingWorkspaceFrame');
             const guard = frame?.contentWindow?.InspectorProPackaging;
+            if (_packagingActiveTurn || _packagingReleasePromise || guard?.isLocked?.()) {
+                window.InspectorProPackagingHost.release().then(() => {
+                    if (typeof resume === 'function') resume();
+                }).catch(error => {
+                    if (window._toast) window._toast('Packaging remains locked: ' + error.message, 'error');
+                });
+                return false;
+            }
             return !guard || guard.confirmNavigation();
+        }
+
+        function _packagingConfirmChatChange(resume) {
+            const guard = document.getElementById('packagingWorkspaceFrame')?.contentWindow?.InspectorProPackaging;
+            if (!_packagingActiveTurn && !_packagingReleasePromise && !guard?.isLocked?.()) return true;
+            return _packagingConfirmLeave(resume);
+        }
+
+        function _packagingRequestContext(admitted, context = {}) {
+            if (!admitted?.document_id || !Number.isSafeInteger(admitted.revision) || admitted.revision < 0) {
+                throw new Error('A saved packaging revision is required for chat memory.');
+            }
+            return { ...context, asset_scope: {
+                kind: 'packaging_shipping', ids: { documentId: admitted.document_id },
+                expectedRevisionVector: { packagingRevision: String(admitted.revision) },
+            } };
         }
 
         function renderViewport() {
@@ -51007,8 +51078,9 @@
         } catch (_) {}
 
         function _trainApplyTrainingTypeDefaults(prevType) {
+            const nextType = trainingState.type;
             if (prevType === 'packaging_shipping' && trainingState.type !== prevType
-                    && !_packagingConfirmLeave()) {
+                    && !_packagingConfirmLeave(() => _trainChangeTypeFromRibbon({ value: nextType }))) {
                 trainingState.type = prevType;
                 return false;
             }
@@ -82617,6 +82689,7 @@
             async function switchConversation(convId) {
                 if (_serverMemoryState === 'initializing') return;
                 if (convId === _currentConversationId) return;
+                if (!_packagingConfirmChatChange(() => switchConversation(convId))) return;
                 if (isAnySessionWaiting()) {
                     if (window._toast) window._toast('Wait for the current response to finish before switching chats.', 'warning');
                     return;
@@ -82644,6 +82717,7 @@
 
             async function createNewConversation() {
                 if (_serverMemoryState === 'initializing') return;
+                if (!_packagingConfirmChatChange(() => createNewConversation())) return;
                 if (isAnySessionWaiting()) {
                     if (window._toast) window._toast('Wait for the current response to finish before starting a new chat.', 'warning');
                     return;
@@ -82675,6 +82749,7 @@
 
             async function clearCurrentConversation() {
                 if (_serverMemoryState === 'initializing') return;
+                if (!_packagingConfirmChatChange(() => clearCurrentConversation())) return;
                 if (isAnySessionWaiting()) {
                     if (window._toast) window._toast('Wait for the current response to finish.', 'warning');
                     return;
@@ -83214,6 +83289,14 @@
             function buildAgentAttachments(agentType) {
                 const att = { schema_version: 1 };
                 const agentSession = getAgentSession(agentType || currentAgent);
+
+                if (state.activeTab === 'training' && trainingState.type === 'packaging_shipping') {
+                    const admitted = _packagingActiveTurn?.admitted;
+                    if (!admitted?.admission_id) throw new Error('Packaging editor admission is required.');
+                    return { schema_version: 1,
+                        session: { agent: agentType || currentAgent, active_tab: 'training', active_mode: 'packaging_shipping' },
+                        packaging: { admission_id: admitted.admission_id } };
+                }
 
                 // SESSION
                 att.session = {
@@ -93885,6 +93968,9 @@
             }
 
             function _agentServiceFailureText(agentKey, error) {
+                if (error?.packagingTurn || error?.codex_packaging) {
+                    return 'The packaging response did not finish. Saved edits may remain; Undo is available after reconciliation.';
+                }
                 const agentName = (AGENTS[agentKey] && AGENTS[agentKey].name) || 'The agent';
                 const code = String(error && error.agentErrorCode || '').toLowerCase();
                 if (code === 'codex_stream_required') {
@@ -93943,7 +94029,11 @@
                     // The 3D Model tab's Sage: the part shown, its features, finishes and dimensions.
                     || (status?.partRuntime === 'codex'
                         && originAgent === 'deviation-analyst' && activeMode === '3dmodel');
-                const codexTurn = codexFacility || codexDocumentation;
+                const packagingMode = activeMode === 'packaging_shipping';
+                const codexPackaging = packagingMode && status?.packagingRuntime === 'codex'
+                    && originAgent === 'deviation-analyst';
+                if (packagingMode && !codexPackaging) throw new Error('Packaging chat execution is not enabled.');
+                const codexTurn = codexFacility || codexDocumentation || codexPackaging;
                 // A Codex turn sends the level the selector shows, and the selector shows the level it sends.
                 const reasoningEffort = codexTurn ? _agentReasoningEffort(status, agentReasoningUiSelection) : '';
                 if (reasoningEffort) setAgentReasoningUiSelection(reasoningEffort);
@@ -93973,6 +94063,10 @@
                 const stepMode = codexTurn;
                 if (stepMode) workingState.enableSteps();
                 const controller = new AbortController();
+                if (codexPackaging && _packagingActiveTurn) {
+                    _packagingActiveTurn.controller = controller;
+                    if (_packagingActiveTurn.cancelled) controller.abort();
+                }
                 // Sage's 3D shots for this turn end with it, however it ends: completed, failed, cancelled or
                 // stopped (SV2/SV3 round 3). The capture hook gets this signal; the teardown below aborts it.
                 const captureStop = new AbortController();
@@ -94025,7 +94119,7 @@
                 if (!response.ok) {
                     originSession.activeStream = null;
                     setWaiting(true, originAgent);
-                    if (response.status === 404 || response.status === 409) {
+                    if (!codexPackaging && (response.status === 404 || response.status === 409)) {
                         if (codexTurn) throw streamRequiredFailure();
                         return null;
                     }
@@ -94043,6 +94137,7 @@
                     failed.agentErrorCode = parsed.code || `http_${response.status}`;
                     failed.streamRetryable = response.status >= 500;
                     failed.workingState = workingState;
+                    if (codexPackaging) failed.codex_packaging = body.codex_packaging || body.detail?.error?.codex_packaging;
                     throw failed;
                 }
 
@@ -94119,6 +94214,7 @@
                                 case 'status':
                                     if (stepMode) {
                                         if (event.phase === 'finalizing') workingState.setPhase('Finishing up');
+                                        else if (event.phase === 'codex_packaging') workingState.setPhase('Working on packaging');
                                     } else if (!streamMessage) workingState.setOperation(
                                         window.InspectorProChatStreamRuntime.statusLabel(event.phase));
                                     break;
@@ -94133,8 +94229,10 @@
                                         preambleText = '';
                                     }
                                     workingState.step(event.step);
-                                    _trainFacilityShowFromStep(event.step);
-                                    _trainFacilityCaptureFromStep(event.step, captureStop.signal);
+                                    if (!codexPackaging) {
+                                        _trainFacilityShowFromStep(event.step);
+                                        _trainFacilityCaptureFromStep(event.step, captureStop.signal);
+                                    }
                                     break;
                                 case 'text_delta': {
                                     const delta = String(event.text || '');
@@ -94165,6 +94263,7 @@
                                 case 'response_cancelled': {
                                     const cancelled = new Error('Generation stopped');
                                     cancelled.streamCancelled = true;
+                                    if (codexPackaging) cancelled.codex_packaging = event.codex_packaging;
                                     throw cancelled;
                                 }
                                 case 'response_error': {
@@ -94173,6 +94272,7 @@
                                     failed.streamRetryable = event.retryable !== false;
                                     failed.agentServiceFailure = true;
                                     failed.agentErrorCode = String(event.code || 'provider_request_failed');
+                                    if (codexPackaging) failed.codex_packaging = event.codex_packaging;
                                     throw failed;
                                 }
                             }
@@ -94259,9 +94359,25 @@
                 },
             };
 
+            window._packagingChatIdentity = () => ({
+                session_id: getCurrentAgentSession().chatSessionId,
+                conversation_id: _currentConversationId,
+            });
+
             async function handleAgentSend(retryOptions) {
-                if (state.activeTab === 'training' && trainingState.type === 'packaging_shipping') {
-                    addMessage('Packaging chat execution is not enabled in this development pilot. No action was executed.', 'system', currentAgent);
+                const packagingRequested = state.activeTab === 'training' && trainingState.type === 'packaging_shipping';
+                if (packagingRequested) {
+                    const status = await _getChatStreamingStatus();
+                    if (currentAgent !== 'deviation-analyst' || status?.packagingRuntime !== 'codex') {
+                        addMessage('Packaging chat execution is not enabled for this agent or backend.', 'system', currentAgent);
+                        return;
+                    }
+                    if (retryOptions?.frozenRequest || _packagingActiveTurn || _packagingReleasePromise) {
+                        addMessage('Wait for packaging reconciliation, then send a new request.', 'system', currentAgent);
+                        return;
+                    }
+                } else if (retryOptions?.frozenRequest?.inspection_context?.attachments?.packaging) {
+                    addMessage('Open the packaging editor and send a new request.', 'system', currentAgent);
                     return;
                 }
                 if (_serverMemoryState === 'initializing') return;
@@ -94273,6 +94389,7 @@
                     _serverMemoryReady = _recoverServerMemoryConnection();
                 }
                 await _serverMemoryReady;
+                if (packagingRequested && (state.activeTab !== 'training' || trainingState.type !== 'packaging_shipping')) return;
                 if (_serverMemoryState === 'initializing') return;
                 if (_serverMemoryState === 'unavailable') {
                     if (!retry) {
@@ -94367,7 +94484,7 @@
                 workingAssistant = ensureAgentWorkingState(originAgent, 'Preparing request');
 
                 // Auto-resolve image: camera capture > uploaded drawing > null
-                const imageToSend = retry
+                const imageToSend = packagingRequested ? null : retry
                     ? (retry.frozenRequest.image || null)
                     : await _resolveAutoImage();
                 // Stale-turn guard: bail if another send happened during image resolution
@@ -94399,7 +94516,20 @@
                 let memoryResult = null;
                 let terminalResponseData = null;
                 let streamTrace = null;
+                let packagingTurn = null;
+                let packagingTerminal = null;
                 try {
+                    if (packagingRequested) {
+                        if (_packagingActiveTurn || _packagingReleasePromise) throw new Error('A packaging turn is already active.');
+                        packagingTurn = { cancelled: false, controller: null, admitted: null };
+                        packagingTurn.done = new Promise(resolve => { packagingTurn.resolve = resolve; });
+                        _packagingActiveTurn = packagingTurn;
+                        packagingTurn.admitted = await window.InspectorProPackagingHost.prepare({
+                            session_id: originSession.chatSessionId,
+                            conversation_id: _currentConversationId,
+                        });
+                        if (packagingTurn.cancelled) throw Object.assign(new Error('Packaging request cancelled'), { streamCancelled: true });
+                    }
                     // Viewport display state is persistent. Highlights, hidden
                     // parts, rotation, and motion are only changed by explicit
                     // tool actions or direct user controls, not by starting a
@@ -94409,7 +94539,7 @@
                         const geoQ = /geometry.?diff|what.?(material|volume).*(added|removed|changed)|net.?volume|solid.?changed|where.*(geometry|material).?change/i;
                         const geoMatch = geoQ.test(messageText);
                         console.log('[GeoDiff Hydrate] regex match:', geoMatch, 'partNumber:', state.partNumber, 'available:', partDiffState.available, 'existing:', !!state._geometryDiffResult);
-                        if (geoMatch) {
+                        if (geoMatch && !packagingRequested) {
                             // Ensure partDiffState is populated first
                             if (!partDiffState.available && state.partNumber) {
                                 console.log('[GeoDiff Hydrate] Fetching revisions...');
@@ -94450,6 +94580,7 @@
                     // Wait for any in-flight cross-agent summarize to finish
                     await crossContextReady;
                     if (originSession.requestId !== turnId) return; // stale after await
+                    if (packagingTurn?.cancelled) throw Object.assign(new Error('Packaging request cancelled'), { streamCancelled: true });
                     let payload;
                     if (retry) {
                         payload = _chatMemoryRuntime.clone(
@@ -94501,6 +94632,11 @@
                     payload = window.InspectorProChatStreamRuntime.ensureFacilityTurnIdentity(
                         payload, _currentConversationId, _newClientTurnId
                     );
+                    if (packagingTurn) {
+                        payload.conversation_id = _currentConversationId;
+                        if (!payload.client_turn_id) payload.client_turn_id = _newClientTurnId();
+                        payload.request_context = _packagingRequestContext(packagingTurn.admitted, payload.request_context);
+                    }
                     if (inspCtx.attachments && inspCtx.attachments.facility_layout
                             && inspCtx.attachments.facility_layout.generationPlanning) {
                         if (!payload.client_turn_id) payload = {...payload, client_turn_id: _newClientTurnId()};
@@ -94531,6 +94667,7 @@
                         workingAssistant = streamedReply.workingState || workingAssistant;
                         streamTrace = streamedReply.trace || null;
                     } else {
+                        if (packagingTurn) throw new Error('Packaging requires the streaming backend; no fallback was attempted.');
                         const res = await fetch('/api/agent/chat', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -94555,6 +94692,12 @@
                         data = await res.json();
                     }
                         terminalResponseData = data;
+                        if (packagingTurn) {
+                            packagingTerminal = data.codex_packaging;
+                            if (data.tool_source !== 'codex_packaging' || !packagingTerminal) {
+                                throw new Error('The packaging runtime did not return a verified terminal result.');
+                            }
+                        }
                         if (_serverMemoryEnabled() && data.memory) {
                             memoryResult = data.memory;
                             const warnings = Array.isArray(data.memory.warnings)
@@ -94590,12 +94733,15 @@
                             'narration_segments:', data.narration_segments ? data.narration_segments.length : 'none',
                             'asme_refs:', data.asme_refs ? data.asme_refs.length : 'none');
                         // Detect narration BEFORE tool dispatch (narration owns its own explode_level)
-                        if (!isBargeIn && Array.isArray(data.narration_segments) && data.narration_segments.length > 1) {
+                        if (!packagingTurn && !isBargeIn && Array.isArray(data.narration_segments) && data.narration_segments.length > 1) {
                             data._isNarration = true;
                         }
                         // === Tool dispatch (Phase 6: tool_calls canonical) ===
                         try {
-                            if (isBargeIn) {
+                            if (packagingTurn || data.tool_source === 'codex_packaging') {
+                                // Packaging edits are committed by the server and reconciled through the admission bridge.
+                                toolCalls = [];
+                            } else if (isBargeIn) {
                                 // Barge-in is a paused walkthrough Q&A path. Sage can answer,
                                 // but it must not execute workspace/navigation tools that would
                                 // switch tabs and destroy the Training visual context.
@@ -94922,7 +95068,7 @@
                         }
                         // Non-tool actions outside the registry:
                         // ASME reference popup (stays on its own path for now)
-                        if (Array.isArray(data.asme_refs) && data.asme_refs.length > 0) {
+                        if (!packagingTurn && Array.isArray(data.asme_refs) && data.asme_refs.length > 0) {
                             try {
                                 _showAsmeRefsFromResponse(data.asme_refs, originAgent);
                             } catch (asmeErr) {
@@ -94934,6 +95080,10 @@
                             response = data;
                         }
                 } catch (err) {
+                    if (packagingRequested) {
+                        err.packagingTurn = true;
+                        packagingTerminal = err.codex_packaging || packagingTerminal;
+                    }
                     if (!(err && (err.streamCancelled || err.name === 'AbortError'))) {
                         console.error('[AgentSend] request or stream handling failed:', err);
                     }
@@ -94945,7 +95095,16 @@
                         }
                         streamingAssistant = err.streamingMessage;
                     }
-                    if (err && err.streamCancelled) {
+                    if (packagingRequested) {
+                        streamTurnCancelled = !!(err.streamCancelled || err.name === 'AbortError');
+                        streamTurnFailed = !streamTurnCancelled;
+                        response = '';
+                        if (workingAssistant?.uiState === RESPONSE_UI_STATES.WORKING) workingAssistant.cancel();
+                        addMessage(packagingTurn?.admitted
+                            ? 'The packaging response stopped. Saved edits may remain; the editor is reconciling. Undo is available for saved edits.'
+                            : 'Packaging request was not sent: ' + String(err.message || 'Editor admission failed.'),
+                            'system', originAgent);
+                    } else if (err && err.streamCancelled) {
                         if (workingAssistant && workingAssistant.uiState === RESPONSE_UI_STATES.WORKING) {
                             workingAssistant.cancel();
                         }
@@ -95028,6 +95187,22 @@
                         response = `Upload a drawing and run an inspection first, then I can help you analyze the results.`;
                     }
                     }
+                } finally {
+                    if (packagingTurn) {
+                        try {
+                            await window.InspectorProPackagingHost.finish(packagingTerminal);
+                        } catch (reconcileError) {
+                            streamTurnFailed = true;
+                            response = '';
+                            if (streamingAssistant) streamingAssistant.discard();
+                            addMessage('Saved packaging edits may remain. The editor is still locked: '
+                                + reconcileError.message + ' Use Resume editing to retry reconciliation; Undo is available after reload.',
+                                'system', originAgent);
+                        } finally {
+                            if (_packagingActiveTurn === packagingTurn) _packagingActiveTurn = null;
+                            packagingTurn.resolve();
+                        }
+                    }
                 }
 
                 if (streamTurnCancelled || streamTurnFailed) {
@@ -95081,6 +95256,11 @@
                     const documentation = terminalResponseData && terminalResponseData.codex_documentation;
                     if (documentation && documentation.checkedDocumentation === false) agentSteps.unchecked = true;
                     if (documentation) agentSteps.workspace = documentation.workspace || 'documentation';
+                    const packaging = terminalResponseData && terminalResponseData.codex_packaging;
+                    if (packaging) {
+                        agentSteps.workspace = 'packaging_shipping';
+                        if (packaging.checkedPackaging === false) agentSteps.unchecked = true;
+                    }
                     if (agentSteps.unchecked || agentSteps.steps.some(step => step.kind === 'tool')) {
                         assistantPresentation.meta.agentSteps = agentSteps;
                     }
@@ -96055,6 +96235,7 @@
                     return;
                 }
                 if (agentKey === currentAgent) return;
+                if (!_packagingConfirmChatChange(() => selectAgent(agentKey))) return;
 
                 // Save leaving agent's UI state into its session
                 const leavingSession = getCurrentAgentSession();

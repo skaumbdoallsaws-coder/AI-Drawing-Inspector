@@ -1,6 +1,6 @@
 # Packaging and Shipping: Isolated Pilot
 
-Date: 2026-11-05. Status: usable manual development pilot, **not a desktop release or complete live Sage workflow**.
+Date: 2026-11-05. Status: manual development pilot plus **live Sage arrangement acceptance passed**. Not a desktop release or a complete shipping/packaging-design workflow.
 
 ## Isolation
 
@@ -9,6 +9,7 @@ Date: 2026-11-05. Status: usable manual development pilot, **not a desktop relea
 - The regular desktop checkout, Claude's CopilotTest copy, existing layouts, and source CAD were not edited or promoted.
 - All packaging databases, browser screenshots and test documents are under this worktree's `.runtime/`. Test documents are labelled `TEST`.
 - The separate pilot runs on `http://127.0.0.1:8179/packaging`. It does not load the main application's environment file, start Codex, or purchase postage.
+- The full Sage test host runs separately at `http://127.0.0.1:8180/?packagingPilot=1`, with isolated engineering data, enforced conversation memory and the explicitly selected existing ChatGPT account. API billing fallback is disabled.
 
 ## Working Now
 
@@ -24,7 +25,7 @@ Date: 2026-11-05. Status: usable manual development pilot, **not a desktop relea
 | Rating adapter | Quote-only EasyPost requests, up to three US destinations and 12 package/destination combinations, kg/m conversion to oz/in, account/currency/mode-aware totals, Decimal arithmetic, revision-bound snapshots, sanitized failures and a 65-second overall deadline. |
 | Reports | Revision-bound draft PDF with product/source data, mass evidence, material BOM, top envelope diagram, placement schedule, findings and any current quotes. |
 | Sage adapter | Inspect, validate, propose, edit, Undo and Redo contracts over the same service. Editing requires refreshed host context, direct-edit authorization, a mutation lease, revisions and bounded calls. See `packaging-sage-integration.md`. |
-| Host hook | Main app entry is development-only: backend `INSPECTORPRO_PACKAGING_ENABLED=1` plus browser `?packagingPilot=1`. Repeated viewport refresh retains the iframe; navigation checks unsaved work. Packaging chat is explicitly blocked until admission wiring exists. |
+| Host hook | Main app entry is development-only: backend `INSPECTORPRO_PACKAGING_ENABLED=1` plus browser `?packagingPilot=1`. Sage additionally requires `INSPECTORPRO_CODEX_PACKAGING=1`. Saved-editor admission, heartbeat, mutation lease, revision checks, cancellation/reconciliation and streaming reuse the existing runtime. |
 
 The geometry status remains `needs_review` even with no detected errors. A fit check is not a cushioning, stacking, support, removal, or transport certification. Carton tare is entered with evidence; it is not computed from the carton bounding volume. Product appearance is not physical material evidence.
 
@@ -74,17 +75,17 @@ The rate adapter accepts `INSPECTORPRO_PACKAGING_EASYPOST_KEY` from the pilot's 
 | P1 manual workspace | Implemented and browser-tested for envelopes/GLB and rectangular pads. Full real-product acceptance needs a verified dimension and mass reference; direct CAD/assembly selection is not wired. |
 | P2 live estimates | Adapter and test-mode/failure contracts implemented. Not passed: no credentialed live rate comparison at valid destinations. |
 | P3 alternatives/inserts | Rectangular envelope arrangement implemented. Sourced carton catalog, custom board blank/tare calculation, pockets, no-contact regions, support/removal checks and cost-driven candidate comparison remain open. |
-| P4 Sage/deliverables | Offline gateway and PDF implemented. Live host admission, routing, streaming, safe refresh and a real Sage turn remain open. No new agent loop was added. |
+| P4 Sage/deliverables | Gateway, PDF and live chat-driven arrangement passed. Host admission, streaming, safe refresh, memory enforcement and manual Undo/Redo are verified. Broader real-product tasks remain; the agent cannot yet import CAD, request quotes or export reports through tools. No new agent loop was added. |
 | P5 desktop | Not promoted. Requires live acceptance, full affected regressions, dependency/license packaging, worker resource hardening and explicit release approval. |
 | P6 advanced | Deferred. No SolidCraft integration, mixed products, dielines, pallets, crates or freight. |
 
 ## Next Work In Order
 
-1. Implement the active-packaging host admission and shared mutation lease described in `packaging-sage-integration.md`. Connect the existing Codex runtime, not another orchestration loop. Add lifecycle/cancellation/receipt tests and then a real Sage turn. Never expose write tools with a fake/null lease.
+1. Completed this increment: active-packaging admission/shared mutation lease, existing Codex runtime route, lifecycle/cancellation/receipt tests and a real Sage arrangement through the chat pane. Expand live acceptance to more products and interrupted turns before release.
 2. Bind the selected native CAD/assembly configuration to trusted extraction records, including mass overrides, physical material evidence and configuration/revision. Validate against one engineer-approved product and measured mass.
 3. Connect an approved carrier account through the existing secure-store pattern. Verify actual quotes for one measured package to three valid US addresses, including two enabled carriers where available. No assertion of all-destination or all-carrier availability until tested.
 4. Add sourced carton/material selection, persistent alternatives and cost comparisons. Only then extend primitives to supported pocket cuts with an available solid backend and independently checked net volumes.
-5. Add memory/quota enforcement, dedicated packaging permissions, durable create idempotency, cancellation endpoint/admission transport and retention rules. Run full desktop startup/shutdown and workflow regression gates before requesting promotion.
+5. Conversation-memory enforcement and cancellation/admission transport now work. Dedicated packaging permissions, quota policy, durable create idempotency and retention rules remain. Run full desktop startup/shutdown and workflow regression gates before requesting promotion.
 
 Needed from the user for later acceptance: an approved carrier account/key via secure entry, valid shipping scenarios, and one representative CAD product with a trustworthy mass/dimension reference. Those inputs do not block the completed offline/manual pilot, but they cannot be replaced with fabricated rates or physical properties.
 
@@ -97,7 +98,7 @@ Needed from the user for later acceptance: an approved carrier account/key via s
 
 Keep downloaded model licenses separate from software licenses. The existing GLB acceptance fixture remains in the repository; no new customer models or source paths were embedded in tests or release artifacts.
 
-## Final Checkpoint Results
+## Previous Manual Checkpoint Results
 
 - Combined Python run: **329 passed**, two dependency deprecation warnings, 35.79 seconds. Includes 210 packaging/domain/rating/gateway/MCP tests and 119 existing Codex/Sage routing/MCP regressions.
 - JavaScript: **18 passed** (13 workspace contracts, 5 host integration contracts).
@@ -105,3 +106,16 @@ Keep downloaded model licenses separate from software licenses. The existing GLB
 - Latest Playwright run: passed at both viewport sizes, zero page errors, real imported mesh and six-instance rendering verified. Every sampled canvas was nonblank and camera changes changed pixels.
 - Main tracked checkout remained clean (`git status --short --untracked-files=no`). No desktop promotion or Claude-copy edits.
 - `git diff --check` and Python/inline-JavaScript syntax checks passed. The full desktop regression suite and live model/carrier acceptance remain unrun.
+
+## Live Sage Checkpoint
+
+- **509 Python tests passed**, two dependency deprecation warnings, 110.10 seconds. Covers packaging/domain/rating, admission, MCP, shared runtime, routing, saved-validation receipts, memory-enforced real SQLite/MCP writes and affected documentation/part/read-only gateway tests.
+- **39 JavaScript tests passed**, including frame/source checks, editor locks, heartbeat, drain-before-switch, conversation changes, revision scope, failed reconciliation and browser timer receiver binding.
+- A real ChatGPT-plan turn through the existing Sage pane completed in about 67 seconds with memory `enforce`. It inspected, proposed, validated a proposal, saved six imported parts and validated the saved revision. Five successful tools and three rejected argument attempts; Sage corrected those attempts without relaxing validation.
+- The viewport reconciled revision 1, displayed all six imported meshes, and remained nonblank. Manual Undo returned to zero placements; Redo restored six at revision 3. No browser page errors. Source/product properties, constraints, quantity, name and carton were compared with the original stored design and remained unchanged.
+- Unknown mass, carton weight, packing allowance and handling confirmation remained unknown. Overall validation correctly remained `failed` for missing inputs; geometric fit alone did not imply shipping readiness or protection certification. No live rates were requested.
+- Evidence: `.runtime/packaging-sage-browser-02/` contains the final SSE result, screenshots and browser summary. The CAD-derived GLB fixture still has no engineer-verified physical dimension/mass reference.
+- Existing memory fixture regression has one unrelated baseline mismatch: its workflow-stage fixture lacks the already-existing `documentation-publication` policy. The new packaging memory-host suite passes all eight cases. Missing baseline fixture files were copied only into this worktree as untracked test inputs, not committed or changed in the source checkout.
+- The initial browser run found an unbound browser timer invocation before inference; the timer receiver fix and regression are included. A later successful run used the real model, not a scripted replacement.
+- Manual browser regression also passed against the full host at desktop and mobile sizes: editing, solver, pad mass, save/reopen, PDF, camera/section/exploded views, Undo/Redo and imported meshes. Evidence: `.runtime/packaging-manual-regression-02/`; no page errors.
+- Not performed: full Electron release/startup/shutdown acceptance, live carrier comparison, verified native CAD mass, fitted protective inserts, or desktop promotion. Ribbon/dialog and decal/display-mode finishing remains on the implementation plan.

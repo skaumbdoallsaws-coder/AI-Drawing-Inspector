@@ -34,7 +34,8 @@ def _fixture(name: str):
 
 def test_registered_stage_policies_exactly_match_the_frozen_contract() -> None:
     fixture = _fixture("workflow-stage-revalidation-v1.json")
-    assert tuple(fixture["dependencyVocabulary"]) == REVISION_VECTOR_FIELDS
+    # Packaging is an additive scope; every original workflow keeps its frozen vocabulary and policy.
+    assert tuple(fixture["dependencyVocabulary"]) + ("packagingRevision",) == REVISION_VECTOR_FIELDS
     assert set(fixture["authorizationKinds"]) == AUTHORIZATION_KINDS
     assert set(WORKFLOW_STAGE_POLICIES) == {
         item["workflowId"] for item in fixture["workflows"]

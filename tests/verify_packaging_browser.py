@@ -10,19 +10,28 @@ from PIL import Image, ImageChops, ImageStat
 from playwright.sync_api import sync_playwright, expect
 
 
-def verify(url, output):
+def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
     output.mkdir(parents=True, exist_ok=True)
     errors = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--enable-unsafe-swiftshader"])
-        context = browser.new_context(viewport={"width": 1440, "height": 1000}, accept_downloads=True)
+        browser = p.chromium.launch(headless=not headed, slow_mo=slow_mo,
+                                    args=["--enable-unsafe-swiftshader"])
+        desktop = {"width": 1440, "height": 900 if headed else 1000}
+        context = browser.new_context(viewport=desktop, accept_downloads=True)
         page = context.new_page()
         page.set_default_timeout(15000)
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.on("dialog", lambda dialog: dialog.accept())
+
+        def phase(message):
+            print(message, flush=True)
+            if headed:
+                page.wait_for_timeout(2500)
+
         page.goto(url + "/packaging", wait_until="networkidle")
         expect(page.locator("#provider-status")).to_contain_text("not configured")
         expect(page.locator("#viewport canvas")).to_be_visible()
+        phase("1/7: Creating a six-item test package with documented input assumptions.")
         name = f"TEST browser package {int(time())}"
         page.locator("#document-name").fill(name)
 
@@ -33,13 +42,14 @@ def verify(url, output):
         for axis, value in enumerate([100, 60, 40]):
             fill(f"product_dim_{axis}", value)
         fill("quantity", 6)
-        page.locator('[name="mass_basis"]').select_option("user_measured")
+        page.locator('[name="mass_basis"]').select_option("estimate")
         fill("product_mass", .5)
-        fill("mass_evidence", "TEST scale input, not production evidence")
+        fill("mass_evidence", "DEMO assumption: 0.5 kg per item, not a measured or CAD-derived value")
         page.locator('[name="contents"]').select_option("ordinary_nonhazardous")
         page.get_by_role("button", name="Add manual product", exact=True).click()
         page.get_by_role("button", name="Save", exact=True).click()
         expect(page.locator("#document-status")).to_contain_text("Saved")
+        phase("2/7: Comparing carton arrangements and applying a feasible candidate.")
         page.get_by_role("tab", name="Arrange", exact=True).click()
         fill("tare", .2)
         fill("tare_evidence", "TEST carton scale")
@@ -53,6 +63,7 @@ def verify(url, output):
         page.get_by_role("button", name="Save", exact=True).click()
         expect(page.locator("#validation-panel")).to_contain_text("Eligible for a rate request")
         expect(page.locator("#validation-panel")).to_contain_text("3.25 kg")
+        phase("3/7: Adding a foam pad and checking the updated gross mass.")
 
         # Add a real solid pad below the product envelopes without colliding.
         page.get_by_role("tab", name="Contents", exact=True).click()
@@ -64,6 +75,7 @@ def verify(url, output):
         page.get_by_role("button", name="Fit view", exact=True).click()
         page.locator("#viewport canvas").screenshot(path=str(output / "canvas-orbit.png"))
         page.screenshot(path=str(output / "desktop.png"))
+        phase("4/7: Inspecting top, section and exploded views; testing Undo and Redo.")
         page.get_by_role("button", name="Top", exact=True).click()
         page.locator("#viewport canvas").screenshot(path=str(output / "canvas-top.png"))
         page.get_by_label("Section", exact=True).check()
@@ -77,6 +89,7 @@ def verify(url, output):
         expect(page.locator("#validation-panel")).to_contain_text("3.25 kg")
         page.get_by_role("button", name="Redo", exact=True).click()
         expect(page.locator("#document-status")).to_contain_text("Saved")
+        phase("5/7: Exporting the review PDF. Carrier quotes are unavailable without credentials.")
         with page.expect_download() as downloaded:
             page.get_by_role("button", name="Download PDF", exact=True).click()
         downloaded.value.save_as(str(output / "packaging-review.pdf"))
@@ -95,7 +108,8 @@ def verify(url, output):
         page.locator("#viewport canvas").screenshot(path=str(output / "canvas-mobile.png"))
 
         # Import an existing CAD-derived repository asset through the actual UI.
-        page.set_viewport_size({"width": 1440, "height": 1000})
+        page.set_viewport_size(desktop)
+        phase("6/7: Importing the existing CAD-derived model without changing its dimensions.")
         page.get_by_role("button", name="New", exact=True).click()
         asset = Path(__file__).resolve().parents[1] / "generated/training/racing-bike/part_glb/RB-001_viewer.glb"
         page.locator('[name="source_file"]').set_input_files(str(asset))
@@ -130,7 +144,11 @@ def verify(url, output):
         page.get_by_role("button", name="Fit view", exact=True).click()
         page.screenshot(path=str(output / "six-imported-products.png"))
         page.locator("#viewport canvas").screenshot(path=str(output / "canvas-six-imported.png"))
+        phase("7/7: Six imported models packed. Missing mass remains unknown and blocks rate requests.")
         assert not errors, errors
+        if headed and hold_seconds:
+            print(f"Holding the final view for {hold_seconds} seconds.", flush=True)
+            page.wait_for_timeout(hold_seconds * 1000)
         context.close()
         browser.close()
 
@@ -142,7 +160,7 @@ def verify(url, output):
         pixel_stats[file.name] = [round(x, 2) for x in deviations]
     first, second = [Image.open(output / x).convert("RGB") for x in ("canvas-orbit.png", "canvas-top.png")]
     assert ImageChops.difference(first, second).getbbox(), "View controls did not change rendered pixels"
-    result = {"url": url, "document_name": name, "page_errors": errors, "canvas_stddev": pixel_stats,
+    result = {"url": url, "headed": headed, "document_name": name, "page_errors": errors, "canvas_stddev": pixel_stats,
               "checks": ["manual editing", "packing solver", "pad mass", "validation", "undo redo", "PDF",
                          "save reopen", "unconfigured rates", "responsive", "camera pixels", "real GLB render",
                          "six real GLB instances with unknown mass preserved"]}
@@ -154,5 +172,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:8179")
     parser.add_argument("--output", type=Path, default=Path(".runtime/packaging-browser"))
+    parser.add_argument("--headed", action="store_true")
+    parser.add_argument("--slow-mo", type=int, choices=range(0, 2001), metavar="MS", default=0)
+    parser.add_argument("--hold-seconds", type=int, choices=range(0, 301), metavar="SECONDS", default=0)
     args = parser.parse_args()
-    verify(args.url, args.output)
+    verify(args.url, args.output, headed=args.headed, slow_mo=args.slow_mo, hold_seconds=args.hold_seconds)

@@ -1,12 +1,37 @@
 # Packaging Tools: Sage Integration Contract
 
-Status: offline adapter implemented and tested, **not live Sage integration**.
-No provider was started, no network billing was performed, and this change does
-not enable packaging chat. Source changes belong only to
-`ai_inspector/codex_runtime/packaging_tools.py`,
-`tests/test_codex_packaging_tools.py`, `tests/test_codex_packaging_mcp.py`, and this
-document. The MCP acceptance addition changes only its new test file and this
-document; it does not change the adapter, bridge, server, or frontend.
+Status: host admission, the shared Codex runtime route, and the editor/chat bridge
+are implemented in the isolated worktree. Live chat acceptance passed on
+2026-11-05. This is not a desktop release. Existing offline transport evidence
+must not be interpreted as proof of a real model turn or live carrier rates.
+
+## Host Implementation
+
+- `packaging_shipping/admission.py` owns a bounded, expiring editor admission
+  and a shared mutation lock. It pins the authenticated principal, conversation,
+  selection, document and saved revision. Heartbeats cannot acknowledge an
+  unrelated writer's revision. A successful terminal binding is read-only and
+  remains available for memory finalization, not further tool calls.
+- `packaging_shipping/api.py` exposes same-origin editor publish, heartbeat and
+  revoke endpoints. Renderer input never grants edit authority. The isolated
+  host explicitly enables direct edits through its existing Codex edit flag.
+- `codex_runtime/packaging_pilot.py` uses the existing service, journal and MCP
+  gateway. `gateway_turn.py` shares AppServer lifecycle with documentation;
+  neither adds a new reasoning loop. Cancellation closes tool admission before
+  transport shutdown and drains active work, preserving mutation receipts.
+- `server.py` routes only admitted Sage `packaging_shipping` turns. It requires
+  streaming, never falls back to another provider, and supplies packaging-only
+  memory scope and revision metadata. Conversation history is not model state.
+- `static/packaging.js` and `static/index.html` coordinate a same-origin,
+  frame-validated bridge, lock manual edits during a turn, heartbeat admission,
+  drain cancellation before transitions, and reconcile the saved document before
+  unlocking. Unknown or committed outcomes never claim that nothing changed.
+
+The development host is `tools/run_packaging_sage_pilot.py`. It uses isolated
+engineering data and an explicitly selected existing ChatGPT account. It does
+not load the desktop environment file or enable API billing fallback. Native
+CAD mass extraction, carrier credentials, dedicated packaging permission names
+and release hardening remain separate gates.
 
 ## Adapter Surface
 
@@ -119,9 +144,8 @@ database writers. Do not supply `nullcontext` as a production write lease.
 The renderer must coordinate transitions with this host state: cancel and drain
 the active turn before switching/editing, or wait for the host lease/admission
 transition acknowledgement before exposing the transition. An unacknowledged,
-delayed browser event cannot provide active-document-switch protection. No such
-transport/lease currently exists in the packaging frontend. Until it does,
-keep direct-edit authority off. Also invalidate admission on frame unload,
+delayed browser event cannot provide active-document-switch protection. The
+implemented bridge and admission manager provide this coordination. Invalidate admission on frame unload,
 disconnect, expired session, and turn cancellation.
 
 ## Receipts And Cancellation
@@ -149,11 +173,14 @@ authorized document, and reconcile unknown outcomes against service receipts.
 Await all active gateway calls before releasing the host. Do not apply a blind
 compensating Undo: it could undo a different editor's subsequent work.
 
-## Minimal Sage Wiring Still Needed
+## Original Integration Checklist
 
 Locations below were inspected in this isolated worktree on 2026-11-05. Other
 owners are actively editing these files; use the named symbols as anchors.
-None of the changes in this section were implemented by this adapter change.
+This checklist describes the original adapter handoff. Its admission, runtime,
+streaming and refresh changes are now implemented as summarized above. The
+historical line numbers and descriptions below identify the inspected baseline;
+use symbols rather than those line numbers when reviewing the current code.
 
 1. **Use the existing service instance and add live admission.**
    `server.py:1673`, the `INSPECTORPRO_PACKAGING_ENABLED` block, now conditionally
@@ -310,10 +337,32 @@ Reproduce from this worktree, without a PYTHONPATH override:
 .\.venv\Scripts\python.exe -B -m pytest tests/test_codex_packaging_mcp.py tests/test_codex_packaging_tools.py -q -p no:cacheprovider --basetemp=.runtime/packaging-mcp-NEW
 ```
 
-**Live Sage chat remains gated.** This proves the local MCP transport contract,
-not end-to-end Sage chat or full host admission. No AppServer/provider process,
-model inference, external network request, live carrier request, or billing flow
-was run. The browser/frame admission bridge, authoritative lifecycle/lease
-integration, runtime routing, and receipt-driven UI refresh above remain required.
-The frontend chat guard must stay in place until that separate integration is
-ready and accepted.
+**This transport run did not use live Sage.** It proves the local MCP transport
+contract, not end-to-end chat or carrier prices. The subsequent host integration
+uses explicit development flags; no regular desktop build has been promoted.
+
+## Live Chat Acceptance
+
+`tests/verify_packaging_sage_chat.py --live --headed` passed against the isolated
+full host on port 8180 with memory enforcement and ChatGPT-plan authentication.
+It used the actual Sage pane, AppServer, MCP gateway, solver and saved-document
+service. No model response or geometry operation was substituted.
+
+The model inspected an imported CAD-derived GLB, proposed six placements,
+validated the proposal, saved it, then validated saved revision 1. Three invalid
+argument calls were rejected before it corrected them; five calls succeeded.
+`checkedPackaging` requires saved validation at the final revision, not merely a
+proposal or older validation. Unknown masses and handling status stayed unknown.
+The geometric fit passed, but the package remained unready for quotes until the
+missing inputs are supplied. No protection certification was claimed.
+
+The renderer refreshed to six meshes, unlocked editing, and manual Undo/Redo
+worked. Canvas checks and screenshots were inspected; there were no page errors.
+Source/product, constraints, quantity, name and carton were independently compared
+against the original stored design. Native CAD mass/dimension verification is
+still outstanding. Evidence stays local in `.runtime/packaging-sage-browser-02/`.
+
+Related automated checks: 509 Python tests and 39 JavaScript tests passed. The
+eight memory-host tests use real admission, SQLite and MCP with only inference
+scripted; the separate browser run above used the real model. See
+`packaging-shipping-status.md` for release gaps and unrelated baseline fixture drift.

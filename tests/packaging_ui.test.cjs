@@ -181,3 +181,224 @@ test('assets, icons, and Three imports stay local; server strings never enter HT
   assert.match(sceneSource, /new GLTFLoader\(\)\.parseAsync/);
   assert.doesNotMatch(sceneSource, /(?:sourceModel|loaded|rotation)\.scale/);
 });
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+const chatIdentity = { session_id: 'sage-session:1', conversation_id: 'conversation.1' };
+function admissionFixture(options = {}) {
+  const current = { document_id: 'pkg_one', revision: 4, dirty: false, conflict: false, pending_operations: 0 };
+  const calls = [], locks = [], invalidated = [], scheduled = new Map();
+  const token = { admission_id: 'adm_one', selection_id: 'sel_one', expires_in: 30 };
+  let nextTimer = 0;
+  const fixture = { current, calls, locks, invalidated, scheduled, token, accepted: [] };
+  fixture.api = async (url, init) => {
+    calls.push({ url, init });
+    if (options.api) return options.api(url, init, fixture);
+    if (url.startsWith('/documents/')) return { id: current.document_id, revision: 6, design: ui.emptyDesign() };
+    return token;
+  };
+  fixture.editor = new ui.PackagingEditorAdmission({
+    snapshot: () => ({ ...current }), lock: value => locks.push(value), api: fixture.api,
+    accept: async saved => {
+      assert.equal(fixture.editor.locked, true, 'accept must precede unlock');
+      fixture.accepted.push(saved); current.revision = saved.revision;
+    },
+    invalidate: error => invalidated.push(error),
+    schedule: (callback, ms) => { const id = ++nextTimer; scheduled.set(id, { callback, ms }); return id; },
+    unschedule: id => scheduled.delete(id),
+  });
+  fixture.tick = async () => {
+    const [id, job] = [...scheduled.entries()][0]; scheduled.delete(id); await job.callback();
+  };
+  return fixture;
+}
+
+test('admission locks synchronously, publishes saved identity, and waits for acknowledgement', async () => {
+  const publish = deferred();
+  const f = admissionFixture({ api: () => publish.promise });
+  const preparing = f.editor.prepare(chatIdentity);
+  assert.equal(f.editor.locked, true); assert.deepEqual(f.locks, [true]);
+  assert.equal(f.editor.admission, null);
+  assert.deepEqual(f.calls[0], { url: '/editor', init: { method: 'POST', body: {
+    ...f.current, ...chatIdentity, active_mode: 'packaging_shipping'
+  } } });
+  publish.resolve(f.token);
+  assert.deepEqual(await preparing, { admission_id: 'adm_one', document_id: 'pkg_one', revision: 4, state: 'locked' });
+  assert.equal([...f.scheduled.values()][0].ms, 10000);
+});
+
+test('unsaved, dirty, conflicted, pending and invalid-identity admission never publishes', async () => {
+  for (const invalid of [{ document_id: null }, { revision: null }, { dirty: true }, { conflict: true }, { pending_operations: 1 }]) {
+    const f = admissionFixture(); Object.assign(f.current, invalid);
+    await assert.rejects(f.editor.prepare(chatIdentity), /Save or reload/);
+    assert.equal(f.calls.length, 0); assert.equal(f.editor.locked, false);
+  }
+  const f = admissionFixture();
+  await assert.rejects(f.editor.prepare({ ...chatIdentity, session_id: '../outside' }), /active chat session/);
+  assert.equal(f.calls.length, 0);
+});
+
+test('publish failure releases only the unadmitted lock; duplicate prepare is rejected', async () => {
+  const f = admissionFixture({ api: async () => { throw new Error('Not authorized'); } });
+  await assert.rejects(f.editor.prepare(chatIdentity), /Not authorized/);
+  assert.deepEqual(f.locks, [true, false]); assert.equal(f.editor.admission, null);
+  const admitted = admissionFixture(); await admitted.editor.prepare(chatIdentity);
+  await assert.rejects(admitted.editor.prepare(chatIdentity), /Save or reload/);
+  assert.equal(admitted.calls.length, 1);
+});
+
+test('heartbeat repeats exact admission binding without document contents', async () => {
+  const f = admissionFixture(); await f.editor.prepare(chatIdentity); await f.tick();
+  assert.deepEqual(f.calls[1], { url: '/editor/adm_one/heartbeat', init: { method: 'POST', body: {
+    ...f.current, ...chatIdentity, active_mode: 'packaging_shipping', selection_id: 'sel_one'
+  } } });
+  assert.equal(f.scheduled.size, 1); assert.equal(f.invalidated.length, 0);
+});
+
+test('finished turn heartbeat stops renewal without aborting final SSE or unlocking', async () => {
+  const f = admissionFixture({ api: async (url, init, self) => {
+    if (url.endsWith('/heartbeat')) throw Object.assign(new Error('Finished'), { code: 'editor_turn_finished' });
+    return self.token;
+  } });
+  await f.editor.prepare(chatIdentity); await f.tick();
+  assert.equal(f.scheduled.size, 0); assert.equal(f.invalidated.length, 0);
+  assert.equal(f.editor.locked, true); assert.equal(f.calls.length, 2);
+});
+
+test('default admission timers preserve the browser global receiver during prepare, heartbeat, finish and unload', async () => {
+  const originalSchedule = globalThis.setTimeout, originalUnschedule = globalThis.clearTimeout;
+  const scheduled = new Map(), receivers = [];
+  let timer = 0;
+  globalThis.setTimeout = function (callback, delay) {
+    if (this !== globalThis) throw new TypeError('Illegal invocation: setTimeout receiver');
+    receivers.push('setTimeout'); const id = ++timer; scheduled.set(id, { callback, delay }); return id;
+  };
+  globalThis.clearTimeout = function (id) {
+    if (this !== globalThis) throw new TypeError('Illegal invocation: clearTimeout receiver');
+    receivers.push('clearTimeout'); scheduled.delete(id);
+  };
+  try {
+    const f = admissionFixture(), locks = [];
+    const editor = new ui.PackagingEditorAdmission({
+      snapshot: () => ({ ...f.current }), lock: value => locks.push(value), api: f.api,
+      accept: async saved => { f.current.revision = saved.revision; },
+    });
+    await editor.prepare(chatIdentity);
+    assert.equal(editor.locked, true); assert.equal(scheduled.size, 1);
+    const [id, heartbeat] = [...scheduled.entries()][0]; scheduled.delete(id);
+    assert.equal(heartbeat.delay, 10000); await heartbeat.callback();
+    assert.equal(f.calls.at(-1).url, '/editor/adm_one/heartbeat'); assert.equal(scheduled.size, 1);
+    await editor.finish();
+    assert.equal(editor.locked, false); assert.equal(scheduled.size, 0);
+    assert.equal(f.current.revision, 6); assert.deepEqual(locks, [true, false]);
+    await editor.prepare(chatIdentity); editor.unload();
+    assert.equal(scheduled.size, 0); assert.equal(f.calls.at(-1).init.keepalive, true);
+    assert.ok(receivers.includes('setTimeout')); assert.ok(receivers.includes('clearTimeout'));
+  } finally {
+    globalThis.setTimeout = originalSchedule; globalThis.clearTimeout = originalUnschedule;
+  }
+});
+
+test('expired or changed editor heartbeat requests host cancellation but keeps the editor locked', async () => {
+  for (const changed of [false, true]) {
+    const f = admissionFixture({ api: async (url, init, self) => {
+      if (url.endsWith('/heartbeat')) throw Object.assign(new Error('Expired'), { code: 'editor_expired' });
+      return self.token;
+    } });
+    await f.editor.prepare(chatIdentity);
+    if (changed) f.current.dirty = true;
+    await f.tick();
+    assert.equal(f.invalidated.length, 1); assert.equal(f.editor.locked, true);
+    assert.equal(f.scheduled.size, 0);
+  }
+});
+
+test('finish coalesces, awaits revoke then authoritative GET, accepts revision then unlocks', async () => {
+  const revoked = deferred(), loaded = deferred();
+  const f = admissionFixture({ api: (url, init, self) => url.endsWith('/revoke') ? revoked.promise
+    : url.startsWith('/documents/') ? loaded.promise : self.token });
+  await f.editor.prepare(chatIdentity);
+  const finished = f.editor.finish({ documentId: 'pkg_one', revision: 6 });
+  assert.equal(f.editor.finish(), finished); assert.equal(f.editor.locked, true);
+  assert.equal(f.calls.length, 2); assert.equal(f.scheduled.size, 0);
+  revoked.resolve({ expires_in: 0 }); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.calls[2].url, '/documents/pkg_one'); assert.equal(f.editor.locked, true);
+  loaded.resolve({ id: 'pkg_one', revision: 6, design: ui.emptyDesign() });
+  assert.deepEqual(await finished, { admission_id: null, document_id: 'pkg_one', revision: 6, state: 'idle' });
+  assert.deepEqual(f.locks, [true, false]); assert.equal(f.accepted.length, 1);
+});
+
+test('cancel or disconnected stream reconciles GET even without terminal receipts', async () => {
+  const f = admissionFixture(); await f.editor.prepare(chatIdentity); await f.editor.finish();
+  assert.equal(f.accepted[0].revision, 6);
+  assert.deepEqual(f.calls.map(call => call.url), ['/editor', '/editor/adm_one/revoke', '/documents/pkg_one']);
+});
+
+test('failed revoke preserves lock and admission for an explicit retry', async () => {
+  let fail = true;
+  const f = admissionFixture({ api: (url, init, self) => {
+    if (url.endsWith('/revoke') && fail) throw new Error('Lease busy');
+    return url.startsWith('/documents/') ? { id: 'pkg_one', revision: 5 } : self.token;
+  } });
+  await f.editor.prepare(chatIdentity);
+  await assert.rejects(f.editor.finish(), /Lease busy/);
+  assert.equal(f.editor.locked, true); assert.ok(f.editor.admission); assert.equal(f.accepted.length, 0);
+  fail = false; await f.editor.finish(); assert.equal(f.editor.locked, false);
+});
+
+test('reconciliation refuses stale receipts, wrong document, changed selection or newly dirty draft', async () => {
+  for (const mismatch of ['receipt', 'response', 'selection', 'dirty']) {
+    const f = admissionFixture({ api: (url, init, self) => {
+      if (!url.startsWith('/documents/')) return self.token;
+      if (mismatch === 'selection') self.current.document_id = 'pkg_other';
+      if (mismatch === 'dirty') self.current.dirty = true;
+      return { id: mismatch === 'response' ? 'pkg_other' : 'pkg_one', revision: 5 };
+    } });
+    await f.editor.prepare(chatIdentity);
+    await assert.rejects(f.editor.finish({ documentId: 'pkg_one', revision: mismatch === 'receipt' ? 6 : 5 }), /not be reconciled/);
+    assert.equal(f.accepted.length, 0); assert.equal(f.editor.locked, true);
+  }
+});
+
+test('pagehide revocation forwards keepalive through the authenticated request helper', async () => {
+  const f = admissionFixture(); await f.editor.prepare(chatIdentity); f.editor.unload();
+  const call = f.calls.at(-1); assert.equal(call.url, '/editor/adm_one/revoke'); assert.equal(call.init.keepalive, true);
+  global.fetch = async (url, init) => {
+    assert.equal(init.keepalive, true); assert.equal(init.credentials, 'same-origin');
+    assert.equal(init.headers['X-InspectorPro-Request'], 'packaging');
+    return new Response('{}');
+  };
+  await ui.request(call.url, call.init);
+});
+
+test('host bridge authenticates source, origin and request nonce; only opaque state can cross back', async () => {
+  const sent = [], frame = { contentWindow: { postMessage: (data, origin) => sent.push({ data, origin }) } };
+  const hostWindow = { location: { origin: 'https://app.example' }, addEventListener() {} };
+  let invalidated = 0;
+  const bridge = new ui.PackagingHostBridge({ hostWindow, frame: () => frame, invalidate: () => invalidated++ });
+  const prepared = bridge.prepare(chatIdentity);
+  assert.equal(sent[0].origin, hostWindow.location.origin);
+  const event = { source: frame.contentWindow, origin: hostWindow.location.origin, data: {
+    type: ui.PACKAGING_BRIDGE, action: 'result', request_id: sent[0].data.request_id, ok: true,
+    value: { admission_id: 'adm_one', document_id: 'pkg_one', revision: 4, state: 'locked' }
+  } };
+  bridge.receive({ ...event, origin: 'https://outside.example' });
+  bridge.receive({ ...event, source: {} });
+  bridge.receive({ ...event, data: { ...event.data, request_id: 'unknown' } });
+  assert.equal(bridge.pending.size, 1); assert.equal(bridge.admitted, null);
+  bridge.receive(event); assert.equal((await prepared).admission_id, 'adm_one');
+  bridge.receive({ ...event, source: {}, data: { type: ui.PACKAGING_BRIDGE, action: 'invalidate' } });
+  assert.equal(invalidated, 0);
+  bridge.receive({ ...event, data: { type: ui.PACKAGING_BRIDGE, action: 'release-request' } });
+  assert.equal(invalidated, 1);
+  const finished = bridge.finish({ documentId: 'pkg_one', revision: 6, mutations: [{}], tools: ['arbitrary'] });
+  assert.deepEqual(sent[1].data.payload, { documentId: 'pkg_one', revision: 6 });
+  bridge.receive({ ...event, data: { ...event.data, request_id: sent[1].data.request_id,
+    value: { admission_id: null, document_id: 'pkg_one', revision: 6, state: 'idle', design: {} } } });
+  await assert.rejects(finished, /Invalid packaging bridge/);
+  assert.ok(bridge.admitted, 'malformed acknowledgement must not clear host admission');
+});

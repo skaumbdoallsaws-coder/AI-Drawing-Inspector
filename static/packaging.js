@@ -58,10 +58,11 @@ export function errorMessage(body, status) {
   return `Packaging request failed (HTTP ${status}).`;
 }
 
-export async function request(path, { method = 'GET', body, raw = false, responseType = 'json' } = {}) {
+export async function request(path, { method = 'GET', body, raw = false, responseType = 'json', keepalive = false } = {}) {
   const headers = { 'X-InspectorPro-Request': 'packaging' };
   if (body !== undefined) headers['Content-Type'] = raw ? 'model/gltf-binary' : 'application/json';
-  const response = await fetch(`/api/packaging${path}`, { method, headers, credentials: 'same-origin', cache: 'no-store',
+  const response = await fetch(`/api/packaging${path}`, { method, headers, credentials: 'same-origin', cache: 'no-store', keepalive,
+    signal: AbortSignal.timeout(90000),
     body: body === undefined ? undefined : raw ? body : JSON.stringify(body) });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
@@ -81,6 +82,162 @@ export function quoteFreshness(quote, revision, dirty, scenarioMatches) {
 
 export function rateAccountLabel(rate) {
   return `Account: ${String(rate.account_id ?? '').trim() || 'not provided'}`;
+}
+
+export const PACKAGING_BRIDGE = 'inspectorpro:packaging-editor-v1';
+const bridgeId = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(value);
+const bridgeHostId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/.test(value);
+const bridgeRevision = value => Number.isSafeInteger(value) && value >= 0;
+
+export class PackagingEditorAdmission {
+  constructor({ snapshot, lock, accept, api = request, invalidate = () => {},
+    schedule = (...args) => globalThis.setTimeout(...args),
+    unschedule = (...args) => globalThis.clearTimeout(...args) }) {
+    Object.assign(this, { snapshot, lock, accept, api, invalidate, schedule, unschedule });
+    this.locked = false; this.admission = null; this.timer = null; this.closing = null;
+  }
+  summary() {
+    const current = this.snapshot();
+    return { admission_id: this.admission?.admission_id || null, document_id: current.document_id,
+      revision: current.revision, state: this.locked ? 'locked' : 'idle' };
+  }
+  clean(current) {
+    return bridgeId(current.document_id) && bridgeRevision(current.revision)
+      && current.dirty === false && current.conflict === false && current.pending_operations === 0;
+  }
+  async prepare(identity) {
+    const current = this.snapshot();
+    if (this.locked || !this.clean(current)) throw new Error('Save or reload the packaging document and finish pending operations before sending.');
+    if (!bridgeHostId(identity?.session_id) || !bridgeHostId(identity?.conversation_id)) throw new Error('An active chat session is required.');
+    this.locked = true; this.lock(true);
+    this.binding = { ...current, session_id: identity.session_id, conversation_id: identity.conversation_id, active_mode: 'packaging_shipping' };
+    try {
+      const result = await this.api('/editor', { method: 'POST', body: this.binding });
+      if (!bridgeId(result?.admission_id) || !bridgeId(result?.selection_id) || !Number.isFinite(result.expires_in) || result.expires_in <= 0) {
+        throw new Error('The packaging editor admission was not acknowledged.');
+      }
+      this.admission = result;
+      this.renew();
+      return this.summary();
+    } catch (error) {
+      this.locked = false; this.lock(false);
+      throw error;
+    }
+  }
+  renew() {
+    this.unschedule(this.timer);
+    const admitted = this.admission;
+    if (!admitted || this.closing) return;
+    this.timer = this.schedule(async () => {
+      try {
+        const current = this.snapshot();
+        if (!this.clean(current) || current.document_id !== this.binding.document_id || current.revision !== this.binding.revision) {
+          throw new Error('The packaging editor changed during the response.');
+        }
+        await this.api(`/editor/${encodeURIComponent(admitted.admission_id)}/heartbeat`, {
+          method: 'POST', body: { ...this.binding, selection_id: admitted.selection_id }
+        });
+        if (this.admission === admitted && !this.closing) this.renew();
+      } catch (error) {
+        if (error?.code === 'editor_turn_finished') return;
+        if (this.admission === admitted && !this.closing) this.invalidate(error);
+      }
+    }, Math.max(1000, Math.min(10000, admitted.expires_in * 1000 / 3)));
+  }
+  finish(terminal = {}) {
+    if (this.closing) return this.closing;
+    this.unschedule(this.timer);
+    this.closing = this.reconcile(terminal).finally(() => { this.closing = null; });
+    return this.closing;
+  }
+  async reconcile(terminal) {
+    const admitted = this.admission;
+    if (admitted) {
+      await this.api(`/editor/${encodeURIComponent(admitted.admission_id)}/revoke`, {
+        method: 'POST', body: { selection_id: admitted.selection_id }
+      });
+      const before = this.snapshot();
+      if (!this.clean(before) || before.document_id !== this.binding.document_id || before.revision !== this.binding.revision) {
+        throw new Error('The selected packaging document changed. Its draft was retained; reload to reconcile.');
+      }
+      const saved = await this.api(`/documents/${encodeURIComponent(before.document_id)}`);
+      const after = this.snapshot();
+      const expected = terminal.documentId === before.document_id && bridgeRevision(terminal.revision)
+        ? Math.max(before.revision, terminal.revision) : before.revision;
+      if (!this.clean(after) || after.document_id !== before.document_id || after.revision !== before.revision
+          || saved?.id !== before.document_id || !bridgeRevision(saved.revision) || saved.revision < expected) {
+        throw new Error('The saved packaging revision could not be reconciled. Your draft was not replaced.');
+      }
+      await this.accept(saved);
+    }
+    this.admission = null; this.locked = false; this.lock(false);
+    return this.summary();
+  }
+  unload() {
+    this.unschedule(this.timer);
+    if (this.admission) void this.api(`/editor/${encodeURIComponent(this.admission.admission_id)}/revoke`, {
+      method: 'POST', body: { selection_id: this.admission.selection_id }, keepalive: true
+    }).catch(() => {});
+  }
+}
+
+export class PackagingHostBridge {
+  constructor({ hostWindow, frame, invalidate = () => {} }) {
+    this.window = hostWindow; this.frame = frame; this.invalidate = invalidate;
+    this.pending = new Map(); this.admitted = null; this.preparing = false;
+    this.listener = event => this.receive(event);
+    hostWindow.addEventListener('message', this.listener);
+  }
+  receive(event) {
+    const data = event.data;
+    if (event.origin !== this.window.location.origin || event.source !== this.frame()?.contentWindow
+        || data?.type !== PACKAGING_BRIDGE) return;
+    if (data.action === 'invalidate' || data.action === 'release-request') { this.invalidate(); return; }
+    const pending = this.pending.get(data.request_id);
+    if (!pending || pending.source !== event.source || data.action !== 'result') return;
+    this.pending.delete(data.request_id); clearTimeout(pending.timer);
+    if (data.ok !== true) { pending.reject(new Error(typeof data.error === 'string' ? data.error.slice(0, 500) : 'Packaging bridge failed.')); return; }
+    const value = data.value;
+    if (!value || Object.keys(value).some(key => !['admission_id', 'document_id', 'revision', 'state'].includes(key))
+        || !['locked', 'idle'].includes(value.state) || (value.document_id !== null && !bridgeId(value.document_id))
+        || (value.revision !== null && !bridgeRevision(value.revision))
+        || (value.admission_id !== null && !bridgeId(value.admission_id))) {
+      pending.reject(new Error('Invalid packaging bridge acknowledgement.')); return;
+    }
+    pending.resolve(value);
+  }
+  command(action, payload = {}) {
+    const source = this.frame()?.contentWindow;
+    if (!source) return Promise.reject(new Error('Open the packaging editor before sending.'));
+    const request_id = crypto.randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pending.delete(request_id); reject(new Error('Packaging editor acknowledgement timed out. The editor may remain locked.')); }, 45000);
+      this.pending.set(request_id, { source, resolve, reject, timer });
+      source.postMessage({ type: PACKAGING_BRIDGE, action, request_id, payload }, this.window.location.origin);
+    });
+  }
+  async prepare(identity) {
+    if (this.preparing || this.admitted) throw new Error('A packaging turn is already active.');
+    this.preparing = true;
+    try {
+      const value = await this.command('prepare', identity);
+      if (value.state !== 'locked' || !value.admission_id) throw new Error('Packaging editor did not lock and acknowledge admission.');
+      this.admitted = value; return value;
+    } finally { this.preparing = false; }
+  }
+  async finish(terminal = {}) {
+    const safe = {};
+    if (bridgeId(terminal?.documentId)) safe.documentId = terminal.documentId;
+    if (bridgeRevision(terminal?.revision)) safe.revision = terminal.revision;
+    const value = await this.command('finish', safe);
+    if (value.state !== 'idle') throw new Error('Packaging editor did not release its lock.');
+    this.admitted = null; return value;
+  }
+  async release() {
+    const value = await this.command('release');
+    if (value.state !== 'idle') throw new Error('Packaging editor did not release its lock.');
+    this.admitted = null; return value;
+  }
 }
 
 const $ = id => document.getElementById(id);
@@ -160,7 +317,7 @@ const state = {
   alternatives: [defaultCarton()], alternativeIndex: 0, maxPackages: 3, candidates: null, candidateRevision: null, candidateConfig: null,
   provider: null, providerError: '', quotes: [], quoteIndex: 0, quoteScenario: null, quoteError: '',
   addresses: { origin: blankAddress(), destinations: [blankAddress()] }, quoteForm: null,
-  section: false, exploded: false, mutationReceipt: null, lastDirtySignal: null
+  section: false, exploded: false, mutationReceipt: null, lastDirtySignal: null, sage: null, conflict: false
 };
 
 function blankAddress() { return { name: '', street1: '', street2: '', city: '', state: '', zip: '', country: 'US', residential: false }; }
@@ -177,8 +334,10 @@ function notify(message, error = false) {
 
 async function invoke(action) {
   if (state.busy) return;
+  if (state.sage?.locked) { notify('The editor is locked for the active response. Resume editing to stop and reconcile it.', true); return; }
   try { await action(); }
   catch (error) {
+    if (error.code === 'revision_conflict') state.conflict = true;
     const suffix = error.code === 'revision_conflict' ? ' Your draft is retained. Reload the document to reconcile with the server.' : '';
     notify(error.message + suffix, true);
   }
@@ -196,7 +355,10 @@ async function working(message, action) {
   }
 }
 
-function edit(change) { state.draft.edit(change); }
+function edit(change) {
+  if (state.sage?.locked) throw new Error('The packaging editor is locked for the active response.');
+  state.draft.edit(change);
+}
 
 function createForm(onApply, label = 'Apply changes') {
   const form = element('form', null, 'form-grid');
@@ -228,7 +390,7 @@ function setEditor(tab) { flushEditor(); state.editor = tab; render(); }
 
 function updateHeader() {
   const draft = state.draft, doc = draft.document;
-  $('document-status').textContent = `${doc ? `Revision ${doc.revision}` : 'New document'} | ${state.busy ? 'Working...' : hasDraft() ? 'Unsaved changes' : doc ? 'Saved' : 'Not saved'}`;
+  $('document-status').textContent = `${doc ? `Revision ${doc.revision}` : 'New document'} | ${state.sage?.locked ? 'Locked for chat' : state.busy ? 'Working...' : hasDraft() ? 'Unsaved changes' : doc ? 'Saved' : 'Not saved'}`;
   const actions = $('document-actions'); actions.replaceChildren();
   actions.append(
     button('New', newDocument), button('Open', openDocuments),
@@ -238,8 +400,15 @@ function updateHeader() {
     button('Reload saved document', reloadDocument, { symbol: 'arrow-clockwise', compact: true, disabled: !doc }),
     button('Download PDF', downloadPDF, { symbol: 'file-export', compact: true, disabled: !doc || hasDraft() })
   );
-  if (state.busy) for (const node of actions.querySelectorAll('button')) node.disabled = true;
-  $('document-name').disabled = state.busy;
+  if (state.busy || state.sage?.locked) for (const node of actions.querySelectorAll('button')) node.disabled = true;
+  if (state.sage?.locked) {
+    const resume = element('button', 'Resume editing'); resume.id = 'packaging-resume-editing'; resume.type = 'button';
+    resume.addEventListener('click', () => window.parent.postMessage({ type: PACKAGING_BRIDGE, action: 'release-request' }, window.location.origin));
+    actions.append(resume);
+  }
+  $('document-name').disabled = state.busy || !!state.sage?.locked;
+  $('workspace').inert = !!state.sage?.locked;
+  document.documentElement.dataset.packagingLocked = String(!!state.sage?.locked);
   const provider = state.provider;
   $('provider-status').textContent = state.providerError || (provider ? `${provider.provider}: ${provider.configured ? 'configured | quote only' : 'not configured'}` : 'Checking rate provider...');
   const dirtySignal = JSON.stringify({ dirty: hasNavigationChanges() || state.busy, documentId: doc?.id || null, revision: doc?.revision ?? null });
@@ -564,6 +733,7 @@ async function newDocument() {
 }
 
 function resetDocumentState() {
+  state.conflict = false;
   state.packageId = null; state.componentId = null; state.candidates = null; state.candidateRevision = null;
   state.alternatives = [defaultCarton()]; state.alternativeIndex = 0; state.maxPackages = 3; state.candidateConfig = null;
   state.quotes = []; state.quoteIndex = 0; state.quoteScenario = null; state.quoteError = ''; state.mutationReceipt = null;
@@ -805,13 +975,49 @@ function boot() {
     catch (error) { event.target.value = state.packageId || ''; throw error; }
   }));
   $('close-open').addEventListener('click', () => $('open-dialog').close());
-  // The embedding workspace can consult this before removing its pilot iframe.
+  state.sage = new PackagingEditorAdmission({
+    snapshot: () => ({ document_id: state.draft.document?.id || null, revision: state.draft.document?.revision ?? null,
+      dirty: hasNavigationChanges() || [...document.querySelectorAll('input[type="file"]')].some(input => input.files?.length),
+      conflict: state.conflict, pending_operations: state.busy || $('open-dialog').open ? 1 : 0 }),
+    lock: () => updateHeader(),
+    accept: async saved => {
+      state.draft.accept(saved); state.formDirty = false; state.conflict = false; state.mutationReceipt = null;
+      state.candidates = null; state.candidateRevision = null; state.candidateConfig = null;
+      await loadQuotes(); render(); notify(`Reconciled saved revision ${saved.revision}. Undo is available for saved edits.`);
+    },
+    invalidate: error => {
+      notify(`${error.message} Edits may remain. Waiting for the host to stop and reconcile.`, true);
+      window.parent.postMessage({ type: PACKAGING_BRIDGE, action: 'invalidate' }, window.location.origin);
+    }
+  });
+  let commands = Promise.resolve();
+  const seen = new Set();
+  window.addEventListener('message', event => {
+    const data = event.data;
+    if (window.parent === window || event.source !== window.parent || event.origin !== window.location.origin
+        || data?.type !== PACKAGING_BRIDGE || !bridgeId(data.request_id)
+        || !['prepare', 'finish', 'release'].includes(data.action) || seen.has(data.request_id)
+        || !data.payload || typeof data.payload !== 'object' || Array.isArray(data.payload)) return;
+    const allowed = data.action === 'prepare' ? ['session_id', 'conversation_id'] : data.action === 'finish' ? ['documentId', 'revision'] : [];
+    if (Object.keys(data.payload).some(key => !allowed.includes(key))) return;
+    seen.add(data.request_id); if (seen.size > 100) seen.delete(seen.values().next().value);
+    commands = commands.catch(() => {}).then(async () => {
+      try {
+        const value = await (data.action === 'prepare' ? state.sage.prepare(data.payload) : state.sage.finish(data.payload));
+        event.source.postMessage({ type: PACKAGING_BRIDGE, action: 'result', request_id: data.request_id, ok: true, value }, event.origin);
+      } catch (error) {
+        notify(error.message, true);
+        event.source.postMessage({ type: PACKAGING_BRIDGE, action: 'result', request_id: data.request_id, ok: false, error: error.message.slice(0, 500) }, event.origin);
+      }
+    });
+  });
   window.InspectorProPackaging = Object.freeze({
+    isLocked: () => state.sage.locked,
     hasUnsavedChanges: () => hasNavigationChanges() || state.busy,
     confirmNavigation: () => !(hasNavigationChanges() || state.busy) || confirm('Leave Packaging & Shipping? Unsaved changes, session-only addresses or an active request may be lost.')
   });
-  window.addEventListener('beforeunload', event => { if (hasNavigationChanges() || state.busy) { event.preventDefault(); event.returnValue = ''; } });
-  window.addEventListener('pagehide', () => state.scene?.dispose());
+  window.addEventListener('beforeunload', event => { if (hasNavigationChanges() || state.busy || state.sage.locked) { event.preventDefault(); event.returnValue = ''; } });
+  window.addEventListener('pagehide', () => { state.sage.unload(); state.scene?.dispose(); });
   document.addEventListener('keydown', event => {
     if (!(event.ctrlKey || event.metaKey)) return;
     if (event.key.toLowerCase() === 's') { event.preventDefault(); invoke(saveDocument); }
@@ -822,4 +1028,4 @@ function boot() {
   render(); renderRates(); initializeScene(); invoke(refreshProvider);
 }
 
-if (typeof document !== 'undefined') boot();
+if (typeof document !== 'undefined' && document.getElementById('document-actions') && document.getElementById('package-select')) boot();

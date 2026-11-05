@@ -551,6 +551,7 @@ class PackagingGateway:
 
     async def _call(self, name, arguments):
         started, argument_hash, mutation = time.monotonic(), None, {}
+        validation = None
         try:
             self._active()
             if self.calls >= self.max_calls:
@@ -595,6 +596,8 @@ class PackagingGateway:
                 raise _error("codex_tool_result_invalid") from None
             if len(_json(result)) > MAX_RESULT_BYTES:
                 raise _error("codex_result_too_large")
+            if name == "validate_packaging":
+                validation = {"saved": result["data"]["saved"], "revision": result["data"]["document"]["revision"]}
         except asyncio.CancelledError:
             self.closed = True
             self._receipt(name, argument_hash, started, "codex_run_closed", mutation)
@@ -606,15 +609,17 @@ class PackagingGateway:
                 self.closed = True
             result = Failure(error={"code": code, "message": _MESSAGES[code]},
                              mutation=mutation or None).model_dump(mode="json", exclude_none=True)
-        self._receipt(name, argument_hash, started, result.get("error", {}).get("code"), mutation)
+        self._receipt(name, argument_hash, started, result.get("error", {}).get("code"), mutation,
+                      validation=validation)
         return result
 
-    def _receipt(self, name, argument_hash, started, code, mutation):
+    def _receipt(self, name, argument_hash, started, code, mutation, *, validation=None):
         if len(self.receipts) < self.max_calls + 1:
             self.receipts.append({"tool": name if isinstance(name, str) and name in self._names else "denied",
                 "ok": code is None, "argumentHash": argument_hash, "bindingHash": self.binding_key,
                 "durationMs": round((time.monotonic() - started) * 1000), "errorCode": code,
-                "mutation": deepcopy(mutation) or None})
+                "mutation": deepcopy(mutation) or None,
+                **({"validation": deepcopy(validation)} if validation is not None else {})})
 
 
 def create_packaging_gateway(service, *, current_context, turn_id, mutation_guard=None,

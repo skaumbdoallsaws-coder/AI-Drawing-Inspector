@@ -1671,16 +1671,22 @@ _FACILITY_LAYOUT_HOST = LocalFacilityLayoutHost(
 app.include_router(_FACILITY_LAYOUT_HOST.create_router())
 
 # Packaging is a separate document domain and is opt-in until release validation.
+_PACKAGING_SERVICE = None
+_PACKAGING_ADMISSION = None
 if os.getenv("INSPECTORPRO_PACKAGING_ENABLED", "").strip().lower() in {"1", "true", "yes"}:
     from ai_inspector.packaging_shipping.api import create_router as create_packaging_router
+    from ai_inspector.packaging_shipping.admission import PackagingAdmission
     from ai_inspector.packaging_shipping.service import PackagingService
     _PACKAGING_SERVICE = PackagingService(
         Path(os.getenv("INSPECTORPRO_PACKAGING_ROOT", str(REPO_ROOT / ".runtime" / "packaging")))
     )
+    _PACKAGING_ADMISSION = PackagingAdmission(_PACKAGING_SERVICE)
     app.include_router(create_packaging_router(
         _PACKAGING_SERVICE,
         principal_resolver=_FACILITY_PRINCIPAL_RESOLVER,
         static_root=REPO_ROOT / "static",
+        admission=_PACKAGING_ADMISSION,
+        sage_enabled=lambda: _codex_packaging_enabled(),
     ))
 
 
@@ -27701,6 +27707,16 @@ def normalize_agent_context(ctx: dict) -> dict:
     flat.pop("_facility_generation_outcome", None)
     flat.pop("_facility_generation_timings", None)
     flat.pop("_facility_generation_sources", None)
+    # Only the opaque editor admission may cross this boundary, never a
+    # renderer-supplied design, permission grant or authoritative revision.
+    for key in tuple(flat):
+        if key.startswith(("packaging_", "_packaging_")):
+            flat.pop(key, None)
+    packaging = attachments.get("packaging") if isinstance(attachments, dict) else None
+    if isinstance(packaging, dict) and set(packaging) == {"admission_id"}:
+        admission_id = packaging.get("admission_id")
+        if isinstance(admission_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{16,128}", admission_id):
+            flat["packaging_admission_id"] = admission_id
 
     # Reconstruct ALL flat keys from structured attachments
     if attachments:
@@ -41423,11 +41439,41 @@ def _codex_documentation_turn(request) -> bool:
             and _codex_documentation_enabled())
 
 
+def _codex_packaging_enabled() -> bool:
+    from ai_inspector.codex_runtime.policy import enabled
+    return (enabled() and _PACKAGING_SERVICE is not None and _PACKAGING_ADMISSION is not None
+            and os.getenv("INSPECTORPRO_CODEX_PACKAGING", "") == "1")
+
+
+def _codex_packaging_turn(request) -> bool:
+    return (getattr(request, "agent_type", None) == "deviation-analyst"
+            and _chat_stream_active_mode(request) == "packaging_shipping"
+            and _codex_packaging_enabled())
+
+
+def _packaging_trusted_reference(request, http_request):
+    from ai_inspector.packaging_shipping.service import PackagingError
+    normalized = normalize_agent_context(request.inspection_context or request.context or {})["flat"]
+    if not _codex_packaging_turn(request) or not normalized.get("packaging_admission_id"):
+        raise HTTPException(status_code=409, detail={"error": {
+            "code": "codex_packaging_context_invalid", "message": "A saved active packaging editor is required."}})
+    try:
+        reference = _PACKAGING_ADMISSION.reference(
+            _FACILITY_LAYOUT_HOST.resolve_principal(http_request), normalized["packaging_admission_id"])
+        if (reference["session_id"] != (request.agent_session_id or request.session_id)
+                or reference["conversation_id"] != request.conversation_id):
+            raise PackagingError("editor_identity_changed", "The admitted packaging conversation changed.")
+        return reference
+    except PackagingError as exc:
+        raise HTTPException(status_code=exc.status, detail={"error": {
+            "code": "codex_packaging_context_invalid", "message": exc.message, "retryable": False}}) from None
+
+
 def _require_subscription_chat_route(request):
     from ai_inspector.codex_runtime.chatgpt_accounts import subscription_mode
     from ai_inspector.codex_runtime.policy import enabled
     if subscription_mode() and not (enabled() and request.agent_type == "deviation-analyst"
-            and _chat_stream_active_mode(request) == "facility_layout") and not _codex_documentation_turn(request):
+            and _chat_stream_active_mode(request) == "facility_layout") and not _codex_documentation_turn(request) and not _codex_packaging_turn(request):
         raise HTTPException(status_code=409, detail={"error": {
             "code": "codex_subscription_workflow_unavailable",
             "message": "ChatGPT plan sign-in currently supports Sage in Facility Layout, Documentation, the "
@@ -41444,6 +41490,26 @@ async def agent_chat(
     """Freeze gateway configuration for the whole authorized Facility turn."""
     _require_subscription_chat_route(request)
     from ai_inspector.codex_runtime.policy import enabled as codex_pilot_enabled, PilotError
+    if _chat_stream_active_mode(request) == "packaging_shipping":
+        if not _codex_packaging_turn(request):
+            raise HTTPException(status_code=409, detail={"error": {
+                "code": "codex_packaging_unavailable", "retryable": False,
+                "message": "Packaging chat is not enabled. No alternate provider was used.",
+            }})
+        from ai_inspector.codex_runtime.packaging_pilot import inspect_packaging
+        try:
+            prepare_memory = _AGENT_MEMORY_ENVELOPE_PREPARER.get()
+            memory_context = prepare_memory({}) if prepare_memory else ""
+            return await inspect_packaging(request, _PACKAGING_SERVICE, _PACKAGING_ADMISSION,
+                principal_resolver=lambda: _FACILITY_LAYOUT_HOST.resolve_principal(http_request),
+                normalized=normalize_agent_context(request.inspection_context or request.context or {})["flat"],
+                text_sink=_AGENT_CHAT_STREAM_SINK.get(), status_sink=_AGENT_CHAT_STATUS_SINK.get(),
+                memory_context=memory_context)
+        except PilotError as exc:
+            error = {"code": exc.code, "message": str(exc), "retryable": False}
+            if isinstance(getattr(exc, "packaging_result", None), dict):
+                error["codex_packaging"] = exc.packaging_result
+            raise HTTPException(status_code=exc.status_code, detail={"error": error}) from None
     if (codex_pilot_enabled() and request.agent_type == "deviation-analyst"
             and _chat_stream_active_mode(request) == "facility_layout"):
         from ai_inspector.codex_runtime.pilot import inspect_facility
@@ -44115,6 +44181,10 @@ def _memory_admin_principal(http_request: Request) -> MemoryPrincipal:
 def _memory_resolved_context(request: AgentChatRequest, http_request: Request) -> Dict[str, Any]:
     from ai_inspector.codex_runtime.policy import enabled as codex_pilot_enabled, PilotError
     ctx = normalize_agent_context(request.inspection_context or request.context or {})["flat"]
+    if _codex_packaging_turn(request):
+        reference = _packaging_trusted_reference(request, http_request)
+        return {"active_mode": "packaging_shipping", "packaging_reference": {
+            "document_id": reference["document_id"], "revision": reference["revision"]}}
     if (codex_pilot_enabled() and request.agent_type == "deviation-analyst"
             and _chat_stream_active_mode(request) == "facility_layout"):
         from ai_inspector.codex_runtime.facility_tools import read_bound_layout
@@ -44146,6 +44216,13 @@ def _memory_trusted_turn_context(
     request: AgentChatRequest,
     http_request: Request,
 ) -> TrustedTurnContext:
+    if _codex_packaging_turn(request):
+        reference = _packaging_trusted_reference(request, http_request)
+        scope = {"kind": "packaging_shipping", "ids": {"documentId": reference["document_id"]}}
+        revisions = {"packagingRevision": str(reference["revision"])}
+        return TrustedTurnContext(asset_scope={**scope, "expectedRevisionVector": revisions},
+            scope_fingerprint="scope-v1:" + memory_canonical_sha256(scope),
+            revision_vector=revisions, workflow_mode="packaging_shipping")
     ctx = _memory_resolved_context(request, http_request)
     scope, revisions = _workflow_scope_identity_and_revision(ctx)
     scope_fingerprint = (
@@ -44175,6 +44252,8 @@ def _memory_reconciliation_context(
     """Resolve the trusted flat context and its current target index."""
 
     ctx = _memory_resolved_context(request, http_request)
+    if _codex_packaging_turn(request):
+        return ctx, {}
     _assets, _contexts, facts = _skill_route_context(ctx)
     target_index = (
         copy.deepcopy(facts.get("target_index"))
@@ -44271,6 +44350,14 @@ def _memory_fallback_provider_inputs(
     trusted_context: TrustedTurnContext,
 ) -> List[Dict[str, Any]]:
     from ai_inspector.codex_runtime.policy import enabled as codex_pilot_enabled
+    if _codex_packaging_turn(request):
+        source_ids, source_revisions = _memory_scope_sources(trusted_context)
+        return [{"contextKey": "packaging_shipping.binding", "origin": "server",
+            "requestedBy": ["codex-packaging"], "required": True, "included": True,
+            "sourceIds": source_ids, "sourceRevisions": source_revisions,
+            "payload": {"scope": copy.deepcopy(trusted_context.asset_scope),
+                "revisionVector": copy.deepcopy(trusted_context.revision_vector),
+                "geometry": "Retrieve current packaging facts through the bound tools."}}]
     if (codex_pilot_enabled()
             and request.agent_type == "deviation-analyst"
             and _chat_stream_active_mode(request) == "facility_layout"
@@ -44366,7 +44453,7 @@ def _memory_model_metadata(request: AgentChatRequest, *, streaming: bool) -> Dic
     agent_type = str(request.agent_type or "").strip().lower()
     from ai_inspector.codex_runtime.policy import enabled as codex_pilot_enabled, RUNTIME_VERSION
     if (codex_pilot_enabled() and agent_type == "deviation-analyst"
-            and _chat_stream_active_mode(request) == "facility_layout") or _codex_documentation_turn(request):
+            and _chat_stream_active_mode(request) == "facility_layout") or _codex_documentation_turn(request) or _codex_packaging_turn(request):
         return {"provider": "openai", "model": os.environ.get("INSPECTORPRO_CODEX_MODEL", ""),
                 "runtime": "codex_app_server", "runtimeVersion": RUNTIME_VERSION,
                 "agentType": agent_type, "transport": "stream" if streaming else "batch"}
@@ -45416,10 +45503,10 @@ async def agent_chat_endpoint(
 ):
     from ai_inspector.codex_runtime.policy import enabled as codex_pilot_enabled
     if (codex_pilot_enabled() and request.agent_type == "deviation-analyst"
-            and _chat_stream_active_mode(request) == "facility_layout") or _codex_documentation_turn(request):
+            and _chat_stream_active_mode(request) == "facility_layout") or _codex_documentation_turn(request) or _codex_packaging_turn(request):
         raise HTTPException(status_code=409, detail={"error": {
             "code": "codex_stream_required",
-            "message": "Codex facility and documentation requests require the cancellable streaming endpoint.",
+            "message": "Codex requests require the cancellable streaming endpoint.",
             "retryable": False,
         }})
     result = await _execute_agent_chat_with_memory(
@@ -45540,7 +45627,9 @@ def _stream_provider_error_payload(exc: Exception) -> Dict[str, Any]:
     gateway_error = detail.get("error", {}) if isinstance(detail, dict) else {}
     if str(gateway_error.get("code", "")).startswith(("codex_", "chatgpt_")):
         return {"code": gateway_error["code"], "message": gateway_error.get("message", "The read-only pilot is unavailable."),
-                "retryable": False}
+                "retryable": False,
+                **({"codex_packaging": gateway_error["codex_packaging"]}
+                   if isinstance(gateway_error.get("codex_packaging"), dict) else {})}
     if str(gateway_error.get("code", "")).startswith("model_gateway_"):
         return {"code": gateway_error["code"], "message": gateway_error.get("message", "The configured model is unavailable."),
                 "retryable": False}
@@ -45724,6 +45813,7 @@ def agent_chat_streaming_status():
         "assemblyRuntime": "codex" if _codex_documentation_enabled() else "legacy",
         # The 3D Model tab's Sage: the part shown (codex_runtime/part_tools.py).
         "partRuntime": "codex" if _codex_documentation_enabled() else "legacy",
+        "packagingRuntime": "codex" if _codex_packaging_enabled() else "disabled",
         # Sage on Codex: the reasoning levels the chat offers, and the one it shows and sends until the user picks.
         "reasoningEffort": {"default": DEFAULT_REASONING_EFFORT, "levels": list(REASONING_EFFORTS)},
         **settings,
@@ -45750,7 +45840,7 @@ async def agent_chat_v2_stream(payload: AgentChatRequest, http_request: Request)
     agent_name = _chat_stream_agent_name(payload.agent_type or "")
     active_mode = _chat_stream_active_mode(payload)
     codex_facility = (codex_pilot_enabled() and payload.agent_type == "deviation-analyst"
-                      and active_mode == "facility_layout") or _codex_documentation_turn(payload)
+                      and active_mode == "facility_layout") or _codex_documentation_turn(payload) or _codex_packaging_turn(payload)
     if not codex_facility and (not settings["enabled"] or agent_name not in set(settings["agents"])):
         raise HTTPException(status_code=404, detail="Chat streaming is not enabled for this agent")
     if codex_facility:   # the chat's reasoning level: a level Sage cannot run at is a 422 here, not a stream event

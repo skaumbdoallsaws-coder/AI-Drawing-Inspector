@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.routing import APIRoute
 
 from .geometry import digest
+from .admission import EditorHeartbeat, EditorRevoke, EditorState, PackagingAdmission
 from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand
 from .packing import propose
 from .rating import EasyPostRating
@@ -27,16 +29,22 @@ class PackagingRoute(APIRoute):
                 response.headers["Cache-Control"] = "no-store"
                 return response
             except PackagingError as exc:
-                return JSONResponse({"error": {"code": exc.code, "message": exc.message}}, status_code=exc.status)
+                return JSONResponse({"error": {"code": exc.code, "message": exc.message}}, status_code=exc.status,
+                                    headers={"Cache-Control": "no-store"})
         return guarded
 
 
-def create_router(service: PackagingService, *, principal_resolver, static_root: Path, rating=None):
+def create_router(service: PackagingService, *, principal_resolver, static_root: Path, rating=None,
+                  admission: PackagingAdmission | None = None, sage_enabled: Callable[[], bool] | None = None):
+    if admission is not None and (not isinstance(admission, PackagingAdmission) or admission.service is not service):
+        raise ValueError("Packaging admission must use this router's service instance.")
+    if sage_enabled is not None and not callable(sage_enabled):
+        raise ValueError("sage_enabled must be a host callback.")
     router = APIRouter(route_class=PackagingRoute)
     provider = rating or EasyPostRating()
     job_lock = asyncio.Lock()
 
-    def scope(request: Request):
+    def principal(request: Request):
         if request.url.hostname not in {"127.0.0.1", "localhost", "::1", "testserver"}:
             raise HTTPException(403, "Packaging pilot is restricted to the local application.")
         origin = request.headers.get("origin")
@@ -44,10 +52,28 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
             raise HTTPException(403, "Cross-origin packaging requests are not permitted.")
         if request.method not in {"GET", "HEAD"} and request.headers.get("x-inspectorpro-request") != "packaging":
             raise HTTPException(403, "Use the InspectorPro packaging client.")
-        principal = principal_resolver(request)
-        if not principal.permits("layout.read") or (request.method not in {"GET", "HEAD"} and not principal.permits("layout.edit")):
+        resolved = principal_resolver(request)
+        if not resolved.permits("layout.read"):
             raise HTTPException(403, "Your application role does not permit this operation.")
-        return digest({"tenant": principal.tenant_id, "sites": sorted(principal.allowed_site_ids), "workflow": "packaging_shipping"})
+        return resolved
+
+    def scope(request: Request, resolved=Depends(principal)):
+        if request.method not in {"GET", "HEAD"} and not resolved.permits("layout.edit"):
+            raise HTTPException(403, "Your application role does not permit this operation.")
+        return digest({"tenant": resolved.tenant_id, "sites": sorted(resolved.allowed_site_ids), "workflow": "packaging_shipping"})
+
+    if admission is not None:
+        @router.post("/api/packaging/editor")
+        def publish_editor(body: EditorState, resolved=Depends(principal)):
+            return admission.publish(resolved, body)
+
+        @router.post("/api/packaging/editor/{admission_id}/heartbeat")
+        def heartbeat_editor(admission_id: str, body: EditorHeartbeat, resolved=Depends(principal)):
+            return admission.heartbeat(resolved, admission_id, body)
+
+        @router.post("/api/packaging/editor/{admission_id}/revoke")
+        def revoke_editor(admission_id: str, body: EditorRevoke, resolved=Depends(principal)):
+            return admission.revoke(resolved, admission_id, body)
 
     @router.get("/packaging")
     def page(_=Depends(scope)):
@@ -55,9 +81,13 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
 
     @router.get("/api/packaging/status")
     def status(_=Depends(scope)):
+        try:
+            sage = admission is not None and sage_enabled is not None and sage_enabled() is True
+        except Exception:
+            sage = False
         return {"workflow": "packaging_shipping", "pilot": True, "rating": provider.status(),
-                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report"],
-                "unsupported": ["solid_cutouts", "verified_cad_mass_import", "transport_certification", "freight", "future_ship_dates", "sage_chat_execution"]}
+                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report"] + (["sage_chat_execution"] if sage else []),
+                "unsupported": ["solid_cutouts", "verified_cad_mass_import", "transport_certification", "freight", "future_ship_dates"] + ([] if sage else ["sage_chat_execution"])}
 
     @router.get("/api/packaging/documents")
     def documents(s=Depends(scope)):

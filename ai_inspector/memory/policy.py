@@ -19,6 +19,7 @@ SEMANTIC_TARGET_FIELDS = (
     "faiCharacteristicIds",
 )
 _SCOPE_FIELDS = {
+    "packaging_shipping": (("documentId",), ("packagingRevision",)),
     "process_map": (
         ("productId", "mapId"),
         (
@@ -121,7 +122,7 @@ def _normalize_asset_scope(value: Any) -> Dict[str, Any]:
         if raw is None or raw == "":
             continue
         normalized_ids[field] = _string_value(raw, f"assetScope.ids.{field}")
-    if kind in {"process_map", "facility_layout"} and set(normalized_ids) != set(id_fields):
+    if kind in {"process_map", "facility_layout", "packaging_shipping"} and set(normalized_ids) != set(id_fields):
         raise ValueError(f"assetScope kind {kind} requires IDs {list(id_fields)}")
     if kind == "none" and (ids or revisions):
         raise ValueError("assetScope kind none must be empty")
@@ -188,4 +189,3 @@ def _string_value(value: Any, name: str, *, allow_empty: bool = False) -> str:
     if not allow_empty and not value:
         raise ValueError(f"{name} must not be empty")
     return value
-

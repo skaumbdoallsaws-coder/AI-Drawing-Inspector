@@ -338,7 +338,7 @@ def _identity(value: Mapping[str, Any]) -> dict[str, str]:
 
 def _scope(value: Mapping[str, Any]) -> dict[str, Any]:
     kind = str(value.get("kind") or "none").strip().lower()
-    if kind not in {"process_map", "facility_layout", "cad_fai", "none"}:
+    if kind not in {"process_map", "facility_layout", "packaging_shipping", "cad_fai", "none"}:
         raise MemoryEnvelopeError("invalid_memory_scope", "unsupported scope kind")
     ids = {
         str(key): str(item)

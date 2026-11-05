@@ -259,6 +259,14 @@ Expose the packaging tools through the existing Sage interface. Supply concise w
 
 ### P5 - Desktop release validation
 
+Final desktop UX requirements agreed on 2026-11-05:
+
+- Product, Carton, Contents, Arrange, Validation and Rates become ribbon commands with familiar icons and tooltips, opening dialogs or collapsible property panels. Keep the normal full viewport footprint when those tools are closed.
+- Reuse Assembly/Facility viewport conventions for selection, fit, standard views, section and exploded inspection.
+- Offer neutral gray shaded, shaded-with-edges, wireframe and transparency modes. Preserve geometry and physical mass/material evidence independently from appearance settings.
+- Adapt the shared decal, lettering and appearance tools to carton/component surfaces, with saved anchors and Undo, available manually and to Sage. Keep aspect ratios and update anchors on supported dimensional changes. Do not reuse facility wall identifiers as packaging entities.
+- Keep these presentation additions after live Sage, trustworthy product data and rate verification; the current side-panel pilot is not the final desktop layout.
+
 Run targeted tests plus affected facility, assembly, documentation, Sage and desktop regressions. Record existing baseline failures separately. Package dependencies in the existing isolated desktop snapshot; verify startup, shutdown, worker cleanup, missing dependency behavior and offline manual use. Verify the feature flag and document a rollback path.
 
 **Gate:** Windows desktop tests and real-Sage evidence pass; existing saved layouts and source CAD are unchanged; credentials are absent from logs and artifacts, and private customer/CAD data are excluded from distributed test/release evidence; cancellation/restart/Undo are verified; promotion is explicitly approved. Validate at least two live enabled carriers before presenting the release as multi-carrier comparison; otherwise explicitly restrict that capability. Only then enable the workflow in the regular desktop build.

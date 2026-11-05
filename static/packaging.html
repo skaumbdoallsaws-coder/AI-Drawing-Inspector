@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Packaging &amp; Shipping | InspectorPro</title>
+  <link rel="icon" href="/static/logo_192.png">
+  <link rel="stylesheet" href="/static/packaging.css">
+  <script type="importmap">
+    {"imports":{"three":"/static/vendor/three/0.184.0/build/three.module.min.js","three/addons/":"/static/vendor/three/0.184.0/examples/jsm/"}}
+  </script>
+  <script type="module" src="/static/packaging.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="identity"><span class="brand">Inspector<span>Pro</span></span><h1>Packaging &amp; Shipping</h1></div>
+    <label class="document-name">Document<input id="document-name" maxlength="160" value="Untitled package" autocomplete="off"></label>
+    <div id="document-actions" class="toolbar" aria-label="Document actions"></div>
+  </header>
+  <div class="statusbar"><span id="document-status" role="status">New document</span><span id="provider-status">Checking rate provider...</span></div>
+  <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+  <main id="workspace" class="workspace">
+    <aside class="editor-pane" aria-label="Package editor">
+      <nav id="editor-tabs" class="tabs" aria-label="Editors"></nav>
+      <div id="editor" class="pane-body"></div>
+    </aside>
+    <section class="scene-pane" aria-label="3D packaging workspace">
+      <div class="package-toolbar">
+        <label class="package-picker">Package<select id="package-select" aria-label="Selected package"></select></label>
+        <div id="package-actions" class="toolbar"></div>
+      </div>
+      <div id="view-actions" class="view-toolbar" aria-label="3D view controls"></div>
+      <div id="viewport" class="viewport" aria-label="3D package view">
+        <div id="scene-message" class="scene-message" role="status">Loading 3D workspace...</div>
+      </div>
+      <div class="scene-footer"><span id="scene-caption">No product selected</span><span>X / Y / Z &middot; mm</span></div>
+    </section>
+    <aside class="review-pane" aria-label="Validation and shipping rates">
+      <nav id="review-tabs" class="tabs" aria-label="Review views"></nav>
+      <section id="validation-panel" class="pane-body" aria-label="Validation findings and mass"></section>
+      <section id="rates-panel" class="pane-body" aria-label="Carrier rate comparison" hidden></section>
+    </aside>
+  </main>
+  <dialog id="open-dialog" aria-labelledby="open-title">
+    <div class="dialog-header"><h2 id="open-title">Open packaging document</h2><button id="close-open" type="button">Close</button></div>
+    <div id="document-list"></div>
+  </dialog>
+  <noscript>JavaScript is required for the packaging workspace.</noscript>
+</body>
+</html>

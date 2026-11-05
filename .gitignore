@@ -5,7 +5,12 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 .env
+
+# Packaging pilot documents, imported models and verification evidence are private.
+.runtime/packaging*/
+.runtime/import-smoke/
 
 # Jupyter
 .ipynb_checkpoints/

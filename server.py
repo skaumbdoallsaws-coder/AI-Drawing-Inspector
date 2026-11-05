@@ -1670,6 +1670,19 @@ _FACILITY_LAYOUT_HOST = LocalFacilityLayoutHost(
 )
 app.include_router(_FACILITY_LAYOUT_HOST.create_router())
 
+# Packaging is a separate document domain and is opt-in until release validation.
+if os.getenv("INSPECTORPRO_PACKAGING_ENABLED", "").strip().lower() in {"1", "true", "yes"}:
+    from ai_inspector.packaging_shipping.api import create_router as create_packaging_router
+    from ai_inspector.packaging_shipping.service import PackagingService
+    _PACKAGING_SERVICE = PackagingService(
+        Path(os.getenv("INSPECTORPRO_PACKAGING_ROOT", str(REPO_ROOT / ".runtime" / "packaging")))
+    )
+    app.include_router(create_packaging_router(
+        _PACKAGING_SERVICE,
+        principal_resolver=_FACILITY_PRINCIPAL_RESOLVER,
+        static_root=REPO_ROOT / "static",
+    ))
+
 
 # Phase 3 telemetry: endpoint timing middleware. Records one telemetry
 # event per /api/* request (route, method, http status, latency). Skips

@@ -21929,6 +21929,8 @@
         // in playNarrationSequence for the wiring points.
         const TRAINING_TYPES = [
             { value: 'assembly',       label: 'Process Map',                 icon: 'process_map.svg' },
+            ...(new URLSearchParams(location.search).get('packagingPilot') === '1'
+                ? [{ value: 'packaging_shipping', label: 'Packaging & Shipping', icon: 'documentation.svg' }] : []),
             { value: 'plant_process',  label: 'Plant / Process Explanation', icon: 'plant_process_explanation.svg' },
             { value: 'facility_layout',label: 'Facility Layout',             icon: 'facility_layout.svg' },
             { value: 'documentation',  label: 'Documentation',               icon: 'documentation.svg' },
@@ -23724,6 +23726,8 @@
         // ---- Viewport Rendering ----
         function switchTab(tab) {
             const previousTab = state.activeTab;
+            if (previousTab === 'training' && tab !== 'training'
+                    && !_packagingConfirmLeave()) return false;
             if (previousTab === 'training' && tab !== 'training' && _trainIsPlantProcessMode()) {
                 _trainExitPlantSpatialWalkthrough('tab_changed');
                 _stopPlantWalkthrough();
@@ -45299,7 +45303,8 @@
             trainingState.type = typeSelect.value;
             const applied = _trainApplyTrainingTypeDefaults(prevType);
             if (applied === false) typeSelect.value = trainingState.type;
-            if (applied !== false && (prevType === 'documentation' || trainingState.type === 'documentation')) {
+            if (applied !== false && (['documentation', 'packaging_shipping'].includes(prevType)
+                    || ['documentation', 'packaging_shipping'].includes(trainingState.type))) {
                 renderViewport();
                 return;
             }
@@ -48091,7 +48096,11 @@
                     ribbon.appendChild(g2);
                 }
             } else if (state.activeTab === 'training') {
-                if (trainingState.type === 'documentation') {
+                if (trainingState.type === 'packaging_shipping') {
+                    const group = _ribbonGroup('Workflow');
+                    group.appendChild(_trainCreateWorkflowTypeSelector());
+                    ribbon.appendChild(group);
+                } else if (trainingState.type === 'documentation') {
                     _renderDocumentationWorkflowRibbon(ribbon);
                 } else if (trainingState.viewportMode === 'process_flow') {
                     _trainRenderProcessMapRibbon(ribbon);
@@ -48135,7 +48144,20 @@
             }
         }
 
+        function _packagingConfirmLeave() {
+            const frame = document.getElementById('packagingWorkspaceFrame');
+            const guard = frame?.contentWindow?.InspectorProPackaging;
+            return !guard || guard.confirmNavigation();
+        }
+
         function renderViewport() {
+            // A ribbon/context refresh must not remount a live packaging draft.
+            if (state.activeTab === 'training' && trainingState.type === 'packaging_shipping'
+                    && document.getElementById('packagingWorkspaceFrame')?.isConnected) {
+                updateAnnotationToolbarVisibility();
+                renderRibbon();
+                return;
+            }
             // Feature #120: Save 3D camera state before clearing viewport
             _save3DCameraState();
             if (ASSEMBLY_VIEWPORT_STATE_PERSISTENCE && state.assyLiveScene && !state._assyViewerIsGuided) {
@@ -49787,6 +49809,16 @@
             const viewportContent = document.getElementById('viewportContent');
             if (!viewportContent) return;
 
+            if (trainingState.type === 'packaging_shipping') {
+                const frame = document.createElement('iframe');
+                frame.id = 'packagingWorkspaceFrame';
+                frame.src = '/packaging';
+                frame.title = 'Packaging and Shipping';
+                frame.style.cssText = 'width:100%;height:100%;min-height:480px;border:0;display:block;';
+                viewportContent.appendChild(frame);
+                return;
+            }
+
             if (trainingState.type === 'documentation') {
                 _renderDocumentationWorkflowTab(viewportContent);
                 return;
@@ -50975,6 +51007,11 @@
         } catch (_) {}
 
         function _trainApplyTrainingTypeDefaults(prevType) {
+            if (prevType === 'packaging_shipping' && trainingState.type !== prevType
+                    && !_packagingConfirmLeave()) {
+                trainingState.type = prevType;
+                return false;
+            }
             const leavingProcessFlow = !!(prevType && prevType !== trainingState.type
                 && trainingState.viewportMode === 'process_flow');
             if (leavingProcessFlow
@@ -50991,9 +51028,11 @@
             }
             const wasSpecial = prevType === 'plant_process'
                 || prevType === 'facility_layout'
+                || prevType === 'packaging_shipping'
                 || prevType === 'documentation';
             const isSpecial = trainingState.type === 'plant_process'
                 || trainingState.type === 'facility_layout'
+                || trainingState.type === 'packaging_shipping'
                 || trainingState.type === 'documentation';
             if (prevType && (wasSpecial || isSpecial) && prevType !== trainingState.type) {
                 trainingState.procedure = null;
@@ -51009,7 +51048,12 @@
                     && trainingState.type !== 'documentation') {
                 try { _closeDocumentationWorkspace(); } catch (_) {}
             }
-            if (trainingState.type === 'documentation') {
+            if (trainingState.type === 'packaging_shipping') {
+                trainingState.viewportMode = 'packaging_shipping';
+                trainingState.panels.setupOpen = false;
+                trainingState.panels.playbackOpen = false;
+                try { _trainDisposeLiveAssemblyViewer(); } catch (_) {}
+            } else if (trainingState.type === 'documentation') {
                 trainingState.targetComponent = assemblyContext?.assembly_name
                     || assemblyContext?.assembly_number
                     || 'Current assembly';
@@ -94216,6 +94260,10 @@
             };
 
             async function handleAgentSend(retryOptions) {
+                if (state.activeTab === 'training' && trainingState.type === 'packaging_shipping') {
+                    addMessage('Packaging chat execution is not enabled in this development pilot. No action was executed.', 'system', currentAgent);
+                    return;
+                }
                 if (_serverMemoryState === 'initializing') return;
                 const retry = retryOptions
                     && retryOptions.frozenRequest

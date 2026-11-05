@@ -559,9 +559,11 @@ def _without_end_pairs(pairs, info, work):
     lines and its two ends are ends of those lines (a jamb, or a wall's end line). Two lines that each close another
     wall are the jambs of an opening between two walls; a pair one of whose lines closes another wall, and that is no
     longer than it is wide, is the ends of a box drawn closed (its longer sides are the faces) or a wall's end line
-    and a wall beyond it. A square box (a pier) has no longer sides: each of its pairs is the other's ends, and the
-    one whose lines make the smaller angle with x (counted from 0 up to 180 degrees) is kept, so it is one wall
-    whichever way round it is drawn, turned or not."""
+    and a wall beyond it. "No longer than wide" allows only rounding for the two pairs of a box drawn closed (each
+    pair's lines close the other's ends), so a box even 1 mm longer than wide is one wall along its longer sides, and
+    TOLERANCE for an end line and a wall beyond it. A square box (a pier) has no longer sides: each of its pairs is
+    the other's ends, and the one whose lines make the smaller angle with x (counted from 0 up to 180 degrees) is
+    kept, so it is one wall whichever way round it is drawn, turned or not."""
     near = 2 * TOLERANCE
     ends = _Grid(1.0, work)
     for index, item in enumerate(info):
@@ -577,12 +579,17 @@ def _without_end_pairs(pairs, info, work):
                 if any(math.dist(one, corner) <= near and any(math.dist(other, end) <= near for end in info[j][:2])
                        for one, other in ((a, b), (b, a))):
                     closes.setdefault(k, set()).add(number)
+    def boxed(number):  # both its lines close one other pair whose lines both close it: two sides of a closed box
+        i, j = pairs[number][:2]
+        return any(all(number in closes.get(line, ()) for line in pairs[other][:2])
+                   for other in closes.get(i, set()) & closes.get(j, set()))
+
     kept, ends_only = set(), set()
     for number, (i, j, _side, gap, low, high) in enumerate(pairs):
         by_i, by_j = closes.get(i, set()), closes.get(j, set())
         if by_i and by_j and not by_i & by_j:
             continue
-        if (by_i or by_j) and high - low <= gap + ROUNDING:  # no longer than wide (a turned square, rounded)
+        if (by_i or by_j) and high - low <= gap + (ROUNDING if boxed(number) else TOLERANCE):  # no longer than wide
             ends_only.add(number)
             continue
         kept.add(number)

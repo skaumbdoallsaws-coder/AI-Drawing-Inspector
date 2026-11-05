@@ -387,6 +387,23 @@ def test_a_box_a_little_longer_than_wide_is_one_wall_along_its_longer_sides_turn
                     assert min(abs(along - expected), 180 - abs(along - expected)) < 0.05, (case, along)
 
 
+def test_an_end_line_about_as_long_as_its_gap_to_a_cross_wall_beyond_is_not_a_wall():
+    # A 0.2 m wall's end line, 0.196 to 0.202 m short of a cross wall's face, is that wall's end and nothing more: no
+    # stub fills the gap (allowing only rounding there made a 0.198 m by 0.2 m wall of the end line and the face).
+    for gap in (0.196, 0.198, 0.2, 0.202):
+        for turned in (False, True):
+            def at(u, v):
+                return (v, u) if turned else (u, v)
+            result = convert(drawing(
+                line("w1", "L1", at(0, 0), at(5, 0)), line("w2", "L1", at(0, 0.2), at(5, 0.2)),
+                line("cap", "L1", at(5, 0), at(5, 0.2)),
+                line("x1", "L1", at(5 + gap, -2), at(5 + gap, 2)),
+                line("x2", "L1", at(5 + gap + 0.2, -2), at(5 + gap + 0.2, 2))), FACES, WALLS)
+            walls = sorted((row["state"], row["thicknessMeters"], row["lengthMeters"]) for row in result["walls"])
+            assert walls == [("new", 0.2, 4.0), ("new", 0.2, 5.0)], (gap, turned, walls)
+            assert result["unconvertedCounts"] == {"wall_end": 1}, (gap, turned)
+
+
 def test_lines_close_to_a_face_but_not_copies_of_it_pair_as_they_did():
     # Only the same line drawn again is folded into one. A line within 5 mm of a face but turned, or a few mm
     # shorter, is a line of its own: the wall and its id are the ones the converter gave before copies were folded.

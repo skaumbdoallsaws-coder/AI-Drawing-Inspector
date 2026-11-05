@@ -59,6 +59,7 @@ SIN_TOLERANCE = math.sin(ANGLE_TOLERANCE)
 GENTLE_BEND = math.radians(25.0)  # a turn below this between straight runs makes them part of a curve
 TOLERANCE = 0.005  # meters: points this close coincide; lines this close are one line
 COPY_TOLERANCE = 1e-6  # meters: a face line whose ends match another's this closely is a copy of it (drawn twice)
+ROUNDING = 1e-9  # meters: two lengths worked out from one shape that differ by less are equal (floating point)
 CLOSE_GAP = 0.01  # meters: an outline that comes back to within 1 cm of its start is closed
 MIN_WALL_METERS = 0.1
 MIN_THICKNESS, MAX_THICKNESS = 0.05, 2.0
@@ -581,7 +582,7 @@ def _without_end_pairs(pairs, info, work):
         by_i, by_j = closes.get(i, set()), closes.get(j, set())
         if by_i and by_j and not by_i & by_j:
             continue
-        if (by_i or by_j) and high - low <= gap + TOLERANCE:  # no longer than wide, give or take rounding
+        if (by_i or by_j) and high - low <= gap + ROUNDING:  # no longer than wide (a turned square, rounded)
             ends_only.add(number)
             continue
         kept.add(number)

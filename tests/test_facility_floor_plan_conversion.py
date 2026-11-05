@@ -357,6 +357,36 @@ def test_a_square_pier_turned_to_any_angle_is_one_wall_whichever_way_round():
         assert min(abs(along - expected), 180 - abs(along - expected)) < 0.05, (angle, along)
 
 
+
+def test_a_box_a_little_longer_than_wide_is_one_wall_along_its_longer_sides_turned_or_not():
+    # Only rounding makes a turned pair "no longer than wide": a pier 0.400 m by 0.405 m, or a stub 0.203 m long and
+    # 0.2 m thick, is one wall along its longer sides however it is turned and however it is drawn (with 5 mm of
+    # slack, the pier turned 1 degree about (2, 3) lost both pairs and became no wall at all, and the stub turned 90
+    # degrees came out 0.203 m thick and 0.2 m long).
+    for size_x, size_y in ((0.4, 0.405), (0.405, 0.4), (0.2, 0.203), (0.203, 0.2)):
+        wide, long = min(size_x, size_y), max(size_x, size_y)
+        for angle in (0, 1, 5, 37, 89, 90, 135):
+            c, s = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+            for cx, cy in ((2, 3), (0.2, 0.2)):
+                corners = [(cx + x * c - y * s, cy + x * s + y * c) for x, y in (
+                    (-size_x / 2, -size_y / 2), (size_x / 2, -size_y / 2), (size_x / 2, size_y / 2),
+                    (-size_x / 2, size_y / 2))]
+                for form, entities, left in (
+                        ("polyline", [poly("p1", "L1", corners)], {}),
+                        ("lines", [line(f"b{k}", "L1", corners[k], corners[(k + 1) % 4]) for k in range(4)],
+                         {"wall_end": 2})):
+                    case = (size_x, size_y, angle, (cx, cy), form)
+                    result = convert(drawing(*entities), FACES, WALLS)
+                    assert len(result["walls"]) == 1, (case, result["unconvertedCounts"])
+                    (wall,) = result["walls"]
+                    assert (wall["state"], wall["thicknessMeters"], wall["lengthMeters"]) == ("new", wide, long), case
+                    assert result["unconvertedCounts"] == left, case
+                    (x1, z1), (x2, z2) = xz(wall, "start"), xz(wall, "end")
+                    along = math.degrees(math.atan2(z2 - z1, x2 - x1)) % 180
+                    expected = (angle + (0 if size_x > size_y else 90)) % 180
+                    assert min(abs(along - expected), 180 - abs(along - expected)) < 0.05, (case, along)
+
+
 def test_lines_close_to_a_face_but_not_copies_of_it_pair_as_they_did():
     # Only the same line drawn again is folded into one. A line within 5 mm of a face but turned, or a few mm
     # shorter, is a line of its own: the wall and its id are the ones the converter gave before copies were folded.

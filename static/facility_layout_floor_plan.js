@@ -1322,7 +1322,7 @@
                     layoutId: layout.layoutId,
                     revision: revision,
                     proposalId: answer.proposal && answer.proposal.proposalId,
-                }, { applyDirectly: false });
+                }, { applyDirectly: false, isCurrent: current });  // closed meanwhile: the session installs nothing
                 if (!current()) return;
                 this.conversionReview = { revision: revision, shown: this.preview };
                 this.message = 'The walls and rooms are on the plan to review. Approve adds them to the layout; '

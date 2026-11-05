@@ -1261,8 +1261,10 @@ check('the list shows what the drawing converts to; the review is staged with th
     const staged = h.calls.filter(call => call[0] === 'convert').at(-1);
     assert.deepStrictEqual(staged[2], { baseRevision: 'r1', stage: 'proposal',
         settings: { excluded: [], walls: { heightMeters: 3, maxThicknessMeters: 0.6 } } });
-    assert.deepStrictEqual(h.calls.filter(call => call[0] === 'install')[0].slice(1), [
-        { siteId: 'site-1', layoutId: 'fl-1', revision: 'r1', proposalId: 'flp-1' }, { applyDirectly: false }]);
+    const install = h.calls.filter(call => call[0] === 'install')[0];
+    assert.deepStrictEqual(install[1], { siteId: 'site-1', layoutId: 'fl-1', revision: 'r1', proposalId: 'flp-1' });
+    assert.deepStrictEqual(Object.keys(install[2]).sort(), ['applyDirectly', 'isCurrent']);
+    assert.strictEqual(install[2].applyDirectly, false);
     assert.ok(/on the plan to review\. Approve adds them/.test(h.panel().text()), h.panel().text());
     // Approved: the layout moved on to a new revision; the list belonged to the old one.
     h.save('r2');
@@ -1350,6 +1352,44 @@ check('an answer from the server is dropped when the panel closed meanwhile; a r
     assert.strictEqual(e.controller.busy, false);
     assert.ok(!e.calls.some(call => call[0] === 'install'));
 });
+
+check('closing the panel while its review is fetched stops the install: the session hears it is not current',
+    async () => {
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const h = converting();
+        const installed = [];
+        h.workspace.session.fetchAndInstallOperationProposal = async (reference, options) => {
+            h.calls.push(['install', reference, options]);
+            await gate;
+            // As the session does once its fetch returns: a caller that is no longer current gets nothing.
+            if (options.isCurrent && !options.isCurrent()) {
+                throw new Error('The operation preview no longer matches the active editor');
+            }
+            installed.push(reference.proposalId);
+        };
+        h.controller.open();
+        field(h, 'wallHeight').value = '3';
+        fire(field(h, 'wallHeight'), 'input');
+        fire(button(h, 'find'), 'click');
+        await settle();
+        fire(button(h, 'review'), 'click');
+        await settle();
+        const call = h.calls.find(item => item[0] === 'install');
+        assert.ok(call, 'the review was asked for');
+        assert.strictEqual(call[2].applyDirectly, false);
+        assert.strictEqual(typeof call[2].isCurrent, 'function');
+        assert.strictEqual(call[2].isCurrent(), true, 'current while the panel is open');
+        h.controller.close();
+        assert.strictEqual(call[2].isCurrent(), false, 'closed: no longer current');
+        release();
+        await settle();
+        assert.deepStrictEqual(installed, [], 'nothing installed after the close');
+        h.controller.open();
+        const text = h.panel().text();
+        assert.ok(!/Approve or dismiss it first/.test(text) && !/no longer matches/.test(text), text);
+        assert.strictEqual(h.controller.busy, false);
+    });
 
 check('a list on show keeps its scroll through a render', async () => {
     const h = converting();

@@ -333,6 +333,47 @@ def test_a_square_pier_drawn_with_four_faces_is_one_wall_whichever_way_round():
         assert result["unconvertedCounts"] == {"wall_end": 2}
 
 
+
+def test_a_square_pier_turned_to_any_angle_is_one_wall_whichever_way_round():
+    # Turned, its sides' lengths and gaps differ in their last digits: still one wall, the same in any order, along
+    # the sides at the smaller angle from x (before, turned 5 degrees about (0, 0) or 95 about (0.2, 0.2), both pairs
+    # were kept: two walls on one spot).
+    for angle, (cx, cy) in ((5, (0, 0)), (95, (0.2, 0.2)), (30, (2, 3)), (45, (2, 3)), (80, (2, 3)), (135, (2, 3))):
+        c, s = math.cos(math.radians(angle)), math.sin(math.radians(angle))
+        corners = [(cx + x * c - y * s, cy + x * s + y * c) for x, y in ((-0.2, -0.2), (0.2, -0.2), (0.2, 0.2),
+                                                                         (-0.2, 0.2))]
+        sides = [line(f"p{k}", "L1", corners[k], corners[(k + 1) % 4]) for k in range(4)]
+        flipped = [line(row["id"], "L1", row["points"][1], row["points"][0]) for row in sides]
+        results = [convert(drawing(*order), FACES, WALLS)
+                   for order in (sides, sides[::-1], [sides[2], sides[0], sides[3], sides[1]], flipped)]
+        assert all((result["walls"], result["operations"]) == (results[0]["walls"], results[0]["operations"])
+                   for result in results), angle
+        (wall,) = results[0]["walls"]
+        assert (wall["state"], wall["thicknessMeters"], wall["lengthMeters"]) == ("new", 0.4, 0.4), angle
+        assert results[0]["unconvertedCounts"] == {"wall_end": 2} and len(results[0]["operations"]) == 1
+        (x1, z1), (x2, z2) = xz(wall, "start"), xz(wall, "end")
+        along = math.degrees(math.atan2(z2 - z1, x2 - x1)) % 180
+        expected = min(angle % 180, (angle + 90) % 180)
+        assert min(abs(along - expected), 180 - abs(along - expected)) < 0.05, (angle, along)
+
+
+def test_lines_close_to_a_face_but_not_copies_of_it_pair_as_they_did():
+    # Only the same line drawn again is folded into one. A line within 5 mm of a face but turned, or a few mm
+    # shorter, is a line of its own: the wall and its id are the ones the converter gave before copies were folded.
+    slanted = drawing(line("e1", "L1", (0, 0), (0.15, 0)), line("e2", "L1", (0, 0.2), (0.15, 0.2)),
+                      line("e3", "L1", (0, -0.004), (0.15, 0.004)))
+    result = convert(slanted, FACES, WALLS)
+    assert segments(result) == [((5.0, 5.1), (5.15, 5.1), 0.2)]
+    assert [row["candidateId"] for row in result["walls"]] == ["iw-fp-1fab0d508f7704a5"]
+    assert result["unconvertedCounts"] == {"no_matching_face": 1}
+    shorter = drawing(line("e1", "L1", (0, 0), (10.004, 0)), line("e2", "L1", (0, 0.2), (10.004, 0.2)),
+                      line("e3", "L1", (0, 0), (10, 0)))
+    result = convert(shorter, FACES, WALLS)
+    assert segments(result) == [((5.0, 5.1), (15.004, 5.1), 0.2)]
+    (wall,) = result["walls"]
+    assert (wall["candidateId"], wall["sources"]) == ("iw-fp-b6d4e3280435910a", ["e1", "e2", "e3"])
+    assert result["unconverted"] == []
+
 def test_the_largest_thickness_applies_before_the_height_is_given():
     # Faces 0.9 m apart pair only when the largest thickness allows it; without a height the wall waits for one.
     geometry = drawing(line("e1", "L1", (0, 0), (10, 0)), line("e2", "L1", (0, 0.9), (10, 0.9)))

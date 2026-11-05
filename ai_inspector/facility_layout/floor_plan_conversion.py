@@ -58,6 +58,7 @@ ANGLE_TOLERANCE = math.radians(1.0)  # parallel or collinear
 SIN_TOLERANCE = math.sin(ANGLE_TOLERANCE)
 GENTLE_BEND = math.radians(25.0)  # a turn below this between straight runs makes them part of a curve
 TOLERANCE = 0.005  # meters: points this close coincide; lines this close are one line
+COPY_TOLERANCE = 1e-6  # meters: a face line whose ends match another's this closely is a copy of it (drawn twice)
 CLOSE_GAP = 0.01  # meters: an outline that comes back to within 1 cm of its start is closed
 MIN_WALL_METERS = 0.1
 MIN_THICKNESS, MAX_THICKNESS = 0.05, 2.0
@@ -454,16 +455,17 @@ class _Wall:
 
 
 def _single_faces(pieces, work):
-    """The face pieces with each line once: copies of a line (both ends within TOLERANCE of its ends, either way round)
-    are one piece that keeps every entity and layer they come from, so a line drawn twice pairs once. The copy that
-    sorts first stands for them all. PIECES: [(a, b, entity_id, layer)]; returns [(a, b, {(entity_id, layer)})]."""
+    """The face pieces with each line once: copies of a line (the same line drawn again: both ends within
+    COPY_TOLERANCE of its ends, either way round) are one piece that keeps every entity and layer they come from, so a
+    line drawn twice pairs once. The copy that sorts first stands for them all. Lines that are merely close stay apart
+    and pair as any lines do. PIECES: [(a, b, entity_id, layer)]; returns [(a, b, {(entity_id, layer)})]."""
     grid = _Grid(1.0, work)
     groups = []  # [(the first copy's ends, the copies, their sources)]
     for a, b, entity, layer in pieces:
-        for index in sorted(grid.near(a, a, TOLERANCE)):
+        for index in sorted(grid.near(a, a, COPY_TOLERANCE)):
             first_a, first_b = groups[index][0]
-            if (math.dist(a, first_a) <= TOLERANCE and math.dist(b, first_b) <= TOLERANCE) or (
-                    math.dist(a, first_b) <= TOLERANCE and math.dist(b, first_a) <= TOLERANCE):
+            if (math.dist(a, first_a) <= COPY_TOLERANCE and math.dist(b, first_b) <= COPY_TOLERANCE) or (
+                    math.dist(a, first_b) <= COPY_TOLERANCE and math.dist(b, first_a) <= COPY_TOLERANCE):
                 groups[index][1].append((a, b))
                 groups[index][2].add((entity, layer))
                 break
@@ -557,7 +559,8 @@ def _without_end_pairs(pairs, info, work):
     wall are the jambs of an opening between two walls; a pair one of whose lines closes another wall, and that is no
     longer than it is wide, is the ends of a box drawn closed (its longer sides are the faces) or a wall's end line
     and a wall beyond it. A square box (a pier) has no longer sides: each of its pairs is the other's ends, and the
-    one more nearly along x is kept, so it is one wall whichever way round it is drawn."""
+    one whose lines make the smaller angle with x (counted from 0 up to 180 degrees) is kept, so it is one wall
+    whichever way round it is drawn, turned or not."""
     near = 2 * TOLERANCE
     ends = _Grid(1.0, work)
     for index, item in enumerate(info):
@@ -578,7 +581,7 @@ def _without_end_pairs(pairs, info, work):
         by_i, by_j = closes.get(i, set()), closes.get(j, set())
         if by_i and by_j and not by_i & by_j:
             continue
-        if (by_i or by_j) and high - low <= gap:
+        if (by_i or by_j) and high - low <= gap + TOLERANCE:  # no longer than wide, give or take rounding
             ends_only.add(number)
             continue
         kept.add(number)

@@ -161,6 +161,59 @@ def test_an_inspection_stays_under_the_result_cap_with_its_layers_and_entities_a
     assert {row["text"] for row in entities["rows"]} == {"é" * 200}
 
 
+
+def test_entities_whose_ids_are_too_long_to_show_are_clipped_and_every_page_moves_on(tmp_path, monkeypatch):
+    # A broken file whose handles run to 60,000 hex digits (an entity's id is its handle): before, the first row did
+    # not fit, and the page came back empty with nextOffset where it started, for ever.
+    import ezdxf
+    from ai_inspector.codex_runtime import floor_plan_tools
+    doc = ezdxf.new("R2010", units=6)
+    doc.layers.add("LONG")
+    space = doc.modelspace()
+    handles = [space.add_line((k, 0), (k, 1), dxfattribs={"layer": "LONG"}).dxf.handle for k in range(3)]
+    path = made(tmp_path) / "long-handles.dxf"
+    doc.saveas(path)
+    data = path.read_bytes()
+    eol = bytes([13, 10]) if bytes([13, 10]) in data else bytes([10])
+    for k, handle in enumerate(handles):
+        marker = b"LINE" + eol + b"  5" + eol + handle.encode() + eol
+        assert data.count(marker) == 1
+        data = data.replace(marker, b"LINE" + eol + b"  5" + eol + b"ABCDEF"[k:k + 1] * 60000 + eol)
+    path.write_bytes(data)
+    client, service = started(tmp_path)
+    response = upload(client, path)
+    assert response.status_code == 200, response.text
+    imported = response.json()
+    response = apply(client, service, {"op": "set_plan_settings", "planSettings": default_plan_settings()},
+                     {"op": "upsert_floor_plan_reference", "reference": reference(imported)})
+    assert response.status_code == 200, response.text
+    layer = next(row["layerId"] for row in imported["manifest"]["layers"] if row["name"] == "LONG")
+    gate = gateway(service, FacilityReadGateway)
+
+    def pages(limit):
+        shown, offset = [], 0
+        while True:
+            (answer,) = calls(gate, ("inspect_floor_plan_import", {"layerId": layer, "limit": limit,
+                                                                    "offset": offset}))
+            assert answer["ok"] and len(json.dumps(answer).encode()) <= 65536, answer
+            entities = answer["data"]["entities"]
+            assert entities["total"] == 3 and entities["rows"]
+            shown += entities["rows"]
+            if not entities["more"]:
+                return shown
+            assert entities["nextOffset"] == offset + len(entities["rows"]) > offset
+            offset = entities["nextOffset"]
+
+    for limit in (50, 1):
+        rows = pages(limit)
+        assert [row["entityId"] for row in rows] == [letter * 117 + "..." for letter in "ABC"]
+        assert all(row["type"] == "LINE" and row["pointCount"] == 2 for row in rows)
+    # A row that does not fit at all is summed up rather than left out, so the next page still starts after it.
+    monkeypatch.setattr(floor_plan_tools, "ANSWER_BYTES", 0)
+    rows = pages(1)
+    assert [(row["entityId"][:1], row["type"], row["omitted"]) for row in rows] == [
+        (letter, "LINE", "too large to show") for letter in "ABC"]
+
 def test_a_placement_fitted_to_the_user_s_points_is_reviewed_then_saved(tmp_path):
     client, service, _import_id = underlay(tmp_path)
     before = revision(service)

@@ -33,6 +33,7 @@ LAYER_ROWS = 200
 ANSWER_BYTES = 56_000
 LAYER_BYTES = 24_000
 WARNINGS_SHOWN = 20
+ENTITY_ID_SHOWN = 120  # characters: an entity's id is its DXF handle(s), which a broken file can make huge
 ROWS_PER_KIND = 40
 POINTS_SHOWN = 8
 OPENINGS_SHOWN = 8
@@ -189,7 +190,9 @@ def _inspect(gateway, reference, arguments):
                        "texts": layer.get("texts", 0)})
     layers.sort(key=lambda row: (str(row["name"]).lower(), row["layerId"]))
     layers_offset = arguments.get("layersOffset", 0)
-    shown = _fitting(layers[layers_offset:layers_offset + LAYER_ROWS], LAYER_BYTES)
+    shown = _moving_on(_fitting(layers[layers_offset:layers_offset + LAYER_ROWS], LAYER_BYTES), layers,
+                       layers_offset, lambda row: {"layerId": row["layerId"], "name": _clip(str(row["name"]), 80),
+                                                   "role": row["role"], "omitted": "too large to show"})
     extents = manifest.get("extents")
     units = manifest.get("units") or {}
     counts = manifest.get("counts") or {}
@@ -224,7 +227,7 @@ def _inspect(gateway, reference, arguments):
         offset, limit = arguments.get("offset", 0), arguments.get("limit", 20)
 
         def row_of(entity):
-            row = {"entityId": str(entity.get("id")), "type": entity.get("type")}
+            row = {"entityId": _clip(str(entity.get("id")), ENTITY_ID_SHOWN), "type": str(entity.get("type"))[:40]}
             if "text" in entity:
                 at = entity.get("at") or [0.0, 0.0]
                 row.update(text=str(entity.get("text"))[:200],
@@ -239,6 +242,9 @@ def _inspect(gateway, reference, arguments):
 
         # The page's own fields take a few hundred bytes; its rows take what the answer has left.
         page = _fitting((row_of(entity) for entity in rows[offset:offset + limit]), ANSWER_BYTES - _size(out) - 400)
+        page = _moving_on(page, rows, offset, lambda entity: {
+            "entityId": _clip(str(entity.get("id")), ENTITY_ID_SHOWN), "type": str(entity.get("type"))[:40],
+            "omitted": "too large to show"})
         out["entities"] = {"layerId": layer_id, "offset": offset, "total": len(rows), "rows": page,
                            "more": offset + len(page) < len(rows)}
         if out["entities"]["more"]:
@@ -260,6 +266,15 @@ def _fitting(rows, budget):
             break
         kept.append(row)
     return kept
+
+
+def _moving_on(page, rows, offset, summary):
+    """PAGE, or when not even its first row fits, that row summed up (SUMMARY): a page always moves on."""
+    return page if page or offset >= len(rows) else [summary(rows[offset])]
+
+
+def _clip(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit - 3] + "..."
 
 
 def _align(gateway, reference, arguments):

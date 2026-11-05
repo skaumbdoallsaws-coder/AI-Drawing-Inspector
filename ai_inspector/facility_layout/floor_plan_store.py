@@ -468,13 +468,29 @@ def delete_conversion(root, principal, site_id, conversion_id) -> None:
         pass
 
 
+def pin_conversion(root, principal, site_id, conversion_id, layout_id, base_revision) -> None:
+    """A staged conversion is about to be applied to LAYOUT_ID at BASE_REVISION: mark it as being applied, so it is
+    kept from here on (sweep_conversions passes over a marked record), even when the server stops before the save is
+    noted (note_conversion_applied) or the save then fails. A mark already there is left as it is. Call it in
+    conversion_held, once the record is checked."""
+    if not isinstance(conversion_id, str) or not CONVERSION_ID.fullmatch(conversion_id):
+        raise ValueError("A conversion record needs its fpc- id.")
+    target = applied_path(scope_folder(root, principal, site_id), conversion_id)
+    if target.exists():
+        return
+    data = json.dumps({"conversionId": conversion_id, "layoutId": layout_id, "baseRevision": base_revision,
+                       "state": "applying", "pinnedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")},
+                      sort_keys=True, separators=(",", ":")).encode("utf-8")
+    _write_atomic(target, data)
+
+
 def note_conversion_applied(root, principal, site_id, conversion_id, layout_id, revision) -> None:
     """A staged conversion was applied to LAYOUT_ID (giving REVISION): its record is kept for good, as the manifest
     of where that layout's walls, rooms and doors came from."""
     if not isinstance(conversion_id, str) or not CONVERSION_ID.fullmatch(conversion_id):
         return
     data = json.dumps({"conversionId": conversion_id, "layoutId": layout_id, "revision": revision,
-                       "appliedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")},
+                       "state": "applied", "appliedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")},
                       sort_keys=True, separators=(",", ":")).encode("utf-8")
     _write_atomic(applied_path(scope_folder(root, principal, site_id), conversion_id), data)
 

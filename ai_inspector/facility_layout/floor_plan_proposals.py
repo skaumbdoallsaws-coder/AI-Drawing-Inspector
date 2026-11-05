@@ -7,13 +7,15 @@
   alignment, layer roles and settings, each candidate with the drawing entities it came from and the native id it
   gets, and the digest of the operations) and the operations are proposed with that record as their origin
   (operation_proposals.create). Approving and applying go through the existing proposal routes. A record written
-  for a proposal that could not be made is removed again; one applied is kept for good (note_applied), and one never
-  applied is swept two hours after it was last staged (floor_plan_store.sweep_conversions).
+  for a proposal that could not be made is removed again; one applied is kept for good (pin_for_apply marks it just
+  before the save, note_applied once saved), and one never applied is swept two hours after it was last staged
+  (floor_plan_store.sweep_conversions).
 
 The origin makes the proposal review-only: it is never direct-applicable, and the approval refuses direct consent for
 it. It is bound into the proposal's id and binding, and every time the proposal is prepared again (opened, approved,
 applied) `verify_origin` checks that the drawing, the conversion record, the underlay's alignment and layer roles and
 the converter are still the ones it was made from, so a stale or altered conversion is converted again, never applied.
+The record is checked once more as the change is saved, in the hold the sweep honors (pin_for_apply).
 """
 from __future__ import annotations
 
@@ -29,8 +31,8 @@ from .floor_plan_conversion import (CONVERTER_VERSION, MAX_OPERATIONS, MAX_PACKA
                                     origin_for)
 from .floor_plan_references import DIGEST, REFERENCE_ID, layout_references
 from .floor_plan_store import (CONVERSION_ID, IMPORT_ID, STORE_FOLDER, artifact_file, conversion_held,
-                               delete_conversion, load_conversion, note_conversion_applied, store_conversion,
-                               stored_import, sweep_conversions)
+                               delete_conversion, load_conversion, note_conversion_applied, pin_conversion,
+                               store_conversion, stored_import, sweep_conversions)
 
 LOGGER = logging.getLogger(__name__)
 STAGES = ("candidates", "proposal")
@@ -172,9 +174,20 @@ def stage_conversion(service, principal, site_id, layout_id, import_id, body):
     return response
 
 
+def pin_for_apply(service, principal, site_id, layout_id, base_revision, origin, operations) -> None:
+    """Just before a conversion's change is saved: in the conversion's hold, so the sweep cannot remove its record
+    meanwhile, check the record is still the one the change was made from and mark it as being applied, so it is kept
+    from here on. Raises floor_plan_conversion_missing (409) when it is gone or altered; then nothing is saved."""
+    root = _store_root(service)
+    origin = normalize_origin(origin)
+    with conversion_held(root, principal, site_id, origin["conversionId"]):
+        _require_record(root, principal, site_id, layout_id, base_revision, origin, operations)
+        pin_conversion(root, principal, site_id, origin["conversionId"], layout_id, base_revision)
+
+
 def note_applied(service, principal, site_id, layout_id, origin, revision) -> None:
-    """A conversion's proposal was applied (the layout is saved at REVISION): its record is kept for good. Never
-    fails the apply that already happened; a record left unmarked is only swept with the unapplied ones."""
+    """A conversion's proposal was applied (the layout is saved at REVISION): its record's mark says so. Never fails
+    the apply that already happened; the record is kept either way (pin_for_apply marked it before the save)."""
     try:
         note_conversion_applied(_store_root(service), principal, site_id, origin["conversionId"], layout_id,
                                 revision)
@@ -204,8 +217,6 @@ def normalize_origin(value) -> dict:
 def verify_origin(service, principal, site_id, layout_id, base_revision, origin, operations) -> dict:
     """Refuse a conversion proposal whose drawing, record, underlay or converter is no longer the one it was made
     from. Returns the origin's stored form (operation_proposals.prepare calls this every time)."""
-    from .operation_proposals import fingerprint
-
     origin = normalize_origin(origin)
     if origin["converterVersion"] != CONVERTER_VERSION:
         raise _stale("The converter changed since this conversion was made. Convert the drawing again.")
@@ -215,6 +226,23 @@ def verify_origin(service, principal, site_id, layout_id, base_revision, origin,
             or record.get("geometrySha256") != origin["geometrySha256"]):
         raise FacilityConflictError("floor_plan_artifact_missing", "The drawing this change was converted from is "
                                     "no longer stored for this site. Import it again and convert again.")
+    _require_record(root, principal, site_id, layout_id, base_revision, origin, operations)
+    current = service.get_layout(principal, site_id, layout_id)
+    if current["revision"] != base_revision:
+        raise FacilityConflictError("revision_conflict", "The layout changed since this conversion was made.",
+                                    details={"currentRevision": current["revision"]})
+    reference = layout_references(current["layout"]).get(origin["referenceId"])
+    if (reference is None or reference.get("importId") != origin["importId"]
+            or _digest(reference.get("alignment")) != origin["alignmentSha256"]
+            or _digest(reference.get("layers")) != origin["layersSha256"]):
+        raise _stale("The underlay moved or its layers changed since this conversion was made. Convert again.")
+    return origin
+
+
+def _require_record(root, principal, site_id, layout_id, base_revision, origin, operations) -> None:
+    """Refuse a change whose conversion record is missing or is not the one ORIGIN and OPERATIONS were made from."""
+    from .operation_proposals import fingerprint
+
     kept = load_conversion(root, principal, site_id, origin["conversionId"])
     try:
         matches = (kept is not None and kept.get("origin") == origin and kept.get("layoutId") == layout_id
@@ -226,13 +254,3 @@ def verify_origin(service, principal, site_id, layout_id, base_revision, origin,
     if not matches:
         raise FacilityConflictError("floor_plan_conversion_missing", "The record of this conversion is missing or "
                                     "does not match the change. Convert the drawing again.")
-    current = service.get_layout(principal, site_id, layout_id)
-    if current["revision"] != base_revision:
-        raise FacilityConflictError("revision_conflict", "The layout changed since this conversion was made.",
-                                    details={"currentRevision": current["revision"]})
-    reference = layout_references(current["layout"]).get(origin["referenceId"])
-    if (reference is None or reference.get("importId") != origin["importId"]
-            or _digest(reference.get("alignment")) != origin["alignmentSha256"]
-            or _digest(reference.get("layers")) != origin["layersSha256"]):
-        raise _stale("The underlay moved or its layers changed since this conversion was made. Convert again.")
-    return origin

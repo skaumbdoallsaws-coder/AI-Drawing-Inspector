@@ -170,7 +170,7 @@ Persist reference settings and alignment. Keep upload progress, temporary select
 
 For each conversion, retain a manifest linking source entities, alignment, conversion settings and resulting native IDs. Wall records have a closed field contract, so do not insert arbitrary provenance fields into them.
 
-Bind conversion artifacts to their hashes and converter version. Preserve artifacts needed by saved revisions and Undo. A conversion staged for review that is never applied is removed two hours after it was last staged (a proposal lives 15 minutes); an applied conversion's record is kept for good as its manifest, marked with the layout and revision it was applied to. Undo needs neither: an undo carries no origin. Removing an underlay removes its current reference, not converted walls or historical source material.
+Bind conversion artifacts to their hashes and converter version. Preserve artifacts needed by saved revisions and Undo. A conversion staged for review that is never applied is removed two hours after it was last staged (a proposal lives 15 minutes); an applied conversion's record is kept for good as its manifest: it is checked and marked as being applied just before the layout is saved, under the same hold the removal honors, then marked with the revision it gave (so a stop in between keeps it too). Undo needs neither: an undo carries no origin. Removing an underlay removes its current reference, not converted walls or historical source material.
 
 A missing reference artifact should produce an actionable warning without destroying access to native layout geometry. Applying a proposal that depends on a missing or changed artifact must fail.
 

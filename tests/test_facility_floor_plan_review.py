@@ -346,8 +346,8 @@ def test_an_applied_conversion_s_record_is_kept_and_reviews_never_applied_are_sw
         "idempotencyKey": "fp-keep-applied"})
     assert applied.status_code == 200, applied.text
     marker = json.loads((folder / (kept["conversionId"] + ".applied.json")).read_text())
-    assert (marker["conversionId"], marker["layoutId"], marker["revision"]) == (
-        kept["conversionId"], "fl-api-cell", revision(service))
+    assert (marker["conversionId"], marker["layoutId"], marker["revision"], marker["state"]) == (
+        kept["conversionId"], "fl-api-cell", revision(service), "applied")
     root, principal = floor_plan_proposals._store_root(service), _principal()
     assert store.sweep_conversions(root, principal, "site-a") == 0, "both are new"
     # Three hours on, the review that was never applied goes; the applied conversion stays, as its manifest.
@@ -379,3 +379,64 @@ def test_a_record_staged_again_counts_as_new_and_one_a_request_holds_is_never_sw
     # Its proposal can no longer be applied: the review says to convert again.
     opened = preview(client, body["proposal"]["proposalId"])
     assert opened.status_code == 409 and code(opened) == "floor_plan_conversion_missing", opened.text
+
+
+def _approved(client, service, import_id, key):
+    body = stage(client, service, import_id)
+    proposal_id = body["proposal"]["proposalId"]
+    alternative = preview(client, proposal_id).json()["alternative"]
+    approval = approve(client, alternative, proposal_id, key)
+    assert approval.status_code == 200, approval.text
+    return body, {"approvalToken": approval.json()["approvalToken"], "binding": alternative["transactionBinding"],
+                  "idempotencyKey": key}
+
+
+def test_an_apply_marks_its_record_before_the_save_so_a_stop_after_the_save_still_keeps_it(tmp_path, monkeypatch):
+    client, service, import_id = underlay(tmp_path)
+    folder = store_folder(service) / "conversions"
+    body, request = _approved(client, service, import_id, "fp-stop-after-save")
+    record_file, mark_file = folder / (body["conversionId"] + ".json"), folder / (body["conversionId"] + ".applied.json")
+    before, marks = revision(service), []
+    save = service.layout_repository.save_approved_layout
+
+    def saving(*args, **kwargs):
+        marks.append(json.loads(mark_file.read_text()))  # marked by the time the save starts
+        return save(*args, **kwargs)
+
+    def stopped(*_args, **_kwargs):
+        raise RuntimeError("the server stopped here")
+
+    monkeypatch.setattr(service.layout_repository, "save_approved_layout", saving)
+    monkeypatch.setattr(floor_plan_proposals, "note_applied", stopped)
+    with pytest.raises(RuntimeError, match="stopped here"):
+        client.post(BASE + "/apply", headers=SESSION, json=request)
+    assert revision(service) != before, "the layout was saved"
+    (mark,) = marks
+    assert (mark["state"], mark["layoutId"], mark["baseRevision"]) == ("applying", "fl-api-cell", before)
+    assert json.loads(mark_file.read_text()) == mark
+    # Hours on, the record is kept: the sweep passes over a marked record.
+    old = time.time() - 3 * 3600
+    os.utime(record_file, (old, old))
+    root, principal = floor_plan_proposals._store_root(service), _principal()
+    assert store.sweep_conversions(root, principal, "site-a") == 0 and record_file.exists()
+
+
+def test_a_record_gone_between_the_approval_and_the_save_stops_the_apply_before_anything_is_saved(tmp_path,
+                                                                                                  monkeypatch):
+    client, service, import_id = underlay(tmp_path)
+    folder = store_folder(service) / "conversions"
+    body, request = _approved(client, service, import_id, "fp-gone-before-save")
+    record_file = folder / (body["conversionId"] + ".json")
+    before = revision(service)
+    recheck = operation_proposals.recheck
+
+    def swept_meanwhile(*args, **kwargs):
+        result = recheck(*args, **kwargs)
+        record_file.unlink(missing_ok=True)  # as a sweep would, once the apply's checks are done, before the save
+        return result
+
+    monkeypatch.setattr(operation_proposals, "recheck", swept_meanwhile)
+    response = client.post(BASE + "/apply", headers=SESSION, json=request)
+    assert response.status_code == 409 and code(response) == "floor_plan_conversion_missing", response.text
+    assert revision(service) == before, "nothing was saved"
+    assert sorted(path.name for path in folder.iterdir()) == [], "and nothing was marked"

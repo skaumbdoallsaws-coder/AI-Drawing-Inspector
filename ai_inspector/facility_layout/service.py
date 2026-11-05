@@ -2813,6 +2813,15 @@ class FacilityLayoutService:
                             "transaction_binding_mismatch",
                             "Facility Layout changed during commit.",
                         )
+                if alternative.get("origin") is not None:
+                    # A conversion from an imported drawing: its record is
+                    # checked again and marked as being applied before the
+                    # save, in the hold the sweep honors, so it is kept for
+                    # good from here on (the unapplied ones are swept).
+                    from .floor_plan_proposals import pin_for_apply
+                    pin_for_apply(service, principal, site_id, layout_id,
+                                  plan.binding.base_revision,
+                                  alternative["origin"], operations)
                 saved = service.layout_repository.save_approved_layout(
                     principal,
                     site_id,
@@ -2821,8 +2830,6 @@ class FacilityLayoutService:
                     plan.binding.base_revision,
                 )
                 if alternative.get("origin") is not None:
-                    # A conversion from an imported drawing: its record is
-                    # kept for good (the unapplied ones are swept).
                     from .floor_plan_proposals import note_applied
                     note_applied(service, principal, site_id, layout_id,
                                  alternative["origin"], saved["revision"])

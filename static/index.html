@@ -21629,12 +21629,13 @@
     <script src="/static/process_map_editor.js"></script>
     <script src="/static/facility_layout_navigation_authoring.js?v=20260901-auto-route"></script>
     <script src="/static/facility_layout_ground.js?v=20261002-ground-1"></script>
-    <script src="/static/facility_layout_walls.js?v=20261024-door-heads-1"></script>
+    <script src="/static/facility_layout_walls.js?v=20261104-columns-1"></script>
     <script src="/static/facility_layout_lettering.js?v=20261013-authoring-1"></script>
     <script src="/static/facility_layout_authoring_dialog.js?v=20261013-authoring-1"></script>
     <script src="/static/facility_layout_component_materials.js?v=20261101-stack-1"></script>
     <script src="/static/facility_layout_interior_walls.js?v=20261013-authoring-1"></script>
     <script src="/static/facility_layout_floor_surfaces.js?v=20261013-authoring-1"></script>
+    <script src="/static/facility_layout_columns.js?v=20261104-columns-1"></script>
     <script src="/static/facility_layout_library.js?v=20261102-cycle-1"></script>
     <script src="/static/facility_layout_finishes.js?v=20261105-gym-lights-1"></script>
     <script src="/static/facility_layout_scenes.js?v=20261019-library-1"></script>
@@ -21642,7 +21643,7 @@
     <script src="/static/facility_layout_replace_asset.js?v=20261013-authoring-1"></script>
     <script src="/static/facility_layout_decals.js?v=20261019-library-1"></script>
     <script src="/static/facility_layout_floor_plan.js?v=20261104-floor-plan-9"></script>
-    <script src="/static/facility_layout_editor.js?v=20261104-fp-authored-1"></script>
+    <script src="/static/facility_layout_editor.js?v=20261104-columns-1"></script>
     <script src="/static/facility_layout_avatar.js?v=20260928-motion-operators-1"></script>
     <script src="/static/process_operator.js?v=20260927-1"></script>
     <script src="/static/walkthrough_camera_settings.js?v=20260927-1"></script>
@@ -21651,7 +21652,7 @@
     <script src="/static/facility_layout_light_pools.js?v=20261105-uplight-gain"></script>
     <script src="/static/facility_layout_light_areas.js?v=20261031-lights-7"></script>
     <script src="/static/facility_layout_light_coverage.js?v=20261101-cc3-1"></script>
-    <script src="/static/facility_layout_three_adapter.js?v=20261105-gym-lights-1"></script>
+    <script src="/static/facility_layout_three_adapter.js?v=20261104-columns-1"></script>
     <script src="/static/facility_layout_recorder.js?v=20261021-site-1"></script>
     <script src="/static/facility_layout_structure.js?v=20260923-structure-tree"></script>
     <script src="/static/facility_layout_structure_tree.js?v=9c9992a02daa"></script>
@@ -21661,10 +21662,10 @@
     <script src="/static/facility_layout_sheets.js?v=20260929-open-layout-1"></script>
     <script src="/static/facility_layout_patterns.js?v=20261101-cell-facing"></script>
     <script src="/static/facility_layout_command_adapter.js?v=20260912-contract-v1-retry-fix"></script>
-    <script src="/static/facility_layout_session.js?v=20261104-floor-plan-3"></script>
+    <script src="/static/facility_layout_session.js?v=20261104-columns-1"></script>
     <script src="/static/facility_layout_transport.js?v=20261104-floor-plan-2"></script>
     <script src="/static/facility_layout_generation_view.js?v=20260917-generation-research"></script>
-    <script src="/static/facility_layout_workspace.js?v=20261104-fp-sage-back-2"></script>
+    <script src="/static/facility_layout_workspace.js?v=20261104-columns-1"></script>
     <script src="/static/facility_layout_app.js?v=20261104-fp-authored-1"></script>
     <script src="/static/desktop_workflow_observation.js?v=20260915-workflow-coverage"></script>
     <script src="/static/desktop_runtime_bridge.js?v=20260915-workflow-coverage"></script>
@@ -45102,7 +45103,7 @@
             { label: 'Arrange', commands: [
                 'rotate', 'duplicate', 'delete', 'clear-all', 'lock', 'appearance', 'component-materials', 'replace-asset',
             ] },
-            { label: 'Surfaces', commands: ['decals', 'lettering', 'interior-walls', 'floor-surfaces', 'floor-plan'] },
+            { label: 'Surfaces', commands: ['decals', 'lettering', 'interior-walls', 'floor-surfaces', 'floor-plan', 'columns'] },
             { label: 'Position', commands: [
                 'align', 'distribute', 'relative', 'distance', 'offset',
             ] },
@@ -45203,6 +45204,10 @@
             'floor-plan': {
                 icon: 'facilityPolygonZone', label: 'Floor Plan (DXF)',
                 title: 'Trace over an imported DXF drawing of the building',
+            },
+            columns: {
+                icon: 'facilityRectangleZone', label: 'Columns',
+                title: 'Add and edit structural columns: rectangular or round',
             },
             'replace-asset': {
                 icon: 'facilitySwap', label: 'Replace Asset',
@@ -47106,8 +47111,8 @@
                 _trainFacilityRibbonMenu('decals', 'Wall Art', 'Add artwork and lettering',
                     ['decals', 'lettering'], { size: 'medium' }),
                 _trainFacilityRibbonMenu('interior-walls', 'Walls / Floors',
-                    'Edit partitions and floor finishes, or trace a DXF floor plan',
-                    ['interior-walls', 'floor-surfaces', 'floor-plan'], { size: 'medium' }),
+                    'Edit partitions, columns and floor finishes, or trace a DXF floor plan',
+                    ['interior-walls', 'floor-surfaces', 'floor-plan', 'columns'], { size: 'medium' }),
             ]);
             appendGroup('position', 'Position', [
                 _trainFacilityRibbonMenu(

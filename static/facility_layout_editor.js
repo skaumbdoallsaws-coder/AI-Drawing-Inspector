@@ -864,10 +864,20 @@
                 if (markingId) return markingId;
                 const routeId = cursor.getAttribute('data-route-id');
                 if (routeId) return routeId;
+                const columnId = cursor.getAttribute('data-column-id');
+                if (columnId) return columnId;
             }
             cursor = cursor.parentNode;
         }
         return null;
+    }
+
+    // Columns (columns.py) are layout objects too: picked, selected and deleted like zones.
+    function layoutColumnIds(layout) {
+        const value = layout && layout.extensions && layout.extensions.facilityColumns;
+        return (value && Array.isArray(value.columns) ? value.columns : []).map(function (column) {
+            return column && column.columnId;
+        }).filter(Boolean);
     }
 
     function clientPlanPoint(input, svg, projection) {
@@ -2474,6 +2484,33 @@
         }, this);
         this.svg.appendChild(wallLayer);
 
+        // Columns show and hide with the walls, but each is a layout object: picked and selected. Like the floor-plan
+        // layer, the layer is there only when there is something in it.
+        const columnVolumes = this.layerVisibility.walls !== false && typeof wallsRuntime.columnVolumes === 'function'
+            ? wallsRuntime.columnVolumes(this.layout) : [];
+        if (columnVolumes.length) {
+            const columnLayer = svgElement(this.document, 'g');
+            columnLayer.setAttribute('data-layer', 'columns');
+            columnVolumes.forEach(function (volume) {
+                const selected = this.selections.has(volume.columnId);
+                const polygon = svgElement(this.document, 'polygon');
+                setAttributes(polygon, {
+                    points: pointString(volume.polygon, this.projection),
+                    fill: selected ? '#bfe3ff' : volume.color,
+                    stroke: selected ? '#0878d1' : '#30363b',
+                    'stroke-width': selected ? '3' : '1',
+                    'vector-effect': 'non-scaling-stroke',
+                    tabindex: '0',
+                    role: 'button',
+                    'aria-label': volume.label,
+                    'aria-selected': selected ? 'true' : 'false',
+                    'data-column-id': volume.columnId,
+                });
+                columnLayer.appendChild(polygon);
+            }, this);
+            this.svg.appendChild(columnLayer);
+        }
+
         const routeLayer = svgElement(this.document, 'g');
         routeLayer.setAttribute('data-layer', 'routes');
         const proposalChangedRoutes = new Set(
@@ -3925,7 +3962,7 @@
             ) || (this.layout.routes || []).some(
                 function (route) { return route.routeId === this.selection; },
                 this
-            );
+            ) || layoutColumnIds(this.layout).includes(this.selection);
             if (!selectedExists) this.selection = null;
         }
         if (this.layout) {
@@ -3938,7 +3975,7 @@
                     return marking.markingId;
                 })).concat((this.layout.routes || []).map(function (route) {
                     return route.routeId;
-                }))
+                })).concat(layoutColumnIds(this.layout))
             );
             this.selections = new Set(Array.from(this.selections).filter(
                 function (identifier) { return available.has(identifier); }
@@ -4409,7 +4446,7 @@
             return marking.markingId === identifier;
         }) || (this.layout.routes || []).some(function (route) {
             return route.routeId === identifier;
-        });
+        }) || layoutColumnIds(this.layout).includes(identifier);
         if (!exists) return false;
         if (this.selectionHandler) this.selectionHandler(identifier, this);
         else this.setSelection(identifier);

@@ -41,3 +41,16 @@ test('replacement footprint fallback uses measured geometry rather than guessed 
     assert.deepEqual(replacement.dimensions(entry,2),{x:8,y:6,z:4});
     assert.equal(replacement.dimensions({assetId:'missing-measurements'}),null);
 });
+test('column volumes stand on their base to their top, in their color or a plain grey under a library finish',()=>{
+    const square=[{x:4.8,z:4.8},{x:5.2,z:4.8},{x:5.2,z:5.2},{x:4.8,z:5.2}];
+    const layout={extensions:{facilityColumns:{version:1,columns:[
+        {columnId:'col-a',label:'A',baseElevation:0.5,heightMeters:6,appearance:{color:'#336699'},footprint:square},
+        {columnId:'col-b',label:'B',baseElevation:0,heightMeters:8,appearance:{appearanceId:'concrete-smooth'},footprint:square},
+        {columnId:'col-c',label:'C',baseElevation:0,heightMeters:8,appearance:{color:'#000000'},footprint:[]}]}}};
+    const [a,b,...rest]=walls.columnVolumes(layout);
+    assert.deepEqual([a.id,a.columnId,a.minimumY,a.maximumY,a.color,a.polygon],['layout-column-col-a','col-a',0.5,6.5,'#336699',square]);
+    assert.deepEqual([b.color,b.appearance],['#8f969c',{appearanceId:'concrete-smooth'}]);
+    assert.deepEqual(rest,[]);  // no outline, nothing to draw
+    assert.deepEqual(walls.columnVolumes({extensions:{}}),[]);
+    assert.equal(walls.volumes(layout).length,0);  // columns are not walls
+});

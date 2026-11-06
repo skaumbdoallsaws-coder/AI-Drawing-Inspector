@@ -12,7 +12,7 @@ const { createHash } = require('node:crypto');
 const ROOT = path.resolve(__dirname, '..');
 const BASELINE = 'c476a2f'; // These three modules are unchanged through fb59e2c.
 // Ribbon commands added since the baseline: it cannot report them, so neither side's snapshot does.
-const COMMANDS_SINCE_BASELINE = ['floor-plan'];
+const COMMANDS_SINCE_BASELINE = ['floor-plan', 'columns'];
 const withoutNewCommands = states => {
     if (!states || typeof states !== 'object') return states;
     const kept = { ...states };
@@ -22,7 +22,7 @@ const withoutNewCommands = states => {
 // Proposal review fields added since the baseline (walls in the change summary, floor-plan FP2): it cannot report
 // them, so neither side's snapshot does. Only review objects (those with zoneChanges) lose them; the workspace suite
 // checks the fields themselves.
-const REVIEW_FIELDS_SINCE_BASELINE = ['wallChanges', 'outerWallChange'];
+const REVIEW_FIELDS_SINCE_BASELINE = ['wallChanges', 'outerWallChange', 'columnChanges'];
 const withoutNewReviewFields = value => {
     if (Array.isArray(value)) return value.map(withoutNewReviewFields);
     if (!value || typeof value !== 'object') return value;

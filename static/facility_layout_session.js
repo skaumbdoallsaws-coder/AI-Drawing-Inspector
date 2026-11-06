@@ -25,6 +25,9 @@
         'delete_floor_surface',
         'upsert_interior_wall',
         'delete_interior_wall',
+        'set_columns',
+        'upsert_column',
+        'delete_column',
         'upsert_decal',
         'delete_decal',
         'edit_perimeter_walls',
@@ -1004,6 +1007,9 @@
         (layout.routes || []).forEach(function (route) {
             available.add(route.routeId);
         });
+        layoutColumns(layout).forEach(function (column) {
+            available.add(column.columnId);
+        });
         return selectedIds.filter(function (id) {
             return available.has(id);
         });
@@ -1024,7 +1030,22 @@
         (layout.routes || []).forEach(function (route) {
             if (route && route.routeId) result.add(route.routeId);
         });
+        layoutColumns(layout).forEach(function (column) {
+            if (column && column.columnId) result.add(column.columnId);
+        });
         return result;
+    }
+
+    // Columns (columns.py): extensions.facilityColumns.columns, selected and deleted like zones.
+    function layoutColumns(layout) {
+        const value = layout && layout.extensions && layout.extensions.facilityColumns;
+        return value && Array.isArray(value.columns) ? value.columns : [];
+    }
+
+    function columnById(layout, columnId) {
+        return layoutColumns(layout).find(function (column) {
+            return column && column.columnId === columnId;
+        }) || null;
     }
 
     function placementById(layout, placementId) {
@@ -4801,6 +4822,9 @@
             const routeIds = expandedIds.filter(function (id) {
                 return Boolean(routeById(draftLayout, id));
             });
+            const columnIds = expandedIds.filter(function (id) {
+                return Boolean(columnById(draftLayout, id));
+            });
             const operations = placementIds.map(function (placementId) {
                 return { op: 'delete_placement', placementId: placementId };
             }).concat(zoneIds.map(function (zoneId) {
@@ -4815,6 +4839,8 @@
                     op: 'delete_route',
                     routeId: routeId,
                 };
+            })).concat(columnIds.map(function (columnId) {
+                return { op: 'delete_column', columnId: columnId };
             }));
             return commitGesture('Delete selection', operations, []);
         }
@@ -4824,6 +4850,9 @@
         }
         async function setInteriorWalls(walls) {
             return commitGesture('Edit interior walls', [{op:'set_interior_walls',walls:clone(walls)}], 'preserve');
+        }
+        async function setColumns(columns) {
+            return commitGesture('Edit columns', [{op:'set_columns',columns:clone(columns)}], 'preserve');
         }
         async function setFloorSurfaces(surfaces) {
             return commitGesture('Edit floor surfaces', [{op:'set_floor_surfaces',surfaces:clone(surfaces)}], 'preserve');
@@ -5631,6 +5660,7 @@
             setEquipmentDecals: setEquipmentDecals,
             setComponentMaterials: setComponentMaterials,
             setInteriorWalls: setInteriorWalls,
+            setColumns: setColumns,
             setFloorSurfaces: setFloorSurfaces,
             previewAssetReplacement: previewAssetReplacement,
             replaceAsset: replaceAsset,

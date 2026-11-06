@@ -131,6 +131,8 @@ def shell_with_plan_boundary(
     append_wall_features(result, layout)
     from .interior_walls import append_interior_features
     append_interior_features(result, layout)
+    from .columns import append_column_features
+    append_column_features(result, layout)
     # Zone ceilings: "ceiling" mounting surfaces that lamps hang from (ceilings.py).
     from .ceilings import append_ceiling_features
     append_ceiling_features(result, layout)

@@ -1392,6 +1392,42 @@ check('zones and placements are mouse and keyboard selectable', () => {
     top.dispose();
 });
 
+check('top plan draws columns over the walls; they are picked like zones and hide with the walls', () => {
+    FakeResizeObserver.reset();
+    const { documentRef, host } = makeHost();
+    const top = facility.createTopPlanAdapter(host, { document: documentRef, ResizeObserver: FakeResizeObserver });
+    const source = layout();
+    source.extensions = Object.assign({}, source.extensions, { facilityColumns: { version: 1, columns: [{
+        columnId: 'col-a', label: 'Column A', shape: 'rectangle', center: { x: 5, z: 5 }, widthMeters: 0.4,
+        depthMeters: 0.4, rotationDegrees: 0, heightMeters: 6, baseElevation: 0, appearance: { color: '#336699' },
+        footprint: [{ x: 4.8, z: 4.8 }, { x: 5.2, z: 4.8 }, { x: 5.2, z: 5.2 }, { x: 4.8, z: 5.2 }] }] } });
+    top.setLayout(source);
+    const node = () => host.findByAttribute('data-column-id', 'col-a')[0];
+    assert.strictEqual(node().getAttribute('role'), 'button');
+    assert.strictEqual(node().getAttribute('fill'), '#336699');
+    assert.strictEqual(node().getAttribute('aria-label'), 'Column A');
+    assert.strictEqual(node().getAttribute('aria-selected'), 'false');
+    const order = node().parentNode.parentNode.children.map(child => child.getAttribute('data-layer'));
+    assert.strictEqual(order.indexOf('columns'), order.indexOf('walls') + 1, order.join());
+    assert.strictEqual(top.pick('col-a'), true);
+    assert.strictEqual(top.getDiagnostics().selection, 'col-a');
+    assert.strictEqual(node().getAttribute('aria-selected'), 'true');
+    top.setSelection(null);
+    const keyboard = top.svg.dispatch('keydown', { target: node(), key: 'Enter' });
+    assert.strictEqual(keyboard.defaultPrevented, true);
+    assert.strictEqual(top.getDiagnostics().selection, 'col-a');
+    top.setLayout(source);  // still there: still selected
+    assert.strictEqual(top.getDiagnostics().selection, 'col-a');
+    top.setLayerVisibility({ walls: false });
+    assert.strictEqual(host.findByAttribute('data-layer', 'columns').length, 0);
+    top.setLayerVisibility({ walls: true });
+    top.setLayout(layout());  // gone: no longer selected, and no empty layer
+    assert.strictEqual(top.getDiagnostics().selection, null);
+    assert.strictEqual(host.findByAttribute('data-layer', 'columns').length, 0);
+    assert.strictEqual(top.pick('col-a'), false);
+    top.dispose();
+});
+
 check('fit delegates to views and leaves authoritative layout byte-identical', () => {
     FakeResizeObserver.reset();
     const { documentRef, host } = makeHost();

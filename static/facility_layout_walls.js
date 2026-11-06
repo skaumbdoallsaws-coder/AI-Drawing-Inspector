@@ -6,6 +6,21 @@
     'use strict';
     function data(layout) { return layout && layout.extensions && layout.extensions.facilityPerimeterWalls; }
     function interiorWalls(layout) { return layout?.extensions?.facilityInteriorWalls?.walls || []; }
+    // Columns (columns.py): their saved outlines, extruded from the base to the top. A library finish keeps a plain
+    // grey here; the 3D view resolves it (appearance).
+    const COLUMN_COLOR = '#8f969c';
+    function columns(layout) { return layout?.extensions?.facilityColumns?.columns || []; }
+    function columnColor(column) {
+        const appearance = column && column.appearance;
+        return appearance && typeof appearance.color === 'string' ? appearance.color : COLUMN_COLOR;
+    }
+    function columnVolumes(layout) {
+        return columns(layout).filter(column => Array.isArray(column.footprint) && column.footprint.length >= 3)
+            .map(column => ({id: 'layout-column-' + column.columnId, columnId: column.columnId,
+                placementId: 'layout-column-' + column.columnId, polygon: column.footprint,
+                minimumY: column.baseElevation, maximumY: column.baseElevation + column.heightMeters,
+                color: columnColor(column), appearance: column.appearance || null, label: column.label}));
+    }
     function outline(layout, settings) {
         const plan = layout.extensions.facilityPlan;
         return settings.boundarySource === 'polygon' ? settings.boundary
@@ -305,5 +320,5 @@
         });
         workspace.root.appendChild(dialog); dialog.showModal(); source.focus();
     }
-    return { data, panels, volumes, interiorWalls, exteriorSurfaces, fittedArtworks, fittedArtworkSurfaces, fittedArtworkFrame, isWallAsset, canEdit, openDialog };
+    return { data, panels, volumes, interiorWalls, columns, columnColor, columnVolumes, exteriorSurfaces, fittedArtworks, fittedArtworkSurfaces, fittedArtworkFrame, isWallAsset, canEdit, openDialog };
 }));

@@ -89,7 +89,19 @@ def extension_definitions():
     polygon_walls = obj({**wall_properties, "boundarySource": {"const": "polygon"},
                         "boundary": array(POINT, 128, 3, uniqueItems=True)},
                        ["boundarySource", "boundary", "heightMeters", "thicknessMeters"])
+    # Columns (columns.py): rectangular or round, each its own record; a converted one keeps its drawing source.
+    column_common = {"columnId": text(80, 5, pattern="^col-[a-z0-9-]{1,76}$"), "label": ref("label"),
+                     "center": POINT, "heightMeters": number(.5, 60), "baseElevation": number(-1000, 1000),
+                     "appearance": {"oneOf": [obj({"color": COLOR}), ref("facilityAppearance")]},
+                     "source": obj({"referenceId": text(63, 4, pattern="^fp-[a-z0-9-]{1,60}$"),
+                                    "importId": text(36, 36, pattern="^fpi-[a-f0-9]{32}$"), "entityId": text(400)})}
+    square_column = {**column_common, "shape": {"const": "rectangle"}, "widthMeters": number(.05, 5),
+                     "depthMeters": number(.05, 5), "rotationDegrees": number(-360, 360)}
+    round_column = {**column_common, "shape": {"const": "circle"}, "diameterMeters": number(.05, 5)}
+    column = {"oneOf": [obj(square_column, [key for key in square_column if key != "source"]),
+                        obj(round_column, [key for key in round_column if key != "source"])]}
     return {
+        "columns": obj({"version": {"const": 1}, "columns": array(column, 1000)}),
         "decals": obj({"version": {"const": 1}, "artworks": array(artwork, 48)}),
         "perimeterWalls": {"oneOf": [plan_walls, polygon_walls]},
         "interiorWalls": obj({"version": {"const": 1}, "walls": array(obj({
@@ -429,6 +441,7 @@ def operation_batch_schema():
     operation("rename_layout", {"displayName": ref("label")})
     for name, key, definition, reset in (("set_floor_surfaces", "surfaces", "floorSurfaces", False),
             ("set_interior_walls", "walls", "interiorWalls", False), ("set_perimeter_walls", "wallSettings", "perimeterWalls", True),
+            ("set_columns", "columns", "columns", False),
             ("set_ground", "ground", "ground", True), ("set_decals", "decals", "decals", False),
             ("set_plan_settings", "planSettings", "planSettings", False)):
         operation(name, {key: nullable(ref(definition)) if reset else ref(definition)},
@@ -458,6 +471,15 @@ def operation_batch_schema():
                               "then": {"properties": {"artwork": deepcopy(finish[key]["items"])}}}
                              for key in ("artworks", "fittedArtworks")]
     operation("delete_wall_artwork", {"collection": {"enum": ["artworks", "fittedArtworks"]}, "artworkId": ART_ID})
+    column_row = definitions["columns"]["properties"]["columns"]["items"]
+    operation("upsert_column", {"column": deepcopy(column_row)},
+              description="Create or replace this exact column; preserve all other records. A rectangle is "
+                          "widthMeters along x (east) and depthMeters along z (north) before rotationDegrees, which "
+                          "turns it as a compass heading turns (90 lays the width north-south); a circle has "
+                          "diameterMeters. center is its middle on the plan; baseElevation is the floor's elevation. "
+                          "appearance is a color ({color}) or a finish from list_facility_library. When changing a "
+                          "column converted from a floor plan, keep its source.")
+    operation("delete_column", {"columnId": deepcopy(column_row["oneOf"][0]["properties"]["columnId"])})
     aisle_properties = {"label": ref("label"), "aisleKind": {"enum": ["forklift", "pedestrian", "material"]},
         "centerline": array(ref("vector3"), 2048, 2), "corridorWidth": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000},
         "direction": {"enum": ["one_way", "two_way"]}, "color": COLOR,

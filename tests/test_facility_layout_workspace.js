@@ -437,7 +437,9 @@ function selectedRecord(document, id) {
     return document.placements.find(item => item.placementId === id)
         || document.zones.find(item => item.zoneId === id)
         || (document.floorMarkings || []).find(item => item.markingId === id)
-        || (document.routes || []).find(item => item.routeId === id);
+        || (document.routes || []).find(item => item.routeId === id)
+        || ((document.extensions && document.extensions.facilityColumns || {}).columns || [])
+            .find(item => item.columnId === id);
 }
 
 class FakeSession {
@@ -2934,6 +2936,20 @@ async function main() {
         assert.strictEqual(workspaceModule.proposalPlainChangeSummary(
             workspaceModule.buildLayoutProposalReview(saved, clone(saved)), {}),
         'No items, walls, zones or aisles change.');
+        const column = (id, x) => ({ columnId: id, label: id, shape: 'circle', center: { x, z: 5 },
+            diameterMeters: 0.4, heightMeters: 6, baseElevation: 0, appearance: { color: '#8f969c' } });
+        const columned = clone(saved);
+        columned.extensions = Object.assign({}, columned.extensions, {
+            facilityColumns: { version: 1, columns: [column('col-a', 10), column('col-b', 12)] } });
+        const columns = workspaceModule.buildLayoutProposalReview(saved, columned);
+        assert.deepStrictEqual(columns.columnChanges, { added: 2, changed: 0, removed: 0 });
+        assert.strictEqual(workspaceModule.proposalPlainChangeSummary(columns, {}), 'Changes: 2 new columns.');
+        const shifted = clone(columned);
+        shifted.extensions.facilityColumns.columns[0].center.x = 11;
+        shifted.extensions.facilityColumns.columns.pop();
+        assert.strictEqual(workspaceModule.proposalPlainChangeSummary(
+            workspaceModule.buildLayoutProposalReview(columned, shifted), {}),
+        'Changes: 1 changed column, 1 removed column.');
     });
 
     await check('proposal review diff is stable-ID based and remains pure',
@@ -4429,6 +4445,21 @@ async function main() {
             data.session.calls.filter(call => call[0] === 'selectMany').length,
             0
         );
+        data.workspace.destroy();
+    });
+
+    await check('columns select directly without starting a marquee', async () => {
+        const data = fixture();
+        data.session.state.layout.extensions = Object.assign({}, data.session.state.layout.extensions, {
+            facilityColumns: { version: 1, columns: [{ columnId: 'col-a', label: 'Column A' }] } });
+        const target = data.documentRef.createElement('polygon');
+        target.setAttribute('data-column-id', 'col-a');
+        data.workspace.planView.appendChild(target);
+        target.dispatch('pointerdown', { pointerId: 32, world: { x: 2, y: 0, z: 2 } });
+        target.dispatch('pointerup', { pointerId: 32, world: { x: 2, y: 0, z: 2 } });
+        assert.deepStrictEqual(data.session.getState().selection, ['col-a']);
+        assert.strictEqual(data.workspace.getState().session.history.length, 0);
+        assert.strictEqual(data.session.calls.filter(call => call[0] === 'selectMany').length, 0);
         data.workspace.destroy();
     });
 

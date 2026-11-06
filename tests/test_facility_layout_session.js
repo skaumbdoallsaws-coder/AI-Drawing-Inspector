@@ -359,6 +359,21 @@ function applyFakeOperations(base, operations) {
             document.processBindings = [];
             document.dismissedSuggestions = [];
             break;
+        case 'set_columns':  // the server checks columns and works out their outlines (columns.py)
+            document.extensions = document.extensions || {};
+            if (operation.columns.columns.length) document.extensions.facilityColumns = clone(operation.columns);
+            else delete document.extensions.facilityColumns;
+            break;
+        case 'delete_column': {
+            const value = document.extensions && document.extensions.facilityColumns;
+            const rows = value ? value.columns : [];
+            if (!rows.some(item => item.columnId === operation.columnId)) {
+                throw operationError('missing_entity', 'Column was not found');
+            }
+            value.columns = rows.filter(item => item.columnId !== operation.columnId);
+            if (!value.columns.length) delete document.extensions.facilityColumns;
+            break;
+        }
         default:
             throw operationError('unknown_operation', operation.op);
         }
@@ -1301,6 +1316,43 @@ async function main() {
             assert.strictEqual(state.layout.zones.length, 0);
             assert.deepStrictEqual(state.selection, []);
             assert.strictEqual(state.history[1].operationCount, 2);
+        });
+
+    await check('columns are selected and deleted with the rest of the selection, and their edits undo',
+        async () => {
+            const column = (columnId, x) => ({ columnId: columnId, label: columnId, shape: 'circle',
+                center: { x: x, z: 2 }, diameterMeters: 0.4, heightMeters: 6, baseElevation: 0,
+                appearance: { color: '#8f969c' } });
+            const authority = fakeAuthority(layout());
+            const session = authority.makeSession();
+            session.load(authority.initialReceipt());
+            const original = session.getState().layout;
+            await session.setColumns({ version: 1, columns: [column('col-a', 2), column('col-b', 4)] });
+            const placed = session.getState();
+            assert.strictEqual(placed.operations[0].op, 'set_columns');
+            assert.deepStrictEqual(placed.layout.extensions.facilityColumns.columns.map(row => row.columnId),
+                ['col-a', 'col-b']);
+            session.select('col-a');
+            assert.deepStrictEqual(session.getState().selection, ['col-a']);
+            session.select('col-missing');  // not in the layout: the selection is unchanged
+            assert.deepStrictEqual(session.getState().selection, ['col-a']);
+            session.selectMany(['pl-a', 'col-b', 'col-missing']);
+            assert.deepStrictEqual(session.getState().selection, ['pl-a', 'col-b']);
+            await session.deleteSelected();
+            const deleted = session.getState();
+            assert.deepStrictEqual(deleted.operations.map(row => row.op),
+                ['set_columns', 'delete_placement', 'delete_column']);
+            assert.strictEqual(deleted.history[1].operationCount, 2);  // one gesture
+            assert.strictEqual(byId(deleted.layout, 'pl-a'), undefined);
+            assert.deepStrictEqual(deleted.layout.extensions.facilityColumns.columns.map(row => row.columnId),
+                ['col-a']);
+            assert.deepStrictEqual(deleted.selection, []);
+            await session.undo();
+            assert.deepStrictEqual(session.getState().layout, placed.layout);
+            await session.undo();
+            assert.deepStrictEqual(session.getState().layout, original);
+            await session.redo();
+            assert.deepStrictEqual(session.getState().layout, placed.layout);
         });
 
     await check('rectangle and polygon zones receive backend IDs and resize deterministically',

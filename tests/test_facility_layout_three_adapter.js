@@ -4727,6 +4727,30 @@ test('perimeter walls and tagged wall assets have an independent presentation la
     data.adapter.dispose();
 });
 
+test('columns stand as their own meshes, shown and hidden with the walls, not counted as walls', async () => {
+    const data = fixture();
+    data.adapter.mount(data.host);
+    const square = [{x:4.8,z:4.8},{x:5.2,z:4.8},{x:5.2,z:5.2},{x:4.8,z:5.2}];
+    const layout = { placements: [], extensions: { facilityColumns: { version: 1, columns: [
+        { columnId: 'col-a', label: 'A', shape: 'rectangle', center: {x:5,z:5}, widthMeters: 0.4, depthMeters: 0.4,
+          rotationDegrees: 0, heightMeters: 6, baseElevation: 0, appearance: { color: '#336699' }, footprint: square },
+        { columnId: 'col-b', label: 'B', shape: 'rectangle', center: {x:5,z:5}, widthMeters: 0.4, depthMeters: 0.4,
+          rotationDegrees: 0, heightMeters: 6, baseElevation: 0, appearance: { color: '#000000' },
+          footprint: square.map(p => ({x: p.x + 3, z: p.z})) }] } } };
+    const before = JSON.stringify(layout);
+    await data.adapter.setScene({ layout, assetCatalog: [] });
+    assert.equal(data.adapter.getDiagnostics().columnCount, 2);
+    assert.equal(data.adapter.getDiagnostics().perimeterWallCount, 0);
+    data.adapter.setLayerVisibility({ walls: false });
+    assert.equal(data.adapter.getDiagnostics().visibleColumnCount, 0);
+    data.adapter.setLayerVisibility({ walls: true });
+    assert.equal(data.adapter.getDiagnostics().visibleColumnCount, 2);
+    assert.equal(JSON.stringify(layout), before);
+    await data.adapter.setScene({ layout: {placements:[]}, assetCatalog: [] });
+    assert.equal(data.adapter.getDiagnostics().columnCount, 0);
+    data.adapter.dispose();
+});
+
 test('overhead and roof sheeting assets have their own layers, sheeting hidden at first', async () => {
     const data = fixture();
     data.adapter.mount(data.host);

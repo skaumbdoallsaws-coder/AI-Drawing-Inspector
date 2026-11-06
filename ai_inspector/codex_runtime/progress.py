@@ -103,7 +103,7 @@ WORKFLOW_STEPS = {
 }
 AUTHORING_VIEWS = {
     "placements": "placed equipment", "zones": "zones", "routes": "aisles and routes",
-    "utilities": "utility networks", "floor_markings": "floor markings", "interior_walls": "interior walls",
+    "utilities": "utility networks", "floor_markings": "floor markings", "interior_walls": "interior walls", "columns": "columns",
     "floor_surfaces": "floor finishes", "decals": "floor graphics", "plan": "plan settings",
     "ground": "ground levels", "perimeter_walls": "outside walls", "navigation": "navigation settings",
     "wall_artworks": "wall artwork", "overview": "the layout contents",

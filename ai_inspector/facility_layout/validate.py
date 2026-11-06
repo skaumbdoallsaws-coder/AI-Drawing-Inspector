@@ -1966,6 +1966,12 @@ def validate_layout(
             validate_interior_walls(layout)
         except ValueError as exc:
             _fail("invalid_interior_walls", str(exc), "$.extensions.facilityInteriorWalls")
+    if isinstance(root_extensions, Mapping) and "facilityColumns" in root_extensions:
+        from .columns import validate_columns
+        try:
+            validate_columns(layout)
+        except ValueError as exc:
+            _fail("invalid_columns", str(exc), "$.extensions.facilityColumns")
     if isinstance(root_extensions, Mapping) and "facilityFloorSurfaces" in root_extensions:
         from .floor_surfaces import normalize_floor_surfaces
         try:

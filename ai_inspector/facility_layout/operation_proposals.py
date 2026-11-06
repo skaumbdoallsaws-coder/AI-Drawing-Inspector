@@ -30,6 +30,7 @@ ALLOWED_OPERATIONS = frozenset({
     "add_utility_network_segment", "edit_utility_network_segment", "delete_utility_network_segment",
     "attach_process_binding", "edit_process_binding", "detach_process_binding",
     "upsert_floor_surface", "delete_floor_surface", "place_asset_array", "delete_asset_array", "upsert_interior_wall", "delete_interior_wall",
+    "set_columns", "upsert_column", "delete_column",
     "upsert_decal", "delete_decal", "edit_perimeter_walls", "upsert_wall_artwork", "delete_wall_artwork",
     "set_site_context", "set_building_pose", "upsert_site_area", "delete_site_area",
     "upsert_site_reference", "delete_site_reference", "set_emergency_plan", "set_zone_ceiling",

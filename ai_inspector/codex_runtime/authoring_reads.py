@@ -12,6 +12,7 @@ COLLECTIONS = {
     "utilities": (None, "utilityNetworks", "utilityNetworkId"),
     "floor_markings": (None, "floorMarkings", "markingId"),
     "interior_walls": ("facilityInteriorWalls", "walls", "wallId"),
+    "columns": ("facilityColumns", "columns", "columnId"),
     "floor_surfaces": ("facilityFloorSurfaces", "surfaces", "surfaceId"),
     "decals": ("facilityDecals", "artworks", "artworkId"),
 }
@@ -121,6 +122,6 @@ def read_authoring(runtime, principal, reference, name, arguments):
     extension, field, id_key = COLLECTIONS[view]
     document = layout if extension is None else ext.get(extension, {})
     rows = document.get(field, [])
-    if view == "interior_walls":
-        rows = [{key: value for key, value in row.items() if key != "panels"} for row in rows]
+    if view in ("interior_walls", "columns"):  # without the derived outlines
+        rows = [{key: value for key, value in row.items() if key not in ("panels", "footprint")} for row in rows]
     return dict(base, view=view, **_page(rows, arguments, id_key))

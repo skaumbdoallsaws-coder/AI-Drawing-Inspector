@@ -2453,6 +2453,7 @@
             zoneCeilingObjects: [],
             zoneRoofObjects: [],
             wallObjects: [],
+            columnObjects: [],
             floorSurfaceObjects: [],
             wallFinishObjects: [],
             wallArtworkLoads: [],
@@ -7743,7 +7744,43 @@
                 mesh.visible = state.layerVisibility.walls !== false;
                 state.modelRoot.add(mesh); state.wallObjects.push(mesh);
             });
+            renderColumns();
             renderExteriorFinishes();
+        }
+
+        // Columns (columns.py): their outlines extruded like walls, shown and hidden with them, in their color or
+        // their library finish (a plain color until the library has loaded).
+        function renderColumns() {
+            if (typeof wallsRuntime.columnVolumes !== 'function') return;
+            const layout = state.currentInput && state.currentInput.layout;
+            wallsRuntime.columnVolumes(layout).forEach(function (volume) {
+                const shape = new THREE.Shape();
+                volume.polygon.forEach(function (point, index) {
+                    if (index === 0) shape.moveTo(point.x, -point.z);
+                    else shape.lineTo(point.x, -point.z);
+                });
+                shape.closePath();
+                const geometry = new THREE.ExtrudeGeometry(shape, {
+                    depth: volume.maximumY - volume.minimumY, bevelEnabled: false, steps: 1,
+                });
+                geometry.rotateX(-Math.PI / 2);
+                const material = new THREE.MeshStandardMaterial({ color: volume.color, roughness: 0.8 });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.y = volume.minimumY;
+                mesh.name = volume.id;
+                mesh.userData.columnId = volume.columnId;
+                mesh.visible = state.layerVisibility.walls !== false;
+                state.modelRoot.add(mesh); state.columnObjects.push(mesh);
+                const appearance = volume.appearance;
+                if (!appearance || !appearance.appearanceId || !libraryRuntime || !finishesRuntime) return;
+                const library = currentLibrary();
+                const resolved = library && libraryRuntime.resolveAppearance(library, appearance, currentLayout());
+                if (!resolved) return;
+                mesh.updateMatrixWorld(true);
+                applyObjectFinish(mesh, createFinishMaterialFor(resolved, 1),
+                    resolved.texture ? finishesRuntime.mappingFor(THREE, mesh, resolved) : null);
+                material.dispose();
+            });
         }
 
         function renderExteriorFinishes() {
@@ -10139,6 +10176,8 @@
             clearEquipmentDecals();
             disposeObjectGraphs(state.wallObjects);
             state.wallObjects = [];
+            disposeObjectGraphs(state.columnObjects);
+            state.columnObjects = [];
             disposeObjectGraphs(state.floorSurfaceObjects);
             state.floorSurfaceObjects = [];
             disposeObjectGraphs(state.wallFinishObjects);
@@ -15002,6 +15041,7 @@
             );
             state.layerVisibility = next;
             state.wallObjects.forEach(function (object) { object.visible = next.walls !== false; });
+            state.columnObjects.forEach(function (object) { object.visible = next.walls !== false; });
             state.wallFinishObjects.forEach(function (object) {
                 const art=object.userData&&object.userData.exteriorArtwork;
                 object.visible = next.walls !== false && (!art || art.status==='ready');
@@ -15388,6 +15428,10 @@
         function layoutNeedsLibrary(layout) {
             if (!layout || typeof layout !== 'object') return false;
             if (layout.extensions && layout.extensions.facilityScene) return true;
+            const columns = layout.extensions && layout.extensions.facilityColumns;
+            if (columns && Array.isArray(columns.columns) && columns.columns.some(function (column) {
+                return column && column.appearance && column.appearance.appearanceId;
+            })) return true;
             return (layout.placements || []).some(function (placement) {
                 if (placement && placement.appearance && placement.appearance.appearanceId) return true;
                 const parts = placement && placement.componentMaterials && placement.componentMaterials.overrides;
@@ -17772,6 +17816,8 @@
                 appearanceLibrary: finishDiagnostics(),
                 perimeterWallCount: state.wallObjects.length,
                 visiblePerimeterWallCount: state.wallObjects.filter(object => object.visible).length,
+                columnCount: state.columnObjects.length,
+                visibleColumnCount: state.columnObjects.filter(object => object.visible).length,
                 exteriorFinishObjectCount: state.wallFinishObjects.length,
                 exteriorArtwork: state.wallArtworkLoads.map(function (record) {
                     const object = state.wallFinishObjects.find(item =>

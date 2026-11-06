@@ -1485,6 +1485,32 @@ def _op_edit_interior_wall_row(document, operation, index, base_revision):
     return created, affected
 
 
+def _op_set_columns(document, operation, _index, _base_revision):
+    from .columns import compile_columns, KEY
+    try:
+        value = compile_columns(operation.get("columns"), document)
+    except ValueError as exc:
+        _fail("invalid_columns", str(exc))
+    previous = {c["columnId"] for c in document.get("extensions", {}).get(KEY, {}).get("columns", [])}
+    current = {c["columnId"] for c in value["columns"]}
+    if value["columns"]:
+        document.setdefault("extensions", {})[KEY] = value
+    else:
+        document.get("extensions", {}).pop(KEY, None)
+    return sorted(current - previous), sorted(current | previous)
+
+
+def _op_edit_column_row(document, operation, index, base_revision):
+    from .columns import KEY
+    value = _mapping(document.get("extensions", {}).get(KEY, {"version": 1, "columns": []}), KEY)
+    created, affected = _edit_collection_row(
+        value, "columns", operation, row_field="column", identity_field="columnId",
+        delete=operation["op"] == "delete_column", derived_fields=("footprint",),
+    )
+    _op_set_columns(document, {"op": "set_columns", "columns": value}, index, base_revision)
+    return created, affected
+
+
 def _op_set_component_materials(document, operation, _index, _base_revision):
     from .component_materials import normalize_component_materials
     identifier = _clean_id(operation.get("placementId"), "placementId", "pl")
@@ -3022,6 +3048,9 @@ _HANDLERS: Dict[str, _Handler] = {
     "set_floor_surfaces": _op_set_floor_surfaces,
     "upsert_interior_wall": _op_edit_interior_wall_row,
     "delete_interior_wall": _op_edit_interior_wall_row,
+    "set_columns": _op_set_columns,
+    "upsert_column": _op_edit_column_row,
+    "delete_column": _op_edit_column_row,
     "upsert_floor_surface": _op_edit_floor_surface_row,
     "delete_floor_surface": _op_edit_floor_surface_row,
     "replace_asset": _op_replace_asset,

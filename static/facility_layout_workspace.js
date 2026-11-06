@@ -20,6 +20,8 @@
         ? require('./facility_layout_interior_walls.js') : root.InspectorProFacilityInteriorWalls;
     const floorSurfacesRuntime = typeof module === 'object' && module.exports
         ? require('./facility_layout_floor_surfaces.js') : root.InspectorProFacilityFloorSurfaces;
+    const columnsRuntime = typeof module === 'object' && module.exports
+        ? require('./facility_layout_columns.js') : root.InspectorProFacilityColumns;
     const groundRuntime = typeof module === 'object' && module.exports
         ? require('./facility_layout_ground.js') : root.InspectorProFacilityGround;
     const lightCoverageRuntime = typeof module === 'object' && module.exports
@@ -2044,6 +2046,12 @@
         return value && Array.isArray(value.walls) ? value.walls : [];
     }
 
+    function columnsOf(layout) {
+        const extensions = layout && layout.extensions;
+        const value = extensions && extensions.facilityColumns;
+        return value && Array.isArray(value.columns) ? value.columns : [];
+    }
+
     // How a proposal changes the plan's outer walls (one record per layout): 'added', 'changed', 'removed' or ''.
     function outerWallChange(savedLayout, proposedLayout) {
         const was = savedLayout && savedLayout.extensions && savedLayout.extensions.facilityPerimeterWalls;
@@ -2135,6 +2143,7 @@
                 'wallId'
             ),
             outerWallChange: outerWallChange(before, after),
+            columnChanges: collectionChangeCounts(columnsOf(before), columnsOf(after), 'columnId'),
             removedNames: removedRecordNames(before, after),
             removedWalks: removedWalkNames(before, after),
         };
@@ -2327,6 +2336,7 @@
         const routes = source.routeChanges || {};
         const markings = source.markingChanges || {};
         const walls = source.wallChanges || {};
+        const columns = source.columnChanges || {};
         const outer = { added: 'new outer walls', changed: 'changed outer walls',
             removed: 'removed outer walls' }[source.outerWallChange];
         const parts = [];
@@ -2345,6 +2355,9 @@
             [finite(walls.added, 0), 'new wall', 'new walls'],
             [finite(walls.changed, 0), 'changed wall', 'changed walls'],
             [finite(walls.removed, 0), 'removed wall', 'removed walls'],
+            [finite(columns.added, 0), 'new column', 'new columns'],
+            [finite(columns.changed, 0), 'changed column', 'changed columns'],
+            [finite(columns.removed, 0), 'removed column', 'removed columns'],
             [finite(zones.added, 0), 'new zone', 'new zones'],
             [finite(zones.changed, 0), 'changed zone', 'changed zones'],
             [finite(zones.removed, 0), 'removed zone', 'removed zones'],
@@ -10604,6 +10617,7 @@
             ['interior-walls', 'Interior Walls', ''],
             ['floor-surfaces', 'Floor Surfaces', ''],
             ['floor-plan', 'Floor Plan (DXF)', ''],
+            ['columns', 'Columns', ''],
             ['replace-asset', 'Replace Asset', ''],
             ['align', 'Align', ''],
             ['distribute', 'Distribute', ''],
@@ -13997,6 +14011,13 @@
             this.suppressAdapterSelection = routeId;
             return;
         }
+        // Columns are selected like routes; the Columns dialog moves and sizes them.
+        const columnId = targetDataId(event.target, 'data-column-id', this.planView);
+        if (columnId && this.toolMode === 'select') {
+            this.handleViewSelection(columnId, event);
+            this.suppressAdapterSelection = columnId;
+            return;
+        }
         if (this.toolMode === 'aisle' && this.aisleState.drawing) {
             if (typeof event.preventDefault === 'function') event.preventDefault();
             this.pointerGesture = { kind: 'aisle', start: world, last: world };
@@ -17014,6 +17035,7 @@
         if (command === 'interior-walls') return Promise.resolve(interiorWallsRuntime.open(this));
         if (command === 'floor-surfaces') return Promise.resolve(floorSurfacesRuntime.open(this));
         if (command === 'floor-plan') return Promise.resolve(this.openFloorPlan());
+        if (command === 'columns') return Promise.resolve(columnsRuntime.open(this));
         if (command === 'replace-asset') return Promise.resolve(replaceAssetRuntime.open(this));
         if (command === 'appearance') return Promise.resolve(this.openAppearanceDialog());
         if (this.generationPlanningView && this.generationPlanningView.activeLayout()
@@ -18109,6 +18131,7 @@
                 : !componentMaterialsRuntime || !wallsRuntime.canEdit(this) || this._selectedPlacementRecords().length !== 1,
             'interior-walls': !interiorWallsRuntime || !wallsRuntime.canEdit(this),
             'floor-surfaces': !floorSurfacesRuntime || !wallsRuntime.canEdit(this),
+            columns: !columnsRuntime || !wallsRuntime.canEdit(this),
             'floor-plan': !floorPlanRuntime || !wallsRuntime.canEdit(this)
                 || typeof this.session.importFloorPlan !== 'function',
             'replace-asset': !replaceAssetRuntime || !wallsRuntime.canEdit(this) || this._selectedPlacementRecords().length !== 1,

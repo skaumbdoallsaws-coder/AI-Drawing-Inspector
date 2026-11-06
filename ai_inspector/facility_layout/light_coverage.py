@@ -15,8 +15,9 @@ off by where their centre is, as the view does (static/facility_layout_light_are
 
 Low lights and uplights (2026-11-05, the gym's garden). A low outdoor light (emission.low: a bollard, a path light, a
 lantern) counts from LOW_MIN_HEIGHT above the ground, and every glowing piece of it with a patch facing down is a lamp
-(share 0, as the view's bulbsOf: a lantern's glass faces down only at its foot). Its lamps share the finish's output,
-as its pools share its light: a festoon string's eight bulbs give 400 lm between them, not each. An uplight
+(share 0, as the view's bulbsOf: a lantern's glass faces down only at its foot). The lamps of one lit part share the
+finish's output, as the view's pools of one mesh share its light: a festoon string's eight bulbs give 400 lm between
+them, not each. Each lit part is one light, as in the view. An uplight
 (emission.uplight) lights what it faces, not the ground: it counts as none, and the summary lists it
 (uplightsNotCounted).
 
@@ -28,7 +29,10 @@ E = I h / d^3 for a cell h below the lamp and d from it, out to MAX_REACH. (Unti
 its angle and dark outside it; that hard edge left pockets at 0 lux between car park poles.) Walls stop light (below);
 nothing else casts a shadow, and there are no reflections, light loss or daylight. A lamp lights the area when it adds
 at least LIGHTING_LUX somewhere in it. Dark spots are connected cells (sides touching) below a level: half the area's
-mean unless one is given.
+mean unless one is given. A cell's value is the light at its centre, except near a lamp below SMOOTH_BELOW (a bollard,
+a lantern: 2026-11-05 review): there the light changes a lot across one cell, so a centre alone swung with where the
+lamp stood over it (a 0.3 m bollard over a cell's centre read 1605 lux there and 0.7 m away 59), and those cells take
+the mean of a grid of points across each (_cell_means).
 
 Walls (2026-11-01, the user's go). Until then the hall's light rows lit the truck yard through the dock wall. A lamp
 lights a cell only if the line from the lamp to the cell clears every wall: where it crosses a wall's line in plan it
@@ -70,6 +74,8 @@ MIN_LAMP_AREA = 0.0005      # square metres; a smaller downward patch is a slive
 MIN_LAMP_SHARE = 0.2        # a lamp's downward patches make up at least this share of its piece's surface
 MIN_HEIGHT = 3.0            # m above the ground below it; lower glows throw no pool and count as no lamp
 LOW_MIN_HEIGHT = 0.1        # m: a low outdoor light (emission.low: a bollard, a lantern) counts from here
+SMOOTH_BELOW = 2.0          # m: near a lamp this low, cells take the mean over points across each (_cell_means) ...
+SMOOTH_REACH = 3.0          # ... within this many times its height of it, and at least 2 m, plus a cell
 DARK_SHARE = 0.5            # default dark level: this share of the area's mean
 LISTED_SPOTS = 20
 NEAREST_LAMPS = 3
@@ -420,7 +426,7 @@ def find_lamps(layout, catalog, library, project_root):
             unread.add(placement["assetId"])
             continue
         matrix = None
-        for primitive in model["parts"]:
+        for part, primitive in enumerate(model["parts"]):
             finish, pattern = _part_finishes(placement, primitive, representation)
             row = library["appearances"].get(finish) if finish else None
             if not row or not row.get("emission"):
@@ -455,7 +461,8 @@ def find_lamps(layout, catalog, library, project_root):
                               "label": (placement.get("metadata") or {}).get("instanceLabel") or placement["assetId"],
                               "finish": finish, "x": float(point[0]), "y": float(point[1]), "z": float(point[2]),
                               "aim": [float(v) for v in direction],
-                              "lumens": data[finish]["lumens"], "beamAngleDegrees": data[finish]["beamAngleDegrees"]})
+                              "lumens": data[finish]["lumens"], "beamAngleDegrees": data[finish]["beamAngleDegrees"],
+                              "_part": part})
     below = ground_heights(layout, [lamp["x"] for lamp in lamps], [lamp["z"] for lamp in lamps]) if lamps else []
     kept = []
     for lamp, ground in zip(lamps, below):
@@ -465,10 +472,11 @@ def find_lamps(layout, catalog, library, project_root):
         on = switch_on and _area_lit(shapes, mode, lamp["x"], lamp["z"])
         kept.append(dict(lamp, heightMeters=round(height, 2), on=bool(on),
                          off=None if on else ("switch" if not switch_on else "area")))
-    # A low light's output is the fixture's: its lamps (a festoon string's bulbs) share it, as its pools share its light.
-    shared = Counter((lamp["placementId"], lamp["finish"]) for lamp in kept if lamp["finish"] in low)
+    # A low part's lamps (a festoon string's bulbs) share its output, as the view's pools of one mesh share its light:
+    # each lit part is one light, in the view and here alike.
+    shared = Counter((lamp["placementId"], lamp["finish"], lamp["_part"]) for lamp in kept if lamp["finish"] in low)
     for lamp in kept:
-        count = shared.get((lamp["placementId"], lamp["finish"]), 0)
+        count = shared.get((lamp["placementId"], lamp["finish"], lamp.pop("_part")), 0)
         if count > 1:
             lamp["lumens"] = lamp["lumens"] / count
     return kept, {"unreadModels": sorted(unread), "signalLightParts": dict(signals), "uplightParts": dict(upward)}
@@ -727,6 +735,13 @@ def estimate(layout, lamps, shape, dark_below=None, walls=()):
         facing = (dx * aim[0] - drop * aim[1] + dz * aim[2]) / safe     # the cosine of the angle off the aim
         lit_here = (drop > 0) & (facing > 0) & (dx * dx + dz * dz <= MAX_REACH * MAX_REACH)
         add = np.where(lit_here, peak * np.clip(facing, 0.0, 1.0) ** power * drop / safe ** 3, 0.0)
+        height = lamp.get("heightMeters")
+        if height is None:
+            ci = min(max(int((lamp["x"] - x0) // CELL) - c0, 0), c1 - c0 - 1)
+            ri = min(max(int((lamp["z"] - z0) // CELL) - r0, 0), r1 - r0 - 1)
+            height = float(drop[ri, ci])
+        if 0 < height < SMOOTH_BELOW:
+            add = _cell_means(add, aim, peak, power, dx, dz, drop, height)
         if len(walls):
             add = np.where(_shadowed(lamp, walls, grid_x[r0:r1, c0:c1], grid_z[r0:r1, c0:c1], ground[r0:r1, c0:c1],
                                      lit_here & inside[r0:r1, c0:c1]), 0.0, add)
@@ -742,6 +757,33 @@ def estimate(layout, lamps, shape, dark_below=None, walls=()):
                      "inside": inside, "lux": lux},
             "cells": int(inside.sum()), "lampsReaching": reaching, "totals": totals,
             "darkLevel": round(level, 1), "darkSpots": spots}
+
+
+def _cell_means(add, aim, peak, power, dx, dz, drop, height):
+    """ADD (a lamp's light at the cell centres, DX, DZ and DROP from the lamp to each) with the cells near a lamp
+    HEIGHT up replaced by the mean over n x n points across each, n = 2 cells over the height (4 to 16): the light under
+    a low lamp changes a lot across one cell. A cell keeps its centre's walls (the caller's shadow test)."""
+    reach = max(2.0, SMOOTH_REACH * height) + CELL
+    near = dx * dx + dz * dz <= reach * reach
+    if not near.any():
+        return add
+    rows, cols = np.nonzero(near)
+    r0, r1, c0, c1 = rows.min(), rows.max() + 1, cols.min(), cols.max() + 1
+    sdx, sdz, sdrop = dx[r0:r1, c0:c1], dz[r0:r1, c0:c1], drop[r0:r1, c0:c1]
+    count = min(16, max(4, math.ceil(2 * CELL / height)))
+    steps = ((np.arange(count) + 0.5) / count - 0.5) * CELL
+    total = np.zeros_like(sdx)
+    for ox in steps:
+        for oz in steps:
+            px, pz = sdx + ox, sdz + oz
+            distance = np.sqrt(px * px + pz * pz + sdrop * sdrop)
+            safe = np.where(distance > 1e-9, distance, 1.0)
+            facing = (px * aim[0] - sdrop * aim[1] + pz * aim[2]) / safe
+            total += np.where((sdrop > 0) & (facing > 0),
+                              peak * np.clip(facing, 0.0, 1.0) ** power * sdrop / safe ** 3, 0.0)
+    result = add.copy()
+    result[r0:r1, c0:c1] = np.where(near[r0:r1, c0:c1], total / count ** 2, add[r0:r1, c0:c1])
+    return result
 
 
 def _dark_spots(lux, inside, level, x0, z0, lamps, walls=None, ground=None):

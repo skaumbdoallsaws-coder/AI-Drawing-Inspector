@@ -256,8 +256,9 @@
     // the ground instead (aimedPool), MIN_HEIGHT above it, and also records the lamp, its aim and the beam's length.
     // A low outdoor light (beam.low, 2026-11-05: a bollard, a lantern) throws one from each glowing piece with a patch
     // facing down (bulbsOf: a lantern's glass faces down only at its foot), LOW_MIN_HEIGHT above the ground, and its
-    // pool is marked low: it shows no beam. A copy's low pools share its light: each gets the color over their number,
-    // so a festoon string's eight bulbs together are as bright as one lantern.
+    // pool is marked low: it shows no beam. A copy's low pools from this mesh share its light: each gets the color over
+    // their number, so a festoon string's eight bulbs together are as bright as one lantern. Each lit mesh is one light
+    // (the coverage estimate shares per part the same way).
     function poolsOf(THREE, mesh, toRoot, color, floorY, beam) {
         const low = Boolean(beam && beam.low);
         const lamps = low ? bulbsOf(mesh && mesh.geometry) : lampsOf(mesh && mesh.geometry);

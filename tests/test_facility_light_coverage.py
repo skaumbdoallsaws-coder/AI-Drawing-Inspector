@@ -25,6 +25,22 @@ def lamp(x, y, z, aim=(0.0, -1.0, 0.0), lumens=12000.0, beam=110.0, on=True, pla
             "aim": list(aim), "heightMeters": y, "lumens": lumens, "beamAngleDegrees": beam, "on": on, "off": None}
 
 
+def test_a_low_lamps_light_does_not_swing_with_where_it_stands_over_a_cell():
+    """2026-11-05 review: read at cell centres only, a 0.3 m bollard (600 lm, 150 degrees) over a 5 x 5 m area gave a
+    mean of 69 lux standing over a cell's centre and 11 lux 0.7 m away, and a cell under a lamp 0.12 m up read more
+    than its whole output. Near a lamp below 2 m each cell now takes the mean over points across it: the light that
+    lands is the lamp's output, wherever it stands."""
+    power = math.log(0.5) / math.log(math.cos(math.radians(75)))
+    for height in (1.5, 0.75, 0.3, 0.12):
+        landed = 600 * (1 - (height / math.hypot(10, height)) ** (power + 1))   # all but what passes 10 m
+        means = []
+        for at in (10.5, 11.0, 10.8):       # over a cell's centre, its corner, between
+            result = estimate({}, [lamp(at, height, at, lumens=600.0, beam=150.0)], box(0, 0, 21, 21))
+            assert result["grid"]["lux"].sum() == pytest.approx(landed, rel=0.1), (height, at)
+            means.append(result["totals"]["mean"])
+        assert max(means) == pytest.approx(min(means), rel=0.1), (height, means)
+
+
 def lux_at(result, x, z):
     grid = result["grid"]
     return grid["lux"][int((z - grid["originZ"]) // 1), int((x - grid["originX"]) // 1)]
@@ -209,10 +225,21 @@ def test_a_low_outdoor_light_counts_from_any_height_and_an_uplight_not_at_all(pr
     assert summary["lamps"]["byFinish"] == {"light-bollard-warm": 1}
 
 
-def test_a_low_lights_lamps_share_its_output(project):
-    """2026-11-05: a low light's lamps (a festoon string's bulbs) share the finish's lumens, as its pools share its
-    light; other lights' lamps each give the whole. A stack light's mount and base (solid, so each has a face looking
-    down) stand in for two bulbs here."""
+def test_a_low_parts_lamps_share_its_output(project, monkeypatch):
+    """2026-11-05: the lamps of one low part (a festoon string's bulbs) share the finish's lumens, as the view's
+    pools of one mesh share its light; each lit part is one light, and other lights' lamps each give the whole. A
+    stack light's mount and base (solid, so each has a face looking down) are the lit parts here, each read as three
+    bulbs in a row."""
+    from ai_inspector.facility_layout import light_coverage
+    real = light_coverage._model_lamps
+
+    def three_bulbs(model, primitive, frame, share):
+        local, parts = real(model, primitive, frame, share)
+        if share == 0.0 and len(parts) == 1:
+            ((centre, aim, area),) = parts
+            parts = [(centre + np.array([dx, 0.0, 0.0]), aim, area) for dx in (-0.05, 0.0, 0.05)]
+        return local, parts
+    monkeypatch.setattr(light_coverage, "_model_lamps", three_bulbs)
     root, catalog = project
     by_revision = {(entry["assetId"], entry["assetDefinitionRevision"]): entry for entry in catalog}
 
@@ -227,7 +254,9 @@ def test_a_low_lights_lamps_share_its_output(project):
     lumens = {}
     for lamp in lamps:
         lumens.setdefault(lamp["placementId"], []).append(lamp["lumens"])
-    assert lumens == {"pl-two": [200, 200], "pl-one": [400], "pl-high": [4000, 4000]}
+    assert lumens == {"pl-two": [pytest.approx(400 / 3)] * 6, "pl-one": [pytest.approx(400 / 3)] * 3,
+                      "pl-high": [4000, 4000]}
+    assert all("_part" not in lamp for lamp in lamps)
 
 
 def test_a_low_lights_lamps_are_its_glowing_pieces_with_a_patch_facing_down():

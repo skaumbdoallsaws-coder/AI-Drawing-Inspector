@@ -15,10 +15,10 @@ light, snapRelationship) for place_asset, from the layout's own geometry:
   two wall segments in line), its back on the wall, as high as the wall allows up to WALL_LIGHT_TOP. A wall has no
   lintel over a gap, so a light "over the door" goes beside it, at the top of the wall. A mount in a walkway, or
   outside every zone that takes equipment, is left out and counted under "skipped".
-- Wall fittings at given points (2026-11-05, the gym's bowling room: sconces, a neon sign): each point is where one
-  goes, on the room side of a wall; it is mounted on the face toward the point of the nearest wall that spans its
-  height (for a point inside a wall, the face toward the zone), its base heightMeters above the floor, facing into
-  the room. A point that cannot take it (no wall within NEAR_WALL, past the wall's end or across an opening, above
+- Wall fittings at given points (2026-11-05, the gym's bowling room: sconces, a neon sign; and any wall-mounted
+  fitting at a spot the user gives): each point is where one goes, on the side of a wall it is to face; it is mounted
+  on the face toward the point of the nearest wall that spans its height (for a point inside a wall or on its face,
+  within ON_FACE, the face toward the zone), its base heightMeters above the floor, facing that side. A point that cannot take it (no wall within NEAR_WALL, past the wall's end or across an opening, above
   the wall's top or below its bottom, in a walkway, outside the zones, against or touching something already there)
   is listed in notMounted with the reason. Walls are the layout's upright wall placements, not the shell's own
   walls, and the shell's walls and columns are not checked here (the preview checks them).
@@ -43,11 +43,13 @@ from .spatial import (_NON_PLACEMENT_ZONE_TYPES, _asset_field, _mounting_referen
 
 NAME = "suggest_facility_light_positions"
 # The helper is for a light with no position from the user. Its texts once read as a rule that only its spots were
-# allowed, and Sage refused a pole the user put at x 312, z 197.5 in a car park. Every text about placing lights says:
-USER_POSITION = ("When the user gives a light's position, place it there with place_asset, even off the helper's "
-                 "spots: in a car park or yard it is then staged for review, which is expected, not a reason to "
-                 "refuse or move it. A wall fitting (a sconce, a neon sign) at a spot the user gives goes there as a "
-                 "suggest_facility_light_positions point, so it is mounted on the wall.")
+# allowed, and Sage refused a pole the user put at x 312, z 197.5 in a car park. Every wall-mounted fitting the user
+# positions goes through the helper as a point (review round 3: an outdoor wall light placed directly has no mount).
+# Every text about placing lights says:
+USER_POSITION = ("A wall-mounted fitting (a wall light, a sconce, a neon sign) at a spot the user gives goes there as "
+                 "a suggest_facility_light_positions point, so it is mounted on the wall. Any other light: when the "
+                 "user gives its position, place it there with place_asset, even off the helper's spots: in a car "
+                 "park or yard it is then staged for review, which is expected, not a reason to refuse or move it.")
 # A "wall points" result is the user's or Sage's own points, mounted: copied as given, never placed off the wall.
 POINTS_HOW = ("These are the points given, mounted on the wall: place each with place_asset, copying its "
               "placement.transform and placement.snapRelationship exactly, and add a new placementId, positionMode "
@@ -69,6 +71,7 @@ WALL_LIGHT_TOP = 4.6        # m above the floor, the highest a wall light goes
 WALL_LIGHT_LOWEST = 2.2     # m above the floor, the lowest (above a door head)
 WALL_GAP = 0.003            # m between a wall light's back plate and the wall
 NEAR_WALL = 1.0             # m: a point given for a wall fitting is at most this far from the wall's face
+ON_FACE = 1e-6              # m: a point this close to a wall's face counts as inside the wall (float rounding)
 OPENING = (0.6, 6.0)        # m: a gap this wide between two wall segments in line is an opening
 MATCH = 0.01                # m: a pole this close to a spot stands on it (spots are given to the millimetre)
 EDGES = {"north": (0, 1), "south": (0, -1), "east": (1, 0), "west": (-1, 0)}
@@ -102,10 +105,11 @@ def tool_spec():
         "lintel over a gap, so a light 'over the door' goes beside it at the top of the wall. Copy a position's "
         "transform and snapRelationship into place_asset exactly (a wall light needs its snapRelationship), with a "
         "new placementId and instanceLabel. Light fittings come lit. Layout geometry only, not a lighting design. "
-        "Inside a room, a wall fitting (a sconce, a neon sign) goes at points: give points, one per fitting, each a "
-        "plan point on the room side of a wall within 1 m of its face, and heightMeters, its base above the floor (a "
-        "sconce about 1.5 m); each is mounted on the nearest wall's face toward its point, facing into the room. A "
-        "wall fitting at a spot the user gives goes there as a point. Only walls placed as items carry a fitting, not "
+        "Wall fittings at chosen spots go at points: a sconce or a neon sign in a room, and any wall-mounted fitting "
+        "(a wall light too) at a spot the user gives. Give points, one per fitting, each a plan point on the side of a "
+        "wall the fitting is to face (the room side, in a room) within 1 m of its face, and heightMeters, its base "
+        "above the floor (a sconce about 1.5 m); each is mounted on the nearest wall's face toward its point, facing "
+        "that side. Only walls placed as items carry a fitting, not "
         "the plan's interior or perimeter walls. One that does not fit (past the wall's end or across an opening, "
         "above the wall's top, in a walkway, against or touching something already there) is listed in notMounted "
         "with the reason: give another point or ask the user.",
@@ -642,11 +646,12 @@ def _point_positions(layout, catalog, asset, zone, points, height_above_floor):
         wall_placement, _, centre, axis, start, end, thickness = wall
         label = _label(wall_placement)
         normal = (-axis[1], axis[0])
-        if gap > 0:
+        if gap > ON_FACE:
             side = 1.0 if across > 0 else -1.0
         else:
-            # A point inside the wall: the face toward the zone (the room), the side whose point 0.3 m off the face
-            # is nearer it (a zone may stop short of the wall); not when both are as near, or the zone is far.
+            # A point inside the wall or on a face (a face at a hair's rounding counted either side, review round 3):
+            # the face toward the zone (the room), the side whose point 0.3 m off the face is nearer it (a zone may
+            # stop short of the wall); not when both are as near, or the zone is far.
             reach = thickness / 2 + 0.3
             foot = (px - normal[0] * across, pz - normal[1] * across)
             away = {s: area.distance(Point(foot[0] + s * normal[0] * reach, foot[1] + s * normal[1] * reach))
@@ -753,6 +758,10 @@ def suggest_light_positions(layout, catalog, arguments):
     low, high = _aabb(asset)
     if not low or not high:
         raise ValueError("This light has no catalog geometry to place.")
+    if any(float(high[axis]) - float(low[axis]) <= 1e-9 for axis in ("x", "y", "z")):
+        # Review round 3: a flat box has no collision volume, so what it would touch could not be checked here, and
+        # the layout refuses it (asset_geometry_missing).
+        raise ValueError("This light's catalog box is flat (no width, depth or height), so it cannot be placed.")
     wall = "wall-mounted" in tags
     points = arguments.get("points")
     if points and not wall:

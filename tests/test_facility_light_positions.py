@@ -365,6 +365,29 @@ def test_a_point_inside_a_wall_goes_on_the_rooms_side():
     assert item["placement"]["snapRelationship"]["face"] == "positive_z" and "facing north" in item["where"]
 
 
+def test_a_point_on_the_far_face_of_a_wall_goes_on_the_rooms_side():
+    """Review 2026-11-05 (round 3): a point exactly on the face away from the room was mounted outside or inside by
+    float rounding (a 9.6 m wall rounds its centre one way, the 9.8 m wall the other). A point within ON_FACE of a
+    face counts as inside the wall, so it goes on the face toward the zone."""
+    layout, catalog = room("east")
+    shorter = asset("asset-pl-north-96", 9.6, 0.2, 3.6, ["wall"])
+    catalog[shorter["assetId"]] = shorter
+    layout["placements"] = [item for item in layout["placements"] if item["placementId"] != "pl-north"]
+    layout["placements"].append(place("pl-north", shorter, 4.8, 0, 7.9))
+    ((item,),) = [wall_points(layout, catalog, [(5.0, 8.0)])["positions"]]
+    assert item["placement"]["snapRelationship"]["face"] == "negative_z" and "facing south" in item["where"]
+    assert spot(item) == pytest.approx((5.0, 7.647))
+    # An unturned wall with the room to its north, the point on its south face.
+    wall = asset("asset-wall-z4", 10.0, 0.2, 3.6, ["wall"])
+    north = {"zones": [dict(zone("zn-room", 10, 12), boundary=[{"x": 0, "z": 4.1}, {"x": 10, "z": 4.1},
+                                                              {"x": 10, "z": 12}, {"x": 0, "z": 12}]),
+                       dict(zone("zn-site", 20, 20), boundary=[{"x": -5, "z": -5}, {"x": 20, "z": -5},
+                                                               {"x": 20, "z": 20}, {"x": -5, "z": 20}])],
+             "floorMarkings": [], "routes": [], "placements": [place("pl-wall", wall, 5.0, 0, 4.0)]}
+    ((item,),) = [wall_points(north, dict(CATALOG, **{wall["assetId"]: wall}), [(5.0, 3.9)])["positions"]]
+    assert item["placement"]["snapRelationship"]["face"] == "positive_z" and "facing north" in item["where"]
+
+
 def test_a_flat_item_in_the_layout_does_not_stop_the_points():
     """Review 2026-11-05 (round 2): a box with no depth (a flat panel) has no collision volume, so the checks leave it
     out; the helper does too, rather than failing every point on the layout."""
@@ -414,6 +437,12 @@ def test_a_mount_outside_every_zone_is_left_out_with_the_reason():
 
 
 def test_only_light_fittings_and_saved_zones():
+    # Review 2026-11-05 (round 3): a flat fitting (no depth) is refused up front: what it touches cannot be checked,
+    # and the layout refuses it.
+    layout, catalog = room("east")
+    flat_sign = asset("asset-neon-flat", 1.2, 0.0, 0.5, ["lighting", "neon sign", "wall-mounted"])
+    with pytest.raises(ValueError, match="flat"):
+        wall_points(layout, dict(catalog, **{flat_sign["assetId"]: flat_sign}), [(5.0, 7.5)], asset_id=flat_sign["assetId"])
     with pytest.raises(ValueError, match="light fittings"):
         suggest_light_positions(yard(), CATALOG, {"assetId": CHAIR["assetId"], "zoneId": "zn-yard"})
     with pytest.raises(ValueError, match="zone"):
@@ -522,6 +551,15 @@ def test_a_light_goes_where_the_user_says_and_the_helper_is_for_no_position():
     # Review 2026-11-05 (round 2): a wall fitting at the user's spot goes there as a point, and a "wall points"
     # result says to copy its mounts as given, never to place a wall fitting off the wall.
     assert "goes there as a suggest_facility_light_positions point" in USER_POSITION
+    # Round 3: one rule for every wall-mounted fitting, an outdoor wall light too: as a point it is mounted on the
+    # wall's outside face; place_asset is for the other lights.
+    assert "A wall-mounted fitting (a wall light, a sconce, a neon sign)" in USER_POSITION
+    assert USER_POSITION.index("Any other light") < USER_POSITION.index("place it there with place_asset")
+    room_layout, room_catalog = room("east")
+    ((outside,),) = [suggest_light_positions(room_layout, room_catalog, {
+        "assetId": WALL_LIGHT["assetId"], "zoneId": "zn-room", "points": [{"x": 10.2, "z": 6.0}],
+        "heightMeters": 2.5})["positions"]]
+    assert outside["placement"]["snapRelationship"]["face"] == "positive_x" and "facing east" in outside["where"]
     layout, catalog = room("east")
     points_how = " ".join(wall_points(layout, catalog, [(2.0, 7.5)])["howToUse"].split())
     assert "snapRelationship exactly" in points_how and "even off the helper's spots" not in points_how

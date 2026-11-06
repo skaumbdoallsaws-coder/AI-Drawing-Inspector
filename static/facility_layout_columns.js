@@ -81,6 +81,11 @@
             });
             finish.value = keep;
         }
+        // The layout's own finishes (facilityAppearances.custom) first, then the library's as it loads.
+        const own = layout.extensions && layout.extensions.facilityAppearances;
+        (own && Array.isArray(own.custom) ? own.custom : []).forEach(function (row) {
+            if (row && typeof row.appearanceId === 'string') addFinish(row.appearanceId, row.label || row.appearanceId);
+        });
         const store = libraryStore(workspace);
         if (store && typeof store.get === 'function') {
             if (store.get()) fillFinishes(store.get());

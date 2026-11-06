@@ -1227,3 +1227,40 @@ def test_more_columns_than_a_plan_holds_block_the_conversion(monkeypatch):
     monkeypatch.setattr(conversion, "MAX_COLUMNS", 1)
     result = convert(drawing(circle("a", (2, 2), 0.2), circle("b", (6, 2), 0.2)), COLUMNS, HEIGHT)
     assert result["summary"]["blocked"]["code"] == "too_many_columns" and result["operations"] == []
+
+
+@pytest.mark.parametrize("turn", [0.0, 0.2, 30.0, 89.8])
+def test_a_box_a_little_off_square_is_one_column_whichever_corner_and_way_round_it_is_drawn(turn):
+    # Codex review (columns, round 1): a box within the right-angle and equal-sides tolerances took its turn from the
+    # side it started on, so its rotation (0 or 0.43 degrees) and its id depended on the corner it was drawn from.
+    c, s = math.cos(math.radians(turn)), math.sin(math.radians(turn))
+    corners = [(10 + x * c - z * s, 10 + x * s + z * c) for x, z in ((0, 0), (0.6, 0), (0.603, 0.4), (0.003, 0.4))]
+    found = set()
+    for start in range(4):
+        for reverse in (False, True):
+            ring = corners[start:] + corners[:start]
+            (row,) = convert(drawing(poly("c1", "L1", ring[::-1] if reverse else ring)), COLUMNS, HEIGHT)["columns"]
+            assert row["state"] == "new" and 0 <= row["rotationDegrees"] < 90
+            found.add((row["candidateId"], row["widthMeters"], row["depthMeters"], row["rotationDegrees"]))
+    assert len(found) == 1, found
+
+
+def test_one_insert_of_many_columns_lists_its_entities_once_not_once_per_column():
+    # Codex review (columns, round 1): each column of an insert listed and sorted all of the insert's entities again,
+    # so one insert of N outlines cost N * N lookups before any limit could refuse it.
+    lookups = [0]
+
+    class Counted(dict):
+        def get(self, key, default=None):
+            lookups[0] += 1
+            return super().get(key, default)
+
+    count = 400
+    entities = [Counted(dict(turned_box(f"row/e{k:03d}", (1 + (k % 20) * 1.5, 1 + (k // 20) * 1.2), 0.4, 0.4, 0),
+                             blocks=["ROW"])) for k in range(count)]
+    result = convert(drawing(*entities), COLUMNS, HEIGHT)
+    assert [row["state"] for row in result["columns"]] == ["new"] * count
+    sources = [f"row/e{k:03d}" for k in range(conversion.MAX_SOURCES)]
+    assert all(row["entityId"] == "row" and row["block"] == "ROW" and row["sources"] == sources
+               and row["layers"] == ["L1"] for row in result["columns"])
+    assert lookups[0] < 30 * count, lookups  # listed per column, it would be over 2 * count * count

@@ -1290,8 +1290,9 @@ def _column_shape(ring, kind):
     """A column's shape from a closed outline RING (its corners on the plan, as _loop gives them) drawn as KIND: a
     circle (an entity read as one, or ROUND_CORNERS or more corners all one distance from their middle), a rectangle
     (four corners at right angles, opposite sides equal), or None. A rectangle's rotation is a column's (a compass
-    turn: T lays the width along (cos T, -sin T)), 0 up to 90 degrees, its width along the side that turn gives, so
-    one rectangle has one shape whichever corner it is drawn from. A circle's middle is the least-squares circle
+    turn: T lays the width along (cos T, -sin T)), 0 up to 90 degrees: the mean of its four sides' directions, its
+    width the mean length of the two sides along that turn, so one rectangle, even one a little off square, has one
+    shape whichever corner it is drawn from and whichever way round. A circle's middle is the least-squares circle
     through its corners (exact for corners on a circle, however unevenly spaced)."""
     count = len(ring)
     cx, cz = sum(point[0] for point in ring) / count, sum(point[1] for point in ring) / count
@@ -1306,8 +1307,14 @@ def _column_shape(ring, kind):
         if not (all(turn >= square for turn in turns) or all(turn <= -square for turn in turns)) \
                 or abs(lengths[0] - lengths[2]) > TOLERANCE or abs(lengths[1] - lengths[3]) > TOLERANCE:
             return None
-        width, depth = (lengths[0] + lengths[2]) / 2, (lengths[1] + lengths[3]) / 2
-        turn = round(math.degrees(math.atan2(-units[0][1], units[0][0])) % 180.0, 3) % 180.0
+        # Sides a quarter turn apart point one way once their angles are multiplied by four: the mean of those is the
+        # box's turn, the same from every corner and either way round (a side drawn backwards is half a turn off).
+        angles = [math.atan2(-unit[1], unit[0]) for unit in units]  # compass turns, radians
+        mean = math.atan2(sum(math.sin(4 * a) for a in angles), sum(math.cos(4 * a) for a in angles)) / 4
+        along = [abs(math.cos(a - mean)) >= abs(math.sin(a - mean)) for a in angles]
+        width = sum(length for length, on in zip(lengths, along) if on) / max(1, sum(along))
+        depth = sum(length for length, on in zip(lengths, along) if not on) / max(1, 4 - sum(along))
+        turn = round(math.degrees(mean) % 180.0, 3) % 180.0
         if turn >= 90.0:
             turn, width, depth = turn - 90.0, depth, width
         return {"shape": "rectangle", "center": (cx, cz), "widthMeters": width, "depthMeters": depth,
@@ -1344,7 +1351,7 @@ def _columns(entities, layout, reference_id, import_id, column_settings, exclude
     for entity, drawn in entities:
         identifier = str(entity.get("id"))
         groups.setdefault(identifier.rsplit("/", 1)[0] if "/" in identifier else None, []).append((entity, drawn))
-    found = []  # (shape, the entities it came from, the entity it keeps as its source, its block)
+    found = []  # (shape, its layers, the entities it came from, the entity it keeps as its source, its block)
     for insert, members in groups.items():
         outlines, loose = [], []
         for entity, drawn in members:
@@ -1374,17 +1381,19 @@ def _columns(entities, layout, reference_id, import_id, column_settings, exclude
                 made.append((shape, entity))
         if insert is None:
             for shape, entity in made:
-                found.append((shape, [entity], str(entity.get("id")), None))
+                found.append((shape, [str(entity.get("layer"))], [str(entity.get("id"))], str(entity.get("id")), None))
             for index in sorted(held):
                 unconverted.add(outlines[index][2], "column_inside")
             for entity in loose:
                 unconverted.add(entity, "column_shape")
             continue
-        everything = [entity for entity, _drawn in members]
-        blocks = everything[0].get("blocks") if isinstance(everything[0].get("blocks"), list) else []
-        for shape, _entity in made:
-            found.append((shape, everything, insert, str(blocks[-1]) if blocks else None))
-        if not made:
+        if made:  # an insert's layers and entities are listed once for all of its columns (it may hold thousands)
+            layers = sorted({str(entity.get("layer")) for entity, _drawn in members})[:MAX_SOURCES]
+            sources = sorted(str(entity.get("id")) for entity, _drawn in members)[:MAX_SOURCES]
+            blocks = members[0][0].get("blocks") if isinstance(members[0][0].get("blocks"), list) else []
+            for shape, _entity in made:
+                found.append((shape, layers, sources, insert, str(blocks[-1]) if blocks else None))
+        else:
             for entity in loose + [outlines[index][2] for index in sorted(held)]:
                 unconverted.add(entity, "column_shape")
 
@@ -1405,7 +1414,7 @@ def _columns(entities, layout, reference_id, import_id, column_settings, exclude
     existing_tree = STRtree(existing_shapes) if existing_shapes else None
 
     rows = []
-    for shape, members, entity_id, block in found:
+    for shape, layers, sources, entity_id, block in found:
         center = {"x": _r(shape["center"][0], 4), "z": _r(shape["center"][1], 4)}
         if shape["shape"] == "rectangle":
             sizes = {"widthMeters": _r(shape["widthMeters"], 4), "depthMeters": _r(shape["depthMeters"], 4),
@@ -1415,9 +1424,7 @@ def _columns(entities, layout, reference_id, import_id, column_settings, exclude
         # Ids come from the drawing and the shape only, so converting again finds a column there.
         column_id = "col-fp-" + _digest(import_id, "column", shape["shape"], center, sizes)[:16]
         rows.append(dict({"candidateId": column_id, "shape": shape["shape"], "center": center}, **sizes,
-                         block=block, entityId=entity_id,
-                         layers=sorted({str(entity.get("layer")) for entity in members}),
-                         sources=sorted(str(entity.get("id")) for entity in members)[:MAX_SOURCES]))
+                         block=block, entityId=entity_id, layers=list(layers), sources=list(sources)))
     rows.sort(key=lambda row: (row["center"]["z"], row["center"]["x"], row["candidateId"]))
 
     height = (column_settings or {}).get("heightMeters")

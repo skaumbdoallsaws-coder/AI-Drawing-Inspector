@@ -7724,6 +7724,16 @@
             return wallsRuntime.volumes(layout, floorY);
         }
 
+        // The layout's columns (columns.py) as solids: drawn by renderColumns, and obstacles to the walker and the
+        // drone as the walls are.
+        function layoutColumnVolumes() {
+            if (typeof wallsRuntime.columnVolumes !== 'function') return [];
+            return wallsRuntime.columnVolumes(state.currentInput && state.currentInput.layout).map(function (volume) {
+                return { id: volume.id, placementId: volume.placementId, polygon: volume.polygon,
+                    minimumY: volume.minimumY, maximumY: volume.maximumY };
+            });
+        }
+
         function renderPerimeterWalls() {
             if (!state.modelRoot) return;
             wallVolumes().forEach(function (volume) {
@@ -7953,7 +7963,7 @@
                     placementId: placement.placementId,
                     polygon: footprintForPlacement(placement),
                 };
-            }).concat(wallVolumes().map(function (volume) {
+            }).concat(wallVolumes().concat(layoutColumnVolumes()).map(function (volume) {
                 return { placementId: volume.id, polygon: volume.polygon };
             })).filter(function (record) {
                 return record.polygon.length >= 3;
@@ -7975,7 +7985,7 @@
                     minimumY: bounds.minimum.y,
                     maximumY: bounds.maximum.y,
                 }, 0);
-            }).concat(wallVolumes()).filter(Boolean).sort(function (left, right) {
+            }).concat(wallVolumes(), layoutColumnVolumes()).filter(Boolean).sort(function (left, right) {
                 return left.placementId.localeCompare(right.placementId);
             });
         }

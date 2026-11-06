@@ -150,9 +150,10 @@ def authored(value) -> dict:
 
 
 def validate_columns(layout) -> None:
-    value = (layout.get("extensions") or {}).get(KEY)
-    if value is None:
+    extensions = layout.get("extensions") or {}
+    if not isinstance(extensions, Mapping) or KEY not in extensions:  # no columns; a stored null is refused below
         return
+    value = extensions[KEY]
     if not isinstance(value, Mapping) or not isinstance(value.get("columns"), list):
         raise ValueError("Invalid columns")
     if compile_columns(authored(value), layout) != value:

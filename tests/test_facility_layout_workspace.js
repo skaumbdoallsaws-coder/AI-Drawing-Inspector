@@ -2976,6 +2976,15 @@ async function main() {
         assert.strictEqual(review.zoneChanges.changed, (saved.zones || []).length);
         assert.ok(/1 removed wall/.test(workspaceModule.proposalPlainChangeSummary(review, {})));
         assert.ok(!/changed wall|moved item|changed aisle/.test(workspaceModule.proposalPlainChangeSummary(review, {})));
+        // As JSON.stringify: an empty array slot is null, whatever the key order around it.
+        const slots = (was, now) => {
+            const left = clone(saved), right = reversed(clone(saved));
+            left.extensions.facilityInteriorWalls.walls[0].openings = was;
+            right.extensions.facilityInteriorWalls.walls[0].openings = now;
+            return workspaceModule.buildLayoutProposalReview(left, right).wallChanges;
+        };
+        assert.deepStrictEqual(slots([], new Array(1)), { added: 0, changed: 1, removed: 0 });
+        assert.deepStrictEqual(slots([null], new Array(1)), { added: 0, changed: 0, removed: 0 });
         // A real difference still counts, at any depth.
         const opened = clone(after);
         opened.extensions.facilityInteriorWalls.walls[0].openings[0].endMeters = 2.5;

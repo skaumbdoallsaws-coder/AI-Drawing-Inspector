@@ -33,12 +33,13 @@ class Node {
     }
 }
 
-function setup(saved, selection) {
+function setup(saved, selection, custom) {
     const doc = { createElement: tag => new Node(doc, tag), activeElement: null,
         defaultView: { crypto: { randomUUID: () => '00000000-0000-4000-8000-000000000001' } } };
     const layout = { layoutId: 'fl-test', coordinateFrame: { floorElevation: 0 },
         extensions: { facilityPlan: { widthMeters: 40, depthMeters: 30 } } };
     if (saved) layout.extensions.facilityColumns = { version: 1, columns: saved };
+    if (custom) layout.extensions.facilityAppearances = { version: 1, custom };
     const calls = [];
     const state = { loaded: true, layout, selection: selection || [], draftRevision: 3 };
     const library = { appearances: new Map([['concrete-smooth', { appearanceId: 'concrete-smooth', label: 'Concrete' }],
@@ -121,3 +122,14 @@ test('round columns take a diameter; another finish replaces the old one; delete
         assert.deepEqual(run.calls, [{ version: 1, columns: [DXF].map(row => {
             const value = JSON.parse(JSON.stringify(row)); delete value.footprint; return value; }) }]);
     });
+
+test('the finish list holds the layout\'s own finishes as well as the library\'s', async () => {
+    // Codex review (columns, round 1): a finish saved in the layout could not be chosen for a column.
+    const run = setup(null, [], [{ appearanceId: 'custom-blue', label: 'Blue paint', baseAppearanceId: 'concrete-smooth' }]);
+    assert.deepEqual(run.field('Finish').options.map(option => [option.value, option.textContent]), [
+        ['', 'Plain color'], ['custom-blue', 'Blue paint'], ['concrete-smooth', 'Concrete'],
+        ['steel-brushed', 'Brushed steel']]);
+    run.field('Finish').value = 'custom-blue';
+    await run.apply();
+    assert.deepEqual(run.calls[0].columns[0].appearance, { appearanceId: 'custom-blue' });
+});

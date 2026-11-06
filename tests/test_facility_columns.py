@@ -177,3 +177,19 @@ def test_sage_can_write_every_column_the_kernel_takes_and_nothing_else():
            {"op": "delete_column", "columnId": "iw-a1"}]
     for operation in bad:
         assert errors(operation), operation
+
+
+def test_a_stored_null_for_the_columns_is_refused_before_any_edit():
+    # Codex review (columns, round 1): "facilityColumns": null passed validation, then set_columns crashed on it.
+    doc = layout()
+    doc["extensions"][KEY] = None
+    with pytest.raises(ValueError, match="Invalid columns"):
+        validate_columns(doc)
+    with pytest.raises(FacilityValidationError):
+        validate_layout(doc)
+    for operation in ({"op": "upsert_column", "column": square()},
+                      {"op": "set_columns", "columns": {"version": 1, "columns": [square()]}}):
+        with pytest.raises(FacilityValidationError, match="Invalid columns"):
+            apply(doc, operation)
+    del doc["extensions"][KEY]
+    validate_columns(doc)  # no columns at all is fine

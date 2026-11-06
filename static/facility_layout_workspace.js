@@ -1898,21 +1898,34 @@
 
     // A record's data as text, its keys in sorted order at every level, so two copies of one record compare equal
     // whatever order their keys came in: the server returns a saved layout with sorted keys, while a proposed one
-    // keeps the order its operations wrote (a wall's derived panels come last). Otherwise as JSON.stringify.
+    // keeps the order its operations wrote (a wall's derived panels come last). Otherwise exactly as JSON.stringify:
+    // in an array an empty slot, undefined, a function or a symbol is null; in an object such a member is left out.
+    function jsonSkips(item) {
+        return item === undefined || typeof item === 'function' || typeof item === 'symbol';
+    }
+
     function canonicalJson(value) {
+        if (value && typeof value.toJSON === 'function') value = value.toJSON();
         if (Array.isArray(value)) {
-            return '[' + value.map(function (item) {
-                return item === undefined || typeof item === 'function' ? 'null' : canonicalJson(item);
-            }).join(',') + ']';
+            const items = [];
+            for (let index = 0; index < value.length; index += 1) {  // every slot, empty ones too
+                items.push(jsonSkips(value[index]) ? 'null' : canonicalJson(value[index]));
+            }
+            return '[' + items.join(',') + ']';
         }
         if (value && typeof value === 'object') {
             return '{' + Object.keys(value).sort().filter(function (key) {
-                return value[key] !== undefined && typeof value[key] !== 'function';
+                return !jsonSkips(value[key]);
             }).map(function (key) {
                 return JSON.stringify(key) + ':' + canonicalJson(value[key]);
             }).join(',') + '}';
         }
         return JSON.stringify(value);
+    }
+
+    // Two records hold the same data. Most copies match as they stand (one key order), so that is tried first.
+    function sameData(left, right) {
+        return JSON.stringify(left) === JSON.stringify(right) || canonicalJson(left) === canonicalJson(right);
     }
 
     function recordIndex(records, identityKey) {
@@ -1929,9 +1942,9 @@
         return index;
     }
 
-    function placementSpatialSignature(placement) {
+    function placementSpatialFields(placement) {
         const source = placement || {};
-        return canonicalJson({
+        return ({
             assetId: source.assetId || '',
             assetDefinitionRevision:
                 source.assetDefinitionRevision || '',
@@ -1948,8 +1961,7 @@
         afterIndex.forEach(function (record, identifier) {
             if (!beforeIndex.has(identifier)) {
                 added += 1;
-            } else if (canonicalJson(beforeIndex.get(identifier))
-                    !== canonicalJson(record)) {
+            } else if (!sameData(beforeIndex.get(identifier), record)) {
                 changed += 1;
             }
         });
@@ -1972,7 +1984,7 @@
             if (!original) {
                 addedIds.push(identifier);
                 proposedRecords.push(clone(record));
-            } else if (canonicalJson(original) !== canonicalJson(record)) {
+            } else if (!sameData(original, record)) {
                 changedIds.push(identifier);
                 beforeRecords.push(clone(original));
                 proposedRecords.push(clone(record));
@@ -2106,8 +2118,8 @@
                 proposedPlacements.push(clone(placement));
                 return;
             }
-            if (placementSpatialSignature(original)
-                    !== placementSpatialSignature(placement)) {
+            if (!sameData(placementSpatialFields(original),
+                    placementSpatialFields(placement))) {
                 movedPlacementIds.push(placementId);
                 beforePlacements.push(clone(original));
                 proposedPlacements.push(clone(placement));

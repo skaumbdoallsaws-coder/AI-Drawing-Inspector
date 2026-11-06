@@ -4751,6 +4751,26 @@ test('columns stand as their own meshes, shown and hidden with the walls, not co
     data.adapter.dispose();
 });
 
+test('columns stop the walker and the drone as walls do', async () => {
+    // Codex review (columns, round 1): columns were drawn but were no obstacle in walkthrough or drone mode.
+    const data = fixture({ worldBounds: { minX: 0, minZ: 0, maxX: 20, maxZ: 20, floorY: 0 } });
+    data.adapter.mount(data.host);
+    const column = (id, x, z) => ({ columnId: id, label: id, shape: 'rectangle', center: { x, z }, widthMeters: 0.4,
+        depthMeters: 0.4, rotationDegrees: 0, heightMeters: 6, baseElevation: 0, appearance: { color: '#8f969c' },
+        footprint: [{ x: x - 0.2, z: z - 0.2 }, { x: x + 0.2, z: z - 0.2 }, { x: x + 0.2, z: z + 0.2 },
+            { x: x - 0.2, z: z + 0.2 }] });
+    await data.adapter.setScene({ layout: { placements: [], extensions: { facilityColumns: { version: 1,
+        columns: [column('col-a', 4, 4), column('col-b', 16, 16)] } } }, assetCatalog: [] });
+    data.scheduler.flush();
+    const walking = data.adapter.enterWalkthrough({ worldPoint: { x: 10, y: 0, z: 10 }, ignoreSelection: true });
+    assert.strictEqual(walking.obstacleCount, 2);
+    data.adapter.exitWalkthrough();
+    const flying = data.adapter.enterDrone({ ignoreSelection: true });
+    assert.strictEqual(flying.obstacleCount, 2);
+    data.adapter.exitDrone();
+    data.adapter.dispose();
+});
+
 test('overhead and roof sheeting assets have their own layers, sheeting hidden at first', async () => {
     const data = fixture();
     data.adapter.mount(data.host);

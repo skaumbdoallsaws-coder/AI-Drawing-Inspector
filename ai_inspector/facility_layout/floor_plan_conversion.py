@@ -1364,7 +1364,8 @@ def _once_round(ring, middle):
     angles = [math.atan2(z - middle[1], x - middle[0]) for x, z in ring]
     steps = [(angles[(k + 1) % len(angles)] - angles[k] + math.pi) % (2 * math.pi) - math.pi
              for k in range(len(angles))]
-    one_way = all(0 < step <= ROUND_STEP for step in steps) or all(-ROUND_STEP <= step < 0 for step in steps)
+    most = ROUND_STEP + 1e-9  # a step of exactly ROUND_STEP passes, whatever rounding its angles carry
+    one_way = all(0 < step <= most for step in steps) or all(-most <= step < 0 for step in steps)
     return one_way and abs(abs(sum(steps)) - 2 * math.pi) <= 1e-6
 
 

@@ -1318,6 +1318,14 @@ def test_a_round_outline_goes_once_round_its_middle():
         assert (rows[name]["state"], rows[name]["shape"]) == ("new", "circle")
         assert rows[name]["diameterMeters"] == pytest.approx(0.5, abs=1e-6)
         assert xz(rows[name], "center") == pytest.approx((x, 7.0), abs=1e-6)
+    # A step of exactly 45 degrees is round enough, whatever rounding the angles carry (Codex review, round 7: 15
+    # corners every 22.5 degrees from 22.5 to 337.5 closed with a step worked out as 45.000000000000206, refused).
+    edge = [22.5 * k for k in range(1, 16)]
+    for start in range(len(edge)):
+        for way in (1, -1):
+            corners = (edge[start:] + edge[:start])[::way]
+            result = convert(drawing(on_circle("edge", (10, 10), corners)), COLUMNS, HEIGHT)
+            assert [(row["shape"], row["state"]) for row in result["columns"]] == [("circle", "new")], (start, way)
 
 
 def test_more_columns_than_a_plan_holds_block_the_conversion(monkeypatch):

@@ -5192,6 +5192,39 @@
             min-height: calc(var(--ribbon-btn-h) + 10px);
             overflow: visible;
         }
+        .packaging-ribbon-shell { display: flex; align-items: stretch; width: 100%; min-width: 0; container-type: inline-size; }
+        .packaging-ribbon-shell .packaging-workflow-selector { flex: 0 0 244px; min-width: 244px; width: 244px; padding: 5px 10px; }
+        .packaging-workflow-selector .workflow-type-combobox { width: 224px; min-width: 0; }
+        .packaging-ribbon-commandbar { flex: 1 1 auto; min-width: 0; }
+        .packaging-ribbon-commandbar .ribbon-group { gap: 2px; padding: 5px 6px; }
+        .packaging-ribbon-commandbar .documentation-ribbon-command.is-medium { width: 60px; min-width: 60px; }
+        .packaging-ribbon-commandbar .documentation-command-label { max-width: 60px; white-space: normal; text-align: center; }
+        .packaging-ribbon-commandbar .documentation-ribbon-command.is-compact .documentation-command-label { text-align: left; }
+        .packaging-ribbon-commandbar [data-packaging-command][hidden] { display: none !important; }
+        .packaging-ribbon-commandbar .documentation-ribbon-command[aria-expanded="true"] { background: rgba(42, 144, 209, .15); border-color: rgba(74, 168, 228, .5); }
+        .packaging-ribbon-commandbar [data-documentation-ribbon-group="more"],
+        .packaging-ribbon-commandbar [data-documentation-separator-for="more"] { display: none; }
+        @container (max-width: 1040px) {
+            .packaging-ribbon-commandbar [data-documentation-ribbon-group="finish"],
+            .packaging-ribbon-commandbar [data-documentation-separator-for="finish"],
+            .packaging-ribbon-commandbar [data-documentation-ribbon-group="review"],
+            .packaging-ribbon-commandbar [data-documentation-separator-for="review"] { display: none; }
+            .packaging-ribbon-commandbar [data-documentation-ribbon-group="more"] { display: flex; }
+            .packaging-ribbon-commandbar [data-documentation-separator-for="more"] { display: block; }
+            .packaging-ribbon-shell .packaging-workflow-selector { flex-basis: 208px; min-width: 208px; width: 208px; }
+            .packaging-workflow-selector .workflow-type-combobox { width: 188px; }
+        }
+        @container (max-width: 780px) {
+            .packaging-ribbon-commandbar .documentation-ribbon-command.is-medium { width: 48px; min-width: 48px; }
+            .packaging-ribbon-commandbar .ribbon-group { padding-left: 3px; padding-right: 3px; }
+        }
+        @container (max-width: 650px) {
+            .packaging-ribbon-shell .packaging-workflow-selector { flex-basis: 184px; min-width: 184px; width: 184px; padding-left: 6px; padding-right: 6px; }
+            .packaging-workflow-selector .workflow-type-combobox { width: 172px; }
+            .packaging-ribbon-commandbar .documentation-ribbon-command.is-medium { width: 44px; min-width: 44px; }
+            .packaging-ribbon-commandbar .documentation-ribbon-stack { display: none; }
+            .packaging-ribbon-commandbar #packaging-ribbon-arrange { display: none; }
+        }
         .facility-ribbon-shell {
             width: 100%;
             min-width: 0;
@@ -21930,6 +21963,8 @@
         // in playNarrationSequence for the wiring points.
         const TRAINING_TYPES = [
             { value: 'assembly',       label: 'Process Map',                 icon: 'process_map.svg' },
+            ...(new URLSearchParams(location.search).get('packagingPilot') === '1'
+                ? [{ value: 'packaging_shipping', label: 'Packaging & Shipping', icon: 'documentation.svg' }] : []),
             { value: 'plant_process',  label: 'Plant / Process Explanation', icon: 'plant_process_explanation.svg' },
             { value: 'facility_layout',label: 'Facility Layout',             icon: 'facility_layout.svg' },
             { value: 'documentation',  label: 'Documentation',               icon: 'documentation.svg' },
@@ -22367,7 +22402,9 @@
         }
 
         function _desktopObserveApplication() {
-            const rows = _desktopInspectOtherWorkflows();
+            const observer = window.InspectorProDesktopWorkflowObservation;
+            if (typeof observer?.withPackaging !== 'function') throw new Error('desktop_workflow_coverage_unavailable');
+            const rows = observer.withPackaging(_desktopInspectOtherWorkflows(), window);
             const facility = _trainFacilityLayoutAuthoringApp?.session?.getState();
             rows.facility = _trainFacilitySheets ? _trainFacilitySheets.observation() : {
                 dirty: !!facility?.dirty,
@@ -23725,6 +23762,8 @@
         // ---- Viewport Rendering ----
         function switchTab(tab) {
             const previousTab = state.activeTab;
+            if (previousTab === 'training' && tab !== 'training'
+                    && !_packagingConfirmLeave(() => switchTab(tab))) return false;
             if (previousTab === 'training' && tab !== 'training' && _trainIsPlantProcessMode()) {
                 _trainExitPlantSpatialWalkthrough('tab_changed');
                 _stopPlantWalkthrough();
@@ -45304,7 +45343,8 @@
             trainingState.type = typeSelect.value;
             const applied = _trainApplyTrainingTypeDefaults(prevType);
             if (applied === false) typeSelect.value = trainingState.type;
-            if (applied !== false && (prevType === 'documentation' || trainingState.type === 'documentation')) {
+            if (applied !== false && (['documentation', 'packaging_shipping'].includes(prevType)
+                    || ['documentation', 'packaging_shipping'].includes(trainingState.type))) {
                 renderViewport();
                 return;
             }
@@ -47210,6 +47250,7 @@
             ribbon.innerHTML = '';
             ribbon.classList.remove('process-map-ribbon');
             ribbon.classList.remove('facility-layout-ribbon');
+            ribbon.classList.remove('packaging-workflow-ribbon');
             ribbon.classList.remove('documentation-workflow-ribbon');
 
             if (state.activeTab === 'drawing') {
@@ -48096,7 +48137,9 @@
                     ribbon.appendChild(g2);
                 }
             } else if (state.activeTab === 'training') {
-                if (trainingState.type === 'documentation') {
+                if (trainingState.type === 'packaging_shipping') {
+                    _trainRenderPackagingRibbon(ribbon);
+                } else if (trainingState.type === 'documentation') {
                     _renderDocumentationWorkflowRibbon(ribbon);
                 } else if (trainingState.viewportMode === 'process_flow') {
                     _trainRenderProcessMapRibbon(ribbon);
@@ -48140,7 +48183,220 @@
             }
         }
 
+        function _packagingEditorUI() {
+            if (state.activeTab !== 'training' || trainingState.type !== 'packaging_shipping') return null;
+            const frame = document.getElementById('packagingWorkspaceFrame');
+            try {
+                const url = new URL(frame?.contentWindow?.location.href || 'about:blank');
+                if (url.origin !== location.origin || url.pathname !== '/packaging') return null;
+                return frame.contentWindow.InspectorProPackaging || null;
+            } catch (_) { return null; }
+        }
+
+        function _packagingRunCommand(id) {
+            const ran = _packagingEditorUI()?.executeCommand(id);
+            _packagingSyncRibbon();
+            return !!ran;
+        }
+
+        function _packagingSyncRibbon() {
+            const current = _packagingEditorUI()?.getRibbonState();
+            document.querySelectorAll('[data-packaging-command]').forEach(button => {
+                const id = button.dataset.packagingCommand;
+                button.disabled = !current?.commands[id]?.enabled;
+                if (button.hasAttribute('aria-controls')) button.setAttribute('aria-expanded', String(!!current?.commands[id]?.active));
+                if (id === 'resume') button.hidden = !current?.locked;
+            });
+            document.querySelectorAll('[data-packaging-command-menu]').forEach(trigger => {
+                trigger.disabled = !trigger.dataset.packagingCommandMenu.split(',').some(id => current?.commands[id]?.enabled);
+            });
+        }
+
+        function _trainRenderPackagingRibbon(ribbon) {
+            ribbon.classList.add('packaging-workflow-ribbon', 'documentation-workflow-ribbon');
+            const shell = document.createElement('div');
+            shell.className = 'documentation-ribbon-shell packaging-ribbon-shell';
+            const selector = document.createElement('div');
+            selector.className = 'documentation-workflow-selector packaging-workflow-selector';
+            selector.appendChild(_trainCreateWorkflowTypeSelector());
+            const bar = document.createElement('div');
+            bar.className = 'documentation-ribbon-commandbar packaging-ribbon-commandbar';
+            const definitions = {
+                product: ['3dmodel', 'Product', 'Product'],
+                carton: ['facilityAlign', 'Carton', 'Carton'],
+                contents: ['facilityVerticalStack', 'Contents', 'Contents'],
+                arrange: ['facilityAutoArrange', 'Arrange', 'Arrange'],
+                appearance: ['facilityAppearance', 'Appearance', 'Appearance'],
+                graphics: ['facilityDecals', 'Graphics', 'Graphics'],
+                validation: ['facilityFit', 'Validation', 'Validation'],
+                rates: ['facilityFloorMarking', 'Rates', 'Rates'],
+                new: ['properties', 'New', 'New packaging document'],
+                open: ['facilityExportPdf', 'Open', 'Open packaging document'],
+                save: ['facilitySave', 'Save', 'Save packaging document'],
+                undo: ['facilityUndo', 'Undo', 'Undo packaging change'],
+                redo: ['facilityRedo', 'Redo', 'Redo packaging change'],
+                reload: ['facilityRotate', 'Reload', 'Reload saved packaging document'],
+                pdf: ['facilityExportPdf', 'Export PDF', 'Download packaging review PDF'],
+                resume: ['facilityLock', 'Resume', 'Resume packaging editing'],
+            };
+            const panels = ['product', 'carton', 'contents', 'arrange', 'appearance', 'graphics', 'validation', 'rates'];
+            const tag = (node, id) => {
+                node.dataset.packagingCommand = id;
+                if (panels.includes(id)) {
+                    node.setAttribute('aria-haspopup', 'dialog');
+                    node.setAttribute('aria-controls', 'packagingWorkspaceFrame');
+                    node.setAttribute('aria-expanded', 'false');
+                }
+                node.disabled = true;
+                return node;
+            };
+            const command = (id, compact = false) => {
+                const [icon, label, title] = definitions[id];
+                return tag(_documentationRibbonButton(icon, label, title, `packaging-ribbon-${id}`,
+                    () => _packagingRunCommand(id), { size: compact ? 'compact' : 'medium', compact }), id);
+            };
+            const menu = (icon, label, ids) => {
+                const node = _documentationRibbonMenu(icon, label, `${label} packaging commands`, ids.map(id => ({
+                    id: `packaging-menu-${id}`, icon: definitions[id][0], label: definitions[id][1],
+                    title: definitions[id][2], disabled: true, handler: () => _packagingRunCommand(id),
+                })), { size: 'medium' });
+                ids.forEach(id => tag(node.querySelector(`#packaging-menu-${id}`), id));
+                node.querySelector('.documentation-ribbon-menu-trigger').dataset.packagingCommandMenu = ids.join(',');
+                return node;
+            };
+            _documentationAppendRibbonGroup(bar, 'Design', panels.slice(0, 4).map(id => command(id)));
+            _documentationAppendRibbonGroup(bar, 'Finish', panels.slice(4, 6).map(id => command(id)));
+            _documentationAppendRibbonGroup(bar, 'Review', panels.slice(6).map(id => command(id)));
+            _documentationAppendRibbonGroup(bar, 'More', [menu('facilityAutoArrange', 'More', panels.slice(3))]);
+            _documentationAppendRibbonGroup(bar, 'Document', [
+                menu('facilityExportPdf', 'Document', ['new', 'open', 'undo', 'redo', 'reload', 'pdf']),
+                _documentationRibbonStack([command('undo', true), command('redo', true)]),
+                command('save'), command('resume'),
+            ]);
+            shell.append(selector, bar); ribbon.appendChild(shell); _packagingSyncRibbon();
+        }
+
+        window.addEventListener('message', event => {
+            const frame = document.getElementById('packagingWorkspaceFrame');
+            if (event.origin !== location.origin || event.source !== frame?.contentWindow || !_packagingEditorUI()) return;
+            if (event.data?.type === 'inspectorpro:packaging-ribbon') _packagingSyncRibbon();
+            if (event.data?.type === 'inspectorpro:packaging-focus') {
+                const button = [...document.querySelectorAll('[data-packaging-command]')]
+                    .find(node => node.dataset.packagingCommand === event.data.command && node.checkVisibility());
+                const fallback = [...document.querySelectorAll('[data-packaging-command-menu]')]
+                    .find(node => node.dataset.packagingCommandMenu.split(',').includes(event.data.command) && node.checkVisibility());
+                (button || fallback)?.focus({ preventScroll: true });
+            }
+        });
+
+        function _packagingSyncTheme() {
+            if (!_packagingEditorUI()) return;
+            document.getElementById('packagingWorkspaceFrame').contentDocument.documentElement.dataset.theme =
+                document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+        }
+        new MutationObserver(_packagingSyncTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+        let _packagingBridgePromise = null;
+        let _packagingActiveTurn = null;
+        let _packagingReleasePromise = null;
+
+        function _packagingBridge() {
+            if (!_packagingBridgePromise) {
+                _packagingBridgePromise = import('/static/packaging.js').then(({ PackagingHostBridge }) =>
+                    new PackagingHostBridge({
+                        hostWindow: window,
+                        frame: () => document.getElementById('packagingWorkspaceFrame'),
+                        invalidate: () => window.InspectorProPackagingHost.release().catch(error => {
+                            if (window._toast) window._toast(error.message, 'error');
+                        }),
+                    }));
+            }
+            return _packagingBridgePromise;
+        }
+
+        window.InspectorProPackagingHost = {
+            viewportIcon(kind) {
+                if (['zoomfit', 'section'].includes(kind)) return _viewerToolbarIconMarkup(kind);
+                if (kind === 'explode') return _ribbonIcons.facilityVerticalStack;
+                if (kind === 'display-appearance') return _ribbonIcons.facilityAppearance;
+                const styles = { 'display-shaded': 'shaded', 'display-edges': 'shaded_edges', 'display-wireframe': 'wireframe' };
+                return styles[kind] ? _displayStyleIconSvg(styles[kind]) : '';
+            },
+            getDesktopLifecycleObservation() {
+                return {
+                    loaded: !!document.getElementById('packagingWorkspaceFrame')
+                        || (state.activeTab === 'training' && trainingState.type === 'packaging_shipping'),
+                    dirty: false,
+                    busy: !!_packagingActiveTurn,
+                    pending: !!(_packagingActiveTurn || _packagingReleasePromise),
+                };
+            },
+            async prepare(identity) {
+                if (_packagingReleasePromise) throw new Error('Wait for packaging reconciliation before sending.');
+                if (state.activeTab !== 'training' || trainingState.type !== 'packaging_shipping') {
+                    throw new Error('Open the packaging editor before sending.');
+                }
+                const bridge = await _packagingBridge();
+                return bridge.prepare(identity || window._packagingChatIdentity?.());
+            },
+            async finish(terminal) {
+                const bridge = await _packagingBridge();
+                return bridge.finish(terminal?.codex_packaging || terminal || {});
+            },
+            release() {
+                if (_packagingReleasePromise) return _packagingReleasePromise;
+                _packagingReleasePromise = (async () => {
+                    const turn = _packagingActiveTurn;
+                    if (turn) {
+                        turn.cancelled = true;
+                        turn.controller?.abort();
+                        await turn.done;
+                    }
+                    const bridge = await _packagingBridge();
+                    return bridge.release();
+                })().finally(() => { _packagingReleasePromise = null; });
+                return _packagingReleasePromise;
+            },
+        };
+
+        function _packagingConfirmLeave(resume) {
+            const frame = document.getElementById('packagingWorkspaceFrame');
+            const guard = frame?.contentWindow?.InspectorProPackaging;
+            if (_packagingActiveTurn || _packagingReleasePromise || guard?.isLocked?.()) {
+                window.InspectorProPackagingHost.release().then(() => {
+                    if (typeof resume === 'function') resume();
+                }).catch(error => {
+                    if (window._toast) window._toast('Packaging remains locked: ' + error.message, 'error');
+                });
+                return false;
+            }
+            return !guard || guard.confirmNavigation();
+        }
+
+        function _packagingConfirmChatChange(resume) {
+            const guard = document.getElementById('packagingWorkspaceFrame')?.contentWindow?.InspectorProPackaging;
+            if (!_packagingActiveTurn && !_packagingReleasePromise && !guard?.isLocked?.()) return true;
+            return _packagingConfirmLeave(resume);
+        }
+
+        function _packagingRequestContext(admitted, context = {}) {
+            if (!admitted?.document_id || !Number.isSafeInteger(admitted.revision) || admitted.revision < 0) {
+                throw new Error('A saved packaging revision is required for chat memory.');
+            }
+            return { ...context, asset_scope: {
+                kind: 'packaging_shipping', ids: { documentId: admitted.document_id },
+                expectedRevisionVector: { packagingRevision: String(admitted.revision) },
+            } };
+        }
+
         function renderViewport() {
+            // A ribbon/context refresh must not remount a live packaging draft.
+            if (state.activeTab === 'training' && trainingState.type === 'packaging_shipping'
+                    && document.getElementById('packagingWorkspaceFrame')?.isConnected) {
+                updateAnnotationToolbarVisibility();
+                renderRibbon();
+                return;
+            }
             // Feature #120: Save 3D camera state before clearing viewport
             _save3DCameraState();
             if (ASSEMBLY_VIEWPORT_STATE_PERSISTENCE && state.assyLiveScene && !state._assyViewerIsGuided) {
@@ -49792,6 +50048,17 @@
             const viewportContent = document.getElementById('viewportContent');
             if (!viewportContent) return;
 
+            if (trainingState.type === 'packaging_shipping') {
+                const frame = document.createElement('iframe');
+                frame.id = 'packagingWorkspaceFrame';
+                frame.src = '/packaging';
+                frame.addEventListener('load', () => { _packagingSyncRibbon(); _packagingSyncTheme(); });
+                frame.title = 'Packaging and Shipping';
+                frame.style.cssText = 'width:100%;height:100%;min-height:480px;border:0;display:block;';
+                viewportContent.appendChild(frame);
+                return;
+            }
+
             if (trainingState.type === 'documentation') {
                 _renderDocumentationWorkflowTab(viewportContent);
                 return;
@@ -50980,6 +51247,12 @@
         } catch (_) {}
 
         function _trainApplyTrainingTypeDefaults(prevType) {
+            const nextType = trainingState.type;
+            if (prevType === 'packaging_shipping' && trainingState.type !== prevType
+                    && !_packagingConfirmLeave(() => _trainChangeTypeFromRibbon({ value: nextType }))) {
+                trainingState.type = prevType;
+                return false;
+            }
             const leavingProcessFlow = !!(prevType && prevType !== trainingState.type
                 && trainingState.viewportMode === 'process_flow');
             if (leavingProcessFlow
@@ -50996,9 +51269,11 @@
             }
             const wasSpecial = prevType === 'plant_process'
                 || prevType === 'facility_layout'
+                || prevType === 'packaging_shipping'
                 || prevType === 'documentation';
             const isSpecial = trainingState.type === 'plant_process'
                 || trainingState.type === 'facility_layout'
+                || trainingState.type === 'packaging_shipping'
                 || trainingState.type === 'documentation';
             if (prevType && (wasSpecial || isSpecial) && prevType !== trainingState.type) {
                 trainingState.procedure = null;
@@ -51014,7 +51289,12 @@
                     && trainingState.type !== 'documentation') {
                 try { _closeDocumentationWorkspace(); } catch (_) {}
             }
-            if (trainingState.type === 'documentation') {
+            if (trainingState.type === 'packaging_shipping') {
+                trainingState.viewportMode = 'packaging_shipping';
+                trainingState.panels.setupOpen = false;
+                trainingState.panels.playbackOpen = false;
+                try { _trainDisposeLiveAssemblyViewer(); } catch (_) {}
+            } else if (trainingState.type === 'documentation') {
                 trainingState.targetComponent = assemblyContext?.assembly_name
                     || assemblyContext?.assembly_number
                     || 'Current assembly';
@@ -82578,6 +82858,7 @@
             async function switchConversation(convId) {
                 if (_serverMemoryState === 'initializing') return;
                 if (convId === _currentConversationId) return;
+                if (!_packagingConfirmChatChange(() => switchConversation(convId))) return;
                 if (isAnySessionWaiting()) {
                     if (window._toast) window._toast('Wait for the current response to finish before switching chats.', 'warning');
                     return;
@@ -82605,6 +82886,7 @@
 
             async function createNewConversation() {
                 if (_serverMemoryState === 'initializing') return;
+                if (!_packagingConfirmChatChange(() => createNewConversation())) return;
                 if (isAnySessionWaiting()) {
                     if (window._toast) window._toast('Wait for the current response to finish before starting a new chat.', 'warning');
                     return;
@@ -82636,6 +82918,7 @@
 
             async function clearCurrentConversation() {
                 if (_serverMemoryState === 'initializing') return;
+                if (!_packagingConfirmChatChange(() => clearCurrentConversation())) return;
                 if (isAnySessionWaiting()) {
                     if (window._toast) window._toast('Wait for the current response to finish.', 'warning');
                     return;
@@ -83175,6 +83458,14 @@
             function buildAgentAttachments(agentType) {
                 const att = { schema_version: 1 };
                 const agentSession = getAgentSession(agentType || currentAgent);
+
+                if (state.activeTab === 'training' && trainingState.type === 'packaging_shipping') {
+                    const admitted = _packagingActiveTurn?.admitted;
+                    if (!admitted?.admission_id) throw new Error('Packaging editor admission is required.');
+                    return { schema_version: 1,
+                        session: { agent: agentType || currentAgent, active_tab: 'training', active_mode: 'packaging_shipping' },
+                        packaging: { admission_id: admitted.admission_id } };
+                }
 
                 // SESSION
                 att.session = {
@@ -93846,6 +94137,9 @@
             }
 
             function _agentServiceFailureText(agentKey, error) {
+                if (error?.packagingTurn || error?.codex_packaging) {
+                    return 'The packaging response did not finish. Saved edits may remain; Undo is available after reconciliation.';
+                }
                 const agentName = (AGENTS[agentKey] && AGENTS[agentKey].name) || 'The agent';
                 const code = String(error && error.agentErrorCode || '').toLowerCase();
                 if (code === 'codex_stream_required') {
@@ -93904,7 +94198,11 @@
                     // The 3D Model tab's Sage: the part shown, its features, finishes and dimensions.
                     || (status?.partRuntime === 'codex'
                         && originAgent === 'deviation-analyst' && activeMode === '3dmodel');
-                const codexTurn = codexFacility || codexDocumentation;
+                const packagingMode = activeMode === 'packaging_shipping';
+                const codexPackaging = packagingMode && status?.packagingRuntime === 'codex'
+                    && originAgent === 'deviation-analyst';
+                if (packagingMode && !codexPackaging) throw new Error('Packaging chat execution is not enabled.');
+                const codexTurn = codexFacility || codexDocumentation || codexPackaging;
                 // A Codex turn sends the level the selector shows, and the selector shows the level it sends.
                 const reasoningEffort = codexTurn ? _agentReasoningEffort(status, agentReasoningUiSelection) : '';
                 if (reasoningEffort) setAgentReasoningUiSelection(reasoningEffort);
@@ -93934,6 +94232,10 @@
                 const stepMode = codexTurn;
                 if (stepMode) workingState.enableSteps();
                 const controller = new AbortController();
+                if (codexPackaging && _packagingActiveTurn) {
+                    _packagingActiveTurn.controller = controller;
+                    if (_packagingActiveTurn.cancelled) controller.abort();
+                }
                 // Sage's 3D shots for this turn end with it, however it ends: completed, failed, cancelled or
                 // stopped (SV2/SV3 round 3). The capture hook gets this signal; the teardown below aborts it.
                 const captureStop = new AbortController();
@@ -93986,7 +94288,7 @@
                 if (!response.ok) {
                     originSession.activeStream = null;
                     setWaiting(true, originAgent);
-                    if (response.status === 404 || response.status === 409) {
+                    if (!codexPackaging && (response.status === 404 || response.status === 409)) {
                         if (codexTurn) throw streamRequiredFailure();
                         return null;
                     }
@@ -94004,6 +94306,7 @@
                     failed.agentErrorCode = parsed.code || `http_${response.status}`;
                     failed.streamRetryable = response.status >= 500;
                     failed.workingState = workingState;
+                    if (codexPackaging) failed.codex_packaging = body.codex_packaging || body.detail?.error?.codex_packaging;
                     throw failed;
                 }
 
@@ -94080,6 +94383,7 @@
                                 case 'status':
                                     if (stepMode) {
                                         if (event.phase === 'finalizing') workingState.setPhase('Finishing up');
+                                        else if (event.phase === 'codex_packaging') workingState.setPhase('Working on packaging');
                                     } else if (!streamMessage) workingState.setOperation(
                                         window.InspectorProChatStreamRuntime.statusLabel(event.phase));
                                     break;
@@ -94094,8 +94398,10 @@
                                         preambleText = '';
                                     }
                                     workingState.step(event.step);
-                                    _trainFacilityShowFromStep(event.step);
-                                    _trainFacilityCaptureFromStep(event.step, captureStop.signal);
+                                    if (!codexPackaging) {
+                                        _trainFacilityShowFromStep(event.step);
+                                        _trainFacilityCaptureFromStep(event.step, captureStop.signal);
+                                    }
                                     break;
                                 case 'text_delta': {
                                     const delta = String(event.text || '');
@@ -94126,6 +94432,7 @@
                                 case 'response_cancelled': {
                                     const cancelled = new Error('Generation stopped');
                                     cancelled.streamCancelled = true;
+                                    if (codexPackaging) cancelled.codex_packaging = event.codex_packaging;
                                     throw cancelled;
                                 }
                                 case 'response_error': {
@@ -94134,6 +94441,7 @@
                                     failed.streamRetryable = event.retryable !== false;
                                     failed.agentServiceFailure = true;
                                     failed.agentErrorCode = String(event.code || 'provider_request_failed');
+                                    if (codexPackaging) failed.codex_packaging = event.codex_packaging;
                                     throw failed;
                                 }
                             }
@@ -94220,7 +94528,27 @@
                 },
             };
 
+            window._packagingChatIdentity = () => ({
+                session_id: getCurrentAgentSession().chatSessionId,
+                conversation_id: _currentConversationId,
+            });
+
             async function handleAgentSend(retryOptions) {
+                const packagingRequested = state.activeTab === 'training' && trainingState.type === 'packaging_shipping';
+                if (packagingRequested) {
+                    const status = await _getChatStreamingStatus();
+                    if (currentAgent !== 'deviation-analyst' || status?.packagingRuntime !== 'codex') {
+                        addMessage('Packaging chat execution is not enabled for this agent or backend.', 'system', currentAgent);
+                        return;
+                    }
+                    if (retryOptions?.frozenRequest || _packagingActiveTurn || _packagingReleasePromise) {
+                        addMessage('Wait for packaging reconciliation, then send a new request.', 'system', currentAgent);
+                        return;
+                    }
+                } else if (retryOptions?.frozenRequest?.inspection_context?.attachments?.packaging) {
+                    addMessage('Open the packaging editor and send a new request.', 'system', currentAgent);
+                    return;
+                }
                 if (_serverMemoryState === 'initializing') return;
                 const retry = retryOptions
                     && retryOptions.frozenRequest
@@ -94230,6 +94558,7 @@
                     _serverMemoryReady = _recoverServerMemoryConnection();
                 }
                 await _serverMemoryReady;
+                if (packagingRequested && (state.activeTab !== 'training' || trainingState.type !== 'packaging_shipping')) return;
                 if (_serverMemoryState === 'initializing') return;
                 if (_serverMemoryState === 'unavailable') {
                     if (!retry) {
@@ -94324,7 +94653,7 @@
                 workingAssistant = ensureAgentWorkingState(originAgent, 'Preparing request');
 
                 // Auto-resolve image: camera capture > uploaded drawing > null
-                const imageToSend = retry
+                const imageToSend = packagingRequested ? null : retry
                     ? (retry.frozenRequest.image || null)
                     : await _resolveAutoImage();
                 // Stale-turn guard: bail if another send happened during image resolution
@@ -94356,7 +94685,20 @@
                 let memoryResult = null;
                 let terminalResponseData = null;
                 let streamTrace = null;
+                let packagingTurn = null;
+                let packagingTerminal = null;
                 try {
+                    if (packagingRequested) {
+                        if (_packagingActiveTurn || _packagingReleasePromise) throw new Error('A packaging turn is already active.');
+                        packagingTurn = { cancelled: false, controller: null, admitted: null };
+                        packagingTurn.done = new Promise(resolve => { packagingTurn.resolve = resolve; });
+                        _packagingActiveTurn = packagingTurn;
+                        packagingTurn.admitted = await window.InspectorProPackagingHost.prepare({
+                            session_id: originSession.chatSessionId,
+                            conversation_id: _currentConversationId,
+                        });
+                        if (packagingTurn.cancelled) throw Object.assign(new Error('Packaging request cancelled'), { streamCancelled: true });
+                    }
                     // Viewport display state is persistent. Highlights, hidden
                     // parts, rotation, and motion are only changed by explicit
                     // tool actions or direct user controls, not by starting a
@@ -94366,7 +94708,7 @@
                         const geoQ = /geometry.?diff|what.?(material|volume).*(added|removed|changed)|net.?volume|solid.?changed|where.*(geometry|material).?change/i;
                         const geoMatch = geoQ.test(messageText);
                         console.log('[GeoDiff Hydrate] regex match:', geoMatch, 'partNumber:', state.partNumber, 'available:', partDiffState.available, 'existing:', !!state._geometryDiffResult);
-                        if (geoMatch) {
+                        if (geoMatch && !packagingRequested) {
                             // Ensure partDiffState is populated first
                             if (!partDiffState.available && state.partNumber) {
                                 console.log('[GeoDiff Hydrate] Fetching revisions...');
@@ -94407,6 +94749,7 @@
                     // Wait for any in-flight cross-agent summarize to finish
                     await crossContextReady;
                     if (originSession.requestId !== turnId) return; // stale after await
+                    if (packagingTurn?.cancelled) throw Object.assign(new Error('Packaging request cancelled'), { streamCancelled: true });
                     let payload;
                     if (retry) {
                         payload = _chatMemoryRuntime.clone(
@@ -94458,6 +94801,11 @@
                     payload = window.InspectorProChatStreamRuntime.ensureFacilityTurnIdentity(
                         payload, _currentConversationId, _newClientTurnId
                     );
+                    if (packagingTurn) {
+                        payload.conversation_id = _currentConversationId;
+                        if (!payload.client_turn_id) payload.client_turn_id = _newClientTurnId();
+                        payload.request_context = _packagingRequestContext(packagingTurn.admitted, payload.request_context);
+                    }
                     if (inspCtx.attachments && inspCtx.attachments.facility_layout
                             && inspCtx.attachments.facility_layout.generationPlanning) {
                         if (!payload.client_turn_id) payload = {...payload, client_turn_id: _newClientTurnId()};
@@ -94488,6 +94836,7 @@
                         workingAssistant = streamedReply.workingState || workingAssistant;
                         streamTrace = streamedReply.trace || null;
                     } else {
+                        if (packagingTurn) throw new Error('Packaging requires the streaming backend; no fallback was attempted.');
                         const res = await fetch('/api/agent/chat', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -94512,6 +94861,12 @@
                         data = await res.json();
                     }
                         terminalResponseData = data;
+                        if (packagingTurn) {
+                            packagingTerminal = data.codex_packaging;
+                            if (data.tool_source !== 'codex_packaging' || !packagingTerminal) {
+                                throw new Error('The packaging runtime did not return a verified terminal result.');
+                            }
+                        }
                         if (_serverMemoryEnabled() && data.memory) {
                             memoryResult = data.memory;
                             const warnings = Array.isArray(data.memory.warnings)
@@ -94547,12 +94902,15 @@
                             'narration_segments:', data.narration_segments ? data.narration_segments.length : 'none',
                             'asme_refs:', data.asme_refs ? data.asme_refs.length : 'none');
                         // Detect narration BEFORE tool dispatch (narration owns its own explode_level)
-                        if (!isBargeIn && Array.isArray(data.narration_segments) && data.narration_segments.length > 1) {
+                        if (!packagingTurn && !isBargeIn && Array.isArray(data.narration_segments) && data.narration_segments.length > 1) {
                             data._isNarration = true;
                         }
                         // === Tool dispatch (Phase 6: tool_calls canonical) ===
                         try {
-                            if (isBargeIn) {
+                            if (packagingTurn || data.tool_source === 'codex_packaging') {
+                                // Packaging edits are committed by the server and reconciled through the admission bridge.
+                                toolCalls = [];
+                            } else if (isBargeIn) {
                                 // Barge-in is a paused walkthrough Q&A path. Sage can answer,
                                 // but it must not execute workspace/navigation tools that would
                                 // switch tabs and destroy the Training visual context.
@@ -94879,7 +95237,7 @@
                         }
                         // Non-tool actions outside the registry:
                         // ASME reference popup (stays on its own path for now)
-                        if (Array.isArray(data.asme_refs) && data.asme_refs.length > 0) {
+                        if (!packagingTurn && Array.isArray(data.asme_refs) && data.asme_refs.length > 0) {
                             try {
                                 _showAsmeRefsFromResponse(data.asme_refs, originAgent);
                             } catch (asmeErr) {
@@ -94891,6 +95249,10 @@
                             response = data;
                         }
                 } catch (err) {
+                    if (packagingRequested) {
+                        err.packagingTurn = true;
+                        packagingTerminal = err.codex_packaging || packagingTerminal;
+                    }
                     if (!(err && (err.streamCancelled || err.name === 'AbortError'))) {
                         console.error('[AgentSend] request or stream handling failed:', err);
                     }
@@ -94902,7 +95264,16 @@
                         }
                         streamingAssistant = err.streamingMessage;
                     }
-                    if (err && err.streamCancelled) {
+                    if (packagingRequested) {
+                        streamTurnCancelled = !!(err.streamCancelled || err.name === 'AbortError');
+                        streamTurnFailed = !streamTurnCancelled;
+                        response = '';
+                        if (workingAssistant?.uiState === RESPONSE_UI_STATES.WORKING) workingAssistant.cancel();
+                        addMessage(packagingTurn?.admitted
+                            ? 'The packaging response stopped. Saved edits may remain; the editor is reconciling. Undo is available for saved edits.'
+                            : 'Packaging request was not sent: ' + String(err.message || 'Editor admission failed.'),
+                            'system', originAgent);
+                    } else if (err && err.streamCancelled) {
                         if (workingAssistant && workingAssistant.uiState === RESPONSE_UI_STATES.WORKING) {
                             workingAssistant.cancel();
                         }
@@ -94985,6 +95356,22 @@
                         response = `Upload a drawing and run an inspection first, then I can help you analyze the results.`;
                     }
                     }
+                } finally {
+                    if (packagingTurn) {
+                        try {
+                            await window.InspectorProPackagingHost.finish(packagingTerminal);
+                        } catch (reconcileError) {
+                            streamTurnFailed = true;
+                            response = '';
+                            if (streamingAssistant) streamingAssistant.discard();
+                            addMessage('Saved packaging edits may remain. The editor is still locked: '
+                                + reconcileError.message + ' Use Resume editing to retry reconciliation; Undo is available after reload.',
+                                'system', originAgent);
+                        } finally {
+                            if (_packagingActiveTurn === packagingTurn) _packagingActiveTurn = null;
+                            packagingTurn.resolve();
+                        }
+                    }
                 }
 
                 if (streamTurnCancelled || streamTurnFailed) {
@@ -95038,6 +95425,11 @@
                     const documentation = terminalResponseData && terminalResponseData.codex_documentation;
                     if (documentation && documentation.checkedDocumentation === false) agentSteps.unchecked = true;
                     if (documentation) agentSteps.workspace = documentation.workspace || 'documentation';
+                    const packaging = terminalResponseData && terminalResponseData.codex_packaging;
+                    if (packaging) {
+                        agentSteps.workspace = 'packaging_shipping';
+                        if (packaging.checkedPackaging === false) agentSteps.unchecked = true;
+                    }
                     if (agentSteps.unchecked || agentSteps.steps.some(step => step.kind === 'tool')) {
                         assistantPresentation.meta.agentSteps = agentSteps;
                     }
@@ -96012,6 +96404,7 @@
                     return;
                 }
                 if (agentKey === currentAgent) return;
+                if (!_packagingConfirmChatChange(() => selectAgent(agentKey))) return;
 
                 // Save leaving agent's UI state into its session
                 const leavingSession = getCurrentAgentSession();

@@ -141,11 +141,12 @@
                 control.assertCurrent();
                 let result;
                 if (request.method === 'inspectOtherWorkflows') {
-                    if (!inspectOtherWorkflows || !root.InspectorProDesktopWorkflowObservation) {
+                    const observation = root.InspectorProDesktopWorkflowObservation;
+                    if (!inspectOtherWorkflows || typeof observation?.withPackaging !== 'function') {
                         throw failure('desktop_workflow_coverage_unavailable');
                     }
-                    result = root.InspectorProDesktopWorkflowObservation.capture(
-                        inspectOtherWorkflows(), facade.snapshot().rendererGeneration);
+                    result = observation.capture(observation.withPackaging(inspectOtherWorkflows(), root),
+                        facade.snapshot().rendererGeneration);
                 } else result = request.method === 'snapshot' ? facade.snapshot() : facade[request.method](request.args);
                 control.assertCurrent();
                 return { ok: true, result: clone(result) };

@@ -21,6 +21,7 @@ REVISION_VECTOR_FIELDS = (
     "drawingRevision",
     "faiRevision",
     "motionAssetPin",
+    "packagingRevision",
 )
 INVALIDATION_ACTIONS = frozenset(
     {
@@ -55,7 +56,7 @@ REVISION_DIMENSIONS = (
     "policyRevision",
 )
 MAP_LAYOUT_REVISION_FIELDS = frozenset(
-    {"processMapRevision", "facilityLayoutRevision"}
+    {"processMapRevision", "facilityLayoutRevision", "packagingRevision"}
 )
 POLICY_REVISION_FIELDS = frozenset({"facilityPolicyRevision"})
 STRUCTURE_EVIDENCE_REVISION_FIELDS = frozenset(REVISION_VECTOR_FIELDS).difference(

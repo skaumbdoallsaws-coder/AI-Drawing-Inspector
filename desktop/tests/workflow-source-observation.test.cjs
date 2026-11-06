@@ -18,11 +18,14 @@ function fixture() {
     trainingState: { type: 'facility_layout', goal: 'Answer facility layout questions.' },
     annoState: { shapes: [] }, regionsCuratorState: {},
     sessionsTabState: { actionBusy: {}, syncPreviews: {}, refreshResults: {} },
-    window: { __agentChatStreamV1: { getDesktopLifecycleObservation: empty } },
+    window: { __agentChatStreamV1: { getDesktopLifecycleObservation: empty },
+      document: { querySelectorAll: () => [] },
+      InspectorProPackagingHost: { getDesktopLifecycleObservation: empty } },
     _trainCurrentProcessFlowEditor: () => null,
   });
   vm.runInContext(source, context);
-  return { context, read: () => observation.capture(context._desktopInspectOtherWorkflows(), 'r') };
+  return { context, read: () => observation.capture(
+    observation.withPackaging(context._desktopInspectOtherWorkflows(), context.window), 'r') };
 }
 test('actual application observer excludes the facility goal from unrelated training work', () => {
   const f = fixture(); assert.doesNotThrow(() => observation.assertEmpty(f.read(), 'r'));

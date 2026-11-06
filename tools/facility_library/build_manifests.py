@@ -101,7 +101,26 @@ add("marble-white", "White marble (visual)", "stone", "#ffffff", 0.14, 0.0, tex(
 
 # Lights (docs/facility-lighting-plan.md, L1): the color is the unlit lens or sign plastic; emission is the glow the
 # Facility 3D view draws, untouched by tone mapping, in every scene. No light falls on other surfaces.
-GLOW = ("Glows like a switched-on outdoor lamp in every scene; in the evening scene it throws a pool of light on the "
+GLOW = ("Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a "
+        "lighting or signage specification.")
+
+
+# L8: an outdoor light's emission has a beam angle: in the evening scene the 3D view then draws a soft cone from the
+# lamp down to the ground and a pool where its aim lands.
+OUTDOOR = ("Glows like a switched-on outdoor lamp in every scene; in the evening scene it also shows a soft beam down "
+           "to the ground and a pool of light where it lands. Visual only: it lights no other surface and is not a "
+           "lighting design.")
+
+
+# 2026-11-02: an accent spot's emission is marked accent: in the evening scene the 3D view lights what its beam
+# reaches with a spot light instead of a pool.
+ACCENT = ("In the evening scene it lights what its beam reaches (a wall, an object or the floor) within about 8 m. "
+          "Glows like a switched-on lamp in every scene. Visual only: not a lighting design.")
+
+
+# 2026-11-05: a low light (a bollard, a lantern) throws its pool however low it stands; an uplight (accent) is aimed
+# up at what it faces.
+LOW = ("Glows like a switched-on outdoor lamp in every scene; in the evening scene it throws a pool of light on the "
        "ground below it however low it stands (no beam is drawn), and near the view it lights what stands around it. "
        "Visual only: not a lighting design.")
 UPLIGHT = ("In the evening scene it lights what it faces from below (a palm, a plant or a wall) within about 8 m. "
@@ -111,7 +130,8 @@ UPLIGHT = ("In the evening scene it lights what it faces from below (a palm, a p
 # L4: a light may blink, strobe or turn like a rotating beacon, one cycle every periodSeconds; the 3D view shows
 # every pattern steady when the viewer prefers reduced motion.
 def light(appearance_id, label, color, glow, tags, roughness=0.3, pattern=None, note=None, beam=None, accent=False,
-          low=False, uplight=False):
+          low=False, uplight=False, estimate=None):
+    """ESTIMATE: (lumens, beam angle in degrees), a typical fitting's output for the lighting estimate (CC1)."""
     emission = {"color": glow, "intensity": 1}
     if pattern:
         emission.update(pattern=pattern, periodSeconds=1)
@@ -124,12 +144,14 @@ def light(appearance_id, label, color, glow, tags, roughness=0.3, pattern=None, 
     if uplight:
         emission["uplight"] = True
     description = UPLIGHT if uplight else ACCENT if accent else LOW if low else OUTDOOR if beam else GLOW
+    extra = {"estimate": {"lumens": estimate[0], "beamAngleDegrees": estimate[1], "basis": "typical, for estimates"}
+             } if estimate else {}
     add(appearance_id, label, "lights", color, roughness, 0.0, None, ("light",) + tags + ("glow",),
-        note + " " + description if note else description, emission=emission)
+        note + " " + description if note else description, emission=emission, **extra)
 
 
-light("light-cool-white-led", "Cool-white LED", "#dfe4e8", "#eef4ff", ("lamp", "led", "cool white", "high bay", "lens"), 0.35)
-light("light-warm-white", "Warm-white light", "#e6e0d6", "#ffd29a", ("lamp", "warm white", "office", "lens"), 0.35)
+light("light-cool-white-led", "Cool-white LED", "#dfe4e8", "#eef4ff", ("lamp", "led", "cool white", "high bay", "lens"), 0.35, estimate=(20000, 120))
+light("light-warm-white", "Warm-white light", "#e6e0d6", "#ffd29a", ("lamp", "warm white", "office", "lens"), 0.35, estimate=(4000, 110))
 light("light-exit-green", "Exit sign green", "#2a7a48", "#2bea74", ("exit", "sign", "emergency", "green"))
 light("light-beacon-amber", "Beacon amber", "#b5740c", "#ffab1f", ("beacon", "amber", "warning", "forklift", "dock", "rotating"),
       pattern="rotate", note="Turns like a rotating beacon, once a second (steady with reduced motion).")
@@ -141,19 +163,19 @@ light("light-stack-red", "Stack light red", "#7d1913", "#ff3a24", ("stack light"
 light("light-stack-amber", "Stack light amber", "#a96d06", "#ffb52a", ("stack light", "andon", "amber", "warning"))
 light("light-stack-green", "Stack light green", "#1d6b37", "#3cf27a", ("stack light", "andon", "green", "running"))
 light("light-pole-led", "Pole light LED", "#dfe4e8", "#fff1dc", ('lamp', 'led', 'pole light', 'street light', 'car park', 'parking', 'yard', 'outdoor', 'beam'), 0.35, beam=110,
-      note="Beam 110 degrees, for a car park or yard pole light.")
+      note="Beam 110 degrees, for a car park or yard pole light.", estimate=(12000, 110))
 light("light-wall-led", "Wall light LED", "#dfe4e8", "#fff1dc", ('lamp', 'led', 'wall light', 'wall pack', 'outdoor', 'beam'), 0.35, beam=100,
-      note="Beam 100 degrees, for a wall light along an outside wall.")
+      note="Beam 100 degrees, for a wall light along an outside wall.", estimate=(4000, 100))
 light("light-dock-led", "Dock light LED", "#dfe4e8", "#ffe2b8", ('lamp', 'led', 'dock light', 'loading dock', 'truck yard', 'outdoor', 'beam'), 0.35, beam=70,
-      note="Beam 70 degrees, for a light over a dock door.")
+      note="Beam 70 degrees, for a light over a dock door.", estimate=(3000, 70))
 light("light-accent-spot", "Accent spot LED", "#e6ddd0", "#ffc08a", ('lamp', 'led', 'spot', 'spotlight', 'accent', 'warm white', 'recessed', 'adjustable', 'beam'), beam=30,
-      accent=True, note="Beam 30 degrees, warm white (about 3000 K), for an adjustable spot aimed at a wall, a picture or an object.")
+      accent=True, note="Beam 30 degrees, warm white (about 3000 K), for an adjustable spot aimed at a wall, a picture or an object.", estimate=(700, 30))
 light("light-bollard-warm", "Bollard light warm", "#e3ddd3", "#ffd29a", ('lamp', 'led', 'bollard', 'path light', 'garden', 'walkway', 'patio', 'outdoor', 'low', 'warm white', 'beam'), 0.35, beam=150, low=True,
-      note="Beam 150 degrees, warm white (about 3000 K), for a bollard or path light along a walkway, a patio or a lawn edge.")
+      note="Beam 150 degrees, warm white (about 3000 K), for a bollard or path light along a walkway, a patio or a lawn edge.", estimate=(600, 150))
 light("light-lantern-warm", "Lantern warm", "#e8d9c2", "#ffbe78", ('lamp', 'led', 'lantern', 'pendant', 'hanging', 'string light', 'pergola', 'patio', 'table', 'outdoor', 'low', 'warm white', 'beam'), 0.3, beam=120, low=True,
-      note="Beam 120 degrees, extra-warm white (about 2700 K), for a lantern or string light hung from a pergola or a tree, or set on a table outdoors.")
+      note="Beam 120 degrees, extra-warm white (about 2700 K), for a lantern or string light hung from a pergola or a tree, or set on a table outdoors.", estimate=(400, 120))
 light("light-garden-uplight", "Garden uplight warm", "#e6ddd0", "#ffc08a", ('lamp', 'led', 'uplight', 'spike light', 'garden', 'plant', 'palm', 'tree', 'accent', 'outdoor', 'warm white', 'beam'), 0.3, beam=40, accent=True, uplight=True,
-      note="Beam 40 degrees, warm white (about 3000 K), for a spike or in-ground uplight at the foot of a palm, a plant or a wall.")
+      note="Beam 40 degrees, warm white (about 3000 K), for a spike or in-ground uplight at the foot of a palm, a plant or a wall.", estimate=(400, 40))
 
 appearances = {
     "schemaVersion": 1, "libraryVersion": VERSION,

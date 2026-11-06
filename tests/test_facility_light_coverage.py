@@ -209,6 +209,27 @@ def test_a_low_outdoor_light_counts_from_any_height_and_an_uplight_not_at_all(pr
     assert summary["lamps"]["byFinish"] == {"light-bollard-warm": 1}
 
 
+def test_a_low_lights_lamps_share_its_output(project):
+    """2026-11-05: a low light's lamps (a festoon string's bulbs) share the finish's lumens, as its pools share its
+    light; other lights' lamps each give the whole. A stack light's mount and base (solid, so each has a face looking
+    down) stand in for two bulbs here."""
+    root, catalog = project
+    by_revision = {(entry["assetId"], entry["assetDefinitionRevision"]): entry for entry in catalog}
+
+    def finishes(appearance_id, names):
+        return {"componentMaterials": {"representation": "overview", "overrides": [
+            {"key": f"p:stack-light/{name}#0", "appearanceId": appearance_id} for name in names]}}
+    layout = {"placements": [
+        place(catalog, models.STACK_LIGHT, "pl-two", 10.0, 1.0, 10.0, **finishes("light-lantern-warm", ("mount", "base"))),
+        place(catalog, models.STACK_LIGHT, "pl-one", 20.0, 1.0, 10.0, **finishes("light-lantern-warm", ("base",))),
+        place(catalog, models.STACK_LIGHT, "pl-high", 30.0, 4.0, 10.0, **finishes("light-warm-white", ("mount", "base")))]}
+    lamps, _ = find_lamps(layout, by_revision, LIBRARY, root)
+    lumens = {}
+    for lamp in lamps:
+        lumens.setdefault(lamp["placementId"], []).append(lamp["lumens"])
+    assert lumens == {"pl-two": [200, 200], "pl-one": [400], "pl-high": [4000, 4000]}
+
+
 def test_a_low_lights_lamps_are_its_glowing_pieces_with_a_patch_facing_down():
     """As the view's bulbsOf: a lantern's glass (a closed box here) faces down only at its foot, a seventh of its
     surface: no lamp by the share rule, but a low outdoor light's lamp."""

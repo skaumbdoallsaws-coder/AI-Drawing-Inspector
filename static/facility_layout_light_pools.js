@@ -256,7 +256,8 @@
     // the ground instead (aimedPool), MIN_HEIGHT above it, and also records the lamp, its aim and the beam's length.
     // A low outdoor light (beam.low, 2026-11-05: a bollard, a lantern) throws one from each glowing piece with a patch
     // facing down (bulbsOf: a lantern's glass faces down only at its foot), LOW_MIN_HEIGHT above the ground, and its
-    // pool is marked low: it shows no beam.
+    // pool is marked low: it shows no beam. A copy's low pools share its light: each gets the color over their number,
+    // so a festoon string's eight bulbs together are as bright as one lantern.
     function poolsOf(THREE, mesh, toRoot, color, floorY, beam) {
         const low = Boolean(beam && beam.low);
         const lamps = low ? bulbsOf(mesh && mesh.geometry) : lampsOf(mesh && mesh.geometry);
@@ -279,6 +280,7 @@
             if (Math.abs(matrix.determinant()) < 1e-12) continue;  // a hidden, zero-scale copy
             down.set(0, -1, 0).transformDirection(matrix);
             if (down.y > FACING_DOWN) continue;  // tipped over: its lamps no longer face the floor
+            const first = pools.length;
             lamps.forEach(function (lamp) {
                 point.set(lamp.x, lamp.y, lamp.z).applyMatrix4(matrix);
                 if (beam) {
@@ -297,6 +299,11 @@
                 if (height < MIN_HEIGHT) return;
                 pools.push({ x: point.x, z: point.z, radius: poolRadius(height), color: color, lampY: point.y });
             });
+            const made = pools.length - first;
+            if (low && made > 1) {
+                const shared = color.clone().multiplyScalar(1 / made);
+                for (let k = first; k < pools.length; k += 1) pools[k].color = shared;
+            }
         }
         return pools;
     }

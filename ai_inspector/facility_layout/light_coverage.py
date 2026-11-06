@@ -15,8 +15,10 @@ off by where their centre is, as the view does (static/facility_layout_light_are
 
 Low lights and uplights (2026-11-05, the gym's garden). A low outdoor light (emission.low: a bollard, a path light, a
 lantern) counts from LOW_MIN_HEIGHT above the ground, and every glowing piece of it with a patch facing down is a lamp
-(share 0, as the view's bulbsOf: a lantern's glass faces down only at its foot). An uplight (emission.uplight) lights
-what it faces, not the ground: it counts as none, and the summary lists it (uplightsNotCounted).
+(share 0, as the view's bulbsOf: a lantern's glass faces down only at its foot). Its lamps share the finish's output,
+as its pools share its light: a festoon string's eight bulbs give 400 lm between them, not each. An uplight
+(emission.uplight) lights what it faces, not the ground: it counts as none, and the summary lists it
+(uplightsNotCounted).
 
 Brightness (CC2). On a CELL grid over the chosen area (a floor area, a zone, a rectangle or the whole lot), each lamp
 is a point source whose light fades away from its aim: I = I0 cos^m(theta) at theta off the aim, with m set so that it
@@ -463,6 +465,12 @@ def find_lamps(layout, catalog, library, project_root):
         on = switch_on and _area_lit(shapes, mode, lamp["x"], lamp["z"])
         kept.append(dict(lamp, heightMeters=round(height, 2), on=bool(on),
                          off=None if on else ("switch" if not switch_on else "area")))
+    # A low light's output is the fixture's: its lamps (a festoon string's bulbs) share it, as its pools share its light.
+    shared = Counter((lamp["placementId"], lamp["finish"]) for lamp in kept if lamp["finish"] in low)
+    for lamp in kept:
+        count = shared.get((lamp["placementId"], lamp["finish"]), 0)
+        if count > 1:
+            lamp["lumens"] = lamp["lumens"] / count
     return kept, {"unreadModels": sorted(unread), "signalLightParts": dict(signals), "uplightParts": dict(upward)}
 
 

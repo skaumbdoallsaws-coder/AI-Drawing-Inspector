@@ -725,6 +725,9 @@ every existing finish draws and counts as before (Factory 02, the game room).
   so the share rule would miss it). Its pool is marked `low` and shows no beam. Between 0.5 and 3 m up it is also a
   spot light candidate near the view, as a pendant is. The coverage check counts it the same way: from 0.1 m, every
   glowing piece with a downward patch (`lamp_parts(..., share=0)`).
+- **A low light's lamps share its light.** Each copy's low pools get the color over their number, and the coverage
+  check gives each of a placement's low lamps the finish's lumens over their number: a festoon string's eight bulbs
+  with Lantern warm give 400 lm between them, as bright as one lantern, not eight. A one-lamp bollard is unchanged.
 - **Uplights.** An accent finish whose emission has `"uplight": true` is aimed along the patches of its lens that
   face up (`lampsOf(geometry, true)`: the share rule upside down), so a spike light at a palm's foot lights the palm.
   Like every accent spot it throws no pool. The coverage check leaves uplights out (they light what they face, not the

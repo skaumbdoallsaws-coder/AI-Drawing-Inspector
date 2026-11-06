@@ -316,6 +316,37 @@ test('a low outdoor light throws its pool from any height, from each glowing pie
     assert.deepStrictEqual(pools.poolsOf(THREE, sunk, identity, color, 0, low), []);
 });
 
+test('a low light\'s pools share its light: a festoon string\'s bulbs together are as bright as one lamp', async () => {
+    const THREE = await three();
+    const color = new THREE.Color(1, 0.72, 0.44);
+    const identity = new THREE.Matrix4();
+    const flat = () => 0;
+    // Four bulbs 0.45 m apart on one string (one geometry, four pieces), two strings 1 m apart under a pergola.
+    const bulbs = merge(THREE, [0, 0.45, 0.9, 1.35].map(x => new THREE.CylinderGeometry(0.03, 0.03, 0.004, 16).translate(x, 0, 0)));
+    const strings = new THREE.InstancedMesh(bulbs, new THREE.MeshBasicMaterial(), 2);
+    strings.setMatrixAt(0, new THREE.Matrix4().makeTranslation(0, 1.9, 0));
+    strings.setMatrixAt(1, new THREE.Matrix4().makeTranslation(0, 1.9, 1));
+    strings.updateMatrixWorld(true);
+    const thrown = pools.poolsOf(THREE, strings, identity, color, 0, { angleDegrees: 120, groundAt: flat, low: true });
+    assert.strictEqual(thrown.length, 8, 'a pool under each bulb of each string');
+    [0, 1].forEach(z => {
+        const mine = thrown.filter(pool => Math.abs(pool.z - z) < 1e-3);
+        assert.strictEqual(mine.length, 4);
+        const sum = mine.reduce((total, pool) => total.add(pool.color), new THREE.Color(0, 0, 0));
+        assert.ok(Math.abs(sum.r - color.r) < 1e-9 && Math.abs(sum.g - color.g) < 1e-9 && Math.abs(sum.b - color.b) < 1e-9,
+            'one lamp\'s light in all: ' + sum.toArray());
+    });
+    assert.deepStrictEqual(color.toArray(), [1, 0.72, 0.44], 'the finish color is left as it was');
+    // Not low: a pole's two heads are two lamps, each with the whole color.
+    const heads = new THREE.Mesh(merge(THREE, [0, 1].map(x => new THREE.CylinderGeometry(0.2, 0.2, 0.02, 16).translate(x, 0, 0))),
+        new THREE.MeshBasicMaterial());
+    heads.position.set(0, 8, 0);
+    heads.updateMatrixWorld(true);
+    const two = pools.poolsOf(THREE, heads, identity, color, 0, { angleDegrees: 110, groundAt: flat });
+    assert.strictEqual(two.length, 2);
+    two.forEach(pool => assert.strictEqual(pool.color, color));
+});
+
 test('an uplight is aimed along the part of its lens that faces up; an accent spot along the part facing down', async () => {
     const THREE = await three();
     const identity = new THREE.Matrix4();

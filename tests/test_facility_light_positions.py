@@ -133,11 +133,15 @@ def test_a_light_hung_from_a_ceiling_or_a_roof_keeps_no_pole_away():
     festoon = asset("asset-festoon", 3.0, 0.1, 0.4, ["lighting", "festoon", "outdoor"])
     pendant = asset("asset-pendant", 0.45, 0.45, 1.3, ["lighting", "pendant"])
     pendant["definition"]["coordinateFrame"] = {"allowedMountingSurfaces": ["ceiling"]}
-    catalog = dict(CATALOG, **{record["assetId"]: record for record in (downlight, festoon, pendant)})
+    strip = asset("asset-strip", 3.0, 0.05, 0.05, ["lighting", "led strip"])     # no wall-mounted tag
+    on_wall = {"family": "wall_attachment", "supportPlacementId": "pl-wall", "supportAssetDefinitionRevision": "r",
+               "face": "negative_z", "localX": 0.0, "localY": 3.25, "normalGapMeters": 0.003}
+    catalog = dict(CATALOG, **{record["assetId"]: record for record in (downlight, festoon, pendant, strip)})
     for item, mounting in ((place("pl-down", downlight, 13.0, 3.185, 13.6), {"surfaceKind": "ceiling"}),
                            (place("pl-festoon", festoon, 13.0, 2.8, 13.6),
                             {"surfaceKind": "ceiling", "placementId": "pl-roof"}),
-                           (place("pl-pendant", pendant, 13.0, 1.9, 13.6), None)):
+                           (place("pl-pendant", pendant, 13.0, 1.9, 13.6), None),
+                           (place("pl-strip", strip, 13.0, 3.25, 13.6, relationship=on_wall), None)):
         if mounting:
             item["metadata"]["mountingSurface"] = mounting
         layout = car_park()
@@ -281,10 +285,21 @@ def test_a_point_that_cannot_take_the_fitting_is_listed_with_the_reason():
         wall_points(layout, catalog, [(2.0, 7.5)], asset_id=POLE["assetId"])
 
 
+def moved(placement, dx=0.0, dy=0.0):
+    """A copy of a wall fitting on an unturned wall that runs along x, moved DX along it and DY up, its mount too."""
+    item = json.loads(json.dumps(placement))
+    item["transform"]["position"]["x"] += dx
+    item["transform"]["position"]["y"] += dy
+    relationship = item["snapRelationship"]
+    relationship["localX"], relationship["localY"] = relationship["localX"] + dx, relationship["localY"] + dy
+    return item
+
+
 def test_touching_something_counts_as_running_into_it():
     """Review 2026-11-05: the layout's checks count touching as a collision, and the helper now tests with their own
     volumes and test. A sign whose base meets a back bar's top, a sconce whose top meets a shelf's underside, one flush
-    against the wall across the corner, and two side by side with no gap are each refused; the server agrees."""
+    against the wall across the corner, and two side by side with no gap are each refused; the server agrees: each,
+    mounted clear and then moved to touch, collides there."""
     layout, catalog = room("east")
     backbar = asset("asset-backbar", 2.0, 0.5, 2.72, ["bar"])
     shelf = asset("asset-shelf2", 1.0, 0.4, 0.3, ["shelf"])
@@ -293,34 +308,54 @@ def test_touching_something_counts_as_running_into_it():
 
     def why(result):
         return [item["why"] for item in result["notMounted"]]
+
+    def clear(point, height=1.5):
+        ((item,),) = [wall_points(layout, catalog, [point], height=height)["positions"]]
+        assert not [f for f in diagnose(layout, catalog, item["placement"]) if f["severity"] == "error"], point
+        return item["placement"]
+
+    def server_hits(light, where=None):
+        return [f["subjectRefs"] for f in diagnose(where or layout, catalog, light) if f["code"] == "placement_collision"]
     on_top = wall_points(layout, catalog, [(5.0, 7.5)], height=2.72)
     assert on_top["positions"] == [] and why(on_top) == ["it would run into pl-backbar (pl-backbar); touching counts"]
-    ((clear,),) = [wall_points(layout, catalog, [(5.0, 7.5)], height=2.75)["positions"]]
-    assert not [f for f in diagnose(layout, catalog, clear["placement"]) if f["severity"] == "error"]
-    touching = json.loads(json.dumps(clear["placement"]))
-    touching["transform"]["position"]["y"] = touching["snapRelationship"]["localY"] = 2.72
-    assert [f["subjectRefs"] for f in diagnose(layout, catalog, touching) if f["code"] == "placement_collision"] == [
-        ["pl-backbar", "pl-light"]], "the server refuses the touching one"
+    assert server_hits(moved(clear((5.0, 7.5), 2.75), dy=-0.03)) == [["pl-backbar", "pl-light"]]
     under = wall_points(layout, catalog, [(1.5, 7.5)])     # its top at 2.0 m, the shelf's underside
     assert under["positions"] == [] and why(under) == ["it would run into pl-shelf2 (pl-shelf2); touching counts"]
+    assert server_hits(moved(clear((1.5, 7.5), 1.45), dy=0.05)) == [["pl-light", "pl-shelf2"]]
     corner = wall_points(layout, catalog, [(9.68, 7.75)])  # its east side at x 9.8, the east wall's face
     assert corner["positions"] == [] and why(corner) == ["it would run into pl-east-b (pl-east-b); touching counts"]
+    assert server_hits(moved(clear((9.6, 7.75)), dx=0.08)) == [["pl-east-b", "pl-light"]]
     side_by_side = wall_points(layout, catalog, [(3.0, 7.5), (3.24, 7.5)])
     assert [spot(item) for item in side_by_side["positions"]] == [pytest.approx((3.0, 7.647))]
     assert why(side_by_side) == ["it would run into the fitting at an earlier point; touching counts"]
+    first = dict(side_by_side["positions"][0]["placement"], placementId="pl-first", positionMode="locked",
+                 metadata={"instanceLabel": "First"})
+    beside = dict(layout, placements=layout["placements"] + [first])
+    assert server_hits(moved(clear((3.3, 7.5)), dx=-0.06), beside) == [["pl-first", "pl-light"]]
 
 
 def test_a_point_inside_a_wall_goes_on_the_rooms_side():
     """Review 2026-11-05: a point inside a wall's thickness (Sage may pass the wall's own position) was mounted by the
-    sign of a hair's offset, outside the room as often as in. It goes on the face toward the zone; inside a wall with
-    the zone on both sides it is refused; a point off a face keeps that face."""
+    sign of a hair's offset, outside the room as often as in. It goes on the face toward the zone, also when the zone
+    stops short of the wall (round 2); inside a wall with the zone on both sides, or far from it, it is refused; a
+    point off a face keeps that face."""
     layout, catalog = room("east")
     for z in (7.8, 7.9, 7.9000001, 7.99, 8.0):
         ((item,),) = [wall_points(layout, catalog, [(5.0, z)])["positions"]]
         assert item["placement"]["snapRelationship"]["face"] == "negative_z", z
         assert spot(item) == pytest.approx((5.0, 7.647)) and "facing south" in item["where"], z
-    ((item,),) = [wall_points(layout, catalog, [(9.9, 6.0)])["positions"]]
-    assert item["placement"]["snapRelationship"]["face"] == "negative_x" and "facing west" in item["where"]
+    for x in (9.9, 9.95):
+        ((item,),) = [wall_points(layout, catalog, [(x, 6.0)])["positions"]]
+        assert item["placement"]["snapRelationship"]["face"] == "negative_x" and "facing west" in item["where"], x
+    room_zone = layout["zones"][0]
+    for edge in (7.5, 7.0, 5.0):      # the room zone's north edge, short of the wall's face at 7.8
+        room_zone["boundary"] = [{"x": 0, "z": 0}, {"x": 10, "z": 0}, {"x": 10, "z": edge}, {"x": 0, "z": edge}]
+        result = wall_points(layout, catalog, [(5.0, 7.9)])
+        if edge == 5.0:
+            assert result["positions"] == [] and "inside pl-north" in result["notMounted"][0]["why"], "the zone is far"
+        else:
+            assert result["positions"][0]["placement"]["snapRelationship"]["face"] == "negative_z", edge
+    room_zone["boundary"] = [{"x": 0, "z": 0}, {"x": 10, "z": 0}, {"x": 10, "z": 8}, {"x": 0, "z": 8}]
     partition = asset("asset-partition", 4.0, 0.2, 3.0, ["wall"])
     catalog[partition["assetId"]] = partition
     layout["placements"].append(place("pl-partition", partition, 5.0, 0.0, 4.0))
@@ -328,6 +363,17 @@ def test_a_point_inside_a_wall_goes_on_the_rooms_side():
     assert inside["positions"] == [] and "inside pl-partition" in inside["notMounted"][0]["why"]
     ((item,),) = [wall_points(layout, catalog, [(5.0, 4.3)])["positions"]]
     assert item["placement"]["snapRelationship"]["face"] == "positive_z" and "facing north" in item["where"]
+
+
+def test_a_flat_item_in_the_layout_does_not_stop_the_points():
+    """Review 2026-11-05 (round 2): a box with no depth (a flat panel) has no collision volume, so the checks leave it
+    out; the helper does too, rather than failing every point on the layout."""
+    layout, catalog = room("east")
+    flat = asset("asset-flat", 2.0, 0.0, 1.5, ["panel"])
+    catalog[flat["assetId"]] = flat
+    layout["placements"].append(place("pl-flat", flat, 15.0, 0.0, 15.0))
+    ((item,),) = [wall_points(layout, catalog, [(2.0, 7.5)])["positions"]]
+    assert spot(item) == pytest.approx((2.0, 7.647))
 
 
 def test_a_fitting_goes_on_the_nearest_wall_that_spans_its_height():
@@ -473,6 +519,13 @@ def test_a_light_goes_where_the_user_says_and_the_helper_is_for_no_position():
         assert USER_POSITION in flat, name
         assert "with no position from the user" in flat.casefold(), name
     assert "place it there with place_asset" in USER_POSITION and "not a reason to refuse or move it" in USER_POSITION
+    # Review 2026-11-05 (round 2): a wall fitting at the user's spot goes there as a point, and a "wall points"
+    # result says to copy its mounts as given, never to place a wall fitting off the wall.
+    assert "goes there as a suggest_facility_light_positions point" in USER_POSITION
+    layout, catalog = room("east")
+    points_how = " ".join(wall_points(layout, catalog, [(2.0, 7.5)])["howToUse"].split())
+    assert "snapRelationship exactly" in points_how and "even off the helper's spots" not in points_how
+    assert "never place a wall fitting without its snapRelationship" in points_how
 
 
 def test_sage_has_the_tool_with_a_progress_line():

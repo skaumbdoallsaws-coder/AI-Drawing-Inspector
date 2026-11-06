@@ -46,7 +46,13 @@ NAME = "suggest_facility_light_positions"
 # allowed, and Sage refused a pole the user put at x 312, z 197.5 in a car park. Every text about placing lights says:
 USER_POSITION = ("When the user gives a light's position, place it there with place_asset, even off the helper's "
                  "spots: in a car park or yard it is then staged for review, which is expected, not a reason to "
-                 "refuse or move it.")
+                 "refuse or move it. A wall fitting (a sconce, a neon sign) at a spot the user gives goes there as a "
+                 "suggest_facility_light_positions point, so it is mounted on the wall.")
+# A "wall points" result is the user's or Sage's own points, mounted: copied as given, never placed off the wall.
+POINTS_HOW = ("These are the points given, mounted on the wall: place each with place_asset, copying its "
+              "placement.transform and placement.snapRelationship exactly, and add a new placementId, positionMode "
+              "locked and an instanceLabel. It comes lit; it needs no finish step. A point in notMounted got no mount: "
+              "give another point for it or ask the user; never place a wall fitting without its snapRelationship.")
 SPACING = 10.0              # m between suggested lights, and from the lights already there
 EDGE_INSET = 2.5            # m in from the zone's edge
 EDGE_BAND = 12.0            # m from the named edge that a spot may be
@@ -639,16 +645,17 @@ def _point_positions(layout, catalog, asset, zone, points, height_above_floor):
         if gap > 0:
             side = 1.0 if across > 0 else -1.0
         else:
-            # A point inside the wall: the face toward the zone (the room), when only one side of the wall is in it.
+            # A point inside the wall: the face toward the zone (the room), the side whose point 0.3 m off the face
+            # is nearer it (a zone may stop short of the wall); not when both are as near, or the zone is far.
             reach = thickness / 2 + 0.3
             foot = (px - normal[0] * across, pz - normal[1] * across)
-            sides = [s for s in (1.0, -1.0)
-                     if area.contains(Point(foot[0] + s * normal[0] * reach, foot[1] + s * normal[1] * reach))]
-            if len(sides) != 1:
+            away = {s: area.distance(Point(foot[0] + s * normal[0] * reach, foot[1] + s * normal[1] * reach))
+                    for s in (1.0, -1.0)}
+            side = min(away, key=away.get)
+            if abs(away[1.0] - away[-1.0]) <= 1e-9 or away[side] > NEAR_WALL:
                 missed.append({"point": given,
                                "why": f"it is inside {label}: give a point on the room side, off its face"})
                 continue
-            side = sides[0]
         outward = (side * normal[0], side * normal[1])
         if along - half_width < start - 1e-9 or along + half_width > end + 1e-9:
             missed.append({"point": given, "why": (f"it would run past the end of {label}: move the point along the "
@@ -686,12 +693,12 @@ def _point_positions(layout, catalog, asset, zone, points, height_above_floor):
 
 def _volumes(placement, record):
     """PLACEMENT's collision volumes as the layout's checks see them: [(plan polygon, (bottom, top))]; its catalog box
-    when the record has no collision geometry."""
+    when the record has no collision geometry; none for a flat box (no width or depth), which the checks leave out."""
     try:
         return [(item.polygon, item.interval) for item in placement_spatial_records(placement, record)]
     except (KeyError, TypeError, ValueError):
         shape = _footprint(placement, record)
-        if shape is None:
+        if shape is None or shape.geom_type != "Polygon":
             return []
         low, high = _aabb(record)
         y = float(placement["transform"]["position"]["y"])
@@ -761,12 +768,12 @@ def suggest_light_positions(layout, catalog, arguments):
     result = {"assetId": asset["assetId"], "assetDefinitionRevision": asset["assetDefinitionRevision"],
               "zoneId": zone["zoneId"], "method": "wall points" if points else "wall" if wall else "pole",
               "edge": edge, "positions": positions,
-              "howToUse": ("For a light with no position from the user, place it with place_asset at one of "
-                           "these positions, best first: copy its placement.transform and placement.snapRelationship "
-                           "exactly, and add a new placementId, positionMode locked and an instanceLabel. It comes "
-                           "lit; it needs no finish step. A pole light placed exactly at one of these positions skips "
-                           "the car park review when you preview it (the server checks the spot again). "
-                           + USER_POSITION),
+              "howToUse": POINTS_HOW if points else (
+                  "For a light with no position from the user, place it with place_asset at one of these positions, "
+                  "best first: copy its placement.transform and placement.snapRelationship exactly, and add a new "
+                  "placementId, positionMode locked and an instanceLabel. It comes lit; it needs no finish step. A "
+                  "pole light placed exactly at one of these positions skips the car park review when you preview "
+                  "it (the server checks the spot again). " + USER_POSITION),
               "limitations": LIMITATIONS}
     if skipped:
         result["skipped"] = {key: f"{number} {SKIPPED[key]}" for key, number in sorted(skipped.items())}

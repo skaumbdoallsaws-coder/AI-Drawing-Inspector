@@ -196,7 +196,7 @@ def test_role_scope_and_cross_scope_document_checks(env):
     with env.registry.begin(viewer, response["admission_id"], session_id="session-1", conversation_id="conversation-1",
                             turn_id="viewer-turn", principal_resolver=lambda: viewer) as turn:
         gw = gateway(env, turn)
-        assert len(gw.specs) == 3
+        assert len(gw.specs) == 5
         assert call(gw)["ok"] is True
         error("editor_edit_denied", lambda: _enter_guard(turn), 403)
 
@@ -481,7 +481,9 @@ def test_editor_api_rejects_missing_marker_cross_origin_and_wrong_host(env, head
 @pytest.mark.parametrize("extra", [{"direct_edit_authorized": True}, {"principal": "admin"}, {"scope": "other"}, {"turn_id": "injected"}])
 def test_editor_api_never_accepts_renderer_authority(env, extra):
     with client(env) as http:
-        assert http.post("/api/packaging/editor", json=editor_state(env, **extra), headers=HEADERS).status_code == 422
+        rejected = http.post("/api/packaging/editor", json=editor_state(env, **extra), headers=HEADERS)
+        assert rejected.status_code == 400
+        assert rejected.json()["error"]["code"] == "editor_state_invalid"
 
 
 def test_api_manual_edit_keeps_revision_cas_and_invalidates_admission_on_next_check(env):

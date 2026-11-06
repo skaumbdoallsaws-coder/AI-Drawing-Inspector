@@ -1677,16 +1677,25 @@ if os.getenv("INSPECTORPRO_PACKAGING_ENABLED", "").strip().lower() in {"1", "tru
     from ai_inspector.packaging_shipping.api import create_router as create_packaging_router
     from ai_inspector.packaging_shipping.admission import PackagingAdmission
     from ai_inspector.packaging_shipping.service import PackagingService
+    from ai_inspector.packaging_shipping.credentials import EasyPostCredentialStore, carrier_owner
     _PACKAGING_SERVICE = PackagingService(
         Path(os.getenv("INSPECTORPRO_PACKAGING_ROOT", str(REPO_ROOT / ".runtime" / "packaging")))
     )
     _PACKAGING_ADMISSION = PackagingAdmission(_PACKAGING_SERVICE)
+    _PACKAGING_ACCOUNTS = {}
+    def _packaging_account(principal):
+        identity = carrier_owner(principal)
+        if identity not in _PACKAGING_ACCOUNTS:
+            _PACKAGING_ACCOUNTS[identity] = EasyPostCredentialStore(
+                _PACKAGING_SERVICE.root / "carrier-credentials", identity, enabled=True)
+        return _PACKAGING_ACCOUNTS[identity]
     app.include_router(create_packaging_router(
         _PACKAGING_SERVICE,
         principal_resolver=_FACILITY_PRINCIPAL_RESOLVER,
         static_root=REPO_ROOT / "static",
         admission=_PACKAGING_ADMISSION,
         sage_enabled=lambda: _codex_packaging_enabled(),
+        credential_factory=_packaging_account,
     ))
 
 

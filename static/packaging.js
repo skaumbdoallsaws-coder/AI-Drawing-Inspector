@@ -1,5 +1,15 @@
 export const ORIENTATION_ORDERS = [[0, 1, 2], [1, 0, 2], [1, 2, 0], [2, 1, 0], [2, 0, 1], [0, 2, 1]];
 export const ORIENTATION_LABELS = ['XYZ', 'YXZ', 'YZX', 'ZYX', 'ZXY', 'XZY'];
+export const PANEL_COMMANDS = [
+  { id: 'product', label: 'Product', icon: 'cube', group: 'editor-tabs' },
+  { id: 'carton', label: 'Carton', icon: 'bounding-box', group: 'editor-tabs' },
+  { id: 'contents', label: 'Contents', icon: 'stack', group: 'editor-tabs' },
+  { id: 'arrange', label: 'Arrange', icon: 'grid-four', group: 'editor-tabs' },
+  { id: 'appearance', label: 'Appearance', icon: 'sphere', group: 'editor-tabs' },
+  { id: 'graphics', label: 'Graphics', icon: 'rectangle', group: 'editor-tabs' },
+  { id: 'validation', label: 'Validation', icon: 'cube-focus', group: 'review-tabs' },
+  { id: 'rates', label: 'Rates', icon: 'navigation-arrow', group: 'review-tabs' },
+];
 export const clone = value => structuredClone(value);
 export const mmToM = value => Number(value) / 1000;
 export const mToMm = value => Number((value * 1000).toFixed(6));
@@ -58,9 +68,10 @@ export function errorMessage(body, status) {
   return `Packaging request failed (HTTP ${status}).`;
 }
 
-export async function request(path, { method = 'GET', body, raw = false, responseType = 'json', keepalive = false } = {}) {
+export async function request(path, { method = 'GET', body, raw = false, contentType = 'model/gltf-binary', responseType = 'json', keepalive = false, idempotencyKey } = {}) {
   const headers = { 'X-InspectorPro-Request': 'packaging' };
-  if (body !== undefined) headers['Content-Type'] = raw ? 'model/gltf-binary' : 'application/json';
+  if (idempotencyKey !== undefined) headers['Idempotency-Key'] = idempotencyKey;
+  if (body !== undefined) headers['Content-Type'] = raw ? contentType : 'application/json';
   const response = await fetch(`/api/packaging${path}`, { method, headers, credentials: 'same-origin', cache: 'no-store', keepalive,
     signal: AbortSignal.timeout(90000),
     body: body === undefined ? undefined : raw ? body : JSON.stringify(body) });
@@ -82,6 +93,15 @@ export function quoteFreshness(quote, revision, dirty, scenarioMatches) {
 
 export function rateAccountLabel(rate) {
   return `Account: ${String(rate.account_id ?? '').trim() || 'not provided'}`;
+}
+
+export function providerNotice(provider) {
+  if (!provider) return 'Provider status unavailable.';
+  if (provider.notice) return String(provider.notice);
+  if (provider.validation === 'unavailable') return 'Carrier account access is unavailable.';
+  if (!provider.configured) return 'No carrier account configured.';
+  if (provider.validation === 'not_validated') return 'Account saved; provider access has not been verified.';
+  return 'Rate estimates only. Shipment purchases are disabled.';
 }
 
 export const PACKAGING_BRIDGE = 'inspectorpro:packaging-editor-v1';
@@ -313,11 +333,13 @@ const readVector = (form, prefix) => [0, 1, 2].map(i => mmToM(numeric(form, `${p
 
 const state = {
   draft: new DraftDocument(), busy: false, formDirty: false, editorForm: null,
-  editor: 'product', review: 'validation', packageId: null, componentId: null, scene: null,
+  editor: 'product', review: 'validation', panel: null, packageId: null, componentId: null, appearanceTarget: 'product', graphicId: null, scene: null,
   alternatives: [defaultCarton()], alternativeIndex: 0, maxPackages: 3, candidates: null, candidateRevision: null, candidateConfig: null,
   provider: null, providerError: '', quotes: [], quoteIndex: 0, quoteScenario: null, quoteError: '',
   addresses: { origin: blankAddress(), destinations: [blankAddress()] }, quoteForm: null,
-  section: false, exploded: false, mutationReceipt: null, lastDirtySignal: null, sage: null, conflict: false
+  section: false, exploded: false, displayMode: 'edges', transparency: 0,
+  mutationReceipt: null, lastDirtySignal: null, sage: null, conflict: false,
+  capabilities: [], catalog: null, alternativeReceipt: null
 };
 
 function blankAddress() { return { name: '', street1: '', street2: '', city: '', state: '', zip: '', country: 'US', residential: false }; }
@@ -383,10 +405,45 @@ function createForm(onApply, label = 'Apply changes') {
 }
 
 function flushEditor() {
-  if (state.formDirty && state.editorForm) state.editorForm.apply();
+  if (state.formDirty && state.editorForm) {
+    state.panel = state.editor; updatePanel();
+    state.editorForm.apply();
+  }
 }
 
-function setEditor(tab) { flushEditor(); state.editor = tab; render(); }
+function openPanel(id, { toggle = true, focus = true } = {}) {
+  const command = PANEL_COMMANDS.find(item => item.id === id);
+  if (!command) throw new Error('Unknown packaging panel.');
+  if (toggle && state.panel === id) { closePanel(); return; }
+  if (command.group === 'editor-tabs' && state.editor !== id) {
+    if ($('editor').querySelector('input[type="file"]')?.files?.length) throw new Error('Import or clear the selected source file first.');
+    flushEditor(); state.editor = id; renderEditor(); refreshScene();
+  } else if (command.group === 'review-tabs') state.review = id;
+  state.panel = id; updatePanel(); updateHeader(); renderValidation();
+  if (focus) $('tool-panel').focus({ preventScroll: true });
+}
+
+function closePanel() {
+  const previous = state.panel;
+  state.panel = null; updatePanel();
+  if (previous) $(`command-${previous}`)?.focus({ preventScroll: true });
+}
+
+function updatePanel() {
+  const panel = $('tool-panel'); if (!panel) return;
+  const command = PANEL_COMMANDS.find(item => item.id === state.panel);
+  panel.hidden = !command; $('workspace').classList.toggle('panel-open', !!command);
+  $('panel-title').textContent = command?.label || 'Product';
+  $('panel-state').textContent = state.sage?.locked ? 'Locked for chat' : state.busy ? 'Working...'
+    : state.formDirty ? 'Unapplied fields' : state.draft.dirty ? 'Unsaved changes' : state.draft.document ? `Saved revision ${state.draft.document.revision}` : 'New document';
+  $('editor').hidden = !command || command.group !== 'editor-tabs';
+  $('validation-panel').hidden = state.panel !== 'validation'; $('rates-panel').hidden = state.panel !== 'rates';
+  for (const item of PANEL_COMMANDS) {
+    const control = $(`command-${item.id}`);
+    if (control) { control.setAttribute('aria-expanded', String(state.panel === item.id)); control.disabled = state.busy || !!state.sage?.locked; }
+  }
+  if ($('close-panel')) $('close-panel').disabled = state.busy || !!state.sage?.locked;
+}
 
 function updateHeader() {
   const draft = state.draft, doc = draft.document;
@@ -409,6 +466,7 @@ function updateHeader() {
   $('document-name').disabled = state.busy || !!state.sage?.locked;
   $('workspace').inert = !!state.sage?.locked;
   document.documentElement.dataset.packagingLocked = String(!!state.sage?.locked);
+  updatePanel();
   const provider = state.provider;
   $('provider-status').textContent = state.providerError || (provider ? `${provider.provider}: ${provider.configured ? 'configured | quote only' : 'not configured'}` : 'Checking rate provider...');
   const dirtySignal = JSON.stringify({ dirty: hasNavigationChanges() || state.busy, documentId: doc?.id || null, revision: doc?.revision ?? null });
@@ -419,33 +477,28 @@ function updateHeader() {
 }
 
 function renderTabs() {
-  for (const [id, entries, selected, handler] of [
-    ['editor-tabs', [['product', 'Product'], ['carton', 'Carton'], ['contents', 'Contents'], ['arrange', 'Arrange']], state.editor, setEditor],
-    ['review-tabs', [['validation', 'Validation'], ['rates', 'Rates']], state.review, tab => { state.review = tab; renderTabs(); }]
-  ]) {
-    const nav = $(id); nav.replaceChildren(); nav.setAttribute('role', 'tablist');
-    entries.forEach(([value, label]) => {
-      const b = button(label, () => handler(value)); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(value === selected));
-      b.setAttribute('aria-controls', id === 'editor-tabs' ? 'editor' : `${value}-panel`);
-      b.tabIndex = value === selected ? 0 : -1;
-      b.addEventListener('keydown', event => {
-        if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
-        event.preventDefault();
-        const i = entries.findIndex(([v]) => v === value);
-        const next = event.key === 'Home' ? 0 : event.key === 'End' ? entries.length - 1 : (i + (event.key === 'ArrowRight' ? 1 : -1) + entries.length) % entries.length;
-        invoke(() => { handler(entries[next][0]); $(id).children[next].focus(); });
-      });
-      nav.append(b);
+  for (const [index, command] of PANEL_COMMANDS.entries()) {
+    if ($(`command-${command.id}`)) continue;
+    const b = button(command.label, () => openPanel(command.id), { symbol: command.icon });
+    b.id = `command-${command.id}`; b.classList.add('ribbon-command');
+    b.setAttribute('aria-controls', 'tool-panel'); b.setAttribute('aria-haspopup', 'dialog');
+    b.addEventListener('keydown', event => {
+      if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? PANEL_COMMANDS.length - 1
+        : (index + (event.key === 'ArrowRight' ? 1 : -1) + PANEL_COMMANDS.length) % PANEL_COMMANDS.length;
+      $(`command-${PANEL_COMMANDS[next].id}`).focus();
     });
+    $(command.group).append(b);
   }
-  $('validation-panel').hidden = state.review !== 'validation'; $('rates-panel').hidden = state.review !== 'rates';
+  updatePanel();
 }
 
 function render() {
   if (!selectedPackage()) state.packageId = state.draft.design.packages[0]?.id ?? null;
   $('document-name').value = state.draft.design.name;
   updateHeader(); renderTabs(); renderPackages(); renderEditor(); renderValidation(); renderQuoteResults();
-  refreshScene();
+  refreshScene(); updatePanel();
 }
 
 function renderPackages() {
@@ -459,7 +512,7 @@ function renderPackages() {
     button('Add carton', () => {
       flushEditor(); const id = uid('box');
       edit(d => d.packages.push({ id, carton: defaultCarton(), placements: [], inserts: [], allowance_kg: null, allowance_evidence: '' }));
-      state.packageId = id; state.editor = 'carton'; render(); state.scene?.fit();
+      state.packageId = id; state.editor = 'carton'; state.panel = 'carton'; render(); state.scene?.fit();
     }, { symbol: 'cube', disabled: state.draft.design.packages.length >= 10 }),
     button('Remove selected package', () => {
       if (!confirm('Remove this carton and all its products and pads?')) return;
@@ -471,40 +524,131 @@ function renderPackages() {
 function renderEditor() {
   state.editorForm = null; state.formDirty = false;
   const host = $('editor'); host.replaceChildren();
-  ({ product: renderProduct, carton: renderCarton, contents: renderContents, arrange: renderArrange })[state.editor](host);
+  ({ product: renderProduct, carton: renderCarton, contents: renderContents, arrange: renderArrange, appearance: renderAppearance, graphics: renderGraphics })[state.editor](host);
 }
 
 function section(host, heading) {
   const group = element('section', null, 'editor-section'); group.append(element('h2', heading)); host.append(group); return group;
 }
 
+function resourceDialog(title, build) {
+  notify('');
+  let dialog = $('resource-dialog');
+  if (!dialog) {
+    dialog = element('dialog'); dialog.id = 'resource-dialog'; document.body.append(dialog);
+    dialog.addEventListener('close', () => { dialog.replaceChildren(); updateHeader(); });
+    dialog.addEventListener('cancel', event => { if (state.busy) event.preventDefault(); });
+  }
+  dialog.replaceChildren(); dialog.setAttribute('aria-labelledby', 'resource-title');
+  const header = element('div', null, 'dialog-header'), heading = element('h2', title); heading.id = 'resource-title';
+  const close = button('Close dialog', () => dialog.close(), { compact: true }); close.append(element('span', '\u00d7'));
+  header.append(heading, close); const body = element('div', null, 'resource-body'); dialog.append(header, body);
+  build(body, dialog); if (!dialog.open) dialog.showModal(); updateHeader();
+}
+
+async function getCatalog() {
+  if (!state.catalog) state.catalog = await request('/catalog');
+  return state.catalog;
+}
+
+export function productFromSource(meta, previous = {}) {
+  return { ...clone(previous), name: meta.name, dimensions_m: clone(meta.dimensions_m), mass_kg: null,
+    mass_basis: 'unknown', mass_evidence: '', mass_calculation: null, source_id: meta.id, source_revision: meta.source_revision };
+}
+
+async function openSources() {
+  flushEditor();
+  const data = await working('Loading product sources...', () => request('/sources'));
+  resourceDialog('Product sources', (body, dialog) => {
+    if (!data.sources.length) body.append(element('p', 'No imported sources.', 'notice'));
+    for (const meta of data.sources) {
+      const row = element('div', null, 'document-row'), info = element('div');
+      info.append(element('strong', meta.name), element('p', dimensionText(meta.dimensions_m)), element('code', meta.id));
+      if (meta.volume_m3) info.append(element('p', `Solid volume: ${numberText(meta.volume_m3 * 1e6)} cm3`));
+      row.append(info, button('Use source', () => {
+        if (state.draft.design.product && !confirm('Replace the product in every placement and reset its mass evidence?')) return;
+        edit(d => { d.product = productFromSource(meta, d.product || {}); }); dialog.close(); render(); state.scene?.fit();
+      })); body.append(row);
+    }
+  });
+}
+
+async function openMassEstimate() {
+  flushEditor(); render();
+  const product = state.draft.design.product;
+  const data = await working('Loading physical material evidence...', async () => ({
+    meta: await request(`/sources/${encodeURIComponent(product.source_id)}`), catalog: await getCatalog()
+  }));
+  if (data.meta.format !== 'step' || data.meta.physical_evidence?.volume_basis !== 'closed_solid_brep') throw new Error('This source has no trusted closed-solid STEP volume.');
+  resourceDialog('Volume and density estimate', (body, dialog) => {
+    body.append(element('p', `STEP solid volume: ${numberText(data.meta.volume_m3 * 1e6)} cm3`, 'metadata'));
+    const form = element('form', null, 'form-grid'); form.addEventListener('submit', event => event.preventDefault()); body.append(form);
+    const calculation = product.mass_calculation;
+    field(form, 'Material name', 'estimate_material', calculation?.material.name || '', { required: true, maxLength: 160 });
+    field(form, 'Density (kg/m3)', 'estimate_density', calculation?.material.density_kg_m3 || '', { type: 'number', min: .000001, max: 25000, required: true });
+    field(form, 'Density evidence', 'estimate_evidence', calculation?.material.evidence || '', { multiline: true, required: true, maxLength: 500 });
+    materialCatalogField(form, data.catalog.materials, 'product', ['estimate_material', 'estimate_density', 'estimate_evidence']);
+    field(form, 'Exclusions / assumptions', 'estimate_exclusions', calculation?.exclusions || '', { multiline: true, required: true, maxLength: 500 });
+    form.append(button('Calculate estimate', async () => {
+      if (!form.reportValidity()) return;
+      const result = await working('Calculating mass estimate...', () => request(`/sources/${encodeURIComponent(product.source_id)}/mass-estimate`, { method: 'POST', body: {
+        source_revision: product.source_revision, material: { name: textValue(form, 'estimate_material'), density_kg_m3: numeric(form, 'estimate_density'), evidence: textValue(form, 'estimate_evidence') },
+        exclusions: textValue(form, 'estimate_exclusions')
+      } }));
+      if (result.product.source_id !== product.source_id || result.product.source_revision !== product.source_revision
+        || JSON.stringify(result.product.dimensions_m) !== JSON.stringify(product.dimensions_m)) throw new Error('Estimated product does not match the selected source.');
+      state.editorForm.stageMass(result.product); dialog.close(); notify('Mass estimate staged. Product changes are not yet applied.');
+    }, { primary: true }));
+  });
+}
+
+function materialCatalogField(form, materials, use, names) {
+  const entries = materials.filter(item => item.use === use || item.use === 'both');
+  const select = field(form, 'Material catalog', 'material_catalog', '', { options: [['', 'Custom material'], ...entries.map(item => [item.id, item.material.name])] });
+  select.addEventListener('change', () => {
+    const selected = entries.find(item => item.id === select.value)?.material; if (!selected) return;
+    [selected.name, selected.density_kg_m3, selected.evidence].forEach((value, index) => { form.elements.namedItem(names[index]).value = value; });
+    form.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 function renderProduct(host) {
   const product = state.draft.design.product;
   const source = section(host, 'Product source');
   const upload = element('form', null, 'form-grid');
-  const file = field(upload, 'Source GLB', 'source_file', '', { type: 'file', accept: '.glb,model/gltf-binary', required: true });
-  field(upload, 'Stored coordinate units', 'source_units', '1', { options: [['1', 'Meters'], ['0.001', 'Millimeters'], ['0.0254', 'Inches']] });
-  upload.append(button('Import GLB', () => {
+  const stepEnabled = state.capabilities.includes('step_import');
+  const file = field(upload, stepEnabled ? 'Source GLB / STEP' : 'Source GLB', 'source_file', '', { type: 'file', accept: stepEnabled ? '.glb,.step,.stp' : '.glb,model/gltf-binary', required: true });
+  const units = field(upload, 'Stored coordinate units', 'source_units', '1', { options: [['1', 'Meters'], ['0.001', 'Millimeters'], ['0.0254', 'Inches']] });
+  const importButton = button('Import GLB', () => {
     if (!upload.reportValidity()) return;
     return importSource(file.files[0], Number(textValue(upload, 'source_units')));
-  }, { symbol: 'file-export' }));
+  }, { symbol: 'file-export' }); upload.append(importButton);
+  file.addEventListener('change', () => {
+    const step = /\.(step|stp)$/i.test(file.files[0]?.name || ''); units.disabled = step;
+    importButton.replaceChildren(element('span', step ? 'Import STEP' : 'Import GLB'));
+    importButton.setAttribute('aria-label', step ? 'Import STEP' : 'Import GLB');
+  });
   upload.addEventListener('submit', event => event.preventDefault()); source.append(upload);
+  if (state.capabilities.includes('saved_alternatives')) source.append(button('Imported sources', openSources, { symbol: 'stack' }));
   if (product?.source_id) {
     const meta = element('div', null, 'metadata');
-    meta.append(element('span', 'Imported GLB | dimensions locked'), element('code', product.source_id), element('span', 'Source revision'), element('code', product.source_revision));
+    meta.append(element('span', 'Imported source | dimensions locked'), element('code', product.source_id), element('span', 'Source revision'), element('code', product.source_revision));
     source.append(meta, button('Replace with manual geometry', () => {
       if (!confirm('Replace the imported model with editable manual bounding geometry?')) return;
-      flushEditor(); edit(d => { d.product.source_id = null; d.product.source_revision = ''; }); render();
+      flushEditor(); edit(d => { d.product.source_id = null; d.product.source_revision = ''; d.product.mass_calculation = null; }); render();
     }, { symbol: 'bounding-box' }));
   } else source.append(element('p', product ? 'Manual geometry: bounding box only.' : 'No product selected.', 'notice'));
 
   const group = section(host, product ? 'Product properties' : 'Manual product');
   const p = product || { name: 'Product', dimensions_m: [.1, .1, .1], mass_kg: null, mass_basis: 'unknown', mass_evidence: '', source_id: null, source_revision: '' };
+  let estimatedProduct = null;
   const { form, actions } = createForm(form => {
     const basis = textValue(form, 'mass_basis');
     const updated = { ...clone(p), name: textValue(form, 'product_name'),
       dimensions_m: p.source_id ? clone(p.dimensions_m) : readVector(form, 'product_dim'), mass_basis: basis,
       mass_kg: basis === 'unknown' ? null : numeric(form, 'product_mass'), mass_evidence: basis === 'unknown' ? '' : textValue(form, 'mass_evidence') };
+    const estimate = estimatedProduct || p;
+    if (estimatedProduct || 'mass_calculation' in updated) updated.mass_calculation = basis === 'estimate' && updated.mass_kg === estimate.mass_kg ? clone(estimate.mass_calculation || null) : null;
     const allowed = [...form.querySelectorAll('[name="orientation"]:checked')].map(x => Number(x.value));
     if (!allowed.length) throw new Error('Allow at least one product orientation.');
     edit(d => {
@@ -516,11 +660,22 @@ function renderProduct(host) {
   field(form, 'Product name', 'product_name', p.name, { maxLength: 160, required: true });
   vector(form, 'Source dimensions', 'product_dim', p.dimensions_m, { readOnly: !!p.source_id });
   field(form, 'Total product quantity', 'quantity', state.draft.design.quantity, { type: 'number', min: 1, max: 48, step: 1, required: true });
-  const basis = field(form, 'Mass basis', 'mass_basis', p.mass_basis, { options: [['unknown', 'Unknown'], ['user_measured', 'Measured'], ['estimate', 'Estimate']] });
+  const basis = field(form, 'Mass basis', 'mass_basis', p.mass_basis, { options: [['unknown', 'Unknown'], ['user_measured', 'Measured'], ['estimate', 'Estimate'], ...(p.mass_basis === 'cad' ? [['cad', 'CAD record']] : [])] });
   const mass = field(form, 'Mass per product (kg)', 'product_mass', p.mass_kg, { type: 'number', min: .000001, max: 1000 });
   const evidence = field(form, 'Mass evidence', 'mass_evidence', p.mass_evidence, { multiline: true, maxLength: 500 });
-  const updateMass = () => { mass.disabled = evidence.disabled = basis.value === 'unknown'; mass.required = evidence.required = basis.value !== 'unknown'; };
+  const updateMass = () => {
+    mass.disabled = evidence.disabled = basis.value === 'unknown'; mass.required = evidence.required = basis.value !== 'unknown';
+    mass.readOnly = evidence.readOnly = basis.value === 'cad';
+  };
   basis.addEventListener('change', updateMass); updateMass();
+  const calculation = element('p', p.mass_calculation ? `Volume: ${numberText(p.mass_calculation.volume_m3 * 1e6)} cm3 | ${p.mass_calculation.material.name} | ${p.mass_calculation.material.density_kg_m3} kg/m3 | ${p.mass_calculation.exclusions}` : '', 'metadata');
+  form.append(calculation);
+  state.editorForm.stageMass = estimated => {
+    estimatedProduct = clone(estimated); basis.value = estimated.mass_basis; mass.value = estimated.mass_kg; evidence.value = estimated.mass_evidence; updateMass();
+    calculation.textContent = `Volume: ${numberText(estimated.mass_calculation.volume_m3 * 1e6)} cm3 | ${estimated.mass_calculation.material.name} | ${estimated.mass_calculation.material.density_kg_m3} kg/m3 | ${estimated.mass_calculation.exclusions}`;
+    state.formDirty = true; updateHeader(); updateFreshness();
+  };
+  if (p.source_id && state.capabilities.includes('cad_volume_density_estimate')) form.append(button('Estimate from volume and density', openMassEstimate, { symbol: 'cube' }));
   form.append(element('h3', 'Packing restrictions'));
   const dims = element('div', null, 'two-cols');
   field(dims, 'Wall clearance (mm)', 'clearance', mToMm(state.draft.design.constraints.clearance_m), { type: 'number', min: 0, max: 200, required: true });
@@ -535,12 +690,15 @@ function renderProduct(host) {
 
 async function importSource(file, unit) {
   flushEditor();
-  if (!file || !/\.glb$/i.test(file.name)) throw new Error('Choose a self-contained GLB file.');
-  if (file.size > 24 * 1024 * 1024) throw new Error('GLB import is limited to 24 MiB.');
+  const step = /\.(step|stp)$/i.test(file?.name || '');
+  if (!file || (!step && !/\.glb$/i.test(file.name))) throw new Error('Choose a GLB or STEP file.');
+  if (step && !state.capabilities.includes('step_import')) throw new Error('STEP import is not configured in this host.');
+  if (!step && file.size > 24 * 1024 * 1024) throw new Error('GLB import is limited to 24 MiB.');
   if (state.draft.design.product && !confirm('Replace the product for every existing placement? Mass provenance will be reset.')) return;
   await working('Importing source geometry...', async () => {
-    const meta = await request(`/sources?name=${encodeURIComponent(file.name.slice(0, 160))}&meters_per_unit=${unit}`, { method: 'POST', body: file, raw: true });
-    edit(d => { d.product = { name: meta.name, dimensions_m: clone(meta.dimensions_m), mass_kg: null, mass_basis: 'unknown', mass_evidence: '', source_id: meta.id, source_revision: meta.source_revision }; });
+    const path = step ? `/sources/step?name=${encodeURIComponent(file.name.slice(0, 160))}` : `/sources?name=${encodeURIComponent(file.name.slice(0, 160))}&meters_per_unit=${unit}`;
+    const meta = await request(path, { method: 'POST', body: file, raw: true, contentType: step ? 'application/step' : 'model/gltf-binary' });
+    edit(d => { d.product = productFromSource(meta, d.product || {}); });
     notify('Source imported. Product mass is unknown.');
   });
   render(); state.scene?.fit();
@@ -556,21 +714,50 @@ function cartonFields(form, carton) {
   const row = element('div', null, 'two-cols');
   field(row, 'Payload limit (kg)', 'payload', carton.max_payload_kg, { type: 'number', min: .000001, max: 1000 });
   field(row, 'Carton cost (USD)', 'carton_cost', carton.cost_usd, { type: 'number', min: 0, max: 10000 }); form.append(row);
+  const method = field(form, 'Carton mass basis', 'tare_method', carton.board_blank ? 'blank' : 'manual', { options: [['manual', 'Entered tare'], ['blank', 'Full board blank estimate']] });
+  const blank = element('fieldset', null, 'form-grid'); blank.append(element('legend', 'Full blank, including flaps and overlaps'));
+  const b = carton.board_blank;
+  field(blank, 'Blank width (mm)', 'blank_width', b ? mToMm(b.dimensions_m[0]) : '', { type: 'number', min: .000001, max: 5000 });
+  field(blank, 'Blank length (mm)', 'blank_length', b ? mToMm(b.dimensions_m[1]) : '', { type: 'number', min: .000001, max: 5000 });
+  field(blank, 'Blank quantity', 'blank_quantity', b?.quantity ?? 1, { type: 'number', min: 1, max: 20, step: 1 });
+  field(blank, 'Board mass per area (kg/m2)', 'blank_basis_weight', b?.mass_per_area_kg_m2 ?? '', { type: 'number', min: .000001, max: 25 });
+  field(blank, 'Blank / board evidence', 'blank_evidence', b?.evidence ?? '', { multiline: true, maxLength: 500 });
+  const calculate = () => {
+    const enabled = method.value === 'blank'; blank.hidden = !enabled; blank.disabled = !enabled;
+    for (const input of blank.querySelectorAll('input, textarea')) input.required = enabled;
+    tare.readOnly = evidence.readOnly = enabled;
+    if (enabled) {
+      const values = ['blank_width', 'blank_length', 'blank_quantity', 'blank_basis_weight'].map(name => Number(textValue(form, name)));
+      tare.value = values.every(value => Number.isFinite(value) && value > 0) ? String(values[0] * values[1] / 1e6 * values[2] * values[3]) : '';
+      evidence.value = textValue(form, 'blank_evidence');
+    }
+    check();
+  };
+  form.append(blank); method.addEventListener('change', calculate); blank.addEventListener('input', calculate); calculate();
 }
 
-function readCarton(form) {
+function readCarton(form, original = {}) {
   const inner = readVector(form, 'inner'), outer = readVector(form, 'outer');
   if (outer.some((x, i) => x <= inner[i])) throw new Error('External dimensions must exceed internal dimensions on every axis.');
-  return { name: textValue(form, 'carton_name'), inner_m: inner, outer_m: outer, tare_kg: numeric(form, 'tare', true),
+  const result = { ...clone(original), name: textValue(form, 'carton_name'), inner_m: inner, outer_m: outer, tare_kg: numeric(form, 'tare', true),
     tare_evidence: textValue(form, 'tare_evidence'), max_payload_kg: numeric(form, 'payload', true), cost_usd: numeric(form, 'carton_cost', true) };
+  const method = textValue(form, 'tare_method');
+  if (method === 'manual') result.board_blank = null;
+  if (method === 'blank') {
+    const b = { dimensions_m: [mmToM(numeric(form, 'blank_width')), mmToM(numeric(form, 'blank_length'))], quantity: numeric(form, 'blank_quantity'),
+      mass_per_area_kg_m2: numeric(form, 'blank_basis_weight'), evidence: textValue(form, 'blank_evidence') };
+    result.board_blank = b; result.tare_kg = b.dimensions_m[0] * b.dimensions_m[1] * b.quantity * b.mass_per_area_kg_m2; result.tare_evidence = b.evidence;
+  }
+  return result;
 }
 
 function renderCarton(host) {
   const p = selectedPackage();
   if (!p) { host.append(element('p', 'No carton selected.', 'notice')); return; }
   const group = section(host, 'Selected carton');
+  if (state.capabilities.includes('material_catalog')) group.append(button('Carton catalog', () => openCartonCatalog(false), { symbol: 'stack' }));
   const { form, actions } = createForm(form => {
-    const carton = readCarton(form), allowance = numeric(form, 'allowance', true), evidence = textValue(form, 'allowance_evidence');
+    const carton = readCarton(form, p.carton), allowance = numeric(form, 'allowance', true), evidence = textValue(form, 'allowance_evidence');
     edit(d => { const target = d.packages.find(x => x.id === p.id); target.carton = carton; target.allowance_kg = allowance; target.allowance_evidence = evidence; });
   }, 'Apply carton');
   cartonFields(form, p.carton);
@@ -611,7 +798,11 @@ function renderContents(host) {
   const { form, actions: applyActions } = createForm(form => {
     const next = { ...clone(item), position_m: readVector(form, 'position') };
     if (isPad) Object.assign(next, { name: textValue(form, 'pad_name'), dimensions_m: readVector(form, 'pad_dim'), material: textValue(form, 'material'),
-      density_kg_m3: numeric(form, 'density'), material_evidence: textValue(form, 'material_evidence'), cost_usd: numeric(form, 'pad_cost', true) });
+      density_kg_m3: numeric(form, 'density'), material_evidence: textValue(form, 'material_evidence'), cost_usd: numeric(form, 'pad_cost', true),
+      minimum_wall_m: mmToM(numeric(form, 'minimum_wall')), minimum_floor_m: mmToM(numeric(form, 'minimum_floor')),
+      pockets: [...form.querySelectorAll('[data-pocket-id]')].map(node => ({ id: node.dataset.pocketId,
+        shape: textValue(form, `${node.dataset.pocketId}_shape`), dimensions_m: readVector(form, `${node.dataset.pocketId}_dim`),
+        position_m: readVector(form, `${node.dataset.pocketId}_pos`) })) });
     else next.orientation = numeric(form, 'item_orientation');
     const destination = textValue(form, 'target_package');
     edit(d => {
@@ -621,6 +812,12 @@ function renderContents(host) {
         if (to[key].length >= (isPad ? 32 : 48)) throw new Error('The target package has reached its component limit.');
       }
       from[key] = from[key].filter(x => x.id !== item.id); to[key].push(next);
+      if (isPad && from.id !== to.id) {
+        const graphics = (from.graphics || []).filter(graphic => graphic.target_id === item.id);
+        if ((to.graphics || []).length + graphics.length > 16) throw new Error('The target package has reached its graphic limit.');
+        from.graphics = (from.graphics || []).filter(graphic => graphic.target_id !== item.id);
+        to.graphics = [...(to.graphics || []), ...graphics];
+      }
     });
     state.packageId = destination; state.componentId = next.id;
   }, isNew ? 'Add pad' : 'Apply placement');
@@ -633,19 +830,165 @@ function renderContents(host) {
     field(form, 'Material', 'material', item.material, { required: true, maxLength: 160 });
     field(form, 'Density (kg/m3)', 'density', item.density_kg_m3, { type: 'number', min: .000001, max: 25000, required: true });
     field(form, 'Material / density evidence', 'material_evidence', item.material_evidence, { multiline: true, required: true, maxLength: 500 });
+    if (state.capabilities.includes('material_catalog')) {
+      const catalogButton = button('Material catalog', async () => {
+        const catalog = await working('Loading material catalog...', getCatalog);
+        materialCatalogField(form, catalog.materials, 'insert', ['material', 'density', 'material_evidence']); catalogButton.remove();
+      }, { symbol: 'stack' }); form.append(catalogButton);
+    }
     field(form, 'Pad cost (USD)', 'pad_cost', item.cost_usd, { type: 'number', min: 0, max: 10000 });
-    editor.append(element('p', `Pad mass: ${massText(item.dimensions_m.reduce((a, b) => a * b, 1) * item.density_kg_m3)}`, 'notice'));
+    if (!(item.pockets || []).length) editor.append(element('p', `Solid pad mass: ${massText(item.dimensions_m.reduce((a, b) => a * b, 1) * item.density_kg_m3)}`, 'notice'));
+    else editor.append(element('p', 'Pocketed insert mass is assessed from the saved net volume.', 'notice'));
+    const limits = element('div', null, 'two-cols');
+    field(limits, 'Minimum wall (mm)', 'minimum_wall', mToMm(item.minimum_wall_m ?? .005), { type: 'number', min: 1, max: 200, required: true });
+    field(limits, 'Minimum floor (mm)', 'minimum_floor', mToMm(item.minimum_floor_m ?? .005), { type: 'number', min: 0, max: 200, required: true }); form.append(limits);
+    pocketFields(form, item);
   } else field(form, 'Orientation (dimension order)', 'item_orientation', item.orientation, { options: ORIENTATION_LABELS.map((label, i) => [String(i), label + (state.draft.design.constraints.allowed_orientations.includes(i) ? '' : ' (restricted)')]) });
   field(form, 'Package', 'target_package', p.id, { options: state.draft.design.packages.map((x, i) => [x.id, `${i + 1}. ${x.carton.name}`]) });
   if (!isNew) applyActions.append(button('Remove component', () => {
-    state.formDirty = false; edit(d => { const box = d.packages.find(x => x.id === p.id); const key = isPad ? 'inserts' : 'placements'; box[key] = box[key].filter(x => x.id !== item.id); });
+    state.formDirty = false; edit(d => {
+      const box = d.packages.find(x => x.id === p.id); const key = isPad ? 'inserts' : 'placements'; box[key] = box[key].filter(x => x.id !== item.id);
+      if (isPad) box.graphics = (box.graphics || []).filter(graphic => graphic.target_id !== item.id);
+    });
     state.componentId = null; render();
   }, { symbol: 'trash', danger: true }));
   form.append(applyActions); editor.append(form);
 }
 
+function pocketFields(form, item) {
+  const host = element('div', null, 'pocket-list'); host.append(element('h3', 'Top-opening pockets (Y+)'));
+  const list = element('div', null, 'pocket-entries'); host.append(list);
+  const markDirty = () => { state.formDirty = true; updateHeader(); updateFreshness(); };
+  const add = button('Add pocket', () => {
+    const dimensions = readVector(form, 'pad_dim'), floor = Math.max(mmToM(numeric(form, 'minimum_floor')), dimensions[1] / 2);
+    append({ id: uid('pocket'), shape: 'rectangular', dimensions_m: [dimensions[0] / 2, Math.max(.000001, dimensions[1] - floor), dimensions[2] / 2],
+      position_m: [dimensions[0] / 4, Math.min(floor, dimensions[1] - .000001), dimensions[2] / 4] }, true);
+    markDirty();
+  }, { symbol: 'rectangle', disabled: (item.pockets || []).length >= 16 });
+  function append(pocket, open = false) {
+    const group = element('details', null, 'pocket-entry'); group.dataset.pocketId = pocket.id; group.open = open;
+    group.append(element('summary', `Pocket ${list.children.length + 1}`));
+    const body = element('div', null, 'form-grid');
+    const shape = field(body, 'Shape', `${pocket.id}_shape`, pocket.shape, { options: [['rectangular', 'Rectangular'], ['cylindrical', 'Cylindrical (Y axis)']] });
+    vector(body, 'Pocket dimensions', `${pocket.id}_dim`, pocket.dimensions_m);
+    vector(body, 'Local minimum-corner position', `${pocket.id}_pos`, pocket.position_m, { position: true });
+    const x = body.querySelector(`[name="${pocket.id}_dim_0"]`), z = body.querySelector(`[name="${pocket.id}_dim_2"]`);
+    const circular = () => { z.readOnly = shape.value === 'cylindrical'; if (z.readOnly) z.value = x.value; };
+    shape.addEventListener('change', circular); x.addEventListener('input', circular); circular();
+    body.append(button('Remove pocket', () => {
+      group.remove(); add.disabled = list.children.length >= 16;
+      [...list.children].forEach((node, i) => { node.querySelector('summary').textContent = `Pocket ${i + 1}`; }); markDirty();
+    }, { symbol: 'trash', danger: true }));
+    group.append(body); list.append(group); add.disabled = list.children.length >= 16;
+  }
+  for (const pocket of item.pockets || []) append(pocket);
+  host.append(add); form.append(host);
+}
+
+function renderAppearance(host) {
+  const pkg = selectedPackage(), product = state.draft.design.product;
+  const targets = [...(product ? [['product', 'Product']] : []), ...(pkg ? [['carton', 'Selected carton'], ...pkg.inserts.map(item => [item.id, item.name])] : [])];
+  if (!targets.length) { host.append(element('p', 'No product or carton selected.', 'notice')); return; }
+  if (!targets.some(([id]) => id === state.appearanceTarget)) state.appearanceTarget = targets[0][0];
+  const select = field(host, 'Surface', 'appearance_target', state.appearanceTarget, { options: targets });
+  select.addEventListener('change', () => invoke(() => { const next = select.value; flushEditor(); state.appearanceTarget = next; renderEditor(); updatePanel(); }));
+  const id = state.appearanceTarget;
+  const target = id === 'product' ? product : id === 'carton' ? pkg.carton : pkg.inserts.find(item => item.id === id);
+  const appearance = target.appearance || { color: '#9BA1A6', roughness: .55, metalness: 0, opacity: 1 };
+  const update = (design, value) => {
+    if (id === 'product') design.product.appearance = value;
+    else {
+      const box = design.packages.find(item => item.id === pkg.id);
+      (id === 'carton' ? box.carton : box.inserts.find(item => item.id === id)).appearance = value;
+    }
+  };
+  const group = section(host, 'Surface appearance');
+  const { form, actions } = createForm(form => {
+    edit(design => update(design, { color: textValue(form, 'appearance_color'), roughness: numeric(form, 'appearance_roughness'),
+      metalness: numeric(form, 'appearance_metalness'), opacity: numeric(form, 'appearance_opacity') }));
+    setDisplayMode('appearance');
+  }, 'Apply appearance');
+  field(form, 'Color', 'appearance_color', appearance.color, { type: 'color' });
+  for (const [key, label, min] of [['roughness', 'Roughness', 0], ['metalness', 'Metalness', 0], ['opacity', 'Opacity', .05]]) {
+    const input = field(form, label, `appearance_${key}`, appearance[key], { type: 'range', min, max: 1, step: .05 });
+    const output = element('output', String(appearance[key])); input.parentElement.append(output); input.addEventListener('input', () => { output.value = input.value; });
+  }
+  actions.append(button('Reset appearance', () => { state.formDirty = false; edit(design => update(design, null)); render(); }, { symbol: 'arrow-clockwise' }));
+  form.append(actions); group.append(form);
+}
+
+function renderGraphics(host) {
+  const pkg = selectedPackage();
+  if (!pkg) { host.append(element('p', 'No carton selected.', 'notice')); return; }
+  const graphics = pkg.graphics || [], list = section(host, 'Surface graphics');
+  list.append(button('Add lettering', () => { flushEditor(); state.graphicId = 'new_graphic'; renderEditor(); updatePanel(); }, { symbol: 'rectangle', disabled: graphics.length >= 16 }));
+  if (state.capabilities.includes('surface_graphics')) {
+    const upload = element('form', null, 'form-grid'); upload.addEventListener('submit', event => event.preventDefault());
+    const file = field(upload, 'Image artwork', 'graphic_file', '', { type: 'file', accept: '.png,.jpg,.jpeg,image/png,image/jpeg', required: true });
+    upload.append(button('Add image', async () => {
+      if (!upload.reportValidity()) return;
+      flushEditor(); const image = file.files[0];
+      if (!image || !/\.(png|jpe?g)$/i.test(image.name) || image.size > 10 * 1024 * 1024) throw new Error('Choose a PNG or JPEG image up to 10 MiB.');
+      const metadata = await working('Importing image artwork...', () => request('/images', { method: 'POST', body: image, raw: true, contentType: /\.png$/i.test(image.name) ? 'image/png' : 'image/jpeg' }));
+      const id = uid('graphic'); edit(d => {
+        const box = d.packages.find(item => item.id === pkg.id);
+        box.graphics = [...(box.graphics || []), { id, target: 'carton', target_id: null, face: 'y+', kind: 'image', text: '', image_id: metadata.id,
+          color: '#17191C', u: .5, v: .5, width_fraction: .7, height_fraction: .3, rotation_degrees: 0 }];
+      });
+      state.graphicId = id; setDisplayMode('appearance'); render(); notify('Image added to draft.');
+    }, { symbol: 'file-export', disabled: graphics.length >= 16 })); list.append(upload);
+  }
+  const entries = element('div', null, 'item-list');
+  for (const graphic of graphics) {
+    const b = button(graphic.kind === 'text' ? graphic.text.slice(0, 60) : 'Image graphic', () => { flushEditor(); state.graphicId = graphic.id; renderEditor(); updatePanel(); });
+    b.setAttribute('aria-pressed', String(state.graphicId === graphic.id)); entries.append(b);
+  }
+  if (!graphics.length) entries.append(element('p', 'No surface graphics.', 'notice')); list.append(entries);
+  const isNew = state.graphicId === 'new_graphic';
+  const graphic = isNew ? { id: uid('graphic'), target: 'carton', target_id: null, face: 'y+', kind: 'text', text: '', image_id: null,
+    color: '#17191C', u: .5, v: .5, width_fraction: .7, height_fraction: .3, rotation_degrees: 0 } : graphics.find(item => item.id === state.graphicId);
+  if (!graphic) return;
+  const group = section(host, isNew ? 'New lettering' : 'Graphic properties');
+  const { form, actions } = createForm(form => {
+    const target = textValue(form, 'graphic_target');
+    const next = { ...clone(graphic), target: target === 'carton' ? 'carton' : 'insert', target_id: target === 'carton' ? null : target,
+      face: textValue(form, 'graphic_face'), text: graphic.kind === 'text' ? textValue(form, 'graphic_text') : '',
+      color: textValue(form, 'graphic_color'), u: numeric(form, 'graphic_u') / 100, v: numeric(form, 'graphic_v') / 100,
+      width_fraction: numeric(form, 'graphic_width') / 100, height_fraction: numeric(form, 'graphic_height') / 100,
+      rotation_degrees: numeric(form, 'graphic_rotation') };
+    if (next.u - next.width_fraction / 2 < -1e-9 || next.u + next.width_fraction / 2 > 1 + 1e-9
+      || next.v - next.height_fraction / 2 < -1e-9 || next.v + next.height_fraction / 2 > 1 + 1e-9) throw new Error('Keep the graphic fit region within the face.');
+    edit(design => {
+      const box = design.packages.find(item => item.id === pkg.id);
+      box.graphics = [...(box.graphics || []).filter(item => item.id !== next.id), next];
+    });
+    state.graphicId = next.id; setDisplayMode('appearance');
+  }, isNew ? 'Add lettering' : 'Apply graphic');
+  field(form, 'Target surface', 'graphic_target', graphic.target === 'carton' ? 'carton' : graphic.target_id,
+    { options: [['carton', 'Carton exterior'], ...pkg.inserts.map(item => [item.id, item.name])] });
+  field(form, 'Face', 'graphic_face', graphic.face, { options: [['y+', 'Top (Y+)'], ['y-', 'Bottom (Y-)'], ['x+', 'Right (X+)'], ['x-', 'Left (X-)'], ['z+', 'Front (Z+)'], ['z-', 'Back (Z-)']] });
+  if (graphic.kind === 'text') field(form, 'Lettering', 'graphic_text', graphic.text, { multiline: true, required: true, maxLength: 500 });
+  else group.append(element('p', `Image: ${graphic.image_id}`, 'metadata'));
+  const color = field(form, 'Color', 'graphic_color', graphic.color, { type: 'color' });
+  color.parentElement.hidden = graphic.kind !== 'text';
+  const region = element('div', null, 'two-cols');
+  for (const [key, label, value, min] of [['u', 'Horizontal center (%)', graphic.u, 0], ['v', 'Vertical center (%)', graphic.v, 0],
+    ['width', 'Fit width (%)', graphic.width_fraction, .1], ['height', 'Fit height (%)', graphic.height_fraction, .1]]) {
+    field(region, label, `graphic_${key}`, value * 100, { type: 'number', min, max: 100, required: true });
+  }
+  form.append(region);
+  field(form, 'Rotation', 'graphic_rotation', graphic.rotation_degrees, { options: [[0, '0 degrees'], [90, '90 degrees'], [180, '180 degrees'], [270, '270 degrees']] });
+  if (!isNew) actions.append(button('Remove graphic', () => {
+    state.formDirty = false; edit(design => { const box = design.packages.find(item => item.id === pkg.id); box.graphics = box.graphics.filter(item => item.id !== graphic.id); });
+    state.graphicId = null; render();
+  }, { symbol: 'trash', danger: true }));
+  form.append(actions); group.append(form);
+}
+
 function renderArrange(host) {
+  if (state.capabilities.includes('saved_alternatives')) host.append(button('Saved designs', openAlternatives, { symbol: 'stack', disabled: !state.draft.document }));
   const group = section(host, 'Carton alternatives');
+  if (state.capabilities.includes('material_catalog')) group.append(button('Carton catalog', () => openCartonCatalog(true), { symbol: 'stack' }));
   const select = field(group, 'Alternative', 'alternative', state.alternativeIndex, { options: state.alternatives.map((c, i) => [String(i), `${i + 1}. ${c.name}`]) });
   select.addEventListener('change', () => invoke(() => { flushEditor(); state.alternativeIndex = Number(select.value); renderEditor(); updateHeader(); }));
   const toolbar = element('div', null, 'actions');
@@ -654,7 +997,7 @@ function renderArrange(host) {
     button('Remove alternative', () => { state.formDirty = false; state.alternatives.splice(state.alternativeIndex, 1); state.alternativeIndex = 0; state.candidates = null; renderEditor(); updateHeader(); }, { symbol: 'trash', compact: true, disabled: state.alternatives.length <= 1 }));
   group.append(toolbar);
   const { form, actions } = createForm(form => {
-    state.alternatives[state.alternativeIndex] = readCarton(form); state.maxPackages = numeric(form, 'max_packages'); state.candidates = null;
+    state.alternatives[state.alternativeIndex] = readCarton(form, state.alternatives[state.alternativeIndex]); state.maxPackages = numeric(form, 'max_packages'); state.candidates = null;
   }, 'Apply alternative');
   cartonFields(form, state.alternatives[state.alternativeIndex]);
   field(form, 'Maximum packages', 'max_packages', state.maxPackages, { type: 'number', min: 1, max: 6, step: 1, required: true });
@@ -674,13 +1017,72 @@ function renderArrange(host) {
       button('Apply candidate', () => {
         flushEditor();
         if (!state.candidates || hasDraft() || state.candidateRevision !== state.draft.document?.revision || state.candidateConfig !== JSON.stringify([state.alternatives, state.maxPackages])) throw new Error('Save changes and regenerate candidates first.');
-        if (!confirm('Replace all package arrangements, pads and allowances with this candidate? This change can be undone.')) return;
+        if (!confirm('Replace all package arrangements, pads, graphics and allowances with this candidate? This change can be undone.')) return;
         edit(d => { d.packages = clone(candidate.design.packages); });
-        state.componentId = null; state.packageId = null; state.editor = 'carton'; render(); state.scene?.fit(); notify('Candidate applied to draft. Review packing materials before saving.');
+        state.componentId = null; state.packageId = null; state.editor = 'carton'; state.panel = 'carton'; render(); state.scene?.fit(); notify('Candidate applied to draft. Review packing materials before saving.');
       }, { disabled: stale, primary: true }));
     results.append(row);
   });
   if (state.candidates.notice) results.append(element('p', state.candidates.notice, 'notice'));
+}
+
+async function openCartonCatalog(forArrangement) {
+  flushEditor();
+  const catalog = await working('Loading carton catalog...', getCatalog);
+  resourceDialog('Carton catalog', (body, dialog) => {
+    body.append(element('p', catalog.notice || '', 'notice'));
+    for (const entry of catalog.cartons) {
+      const carton = entry.carton, row = element('div', null, 'document-row'), info = element('div');
+      info.append(element('strong', carton.name), element('p', `Internal ${dimensionText(carton.inner_m)} | External ${dimensionText(carton.outer_m)}`),
+        element('p', `${massText(carton.tare_kg)} tare | Payload ${massText(carton.max_payload_kg)}`), element('p', carton.tare_evidence, 'metadata'));
+      row.append(info, button('Use carton', () => {
+        if (forArrangement) { state.alternatives[state.alternativeIndex] = clone(carton); state.candidates = null; }
+        else {
+          if (!confirm('Replace the selected carton? Existing contents remain at their current positions.')) return;
+          edit(d => { d.packages.find(item => item.id === state.packageId).carton = clone(carton); });
+        }
+        dialog.close(); render();
+      })); body.append(row);
+    }
+  });
+}
+
+async function openAlternatives() {
+  flushEditor();
+  if (!state.draft.document || hasDraft()) throw new Error('Save the document before opening saved designs.');
+  const path = `${docPath()}/alternatives`, revision = state.draft.document.revision;
+  const data = await working('Loading saved designs...', () => request(path));
+  resourceDialog('Saved designs', (body, dialog) => {
+    const form = element('form', null, 'form-grid'); form.addEventListener('submit', event => event.preventDefault());
+    field(form, 'Snapshot name', 'alternative_name', '', { required: true, maxLength: 160 });
+    form.append(button('Save snapshot', async () => {
+      if (!form.reportValidity()) return;
+      const name = textValue(form, 'alternative_name'), fingerprint = JSON.stringify([path, revision, name]);
+      if (state.alternativeReceipt?.fingerprint !== fingerprint) state.alternativeReceipt = { fingerprint, id: uid('snapshot') };
+      const saved = await working('Saving immutable design snapshot...', () => request(path, { method: 'POST', body: {
+        expected_revision: revision, request_id: state.alternativeReceipt.id, name
+      } }));
+      state.alternativeReceipt = null; if (!data.alternatives.some(item => item.id === saved.id)) data.alternatives.push(saved);
+      form.reset(); draw(); notify('Design snapshot saved.');
+    }, { primary: true })); body.append(form);
+    const list = element('div'); body.append(list);
+    const draw = () => {
+      list.replaceChildren();
+      if (!data.alternatives.length) list.append(element('p', 'No saved design snapshots.', 'notice'));
+      for (const alternative of data.alternatives) {
+        const row = element('div', null, 'document-row'), info = element('div'), c = alternative.comparison;
+        info.append(element('strong', alternative.name), element('p', `Revision ${alternative.base_revision} | ${c.carton_count} cartons | ${massText(c.total_gross_kg)} gross`),
+          element('p', `${numberText(c.outer_volume_m3 * 1000)} L exterior | Materials ${c.materials_cost_usd == null ? 'unknown' : 'USD ' + numberText(c.materials_cost_usd, 2)} | Shipping not quoted`, 'notice'),
+          element('p', `${alternative.assessment.status} | ${alternative.assessment.findings.length} findings`, 'notice'));
+        row.append(info, button('Apply saved design', async () => {
+          if (hasDraft() || state.draft.document.revision !== revision) throw new Error('Document changed. Reopen saved designs after saving or reloading.');
+          if (!confirm('Replace the full document with this saved design? The saved edit can be undone.')) return;
+          edit(d => Object.assign(d, clone(alternative.design))); state.componentId = null; state.graphicId = null;
+          state.candidates = null; dialog.close(); await saveDocument(); state.scene?.fit();
+        })); list.append(row);
+      }
+    }; draw();
+  });
 }
 
 async function generateCandidates() {
@@ -720,7 +1122,7 @@ function renderValidation() {
       const box = state.draft.design.packages.find(p => f.entity_ids.includes(p.id) || [...p.placements, ...p.inserts].some(x => f.entity_ids.includes(x.id)));
       if (box) {
         state.packageId = box.id; state.componentId = [...box.placements, ...box.inserts].find(x => f.entity_ids.includes(x.id))?.id ?? null;
-        state.editor = state.componentId ? 'contents' : 'carton'; render(); state.scene?.fit();
+        state.editor = state.componentId ? 'contents' : 'carton'; state.panel = state.editor; render(); state.scene?.fit();
       }
     }));
     list.append(row);
@@ -729,7 +1131,7 @@ function renderValidation() {
 
 async function newDocument() {
   if (hasNavigationChanges() && !confirm('Discard unsaved document changes and session-only addresses, and start a new document?')) return;
-  state.draft.reset(); state.formDirty = false; resetDocumentState(); render(); renderRates(); notify('New packaging document.');
+  state.draft.reset(); state.formDirty = false; resetDocumentState(); state.panel = 'product'; render(); renderRates(); notify('New packaging document.');
 }
 
 function resetDocumentState() {
@@ -738,6 +1140,9 @@ function resetDocumentState() {
   state.alternatives = [defaultCarton()]; state.alternativeIndex = 0; state.maxPackages = 3; state.candidateConfig = null;
   state.quotes = []; state.quoteIndex = 0; state.quoteScenario = null; state.quoteError = ''; state.mutationReceipt = null;
   state.addresses = { origin: blankAddress(), destinations: [blankAddress()] }; state.editor = 'product'; state.review = 'validation';
+  state.panel = null;
+  state.graphicId = null; state.appearanceTarget = 'product';
+  state.alternativeReceipt = null;
 }
 
 async function openDocuments() {
@@ -776,7 +1181,11 @@ async function saveDocument() {
   if (state.draft.document && !state.draft.dirty) { render(); return; }
   await working('Saving and validating document...', async () => {
     let result;
-    if (!state.draft.document) result = await request('/documents', { method: 'POST', body: state.draft.design });
+    if (!state.draft.document) {
+      const fingerprint = JSON.stringify({ create: state.draft.design });
+      if (state.mutationReceipt?.fingerprint !== fingerprint) state.mutationReceipt = { fingerprint, id: uid('create') };
+      result = await request('/documents', { method: 'POST', body: state.draft.design, idempotencyKey: state.mutationReceipt.id });
+    }
     else {
       // Keep the receipt on network failure so an exact retry is idempotent.
       const fingerprint = JSON.stringify({ revision: state.draft.document.revision, design: state.draft.design });
@@ -839,7 +1248,9 @@ function renderRates() {
   const host = $('rates-panel'); host.replaceChildren();
   const provider = section(host, 'Rate provider');
   provider.append(element('p', state.providerError || `${state.provider?.provider || 'Provider'} | ${state.provider?.configured ? 'Configured' : 'Not configured'}`, state.provider?.configured ? 'notice' : 'warning'));
-  provider.append(element('p', state.provider?.notice || 'Provider status unavailable.', 'notice'), button('Refresh provider status', refreshProvider, { symbol: 'arrow-clockwise' }));
+  provider.append(element('p', providerNotice(state.provider), 'notice'), button('Refresh provider status', refreshProvider, { symbol: 'arrow-clockwise' }));
+  if (state.provider?.secure_store_enabled) provider.append(button('Carrier account', openCarrierAccount, { symbol: 'cube' }));
+  if (state.provider?.account_alias) provider.append(element('p', `${state.provider.account_alias} | ${state.provider.validation || 'Not validated'}`, 'metadata'));
   const form = element('form', null, 'form-grid'); state.quoteForm = form;
   addressFields(form, 'Origin', 'origin', state.addresses.origin);
   state.addresses.destinations.forEach((address, i) => addressFields(form, `Destination ${i + 1}`, `destination${i}`, address));
@@ -856,10 +1267,43 @@ function renderRates() {
 
 async function refreshProvider() {
   await working('Checking carrier provider...', async () => {
-    try { const data = await request('/status'); state.provider = data.rating; state.providerError = ''; notify('Provider status updated.'); }
+    try { const data = await request('/status'); state.provider = data.rating; state.capabilities = data.capabilities || []; state.providerError = ''; notify('Provider status updated.'); }
     catch (error) { state.provider = null; state.providerError = `Provider status unavailable: ${error.message}`; throw error; }
     finally { state.addresses = captureAddresses(); }
-  }).finally(() => renderRates());
+  }).finally(() => {
+    renderRates();
+    if (!state.formDirty && ![...$('editor').querySelectorAll('input[type="file"]')].some(input => input.files?.length)) renderEditor();
+  });
+}
+
+async function openCarrierAccount() {
+  const account = await working('Loading carrier account status...', () => request('/account'));
+  resourceDialog('Carrier account', (body, dialog) => {
+    body.append(element('p', `${account.account_alias || 'No account'} | ${account.validation || 'Not validated'}`, 'metadata'));
+    const form = element('form', null, 'form-grid'); form.autocomplete = 'off'; form.addEventListener('submit', event => event.preventDefault());
+    const alias = field(form, 'Account alias', 'carrier_alias', account.account_alias || '', { required: true, maxLength: 80 });
+    const secret = field(form, 'EasyPost API key', 'carrier_key', '', { type: 'password', required: true, maxLength: 4096 }); secret.autocomplete = 'new-password';
+    secret.spellcheck = false; alias.autocomplete = 'off';
+    const failure = element('p', '', 'error'); failure.setAttribute('role', 'alert');
+    const actions = element('div', null, 'actions');
+    actions.append(button('Save account', async () => {
+      if (!form.reportValidity()) return;
+      const body = { api_key: secret.value, account_alias: alias.value.trim() }; secret.value = ''; failure.textContent = '';
+      try {
+        state.provider = await working('Updating carrier account...', () => request('/account', { method: 'PUT', body }));
+        state.quoteScenario = null; dialog.close(); state.addresses = captureAddresses(); renderRates(); notify('Carrier account saved. No rate request was made.');
+      } catch { failure.textContent = 'Carrier account could not be saved. Check the key, alias and secure-store availability.'; }
+      finally { body.api_key = ''; secret.value = ''; }
+    }, { primary: true }), button('Remove account', async () => {
+      if (!confirm('Remove the configured carrier account for future requests?')) return;
+      secret.value = ''; failure.textContent = '';
+      try {
+        state.provider = await working('Removing carrier account...', () => request('/account', { method: 'DELETE' }));
+        state.quoteScenario = null; dialog.close(); state.addresses = captureAddresses(); renderRates(); notify('Carrier account removed.');
+      } catch { failure.textContent = 'Carrier account could not be removed. Check secure-store availability.'; }
+    }, { symbol: 'trash', danger: true, disabled: !account.configured }));
+    form.append(actions, failure); body.append(form);
+  });
 }
 
 async function loadQuotes() {
@@ -943,29 +1387,60 @@ function renderQuoteResults() {
 
 function refreshScene() {
   const p = selectedPackage(), product = state.draft.design.product;
-  $('scene-caption').textContent = `${product ? product.source_id ? product.name + ' | imported GLB' : product.name + ' | manual geometry' : 'No product selected'}${p ? ` | ${dimensionText(p.carton.inner_m)} internal` : ''}${state.exploded ? ' | exploded view, positions unchanged' : ''}`;
-  state.scene?.setDesign(state.draft.design, state.packageId, state.componentId);
+  $('scene-caption').textContent = `${product ? product.source_id ? product.name + ' | imported geometry' : product.name + ' | manual geometry' : 'No product selected'}${p ? ` | ${dimensionText(p.carton.inner_m)} internal` : ''}${state.exploded ? ' | exploded view, positions unchanged' : ''}`;
+  state.scene?.setDesign(state.draft.design, state.packageId, state.componentId, state.graphicId);
+}
+
+function setDisplayMode(mode) {
+  state.displayMode = mode; state.scene?.setDisplay(mode, state.transparency);
+  for (const node of document.querySelectorAll('#view-actions [data-mode]')) node.setAttribute('aria-pressed', String(node.dataset.mode === mode));
 }
 
 async function initializeScene() {
   const controls = $('view-actions');
-  controls.append(button('Fit view', () => state.scene?.fit(), { symbol: 'corners-out', compact: true }));
+  const views = element('div', null, 'view-group'); views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Camera views');
+  views.append(button('Fit view', () => state.scene?.fit(), { symbol: 'corners-out', compact: true }));
   for (const [view, label] of [['iso', 'Orbit'], ['top', 'Top'], ['front', 'Front'], ['side', 'Side']]) {
-    controls.append(button(label, () => state.scene?.view(view), { symbol: view === 'iso' ? 'cube' : undefined }));
+    const b = button(label, () => state.scene?.view(view), { compact: true });
+    const img = element('img'); img.src = `/static/assets/view-toolbar-icons/view-${view === 'side' ? 'right' : view}.png`; img.alt = ''; b.append(img); views.append(b);
   }
-  checkbox(controls, 'Section', false, checked => { state.section = checked; state.scene?.setSection(checked); });
-  checkbox(controls, 'Exploded', false, checked => { state.exploded = checked; state.scene?.setExploded(checked); refreshScene(); state.scene?.fit(); });
+  const inspection = element('div', null, 'view-group'); inspection.setAttribute('role', 'group'); inspection.setAttribute('aria-label', 'Inspection views');
+  checkbox(inspection, 'Section', false, checked => { state.section = checked; state.scene?.setSection(checked); });
+  checkbox(inspection, 'Exploded', false, checked => { state.exploded = checked; state.scene?.setExploded(checked); refreshScene(); state.scene?.fit(); });
+  const display = element('div', null, 'view-group'), modes = element('div', null, 'display-modes');
+  modes.setAttribute('role', 'group'); modes.setAttribute('aria-label', 'Display mode');
+  for (const [mode, label, symbol] of [['shaded', 'Gray shaded', 'sphere'], ['edges', 'Shaded with edges', 'cube'], ['wireframe', 'Wireframe', 'bounding-box'], ['appearance', 'Appearance colors', 'mirror']]) {
+    const b = button(label, () => setDisplayMode(mode), { symbol, compact: true });
+    b.dataset.mode = mode; b.setAttribute('aria-pressed', String(mode === state.displayMode)); modes.append(b);
+  }
+  const transparency = element('label', 'Transparency', 'transparency-control');
+  const slider = element('input'); slider.id = 'display-transparency'; slider.type = 'range'; slider.min = '0'; slider.max = '85'; slider.step = '5'; slider.value = String(state.transparency);
+  slider.setAttribute('aria-label', 'Display transparency');
+  const value = element('output', `${state.transparency}%`); value.htmlFor = slider.id;
+  slider.addEventListener('input', () => {
+    state.transparency = slider.valueAsNumber; value.value = `${state.transparency}%`;
+    state.scene?.setDisplay(state.displayMode, state.transparency);
+  });
+  transparency.append(slider, value); display.append(modes, transparency);
+  controls.append(views, inspection, display);
   try {
     const { PackagingScene } = await import('./packaging_scene.js');
     state.scene = new PackagingScene($('viewport'), {
       onStatus: message => { $('scene-message').textContent = message; },
-      onSelect: id => invoke(() => { flushEditor(); state.componentId = id; state.editor = 'contents'; render(); })
-    }); refreshScene();
+      onSelect: (id, kind) => invoke(() => {
+        flushEditor();
+        if (kind === 'graphic') { state.graphicId = id; state.editor = 'graphics'; }
+        else { state.componentId = id; state.graphicId = null; state.editor = 'contents'; }
+        state.panel = state.editor; render();
+      })
+    }); state.scene.setDisplay(state.displayMode, state.transparency); refreshScene();
   } catch (error) { $('scene-message').textContent = `3D unavailable: ${error.message}. Numeric editing remains available.`; }
 }
 
 function boot() {
   try { const theme = localStorage.getItem('inspectorpro.theme'); if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme; } catch { /* Storage may be restricted. */ }
+  const close = button('Close panel', closePanel, { compact: true }); close.id = 'close-panel';
+  const cross = element('span', '\u00d7'); cross.setAttribute('aria-hidden', 'true'); cross.style.fontSize = '22px'; close.append(cross); $('panel-actions').append(close);
   $('document-name').addEventListener('input', () => {
     edit(d => { d.name = $('document-name').value; }); updateHeader(); updateFreshness(); renderValidation();
   });
@@ -978,7 +1453,7 @@ function boot() {
   state.sage = new PackagingEditorAdmission({
     snapshot: () => ({ document_id: state.draft.document?.id || null, revision: state.draft.document?.revision ?? null,
       dirty: hasNavigationChanges() || [...document.querySelectorAll('input[type="file"]')].some(input => input.files?.length),
-      conflict: state.conflict, pending_operations: state.busy || $('open-dialog').open ? 1 : 0 }),
+      conflict: state.conflict, pending_operations: state.busy || document.querySelector('dialog[open]') ? 1 : 0 }),
     lock: () => updateHeader(),
     accept: async saved => {
       state.draft.accept(saved); state.formDirty = false; state.conflict = false; state.mutationReceipt = null;
@@ -1012,6 +1487,12 @@ function boot() {
     });
   });
   window.InspectorProPackaging = Object.freeze({
+    getDesktopLifecycleObservation: () => ({
+      loaded: true,
+      dirty: hasNavigationChanges() || [...document.querySelectorAll('input[type="file"]')].some(input => input.files?.length),
+      busy: !!(state.busy || state.sage.locked),
+      pending: !!(state.conflict || state.sage.admission || state.sage.closing || document.querySelector('dialog[open]')),
+    }),
     isLocked: () => state.sage.locked,
     hasUnsavedChanges: () => hasNavigationChanges() || state.busy,
     confirmNavigation: () => !(hasNavigationChanges() || state.busy) || confirm('Leave Packaging & Shipping? Unsaved changes, session-only addresses or an active request may be lost.')
@@ -1019,6 +1500,9 @@ function boot() {
   window.addEventListener('beforeunload', event => { if (hasNavigationChanges() || state.busy || state.sage.locked) { event.preventDefault(); event.returnValue = ''; } });
   window.addEventListener('pagehide', () => { state.sage.unload(); state.scene?.dispose(); });
   document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && state.panel && !document.querySelector('dialog[open]') && !state.busy && !state.sage.locked) {
+      event.preventDefault(); closePanel(); return;
+    }
     if (!(event.ctrlKey || event.metaKey)) return;
     if (event.key.toLowerCase() === 's') { event.preventDefault(); invoke(saveDocument); }
     if (event.key.toLowerCase() === 'z' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) {

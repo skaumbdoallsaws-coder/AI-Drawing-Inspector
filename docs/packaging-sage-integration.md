@@ -30,8 +30,14 @@ must not be interpreted as proof of a real model turn or live carrier rates.
 The development host is `tools/run_packaging_sage_pilot.py`. It uses isolated
 engineering data and an explicitly selected existing ChatGPT account. It does
 not load the desktop environment file or enable API billing fallback. Native
-CAD mass extraction, carrier credentials, dedicated packaging permission names
+CAD material-mass extraction, live carrier verification, dedicated packaging permission names
 and release hardening remain separate gates.
+
+Authenticated malformed editor transitions also revoke prior admission, including
+invalid JSON and oversized bodies. HTTP schema rejection must not leave an old
+selection authorized. Desktop observation is conservative: a mounted packaging
+workspace, active turn or reconciliation blocks destructive native transitions
+until the user leaves that workspace. No packaging crash-recovery format is claimed.
 
 ## Adapter Surface
 
@@ -46,6 +52,8 @@ it carries no keys and does not replace the refreshed context callback.
 
 | Tool | Input and behavior |
 | --- | --- |
+| `packaging_resources` | Saved revision and resource `sources`, `catalog`, `alternatives` or `report`. Bounded source/alternative pages; cited density/carton presets; revision-specific PDF link. Read-only, no credential or filesystem access. |
+| `estimate_packaging_mass` | Saved revision, authorized source ID/revision, documented density and exclusions. Returns an unsaved Product estimate based on closed-solid STEP volume; edit/validate are separate. |
 | `inspect_packaging` | Required `expected_revision`; `package_offset` 0-10 and `package_limit` 1-2. Returns product, constraints, package page, saved history availability, source references, and assessment summary. |
 | `validate_packaging` | Required `expected_revision`; optional complete `design`, findings offset and limit (1-50). Checks source provenance and assesses envelopes without saving. `saved` distinguishes the assessed saved design from a proposed design. |
 | `propose_packaging` | `PackingRequest` plus `limit` 1-3: saved revision, 1-6 cartons, 1-6 maximum packages. Calls existing `packing.propose`, then assesses returned designs. No persistence or rates. |
@@ -63,7 +71,7 @@ Inputs and outputs are closed Pydantic models with generated JSON schemas.
 Input parsing is strict JSON (no string/boolean numeric coercion, tuple coercion,
 non-finite values, extra properties, paths, scope overrides, or document selectors).
 The domain `models.py` remains the source of design constraints: SI dimensions,
-six orthogonal orientations (0-5), 48 requested items, cartons, solid inserts/pads,
+six orthogonal orientations (0-5), 48 requested items, cartons, pads, top-open pockets, surface graphics,
 and mass/material evidence. The adapter additionally bounds total placed items
 to 48, revisions to JavaScript-safe nonnegative integers, argument depth to 20,
 argument nodes to 10,000, arguments to 24 KiB, and results to 64 KiB. Full designs
@@ -78,21 +86,22 @@ uses the existing solver's cooperative deadline, at most 10 seconds or the turn'
 remaining time. A single synchronous solver step or database operation can outlast
 the deadline; it is joined rather than abandoned. This is not process preemption.
 
-Manual dimensions have no source reference. Imported GLBs are selected using
+Manual dimensions have no source reference. Imported GLB/STEP sources are selected using
 `product.source_id` and the exact imported hash in `product.source_revision`.
 `PackagingService.source` is resolved only within the admitted scope, and its
 dimensions/revision must match. Returned `source_refs` contain only
-`{kind: "imported_glb", source_id, source_revision}`. Source bytes, metadata
+`{kind: "imported_glb" | "imported_step", source_id, source_revision}`. Source bytes, metadata
 extensions, storage roots, database paths, and private source paths are not
-returned. The existing source API returns metadata and bytes together; a future
-metadata-only service getter could reduce repeated reads of large GLBs.
-Manual inputs and GLB imports cannot claim verified CAD mass.
+returned. Admission/source validation reads metadata without loading model bytes.
+No imported source claims verified material mass. STEP density calculations remain estimates;
+GLB/manual envelopes cannot be used as trusted solid volume.
 
 Proposals replace existing packages, including pads and allowance evidence. The
 result explicitly warns about this; it is not a protective-packaging design or
 transport certification. Selecting a candidate is not an approval or a save.
 Saving it requires a separate authorized `edit_packaging` call and current
-revision. The adapter exposes no create/list/import/quote/report/purchase tools.
+revision. There are no create/import/quote/purchase tools. Resource discovery is scope-bound,
+and report links are generated for the admitted document revision only.
 
 ## Required Host Admission
 

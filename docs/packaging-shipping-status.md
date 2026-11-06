@@ -1,6 +1,62 @@
 # Packaging and Shipping: Isolated Pilot
 
-Date: 2026-11-05. Status: manual development pilot plus **live Sage arrangement acceptance passed**. Not a desktop release or a complete shipping/packaging-design workflow.
+Date: 2026-11-05. Status: expanded isolated packaging pilot, including real STEP and live Sage density acceptance. **Not promoted to the regular desktop build.**
+
+## Current V2 Checkpoint
+
+The active updated test host is `http://127.0.0.1:8181/?packagingPilot=1`; standalone workspace: `http://127.0.0.1:8181/packaging`.
+Its data is isolated under `.runtime/packaging-v2-acceptance`. The previous visible demonstration on port 8180 is not the current backend.
+
+Implemented since the baseline below:
+
+- Icon ribbon with modeless Product, Carton, Contents, Arrange, Appearance, Graphics, Validation and Rates panels. Closing a panel restores the full viewport; unapplied inputs remain protected.
+- Gray shaded, shaded-with-edges, wireframe and saved-appearance modes; transparency, section and exploded inspection. Display controls do not change physical properties or Undo history.
+- Optional owned STEP worker with explicit units, BRep bounds and summed closed-solid volume; bounded CPU/memory/time, hidden processes, cancellation cleanup and no carrier credentials. Its OCP dependencies are separate from the main Python environment. GLB remains an envelope source, not solid-volume evidence.
+- Density-based product estimates bound to immutable STEP revision/volume, retaining material evidence and exclusions. They remain estimates, not verified CAD material mass.
+- Rectangular/cylindrical top-open insert pockets, side-wall/floor/web checks, material-intersection checks and net-volume insert mass. Invalid pockets leave mass unknown. These checks do not certify protection or a complete removal sequence.
+- Full-blank area/basis-weight carton tare estimates, with evidence and explicit unknown inputs preserved.
+- Cited PMMA and Ethafoam density presets and an initial ULINE carton preset. No invented material prices, payload ratings, shipping prices or cushioning approvals.
+- Scoped alpha-preserving PNG/JPEG artwork and face-bound lettering on cartons/inserts. Normalized fit regions resize with the target face; artwork does not change mass.
+- Up to 20 immutable named alternatives per document, revision checks, idempotent save, volume/mass/known-material-cost comparisons. Apply uses ordinary edits and Undo. Unknown cost is not zero.
+- Schema 2 migration with a pre-upgrade SQLite backup for schema 1 stores. Existing documents, source IDs, receipts and Undo/Redo are retained.
+- Durable, scoped first-save idempotency. Exact retries return the original creation result across server restarts; conflicting content is rejected. The UI retains its request key after a lost response. Existing unkeyed clients remain compatible.
+- Current-user Windows DPAPI carrier account storage and manual account endpoints. Saved credentials, replacement and removal are distinct from environment fallback; no secrets enter Sage tools or document JSON. Live carrier credentials are still absent.
+- Malformed, oversized and excessively nested editor transitions invalidate the old admission rather than leaving Sage authorized to edit a previous selection. Non-binary mutation body limits apply regardless of JSON content type.
+- Desktop observation includes the actual packaging iframe, unapplied fields, selected files, requests, dialogs and Sage admission/reconciliation. This is a fail-closed guard, not native draft recovery: an open packaging workspace must be exited before native close/reload/restart is allowed.
+- Sage can discover scoped sources/catalog/alternatives, calculate a documented STEP density estimate, edit all supported document fields and provide a revision-specific PDF download link. File upload and carrier requests remain manual UI operations; no shell, account-secret or shipment-purchase tool is exposed.
+- Expanded draft PDF with density/exclusions, carton provenance, net insert/pocket details, graphics schedule, findings and revision-bound quote snapshots.
+
+### Real Acceptance
+
+- User-approved straight rack/pusher STEP imported through the actual API: five solids, unchanged original hash. Four copies represent four racks and four pushers. PMMA-only product mass estimate: **1.726154403 kg total**, excluding magnets, adhesive and packaging.
+- A four-pocket concept passed supported geometric checks and rendered at desktop/mobile sizes without page errors. Carton tare, allowance and handling remain unknown, correctly blocking rates. Original CAD was not modified. Evidence: `.runtime/packaging-v2-real-step-01/`.
+- A real ChatGPT-plan Sage turn through the main chat pane read the catalog and source evidence, estimated mass, validated, saved and revalidated, then returned a draft PDF link. Ten successful tool calls, no API billing fallback. Placements, inserts, graphics and unknown inputs remained unchanged; manual Undo/Redo passed. Evidence: `.runtime/packaging-v2-sage-resources-01/`.
+- Combined Python regression: **894 passed, 1 optional proprietary-file test skipped**, with two upstream WebSocket deprecation warnings. That optional test was then run against the user-approved straight STEP and **passed**, checking five solids, exact bounds/volume, rendered extents and unchanged original bytes. After the final credential-owner encoding change, the affected account/API suite passed **69 tests**.
+- Workspace/host JavaScript: **57 passed**. Three final Playwright suites passed with no page errors: `.runtime/packaging-panels-final-01`, `.runtime/packaging-resources-final-01`, `.runtime/packaging-host-final-01`. They cover desktop/mobile canvas pixels, the lost-first-save response, ribbon dialogs, source imports, density evidence, alpha artwork, alternatives/Undo, synthetic account UI and live-editor admission/reconciliation. Synthetic carrier tests are not evidence of real quotes.
+- Dedicated desktop packaging lifecycle contracts: **83 passed**, using actual renderer/preload/main source with mocked native effects. Full desktop suite: **791 passed, 11 failed**. The same 11 failure locations reproduced with the pre-guard source/fixture: seven startup fixtures, two facility-mount fixtures, one panel regex and one documentation-generation fixture. No new lifecycle regression was found; this is not a clean full-desktop release result.
+- The three-page expanded report was rendered and visually inspected; additional real-product PDF output is in the STEP evidence directory. Reports remain draft reviews, not a manufacturing or protective-performance certification.
+- Earlier counts below describe previous checkpoints, not a current desktop release.
+
+### Remaining Release Gates
+
+- Carrier credentials entered privately, actual package/weight confirmation and valid origin/destination scenarios, then real account/service comparisons. No claim of universal US carrier or destination coverage before that acceptance.
+- Full native Electron acceptance, recoverable packaging workspace integration and dependency/license deployment checks. Lifecycle contract tests do not substitute for launching an isolated release snapshot. No change to the production desktop profile, Claude's copy, or saved facility layouts.
+- The new observation guard covers normal application mode and the facility-attached managed runtime. The legacy managed runtime's unattached transition path does not invoke that observer. Do not enable packaging in that mode until its transition contract is extended and tested.
+- Direct selected-assembly/configuration integration, manufacturing-ready packing/removal instructions, no-contact constraints, additional stock-carton records and storage retention/quota policy are still broader release work.
+- Sage does not yet initiate carrier requests or upload files. It uses already authorized uploaded sources and the same validated editing service.
+- Complex contour inserts, mixed products, cushioning simulation, dielines, SolidCraft, pallets/crates/freight and shipment purchase remain outside this increment.
+
+### Optional STEP Runtime
+
+`requirements-packaging-step.txt` pins the optional OCP worker dependencies. Run `tools/setup_packaging_geometry.py` with Python 3.11 to provision the worktree-local `.runtime/step-venv`; `--check` verifies an existing installation. The Sage pilot detects this local environment. Other hosts must explicitly set `INSPECTORPRO_PACKAGING_GEOMETRY_PYTHON` to its absolute executable path. No dependency is installed into the normal desktop environment.
+
+The worker has resource limits, rejects supported external-reference forms and receives a restricted environment. It is **not an OS security sandbox** and still runs as the current Windows user. Binary redistribution, native dependency notices and security hardening remain release gates. Account credentials are never sent to the geometry worker.
+
+The full test host intentionally does not contain the normal desktop's private assembly registry/library. Its existing missing-registry/legacy-provider startup warnings do not prevent packaging, but this host is not proof that unrelated workflows are release-ready.
+
+## Historical Baseline
+
+The sections below retain the earlier pilot's implementation and verification history. Where they describe a feature as missing, the Current V2 Checkpoint above takes precedence.
 
 ## Isolation
 

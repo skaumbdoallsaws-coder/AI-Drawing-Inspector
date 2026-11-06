@@ -92,9 +92,9 @@ def test_specs_closed_typed_independent_and_scope_matches_api(env):
     principal = env[2][0].principal
     assert env[1] == digest({"tenant": principal.tenant_id, "sites": ["site-a", "site-b"],
                              "workflow": "packaging_shipping"})
-    assert len(tools.tool_specs()) == 3
+    assert len(tools.tool_specs()) == 5
     specs = tools.tool_specs(direct_edit=True)
-    assert len(specs) == 6
+    assert len(specs) == 8
 
     def closed(value):
         if isinstance(value, dict):
@@ -114,7 +114,7 @@ def test_specs_closed_typed_independent_and_scope_matches_api(env):
     binding = gw.binding
     binding["document_id"] = "other"
     gw.specs.clear()
-    assert gw.binding["document_id"] == env[2][0].document_id and len(gw.specs) == 3
+    assert gw.binding["document_id"] == env[2][0].document_id and len(gw.specs) == 5
 
 
 def test_inspect_validate_propose_real_solver_do_not_write(env):
@@ -328,10 +328,10 @@ def test_principal_and_scope_are_immutable(env, change):
 
 
 def test_direct_edit_requires_both_role_and_explicit_authority_and_lease(env):
-    assert len(gateway(env).specs) == 3
+    assert len(gateway(env).specs) == 5
     env[2][0] = replace(env[2][0], principal=replace(env[2][0].principal, roles=("viewer",)))
     gw = gateway(env, editing=True)
-    assert len(gw.specs) == 3
+    assert len(gw.specs) == 5
     assert_error(invoke(gw, "edit_packaging", edit_args()), "codex_tool_denied")
     env[2][0] = replace(env[2][0], principal=replace(env[2][0].principal, roles=("editor",)))
     with pytest.raises(PilotError, match="admitted"):

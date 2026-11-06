@@ -46,6 +46,9 @@ def configure(profile_path: Path, output: Path, *, live=False, memory_mode="enfo
         "INSPECTORPRO_WORK_INSTRUCTION_ROOT": str(output / "work-instruction"),
         "INSPECTORPRO_CHAT_STREAMING": "1", "INSPECTORPRO_STREAMING_AGENTS": "sage",
     })
+    geometry_python = ROOT / ".runtime" / "step-venv" / "Scripts" / "python.exe"
+    if geometry_python.is_file():
+        os.environ["INSPECTORPRO_PACKAGING_GEOMETRY_PYTHON"] = str(geometry_python)
     return output
 
 

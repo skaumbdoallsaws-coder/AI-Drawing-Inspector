@@ -235,7 +235,7 @@ def host(tmp_path, monkeypatch):
             listing = await rpc("tools/list", {})
             assert {tool["name"] for tool in listing["tools"]} == {
                 "inspect_packaging", "validate_packaging", "propose_packaging",
-                "edit_packaging", "undo_packaging", "redo_packaging"}
+                "edit_packaging", "undo_packaging", "redo_packaging", "packaging_resources", "estimate_packaging_mass"}
             inspected = await call("inspect_packaging", {"expected_revision": 0})
             design = {key: deepcopy(inspected[key])
                       for key in ("name", "product", "quantity", "constraints", "packages")}

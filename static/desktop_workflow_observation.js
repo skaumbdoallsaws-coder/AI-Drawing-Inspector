@@ -9,9 +9,78 @@
         drawing: 'Drawing and inspection', model: '3D Model', assembly: 'Assembly',
         processMap: 'Process Map', documentation: 'Documentation', training: 'Training',
         report: 'Report', sessions: 'Edit sessions', agent: 'Chat and voice', curation: 'Region curation',
+        packaging: 'Packaging & Shipping',
     });
     const FLAGS = Object.freeze(['loaded', 'dirty', 'busy', 'pending']);
     const failure = (code, message) => Object.assign(new Error(message || code), { code });
+    const empty = () => ({ loaded: false, dirty: false, busy: false, pending: false });
+    function checkedFlags(value) {
+        const fields = value && typeof value === 'object' ? Object.getOwnPropertyDescriptors(value) : {};
+        if (!value || typeof value !== 'object' || Array.isArray(value)
+                || Object.keys(value).length !== FLAGS.length
+                || FLAGS.some(key => !Object.hasOwn(fields, key) || typeof fields[key].value !== 'boolean')) {
+            throw failure('desktop_workflow_coverage_unavailable');
+        }
+        return Object.fromEntries(FLAGS.map(key => [key, fields[key].value]));
+    }
+    function mergeFlags(left, right) {
+        left = checkedFlags(left); right = checkedFlags(right);
+        return Object.fromEntries(FLAGS.map(key => [key, left[key] || right[key]]));
+    }
+    function observePackaging(host) {
+        // Read-only, synchronous observations, never a navigation confirmation,
+        // discard action, serialized draft, or grant of recovery/write authority.
+        try {
+            const document = host?.document;
+            if (!document || typeof document.querySelectorAll !== 'function') throw failure('desktop_workflow_coverage_unavailable');
+            const frames = document.querySelectorAll('#packagingWorkspaceFrame');
+            if (frames.length > 1) throw failure('desktop_workflow_coverage_unavailable');
+            const owner = host.InspectorProPackagingHost;
+            let observed = empty();
+            if (owner !== undefined && owner !== null) {
+                if (typeof owner.getDesktopLifecycleObservation !== 'function') throw failure('desktop_workflow_coverage_unavailable');
+                observed = checkedFlags(owner.getDesktopLifecycleObservation());
+            }
+            const frame = frames[0];
+            if (frame) {
+                if (!owner || frame.tagName !== 'IFRAME' || frame.isConnected !== true) throw failure('desktop_workflow_coverage_unavailable');
+                const requested = new URL(frame.src, host.location.href);
+                const child = frame.contentWindow, content = frame.contentDocument;
+                const adapter = child?.InspectorProPackaging;
+                if (requested.origin !== host.location.origin || requested.pathname !== '/packaging'
+                        || !content || child.document !== content || content.readyState !== 'complete'
+                        || child.location.href !== requested.href
+                        || typeof adapter?.getDesktopLifecycleObservation !== 'function') {
+                    throw failure('desktop_workflow_coverage_unavailable');
+                }
+                observed = mergeFlags(observed, checkedFlags(adapter.getDesktopLifecycleObservation()));
+                // A mounted, saved editor is still an uncovered workspace.
+                observed.loaded = true;
+                if (frame.contentWindow !== child || frame.contentDocument !== content || child.document !== content
+                        || child.InspectorProPackaging !== adapter || content.readyState !== 'complete'
+                        || child.location.href !== requested.href || new URL(frame.src, host.location.href).href !== requested.href
+                        || frame.isConnected !== true) throw failure('desktop_workflow_coverage_unavailable');
+            }
+            const currentFrames = document.querySelectorAll('#packagingWorkspaceFrame');
+            if (host.document !== document || host.InspectorProPackagingHost !== owner
+                    || currentFrames.length !== frames.length || currentFrames[0] !== frame) {
+                throw failure('desktop_workflow_coverage_unavailable');
+            }
+            // The general application observer considers dirty/busy/pending,
+            // not loaded. Do not offer discard for an uncovered saved editor.
+            observed.pending = FLAGS.some(key => observed[key]);
+            return observed;
+        } catch (_) {
+            throw failure('desktop_workflow_coverage_unavailable');
+        }
+    }
+    function withPackaging(sources, host) {
+        const observed = observePackaging(host);
+        const packaging = sources && Object.hasOwn(sources, 'packaging')
+            ? mergeFlags(sources.packaging, observed) : observed;
+        packaging.pending = FLAGS.some(key => packaging[key]);
+        return { ...sources, packaging };
+    }
     function capture(sources, rendererGeneration) {
         if (!sources || typeof rendererGeneration !== 'string' || !rendererGeneration
                 || Object.keys(sources).length !== Object.keys(WORKFLOWS).length) {
@@ -19,11 +88,7 @@
         }
         const workflows = Object.keys(WORKFLOWS).map(workflowId => {
             const value = sources[workflowId];
-            if (!value || Object.keys(value).length !== FLAGS.length
-                    || FLAGS.some(key => typeof value[key] !== 'boolean')) {
-                throw failure('desktop_workflow_coverage_unavailable');
-            }
-            return { workflowId, ...Object.fromEntries(FLAGS.map(key => [key, value[key]])) };
+            return { workflowId, ...checkedFlags(value) };
         });
         return { schemaVersion: 1, rendererGeneration, workflows };
     }
@@ -51,5 +116,5 @@
         return checked;
     }
     // Empty means no observed work, not recovery coverage for a loaded workflow.
-    return Object.freeze({ capture, assertEmpty, WORKFLOWS });
+    return Object.freeze({ capture, assertEmpty, observePackaging, withPackaging, WORKFLOWS });
 }));

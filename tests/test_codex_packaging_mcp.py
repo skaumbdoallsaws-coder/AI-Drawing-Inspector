@@ -32,7 +32,7 @@ from ai_inspector.facility_layout.authorization import FacilityPrincipal
 
 PROTOCOL = "2025-11-25"
 ASGI_HOST = "127.0.0.1:7654"
-READ_TOOLS = {"inspect_packaging", "validate_packaging", "propose_packaging"}
+READ_TOOLS = {"inspect_packaging", "validate_packaging", "propose_packaging", "packaging_resources", "estimate_packaging_mass"}
 WRITE_TOOLS = {"edit_packaging", "undo_packaging", "redo_packaging"}
 
 

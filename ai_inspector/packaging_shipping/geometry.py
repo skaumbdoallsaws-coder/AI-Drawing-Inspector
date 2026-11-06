@@ -6,6 +6,7 @@ import json
 import math
 from decimal import Decimal, ROUND_HALF_UP
 from .models import Design
+from .components import insert_geometry, intersects_insert_material, contact_evidence
 
 # Matches py3dbp's six orthogonal orientations. These are dimension orders,
 # not arbitrary part scaling or reflections; the viewer supplies rigid rotations.
@@ -66,6 +67,8 @@ def assess(design: Design) -> dict:
             issue("allowance_unknown", "Confirm the allowance for tape and other packing materials.", ids)
         if carton.max_payload_kg is None:
             issue("load_limit_unknown", "Carton payload capacity has not been verified.", ids, "warning")
+        if carton.board_blank is not None:
+            issue("estimated_carton_mass", "Carton tare uses a full-blank area estimate; verify the manufactured carton.", ids, "warning")
         for item in package.placements:
             if product is None:
                 continue
@@ -80,18 +83,30 @@ def assess(design: Design) -> dict:
                     issue("envelope_overlap", "Product envelopes overlap or violate the required separation.", (item.id, other_id))
             boxes.append((item.id, box, True))
         for insert in package.inserts:
+            shape = insert_geometry(insert)
+            for code, message in shape["findings"]:
+                issue(code, message, (insert.id,))
             box = envelope(insert.position_m, insert.dimensions_m)
             if any(box[1][i] > carton.inner_m[i] + TOLERANCE_M for i in range(3)):
                 issue("insert_outside_carton", "Packing component extends outside the carton.", (insert.id,))
-            for other_id, other_box, _ in boxes:
-                if overlaps(box, other_box):
+            for other_id, other_box, is_product in boxes:
+                intersection = intersects_insert_material(other_box, insert) if is_product else overlaps(box, other_box)
+                if intersection:
                     issue("insert_overlap", "Packing component intersects another component's envelope.", (insert.id, other_id))
             boxes.append((insert.id, box, False))
+        if product and package.inserts:
+            unsupported = [item.id for item in package.placements
+                           if item.position_m[1] > TOLERANCE_M
+                           and not any(contact_evidence(envelope(item.position_m, oriented(product.dimensions_m, item.orientation)), i)
+                                       for i in package.inserts)]
+            if unsupported:
+                issue("support_not_verified", "Some elevated products have no detected contact with an insert support. Review the packing sequence and support.", ids, "warning")
         product_mass = product.mass_kg * len(package.placements) if product and product.mass_kg is not None else None
-        insert_mass = sum(volume(x.dimensions_m) * x.density_kg_m3 for x in package.inserts)
+        shapes = [insert_geometry(x) for x in package.inserts]
+        insert_mass = sum(shape["net_volume_m3"] * x.density_kg_m3 for shape, x in zip(shapes, package.inserts)) if all(s["valid"] for s in shapes) else None
         allowance = package.allowance_kg
-        gross = None if product_mass is None or carton.tare_kg is None or allowance is None else product_mass + insert_mass + carton.tare_kg + allowance
-        if product_mass is not None and allowance is not None and carton.max_payload_kg is not None:
+        gross = None if product_mass is None or insert_mass is None or carton.tare_kg is None or allowance is None else product_mass + insert_mass + carton.tare_kg + allowance
+        if product_mass is not None and insert_mass is not None and allowance is not None and carton.max_payload_kg is not None:
             if product_mass + insert_mass + allowance > carton.max_payload_kg + 1e-9:
                 issue("payload_exceeded", "Contents exceed the declared carton payload limit.", ids)
         known_cost = carton.cost_usd is not None and all(x.cost_usd is not None for x in package.inserts)

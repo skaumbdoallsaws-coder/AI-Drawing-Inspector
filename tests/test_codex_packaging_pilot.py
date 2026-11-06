@@ -148,7 +148,7 @@ def test_runtime_without_inspection_is_not_verified(setup, monkeypatch):
 def test_readonly_host_grant_excludes_writes(setup, monkeypatch):
     monkeypatch.setenv("INSPECTORPRO_CODEX_EDIT_PREVIEWS", "0")
     async def runtime(**kw):
-        assert len(kw["gateway"].specs) == 3
+        assert len(kw["gateway"].specs) == 5
         assert (await kw["gateway"].call("inspect_packaging", {"expected_revision": 0}))["ok"]
         return "Missing mass", SimpleNamespace(timeline=[])
     monkeypatch.setattr(pilot, "run_gateway_turn", runtime)

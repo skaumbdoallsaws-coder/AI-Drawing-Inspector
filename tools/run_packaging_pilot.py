@@ -14,9 +14,16 @@ def create_app(storage=None, rating=None):
     from ai_inspector.facility_layout.authorization import local_facility_principal
     from ai_inspector.packaging_shipping.api import create_router
     from ai_inspector.packaging_shipping.service import PackagingService
+    from ai_inspector.packaging_shipping.credentials import EasyPostCredentialStore, carrier_owner
     app = FastAPI(title="InspectorPro Packaging Pilot")
     service = PackagingService(storage or ROOT / ".runtime" / "packaging-pilot")
-    app.include_router(create_router(service, principal_resolver=lambda request: local_facility_principal(site_id="packaging-pilot"), static_root=ROOT / "static", rating=rating))
+    stores = {}
+    def account(principal):
+        identity = carrier_owner(principal)
+        if identity not in stores:
+            stores[identity] = EasyPostCredentialStore(service.root / "carrier-credentials", identity, enabled=True)
+        return stores[identity]
+    app.include_router(create_router(service, principal_resolver=lambda request: local_facility_principal(site_id="packaging-pilot"), static_root=ROOT / "static", rating=rating, credential_factory=None if rating else account))
     app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
     @app.get("/")

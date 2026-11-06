@@ -26,7 +26,7 @@ from ai_inspector.packaging_shipping.models import (
 )
 from ai_inspector.packaging_shipping.packing import propose
 from ai_inspector.packaging_shipping.rating import EasyPostRating
-from ai_inspector.packaging_shipping.service import PackagingError, PackagingService
+from ai_inspector.packaging_shipping.service import PackagingError, PackagingService, SCHEMA_VERSION
 from ai_inspector.packaging_shipping.sources import MAX_BYTES, import_glb, import_glb_isolated
 from tools.run_packaging_pilot import create_app
 
@@ -245,7 +245,7 @@ def test_mass_budget_separates_contents_tare_and_external_dimensions(design):
     assert result["rate_ready"] is True
     assert result["status"] == "needs_review"
     assert result["validation_level"] == "conservative_bounding_envelopes"
-    assert codes(result) == {"protection_not_evaluated"}
+    assert codes(result) == {"protection_not_evaluated", "support_not_verified"}
     mass = result["packages"][0]
     assert mass["product_kg"] == 2
     assert mass["insert_kg"] == pytest.approx(0.01)
@@ -394,18 +394,18 @@ def test_future_store_version_is_refused_without_modifying_the_database(tmp_path
     with sqlite3.connect(database) as db:
         db.execute("CREATE TABLE future_data (id INTEGER PRIMARY KEY, evidence TEXT)")
         db.execute("INSERT INTO future_data VALUES (1, 'TEST future data must survive')")
-        db.execute("PRAGMA user_version=2")
+        db.execute("PRAGMA user_version=999")
     before = database.read_bytes()
 
     expect_error("schema_unsupported", lambda: PackagingService(root), 409)
 
     assert database.read_bytes() == before
     with sqlite3.connect(database) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 999
         assert db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == [("future_data",)]
         assert db.execute("SELECT evidence FROM future_data WHERE id=1").fetchone()[0] == "TEST future data must survive"
     independent = PackagingService(tmp_path / "current-store")
-    assert independent.create("TEST scope")["schema_version"] == 1
+    assert independent.create("TEST scope")["schema_version"] == SCHEMA_VERSION
     assert database.read_bytes() == before
 
 
@@ -433,10 +433,10 @@ def test_supported_store_versions_preserve_records_and_document_metadata(service
     assert undone["design"] == original["design"]
     assert redone["design"] == edited["design"]
     for result in (original, edited, before, replayed, undone, redone):
-        assert type(result["schema_version"]) is int and result["schema_version"] == 1
+        assert type(result["schema_version"]) is int and result["schema_version"] == SCHEMA_VERSION
         assert result["units"] == {"length": "m", "mass": "kg", "up": "Y"}
     with reopened.db() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
 def test_report_text_preserves_density_evidence_accounts_and_quote_revision(service, design):
@@ -789,7 +789,7 @@ def test_pilot_document_source_quote_scope_and_stale_quotes(pilot, box_glb):
     source_url = f"/api/packaging/sources/{source_id}.glb"
     assert client.get(source_url).headers["content-type"] == "model/gltf-binary"
     document = client.post("/api/packaging/documents", json=design_data()).json()
-    assert document["schema_version"] == 1
+    assert document["schema_version"] == SCHEMA_VERSION
     assert document["units"] == {"length": "m", "mass": "kg", "up": "Y"}
     url = f"/api/packaging/documents/{document['id']}"
     quote_body = {"expected_revision": 0, "origin": address_data(), "destinations": [address_data()]}

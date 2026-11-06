@@ -22368,7 +22368,9 @@
         }
 
         function _desktopObserveApplication() {
-            const rows = _desktopInspectOtherWorkflows();
+            const observer = window.InspectorProDesktopWorkflowObservation;
+            if (typeof observer?.withPackaging !== 'function') throw new Error('desktop_workflow_coverage_unavailable');
+            const rows = observer.withPackaging(_desktopInspectOtherWorkflows(), window);
             const facility = _trainFacilityLayoutAuthoringApp?.session?.getState();
             rows.facility = _trainFacilitySheets ? _trainFacilitySheets.observation() : {
                 dirty: !!facility?.dirty,
@@ -48163,6 +48165,15 @@
         }
 
         window.InspectorProPackagingHost = {
+            getDesktopLifecycleObservation() {
+                return {
+                    loaded: !!document.getElementById('packagingWorkspaceFrame')
+                        || (state.activeTab === 'training' && trainingState.type === 'packaging_shipping'),
+                    dirty: false,
+                    busy: !!_packagingActiveTurn,
+                    pending: !!(_packagingActiveTurn || _packagingReleasePromise),
+                };
+            },
             async prepare(identity) {
                 if (_packagingReleasePromise) throw new Error('Wait for packaging reconciliation before sending.');
                 if (state.activeTab !== 'training' || trainingState.type !== 'packaging_shipping') {

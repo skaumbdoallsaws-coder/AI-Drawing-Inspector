@@ -8,14 +8,208 @@ const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'static/packaging.js'), 'utf8');
 const sceneSource = fs.readFileSync(path.join(root, 'static/packaging_scene.js'), 'utf8');
 const originalFetch = global.fetch;
-let ui, THREE;
+let ui, THREE, scene;
 
 before(async () => {
-  const testSource = source + '\nexport { state as testState, resetDocumentState as testResetDocumentState };';
-  ui = await import('data:text/javascript;base64,' + Buffer.from(testSource).toString('base64'));
-  THREE = await import(pathToFileURL(path.join(root, 'static/vendor/three/0.184.0/build/three.module.min.js')).href);
+  const testSource = source + '\nexport { state as testState, resetDocumentState as testResetDocumentState, readCarton as testReadCarton };';
+  const uiUrl = 'data:text/javascript;base64,' + Buffer.from(testSource).toString('base64');
+  const threeUrl = pathToFileURL(path.join(root, 'static/vendor/three/0.184.0/build/three.module.min.js')).href;
+  ui = await import(uiUrl);
+  THREE = await import(threeUrl);
+  const boundsSource = sceneSource.replace("from 'three'", `from '${threeUrl}'`)
+    .replace(/^import .* from 'three\/addons\/.*';$/gm, '')
+    .replace("from './packaging.js'", `from '${uiUrl}'`);
+  scene = await import('data:text/javascript;base64,' + Buffer.from(boundsSource).toString('base64'));
 });
 afterEach(() => { global.fetch = originalFetch; });
+
+test('source bounds accept angled nested CAD geometry without inflating or scaling it', () => {
+  const root = new THREE.Group(), assembly = new THREE.Group();
+  root.position.set(1.7, 2.3, -1.2); root.add(assembly);
+  assembly.rotation.set(.4, .3, Math.PI / 5); assembly.position.set(.2, -.1, .3);
+  const geometry = new THREE.TetrahedronGeometry(.1), material = new THREE.MeshBasicMaterial();
+  const mesh = new THREE.Mesh(geometry, material); assembly.add(mesh); root.updateMatrixWorld(true);
+  const positions = geometry.getAttribute('position'), points = [];
+  for (let i = 0; i < positions.count; i++) points.push(new THREE.Vector3().fromBufferAttribute(positions, i).applyMatrix4(mesh.matrixWorld));
+  const expected = new THREE.Box3().setFromPoints(points), dimensions = expected.getSize(new THREE.Vector3()).toArray();
+  const approximate = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3()).toArray();
+  assert.ok(approximate.some((n, i) => n - dimensions[i] > .001), 'fixture exposes the conservative-box mismatch');
+  const before = mesh.matrixWorld.toArray();
+  const actual = scene.sourceBounds(root, dimensions);
+  assert.ok(actual.min.distanceTo(expected.min) < 1e-10);
+  assert.ok(actual.max.distanceTo(expected.max) < 1e-10);
+  assert.deepEqual(mesh.matrixWorld.toArray(), before);
+  assert.deepEqual(root.scale.toArray(), [1, 1, 1]);
+  assert.match(sceneSource, /const box = sourceBounds\(loaded, product\.dimensions_m\)/);
+  geometry.dispose(); material.dispose();
+});
+
+test('source bounds still reject wrong dimensions, empty sources and nonfinite vertices', () => {
+  const geometry = new THREE.BoxGeometry(.1, .2, .3), material = new THREE.MeshBasicMaterial();
+  const mesh = new THREE.Mesh(geometry, material);
+  assert.throws(() => scene.sourceBounds(mesh, [.1, .2, .4]), /immutable source dimensions/);
+  assert.throws(() => scene.sourceBounds(new THREE.Group(), [.1, .2, .3]), /immutable source dimensions/);
+  geometry.getAttribute('position').setX(0, Infinity);
+  assert.throws(() => scene.sourceBounds(mesh, [.1, .2, .3]), /immutable source dimensions/);
+  geometry.dispose(); material.dispose();
+});
+
+test('display modes and transparency are finite presentation settings, not physical material inputs', () => {
+  const shaded = scene.displayMaterialSettings('shaded', 0);
+  assert.equal(shaded.wireframe, false); assert.equal(shaded.transparent, false); assert.equal(shaded.opacity, 1);
+  assert.equal(shaded.color, 0xb9bfc5);
+  const wire = scene.displayMaterialSettings('wireframe', 65);
+  assert.equal(wire.wireframe, true); assert.equal(wire.opacity, .35); assert.equal(wire.depthWrite, false);
+  assert.equal(scene.displayMaterialSettings('edges', 0).polygonOffset, true);
+  for (const value of [-1, 86, NaN, Infinity, '50', true]) assert.throws(() => scene.displayMaterialSettings('shaded', value), /display settings/);
+  assert.throws(() => scene.displayMaterialSettings('invented', 0), /display settings/);
+  assert.equal('density_kg_m3' in wire, false); assert.equal('mass_kg' in wire, false);
+});
+
+test('display styling clones materials, keeps source vertices and transforms, and shares edge geometry', () => {
+  const original = new THREE.MeshStandardMaterial({ color: 0xff5500, opacity: .8 });
+  const geometry = new THREE.BoxGeometry(.1, .2, .3), model = new THREE.Group();
+  model.add(new THREE.Mesh(geometry, original)); model.position.set(.2, .1, -.3);
+  const clone = model.clone(true); clone.add(new THREE.Mesh(geometry, original));
+  const viewer = Object.create(scene.PackagingScene.prototype);
+  Object.assign(viewer, { resources: new Set(), edgeCache: new Map(), displayMode: 'edges', transparency: 40 });
+  const vertices = [...geometry.attributes.position.array], position = clone.position.toArray();
+  viewer.styleComponent(clone);
+  assert.equal(model.children[0].material, original); assert.equal(original.color.getHex(), 0xff5500);
+  assert.equal(original.opacity, .8); assert.equal(clone.children[0].geometry, geometry);
+  assert.notEqual(clone.children[0].material, original);
+  assert.equal(clone.children[0].material.opacity, .6);
+  assert.equal(clone.children[0].children[0].geometry, clone.children[1].children[0].geometry);
+  assert.deepEqual([...geometry.attributes.position.array], vertices);
+  assert.deepEqual(clone.position.toArray(), position); assert.deepEqual(clone.scale.toArray(), [1, 1, 1]);
+  for (const resource of viewer.resources) resource.dispose(); geometry.dispose(); original.dispose();
+});
+
+test('changing display state never edits the design, document revision or undo history', () => {
+  const draft = new ui.DraftDocument();
+  draft.accept({ id: 'pkg_view', revision: 9, design: { ...ui.emptyDesign(), product: {
+    name: 'Measured', dimensions_m: [.1, .2, .3], mass_kg: .4, mass_basis: 'user_measured', mass_evidence: 'Scale',
+  } } });
+  const before = JSON.stringify(draft), viewer = Object.create(scene.PackagingScene.prototype);
+  let redraws = 0;
+  Object.assign(viewer, { design: draft.design, displayMode: 'edges', transparency: 0, rebuild: () => redraws++ });
+  viewer.setDisplay('shaded', 40); viewer.setDisplay('wireframe', 0); viewer.setDisplay('edges', 0);
+  assert.equal(redraws, 3); assert.equal(JSON.stringify(draft), before);
+});
+
+test('ribbon commands use local icons and carton edits preserve additive physical and appearance records', () => {
+  assert.deepEqual(ui.PANEL_COMMANDS.map(command => command.id), ['product', 'carton', 'contents', 'arrange', 'appearance', 'graphics', 'validation', 'rates']);
+  for (const command of ui.PANEL_COMMANDS) assert.ok(fs.existsSync(path.join(root, 'static/assets/facility-layout-ribbon-icons/svg', command.icon + '.svg')));
+  const original = { ...ui.defaultCarton(), appearance: { color: '#909090', opacity: .8 },
+    board_blank: { dimensions_m: [1, 2], quantity: 1, mass_per_area_kg_m2: .2, evidence: 'Supplier' } };
+  const fields = { carton_name: 'Edited carton', inner_0: '400', inner_1: '300', inner_2: '250', outer_0: '410', outer_1: '310', outer_2: '260',
+    tare: '.4', tare_evidence: 'Supplier', payload: '', carton_cost: '' };
+  const updated = ui.testReadCarton({ elements: { namedItem: name => ({ value: fields[name] }) } }, original);
+  assert.deepEqual(updated.appearance, original.appearance); assert.deepEqual(updated.board_blank, original.board_blank);
+  assert.notEqual(updated.appearance, original.appearance); assert.equal(updated.name, 'Edited carton');
+  assert.equal(original.name, 'Carton');
+});
+
+test('pocket display removes actual geometry with unchanged outer bounds and documented floors', () => {
+  const pad = { dimensions_m: [.2, .05, .15], pockets: [
+    { shape: 'rectangular', position_m: [.01, .01, .01], dimensions_m: [.05, .04, .05] },
+    { shape: 'cylindrical', position_m: [.1, .02, .05], dimensions_m: [.04, .03, .04] },
+  ] };
+  const before = JSON.stringify(pad), geometries = scene.insertGeometries(pad), group = new THREE.Group();
+  let volume = 0;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  for (const geometry of geometries) {
+    const positions = geometry.attributes.position;
+    for (let i = 0; i < positions.count; i += 3) {
+      a.fromBufferAttribute(positions, i); b.fromBufferAttribute(positions, i + 1); c.fromBufferAttribute(positions, i + 2);
+      volume += a.dot(b.cross(c)) / 6;
+    }
+    group.add(new THREE.Mesh(geometry));
+  }
+  const expected = .2 * .05 * .15 - .05 * .04 * .05 - Math.PI * .02 ** 2 * .03;
+  assert.ok(Math.abs(volume - expected) < 5e-8, `${volume} versus ${expected}`);
+  const bounds = new THREE.Box3().setFromObject(group, true);
+  assert.ok(bounds.min.length() < 1e-8);
+  bounds.getSize(a); assert.ok(a.distanceTo(new THREE.Vector3(...pad.dimensions_m)) < 1e-7);
+  assert.equal(JSON.stringify(pad), before);
+  for (const geometry of geometries) geometry.dispose();
+  group.children.forEach(mesh => mesh.material.dispose());
+  assert.throws(() => scene.insertGeometries({ ...pad, pockets: [{ ...pad.pockets[0], position_m: [.01, 0, .01] }] }), /top-opening/);
+  assert.throws(() => scene.insertGeometries({ ...pad, pockets: [pad.pockets[0], pad.pockets[0]] }), /Overlapping/);
+});
+
+test('gray display ignores saved colors while appearance mode uses only visual fields', () => {
+  const appearance = { color: '#42A578', roughness: .3, metalness: .7, opacity: .5 };
+  assert.equal(scene.displayMaterialSettings('shaded', 0, appearance).color, 0xb9bfc5);
+  const styled = scene.displayMaterialSettings('appearance', 40, appearance);
+  assert.equal(styled.color, appearance.color); assert.equal(styled.opacity, .3);
+  assert.equal(styled.roughness, .3); assert.equal(styled.metalness, .7);
+});
+
+test('diagonally separated round pockets render real voids despite intersecting footprint AABBs', () => {
+  const circle = { shape: 'cylindrical', position_m: [.02, .01, .02], dimensions_m: [.04, .04, .04] };
+  for (const second of [
+    { shape: 'cylindrical', position_m: [.055, .01, .055], dimensions_m: [.04, .04, .04] },
+    { shape: 'rectangular', position_m: [.058, .01, .058], dimensions_m: [.025, .04, .025] },
+  ]) {
+    assert.ok([0, 2].every(axis => circle.position_m[axis] + circle.dimensions_m[axis] > second.position_m[axis]), 'fixture has overlapping AABBs');
+    assert.ok(scene.pocketFootprintDistance(circle, second) > .005, 'actual voids retain the backend default minimum web');
+    assert.ok(Math.abs(scene.pocketFootprintDistance(circle, second) - scene.pocketFootprintDistance(second, circle)) < 1e-14);
+    const pad = { dimensions_m: [.12, .05, .12], pockets: [circle, second] }, before = JSON.stringify(pad);
+    const geometries = scene.insertGeometries(pad), group = new THREE.Group();
+    const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+    geometries.forEach(geometry => group.add(new THREE.Mesh(geometry, material))); group.updateMatrixWorld(true);
+    for (const pocket of pad.pockets) {
+      const center = new THREE.Vector3(pocket.position_m[0] + pocket.dimensions_m[0] / 2, .1, pocket.position_m[2] + pocket.dimensions_m[2] / 2);
+      const hit = new THREE.Raycaster(center, new THREE.Vector3(0, -1, 0)).intersectObject(group, true)[0];
+      assert.ok(hit && Math.abs(hit.point.y - .01) < 1e-7, 'ray enters the cut and hits its floor, not a solid envelope');
+    }
+    assert.equal(JSON.stringify(pad), before);
+    geometries.forEach(geometry => geometry.dispose()); material.dispose();
+    assert.throws(() => scene.insertGeometries({ ...pad, pockets: [circle, { ...second, position_m: [.035, .01, .035] }] }), /Overlapping/);
+  }
+});
+
+test('pocket display matches the backend one-micron top-opening tolerance without changing source records', () => {
+  const backend = fs.readFileSync(path.join(root, 'ai_inspector/packaging_shipping/components.py'), 'utf8');
+  assert.equal(scene.PACKAGING_TOLERANCE_M, Number(backend.match(/^TOLERANCE_M = (.+)$/m)[1]));
+  const pad = { dimensions_m: [.1, .05, .1], pockets: [{ shape: 'rectangular', position_m: [.02, .01, .02], dimensions_m: [.02, .04, .02] }] };
+  for (const delta of [-.9e-6, .9e-6]) {
+    const input = structuredClone(pad); input.pockets[0].dimensions_m[1] += delta;
+    const before = JSON.stringify(input), geometries = scene.insertGeometries(input);
+    const bounds = new THREE.Box3();
+    for (const geometry of geometries) { geometry.computeBoundingBox(); bounds.union(geometry.boundingBox); geometry.dispose(); }
+    assert.ok(Math.abs(bounds.max.y - .05) < 1e-8); assert.equal(JSON.stringify(input), before);
+  }
+  for (const delta of [-1.1e-6, 1.1e-6]) {
+    const input = structuredClone(pad); input.pockets[0].dimensions_m[1] += delta;
+    assert.throws(() => scene.insertGeometries(input), /top-opening/);
+  }
+});
+
+test('surface graphics preserve aspect after rotation and use outward face coordinates', () => {
+  for (const face of ['x-', 'x+', 'y-', 'y+', 'z-', 'z+']) for (const rotation of [0, 90, 180, 270]) {
+    const graphic = { face, rotation_degrees: rotation, u: .5, v: .5, width_fraction: .6, height_fraction: .3 };
+    const placed = scene.graphicPlacement([.4, .3, .2], graphic, 3);
+    assert.ok(Math.abs(placed.width / placed.height - 3) < 1e-10);
+    const u = new THREE.Vector3(...placed.u), v = new THREE.Vector3(...placed.v), n = new THREE.Vector3(...placed.normal);
+    assert.ok(u.cross(v).distanceTo(n) < 1e-10);
+    const axis = 'xyz'.indexOf(face[0]), offset = placed.center[axis] - [.4, .3, .2][axis] / 2;
+    assert.equal(Math.sign(offset), face.endsWith('+') ? 1 : -1);
+    const larger = scene.graphicPlacement([.8, .6, .4], graphic, 3);
+    assert.ok(Math.abs(larger.width - placed.width * 2) < 1e-10);
+  }
+  assert.throws(() => scene.graphicPlacement([1, 1, 1], { face: 'y+', rotation_degrees: 45 }, 1), /Invalid graphic/);
+});
+
+test('blank-area tare is computed from sourced area weight, never from the carton envelope', () => {
+  const fields = { carton_name: 'Blank estimate', inner_0: '400', inner_1: '300', inner_2: '250', outer_0: '410', outer_1: '310', outer_2: '260',
+    tare: '0.01', tare_evidence: 'stale', payload: '', carton_cost: '', tare_method: 'blank',
+    blank_width: '800', blank_length: '1200', blank_quantity: '2', blank_basis_weight: '.4', blank_evidence: 'Supplier board and complete blank' };
+  const result = ui.testReadCarton({ elements: { namedItem: name => ({ value: fields[name] }) } }, ui.defaultCarton());
+  assert.equal(result.tare_kg, .768); assert.equal(result.tare_evidence, fields.blank_evidence);
+  assert.deepEqual(result.board_blank.dimensions_m, [.8, 1.2]);
+});
 
 test('form millimeters convert to SI meters without changing source dimensions', () => {
   for (const [mm, m] of [[100, .1], [25.4, .0254], [1, .001], [5000, 5], [0, 0]]) {
@@ -97,16 +291,60 @@ test('New/Open reset carton alternatives, evidence, candidate settings and the r
   assert.match(source, /async function loadDocument\(id\)[\s\S]*?resetDocumentState\(\)/);
 });
 
-test('applying a candidate can restore every prior pad and allowance with Undo', () => {
+test('applying a candidate can restore every prior pad, graphic and allowance with Undo', () => {
   const draft = new ui.DraftDocument(), design = ui.emptyDesign();
-  design.packages = [{ id: 'box_original', placements: [], inserts: [{ id: 'pad', density_kg_m3: 30 }], allowance_kg: .08, allowance_evidence: 'Measured tape' }];
+  design.packages = [{ id: 'box_original', placements: [], inserts: [{ id: 'pad', density_kg_m3: 30 }], graphics: [{ id: 'graphic', kind: 'text', text: 'TEST' }], allowance_kg: .08, allowance_evidence: 'Measured tape' }];
   draft.accept({ id: 'pkg', revision: 2, design });
   const candidatePackages = [{ id: 'box_1', placements: [{ id: 'item_1' }], inserts: [], allowance_kg: null, allowance_evidence: '' }];
   draft.edit(d => { d.packages = ui.clone(candidatePackages); });
   assert.equal(draft.design.packages[0].allowance_kg, null);
   draft.undo(); assert.deepEqual(draft.design.packages, design.packages);
   draft.redo(); assert.deepEqual(draft.design.packages, candidatePackages);
-  assert.match(source, /Replace all package arrangements, pads and allowances/);
+  assert.ok(source.includes('Replace all package arrangements, pads, graphics and allowances'));
+});
+
+test('reusing a source retains appearance but never inherits mass evidence or calculation from a different source', () => {
+  const prior = { name: 'Old', appearance: { color: '#FF0000' }, mass_basis: 'estimate', mass_kg: 4, mass_evidence: 'Old evidence', mass_calculation: { volume_m3: 1 }, source_id: 'old' };
+  const metadata = { id: 'src_new', name: 'New source', dimensions_m: [.1, .2, .3], source_revision: 'a'.repeat(64) };
+  const next = ui.productFromSource(metadata, prior);
+  assert.deepEqual(next.appearance, prior.appearance); assert.notEqual(next.appearance, prior.appearance);
+  assert.deepEqual(next.dimensions_m, metadata.dimensions_m); assert.notEqual(next.dimensions_m, metadata.dimensions_m);
+  assert.equal(next.source_id, metadata.id); assert.equal(next.source_revision, metadata.source_revision);
+  assert.equal(next.mass_kg, null); assert.equal(next.mass_calculation, null); assert.equal(next.mass_basis, 'unknown'); assert.equal(next.mass_evidence, '');
+  assert.equal(prior.mass_kg, 4);
+});
+
+test('image crop honors authoritative trimmed alpha UVs with bottom-up V and rejects malformed metadata', () => {
+  assert.deepEqual(scene.imageCrop({ width: 1000, height: 800, uv: [.1, .2, .9, .75] }), { x: 100, y: 200, width: 800, height: 440 });
+  for (const metadata of [{ width: '100', height: 100, uv: [0, 0, 1, 1] }, { width: 4097, height: 100, uv: [0, 0, 1, 1] },
+    { width: 100, height: 100, uv: [0, 0, NaN, 1] }, { width: 100, height: 100, uv: [.5, 0, .5, 1] },
+    { width: 100, height: 100, uv: [0, 0, 1, 2] }]) assert.throws(() => scene.imageCrop(metadata), /metadata/);
+});
+
+test('pocket graphics masks stay in local coordinates through all rotations and only cut through floors on the bottom', () => {
+  const dimensions = [.2, .05, .2], pockets = [
+    { shape: 'rectangular', position_m: [.08, .01, .08], dimensions_m: [.04, .04, .04] },
+    { shape: 'cylindrical', position_m: [.01, 0, .01], dimensions_m: [.02, .05, .02] },
+  ];
+  for (const rotation_degrees of [0, 90, 180, 270]) {
+    const graphic = { face: 'y+', u: .5, v: .5, width_fraction: 1, height_fraction: 1, rotation_degrees };
+    const paths = scene.graphicPocketPaths(dimensions, graphic, 1, pockets);
+    assert.equal(paths.length, 2); assert.equal(paths[0].length, 4); assert.equal(paths[1].length, 96);
+    for (const point of paths[0]) for (const value of point) assert.ok(Math.abs(value - .4) < 1e-9 || Math.abs(value - .6) < 1e-9);
+    const bottom = scene.graphicPocketPaths(dimensions, { ...graphic, face: 'y-' }, 1, pockets);
+    assert.equal(bottom.length, 1); assert.equal(bottom[0].length, 96);
+    assert.deepEqual(scene.graphicPocketPaths(dimensions, { ...graphic, face: 'x+' }, 1, pockets), []);
+  }
+});
+
+test('binary upload helper supports explicit STEP and image content types without encoding the payload', async () => {
+  const calls = [], payload = new Uint8Array([1, 2, 3]);
+  global.fetch = async (url, options) => { calls.push({ url, options }); return new Response('{}'); };
+  for (const [path, contentType] of [['/sources/step?name=test.step', 'application/step'], ['/images', 'image/png'], ['/images', 'image/jpeg']]) {
+    await ui.request(path, { method: 'POST', body: payload, raw: true, contentType });
+    assert.equal(calls.at(-1).options.headers['Content-Type'], contentType);
+    assert.equal(calls.at(-1).options.body, payload);
+  }
 });
 
 test('all API requests carry the packaging header; source upload is raw binary', async () => {
@@ -133,6 +371,24 @@ test('revision conflicts, validation failures and provider errors are not hidden
   assert.equal(ui.errorMessage({ detail: [{ loc: ['body', 'product'], msg: 'Missing evidence' }] }, 422), 'body.product: Missing evidence');
   global.fetch = async () => new Response('unavailable', { status: 503 });
   await assert.rejects(ui.request('/status'), /HTTP 503/);
+});
+
+test('first-save retry sends an explicit idempotency key without altering the document', async () => {
+  const calls = [], design = ui.emptyDesign();
+  global.fetch = async (url, options) => { calls.push(options); return new Response('{}'); };
+  await ui.request('/documents', { method: 'POST', body: design, idempotencyKey: 'create_123' });
+  assert.equal(calls[0].headers['Idempotency-Key'], 'create_123');
+  assert.deepEqual(JSON.parse(calls[0].body), design);
+  await ui.request('/documents');
+  assert.equal(calls[1].headers['Idempotency-Key'], undefined);
+});
+
+test('carrier status distinguishes absent, saved unverified, and unavailable accounts', () => {
+  assert.equal(ui.providerNotice(null), 'Provider status unavailable.');
+  assert.equal(ui.providerNotice({ configured: false, validation: 'not_configured' }), 'No carrier account configured.');
+  assert.equal(ui.providerNotice({ configured: true, validation: 'not_validated' }), 'Account saved; provider access has not been verified.');
+  assert.equal(ui.providerNotice({ configured: false, validation: 'unavailable' }), 'Carrier account access is unavailable.');
+  assert.equal(ui.providerNotice({ configured: true, notice: 'Provider supplied notice' }), 'Provider supplied notice');
 });
 
 test('PDF endpoint is consumed as a Blob', async () => {

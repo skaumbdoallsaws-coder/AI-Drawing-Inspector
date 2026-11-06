@@ -347,7 +347,8 @@ const selectedPackage = () => state.draft.design.packages.find(p => p.id === sta
 const docPath = () => `/documents/${encodeURIComponent(state.draft.document.id)}`;
 const hasDraft = () => state.draft.dirty || state.formDirty;
 const hasAddressInputs = () => JSON.stringify(captureAddresses()) !== JSON.stringify({ origin: blankAddress(), destinations: [blankAddress()] });
-const hasNavigationChanges = () => hasDraft() || hasAddressInputs();
+const hasSelectedFiles = () => [...document.querySelectorAll('input[type="file"]')].some(input => input.files?.length);
+const hasNavigationChanges = () => hasDraft() || hasAddressInputs() || hasSelectedFiles();
 
 function notify(message, error = false) {
   $('message').textContent = message; $('message').className = `message${error ? ' error' : ''}`; $('message').hidden = !message;
@@ -1254,7 +1255,7 @@ async function downloadPDF() {
     const blob = await request(`${docPath()}/report.pdf?revision=${state.draft.document.revision}`, { responseType: 'blob' });
     const url = URL.createObjectURL(blob), link = element('a'); link.href = url; link.download = 'packaging-review.pdf';
     document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
-    notify('PDF downloaded.');
+    notify('PDF export requested.');
   });
 }
 
@@ -1516,7 +1517,7 @@ function boot() {
   $('close-open').addEventListener('click', () => $('open-dialog').close());
   state.sage = new PackagingEditorAdmission({
     snapshot: () => ({ document_id: state.draft.document?.id || null, revision: state.draft.document?.revision ?? null,
-      dirty: hasNavigationChanges() || [...document.querySelectorAll('input[type="file"]')].some(input => input.files?.length),
+      dirty: hasNavigationChanges(),
       conflict: state.conflict, pending_operations: state.busy || document.querySelector('dialog[open]') ? 1 : 0 }),
     lock: () => updateHeader(),
     accept: async saved => {
@@ -1555,13 +1556,13 @@ function boot() {
     executeCommand: id => executeRibbonCommand(id),
     getDesktopLifecycleObservation: () => ({
       loaded: true,
-      dirty: hasNavigationChanges() || [...document.querySelectorAll('input[type="file"]')].some(input => input.files?.length),
+      dirty: hasNavigationChanges(),
       busy: !!(state.busy || state.sage.locked),
       pending: !!(state.conflict || state.sage.admission || state.sage.closing || document.querySelector('dialog[open]')),
     }),
     isLocked: () => state.sage.locked,
     hasUnsavedChanges: () => hasNavigationChanges() || state.busy,
-    confirmNavigation: () => !(hasNavigationChanges() || state.busy) || confirm('Leave Packaging & Shipping? Unsaved changes, session-only addresses or an active request may be lost.')
+    confirmNavigation: () => !(hasNavigationChanges() || state.busy) || confirm('Leave Packaging & Shipping? Unsaved changes, selected files, session-only addresses or an active request may be lost.')
   });
   // Dialogs can open without changing the document. Keep the outer ribbon
   // unavailable until the modal interaction has completed.

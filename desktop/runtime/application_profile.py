@@ -36,7 +36,7 @@ def load_application_profile(file):
     file = local_path(file)
     if file.stat().st_size > 16384: raise ValueError('Application profile is too large')
     value = json.loads(file.read_text(encoding='utf-8'))
-    if (not isinstance(value, dict) or not KEYS <= set(value) or set(value) - KEYS - {'modelGateway', 'codexRuntime'}
+    if (not isinstance(value, dict) or not KEYS <= set(value) or set(value) - KEYS - {'modelGateway', 'codexRuntime', 'packagingRuntime'}
             or type(value['schemaVersion']) is not int
             or value['schemaVersion'] != 1 or value['mode'] != 'application'
             or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}', value['profileId'])):
@@ -66,4 +66,7 @@ def load_application_profile(file):
     if 'codexRuntime' in value:
         from desktop.runtime.codex_config import validate_config
         value['codexRuntime'] = validate_config(value['codexRuntime'], value)
+    if 'packagingRuntime' in value:
+        from desktop.runtime.packaging_config import validate_config
+        value['packagingRuntime'] = validate_config(value['packagingRuntime'], value)
     return ApplicationProfile(value)

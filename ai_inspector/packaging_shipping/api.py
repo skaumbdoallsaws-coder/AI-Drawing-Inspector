@@ -19,7 +19,7 @@ from .catalog import catalog
 from .packing import propose
 from .rating import EasyPostRating
 from .service import PackagingError, PackagingService
-from .sources import MAX_BYTES, import_glb_isolated
+from .sources import MAX_BYTES, GlbRuntime, glb_runtime, import_glb_isolated
 from .step_import import StepRuntime, StepImportError, import_step
 
 
@@ -56,11 +56,14 @@ class PackagingRoute(APIRoute):
 
 def create_router(service: PackagingService, *, principal_resolver, static_root: Path, rating=None,
                   admission: PackagingAdmission | None = None, sage_enabled: Callable[[], bool] | None = None,
-                  credential_factory=None, step_runtime=None):
+                  credential_factory=None, step_runtime=None, source_runtime=None):
     if admission is not None and (not isinstance(admission, PackagingAdmission) or admission.service is not service):
         raise ValueError("Packaging admission must use this router's service instance.")
     if sage_enabled is not None and not callable(sage_enabled):
         raise ValueError("sage_enabled must be a host callback.")
+    source_runtime = glb_runtime() if source_runtime is None else source_runtime
+    if not isinstance(source_runtime, GlbRuntime):
+        raise TypeError('A host-configured GlbRuntime is required')
     router = APIRouter(route_class=PackagingRoute)
     provider = rating or EasyPostRating()
     job_lock = asyncio.Lock()
@@ -208,7 +211,8 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
             raise PackagingError("units_required", "Choose a supported source unit.", 400)
         data = await bounded_body(request, MAX_BYTES)
         async with job_lock:
-            metadata, glb = await import_glb_isolated(bytes(data), request.query_params.get("name", "Imported product"), unit, service.root)
+            metadata, glb = await import_glb_isolated(bytes(data), request.query_params.get("name", "Imported product"), unit, service.root,
+                                                      runtime=source_runtime)
         return service.store_source(s, metadata, glb)
 
     @router.post("/api/packaging/sources/step")

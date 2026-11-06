@@ -78,16 +78,35 @@ new MutationObserver(() => {
   if (visible !== lastOverlay) { lastOverlay = visible; ipcRenderer.send('ip-browser-overlay', visible); }
 }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['open', 'aria-modal', 'class', 'hidden'] });
 let observe = null;
+let closePackaging = null;
 contextBridge.exposeInMainWorld('InspectorProNativeApplication', Object.freeze({
   registerLifecycleObserver(callback) {
     if (typeof callback !== 'function' || observe) throw new Error('Lifecycle observer is already registered or invalid');
     observe = callback;
+  },
+  registerPackagingClose(callback) {
+    if (typeof callback !== 'function' || closePackaging) throw new Error('Packaging close handler is already registered or invalid');
+    closePackaging = callback;
   },
 }));
 ipcRenderer.on('ip-application-observe', (_event, id) => {
   let result;
   try { result = observe ? observe() : null; } catch (_) { result = null; }
   ipcRenderer.send('ip-application-observed', id, result);
+});
+ipcRenderer.on('ip-application-close-packaging', (_event, request) => {
+  if (!request || typeof request.id !== 'string' || !Number.isFinite(request.expiresAt)
+      || typeof request.cleanOnly !== 'boolean' || Date.now() >= request.expiresAt) return;
+  let result;
+  try {
+    if (!closePackaging) throw new Error('Packaging close is not available. The editor was kept open.');
+    // IPC remains usable while the document is inert. Never unfreeze to leave.
+    const closed = closePackaging({ cleanOnly: request.cleanOnly || document.documentElement.inert === true });
+    result = { closed: closed === true };
+  } catch (error) {
+    result = { closed: false, reason: String(error.message || 'Packaging remains open.').slice(0, 500) };
+  }
+  ipcRenderer.send('ip-application-packaging-closed', request.id, result);
 });
 let transitionNotice = null;
 ipcRenderer.on('ip-application-transition-status', (_event, detail) => {

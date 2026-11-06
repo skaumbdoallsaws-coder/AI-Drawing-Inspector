@@ -37,6 +37,23 @@ test('same origin dedicated worker and websocket retain private authentication',
     assert.equal(net.headers({ ...request, ...change }).cancel, false);
   }
 });
+
+test('first packaging navigation authenticates only a direct blank child of the local app', () => {
+  const { net, request, mainFrame } = fixture();
+  const frame = { url: 'about:blank', top: mainFrame, parent: mainFrame, detached: false };
+  const navigation = { ...request, frame, url: origin + '/packaging', resourceType: 'subFrame', method: 'GET' };
+  const response = net.headers(navigation);
+  assert.equal(response.cancel, false);
+  assert.equal(response.requestHeaders['X-InspectorPro-Desktop-Token'], 'a'.repeat(64));
+  for (const change of [{ resourceType: 'xhr' }, { method: 'POST' }, { url: origin + '/api/packaging/documents' },
+    { url: origin + '/packaging?redirect=1' }, { url: 'https://evil.invalid/packaging' },
+    { frame: { ...frame, detached: true } }, { frame: { ...frame, parent: { url: origin } } },
+    { frame: { ...frame, url: 'https://evil.invalid' } }, { webContentsId: 9 }]) {
+    assert.equal(net.headers({ ...navigation, ...change }).cancel, true, JSON.stringify(change));
+  }
+  mainFrame.url = 'https://evil.invalid/';
+  assert.equal(net.allowed(navigation), false);
+});
 test('navigation and remote scripts remain outside the app authority', () => {
   const { net, request } = fixture();
   for (const change of [{ url: 'https://evil.invalid/', resourceType: 'mainFrame' }, { url: origin + '/api/agent/chat', resourceType: 'mainFrame' },

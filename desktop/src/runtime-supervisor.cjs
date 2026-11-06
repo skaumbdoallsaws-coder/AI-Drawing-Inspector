@@ -10,7 +10,8 @@ const failure = (code, message = code) => Object.assign(new Error(message), { co
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 function childEnvironment(profile, python, source = process.env) {
   if (profile.mode === 'application') {
-    const result = { ...require('./codex-config.cjs').isolateCodexEnvironment(source), PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' };
+    const isolated = require('./packaging-config.cjs').isolatePackagingEnvironment(source);
+    const result = { ...require('./codex-config.cjs').isolateCodexEnvironment(isolated), PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', PYTHONIOENCODING: 'utf-8' };
     for (const key of Object.keys(result)) if (/^(ELECTRON_|NODE_OPTIONS$|PYTHON_DOTENV_DISABLED$)/i.test(key)) delete result[key];
     if (profile.modelGateway) {
       // The selected native profile, not inherited shell settings, owns this binding.
@@ -19,6 +20,13 @@ function childEnvironment(profile, python, source = process.env) {
       for (const key of Object.keys(result)) if (/^(INSPECTORPRO_LLM_GATEWAY_CONFIG|PYTHONPATH)$/i.test(key)) delete result[key];
       result.INSPECTORPRO_LLM_GATEWAY_CONFIG = profile.modelGateway.configPath;
       result.PYTHONPATH = [profile.modelGateway.dependencyRoot, searchPath].filter(Boolean).join(path.delimiter);
+    }
+    if (profile.packagingRuntime) {
+      // App dependencies only. The optional STEP interpreter stays isolated.
+      const inheritedPath = Object.keys(result).find(key => key.toUpperCase() === 'PYTHONPATH');
+      const searchPath = inheritedPath ? result[inheritedPath] : '';
+      for (const key of Object.keys(result)) if (/^PYTHONPATH$/i.test(key)) delete result[key];
+      result.PYTHONPATH = [searchPath, profile.packagingRuntime.dependencyRoot].filter(Boolean).join(path.delimiter);
     }
     return result;
   }

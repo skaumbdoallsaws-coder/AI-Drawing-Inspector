@@ -645,8 +645,10 @@ def test_real_glb_dimension_limits(dimensions):
 
 
 def test_real_isolated_glb_worker_matches_pure_import_and_cleans_job(tmp_path, box_glb):
+    from ai_inspector.packaging_shipping.sources import GlbRuntime
     expected, _ = import_glb(box_glb, "TEST worker", 1.0)
-    metadata, normalized = asyncio.run(import_glb_isolated(box_glb, "TEST worker", 1.0, tmp_path))
+    runtime = GlbRuntime(Path(trimesh.__file__).resolve().parents[1])
+    metadata, normalized = asyncio.run(import_glb_isolated(box_glb, "TEST worker", 1.0, tmp_path, runtime=runtime))
     assert metadata == expected
     scene = trimesh.load_scene(BytesIO(normalized), file_type="glb", process=False)
     assert scene.extents == pytest.approx(expected["dimensions_m"], abs=1e-7)
@@ -726,6 +728,8 @@ def test_isolated_worker_is_killed_reaped_and_cleaned_on_termination(tmp_path, m
 
 @pytest.fixture
 def pilot(tmp_path, monkeypatch):
+    from ai_inspector.packaging_shipping import sources
+    monkeypatch.setattr(sources, '_RUNTIME', sources.GlbRuntime(Path(trimesh.__file__).resolve().parents[1]))
     principal = {"value": authorization.FacilityPrincipal("tester", "tenant-a", ("test-site",), ("editor",))}
     monkeypatch.setattr(authorization, "local_facility_principal", lambda **kwargs: principal["value"])
     requests = []

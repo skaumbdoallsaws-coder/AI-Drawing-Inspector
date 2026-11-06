@@ -8,6 +8,17 @@ import math
 import os
 from pathlib import Path
 import sys
+import sysconfig
+
+# -S keeps sitecustomize/.pth out of the disposable worker. Python 3.11's
+# no-site venv prefix points at the base interpreter, so use the selected exe.
+if __name__ == '__main__':
+    executable = Path(sys.executable)
+    prefix = executable.parent.parent if executable.parent.name.lower() in {'scripts', 'bin'} else executable.parent
+    for key in ('purelib', 'platlib'):
+        dependency = sysconfig.get_path(key, vars={'base': str(prefix), 'platbase': str(prefix)})
+        if dependency not in sys.path:
+            sys.path.append(dependency)
 
 
 _JOB = None

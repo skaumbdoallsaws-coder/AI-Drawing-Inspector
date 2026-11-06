@@ -12,16 +12,18 @@ test('normal native window integrates OS caption controls without replacing clos
   assert.match(source, /window\.on\('close', event => \{ if \(!closing\) \{ event\.preventDefault\(\); void change\('close'\);/);
 });
 
-test('native preload installs one header-only drag region with safe controls and no new IPC authority', () => {
+test('native preload installs header-only drag regions and a registration-only bridge without arbitrary IPC', () => {
   const events = new Map();
   const styles = [];
   const exposed = [];
+  const ipcCalls = [];
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/application-preload.cjs'), 'utf8'), {
     require(name) {
       assert.equal(name, 'electron');
       return {
         contextBridge: { exposeInMainWorld: (name, api) => exposed.push([name, api]) },
-        ipcRenderer: { on() {}, send() {} },
+        ipcRenderer: { on() {}, send: (...args) => ipcCalls.push(['send', ...args]),
+          invoke: (...args) => ipcCalls.push(['invoke', ...args]) },
       };
     },
     document: {
@@ -45,6 +47,19 @@ test('native preload installs one header-only drag region with safe controls and
   }
   assert.match(css, /-webkit-app-region: no-drag/);
   assert.deepEqual(exposed.map(([name, api]) => [name, Object.keys(api)]), [
-    ['InspectorProNativeApplication', ['registerLifecycleObserver']],
+    ['InspectorProNativeApplication', ['registerLifecycleObserver', 'registerPackagingClose']],
   ]);
+  const api = exposed[0][1];
+  assert.equal(Object.isFrozen(api), true);
+  for (const name of ['send', 'sendSync', 'invoke', 'on', 'ipcRenderer', 'close', 'reload', 'restart', 'closePackaging']) {
+    assert.equal(api[name], undefined, 'No renderer IPC or native action capability: ' + name);
+  }
+  let callbacks = 0;
+  for (const name of ['registerLifecycleObserver', 'registerPackagingClose']) {
+    for (const invalid of [null, {}, 'arbitrary-channel']) assert.throws(() => api[name](invalid));
+    api[name](() => { callbacks++; });
+    assert.throws(() => api[name](() => {}), /already registered/);
+  }
+  assert.equal(callbacks, 0, 'Registration must not execute a lifecycle action');
+  assert.deepEqual(ipcCalls, [], 'Registration must not dispatch arbitrary IPC');
 });

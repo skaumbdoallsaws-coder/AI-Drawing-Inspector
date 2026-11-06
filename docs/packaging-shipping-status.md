@@ -1,6 +1,22 @@
 # Packaging and Shipping: Isolated Pilot
 
-Date: 2026-11-05. Status: expanded isolated packaging pilot, including real STEP and live Sage density acceptance. **Not promoted to the regular desktop build.**
+Date: 2026-11-06. Status: native desktop promotion candidate. Earlier sections retain their historical pilot results; the desktop checkpoint below supersedes their deployment status.
+
+## Desktop Promotion Checkpoint
+
+Packaging was merged into the current desktop source after the columns review changes, not copied over them. Normal application mode opts in through `packagingRuntime` in its explicit profile. The optional configuration supplies a dependency directory and a separate STEP interpreter; its persistent documents live under `dataRoot/packaging`. Existing Codex authentication, model-gateway configuration, facility roots and startup layout stay unchanged. Neither Claude's checkout nor saved facility documents are part of the promotion.
+
+The development desktop uses `requirements-packaging.txt` and `requirements-packaging-step.txt` in a separate local runtime directory. GLB and STEP workers run isolated with explicit dependency paths; they do not execute `.pth` startup files or inherit carrier credentials. This is local development deployment, not a signed redistributable installer or a completed third-party license review.
+
+Native acceptance in `.runtime/native-packaging-01/evidence-07` passed: authenticated iframe, main ribbon, manual packing and mass validation, Undo/Redo, nonblank camera pixels, native PDF download, real five-solid STEP import with four-pair quantity, compact window layout, guarded departure, backend restart and saved-document reopen. A controlled backend stop also passed clean departure through the native menu while the renderer was inert, followed by restart. This is not hard-crash recovery. Original CAD bytes remained unchanged. No inference or live carrier request was made.
+
+The mounted editor still prevents native close/reload/restart. Save, then choose the ribbon's **Document > Close Packaging** before leaving the app. Press **Alt**, then **Document > Close Packaging** for the native menu while the renderer is inert; it permits only clean, idle departure. Unsaved work, conflicts, file selections, dialogs and Sage admission/reconciliation remain guarded. This is not crash recovery or an autosave promise.
+
+Verification: 783 packaging/Codex/profile Python tests passed with 12 optional geometry skips; the configured STEP suite then passed all 58 tests including the real assembly. The current columns/floor-plan subset has 179 passes and the same 29 `parse_unavailable` failures on both the unmodified desktop source and the integration worktree. Those baseline failures are not reported as fixed.
+
+Final isolated-worker regression: 266 passed, one optional proprietary-sample skip, plus 29 focused checks. Runtime acceptance at `.runtime/packaging-release-imports-03` imported a GLB ring and STEP bored block using the deployed dependency locations, with correct mesh dimensions/STEP volume, desktop/mobile render pixels, view changes and PDF outputs; zero browser errors or external requests. The affected desktop/packaging JavaScript subset passed 194 tests. Profile-promotion backup/idempotency checks passed two tests. This is not a claim that the full legacy application suite is green.
+
+Enable only after native checks pass using `tools/enable_desktop_packaging.py`. It validates the profile and dependencies, writes an exact backup beside the profile, detects concurrent profile changes, and changes only `packagingRuntime`. The regular desktop shortcut stays in place. Live shipping quotes still require a privately entered carrier account and verified shipping inputs; no rates, purchase or destination-coverage claims are inferred from mock tests.
 
 ## Current V2 Checkpoint
 

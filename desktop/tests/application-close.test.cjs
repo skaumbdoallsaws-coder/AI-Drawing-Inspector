@@ -86,12 +86,17 @@ function fixture(options = {}) {
 
 test('stalled reload queues a second close, stops navigation, and rechecks unsaved work', async () => {
   const navigation = deferred();
-  const f = fixture({ loadURL: () => navigation.promise });
+  let enteredNavigation = false;
+  const f = fixture({ loadURL: () => {
+    enteredNavigation = true;
+    // Queue Close at navigation entry, before the short fixture deadline can fire.
+    f.request();
+    return navigation.promise;
+  } });
   const reloading = f.context.change('reload', 'http://application/');
-  await turn();
-  f.request();
-  assert(f.notices.some(value => value.includes('Close requested')));
   await reloading;
+  assert.equal(enteredNavigation, true);
+  assert(f.notices.some(value => value.includes('Close requested')));
   await until(f.closed);
   assert(f.events.includes('stop-navigation'));
   assert.equal(f.events.filter(value => value === 'stop-backend').length, 1);
@@ -330,7 +335,7 @@ test('preload keeps a dismissible text notice above the shutdown overlay without
   assert.equal(nodes[2].children[0].textContent, 'The window was kept open. <unsafe>');
   nodes[2].children[1].handlers.click();
   assert(nodes[2].removed);
-  assert.deepEqual(exposed, [['InspectorProNativeApplication', ['registerLifecycleObserver']]]);
+  assert.deepEqual(exposed, [['InspectorProNativeApplication', ['registerLifecycleObserver', 'registerPackagingClose']]]);
 });
 
 test('an already-committed shutdown gives a visible reason for a menu close', async () => {

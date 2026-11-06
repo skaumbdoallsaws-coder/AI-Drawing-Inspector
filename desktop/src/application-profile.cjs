@@ -9,7 +9,7 @@ async function loadApplicationProfile(file) {
   file = await localPath(file);
   if ((await fs.stat(file)).size > 16384) throw fail('desktop_profile_invalid');
   const p = JSON.parse(await fs.readFile(file, 'utf8'));
-  if (!p || Object.keys(p).some(k => !KEYS.includes(k) && !['modelGateway', 'codexRuntime'].includes(k)) || KEYS.some(k => !Object.hasOwn(p, k))
+  if (!p || Object.keys(p).some(k => !KEYS.includes(k) && !['modelGateway', 'codexRuntime', 'packagingRuntime'].includes(k)) || KEYS.some(k => !Object.hasOwn(p, k))
       || p.schemaVersion !== 1 || p.mode !== 'application'
       || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(p.profileId)
       || ['backendId', 'storeId'].some(k => !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(p[k]))
@@ -29,6 +29,7 @@ async function loadApplicationProfile(file) {
     p.modelGateway = Object.freeze({ configPath, dependencyRoot });
   }
   if (Object.hasOwn(p, 'codexRuntime')) p.codexRuntime = await require('./codex-config.cjs').validateCodexConfig(p.codexRuntime, p);
+  if (Object.hasOwn(p, 'packagingRuntime')) p.packagingRuntime = await require('./packaging-config.cjs').validatePackagingConfig(p.packagingRuntime, p);
   const binding = [p.backendId, p.storeId, p.facilityRoot, p.libraryRoot].join('\n');
   return Object.freeze({ ...p, profileFile: file, stateRoot: path.join(p.dataRoot, 'desktop-client'),
     partition: 'persist:ip-application-' + createHash('sha256').update(binding).digest('hex').slice(0, 32) });

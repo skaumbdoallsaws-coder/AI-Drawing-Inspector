@@ -22342,6 +22342,7 @@
         async function init() {
             if (window.InspectorProNativeApplication) {
                 window.InspectorProNativeApplication.registerLifecycleObserver(_desktopObserveApplication);
+                window.InspectorProNativeApplication.registerPackagingClose(_packagingCloseWorkspace);
             }
             // Attach event listeners synchronously FIRST so UI is interactive immediately
             setupEventListeners();
@@ -48194,6 +48195,7 @@
         }
 
         function _packagingRunCommand(id) {
+            if (id === 'close') return window.InspectorProPackagingHost.closeWorkspace();
             const ran = _packagingEditorUI()?.executeCommand(id);
             _packagingSyncRibbon();
             return !!ran;
@@ -48203,12 +48205,12 @@
             const current = _packagingEditorUI()?.getRibbonState();
             document.querySelectorAll('[data-packaging-command]').forEach(button => {
                 const id = button.dataset.packagingCommand;
-                button.disabled = !current?.commands[id]?.enabled;
+                button.disabled = id === 'close' ? !current : !current?.commands[id]?.enabled;
                 if (button.hasAttribute('aria-controls')) button.setAttribute('aria-expanded', String(!!current?.commands[id]?.active));
                 if (id === 'resume') button.hidden = !current?.locked;
             });
             document.querySelectorAll('[data-packaging-command-menu]').forEach(trigger => {
-                trigger.disabled = !trigger.dataset.packagingCommandMenu.split(',').some(id => current?.commands[id]?.enabled);
+                trigger.disabled = !trigger.dataset.packagingCommandMenu.split(',').some(id => id === 'close' ? !!current : current?.commands[id]?.enabled);
             });
         }
 
@@ -48238,6 +48240,7 @@
                 reload: ['facilityRotate', 'Reload', 'Reload saved packaging document'],
                 pdf: ['facilityExportPdf', 'Export PDF', 'Download packaging review PDF'],
                 resume: ['facilityLock', 'Resume', 'Resume packaging editing'],
+                close: ['facilityExportPdf', 'Close Packaging', 'Close Packaging & Shipping'],
             };
             const panels = ['product', 'carton', 'contents', 'arrange', 'appearance', 'graphics', 'validation', 'rates'];
             const tag = (node, id) => {
@@ -48269,7 +48272,7 @@
             _documentationAppendRibbonGroup(bar, 'Review', panels.slice(6).map(id => command(id)));
             _documentationAppendRibbonGroup(bar, 'More', [menu('facilityAutoArrange', 'More', panels.slice(3))]);
             _documentationAppendRibbonGroup(bar, 'Document', [
-                menu('facilityExportPdf', 'Document', ['new', 'open', 'undo', 'redo', 'reload', 'pdf']),
+                menu('facilityExportPdf', 'Document', ['new', 'open', 'undo', 'redo', 'reload', 'pdf', 'close']),
                 _documentationRibbonStack([command('undo', true), command('redo', true)]),
                 command('save'), command('resume'),
             ]);
@@ -48315,6 +48318,10 @@
         }
 
         window.InspectorProPackagingHost = {
+            closeWorkspace() {
+                try { return _packagingCloseWorkspace(); }
+                catch (error) { window._toast?.(error.message, 'error'); return false; }
+            },
             viewportIcon(kind) {
                 if (['zoomfit', 'section'].includes(kind)) return _viewerToolbarIconMarkup(kind);
                 if (kind === 'explode') return _ribbonIcons.facilityVerticalStack;
@@ -48371,6 +48378,28 @@
                 return false;
             }
             return !guard || guard.confirmNavigation();
+        }
+
+        function _packagingCloseWorkspace({ cleanOnly = false } = {}) {
+            const observation = window.InspectorProDesktopWorkflowObservation;
+            const guard = _packagingEditorUI();
+            if (!guard || typeof observation?.observePackaging !== 'function') {
+                throw new Error('Packaging state is unavailable. The workspace was kept open.');
+            }
+            observation.observePackaging(window);
+            // Backend-loss departure is synchronous and cannot revoke an admission,
+            // discard a draft, or declare a mounted editor recoverable.
+            if (cleanOnly || document.documentElement.inert) {
+                const rows = [window.InspectorProPackagingHost.getDesktopLifecycleObservation(),
+                    guard.getDesktopLifecycleObservation()];
+                if (rows.some(row => row?.loaded !== true
+                        || ['dirty', 'busy', 'pending'].some(key => row[key] !== false))) {
+                    throw new Error('Packaging has unsaved or unresolved work. Keep this window open; backend-loss draft recovery is not available.');
+                }
+            }
+            switchTab('drawing');
+            const remaining = observation.observePackaging(window);
+            return !['loaded', 'dirty', 'busy', 'pending'].some(key => remaining[key]);
         }
 
         function _packagingConfirmChatChange(resume) {

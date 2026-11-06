@@ -278,7 +278,7 @@ async def _run(runtime, directory, cancel_event):
     try:
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         starting = asyncio.create_task(asyncio.create_subprocess_exec(
-            str(runtime.python_executable), "-I", "-B", str(_WORKER),
+            str(runtime.python_executable), "-I", "-S", "-B", str(_WORKER),
             json.dumps(runtime.worker_limits(), separators=(",", ":")),
             cwd=str(directory), env=_environment(runtime, directory),
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,

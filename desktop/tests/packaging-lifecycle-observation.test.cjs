@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const observation = require('../../static/desktop_workflow_observation.js');
 const Session = require('../../static/facility_layout_session.js');
 const { createRuntimeLifecycle } = require('../src/runtime-lifecycle.cjs');
-const { authorizeTransition, transitionStep } = require('../src/application-lifecycle.cjs');
+const { authorizeTransition, transitionStep, validateObservation } = require('../src/application-lifecycle.cjs');
 const base = require('../../tests/fixtures/facility_layout/empty_cell.json');
 const bridgeSource = fs.readFileSync(path.join(__dirname, '../../static/desktop_runtime_bridge.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '../../static/index.html'), 'utf8');
@@ -80,7 +80,7 @@ function actualPackagingFixture() {
   vm.runInContext(between(html, 'window.InspectorProPackagingHost = {', '\n        };') + '\n};', hostContext);
   vm.runInContext(between(html, '        function _desktopObserveApplication() {',
     '        function setupEventListeners() {'), hostContext);
-  return Object.assign(f, { childState, files, addresses, hostContext });
+  return Object.assign(f, { childState, files, addresses, hostContext, childContext });
 }
 
 test('actual host hook covers active workspace, preparing turn and release without an iframe', () => {
@@ -353,7 +353,7 @@ test('actual host and child hooks also block the managed runtime bridge route', 
 });
 
 function applicationFixture(options = {}) {
-  const f = actualPackagingFixture(), events = [], replies = [], dialogs = [];
+  const f = actualPackagingFixture(), events = [], replies = [], dialogs = [], departureReplies = [];
   const mainHandlers = new Map(), rendererHandlers = new Map();
   const receipt = { terminationConfirmed: true, stdioClosed: true, resourcesClosed: true };
   let destroyed = false, requests = 0;
@@ -365,13 +365,16 @@ function applicationFixture(options = {}) {
         if (channel === 'ip-application-observe') {
           options.beforeObservation?.(f, ++requests);
           rendererHandlers.get(channel)({}, id);
+        } else if (channel === 'ip-application-close-packaging') {
+          if (!options.dropDeparture) rendererHandlers.get(channel)({}, id);
         } else if (channel !== 'ip-application-transition-status') events.push(channel);
       } },
   };
   const main = vm.createContext({ window, app: { quit: () => events.push('quit') },
     ipcMain: { on: (channel, callback) => mainHandlers.set(channel, callback) },
     randomUUID: () => 'observation-' + requests, setTimeout, clearTimeout, path,
-    closing: false, transition: false, booted: true, closeRequested: false, transitionStatus: null,
+    closing: false, transition: false, booted: true, closeRequested: false, transitionStatus: null, backendUnavailable: false,
+    trusted: event => event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame,
     browser: null, browserPromise: null, documents: null, chatgptAccount: null, acceptanceOutput: null,
     profile: { dataRoot: '/unused-no-persistence' }, evidenceWrites: Promise.resolve(),
     fs: { writeFile: async () => events.push('evidence') },
@@ -379,7 +382,7 @@ function applicationFixture(options = {}) {
       restart: async () => events.push('restart'), getEvidence: () => [] },
     network: { setEnabled: () => events.push('network'), getEvidence: () => ({}) },
     dialog: { showMessageBox: async (_window, value) => { dialogs.push(value); return { response: 1 }; } },
-    transitionStep, authorizeTransition,
+    transitionStep, authorizeTransition, validateObservation,
   });
   vm.runInContext(between(mainSource, 'const observations = new Map();', 'function transitionNotice('), main);
   for (const name of ['transitionNotice', 'message', 'writeEvidence', 'shutdown', 'change']) {
@@ -388,10 +391,12 @@ function applicationFixture(options = {}) {
     vm.runInContext(source[0], main);
   }
   const preload = vm.createContext({
+    document: f.host.document,
     contextBridge: { exposeInMainWorld: (name, value) => { f.host[name] = value; } },
     ipcRenderer: { on: (channel, callback) => rendererHandlers.set(channel, callback),
       send(channel, id, value) {
-        assert.equal(channel, 'ip-application-observed'); replies.push(clone(value));
+        if (channel === 'ip-application-observed') replies.push(clone(value));
+        else { assert.equal(channel, 'ip-application-packaging-closed'); departureReplies.push(clone(value)); }
         mainHandlers.get(channel)({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, id, clone(value));
       } },
   });
@@ -399,7 +404,7 @@ function applicationFixture(options = {}) {
   const registration = html.match(/window\.InspectorProNativeApplication\.registerLifecycleObserver\(_desktopObserveApplication\);/);
   assert.ok(registration, 'actual index observer registration');
   vm.runInContext(registration[0], f.hostContext);
-  return Object.assign(f, { main, events, replies, dialogs, closed: () => destroyed });
+  return Object.assign(f, { main, events, replies, dialogs, departureReplies, mainHandlers, rendererHandlers, nativeWindow: window, closed: () => destroyed });
 }
 
 for (const kind of ['close', 'reload', 'restart']) {
@@ -455,6 +460,208 @@ test('application observation accepts all eleven workflows plus facility within 
   f.hostContext._trainFacilitySheets = { observation: () => ({ dirty: false, busy: false, pending: true }) };
   await f.main.change('close');
   assert.equal(f.replies[0].affected.length, 12);
-  assert.match(f.dialogs[0].message, /Finish or cancel/);
+  assert.match(f.dialogs[0].message, /Packaging & Shipping is open.*Document > Close Packaging/);
   assert.deepEqual(f.events, []);
+});
+
+function departureFixture(options = {}) {
+  const f = applicationFixture(options), context = f.hostContext;
+  f.frames.push(f.frame);
+  context.state.activeTab = 'training'; context.trainingState.type = 'packaging_shipping';
+  f.host.document.documentElement = { inert: !!options.frozen };
+  context.location = f.host.location; context.URL = URL;
+  f.host.document.getElementById = id => id === 'packagingWorkspaceFrame' ? f.frames[0] || null : null;
+  f.host.document.querySelectorAll = selector => selector === '#packagingWorkspaceFrame' ? [...f.frames] : [];
+  context._trainIsPlantProcessMode = () => false;
+  context._desktopRestorePartPanel = () => {};
+  context.renderViewport = () => { f.frames.splice(0); f.frame.isConnected = false; };
+  f.prompts = [];
+  f.childContext.confirm = message => { f.prompts.push(message); return options.discard === true; };
+  for (const name of ['_packagingEditorUI', '_packagingCloseWorkspace', '_packagingConfirmLeave', 'switchTab']) {
+    const source = html.match(new RegExp('^        function ' + name + '\\([^]*?^        \\}', 'm'));
+    assert.ok(source, name); vm.runInContext(source[0], context);
+  }
+  f.host.InspectorProNativeApplication.registerPackagingClose(context._packagingCloseWorkspace);
+  f.main.backendUnavailable = !!options.frozen;
+  return f;
+}
+
+test('native menu has an outside-document Close Packaging command and the profile presence enables the pilot', () => {
+  let invoked = 0, menu;
+  vm.runInNewContext(mainSource.match(/Menu\.setApplicationMenu\(Menu\.buildFromTemplate\(\[[^]*?\]\)\);/)[0], {
+    Menu: { buildFromTemplate: value => value, setApplicationMenu: value => { menu = value; } },
+    profile: {}, closePackaging: () => invoked++,
+  });
+  menu.find(row => row.label === 'Document').submenu.find(row => row.label === 'Close Packaging').click();
+  assert.equal(invoked, 1);
+  const start = between(mainSource, '  const url = new URL(profile.origin);', '  await window.loadURL(url.href);');
+  for (const config of [undefined, { schemaVersion: 1, dependencyRoot: 'local-packages' }]) {
+    const result = vm.runInNewContext(start + '\nurl.href', { URL, profile: {
+      origin: 'http://127.0.0.1:8180', startupLayoutId: 'fl-local', packagingRuntime: config } });
+    const url = new URL(result);
+    assert.equal(url.searchParams.get('packagingPilot'), config ? '1' : null);
+    assert.equal(url.searchParams.get('facilityLayoutId'), 'fl-local');
+  }
+  assert.match(html, /menu\('facilityExportPdf', 'Document', \['new', 'open', 'undo', 'redo', 'reload', 'pdf', 'close'\]\)/);
+});
+
+test('backend interruption notice explains how to reveal the native menu while the document is inert', () => {
+  const events = [], notices = [];
+  const context = vm.createContext({
+    state: { status: 'interrupted' }, backendUnavailable: false,
+    window: { isDestroyed: () => false, webContents: { send: (...args) => events.push(args) } },
+    network: { setEnabled: value => events.push(['network', value]) },
+    message: (title, detail) => notices.push({ title, detail }),
+  });
+  vm.runInContext(between(mainSource, "    if (state.status === 'interrupted'", '  }});'), context);
+  assert.equal(context.backendUnavailable, true);
+  assert.deepEqual(events, [['network', false], ['ip-application-freeze', true]]);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].detail, /Press Alt, then Document > Close Packaging/);
+  assert.match(notices[0].detail, /Unsaved or unresolved packaging work stays blocked; draft recovery is not available/);
+});
+
+test('saved backend-loss native departure unmounts without unfreezing, then fresh close succeeds', async () => {
+  const f = departureFixture({ frozen: true });
+  await f.main.change('restart');
+  assert.deepEqual(f.events, []); assert.equal(f.read().pending, true);
+  assert.equal(await f.main.closePackaging(), true);
+  assert.equal(f.frames.length, 0); assert.equal(f.hostContext.state.activeTab, 'drawing');
+  assert.equal(f.host.document.documentElement.inert, true);
+  assert.equal(f.main.backendUnavailable, true);
+  assert.deepEqual(f.events, []); assert.deepEqual(f.prompts, []); assert.equal(f.closed(), false);
+  const count = f.replies.length;
+  await f.main.change('close');
+  assert.equal(f.replies.length, count + 2); assert.equal(f.closed(), true);
+});
+
+test('saved backend-loss departure permits separately requested restart through normal guards', async () => {
+  const f = departureFixture({ frozen: true });
+  assert.equal(await f.main.closePackaging(), true);
+  await f.main.change('restart');
+  assert.ok(f.events.includes('restart')); assert.equal(f.main.backendUnavailable, false);
+});
+
+for (const [name, mutate] of [
+  ['draft', f => { f.childState.draft.dirty = true; }],
+  ['unapplied fields', f => { f.childState.formDirty = true; }],
+  ['address', f => { f.addresses.origin.street1 = 'session-only'; }],
+  ['selected file', f => { f.files.push({ files: [{ name: 'selected.glb' }] }); }],
+  ['request', f => { f.childState.busy = true; }],
+  ['Sage lock', f => { f.childState.sage.locked = true; }],
+  ['admission without lock', f => { f.childState.sage.admission = {}; }],
+  ['reconciliation', f => { f.childState.sage.closing = Promise.resolve(); }],
+  ['conflict', f => { f.childState.conflict = true; }],
+  ['dialog', f => { f.dialog = {}; }],
+  ['host turn', f => { f.hostContext._packagingActiveTurn = {}; }],
+  ['host release', f => { f.hostContext._packagingReleasePromise = Promise.resolve(); }],
+  ['unavailable adapter', f => { delete f.child.InspectorProPackaging; }],
+  ['loading frame', f => { f.childDocument.readyState = 'loading'; }],
+]) test('backend-loss departure retains ' + name + ' without discard or Sage release', async () => {
+  const f = departureFixture({ frozen: true, discard: true }); mutate(f);
+  f.host.InspectorProPackagingHost.release = () => assert.fail('No offline admission release');
+  assert.equal(await f.main.closePackaging(), false);
+  assert.equal(f.frames.length, 1); assert.equal(f.hostContext.state.activeTab, 'training');
+  assert.equal(f.host.document.documentElement.inert, true);
+  assert.equal(f.main.backendUnavailable, true);
+  assert.deepEqual(f.events, []); assert.deepEqual(f.prompts, []); assert.equal(f.closed(), false);
+});
+
+test('preload enforces clean-only on an inert document even without the main flag', async () => {
+  const f = departureFixture({ frozen: true, discard: true });
+  f.main.backendUnavailable = false; f.childState.draft.dirty = true;
+  assert.equal(await f.main.closePackaging(), false);
+  assert.equal(f.frames.length, 1); assert.deepEqual(f.prompts, []);
+});
+
+test('healthy Close Packaging confirms file-only drafts and preserves Cancel', () => {
+  for (const discard of [false, true]) {
+    const f = departureFixture({ discard }); f.files.push({ files: [{ name: 'artwork.png' }] });
+    assert.equal(f.host.InspectorProPackagingHost.closeWorkspace(), discard);
+    assert.equal(f.frames.length, discard ? 0 : 1);
+    assert.equal(f.prompts.length, 1); assert.match(f.prompts[0], /selected files/);
+  }
+});
+
+test('healthy Close Packaging waits for Sage release, rechecks unsaved work, and retains failure', async () => {
+  for (const success of [false, true]) {
+    const f = departureFixture({ discard: false });
+    f.childState.sage.locked = true;
+    let resolve, reject;
+    const release = new Promise((yes, no) => { resolve = yes; reject = no; });
+    f.host.InspectorProPackagingHost.release = () => release;
+    assert.equal(f.host.InspectorProPackagingHost.closeWorkspace(), false);
+    assert.equal(f.frames.length, 1);
+    if (success) {
+      f.childState.sage.locked = false; f.childState.formDirty = true; resolve();
+    } else reject(new Error('Reconciliation failed'));
+    await new Promise(done => setImmediate(done));
+    assert.equal(f.frames.length, 1);
+    assert.equal(f.prompts.length, success ? 1 : 0);
+  }
+});
+
+test('healthy Close Packaging completes only after successful Sage cancellation and reconciliation', async () => {
+  const f = departureFixture(); f.childState.sage.locked = true;
+  let resolve;
+  const release = new Promise(done => { resolve = done; });
+  f.host.InspectorProPackagingHost.release = () => release;
+  assert.equal(f.host.InspectorProPackagingHost.closeWorkspace(), false);
+  assert.equal(f.frames.length, 1);
+  f.childState.sage.locked = false; resolve();
+  await new Promise(done => setImmediate(done));
+  assert.equal(f.frames.length, 0); assert.equal(f.hostContext.state.activeTab, 'drawing');
+  assert.deepEqual(f.prompts, []); assert.deepEqual(f.events, []);
+});
+
+test('failed native IPC send clears its timer and permits a new departure attempt', async () => {
+  const f = departureFixture({ frozen: true });
+  const send = f.nativeWindow.webContents.send;
+  let cleared = 0;
+  f.main.setTimeout = () => 1; f.main.clearTimeout = () => cleared++;
+  f.nativeWindow.webContents.send = (channel, value) => {
+    if (channel === 'ip-application-close-packaging') throw new Error('Renderer unavailable');
+    return send(channel, value);
+  };
+  assert.equal(await f.main.closePackaging(), false); assert.equal(cleared, 1);
+  assert.equal(f.main.transition, false); assert.equal(f.frames.length, 1);
+  f.nativeWindow.webContents.send = send;
+  assert.equal(await f.main.closePackaging(), true);
+});
+
+test('native departure refuses a forged acknowledgement, times out and ignores late replies', async () => {
+  const f = departureFixture({ frozen: true, dropDeparture: true });
+  let timeout;
+  f.main.setTimeout = callback => { timeout = callback; return 1; }; f.main.clearTimeout = () => {};
+  const pending = f.main.closePackaging();
+  const handler = f.mainHandlers.get('ip-application-packaging-closed');
+  handler({ sender: {}, senderFrame: {} }, 'observation-0', { closed: true });
+  assert.equal(f.main.transition, 'packaging-close');
+  timeout(); assert.equal(await pending, false);
+  handler({ sender: f.nativeWindow.webContents, senderFrame: f.nativeWindow.webContents.mainFrame },
+    'observation-0', { closed: true });
+  assert.equal(f.frames.length, 1); assert.deepEqual(f.events, []);
+  f.rendererHandlers.get('ip-application-close-packaging')({}, { id: 'expired', expiresAt: Date.now() - 1, cleanOnly: true });
+  assert.equal(f.frames.length, 1); assert.equal(f.departureReplies.length, 0);
+});
+
+test('native departure reobserves and cannot claim success while host work remains', async () => {
+  const f = departureFixture({ frozen: true, beforeObservation: state => {
+    state.hostContext._packagingReleasePromise = Promise.resolve();
+  } });
+  assert.equal(await f.main.closePackaging(), false);
+  assert.equal(f.read().pending, true); assert.deepEqual(f.events, []);
+});
+
+test('PDF action reports request dispatch, not unconfirmed native download success', async () => {
+  const messages = [], actions = [];
+  const context = vm.createContext({ state: { draft: { document: { revision: 3 } } }, hasDraft: () => false,
+    docPath: () => '/documents/pkg_saved', working: async (_message, action) => action(),
+    request: async url => { assert.equal(url, '/documents/pkg_saved/report.pdf?revision=3'); return {}; },
+    URL: { createObjectURL: () => 'blob:owned', revokeObjectURL() {} },
+    element: () => ({ click: () => actions.push('download-request'), remove() {} }),
+    document: { body: { append() {} } }, setTimeout() {}, notify: message => messages.push(message) });
+  vm.runInContext(between(packagingSource, 'async function downloadPDF()', '\nfunction '), context);
+  await context.downloadPDF();
+  assert.deepEqual(actions, ['download-request']); assert.deepEqual(messages, ['PDF export requested.']);
 });

@@ -8,13 +8,14 @@ const { loadApplicationProfile } = require('./application-profile.cjs');
 const { createManagedRuntime } = require('./runtime-supervisor.cjs');
 const { createApplicationNetwork } = require('./application-network.cjs');
 const { installApplicationLinks } = require('./application-links.cjs');
-const { authorizeTransition, transitionStep } = require('./application-lifecycle.cjs');
+const { authorizeTransition, transitionStep, validateObservation } = require('./application-lifecycle.cjs');
 const { ICON_PATH, brandApplication, brandWindow } = require('./application-branding.cjs');
 const { documentURL, createDocumentPreview } = require('./document-preview.cjs');
 brandApplication(app);
 const root = path.resolve(__dirname, '../..');
 let window, runtime, network, closing = false, transition = false, booted = false, profile;
 let closeRequested = false, transitionStatus = null;
+let backendUnavailable = false;
 let acceptanceOutput = null;
 let browser = null, browserPromise = null, documents = null, pythonPath, applicationOverlay = false;
 let chatgptAccount = null;
@@ -86,6 +87,53 @@ ipcMain.on('ip-application-observed', (event, id, value) => {
   const item = observations.get(id); if (!item) return;
   clearTimeout(item.timer); observations.delete(id); item.resolve(value);
 });
+const packagingClosures = new Map();
+function requestPackagingClose() {
+  return new Promise((resolve, reject) => {
+    const id = randomUUID(), expiresAt = Date.now() + 5000;
+    const timer = setTimeout(() => {
+      packagingClosures.delete(id);
+      reject(new Error('Close Packaging timed out. No native close or restart was authorized.'));
+    }, 5000);
+    packagingClosures.set(id, { resolve, timer, expiresAt });
+    try {
+      window.webContents.send('ip-application-close-packaging', { id, expiresAt, cleanOnly: backendUnavailable });
+    } catch (error) {
+      clearTimeout(timer); packagingClosures.delete(id); reject(error);
+    }
+  });
+}
+ipcMain.on('ip-application-packaging-closed', (event, id, value) => {
+  if (!trusted(event)) return;
+  const item = packagingClosures.get(id); if (!item) return;
+  if (Date.now() >= item.expiresAt) return;
+  clearTimeout(item.timer); packagingClosures.delete(id); item.resolve(value);
+});
+async function closePackaging() {
+  if (closing || transition || !booted) {
+    transitionNotice('Close Packaging is unavailable during an application transition. Retry when it finishes.');
+    return false;
+  }
+  transition = 'packaging-close';
+  try {
+    const result = await requestPackagingClose();
+    if (result?.closed !== true) {
+      throw new Error(typeof result?.reason === 'string' ? result.reason.slice(0, 500)
+        : 'Packaging remains open. Complete or cancel the current interaction before trying again.');
+    }
+    const current = validateObservation(await transitionStep('Workflow observation', observe, 5000));
+    if (current.affected.includes('packaging')) throw new Error('Packaging is still active. No native transition was authorized.');
+    transitionNotice('Packaging closed. You can now retry Close, Reload, or Backend > Restart backend.');
+    return true;
+  } catch (error) {
+    transitionNotice(error.message);
+    return false;
+  } finally {
+    transition = false;
+    // Departure never implies consent to a queued destructive native action.
+    closeRequested = false;
+  }
+}
 function transitionNotice(detail) {
   transitionStatus = detail;
   if (!window || window.isDestroyed()) return;
@@ -182,10 +230,12 @@ async function change(kind, destination) {
       return;
     }
     if (kind === 'restart') {
+      backendUnavailable = true;
       window.webContents.send('ip-application-freeze', true);
       network.setEnabled(false);
       try {
         await transitionStep('Backend restart', signal => runtime.restart({ signal }), 165000);
+        backendUnavailable = false;
         network.setEnabled(true); window.webContents.send('ip-application-freeze', false);
       } catch (error) {
         transitionNotice('Backend restart failed. Your draft remains in this window. ' + error.message);
@@ -194,6 +244,7 @@ async function change(kind, destination) {
       return;
     }
     transitionNotice('Closing: cleaning up the browser and owned backend...');
+    backendUnavailable = true;
     window.webContents.send('ip-application-freeze', true, 'InspectorPro is closing. Your draft remains in this window until cleanup finishes.');
     network.setEnabled(false);
     await shutdown();
@@ -238,8 +289,10 @@ async function start() {
   // startup separately (the browser launcher already allows 180s).
   runtime = createManagedRuntime({ profile, python, appRoot: root, startupTimeoutMs: 120000, onState: state => {
     if (state.status === 'interrupted' && window && !window.isDestroyed()) {
+      backendUnavailable = true;
       network?.setEnabled(false); window.webContents.send('ip-application-freeze', true);
-      void message('The backend stopped. Your draft remains in this window.', 'Use Backend > Restart backend. No pending operation is automatically repeated.');
+      void message('The backend stopped. Your draft remains in this window.',
+        'If Packaging & Shipping is open and clean, use the native menu: Press Alt, then Document > Close Packaging. Then try Backend > Restart backend. Unsaved or unresolved packaging work stays blocked; draft recovery is not available. No pending operation is automatically repeated.');
     }
   }});
   await runtime.start();
@@ -278,6 +331,7 @@ async function start() {
   });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: 'File', submenu: [{ label: 'Close', accelerator: 'Alt+F4', click: () => change('close') }] },
+    { label: 'Document', submenu: [{ label: 'Close Packaging', click: () => closePackaging() }] },
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ label: 'Reload', click: () => change('reload') }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'togglefullscreen' }] },
     { label: 'Browser', submenu: [
@@ -291,6 +345,7 @@ async function start() {
   ]));
   const url = new URL(profile.origin);
   if (profile.startupLayoutId) url.searchParams.set('facilityLayoutId', profile.startupLayoutId);
+  if (profile.packagingRuntime) url.searchParams.set('packagingPilot', '1');
   await window.loadURL(url.href);
   booted = true; window.show(); window.focus();
   if (options.acceptanceOutput || options.workflowAcceptanceOutput || options.browserAcceptanceOutput || options.generationAcceptanceOutput || options.codexAcceptanceOutput) {

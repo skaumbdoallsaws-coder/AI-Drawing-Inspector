@@ -29,6 +29,8 @@ def main():
     os.environ['INSPECTORPRO_LIBRARY_DIR'] = profile.value['libraryRoot']
     from desktop.runtime.codex_config import configure_codex
     configure_codex(profile, ROOT)
+    from desktop.runtime.packaging_config import configure_packaging
+    configure_packaging(profile)
     os.chdir(ROOT)
     control = PrivateControl(pipe)
     threading.Thread(target=control.read, name='desktop-private-control', daemon=True).start()

@@ -18,7 +18,17 @@ function createApplicationNetwork({ origin, getWindow, getCredential, confirmPer
     if (d.frame) {
       if (d.frame.detached) return false;
       if (d.frame === w.webContents.mainFrame) return !d.frame.url || d.frame.url === 'about:blank' || local(d.frame.url);
-      return d.frame.top === w.webContents.mainFrame && local(d.frame.url);
+      if (d.frame.top !== w.webContents.mainFrame) return false;
+      if (local(d.frame.url)) return true;
+      // The first iframe navigation is attributed to its empty initial document.
+      // Admit only the packaging page, directly owned by the trusted app frame;
+      // an empty/foreign frame still cannot issue API or subresource requests.
+      const target = parse(d.url);
+      return (!d.frame.url || d.frame.url === 'about:blank')
+        && d.frame.parent === w.webContents.mainFrame && local(d.frame.parent.url)
+        && d.resourceType === 'subFrame' && d.method === 'GET'
+        && target?.origin === origin && target.pathname === '/packaging'
+        && !target.username && !target.password && !target.search && !target.hash;
     }
     // Dedicated workers may omit frame metadata. Attribution to the owned
     // webContents and same-origin initiator are both required in that case.

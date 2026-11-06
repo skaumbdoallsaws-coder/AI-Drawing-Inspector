@@ -1,6 +1,6 @@
 # Packaging and Shipping: Isolated Pilot
 
-Date: 2026-11-06. Status: native desktop promotion candidate. Earlier sections retain their historical pilot results; the desktop checkpoint below supersedes their deployment status.
+Date: 2026-11-06. Status: promoted to the local regular desktop build. Earlier sections retain their historical pilot results; the desktop checkpoint below supersedes their deployment status.
 
 ## Desktop Promotion Checkpoint
 
@@ -17,6 +17,8 @@ Verification: 783 packaging/Codex/profile Python tests passed with 12 optional g
 Final isolated-worker regression: 266 passed, one optional proprietary-sample skip, plus 29 focused checks. Runtime acceptance at `.runtime/packaging-release-imports-03` imported a GLB ring and STEP bored block using the deployed dependency locations, with correct mesh dimensions/STEP volume, desktop/mobile render pixels, view changes and PDF outputs; zero browser errors or external requests. The affected desktop/packaging JavaScript subset passed 194 tests. Profile-promotion backup/idempotency checks passed two tests. This is not a claim that the full legacy application suite is green.
 
 Enable only after native checks pass using `tools/enable_desktop_packaging.py`. It validates the profile and dependencies, writes an exact backup beside the profile, detects concurrent profile changes, and changes only `packagingRuntime`. The regular desktop shortcut stays in place. Live shipping quotes still require a privately entered carrier account and verified shipping inputs; no rates, purchase or destination-coverage claims are inferred from mock tests.
+
+Local promotion completed at `3ce2b05`, with the prior source retained as `before-packaging-desktop-20261106`. The regular profile was backed up beside itself and its non-packaging values compared equal after activation. The regular shortcut launched the updated source, the protected backend reported ready, and the native window was present and responsive. The permanent packaging database was initialized separately from the pilot/test stores. Pilot documents were not bulk-copied, and no live carrier credentials were entered. The pre-existing untracked implementation plan was preserved under the workspace's `.runtime/packaging-promotion-backup-20261106` before the updated tracked plan was installed.
 
 ## Current V2 Checkpoint
 

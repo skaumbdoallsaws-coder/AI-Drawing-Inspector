@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "libraryVersion": "2026.11.02.1",
+  "libraryVersion": "2026.11.05.1",
   "notes": "Appearances are visual only. They never change mass, density, strength or an assigned engineering material.",
   "categories": [
     {
@@ -1486,6 +1486,127 @@
       "estimate": {
         "lumens": 700,
         "beamAngleDegrees": 30,
+        "basis": "typical, for estimates"
+      }
+    },
+    {
+      "appearanceId": "light-bollard-warm",
+      "label": "Bollard light warm",
+      "category": "lights",
+      "model": "standard",
+      "color": "#e3ddd3",
+      "roughness": 0.35,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "lamp",
+        "led",
+        "bollard",
+        "path light",
+        "garden",
+        "walkway",
+        "patio",
+        "outdoor",
+        "low",
+        "warm white",
+        "beam",
+        "glow"
+      ],
+      "description": "Beam 150 degrees, warm white (about 3000 K), for a bollard or path light along a walkway, a patio or a lawn edge. Glows like a switched-on outdoor lamp in every scene; in the evening scene it throws a pool of light on the ground below it however low it stands (no beam is drawn), and near the view it lights what stands around it. Visual only: not a lighting design.",
+      "thumbnail": "thumbnails/appearances/light-bollard-warm.png",
+      "emission": {
+        "color": "#ffd29a",
+        "intensity": 1,
+        "beamAngleDegrees": 150,
+        "low": true
+      },
+      "estimate": {
+        "lumens": 600,
+        "beamAngleDegrees": 150,
+        "basis": "typical, for estimates"
+      }
+    },
+    {
+      "appearanceId": "light-lantern-warm",
+      "label": "Lantern warm",
+      "category": "lights",
+      "model": "standard",
+      "color": "#e8d9c2",
+      "roughness": 0.3,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "lamp",
+        "led",
+        "lantern",
+        "pendant",
+        "hanging",
+        "string light",
+        "pergola",
+        "patio",
+        "table",
+        "outdoor",
+        "low",
+        "warm white",
+        "beam",
+        "glow"
+      ],
+      "description": "Beam 120 degrees, extra-warm white (about 2700 K), for a lantern or string light hung from a pergola or a tree, or set on a table outdoors. Glows like a switched-on outdoor lamp in every scene; in the evening scene it throws a pool of light on the ground below it however low it stands (no beam is drawn), and near the view it lights what stands around it. Visual only: not a lighting design.",
+      "thumbnail": "thumbnails/appearances/light-lantern-warm.png",
+      "emission": {
+        "color": "#ffbe78",
+        "intensity": 1,
+        "beamAngleDegrees": 120,
+        "low": true
+      },
+      "estimate": {
+        "lumens": 400,
+        "beamAngleDegrees": 120,
+        "basis": "typical, for estimates"
+      }
+    },
+    {
+      "appearanceId": "light-garden-uplight",
+      "label": "Garden uplight warm",
+      "category": "lights",
+      "model": "standard",
+      "color": "#e6ddd0",
+      "roughness": 0.3,
+      "metalness": 0.0,
+      "opacity": 1,
+      "texture": null,
+      "tags": [
+        "light",
+        "lamp",
+        "led",
+        "uplight",
+        "spike light",
+        "garden",
+        "plant",
+        "palm",
+        "tree",
+        "accent",
+        "outdoor",
+        "warm white",
+        "beam",
+        "glow"
+      ],
+      "description": "Beam 40 degrees, warm white (about 3000 K), for a spike or in-ground uplight at the foot of a palm, a plant or a wall. In the evening scene it lights what it faces from below (a palm, a plant or a wall) within about 8 m. Glows like a switched-on lamp in every scene. Visual only: not a lighting design.",
+      "thumbnail": "thumbnails/appearances/light-garden-uplight.png",
+      "emission": {
+        "color": "#ffc08a",
+        "intensity": 1,
+        "beamAngleDegrees": 40,
+        "accent": true,
+        "uplight": true
+      },
+      "estimate": {
+        "lumens": 400,
+        "beamAngleDegrees": 40,
         "basis": "typical, for estimates"
       }
     }

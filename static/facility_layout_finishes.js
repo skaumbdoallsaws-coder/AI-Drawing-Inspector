@@ -454,6 +454,10 @@
         if (Number.isFinite(beam) && beam > 0) glow.beamAngleDegrees = beam;
         // An accent spot (2026-11-02): in the evening scene it lights what its beam reaches, not a pool on the floor.
         if (emission.accent === true) glow.accent = true;
+        // A low outdoor light (2026-11-05: a bollard, a lantern) throws its pool from any height and shows no beam; an
+        // uplight is an accent spot aimed along the part of its lens that faces up (a spike light at a palm's foot).
+        if (emission.low === true) glow.low = true;
+        if (emission.uplight === true) glow.uplight = true;
         // A steady lamp's typical output (a blinking one lights nothing steady, as in the coverage estimate).
         if (!cycle && estimate && Number(estimate.lumens) > 0) {
             glow.lumens = Number(estimate.lumens);

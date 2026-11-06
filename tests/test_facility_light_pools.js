@@ -271,6 +271,82 @@ test('an outdoor pool lies on its own ground, and a beam is an open cone from th
     assert.ok(/instanceColor/.test(pools.BEAM_VERTEX_SHADER) && /facilityBeamStrength/.test(pools.BEAM_FRAGMENT_SHADER));
 });
 
+// Low lights and uplights (2026-11-05, the gym's garden): a low outdoor light (a bollard, a lantern) throws its pool
+// from any height, from each glowing piece with a patch facing down, marked low so no beam is drawn for it; an uplight
+// is aimed along the part of its lens that faces up.
+test('a low outdoor light throws its pool from any height, from each glowing piece, marked low (no beam)', async () => {
+    const THREE = await three();
+    const color = new THREE.Color(1, 0.82, 0.6);
+    const identity = new THREE.Matrix4();
+    const flat = () => 0;
+    const close = (actual, expected, label) => assert.ok(Math.abs(actual - expected) < 1e-6, label + ': ' + actual + ' vs ' + expected);
+    const at = (geometry, x, y, z) => {
+        const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
+        mesh.position.set(x, y, z);
+        mesh.updateMatrixWorld(true);
+        return mesh;
+    };
+    // A bollard's emitter: a thin disc under its cap, 0.75 m up (its underside at 0.748 m).
+    const bollard = at(new THREE.CylinderGeometry(0.08, 0.08, 0.004, 24), 2, 0.75, 3);
+    const beam = { angleDegrees: 150, groundAt: flat };
+    assert.deepStrictEqual(pools.poolsOf(THREE, bollard, identity, color, 0, beam), [], 'an outdoor lamp this low throws none');
+    const low = Object.assign({ low: true }, beam);
+    const thrown = pools.poolsOf(THREE, bollard, identity, color, 0, low);
+    assert.strictEqual(thrown.length, 1);
+    const pool = thrown[0];
+    close(pool.x, 2, 'x');
+    close(pool.y, 0, 'on the ground');
+    close(pool.z, 3, 'z');
+    close(pool.length, 0.748, 'from the disc\'s underside');
+    close(pool.radius, 0.748 * Math.tan(75 * Math.PI / 180), 'as wide as its beam');
+    close(pool.lamp.y, 0.748, 'the lamp');
+    assert.strictEqual(pool.low, true, 'marked low: no beam is drawn for it');
+    assert.strictEqual(pool.color, color);
+    // A lantern's glass hung from a pergola: a closed cylinder whose foot is its only downward face, a seventh of its
+    // surface, so no lamp by the share rule; its pool still comes from that foot.
+    const glass = new THREE.CylinderGeometry(0.1, 0.1, 0.25, 24);
+    assert.strictEqual(pools.lampsOf(glass).length, 0, 'no lamp by the share rule');
+    const hung = pools.poolsOf(THREE, at(glass, 0, 1.9, 0), identity, color, 0, { angleDegrees: 120, groundAt: flat, low: true });
+    assert.strictEqual(hung.length, 1);
+    close(hung[0].length, 1.775, 'from its foot');
+    close(hung[0].radius, 1.775 * Math.tan(60 * Math.PI / 180), 'radius');
+    // One lying right on the ground throws none.
+    assert.strictEqual(pools.LOW_MIN_HEIGHT, 0.1);
+    const sunk = at(new THREE.CylinderGeometry(0.08, 0.08, 0.004, 24), 0, 0.05, 0);
+    assert.deepStrictEqual(pools.poolsOf(THREE, sunk, identity, color, 0, low), []);
+});
+
+test('an uplight is aimed along the part of its lens that faces up; an accent spot along the part facing down', async () => {
+    const THREE = await three();
+    const identity = new THREE.Matrix4();
+    // A spike light's lens: a thin disc (as much of it faces up as down), tilted 20 degrees toward +z.
+    const lens = new THREE.CylinderGeometry(0.035, 0.035, 0.004, 16).rotateX(Math.PI / 9);
+    const up = pools.lampsOf(lens, true);
+    assert.strictEqual(up.length, 1);
+    assert.strictEqual(pools.lampsOf(lens, true), up, 'cached');
+    assert.notStrictEqual(pools.lampsOf(lens), up, 'apart from its downward lamps');
+    assert.ok(pools.lampsOf(lens)[0].ny < -0.9 && up[0].ny > 0.9);
+    assert.deepStrictEqual(Array.from(pools.lampPartsOf(lens, true).vertexPart), Array.from(pools.lampPartsOf(lens).vertexPart),
+        'the same parts, so switching lamps by area (L7) is unchanged');
+    // At a palm's foot in the gym's garden.
+    const mesh = new THREE.Mesh(lens, new THREE.MeshBasicMaterial());
+    mesh.position.set(69.3, 0.12, 70.2);
+    mesh.updateMatrixWorld(true);
+    const uplight = { color: '#ffc08a', intensity: 1, beamAngleDegrees: 40, accent: true, uplight: true, lumens: 400 };
+    const round = v => Math.round(v * 1000) / 1000 + 0;
+    const near = v => Math.round(v * 100) / 100 + 0;
+    const found = pools.spotsOf(THREE, mesh, identity, uplight, 0);
+    assert.strictEqual(found.length, 1);
+    const spot = found[0];
+    assert.strictEqual(spot.kind, 'accent');
+    assert.deepStrictEqual([spot.aim.x, spot.aim.y, spot.aim.z].map(round), [0, 0.94, 0.342], 'up, 20 degrees toward +z');
+    assert.deepStrictEqual([spot.x, spot.z].map(near), [69.3, 70.2]);
+    assert.ok(spot.y > 0.12, 'at the top of the lens: ' + spot.y);
+    const down = pools.spotsOf(THREE, mesh, identity, Object.assign({}, uplight, { uplight: false }), 0)[0];
+    assert.deepStrictEqual([down.aim.x, down.aim.y, down.aim.z].map(round), [0, -0.94, -0.342], 'an accent spot: down');
+    assert.ok(down.y < 0.12);
+});
+
 // Lamps that light things (2026-11-02): pendants over tables and accent spots become spot light candidates; the
 // general lighting's pools sum into a fill map that lit materials add below the lamps.
 test('a pendant hung over a table and an accent spot aimed along its lens are spot candidates; high lamps are not', async () => {

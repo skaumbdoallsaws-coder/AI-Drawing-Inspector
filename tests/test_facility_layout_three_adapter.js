@@ -8122,6 +8122,30 @@ async function lampRowFixture(extra) {
     }, extra || {}));
 }
 
+// Low outdoor lights (2026-11-05, the gym's garden): a lens with a low outdoor finish (a bollard) 1 m up throws its
+// pool on the ground below it and shows no beam; the same lens with the pole light's finish, as low, throws neither.
+test('a low outdoor light throws its pool from 1 m up and shows no beam', async () => {
+    const data = await lampRowFixture();
+    const lamp = (id, x, appearanceId) => Object.assign(placement(id, 'light-row', REV_A, x, 1, 0), {
+        componentMaterials: { representation: 'overview', overrides: [{ key: 'p:row/lens#0', appearanceId }] } });
+    await data.adapter.setScene({ layout: { placements: [lamp('bollard', 0, 'light-bollard-warm'), lamp('pole', 10, 'light-pole-led')],
+        extensions: { facilityScene: { version: 1, sceneId: 'evening' } } }, assetCatalog: [asset('light-row', REV_A)] });
+    await settleAsync();
+    data.scheduler.flush();
+    const info = data.adapter.getDiagnostics().appearanceLibrary;
+    assert.strictEqual(info.lightPools, 1, 'the low light only');
+    assert.strictEqual(info.lightBeams, 0, 'and no beam');
+    const quads = [];
+    renderedScene().traverse(o => {
+        if (!o.isMesh || !o.userData.facilityLightPools) return;
+        const position = o.geometry.attributes.position;
+        for (let v = 0; v < position.count; v += 4) quads.push([(position.getX(v) + position.getX(v + 2)) / 2, position.getY(v)]);
+    });
+    assert.strictEqual(quads.length, 1);
+    assert.ok(Math.abs(quads[0][0]) < 1e-3 && Math.abs(quads[0][1] - 0.02) < 1e-3, 'on the ground under the lamp: ' + quads[0]);
+    data.adapter.dispose();
+});
+
 // FIX 3a: a light fitting whose model names its lens finish (glTF material extras facilityDefaultFinish), so it
 // comes lit with no part finish of its own.
 test('a light whose model names a default lens finish comes lit, glows, and throws its beam in Evening', async () => {

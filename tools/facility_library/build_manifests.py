@@ -3,7 +3,7 @@ import sys, json, hashlib
 from pathlib import Path
 
 LIB = Path(sys.argv[1]); S = Path(sys.argv[2])
-VERSION = "2026.11.02.1"
+VERSION = "2026.11.05.1"
 tex_report = json.loads((S / "texture_report.json").read_text(encoding="utf-8"))
 zip_sha = {}
 for line in (S / "acg_zip_sha256.txt").read_text().splitlines():
@@ -101,27 +101,17 @@ add("marble-white", "White marble (visual)", "stone", "#ffffff", 0.14, 0.0, tex(
 
 # Lights (docs/facility-lighting-plan.md, L1): the color is the unlit lens or sign plastic; emission is the glow the
 # Facility 3D view draws, untouched by tone mapping, in every scene. No light falls on other surfaces.
-GLOW = ("Glows like a switched-on lamp in every scene. Visual only: it lights no other surface and is not a "
-        "lighting or signage specification.")
-
-
-# L8: an outdoor light's emission has a beam angle: in the evening scene the 3D view then draws a soft cone from the
-# lamp down to the ground and a pool where its aim lands.
-OUTDOOR = ("Glows like a switched-on outdoor lamp in every scene; in the evening scene it also shows a soft beam down "
-           "to the ground and a pool of light where it lands. Visual only: it lights no other surface and is not a "
-           "lighting design.")
-
-
-# 2026-11-02: an accent spot's emission is marked accent: in the evening scene the 3D view lights what its beam
-# reaches with a spot light instead of a pool. (The general and outdoor lights' estimate data, CC1, and this one's
-# are written in appearances.json itself.)
-ACCENT = ("In the evening scene it lights what its beam reaches (a wall, an object or the floor) within about 8 m. "
-          "Glows like a switched-on lamp in every scene. Visual only: not a lighting design.")
+GLOW = ("Glows like a switched-on outdoor lamp in every scene; in the evening scene it throws a pool of light on the "
+       "ground below it however low it stands (no beam is drawn), and near the view it lights what stands around it. "
+       "Visual only: not a lighting design.")
+UPLIGHT = ("In the evening scene it lights what it faces from below (a palm, a plant or a wall) within about 8 m. "
+           "Glows like a switched-on lamp in every scene. Visual only: not a lighting design.")
 
 
 # L4: a light may blink, strobe or turn like a rotating beacon, one cycle every periodSeconds; the 3D view shows
 # every pattern steady when the viewer prefers reduced motion.
-def light(appearance_id, label, color, glow, tags, roughness=0.3, pattern=None, note=None, beam=None, accent=False):
+def light(appearance_id, label, color, glow, tags, roughness=0.3, pattern=None, note=None, beam=None, accent=False,
+          low=False, uplight=False):
     emission = {"color": glow, "intensity": 1}
     if pattern:
         emission.update(pattern=pattern, periodSeconds=1)
@@ -129,7 +119,11 @@ def light(appearance_id, label, color, glow, tags, roughness=0.3, pattern=None, 
         emission["beamAngleDegrees"] = beam
     if accent:
         emission["accent"] = True
-    description = ACCENT if accent else OUTDOOR if beam else GLOW
+    if low:
+        emission["low"] = True
+    if uplight:
+        emission["uplight"] = True
+    description = UPLIGHT if uplight else ACCENT if accent else LOW if low else OUTDOOR if beam else GLOW
     add(appearance_id, label, "lights", color, roughness, 0.0, None, ("light",) + tags + ("glow",),
         note + " " + description if note else description, emission=emission)
 
@@ -154,6 +148,12 @@ light("light-dock-led", "Dock light LED", "#dfe4e8", "#ffe2b8", ('lamp', 'led', 
       note="Beam 70 degrees, for a light over a dock door.")
 light("light-accent-spot", "Accent spot LED", "#e6ddd0", "#ffc08a", ('lamp', 'led', 'spot', 'spotlight', 'accent', 'warm white', 'recessed', 'adjustable', 'beam'), beam=30,
       accent=True, note="Beam 30 degrees, warm white (about 3000 K), for an adjustable spot aimed at a wall, a picture or an object.")
+light("light-bollard-warm", "Bollard light warm", "#e3ddd3", "#ffd29a", ('lamp', 'led', 'bollard', 'path light', 'garden', 'walkway', 'patio', 'outdoor', 'low', 'warm white', 'beam'), 0.35, beam=150, low=True,
+      note="Beam 150 degrees, warm white (about 3000 K), for a bollard or path light along a walkway, a patio or a lawn edge.")
+light("light-lantern-warm", "Lantern warm", "#e8d9c2", "#ffbe78", ('lamp', 'led', 'lantern', 'pendant', 'hanging', 'string light', 'pergola', 'patio', 'table', 'outdoor', 'low', 'warm white', 'beam'), 0.3, beam=120, low=True,
+      note="Beam 120 degrees, extra-warm white (about 2700 K), for a lantern or string light hung from a pergola or a tree, or set on a table outdoors.")
+light("light-garden-uplight", "Garden uplight warm", "#e6ddd0", "#ffc08a", ('lamp', 'led', 'uplight', 'spike light', 'garden', 'plant', 'palm', 'tree', 'accent', 'outdoor', 'warm white', 'beam'), 0.3, beam=40, accent=True, uplight=True,
+      note="Beam 40 degrees, warm white (about 3000 K), for a spike or in-ground uplight at the foot of a palm, a plant or a wall.")
 
 appearances = {
     "schemaVersion": 1, "libraryVersion": VERSION,

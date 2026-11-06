@@ -12,9 +12,9 @@ from ai_inspector.codex_runtime.facility_tools import tool_specs
 from ai_inspector.codex_runtime.progress import describe
 from ai_inspector.facility_layout.appearance_library import _valid_estimate, load_library
 from ai_inspector.facility_layout.host import build_private_local_asset_catalog
-from ai_inspector.facility_layout.light_coverage import (CAPTION, NAME, OUTSIDE_VALUE, _dark_spots, area_of,
-                                                         blocking_walls, check_lighting_coverage, estimate, find_lamps,
-                                                         lamp_data, view_payload)
+from ai_inspector.facility_layout.light_coverage import (CAPTION, LOW_MIN_HEIGHT, NAME, OUTSIDE_VALUE, _dark_spots,
+                                                         area_of, blocking_walls, check_lighting_coverage, estimate,
+                                                         find_lamps, lamp_data, lamp_parts, view_payload)
 from tools import factory02_light_models as models
 
 LIBRARY = load_library()
@@ -166,7 +166,7 @@ def test_lamps_are_found_in_the_real_models_as_the_view_finds_them(project):
         place(catalog, models.BEACON, "pl-beacon", 80.0, 3.0, 20.0)]}                      # a signal light
     lamps, notes = find_lamps(layout, by_revision, LIBRARY, root)
     assert [item["placementId"] for item in lamps] == ["pl-pole", "pl-wall", "pl-pole-dock"]
-    assert notes == {"unreadModels": [], "signalLightParts": {"Beacon amber": 1}}
+    assert notes == {"unreadModels": [], "signalLightParts": {"Beacon amber": 1}, "uplightParts": {}}
     pole, wall, dock = lamps
     centre = lens_centre(models.POLE_LIGHT)
     # Mirrored across the model's x = 0, then turned 90 degrees: model (x, z) lands at (z, x) about the placement.
@@ -178,6 +178,48 @@ def test_lamps_are_found_in_the_real_models_as_the_view_finds_them(project):
     assert wall["y"] > 3.0 and wall["finish"] == "light-wall-led" and wall["lumens"] == 4000
     assert dock["finish"] == "light-dock-led" and dock["beamAngleDegrees"] == 70, "its own Lights finish wins"
     assert all(item["on"] and item["off"] is None for item in lamps)
+
+
+def test_a_low_outdoor_light_counts_from_any_height_and_an_uplight_not_at_all(project):
+    """2026-11-05 (the gym's garden): a low outdoor light (a bollard, a lantern) counts from LOW_MIN_HEIGHT, as the view
+    throws its pool; an uplight lights what it faces, not the ground, so it counts as none and is listed."""
+    root, catalog = project
+    by_revision = {(entry["assetId"], entry["assetDefinitionRevision"]): entry for entry in catalog}
+    lens = models.LED_LENS_KEYS[models.WALL_LIGHT]
+
+    def finish(appearance_id):
+        return {"componentMaterials": {"representation": "overview",
+                                       "overrides": [{"key": lens, "appearanceId": appearance_id}]}}
+    layout = {"placements": [
+        place(catalog, models.WALL_LIGHT, "pl-bollard", 10.0, 0.6, 20.0, **finish("light-bollard-warm")),
+        place(catalog, models.WALL_LIGHT, "pl-wall-low", 20.0, 0.6, 20.0),               # its own finish: too low
+        place(catalog, models.WALL_LIGHT, "pl-uplight", 30.0, 5.0, 20.0, **finish("light-garden-uplight"))]}
+    lamps, notes = find_lamps(layout, by_revision, LIBRARY, root)
+    assert [lamp["placementId"] for lamp in lamps] == ["pl-bollard"]
+    (bollard,) = lamps
+    assert (bollard["finish"], bollard["lumens"], bollard["beamAngleDegrees"]) == ("light-bollard-warm", 600, 150)
+    assert LOW_MIN_HEIGHT <= bollard["heightMeters"] < 1.0, bollard["heightMeters"]
+    assert notes == {"unreadModels": [], "signalLightParts": {}, "uplightParts": {"Garden uplight warm": 1}}
+    result = estimate({}, lamps, box(0, 10, 20, 30))
+    assert lux_at(result, bollard["x"], bollard["z"]) > lux_at(result, bollard["x"] + 4, bollard["z"]) > 0
+    # Sage's summary lists the uplight it left out.
+    summary, _ = check_lighting_coverage(layout, catalog, LIBRARY, {"rectangle": {"minX": 0, "minZ": 10, "maxX": 40,
+                                                                                  "maxZ": 30}}, root)
+    assert summary["lamps"]["uplightsNotCounted"] == {"Garden uplight warm": 1}
+    assert summary["lamps"]["byFinish"] == {"light-bollard-warm": 1}
+
+
+def test_a_low_lights_lamps_are_its_glowing_pieces_with_a_patch_facing_down():
+    """As the view's bulbsOf: a lantern's glass (a closed box here) faces down only at its foot, a seventh of its
+    surface: no lamp by the share rule, but a low outdoor light's lamp."""
+    corners = [(-0.1, 0, -0.1), (0.1, 0, -0.1), (0.1, 0, 0.1), (-0.1, 0, 0.1),
+               (-0.1, 0.25, -0.1), (0.1, 0.25, -0.1), (0.1, 0.25, 0.1), (-0.1, 0.25, 0.1)]
+    triangles = [(0, 1, 2), (0, 2, 3), (4, 6, 5), (4, 7, 6), (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5),
+                 (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]
+    assert lamp_parts(corners, triangles) == []
+    ((centre, aim, area),) = lamp_parts(corners, triangles, share=0.0)
+    assert list(centre) == pytest.approx([0, 0, 0]) and list(aim) == pytest.approx([0, -1, 0])
+    assert area == pytest.approx(0.04)
 
 
 def test_the_saved_scene_switch_and_areas_turn_lamps_off(project):
@@ -282,7 +324,8 @@ def test_the_lot_is_outdoor_ground_not_the_building(project):
 def test_lamp_data_is_typical_and_matches_the_outdoor_beams():
     data = lamp_data(LIBRARY)
     assert set(data) == {"light-cool-white-led", "light-warm-white", "light-pole-led", "light-wall-led",
-                         "light-dock-led", "light-accent-spot"}, "general, outdoor and accent lights; no signal lights"
+                         "light-dock-led", "light-accent-spot", "light-bollard-warm", "light-lantern-warm"}, (
+        "general, outdoor, low and accent lights; no signal lights, and no uplights (they light what they face)")
     for appearance_id in data:
         row = LIBRARY["appearances"][appearance_id]
         assert row["estimate"]["basis"] == "typical, for estimates"

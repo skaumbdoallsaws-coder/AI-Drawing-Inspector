@@ -72,7 +72,8 @@ test('on a light the color override is its glow, the unlit color stays, and the 
     assert.deepStrictEqual(libraryApi.search(library, { kind: 'appearance', category: 'lights' }).map(row => row.id), [
         'light-cool-white-led', 'light-warm-white', 'light-exit-green', 'light-beacon-amber', 'light-alarm-red',
         'light-signal-blue', 'light-stack-red', 'light-stack-amber', 'light-stack-green',
-        'light-pole-led', 'light-wall-led', 'light-dock-led', 'light-accent-spot']);
+        'light-pole-led', 'light-wall-led', 'light-dock-led', 'light-accent-spot',
+        'light-bollard-warm', 'light-lantern-warm', 'light-garden-uplight']);
     // An outdoor light's beam angle (L8) comes with it and makes its own material.
     assert.strictEqual(libraryApi.resolveAppearance(library, { appearanceId: 'light-pole-led' }, {}).emission.beamAngleDegrees, 110);
     const pole = libraryApi.resolveAppearance(library, { appearanceId: 'light-pole-led' }, {});
@@ -367,6 +368,15 @@ async function runThreeTests() {
     const accent = finishes.createFinishMaterial(THREE, libraryApi.resolveAppearance(library, { appearanceId: 'light-accent-spot' }, {}), {});
     assert.deepStrictEqual(accent.userData.facilityGlow, { color: '#ffc08a', intensity: 1, beamAngleDegrees: 30, accent: true,
         lumens: 700, estimateBeamAngleDegrees: 30 }, 'an accent spot is marked');
+    // A low outdoor light and an uplight (2026-11-05, the gym's garden) are marked too.
+    const glowOf = id => finishes.createFinishMaterial(THREE, libraryApi.resolveAppearance(library, { appearanceId: id }, {}), {})
+        .userData.facilityGlow;
+    assert.deepStrictEqual(glowOf('light-bollard-warm'), { color: '#ffd29a', intensity: 1, beamAngleDegrees: 150, low: true,
+        lumens: 600, estimateBeamAngleDegrees: 150 }, 'a low outdoor light');
+    assert.deepStrictEqual(glowOf('light-lantern-warm'), { color: '#ffbe78', intensity: 1, beamAngleDegrees: 120, low: true,
+        lumens: 400, estimateBeamAngleDegrees: 120 });
+    assert.deepStrictEqual(glowOf('light-garden-uplight'), { color: '#ffc08a', intensity: 1, beamAngleDegrees: 40, accent: true,
+        uplight: true, lumens: 400, estimateBeamAngleDegrees: 40 }, 'an uplight');
     const copy = led.clone();
     assert.ok(finishes.isGlowMaterial(copy) && copy.toneMapped === false && copy.emissive.getHexString() === 'eef4ff');
     const amber = finishes.createFinishMaterial(THREE,

@@ -40,6 +40,10 @@ evening scene the Facility view then draws a soft beam from the lamp down to the
 ground and a pool of light where its aim lands (docs/facility-lighting-plan.md, L8).
 With ``"accent": true`` as well (an accent spot) the view instead lights what the
 beam reaches (a wall, an object, the floor) with a spot light, and draws no pool.
+With ``"low": true`` (2026-11-05: a bollard, a path light, a lantern) an outdoor light
+throws its pool on the ground from any height and shows no beam; with ``"uplight": true``
+an accent spot is aimed along the part of its lens that faces up (a garden spike light
+at the foot of a palm or a plant).
 A general, outdoor or accent Lights finish may carry ``estimate`` (``{"lumens", "beamAngleDegrees", "basis"}``): a
 typical output and beam angle, for the lighting coverage estimate only (light_coverage.py, CC).
 """
@@ -105,9 +109,16 @@ def _valid_emission(emission):
     (docs/facility-lighting-plan.md)."""
     if not isinstance(emission, Mapping) or not (
             {"color", "intensity"} <= set(emission)
-            <= {"color", "intensity", "pattern", "periodSeconds", "cycleColors", "beamAngleDegrees", "accent"}):
+            <= {"color", "intensity", "pattern", "periodSeconds", "cycleColors", "beamAngleDegrees", "accent", "low",
+                "uplight"}):
         return False
     if "accent" in emission and not (emission["accent"] is True and "beamAngleDegrees" in emission):
+        return False
+    # 2026-11-05: a low outdoor light has a beam and is no accent spot; an uplight is an accent spot.
+    if "low" in emission and not (emission["low"] is True and "beamAngleDegrees" in emission
+                                  and "accent" not in emission):
+        return False
+    if "uplight" in emission and not (emission["uplight"] is True and "accent" in emission):
         return False
     if "beamAngleDegrees" in emission and not (
             _finite_number(emission["beamAngleDegrees"]) and 10 <= emission["beamAngleDegrees"] <= 160):

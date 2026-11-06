@@ -14,6 +14,11 @@
 // a small map over the plan, and patchFillShader adds it to a lit material's indirect light below the lamps. The
 // fill is only under zone ceilings (the user's choice, 2026-11-02): the adapter passes only pools whose lamp is in
 // a zone with a ceiling, and fillMask gives the shader those zones' footprint, outside which it adds nothing.
+//
+// Low lights and uplights (2026-11-05, the gym's garden): an outdoor finish marked low (a bollard, a path light, a
+// lantern) throws its pool from LOW_MIN_HEIGHT up, from each glowing piece with a patch facing down (bulbsOf), and
+// shows no beam; an accent finish marked uplight (a spike light at a palm's foot) is aimed along the patches of its
+// lens that face up.
 (function (root, factory) {
     'use strict';
 
@@ -27,6 +32,7 @@
     const MIN_LAMP_AREA = 0.0005;  // square metres; a smaller downward patch is a sliver, not a lamp
     const MIN_LAMP_SHARE = 0.2;    // a lamp faces down: at least this share of its part's surface (a lens: about half)
     const MIN_HEIGHT = 3;          // metres above the floor; lower glows (signs, displays, beacons) throw no pool
+    const LOW_MIN_HEIGHT = 0.1;    // metres above the ground: a low outdoor light (a bollard) throws its pool from here
     const TEXTURE_SIZE = 64;
     const BEAM_REACH = 80;         // metres along an outdoor lamp's aim to look for the ground (L8)
     const BEAM_STEP = 0.25;        // metres per step while looking
@@ -55,18 +61,22 @@
     const FILL_BELOW = 0.05;       // the fill lights what is at least this far below its lamps (not a ceiling)
     const partCache = new WeakMap();
     const lampCache = new WeakMap();
+    const upPartCache = new WeakMap();
+    const upLampCache = new WeakMap();
 
     // The parts of a glowing geometry, numbered in the order they first appear: its pieces, joined wherever corners
     // meet (by position, so a hard edge does not split a piece). A part is a lamp when it faces down: its patches of
     // downward-facing triangles of at least MIN_LAMP_AREA add up to at least MIN_LAMP_SHARE of its surface. So a
     // lens is a lamp, and the thin bottom edge of an exit sign is not. A lamp's centre is the area-weighted centre of
     // those patches, and its aim (nx, ny, nz) their area-weighted normal; vertexPart gives each vertex its part's
-    // number (L7 switches lamps by area with it). Cached.
-    function lampPartsOf(geometry) {
+    // number (L7 switches lamps by area with it). Cached. With UP (an uplight's lens, 2026-11-05) the same for the
+    // patches that face up, cached apart.
+    function lampPartsOf(geometry, up) {
         if (!geometry || !geometry.attributes || !geometry.attributes.position) {
             return { parts: [], lamps: 0, vertexPart: new Float32Array(0) };
         }
-        if (partCache.has(geometry)) return partCache.get(geometry);
+        const cache = up ? upPartCache : partCache;
+        if (cache.has(geometry)) return cache.get(geometry);
         const position = geometry.attributes.position;
         const index = geometry.index;
         const triangles = Math.floor((index ? index.count : position.count) / 3);
@@ -103,7 +113,7 @@
             const nz = e1[0] * e2[1] - e1[1] * e2[0];
             const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
             areas[t] = length / 2;
-            if (length <= 1e-12 || ny / length >= FACING_DOWN) continue;
+            if (length <= 1e-12 || (up ? -ny : ny) / length >= FACING_DOWN) continue;
             keys.forEach(patches.add);
             patches.join(keys[0], keys[1]);
             patches.join(keys[1], keys[2]);
@@ -168,19 +178,22 @@
         }
         const result = { parts: parts, lamps: parts.filter(function (part) { return part.lamp; }).length,
             vertexPart: vertexPart };
-        partCache.set(geometry, result);
+        cache.set(geometry, result);
         return result;
     }
 
-    // The lamps in a geometry (see lampPartsOf), in its own coordinates, sorted along x, then z, then y. Cached.
-    function lampsOf(geometry) {
+    // The lamps in a geometry (see lampPartsOf; with UP, those facing up), in its own coordinates, sorted along x,
+    // then z, then y. Cached.
+    function lampsOf(geometry, up) {
         if (!geometry || !geometry.attributes || !geometry.attributes.position) return [];
-        if (lampCache.has(geometry)) return lampCache.get(geometry);
-        const lamps = lampPartsOf(geometry).parts.filter(function (part) { return part.lamp; }).map(function (part) {
+        const cache = up ? upLampCache : lampCache;
+        if (cache.has(geometry)) return cache.get(geometry);
+        const parts = lampPartsOf(geometry, up).parts;
+        const lamps = parts.filter(function (part) { return part.lamp; }).map(function (part) {
             return { x: part.x, y: part.y, z: part.z, area: part.area, nx: part.nx, ny: part.ny, nz: part.nz };
         });
         lamps.sort(function (a, b) { return a.x - b.x || a.z - b.z || a.y - b.y; });
-        lampCache.set(geometry, lamps);
+        cache.set(geometry, lamps);
         return lamps;
     }
 
@@ -241,8 +254,12 @@
     // maps world space into. Only lamps that still face down there and hang MIN_HEIGHT above `floorY` count.
     // With `beam` ({angleDegrees, groundAt}, an outdoor Lights finish, L8) each lamp's pool lies where its aim meets
     // the ground instead (aimedPool), MIN_HEIGHT above it, and also records the lamp, its aim and the beam's length.
+    // A low outdoor light (beam.low, 2026-11-05: a bollard, a lantern) throws one from each glowing piece with a patch
+    // facing down (bulbsOf: a lantern's glass faces down only at its foot), LOW_MIN_HEIGHT above the ground, and its
+    // pool is marked low: it shows no beam.
     function poolsOf(THREE, mesh, toRoot, color, floorY, beam) {
-        const lamps = lampsOf(mesh && mesh.geometry);
+        const low = Boolean(beam && beam.low);
+        const lamps = low ? bulbsOf(mesh && mesh.geometry) : lampsOf(mesh && mesh.geometry);
         if (!lamps.length) return [];
         const base = new THREE.Matrix4().multiplyMatrices(toRoot, mesh.matrixWorld);
         const instance = new THREE.Matrix4();
@@ -268,10 +285,12 @@
                     aim.set(lamp.nx, lamp.ny, lamp.nz).transformDirection(matrix);
                     if (aim.y > FACING_DOWN) return;
                     const hit = aimedPool(point, aim, beam.angleDegrees, beam.groundAt);
-                    if (!hit || point.y - hit.y < MIN_HEIGHT) return;
-                    pools.push({ x: hit.x, y: hit.y, z: hit.z, radius: hit.radius, color: color,
+                    if (!hit || point.y - hit.y < (low ? LOW_MIN_HEIGHT : MIN_HEIGHT)) return;
+                    const pool = { x: hit.x, y: hit.y, z: hit.z, radius: hit.radius, color: color,
                         lamp: { x: point.x, y: point.y, z: point.z }, aim: { x: aim.x, y: aim.y, z: aim.z },
-                        length: hit.length, beamAngleDegrees: beam.angleDegrees });
+                        length: hit.length, beamAngleDegrees: beam.angleDegrees };
+                    if (low) pool.low = true;
+                    pools.push(pool);
                     return;
                 }
                 const height = point.y - floorY;
@@ -325,12 +344,13 @@
     // or else its pendants: a finish with lighting data (glow.lumens, from its estimate: never a sign, beacon or
     // signal lamp) on lamps or bare bulbs (bulbsOf) still facing down there, hung SPOT_MIN_HEIGHT to MIN_HEIGHT above
     // `floorY` (higher ones throw pools). A copy's lamps make one spot at their area-weighted centre, aimed along
-    // their mean aim.
+    // their mean aim. An uplight (glow.uplight, 2026-11-05) is aimed along the part of its lens that faces up.
     function spotsOf(THREE, mesh, toRoot, glow, floorY) {
         if (!glow) return [];
         const accent = glow.accent === true;
         const geometry = mesh && mesh.geometry;
-        const lamps = accent ? lampsOf(geometry) : Number(glow.lumens) > 0 ? bulbsOf(geometry) : [];
+        const lamps = accent ? lampsOf(geometry, glow.uplight === true)
+            : Number(glow.lumens) > 0 ? bulbsOf(geometry) : [];
         if (!lamps.length) return [];
         const base = new THREE.Matrix4().multiplyMatrices(toRoot, mesh.matrixWorld);
         const instance = new THREE.Matrix4();
@@ -1403,6 +1423,7 @@
         MIN_LAMP_AREA: MIN_LAMP_AREA,
         MIN_LAMP_SHARE: MIN_LAMP_SHARE,
         MIN_HEIGHT: MIN_HEIGHT,
+        LOW_MIN_HEIGHT: LOW_MIN_HEIGHT,
         BEAM_REACH: BEAM_REACH,
         SPOT_COUNT: SPOT_COUNT,
         SPOT_MIN_HEIGHT: SPOT_MIN_HEIGHT,

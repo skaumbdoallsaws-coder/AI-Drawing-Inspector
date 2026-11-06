@@ -15650,6 +15650,7 @@
         // per render group, built the first time it is needed and dropped with the group. The pools follow the
         // group's layer, are never picked and light nothing else. An outdoor lamp (a Lights finish with a beam
         // angle, L8) throws its pool on the ground where its aim lands instead, and shows a beam (syncLightBeams).
+        // A low outdoor light (emission.low, 2026-11-05: a bollard, a lantern) throws it from any height, with no beam.
         function lightPoolsWanted() {
             return Boolean(lightPoolsRuntime && lightsOn() && state.viewportScene && state.viewportScene.lightPools);
         }
@@ -15671,7 +15672,8 @@
                 if (Array.isArray(glow.rgb)) color.setRGB(glow.rgb[0], glow.rgb[1], glow.rgb[2]);
                 else color.set(glow.color);
                 const beam = Number(glow.beamAngleDegrees) > 0
-                    ? { angleDegrees: Number(glow.beamAngleDegrees), groundAt: groundHeightAt } : null;
+                    ? { angleDegrees: Number(glow.beamAngleDegrees), groundAt: groundHeightAt, low: glow.low === true }
+                    : null;
                 Array.prototype.push.apply(pools, lightPoolsRuntime.poolsOf(THREE, object, toRoot, color, 0, beam));
             });
             if (!pools.length) return null;
@@ -16313,7 +16315,7 @@
             shared.meshes.forEach(function (mesh) {
                 if (!mesh || !mesh.visible) return;
                 (state.lightAreas.pools.get(mesh) || []).forEach(function (pool) {
-                    if (!pool.aim) return;
+                    if (!pool.aim || pool.low) return;  // a low light's pool (a bollard, a lantern) needs no beam
                     total += 1;
                     if (beams.length < LIGHT_BEAM_CAP) beams.push(pool);
                 });

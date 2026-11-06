@@ -13,6 +13,11 @@ longer faces down, or less than MIN_HEIGHT above the ground below it, counts as 
 scene's switch (adjustments.lights false) turns every lamp off; its areas (adjustments.lightAreas, L7) turn lamps
 off by where their centre is, as the view does (static/facility_layout_light_areas.js).
 
+Low lights and uplights (2026-11-05, the gym's garden). A low outdoor light (emission.low: a bollard, a path light, a
+lantern) counts from LOW_MIN_HEIGHT above the ground, and every glowing piece of it with a patch facing down is a lamp
+(share 0, as the view's bulbsOf: a lantern's glass faces down only at its foot). An uplight (emission.uplight) lights
+what it faces, not the ground: it counts as none, and the summary lists it (uplightsNotCounted).
+
 Brightness (CC2). On a CELL grid over the chosen area (a floor area, a zone, a rectangle or the whole lot), each lamp
 is a point source whose light fades away from its aim: I = I0 cos^m(theta) at theta off the aim, with m set so that it
 is half the peak at the edge of the beam angle (as makers give a beam angle) and the whole output in the lamp's front
@@ -62,6 +67,7 @@ FACING_DOWN = -0.7          # as static/facility_layout_light_pools.js
 MIN_LAMP_AREA = 0.0005      # square metres; a smaller downward patch is a sliver, not a lamp
 MIN_LAMP_SHARE = 0.2        # a lamp's downward patches make up at least this share of its piece's surface
 MIN_HEIGHT = 3.0            # m above the ground below it; lower glows throw no pool and count as no lamp
+LOW_MIN_HEIGHT = 0.1        # m: a low outdoor light (emission.low: a bollard, a lantern) counts from here
 DARK_SHARE = 0.5            # default dark level: this share of the area's mean
 LISTED_SPOTS = 20
 NEAREST_LAMPS = 3
@@ -75,7 +81,8 @@ LIMITATIONS = [
     "it. Walls stop it (wall placements and the building's own walls, up to their top); doors, racks, machines and "
     "other items cast no shadows. No reflections, no light loss over time and no daylight.",
     "Brightness is on the floor or ground (horizontal), on a 1 m grid.",
-    "Only lamps with a general or outdoor Lights finish count, hung at least 3 m up; signal lights do not.",
+    "Only lamps with a general or outdoor Lights finish count, hung at least 3 m up (low outdoor lights such as "
+    "bollards and lanterns from any height); signal lights and uplights do not.",
 ]
 _GEOMETRY_CACHE = {}
 _VISUAL_PATHS = {}
@@ -87,7 +94,8 @@ def tool_spec():
         "list the dark spots between lamps. Give exactly one of floorAreaId (inspect_facility_authoring "
         "floor_surfaces), zoneId (e.g. a car park or the truck yard), rectangle {minX, minZ, maxX, maxZ} in plan "
         "metres, or lot: true. Optional darkBelowLux sets the dark level (default: half the area's mean). Lamps are "
-        "the layout's general and outdoor lights (Lights finishes) with typical outputs; the saved scene's lights "
+        "the layout's general and outdoor lights (Lights finishes; low ones such as bollards and lanterns count from "
+        "any height, uplights not at all) with typical outputs; the saved scene's lights "
         "switch and light areas apply; walls stop light, nothing else casts shadows. Returns estimated lux (minimum, "
         "mean, maximum) and the dark spots with their "
         "centres, sizes and nearest lamps. It is an estimate, not a lighting design: always say so ("
@@ -109,7 +117,8 @@ def lamp_data(library):
     result = {}
     for appearance_id, row in library["appearances"].items():
         estimate, emission = row.get("estimate"), row.get("emission")
-        if isinstance(estimate, dict) and emission and emission.get("pattern", "steady") == "steady":
+        if (isinstance(estimate, dict) and emission and emission.get("pattern", "steady") == "steady"
+                and not emission.get("uplight")):   # an uplight lights what it faces, not the ground
             result[appearance_id] = {"label": row.get("label", appearance_id), "lumens": float(estimate["lumens"]),
                                      "beamAngleDegrees": float(estimate["beamAngleDegrees"])}
     return result
@@ -148,9 +157,10 @@ def _components(count, triangles, mask):
     return connected_components(graph, directed=False)[1]
 
 
-def lamp_parts(positions, triangles):
+def lamp_parts(positions, triangles, share=MIN_LAMP_SHARE):
     """The lamps in one triangle geometry, as lampPartsOf in static/facility_layout_light_pools.js: a list of
-    (centre, aim, area) in the geometry's own coordinates."""
+    (centre, aim, area) in the geometry's own coordinates. SHARE 0 takes every piece with a downward patch, as the
+    view's bulbsOf does (a low outdoor light's lamps)."""
     positions = np.asarray(positions, dtype=np.float64)
     triangles = np.asarray(triangles, dtype=np.int64).reshape(-1, 3)
     if not len(triangles):
@@ -184,7 +194,7 @@ def lamp_parts(positions, triangles):
     for owner_piece in np.unique(owner[keep]):
         rows = keep & (owner == owner_piece)
         area = patch_area[rows].sum()
-        if area <= 0 or area < MIN_LAMP_SHARE * surface[owner_piece]:
+        if area <= 0 or area < share * surface[owner_piece]:
             continue
         centre = np.array([sums[key][rows].sum() for key in ("x", "y", "z")]) / area
         aim = np.array([sums[key][rows].sum() for key in ("nx", "ny", "nz")])
@@ -281,17 +291,18 @@ def _geometry(model, part):
     return part
 
 
-def _model_lamps(model, primitive, source_to_canonical):
+def _model_lamps(model, primitive, source_to_canonical, share=MIN_LAMP_SHARE):
     """A part's lamps in its own frame as the view holds it (mirrored across the model's x = 0 with the winding
-    restored), and the part's matrix in the placed model (sourceToCanonical, then the node chain)."""
+    restored), and the part's matrix in the placed model (sourceToCanonical, then the node chain). SHARE as
+    lamp_parts."""
     cache = primitive.setdefault("lamps", {})
     _geometry(model, primitive)
-    key = tuple(np.round(source_to_canonical.reshape(-1), 9))
+    key = (tuple(np.round(source_to_canonical.reshape(-1), 9)), share)
     if key not in cache:
         local = source_to_canonical @ primitive["node"]
         reflect = np.linalg.inv(local) @ MIRROR @ local
         points = np.c_[primitive["positions"], np.ones(len(primitive["positions"]))] @ reflect.T
-        cache[key] = (local, lamp_parts(points[:, :3], primitive["triangles"][:, [0, 2, 1]]))
+        cache[key] = (local, lamp_parts(points[:, :3], primitive["triangles"][:, [0, 2, 1]], share))
     return cache[key]
 
 
@@ -384,8 +395,11 @@ def _area_lit(shapes, mode, x, z):
 def find_lamps(layout, catalog, library, project_root):
     """Every lamp of a general or outdoor Lights finish in the layout, with whether the saved scene has it on."""
     data = lamp_data(library)
+    emissions = {key: row.get("emission") or {} for key, row in library["appearances"].items()}
+    low = {key for key, emission in emissions.items() if emission.get("low") is True}
+    uplights = {key for key, emission in emissions.items() if emission.get("uplight") is True}
     switch_on, shapes, mode, _ = scene_switches(layout)
-    lamps, unread, signals, models = [], set(), Counter(), {}
+    lamps, unread, signals, upward, models = [], set(), Counter(), Counter(), {}
     for placement in layout.get("placements", []):
         record = catalog.get((placement.get("assetId"), placement.get("assetDefinitionRevision")))
         if record is None:
@@ -409,6 +423,9 @@ def find_lamps(layout, catalog, library, project_root):
             row = library["appearances"].get(finish) if finish else None
             if not row or not row.get("emission"):
                 continue
+            if finish in uplights:    # it lights the palm, plant or wall it faces, not the ground
+                upward[row.get("label", finish)] += 1
+                continue
             if finish not in data or (pattern and pattern != "steady"):
                 signals[row.get("label", finish)] += 1
                 continue
@@ -418,7 +435,7 @@ def find_lamps(layout, catalog, library, project_root):
                 matrix = placement_matrix(placement["transform"]), _matrix(frame)
             place, frame = matrix
             try:
-                local, parts = _model_lamps(model, primitive, frame)
+                local, parts = _model_lamps(model, primitive, frame, 0.0 if finish in low else MIN_LAMP_SHARE)
             except Exception:  # noqa: BLE001 -- as above
                 unread.add(placement["assetId"])
                 continue
@@ -441,12 +458,12 @@ def find_lamps(layout, catalog, library, project_root):
     kept = []
     for lamp, ground in zip(lamps, below):
         height = lamp["y"] - float(ground)
-        if height < MIN_HEIGHT:
-            continue    # as for the pools: a glow this low is no lamp
+        if height < (LOW_MIN_HEIGHT if lamp["finish"] in low else MIN_HEIGHT):
+            continue    # as for the pools: a glow this low is no lamp (a low outdoor light's, from LOW_MIN_HEIGHT)
         on = switch_on and _area_lit(shapes, mode, lamp["x"], lamp["z"])
         kept.append(dict(lamp, heightMeters=round(height, 2), on=bool(on),
                          off=None if on else ("switch" if not switch_on else "area")))
-    return kept, {"unreadModels": sorted(unread), "signalLightParts": dict(signals)}
+    return kept, {"unreadModels": sorted(unread), "signalLightParts": dict(signals), "uplightParts": dict(upward)}
 
 
 # Brightness (CC2) --------------------------------------------------------------------------------------------------
@@ -840,6 +857,8 @@ def check_lighting_coverage(layout, catalog, library, arguments, project_root=No
         summary["lamps"]["unreadModels"] = notes["unreadModels"]
     if notes["signalLightParts"]:
         summary["lamps"]["signalLightsNotCounted"] = notes["signalLightParts"]
+    if notes["uplightParts"]:
+        summary["lamps"]["uplightsNotCounted"] = notes["uplightParts"]
     if result["totals"]["maximum"] <= 0:
         summary["darkSpots"]["note"] = ("No lamp that is on lights this area: it is dark everywhere." if lamps else
                                         "This layout has no general or outdoor lights.")

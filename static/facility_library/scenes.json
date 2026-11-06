@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "libraryVersion": "2026.11.02.1",
+  "libraryVersion": "2026.11.05.1",
   "notes": "A scene changes only the viewport: background, lighting, reflections and shadows. It never changes the layout.",
   "groups": [
     {

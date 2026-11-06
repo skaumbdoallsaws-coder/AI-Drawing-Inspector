@@ -714,6 +714,25 @@ zones in the gym (training floors 3.6 m, boxing 4.2 m, soccer 6.2 m). Tile rooms
 - **Frame time** (gym, roof layer off, median ms before -> after): overview 80.6 -> 79.4; free weights 47.7 -> 48.5;
   cardio-reception step 49.9 -> 44.8. No cost shows.
 
+## Low lights and uplights (2026-11-05, gym-lights)
+
+For the gym lighting demo (bollards, lanterns and uplights in the gym's garden). Opt-in through three new finishes, so
+every existing finish draws and counts as before (Factory 02, the game room).
+
+- **Low outdoor lights.** A Lights finish whose emission has `"low": true` (it needs a beam angle and is never an
+  accent spot) throws its pool on the ground from `LOW_MIN_HEIGHT` (0.1 m) up, where every other lamp needs 3 m. Its
+  lamps are the glowing pieces with any patch facing down (`bulbsOf`: a lantern's glass faces down only at its foot,
+  so the share rule would miss it). Its pool is marked `low` and shows no beam. Between 0.5 and 3 m up it is also a
+  spot light candidate near the view, as a pendant is. The coverage check counts it the same way: from 0.1 m, every
+  glowing piece with a downward patch (`lamp_parts(..., share=0)`).
+- **Uplights.** An accent finish whose emission has `"uplight": true` is aimed along the patches of its lens that
+  face up (`lampsOf(geometry, true)`: the share rule upside down), so a spike light at a palm's foot lights the palm.
+  Like every accent spot it throws no pool. The coverage check leaves uplights out (they light what they face, not the
+  ground) and lists them in the summary as `uplightsNotCounted`.
+- **Finishes** (library 2026.11.05.1): Bollard light warm (`light-bollard-warm`, 150 degrees, 600 lm), Lantern warm
+  (`light-lantern-warm`, 120 degrees, 400 lm, about 2700 K) and Garden uplight warm (`light-garden-uplight`, 40
+  degrees, 400 lm). Sage is told in one sentence each (list_library).
+
 ## L7 results (2026-10-31, test copy)
 
 What L7 added:

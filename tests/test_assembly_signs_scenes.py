@@ -213,7 +213,7 @@ def test_the_assembly_view_draws_scenes_and_signs_and_the_assembly_tab_has_its_l
             'src="/static/vendor/three/0.128.0/examples/js/loaders/RGBELoader.js"',
             'src="/static/assembly_library_panel.js?v=',
             'id="assemblyLibraryPanelHost" hidden',
-            "const FACILITY_LIBRARY_VERSION = '2026.11.02.1';",
+            "const FACILITY_LIBRARY_VERSION = '2026.11.05.1';",
             # One refresh at a time; it resolves once the scene and signs are drawn, which the capture awaits.
             "state._assyAppearanceChain = (state._assyAppearanceChain || Promise.resolve()).then(run, run);",
             "if (state.assyScene && redraw) await _assemblySceneApply(state.assyFinish.scene);",

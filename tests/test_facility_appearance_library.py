@@ -108,7 +108,8 @@ def test_lights_glow_in_the_facility_view_and_stay_out_of_the_assembly_lists():
     lights = {key for key, row in library["appearances"].items() if row["category"] == "lights"}
     assert lights == {"light-cool-white-led", "light-warm-white", "light-exit-green", "light-beacon-amber", "light-alarm-red",
                       "light-signal-blue", "light-stack-red", "light-stack-amber", "light-stack-green",
-                      "light-pole-led", "light-wall-led", "light-dock-led", "light-accent-spot"}
+                      "light-pole-led", "light-wall-led", "light-dock-led", "light-accent-spot",
+                      "light-bollard-warm", "light-lantern-warm", "light-garden-uplight"}
     for row in library["appearances"].values():
         # Only the Lights glow; each keeps an unlit color (the plastic when switched off) and a rendered thumbnail.
         assert bool(row.get("emission")) == (row["category"] == "lights"), row["appearanceId"]
@@ -129,10 +130,17 @@ def test_lights_glow_in_the_facility_view_and_stay_out_of_the_assembly_lists():
     # The outdoor ones have a beam angle (L8): the evening scene shows a beam and a pool where it lands.
     beams = {row["appearanceId"]: row["emission"].get("beamAngleDegrees") for row in listed["items"]}
     assert {key: value for key, value in beams.items() if value} == {
-        "light-pole-led": 110, "light-wall-led": 100, "light-dock-led": 70, "light-accent-spot": 30}
+        "light-pole-led": 110, "light-wall-led": 100, "light-dock-led": 70, "light-accent-spot": 30,
+        "light-bollard-warm": 150, "light-lantern-warm": 120, "light-garden-uplight": 40}
     # The accent spot (2026-11-02) lights what its lens faces in the evening scene, with a spot light, not a pool.
     accents = {row["appearanceId"] for row in listed["items"] if row["emission"].get("accent")}
-    assert accents == {"light-accent-spot"}
+    assert accents == {"light-accent-spot", "light-garden-uplight"}
+    # Low outdoor lights and an uplight (2026-11-05, the gym's garden).
+    assert {row["appearanceId"] for row in listed["items"] if row["emission"].get("low")} == {
+        "light-bollard-warm", "light-lantern-warm"}
+    assert {row["appearanceId"] for row in listed["items"] if row["emission"].get("uplight")} == {"light-garden-uplight"}
+    assert "Garden uplight warm (emission.uplight)" in tool_specs()[0]["description"]
+    assert "Bollard light warm and Lantern warm (emission.low)" in tool_specs()[0]["description"]
     accent = library["appearances"]["light-accent-spot"]
     assert accent["label"] == "Accent spot LED" and accent["estimate"]["lumens"] == 700
     assert accent["estimate"]["beamAngleDegrees"] == 30 and "8 m" in accent["description"]
@@ -146,6 +154,14 @@ def test_lights_glow_in_the_facility_view_and_stay_out_of_the_assembly_lists():
     assert not _valid_emission({"color": "#ffffff", "intensity": 1, "accent": True}), "an accent spot has a beam"
     assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 30, "accent": False})
     assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 30, "accent": 1})
+    assert _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 150, "low": True})
+    assert not _valid_emission({"color": "#ffffff", "intensity": 1, "low": True}), "a low light has a beam"
+    assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 150, "low": 1})
+    assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 30, "accent": True, "low": True})
+    assert _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 40, "accent": True, "uplight": True})
+    assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 40, "uplight": True}), "accent"
+    assert not _valid_emission({"color": "#ffffff", "intensity": 1, "beamAngleDegrees": 40, "accent": True,
+                                "uplight": False})
     assert "emission.pattern" in tool_specs()[0]["description"]
     assert "Lights finish: the light's color, lit and unlit" in listed["adjustments"]
     assert all("emission" not in row for row in library_summary("appearances", category="metals"))

@@ -86,6 +86,18 @@ place_asset, even off the helper's spots: in a car park or yard it is then stage
 a reason to refuse or move it. Light fittings come lit: no finish step.
 For how well an area is lit, or its dark spots, call check_lighting_coverage. Call its numbers an estimate, not a
 lighting design, and never say a layout meets or fails a lighting code or standard.
+Lighting a garden, a patio, a lounge or a bar: when the user asks where lights should go or how many, choose from
+these rules, place them, and say in a sentence or two what you chose and why. The position helper is only for
+outdoor pole lights and wall lights by an outside door; place every other light with place_asset.
+- Walkways and lawn edges: bollards every 3 to 5 m along a side, about 0.5 m in from the edge.
+- Palms, plants and feature walls: an uplight 0.3 to 0.5 m from the trunk or wall, facing it; two for a big palm.
+- Under a pergola roof: festoon strings hung under the roof (metadata.mountingSurface with the roof's placementId),
+  2 to 4 side by side about 0.9 m apart, inside the roof's footprint.
+- Outdoor workout areas and courts: area light poles near the edge, facing in, about 3 times their height apart.
+- Over a bar or a table: pendants hung from the ceiling 0.75 to 0.9 m above its top, about 0.6 to 0.8 m apart.
+- Lounge and bar walls: sconces with their base about 1.5 m up, 2.5 to 3 m apart, clear of doors and screens; a
+  neon sign on the wall behind the bar.
+- For ambiance: warm, layered light (low lights, accents and a few pendants) rather than more ceiling light.
 Only when the user asks to see, show, look at or go to something ("show me Assembly Cell A06", "take me to the
 dock doors", "show me what you changed"), call show_facility_views: query with what they named, in their words
 (the server resolves zone, floor-marking and equipment names; a zone brings what stands in it), targetIds when you

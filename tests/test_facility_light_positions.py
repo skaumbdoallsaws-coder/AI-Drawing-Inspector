@@ -104,6 +104,22 @@ def test_a_car_park_pole_goes_on_the_strip_between_head_to_head_rows_clear_of_ot
     assert spot(found[0]) == pytest.approx((21.2, 13.6)), "10 m from the light already there"
 
 
+def test_a_low_light_keeps_no_pole_away_and_a_pole_does():
+    """2026-11-05: only another pole (a light at least POLE_HEIGHT tall) keeps a new pole SPACING away; a bollard,
+    an uplight or a festoon string near the spot does not (it still blocks the ground it stands on)."""
+    bollard = asset("asset-bollard", 0.18, 0.18, 0.85, ["lighting", "bollard", "outdoor"])
+    catalog = dict(CATALOG, **{bollard["assetId"]: bollard})
+    layout = car_park()
+    layout["placements"].append(place("pl-bollard", bollard, 13.0, 0.0, 13.6))
+    found = suggest_light_positions(layout, catalog, {"assetId": POLE["assetId"], "zoneId": "zn-park",
+                                                      "count": 2})["positions"]
+    assert [spot(item) for item in found] == [pytest.approx((10.0, 13.6)), pytest.approx((21.2, 13.6))]
+    layout["placements"][-1] = place("pl-pole", POLE, 13.0, 0.0, 13.6)
+    found = suggest_light_positions(layout, catalog, {"assetId": POLE["assetId"], "zoneId": "zn-park",
+                                                      "count": 2})["positions"]
+    assert all(math.dist(spot(item), (13.0, 13.6)) >= SPACING for item in found)
+
+
 def test_the_ground_and_placements_decide_where_a_pole_can_stand():
     layout = yard()
     layout["extensions"] = {"facilityGround": {"schemaVersion": 1, "surfaces": [
@@ -308,3 +324,16 @@ def test_sage_has_the_tool_with_a_progress_line():
     assert spec["input_schema"]["required"] == ["assetId", "zoneId"]
     assert "snapRelationship" in spec["description"] and "come lit" in spec["description"]
     assert describe(NAME, {"zoneId": "zn-yard-all"})["done"] == "Checked clear spots for the light"
+
+
+def test_sage_has_a_lighting_playbook_for_its_opinions():
+    """2026-11-05 (the gym lighting demo): asked where lights should go or how many, Sage chooses from a few rules
+    and says what it chose; the position helper is only for outdoor poles and wall lights by a door."""
+    from ai_inspector.codex_runtime.pilot import EDIT_INSTRUCTIONS
+    text = " ".join(EDIT_INSTRUCTIONS.split())
+    for rule in ("The position helper is only for outdoor pole lights and wall lights by an outside door",
+                 "bollards every 3 to 5 m", "an uplight 0.3 to 0.5 m from the trunk or wall, facing it",
+                 "festoon strings hung under the roof (metadata.mountingSurface with the roof's placementId)",
+                 "about 3 times their height apart", "0.75 to 0.9 m above its top",
+                 "sconces with their base about 1.5 m up, 2.5 to 3 m apart", "warm, layered light"):
+        assert rule in text, rule

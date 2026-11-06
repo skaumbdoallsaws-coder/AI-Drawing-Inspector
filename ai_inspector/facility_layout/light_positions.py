@@ -8,7 +8,8 @@ light, snapRelationship) for place_asset, from the layout's own geometry:
   parked head to head, on an unpainted island between two painted lanes, or near the zone's edge. Never in a bay
   or a bay's approach, in a painted lane (the strip between two long parallel lines with direction arrows between
   them, running on past the lines' ends), on paint, in a route corridor or on another placement, within
-  SPACING of another light, or where the layout's zones refuse equipment.
+  SPACING of another pole (a light at least POLE_HEIGHT tall: a bollard, an uplight or a festoon string keeps no
+  pole away, 2026-11-05), or where the layout's zones refuse equipment.
 - A wall-mounted fitting goes on the outside face of a wall beside each opening in the zone's walls (a gap between
   two wall segments in line), its back on the wall, as high as the wall allows up to WALL_LIGHT_TOP. A wall has no
   lintel over a gap, so a light "over the door" goes beside it, at the top of the wall. A mount in a walkway, or
@@ -48,6 +49,7 @@ LANE_WIDTH = (2.5, 15.0)    # m between the two lines of a lane or an island
 LANE_EXTENSION = 6.0        # m a painted lane runs on past its lines' ends (where vehicles turn in and out)
 AREA_ROLES = {"pedestrian_lane", "forklift_lane", "keep_clear"}   # painted areas that are kept clear
 OVERHEAD = 4.5              # m above the floor: a placement this high does not block the ground
+POLE_HEIGHT = 3.0           # m: a light at least this tall is a pole; a lower one (a bollard) keeps no pole away
 WALL_LIGHT_TOP = 4.6        # m above the floor, the highest a wall light goes
 WALL_LIGHT_LOWEST = 2.2     # m above the floor, the lowest (above a door head)
 WALL_GAP = 0.003            # m between a wall light's back plate and the wall
@@ -76,7 +78,7 @@ def tool_spec():
         "(north is +z, east +x). Poles: best first on the strip between parking rows parked head to head, on an "
         "unpainted island between two painted lanes, or near the zone's edge; never in a bay or its approach, a "
         "painted lane (two long lines with direction arrows between them), on paint, a walkway or route corridor, or "
-        "within 10 m of another light. A pole light's LED head faces straight down, so its turn does not matter. "
+        "within 10 m of another pole light. A pole light's LED head faces straight down, so its turn does not matter. "
         "Wall lights: on the outside face of the wall beside each door opening (a gap between wall segments), back "
         "plate (-Z) on the wall, lens facing down and out, as high as the wall allows up to 4.6 m; a wall has no "
         "lintel over a gap, so a light 'over the door' goes beside it at the top of the wall. Copy a position's "
@@ -324,9 +326,10 @@ def _pole_candidates(layout, catalog, asset, zone, edge, at=None, turn=None):
         p = placement["transform"]["position"]
         if record is None or not near.contains(Point(p["x"], p["z"])):
             continue
-        low, _ = _aabb(record)
+        low, high = _aabb(record)
         tags = _tags(record)
-        if "lighting" in tags and "wall-mounted" not in tags:
+        if ("lighting" in tags and "wall-mounted" not in tags and low and high
+                and float(high["y"]) - float(low["y"]) >= POLE_HEIGHT):
             lights.append((p["x"], p["z"]))
         if low and float(p["y"]) + float(low["y"]) >= floor + OVERHEAD:
             continue

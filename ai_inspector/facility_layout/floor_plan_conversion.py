@@ -35,10 +35,16 @@ proposal the user reviews; a conversion is never applied directly (operation_pro
   swinging both ways is one door, and swings there that overlap without matching stay drawing. Swings that disagree
   about a break, or one that fits two breaks, leave the door unclear and the break stays. A door drawn as one
   polyline (its leaf and its swing) reads like one drawn as a line and an arc.
-- Columns ("column") come in a later phase: listed, not converted.
+- Columns ("column"): each closed outline on a column layer that no other one there holds is a native column: a
+  circle (one read as a circle, or twelve or more corners all one distance from their middle) is a round column of
+  its diameter, four corners at right angles a rectangular one (its width along its first side, turned to match).
+  A block insert's entities on those layers are one group: its outermost outlines are its columns and the rest of it
+  belongs to them. Each column keeps the drawing entity it came from (the insert, for a block) and waits for the
+  column height; any other shape, and a column drawn as loose lines, stays drawing.
 
-Existing walls and zones are never changed: a candidate whose id is already in the layout is reported as there (or
-edited since) and left alone, and one that lands on a wall or zone already on the plan is refused. The outer walls
+Existing walls, zones and columns are never changed: a candidate whose id is already in the layout is reported as
+there (or edited since) and left alone, and one that lands on a wall, zone or column already on the plan is
+refused. The outer walls
 are replaced only when the user says so, and the review says what the replacement drops.
 
 The work is bounded: the pieces, outlines and door symbols read, and the grid cells and neighbors visited (lines are
@@ -53,7 +59,10 @@ import json
 import math
 import re
 
-CONVERTER_VERSION = "fp-convert-4"
+from .columns import (DEFAULT_COLOR as COLUMN_COLOR, MAX_COLUMNS, MAX_ENTITY_ID, MAX_SIZE as MAX_COLUMN_SIZE,
+                      MIN_SIZE as MIN_COLUMN_SIZE)
+
+CONVERTER_VERSION = "fp-convert-5"
 ANGLE_TOLERANCE = math.radians(1.0)  # parallel or collinear
 SIN_TOLERANCE = math.sin(ANGLE_TOLERANCE)
 GENTLE_BEND = math.radians(25.0)  # a turn below this between straight runs makes them part of a curve
@@ -77,6 +86,9 @@ MAX_OPERATIONS = 500  # the operation kernel's transaction limit
 MAX_PIECES = 20000  # straight pieces on the wall layers
 MAX_LOOPS = 5000  # closed outlines on the room and outline layers
 MAX_DOOR_SYMBOLS = 20000  # swings and straight pieces on the door layers
+MAX_COLUMN_ENTITIES = 20000  # entities on the column layers
+ROUND_CORNERS = 12  # an outline not read as a circle needs this many corners, all one distance from the middle
+ROUND_SLACK = 0.02  # of the radius: how far a round outline's corners may sit from one distance
 MAX_WORK = 6_000_000  # grid cells and neighbors one conversion may visit (_Work): a few seconds at most
 OVERLAP_WORK = 50  # the work of one overlap of two outlines worked out (a room and a zone), in those units
 BOX_WORK = 4  # the work of checking that two lines closing a pair's two ends make a box with it, in those units
@@ -94,7 +106,7 @@ ZONE_TYPES = ("workcell", "storage", "staging", "receiving", "shipping", "inspec
 STRAIGHT_TYPES = frozenset({"LINE", "LWPOLYLINE", "POLYLINE"})
 WALL_ROLES = ("wall_centerline", "wall_faces")
 LOOP_ROLES = ("room_boundary", "perimeter")
-CANDIDATE_ID = re.compile(r"(iw|zn|ol|dr)-fp-[a-f0-9]{16}")
+CANDIDATE_ID = re.compile(r"(iw|zn|ol|dr|col)-fp-[a-f0-9]{16}")
 
 MESSAGES = {
     # Candidates that are not added.
@@ -123,6 +135,10 @@ MESSAGES = {
     "door_settings": "Give the outer doors' height to add the outer walls with their doors, or leave the doors out.",
     "door_ambiguous": "The door swings here disagree, or one fits another break too, so the door is unclear; the "
                       "wall keeps its break.",
+    "column_settings": "Give the column height to add the columns.",
+    "column_size": "Its sides are not 0.05 to 5 m.",
+    "column_there": "A column is already on the plan here.",
+    "overlapping_columns": "It overlaps another column from the drawing.",
     # Drawn entities that are not converted.
     "curve": "A curve: it stays as drawing.",
     "no_matching_face": "No matching face line: not a wall.",
@@ -131,7 +147,9 @@ MESSAGES = {
     "crosses_itself": "It crosses itself.",
     "too_small": "Too small to be a room.",
     "too_many_vertices": "More corners than a zone takes (256).",
-    "later_phase": "Columns are converted in a later step; it stays as drawing.",
+    "column_shape": "On a column layer but not a closed circle or rectangle (or a block holding one): it stays as "
+                    "drawing.",
+    "column_inside": "Inside another column outline on a column layer: part of that column.",
     "door_unmatched": "A door swing that fits no break in a wall and no edge of the outer walls: it stays drawing.",
     "door_leaf_missing": "A door swing on the outer walls without its door leaf: an arc alone is not enough to cut a "
                          "door there; it stays drawing.",
@@ -173,8 +191,9 @@ def normalize_settings(value) -> dict:
     """The conversion request's settings, closed and checked (ConversionSettingsError). Each part is optional, and so
     are the wall and outer wall heights: what has no height is listed and not added, while the thicknesses and the
     outline chosen apply at once."""
-    source = _closed({} if value is None else value, "settings", {"walls", "rooms", "outline", "doors", "excluded"})
-    out = {"walls": None, "rooms": None, "outline": None, "doors": None, "excluded": []}
+    source = _closed({} if value is None else value, "settings",
+                     {"walls", "rooms", "outline", "doors", "columns", "excluded"})
+    out = {"walls": None, "rooms": None, "outline": None, "doors": None, "columns": None, "excluded": []}
     walls = source.get("walls")
     if walls is not None:
         walls = _closed(walls, "walls", {"heightMeters", "thicknessMeters", "maxThicknessMeters"})
@@ -221,6 +240,11 @@ def normalize_settings(value) -> dict:
         doors = _closed(doors, "doors", {"heightMeters"})
         out["doors"] = {"heightMeters": None if doors.get("heightMeters") is None
                         else _number(doors["heightMeters"], "Door height", MIN_HEIGHT, MAX_HEIGHT)}
+    columns = source.get("columns")
+    if columns is not None:
+        columns = _closed(columns, "columns", {"heightMeters"})
+        out["columns"] = {"heightMeters": None if columns.get("heightMeters") is None
+                          else _number(columns["heightMeters"], "Column height", MIN_HEIGHT, MAX_HEIGHT)}
     excluded = source.get("excluded", [])
     if not isinstance(excluded, list) or len(excluded) > MAX_SETTINGS_IDS:
         raise ConversionSettingsError(f"excluded lists at most {MAX_SETTINGS_IDS} candidate ids.")
@@ -1258,6 +1282,198 @@ def _compile_problem(error: ValueError) -> tuple[str, str]:
     return "invalid", text[:200]
 
 
+COLUMN_SIZES = {"rectangle": ("widthMeters", "depthMeters"), "circle": ("diameterMeters",)}
+COLUMN_FIELDS = {"rectangle": ("widthMeters", "depthMeters", "rotationDegrees"), "circle": ("diameterMeters",)}
+
+
+def _column_shape(ring, kind):
+    """A column's shape from a closed outline RING (its corners on the plan, as _loop gives them) drawn as KIND: a
+    circle (an entity read as one, or ROUND_CORNERS or more corners all one distance from their middle), a rectangle
+    (four corners at right angles, opposite sides equal), or None. A rectangle's rotation is a column's (a compass
+    turn: T lays the width along (cos T, -sin T)), 0 up to 90 degrees, its width along the side that turn gives, so
+    one rectangle has one shape whichever corner it is drawn from. A circle's middle is the least-squares circle
+    through its corners (exact for corners on a circle, however unevenly spaced)."""
+    count = len(ring)
+    cx, cz = sum(point[0] for point in ring) / count, sum(point[1] for point in ring) / count
+    if count == 4:
+        sides = [_sub(ring[(k + 1) % 4], ring[k]) for k in range(4)]
+        lengths = [math.hypot(*side) for side in sides]
+        if min(lengths) <= TOLERANCE:
+            return None
+        units = [(side[0] / length, side[1] / length) for side, length in zip(sides, lengths)]
+        turns = [_cross(units[k], units[(k + 1) % 4]) for k in range(4)]
+        square = math.cos(ANGLE_TOLERANCE)
+        if not (all(turn >= square for turn in turns) or all(turn <= -square for turn in turns)) \
+                or abs(lengths[0] - lengths[2]) > TOLERANCE or abs(lengths[1] - lengths[3]) > TOLERANCE:
+            return None
+        width, depth = (lengths[0] + lengths[2]) / 2, (lengths[1] + lengths[3]) / 2
+        turn = round(math.degrees(math.atan2(-units[0][1], units[0][0])) % 180.0, 3) % 180.0
+        if turn >= 90.0:
+            turn, width, depth = turn - 90.0, depth, width
+        return {"shape": "rectangle", "center": (cx, cz), "widthMeters": width, "depthMeters": depth,
+                "rotationDegrees": turn}
+    if kind != "CIRCLE" and count < ROUND_CORNERS:
+        return None
+    # The circle a*u + b*v + c = u^2 + v^2 that fits best (u, v from the corners' mean): its middle is (a/2, b/2).
+    us, vs = [x - cx for x, _z in ring], [z - cz for _x, z in ring]
+    suu, svv, suv = sum(u * u for u in us), sum(v * v for v in vs), sum(u * v for u, v in zip(us, vs))
+    ru = sum(u * (u * u + v * v) for u, v in zip(us, vs)) / 2
+    rv = sum(v * (u * u + v * v) for u, v in zip(us, vs)) / 2
+    determinant = suu * svv - suv * suv
+    if determinant <= ROUNDING * max(suu * svv, ROUNDING):
+        return None
+    cx, cz = cx + (ru * svv - rv * suv) / determinant, cz + (rv * suu - ru * suv) / determinant
+    radii = [math.dist(point, (cx, cz)) for point in ring]
+    radius = sum(radii) / count
+    if radius > 0 \
+            and max(abs(value - radius) for value in radii) <= max(TOLERANCE, ROUND_SLACK * radius):
+        return {"shape": "circle", "center": (cx, cz), "diameterMeters": 2 * radius}
+    return None
+
+
+def _columns(entities, layout, reference_id, import_id, column_settings, excluded, floor, work, unconverted):
+    """The column candidates (in reading order: by center, z then x) from ENTITIES, the entities on the column layers
+    with their points on the plan, and the number of columns already on the plan. Entities from one block insert
+    (the innermost; one copy of an array insert) are one group, the others another: a group's closed outlines that
+    no larger one of the group covers are its columns. A column from an insert keeps the insert as its source and
+    has all of the insert's entities; leftovers stay drawing with the reason."""
+    from shapely.geometry import Polygon
+    from shapely.strtree import STRtree
+    from .columns import compile_columns, footprint
+    groups = {}  # the insert an entity came from (None: none) -> its entities, in the drawing's order
+    for entity, drawn in entities:
+        identifier = str(entity.get("id"))
+        groups.setdefault(identifier.rsplit("/", 1)[0] if "/" in identifier else None, []).append((entity, drawn))
+    found = []  # (shape, the entities it came from, the entity it keeps as its source, its block)
+    for insert, members in groups.items():
+        outlines, loose = [], []
+        for entity, drawn in members:
+            ring, _reason = _loop(drawn, bool(entity.get("closed")))
+            polygon = Polygon(ring) if ring is not None else None
+            if polygon is not None and polygon.is_valid and polygon.area > 0:
+                outlines.append((ring, polygon, entity))
+            else:
+                loose.append(entity)
+        held = set()
+        if len(outlines) > 1:
+            tree = STRtree([polygon for _ring, polygon, _entity in outlines])
+            for index, (_ring, polygon, _entity) in enumerate(outlines):
+                near = tree.query(polygon)
+                work.spend(len(near))
+                if any(int(j) != index and outlines[int(j)][1].area > polygon.area + ROUNDING
+                       and outlines[int(j)][1].covers(polygon) for j in near):
+                    held.add(index)
+        made = []
+        for index, (ring, _polygon, entity) in enumerate(outlines):
+            if index in held:
+                continue
+            shape = _column_shape(ring, entity.get("type"))
+            if shape is None:
+                unconverted.add(entity, "column_shape")
+            else:
+                made.append((shape, entity))
+        if insert is None:
+            for shape, entity in made:
+                found.append((shape, [entity], str(entity.get("id")), None))
+            for index in sorted(held):
+                unconverted.add(outlines[index][2], "column_inside")
+            for entity in loose:
+                unconverted.add(entity, "column_shape")
+            continue
+        everything = [entity for entity, _drawn in members]
+        blocks = everything[0].get("blocks") if isinstance(everything[0].get("blocks"), list) else []
+        for shape, _entity in made:
+            found.append((shape, everything, insert, str(blocks[-1]) if blocks else None))
+        if not made:
+            for entity in loose + [outlines[index][2] for index in sorted(held)]:
+                unconverted.add(entity, "column_shape")
+
+    extensions = layout.get("extensions") if isinstance(layout.get("extensions"), dict) else {}
+    saved = extensions.get("facilityColumns") if isinstance(extensions.get("facilityColumns"), dict) else {}
+    existing = [row for row in saved.get("columns", []) if isinstance(row, dict)] \
+        if isinstance(saved.get("columns"), list) else []
+    by_id = {row.get("columnId"): row for row in existing}
+    existing_shapes, existing_ids = [], []
+    for row in existing:
+        try:
+            shape = Polygon([(float(point["x"]), float(point["z"])) for point in row["footprint"]])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if shape.is_valid and shape.area > 0:
+            existing_shapes.append(shape)
+            existing_ids.append(row.get("columnId"))
+    existing_tree = STRtree(existing_shapes) if existing_shapes else None
+
+    rows = []
+    for shape, members, entity_id, block in found:
+        center = {"x": _r(shape["center"][0], 4), "z": _r(shape["center"][1], 4)}
+        if shape["shape"] == "rectangle":
+            sizes = {"widthMeters": _r(shape["widthMeters"], 4), "depthMeters": _r(shape["depthMeters"], 4),
+                     "rotationDegrees": _r(shape["rotationDegrees"], 3)}
+        else:
+            sizes = {"diameterMeters": _r(shape["diameterMeters"], 4)}
+        # Ids come from the drawing and the shape only, so converting again finds a column there.
+        column_id = "col-fp-" + _digest(import_id, "column", shape["shape"], center, sizes)[:16]
+        rows.append(dict({"candidateId": column_id, "shape": shape["shape"], "center": center}, **sizes,
+                         block=block, entityId=entity_id,
+                         layers=sorted({str(entity.get("layer")) for entity in members}),
+                         sources=sorted(str(entity.get("id")) for entity in members)[:MAX_SOURCES]))
+    rows.sort(key=lambda row: (row["center"]["z"], row["center"]["x"], row["candidateId"]))
+
+    height = (column_settings or {}).get("heightMeters")
+    seen, added = set(), _Grid(1.0, work)
+    outlines = []  # the outlines of the columns before this one that are added (or wait to be)
+    for number, row in enumerate(rows, 1):
+        row["label"] = f"Drawing column {number}"
+        record = {"columnId": row["candidateId"], "label": row["label"], "shape": row["shape"],
+                  "center": row["center"]}
+        record.update({key: row[key] for key in COLUMN_FIELDS[row["shape"]]})
+        record.update(heightMeters=height, baseElevation=floor, appearance={"color": COLUMN_COLOR})
+        if 0 < len(row["entityId"]) <= MAX_ENTITY_ID:  # it keeps the entity it came from when the id fits
+            record["source"] = {"referenceId": reference_id, "importId": import_id, "entityId": row["entityId"]}
+        row["heightMeters"] = height
+        row["record"] = record
+        outline = Polygon(footprint(record))
+        middle = (row["center"]["x"], row["center"]["z"])
+        reach = max(math.dist(middle, point) for point in footprint(record))
+        column_id = row["candidateId"]
+        if column_id in by_id:
+            kept = by_id[column_id]
+            same = all(kept.get(key) == record.get(key) for key in ("shape", "center") + COLUMN_FIELDS[row["shape"]])
+            _state(row, "there" if same else "edited", None if same else "edited")
+        elif column_id in seen:
+            _state(row, "refused", "duplicate")
+        elif not all(MIN_COLUMN_SIZE <= row[key] <= MAX_COLUMN_SIZE for key in COLUMN_SIZES[row["shape"]]):
+            _state(row, "refused", "column_size")
+        elif column_id in excluded:
+            _state(row, "excluded")
+        elif existing_tree is not None and any(
+                existing_ids[int(j)] != column_id and existing_shapes[int(j)].intersection(outline).area > ROUNDING
+                for j in _spent(work, existing_tree.query(outline))):
+            _state(row, "refused", "column_there")
+        elif any(outlines[k].intersection(outline).area > ROUNDING for k in added.near(middle, middle, reach)):
+            _state(row, "refused", "overlapping_columns")
+        elif height is None:
+            _state(row, "waiting", "column_settings")
+        else:
+            try:
+                compile_columns({"version": 1, "columns": [record]}, layout)
+                _state(row, "new")
+            except ValueError as exc:
+                _state(row, "refused", *_compile_problem(exc))
+        seen.add(column_id)
+        if row["state"] in ("new", "waiting"):
+            added.add(len(outlines), middle, middle, reach)
+            outlines.append(outline)
+    return rows, len(existing)
+
+
+def _spent(work, found):
+    """FOUND (a search's hits), each spent from the work before it is looked at."""
+    work.spend(OVERLAP_WORK * len(found))
+    return found
+
+
 def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, import_id: str) -> dict:
     """The conversion of GEOMETRY (the stored drawing) placed by REFERENCE (the saved underlay: its alignment and layer
     roles) into LAYOUT, with SETTINGS (normalize_settings). Pure: reads nothing else and changes nothing."""
@@ -1277,6 +1493,7 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     loops = {role: [] for role in LOOP_ROLES}
     texts = []
     door_entities = []
+    column_entities = []
     piece_count = loop_count = 0
     for entity in geometry.get("entities", []):
         role = roles.get(entity.get("layer"), "reference")
@@ -1291,7 +1508,11 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         if not isinstance(points, list) or len(points) < 2 or role == "text":
             continue
         if role == "column":
-            unconverted.add(entity, "later_phase")
+            column_entities.append((entity, [transform(point) for point in points]))
+            if len(column_entities) > MAX_COLUMN_ENTITIES:
+                raise ConversionTooLargeError(
+                    f"The layers given the column role hold more than {MAX_COLUMN_ENTITIES:,} entities, more than one "
+                    "conversion reads. Give the column role to fewer layers.")
             continue
         if role == "door":
             door_entities.append((entity, [transform(point) for point in points]))
@@ -1707,7 +1928,10 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     for number, row in enumerate(door_rows, 1):
         row["label"] = f"Drawing door {number}"
 
-    # Operations, in a fixed order: the outer walls, then walls, then zones.
+    column_rows, existing_columns = _columns(column_entities, layout, reference["referenceId"], import_id,
+                                             settings["columns"], excluded, floor, work, unconverted)
+
+    # Operations, in a fixed order: the outer walls, then walls, then zones, then columns.
     operations = []
     for row in outline_rows:
         if row["state"] == "new":
@@ -1715,12 +1939,19 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     new_walls = [row for row in wall_rows if row["state"] == "new"]
     operations.extend({"op": "upsert_interior_wall", "wall": row["record"]} for row in new_walls)
     operations.extend({"op": "add_zone", "zone": row["record"]} for row in room_rows if row["state"] == "new")
+    new_columns = [row for row in column_rows if row["state"] == "new"]
+    operations.extend({"op": "upsert_column", "column": row["record"]} for row in new_columns)
     blocked = None
     if len(existing_walls) + len(new_walls) > MAX_WALLS:
         blocked = {"code": "too_many_walls",
                    "message": f"{len(new_walls)} new walls and the {len(existing_walls)} already on the plan are more "
                               f"than the {MAX_WALLS} a plan holds. Leave some out, or give the wall roles to fewer "
                               f"layers."}
+    elif existing_columns + len(new_columns) > MAX_COLUMNS:
+        blocked = {"code": "too_many_columns",
+                   "message": f"{len(new_columns)} new columns and the {existing_columns} already on the plan are "
+                              f"more than the {MAX_COLUMNS} a plan holds. Leave some out, or give the column role to "
+                              f"fewer layers."}
     elif len(operations) > MAX_OPERATIONS:
         blocked = {"code": "too_many_changes",
                    "message": f"{len(operations)} changes are more than one review holds ({MAX_OPERATIONS}). "
@@ -1744,7 +1975,7 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     # Every layer given a role is listed in the review, with the layers that gave or refused something.
     used_layers = {layer for layer, role in roles.items() if role not in ("reference", "ignore")}
     used_layers.update(row["layerId"] for row in unconverted.rows)
-    for rows in (wall_rows, room_rows, outline_rows, door_rows):
+    for rows in (wall_rows, room_rows, outline_rows, door_rows, column_rows):
         for row in rows:
             used_layers.update(row["layers"])
     return {
@@ -1756,13 +1987,15 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         "rooms": public(room_rows),
         "outlines": public(outline_rows),
         "doors": public(door_rows),
+        "columns": public(column_rows),
         "unconverted": unconverted.rows,
         "unconvertedCounts": dict(sorted(unconverted.counts.items())),
         "layers": {layer: {"name": names.get(layer), "role": roles.get(layer, "reference")}
                    for layer in sorted(used_layers)},
         "summary": {"walls": counts(wall_rows), "rooms": counts(room_rows), "outlines": counts(outline_rows),
-                    "doors": counts(door_rows),
+                    "doors": counts(door_rows), "columns": counts(column_rows),
                     "operations": len(operations), "wallsOnPlan": len(existing_walls), "wallLimit": MAX_WALLS,
+                    "columnsOnPlan": existing_columns, "columnLimit": MAX_COLUMNS,
                     "blocked": blocked},
         "operations": [] if blocked else operations,
     }

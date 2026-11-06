@@ -42,9 +42,9 @@
     // the layer.
     const ROLE_OPTIONS = [['reference', 'Drawing only'], ['wall_centerline', 'Walls: center lines'],
         ['wall_faces', 'Walls: both faces'], ['perimeter', 'Building outline'], ['room_boundary', 'Room outlines'],
-        ['text', 'Room names'], ['column', 'Columns (later)'], ['door', 'Doors'], ['ignore', 'Ignore']];
+        ['text', 'Room names'], ['column', 'Columns'], ['door', 'Doors'], ['ignore', 'Ignore']];
     const WALL_ROLES = ['wall_centerline', 'wall_faces'];
-    const CONVERTED_ROLES = ['wall_centerline', 'wall_faces', 'perimeter', 'room_boundary'];
+    const CONVERTED_ROLES = ['wall_centerline', 'wall_faces', 'perimeter', 'room_boundary', 'column'];
     // The zone types a room can become (floor_plan_conversion.ZONE_TYPES), named as the zone properties name them.
     const ZONE_TYPE_OPTIONS = [['workcell', 'Department / equipment area'], ['receiving', 'Receiving'],
         ['storage', 'Storage'], ['staging', 'Staging'], ['shipping', 'Shipping'], ['inspection', 'Inspection'],
@@ -58,7 +58,7 @@
     const LISTED_CANDIDATES = 300;
     const OUTDATED_NOTE = 'Changed since this list was made: Update the list to review the change.';
     const CONVERSION_FIELDS = ['wallHeight', 'wallThickness', 'maxThickness', 'outlineHeight', 'outlineThickness',
-        'doorHeight', 'zoneType'];
+        'doorHeight', 'columnHeight', 'zoneType'];
 
     function finite(value) {
         return typeof value === 'number' && Number.isFinite(value);
@@ -403,7 +403,7 @@
 
     function newConversionForm() {
         return { wallHeight: '', wallThickness: '0.2', maxThickness: '0.6', outlineHeight: '', outlineThickness: '0.3',
-            doorHeight: '', zoneType: '', types: {}, loop: null, replace: false, excluded: [] };
+            doorHeight: '', columnHeight: '', zoneType: '', types: {}, loop: null, replace: false, excluded: [] };
     }
 
     function rolesOf(reference) {
@@ -448,6 +448,10 @@
         }
         if (roles.has('room_boundary')) {
             settings.rooms = { zoneType: form.zoneType || null, types: Object.assign({}, form.types) };
+        }
+        if (roles.has('column')) {
+            settings.columns = {};
+            put(settings.columns, 'heightMeters', form.columnHeight);
         }
         return settings;
     }
@@ -1352,7 +1356,8 @@
         section.appendChild(html(doc, 'div', { className: 'ip-flw-floor-plan-heading' }, 'Walls and rooms'));
         if (!CONVERTED_ROLES.some(function (role) { return roles.has(role); })) {
             section.appendChild(html(doc, 'p', { className: 'ip-flw-floor-plan-note' }, 'To turn the drawing into '
-                + 'walls and rooms, choose above what its layers show: walls, room outlines or the building outline.'));
+                + 'walls and rooms, choose above what its layers show: walls, room outlines, the building outline or '
+                + 'columns.'));
             return;
         }
         const form = conversion.form;
@@ -1375,6 +1380,7 @@
             field('outlineThickness', 'Outer wall thickness (m)', '0.01');
             if (roles.has('door')) field('doorHeight', 'Outer door height (m)', '0.1');
         }
+        if (roles.has('column')) field('columnHeight', 'Column height (m)', '0.1');
         if (roles.has('room_boundary')) {
             const row = html(doc, 'label', { className: 'ip-flw-floor-plan-field' }, 'Rooms become zones of type');
             const select = html(doc, 'select', { 'data-fp-setting': 'zoneType', disabled: busy });
@@ -1407,7 +1413,7 @@
         section.appendChild(html(doc, 'p', { className: 'ip-flw-floor-plan-warning', 'data-fp-outdated': 'true',
             hidden: !outdated }, outdated ? OUTDATED_NOTE : ''));
         [['Walls', summary.walls], ['Doors', summary.doors], ['Rooms', summary.rooms],
-            ['Building outline', summary.outlines]].forEach(
+            ['Building outline', summary.outlines], ['Columns', summary.columns]].forEach(
             function (part) {
                 const states = Object.keys(part[1] || {});
                 if (!states.length) return;
@@ -1431,6 +1437,7 @@
         (result.walls || []).forEach(function (row) { rows.push(['wall', row]); });
         (result.doors || []).forEach(function (row) { rows.push(['door', row]); });
         (result.rooms || []).forEach(function (row) { rows.push(['room', row]); });
+        (result.columns || []).forEach(function (row) { rows.push(['column', row]); });
         if (!rows.length) {
             note('Nothing on those layers converts.');
         } else {
@@ -1476,6 +1483,11 @@
                 : row.outline ? ' in the outer walls' : '');
         } else if (kind === 'room') {
             text = row.label + ': ' + round(row.areaSquareMeters, 1) + ' m2';
+        } else if (kind === 'column') {
+            text = row.label + ': ' + (row.shape === 'circle' ? 'round, ' + round(row.diameterMeters, 3) + ' m across'
+                : round(row.widthMeters, 3) + ' x ' + round(row.depthMeters, 3) + ' m'
+                + (row.rotationDegrees ? ', turned ' + round(row.rotationDegrees, 1) + ' degrees' : ''))
+                + (row.block ? ' (block ' + row.block + ')' : '');
         } else {
             text = 'Outline: ' + (finite(row.areaSquareMeters) ? round(row.areaSquareMeters, 1) + ' m2, ' : '')
                 + (row.boundary || []).length + ' corners, walls ' + round(row.thicknessMeters, 3) + ' m thick';

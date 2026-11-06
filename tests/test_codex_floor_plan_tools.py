@@ -294,7 +294,8 @@ def test_sage_plans_the_conversion_and_the_user_approves_it_bound_to_its_origin(
             for row in waiting["data"][kind]} == {"waiting"}
     assert waiting["data"]["reasons"] == {"wall_settings": "Give the wall height to add the walls.",
                                           "zone_type": "Choose its zone type.",
-                                          "outline_settings": "Give the outer wall height to add the outer walls."}
+                                          "outline_settings": "Give the outer wall height to add the outer walls.",
+                                          "column_settings": "Give the column height to add the columns."}
     data = planned["data"]
     assert data["summary"]["operations"] == 3 and data["summary"]["blocked"] is None
     (wall,) = data["walls"]
@@ -306,7 +307,9 @@ def test_sage_plans_the_conversion_and_the_user_approves_it_bound_to_its_origin(
     assert [(row["label"], row["areaSquareMeters"], row["zoneType"]) for row in data["rooms"]] == [
         ("Office", 20.0, "workcell")]
     assert [(row["corners"], row["areaSquareMeters"]) for row in data["outlines"]] == [(4, 600.0)]
-    assert {row["reason"]: row["count"] for row in data["leftAsDrawing"]} == {"later_phase": 1, "wall_end": 3}
+    assert {row["reason"]: row["count"] for row in data["leftAsDrawing"]} == {"wall_end": 3}
+    assert [(row["shape"], row["diameterMeters"], row["state"], row["reason"]) for row in data["columns"]] == [
+        ("circle", 0.5, "waiting", "column_settings")]
     assert data["roomNamesAreDrawingText"] is True
     assert sneaked["ok"] is False and sneaked["error"]["code"] == "codex_design_package_unknown"
     assert staged["ok"], staged

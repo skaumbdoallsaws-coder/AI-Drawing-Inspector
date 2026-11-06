@@ -86,7 +86,10 @@ def near(a, b, tolerance=1e-9):
 
 def test_settings_are_closed_and_checked():
     assert conversion.normalize_settings(None) == {"walls": None, "rooms": None, "outline": None, "doors": None,
-                                                   "excluded": []}
+                                                   "columns": None, "excluded": []}
+    assert conversion.normalize_settings({"columns": {"heightMeters": 6}})["columns"] == {"heightMeters": 6.0}
+    assert conversion.normalize_settings({"columns": {}})["columns"] == {"heightMeters": None}
+    assert conversion.normalize_settings({"excluded": ["col-fp-" + "4" * 16]})["excluded"] == ["col-fp-" + "4" * 16]
     assert conversion.normalize_settings({"doors": {"heightMeters": 2.1}})["doors"] == {"heightMeters": 2.1}
     assert conversion.normalize_settings({"doors": {}})["doors"] == {"heightMeters": None}
     assert conversion.normalize_settings({"excluded": ["dr-fp-" + "3" * 16]})["excluded"] == ["dr-fp-" + "3" * 16]
@@ -107,7 +110,8 @@ def test_settings_are_closed_and_checked():
                 {"rooms": {"types": {"zn-fp-" + "1" * 16: "office"}}}, {"rooms": {"types": {"zone-1": "storage"}}},
                 {"outline": {"heightMeters": 6, "replace": "yes"}}, {"outline": {"heightMeters": 6, "loop": "x"}},
                 {"excluded": ["pl-1"]}, {"excluded": "iw-fp-" + "1" * 16}, {"other": 1}, [],
-                {"doors": {"heightMeters": 0.2}}, {"doors": {"widthMeters": 1}}, {"doors": 2.1}):
+                {"doors": {"heightMeters": 0.2}}, {"doors": {"widthMeters": 1}}, {"doors": 2.1},
+                {"columns": {"heightMeters": 31}}, {"columns": {"color": "#fff"}}, {"excluded": ["col-1"]}):
         with pytest.raises(conversion.ConversionSettingsError):
             conversion.normalize_settings(bad)
 
@@ -168,8 +172,13 @@ def test_the_factory_converts_to_hand_worked_walls_room_and_outline(factory_geom
     assert outline["boundary"] == [{"x": 5.0, "z": 5.0}, {"x": 35.0, "z": 5.0}, {"x": 35.0, "z": 25.0},
                                    {"x": 5.0, "z": 25.0}]
     assert (outline["from"], outline["thicknessMeters"], outline["state"]) == ("line", 0.3, "new")
-    # The jambs and the end line close the wall ends; the column waits for a later step.
-    assert result["unconvertedCounts"] == {"later_phase": 1, "wall_end": 3}
+    # The jambs and the end line close the wall ends; the round column waits for its height.
+    assert result["unconvertedCounts"] == {"wall_end": 3}
+    (column,) = result["columns"]
+    assert {key: column[key] for key in ("shape", "center", "diameterMeters", "state", "reason", "label")} == {
+        "shape": "circle", "center": {"x": 22.5, "z": 11.5}, "diameterMeters": 0.5, "state": "waiting",
+        "reason": "column_settings", "label": "Drawing column 1"}
+    assert result["summary"]["columns"] == {"waiting": 1}
     assert [op["op"] for op in result["operations"]] == ["set_perimeter_walls", "upsert_interior_wall", "add_zone"]
     assert result["summary"]["blocked"] is None and result["summary"]["doors"] == {"new": 1}
     wall = result["operations"][1]["wall"]
@@ -825,10 +834,11 @@ def test_outer_walls_already_there_are_replaced_only_when_asked_and_the_review_s
     assert replaced["operations"][0]["wallSettings"]["interiorColor"] == "#aabbcc"
 
 
-def test_columns_are_listed_for_a_later_step_and_a_stray_door_line_stays_drawing():
+def test_a_column_waits_for_its_height_and_a_stray_door_line_stays_drawing():
     geometry = drawing(square("c1", 0, 0, 0.4, layer="L1"), line("d1", "L2", (0, 0), (1, 0)))
     result = convert(geometry, {"L1": "column", "L2": "door"})
-    assert result["unconvertedCounts"] == {"door_part": 1, "later_phase": 1}
+    assert result["unconvertedCounts"] == {"door_part": 1}
+    assert [(row["state"], row["reason"]) for row in result["columns"]] == [("waiting", "column_settings")]
     assert result["layers"] == {"L1": {"name": "layer L1", "role": "column"},
                                 "L2": {"name": "layer L2", "role": "door"}}
 
@@ -1044,15 +1054,15 @@ def test_an_outer_door_drawn_twice_or_swinging_both_ways_is_one_door():
 
 
 def test_every_reason_keeps_a_listed_row_past_the_listing_limit():
-    # More curves than are listed, then a column: the column's reason still has a row, and so its message.
+    # More curves than are listed, then a stray line on a column layer: its reason still has a row and a message.
     arcs = [{"id": f"a{index}", "layer": "L1", "type": "ARC", "closed": False,
              "points": [[index, 0], [index + 0.5, 0.5]]} for index in range(conversion.MAX_LISTED + 5)]
-    result = convert(drawing(*arcs, square("c1", 0, 20, 0.4, layer="L2")), {"L1": "wall_centerline", "L2": "column"})
-    assert result["unconvertedCounts"] == {"curve": conversion.MAX_LISTED + 5, "later_phase": 1}
+    result = convert(drawing(*arcs, line("c1", "L2", (0, 20), (0.4, 20))), {"L1": "wall_centerline", "L2": "column"})
+    assert result["unconvertedCounts"] == {"curve": conversion.MAX_LISTED + 5, "column_shape": 1}
     reasons = [row["reason"] for row in result["unconverted"]]
-    assert reasons.count("curve") == conversion.MAX_LISTED and reasons.count("later_phase") == 1
-    column = next(row for row in result["unconverted"] if row["reason"] == "later_phase")
-    assert (column["entityId"], column["message"]) == ("c1", conversion.MESSAGES["later_phase"])
+    assert reasons.count("curve") == conversion.MAX_LISTED and reasons.count("column_shape") == 1
+    column = next(row for row in result["unconverted"] if row["reason"] == "column_shape")
+    assert (column["entityId"], column["message"]) == ("c1", conversion.MESSAGES["column_shape"])
 
 
 def test_the_origin_binds_the_source_alignment_layers_settings_and_converter():
@@ -1073,3 +1083,147 @@ def test_the_origin_binds_the_source_alignment_layers_settings_and_converter():
            conversion.conversion_id(IMPORT_ID, moved, "fl-main", "r" * 64, settings),
            conversion.conversion_id(IMPORT_ID, ref, "fl-main", "s" * 64, settings)}
     assert len(ids) == 3
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Columns: on L1, moved by (5, 5) into the 40 m x 30 m plan.
+
+
+COLUMNS = {"L1": "column"}
+HEIGHT = {"columns": {"heightMeters": 6}}
+
+
+def turned_box(entity, center, width, depth, degrees, start=0, reverse=False, layer="L1", **options):
+    """A WIDTH x DEPTH box drawn as a closed polyline, its width along DEGREES (counterclockwise from +x), from corner
+    START, either way round."""
+    c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    corners = [(center[0] + x * c - z * s, center[1] + x * s + z * c)
+               for x, z in ((-width / 2, -depth / 2), (width / 2, -depth / 2), (width / 2, depth / 2),
+                            (-width / 2, depth / 2))]
+    corners = corners[start:] + corners[:start]
+    return poly(entity, layer, corners[::-1] if reverse else corners, **options)
+
+
+def circle(entity, center, radius, steps=64, layer="L1", kind="CIRCLE"):
+    return poly(entity, layer, [(center[0] + radius * math.cos(2 * math.pi * k / steps),
+                                 center[1] + radius * math.sin(2 * math.pi * k / steps)) for k in range(steps)],
+                kind=kind)
+
+
+def test_circles_and_rectangles_on_a_column_layer_become_columns_that_keep_their_entity():
+    geometry = drawing(circle("c1", (2, 3), 0.25), turned_box("c2", (10, 3), 0.6, 0.4, 0),
+                       turned_box("c3", (20, 3), 0.6, 0.4, 30), circle("c4", (2, 10), 0.3, kind="LWPOLYLINE"))
+    waiting = convert(geometry, COLUMNS)
+    assert [(row["state"], row["reason"]) for row in waiting["columns"]] == [("waiting", "column_settings")] * 4
+    assert waiting["operations"] == [] and waiting["summary"]["blocked"]["code"] == "nothing_to_add"
+    result = convert(geometry, COLUMNS, HEIGHT)
+    rows = {row["sources"][0]: row for row in result["columns"]}
+    assert {key: rows["c1"][key] for key in ("shape", "center", "diameterMeters", "label", "entityId", "block")} == {
+        "shape": "circle", "center": {"x": 7.0, "z": 8.0}, "diameterMeters": 0.5, "label": "Drawing column 1",
+        "entityId": "c1", "block": None}
+    assert {key: rows["c2"][key] for key in ("shape", "center", "widthMeters", "depthMeters", "rotationDegrees")} == {
+        "shape": "rectangle", "center": {"x": 15.0, "z": 8.0}, "widthMeters": 0.6, "depthMeters": 0.4,
+        "rotationDegrees": 0.0}
+    # Turned 30 degrees counterclockwise (x right, z up) is a compass turn of 330: 60 after the swap that keeps
+    # rotations under 90 (its 0.4 m side runs along 120 degrees counterclockwise).
+    assert (rows["c3"]["widthMeters"], rows["c3"]["depthMeters"], rows["c3"]["rotationDegrees"]) == (0.4, 0.6, 60.0)
+    assert (rows["c4"]["shape"], rows["c4"]["diameterMeters"]) == ("circle", 0.6)
+    assert [row["state"] for row in result["columns"]] == ["new"] * 4 and result["summary"]["columns"] == {"new": 4}
+    assert [op["op"] for op in result["operations"]] == ["upsert_column"] * 4
+    record = result["operations"][0]["column"]
+    assert record == {"columnId": result["columns"][0]["candidateId"], "label": "Drawing column 1", "shape": "circle",
+                      "center": {"x": 7.0, "z": 8.0}, "diameterMeters": 0.5, "heightMeters": 6.0,
+                      "baseElevation": 0.0, "appearance": {"color": "#8f969c"},
+                      "source": {"referenceId": "fp-main", "importId": IMPORT_ID, "entityId": "c1"}}
+    assert result["columns"][0]["candidateId"].startswith("col-fp-")
+    # Applied, they are saved with their outlines, and converting again finds them there.
+    doc = apply_facility_layout_operations(layout(), result["operations"])["document"]
+    saved = doc["extensions"]["facilityColumns"]["columns"]
+    assert [row["source"]["entityId"] for row in saved] == ["c1", "c2", "c3", "c4"]
+    again = convert(geometry, COLUMNS, HEIGHT, doc=doc)
+    assert [row["state"] for row in again["columns"]] == ["there"] * 4 and again["operations"] == []
+    assert again["summary"]["columnsOnPlan"] == 4 and again["summary"]["columnLimit"] == 1000
+
+
+@pytest.mark.parametrize("degrees", [0, 1, 30, 45, 89, 90, 91, 135, 180, 270, 359])
+def test_a_rectangle_is_one_column_whichever_corner_and_way_round_it_is_drawn_and_lands_on_its_drawing(degrees):
+    from ai_inspector.facility_layout.columns import footprint
+    ids, shapes = set(), set()
+    for start in range(4):
+        for reverse in (False, True):
+            geometry = drawing(turned_box("c1", (10, 10), 0.8, 0.3, degrees, start, reverse))
+            (row,) = convert(geometry, COLUMNS, HEIGHT)["columns"]
+            ids.add(row["candidateId"])
+            shapes.add((row["widthMeters"], row["depthMeters"], row["rotationDegrees"]))
+            assert 0 <= row["rotationDegrees"] < 90
+            # The saved outline is the drawn box, moved by (5, 5), whatever the turn.
+            drawn = turned_box("c1", (15, 15), 0.8, 0.3, degrees)["points"]
+            outline = footprint(row)
+            assert all(min(math.dist(point, corner) for corner in outline) < 2e-4 for point in drawn), (
+                degrees, start, reverse, outline)
+    assert len(ids) == 1 and len(shapes) == 1, (ids, shapes)
+
+
+def test_a_block_insert_is_one_column_that_keeps_the_insert_and_an_array_is_one_per_copy():
+    blocks = {"blocks": ["COL400"]}
+    geometry = drawing(
+        dict(turned_box("i1/a", (4, 4), 0.4, 0.4, 0), **blocks), dict(line("i1/b", "L1", (3.8, 3.8), (4.2, 4.2)),
+                                                                        **blocks),
+        dict(turned_box("i1/c", (4, 4), 0.3, 0.3, 0), **blocks),  # an inner outline: part of the column
+        dict(circle("g[0]/a", (10, 4), 0.2), blocks=["C300"]), dict(circle("g[1]/a", (14, 4), 0.2), blocks=["C300"]),
+        dict(turned_box("r/k1/a", (20, 4), 0.4, 0.4, 0), blocks=["ROW", "COL"]),
+        dict(turned_box("r/k2/a", (20, 10), 0.4, 0.4, 0), blocks=["ROW", "COL"]))
+    result = convert(geometry, COLUMNS, HEIGHT)
+    assert [(row["entityId"], row["block"], row["shape"], row["state"]) for row in result["columns"]] == [
+        ("i1", "COL400", "rectangle", "new"), ("g[0]", "C300", "circle", "new"), ("g[1]", "C300", "circle", "new"),
+        ("r/k1", "COL", "rectangle", "new"), ("r/k2", "COL", "rectangle", "new")]
+    assert result["columns"][0]["sources"] == ["i1/a", "i1/b", "i1/c"]
+    assert result["unconvertedCounts"] == {}
+    assert result["operations"][0]["column"]["source"]["entityId"] == "i1"
+
+
+def test_what_is_not_a_column_stays_drawing_with_the_reason():
+    octagon = [(30 + 0.3 * math.cos(2 * math.pi * k / 8), 4 + 0.3 * math.sin(2 * math.pi * k / 8)) for k in range(8)]
+    geometry = drawing(
+        poly("oct", "L1", octagon),  # too few corners for a circle
+        poly("ell", "L1", [(0, 0), (1, 0), (1, 0.4), (0.4, 0.4), (0.4, 1), (0, 1)]),  # an L
+        line("stray", "L1", (5, 5), (6, 5)),
+        turned_box("outer", (10, 10), 1.0, 1.0, 0), turned_box("inner", (10, 10), 0.4, 0.4, 0),  # one inside another
+        *(line(f"loose{k}", "L1", a, b) for k, (a, b) in enumerate(  # a box drawn as four lines
+            [((20, 20), (20.4, 20)), ((20.4, 20), (20.4, 20.4)), ((20.4, 20.4), (20, 20.4)), ((20, 20.4), (20, 20))])),
+        dict(line("blk/x", "L1", (25, 25), (25.4, 25.4)), blocks=["MARK"]))  # a block with no outline
+    result = convert(geometry, COLUMNS, HEIGHT)
+    assert [row["sources"] for row in result["columns"]] == [["outer"]]
+    assert {row["entityId"]: row["reason"] for row in result["unconverted"]} == {
+        "oct": "column_shape", "ell": "column_shape", "stray": "column_shape", "inner": "column_inside",
+        "loose0": "column_shape", "loose1": "column_shape", "loose2": "column_shape", "loose3": "column_shape",
+        "blk/x": "column_shape"}
+
+
+def test_columns_on_the_plan_overlaps_and_odd_sizes_are_refused_and_left_out_ones_stay_out():
+    hand_made = {"columnId": "col-hand", "label": "Hand", "shape": "circle", "center": {"x": 25.0, "z": 25.0},
+                 "diameterMeters": 1.0, "heightMeters": 6, "baseElevation": 0, "appearance": {"color": "#8f969c"}}
+    doc = apply_facility_layout_operations(layout(), [{"op": "upsert_column", "column": hand_made}])["document"]
+    geometry = drawing(
+        circle("on-hand", (20, 20), 0.3),  # lands on the hand-made column at (25, 25)
+        turned_box("first", (2, 2), 0.4, 0.4, 0), turned_box("overlap", (2.2, 2), 0.4, 0.4, 0),
+        turned_box("copy", (8, 2), 0.4, 0.4, 0), turned_box("copy2", (8, 2), 0.4, 0.4, 0),
+        turned_box("tiny", (12, 2), 0.03, 0.4, 0), circle("huge", (16, 8), 2.6),
+        turned_box("away", (14, 2), 0.4, 0.4, 0), turned_box("outside", (60, 2), 0.4, 0.4, 0))
+    first = convert(geometry, COLUMNS, HEIGHT, doc=doc)
+    states = {row["sources"][0]: (row["state"], row["reason"]) for row in first["columns"]}
+    away = next(row["candidateId"] for row in first["columns"] if row["sources"] == ["away"])
+    assert states == {"on-hand": ("refused", "column_there"), "first": ("new", None),
+                      "overlap": ("refused", "overlapping_columns"), "copy": ("new", None),
+                      "copy2": ("refused", "duplicate"), "tiny": ("refused", "column_size"),
+                      "huge": ("refused", "column_size"), "away": ("new", None),
+                      "outside": ("refused", "outside_plan")}
+    left_out = convert(geometry, COLUMNS, dict(HEIGHT, excluded=[away]), doc=doc)
+    assert [row["state"] for row in left_out["columns"] if row["candidateId"] == away] == ["excluded"]
+    assert len(left_out["operations"]) == len(first["operations"]) - 1
+
+
+def test_more_columns_than_a_plan_holds_block_the_conversion(monkeypatch):
+    monkeypatch.setattr(conversion, "MAX_COLUMNS", 1)
+    result = convert(drawing(circle("a", (2, 2), 0.2), circle("b", (6, 2), 0.2)), COLUMNS, HEIGHT)
+    assert result["summary"]["blocked"]["code"] == "too_many_columns" and result["operations"] == []

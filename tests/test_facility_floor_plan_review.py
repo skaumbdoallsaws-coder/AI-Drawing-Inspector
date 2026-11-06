@@ -81,7 +81,8 @@ def test_candidates_are_listed_and_nothing_is_stored_or_changed(tmp_path):
         ("single", conversion["walls"][0]["candidateId"], "new")]
     assert [(row["label"], row["areaSquareMeters"]) for row in conversion["rooms"]] == [("Office", 20.0)]
     assert conversion["summary"]["operations"] == 3 and conversion["summary"]["blocked"] is None
-    assert conversion["unconvertedCounts"] == {"later_phase": 1, "wall_end": 3}
+    assert conversion["unconvertedCounts"] == {"wall_end": 3}
+    assert [(row["shape"], row["state"]) for row in conversion["columns"]] == [("circle", "waiting")]
     assert {layer["name"]: layer["role"] for layer in conversion["layers"].values()} == ROLES
     assert saved(service) == before
     assert not (store_folder(service) / "conversions").exists()

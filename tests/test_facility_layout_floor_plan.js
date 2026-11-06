@@ -1047,6 +1047,33 @@ function doorsAnswer(settings) {
             wallsOnPlan: 0, wallLimit: 128, blocked: null } };
 }
 
+const COLUMN_A = 'col-fp-' + 'a'.repeat(16);
+const COLUMN_B = 'col-fp-' + 'b'.repeat(16);
+
+function columnsAnswer(settings) {
+    const height = settings.columns && settings.columns.heightMeters;
+    const left = (settings.excluded || []).includes(COLUMN_B);
+    const state = height ? 'new' : 'waiting';
+    const round = { candidateId: COLUMN_A, label: 'Drawing column 1', shape: 'circle', center: { x: 4, z: 4 },
+        diameterMeters: 0.5, block: null, entityId: 'c1', layers: ['L1'], sources: ['c1'], heightMeters: height || null,
+        state, reason: height ? null : 'column_settings', message: height ? null : 'Give the column height to add '
+            + 'the columns.' };
+    const square = { candidateId: COLUMN_B, label: 'Drawing column 2', shape: 'rectangle', center: { x: 10, z: 4 },
+        widthMeters: 0.4, depthMeters: 0.6, rotationDegrees: 30, block: 'COL400', entityId: 'i1', layers: ['L1'],
+        sources: ['i1/a', 'i1/b'], heightMeters: height || null, state: left ? 'excluded' : state,
+        reason: left || height ? null : 'column_settings', message: left || height ? null : round.message };
+    const columns = {};
+    [round, square].forEach(row => { columns[row.state] = (columns[row.state] || 0) + 1; });
+    return { converterVersion: 'fp-convert-5', importId: RECORD.importId, referenceId: 'fp-main', settings,
+        walls: [], rooms: [], outlines: [], doors: [], columns: [round, square],
+        unconverted: [{ entityId: 'x1', layerId: 'L1', reason: 'column_shape', message: 'On a column layer but not '
+            + 'a closed circle or rectangle (or a block holding one): it stays as drawing.' }],
+        unconvertedCounts: { column_shape: 1 }, layers: {},
+        summary: { walls: {}, rooms: {}, outlines: {}, doors: {}, columns, operations: height ? (left ? 1 : 2) : 0,
+            wallsOnPlan: 0, wallLimit: 128, columnsOnPlan: 0, columnLimit: 1000,
+            blocked: height ? null : { code: 'nothing_to_add', message: 'Nothing new to add.' } } };
+}
+
 function converting(options) {
     const settings = options || {};
     const h = harness();
@@ -1151,6 +1178,12 @@ check('the settings sent are the fields the layers call for, heights optional', 
     assert.deepStrictEqual(floorPlan.conversionSettings(form, new Set(['perimeter', 'door'])).doors, {});
     assert.ok(!('doors' in floorPlan.conversionSettings(Object.assign({}, form, { doorHeight: '2.1' }),
         new Set(['wall_centerline', 'door']))));
+    // Columns take their height, when a layer shows columns.
+    assert.deepStrictEqual(floorPlan.conversionSettings(Object.assign({}, form, { columnHeight: '6' }),
+        new Set(['column'])), { excluded: [WALL_A, WALL_B], columns: { heightMeters: 6 } });
+    assert.deepStrictEqual(floorPlan.conversionSettings(form, new Set(['column'])).columns, {});
+    assert.ok(!('columns' in floorPlan.conversionSettings(Object.assign({}, form, { columnHeight: '6' }),
+        new Set(['wall_faces']))));
 });
 
 check('doors are listed with the wall they open; those in the outer walls wait for their height', async () => {
@@ -1181,6 +1214,33 @@ check('doors are listed with the wall they open; those in the outer walls wait f
     text = h.panel().text();
     assert.ok(/Doors: 1 left out, 1 to add\./.test(text), text);
     assert.strictEqual(h.panel().querySelector('[data-fp-keep="' + DOOR_A + '"]').checked, false);
+    assert.strictEqual(button(h, 'review').disabled, false);
+});
+
+check('columns are listed round or by their sides, and wait for their height', async () => {
+    const h = converting({ roles: { L1: 'column' }, answer: columnsAnswer });
+    h.controller.open();
+    assert.ok(/Column height \(m\)/.test(h.panel().text()), h.panel().text());
+    assert.ok(!/Wall height/.test(h.panel().text()), h.panel().text());
+    fire(button(h, 'find'), 'click');
+    await settle();
+    let text = h.panel().text();
+    assert.ok(/Columns: 2 waiting\./.test(text), text);
+    assert.ok(/Drawing column 1: round, 0.5 m across/.test(text), text);
+    assert.ok(/Drawing column 2: 0.4 x 0.6 m, turned 30 degrees \(block COL400\)/.test(text), text);
+    assert.ok(/waiting: Give the column height to add the columns\./.test(text), text);
+    assert.ok(/1 - On a column layer but not a closed circle or rectangle/.test(text), text);
+    const keep = h.panel().querySelector('[data-fp-keep="' + COLUMN_B + '"]');
+    keep.checked = false;
+    fire(keep, 'change');
+    field(h, 'columnHeight').value = '6';
+    fire(field(h, 'columnHeight'), 'input');
+    fire(button(h, 'find'), 'click');
+    await settle();
+    assert.deepStrictEqual(h.calls.filter(call => call[0] === 'convert').at(-1)[2].settings, {
+        excluded: [COLUMN_B], columns: { heightMeters: 6 } });
+    text = h.panel().text();
+    assert.ok(/Columns: 1 to add, 1 left out\./.test(text), text);
     assert.strictEqual(button(h, 'review').disabled, false);
 });
 

@@ -89,10 +89,12 @@ MAX_DOOR_SYMBOLS = 20000  # swings and straight pieces on the door layers
 MAX_COLUMN_ENTITIES = 20000  # entities on the column layers
 ROUND_CORNERS = 12  # an outline not read as a circle needs this many corners, all one distance from the middle
 ROUND_SLACK = 0.02  # of the radius: how far a round outline's corners may sit from one distance
+ROUND_STEP = math.radians(45.0)  # a round outline goes once round its middle, no corner further on than this from the last
 MAX_WORK = 6_000_000  # grid cells and neighbors one conversion may visit (_Work): a few seconds at most
 OVERLAP_WORK = 50  # the work of one overlap of two outlines worked out (a room and a zone), in those units
 BOX_WORK = 4  # the work of checking that two lines closing a pair's two ends make a box with it, in those units
 MAX_PACKAGE_BYTES = 600_000  # the changes one review holds (floor_plan_proposals.PACKAGE_LIMITS)
+UPSERT_COLUMNS = 32  # new columns that go in one change each when one change with the columns there is too large
 MAX_SETTINGS_IDS = 2000
 MAX_LISTED = 200
 MAX_SOURCES = 50
@@ -1349,9 +1351,21 @@ def _column_shape(ring, kind):
     radii = [math.dist(point, (cx, cz)) for point in ring]
     radius = sum(radii) / count
     if radius > 0 \
-            and max(abs(value - radius) for value in radii) <= max(TOLERANCE, ROUND_SLACK * radius):
+            and max(abs(value - radius) for value in radii) <= max(TOLERANCE, ROUND_SLACK * radius) \
+            and (kind == "CIRCLE" or _once_round(ring, (cx, cz))):
         return {"shape": "circle", "center": (cx, cz), "diameterMeters": 2 * radius}
     return None
+
+
+def _once_round(ring, middle):
+    """Whether the corners of RING go once round MIDDLE, all one way, none more than ROUND_STEP on from the one
+    before (the first from the last too). Corners all one distance from their middle can still draw part of a circle
+    closed by a straight side (a half-round), or go there and back."""
+    angles = [math.atan2(z - middle[1], x - middle[0]) for x, z in ring]
+    steps = [(angles[(k + 1) % len(angles)] - angles[k] + math.pi) % (2 * math.pi) - math.pi
+             for k in range(len(angles))]
+    one_way = all(0 < step <= ROUND_STEP for step in steps) or all(-ROUND_STEP <= step < 0 for step in steps)
+    return one_way and abs(abs(sum(steps)) - 2 * math.pi) <= 1e-6
 
 
 def _columns(entities, layout, reference_id, import_id, column_settings, excluded, floor, work, unconverted, footing):
@@ -1522,6 +1536,11 @@ def _spent(work, found):
     """FOUND (a search's hits), each spent from the work before it is looked at."""
     work.spend(OVERLAP_WORK * len(found))
     return found
+
+
+def _package_bytes(operations):
+    """The size of OPERATIONS as one review holds them (MAX_PACKAGE_BYTES)."""
+    return len(json.dumps(operations, allow_nan=False).encode())
 
 
 def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, import_id: str) -> dict:
@@ -1992,9 +2011,16 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     operations.extend({"op": "upsert_interior_wall", "wall": row["record"]} for row in new_walls)
     operations.extend({"op": "add_zone", "zone": row["record"]} for row in room_rows if row["state"] == "new")
     new_columns = [row for row in column_rows if row["state"] == "new"]
-    if new_columns:  # one change, the columns there unchanged: one for each recompiled every column on the plan
-        operations.append({"op": "set_columns", "columns": {
-            "version": 1, "columns": kept_columns + [row["record"] for row in new_columns]}})
+    if new_columns:
+        # One change, the columns there unchanged: an upsert_column for each new column recompiled every column on
+        # the plan for each. That change holds the columns already there, though, so when it is more than a review
+        # holds, a few new columns (UPSERT_COLUMNS at most, each still recompiling the plan's) go in one change each.
+        records = [row["record"] for row in new_columns]
+        whole = {"op": "set_columns", "columns": {"version": 1, "columns": kept_columns + records}}
+        if len(records) <= UPSERT_COLUMNS and _package_bytes(operations + [whole]) > MAX_PACKAGE_BYTES:
+            operations.extend({"op": "upsert_column", "column": record} for record in records)
+        else:
+            operations.append(whole)
     blocked = None
     if len(existing_walls) + len(new_walls) > MAX_WALLS:
         blocked = {"code": "too_many_walls",
@@ -2010,10 +2036,10 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         blocked = {"code": "too_many_changes",
                    "message": f"{len(operations)} changes are more than one review holds ({MAX_OPERATIONS}). "
                               f"Convert fewer layers at a time."}
-    elif len(json.dumps(operations, allow_nan=False).encode()) > MAX_PACKAGE_BYTES:
+    elif _package_bytes(operations) > MAX_PACKAGE_BYTES:
         blocked = {"code": "changes_too_large",
                    "message": f"These changes are more than one review holds ({MAX_PACKAGE_BYTES // 1000:,} KB). "
-                              "Convert fewer layers at a time."}
+                              "Convert fewer layers at a time, or leave some of the new columns out."}
     elif not operations:
         blocked = {"code": "nothing_to_add", "message": "Nothing new to add."}
 

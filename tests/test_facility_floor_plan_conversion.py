@@ -1258,6 +1258,68 @@ def test_a_conversion_adds_its_columns_in_one_change_with_the_columns_there(monk
     assert compiled[0] <= 4 * len(rows), compiled  # an upsert for each: 30 compiles of 21 to 50 columns, over 1,000
 
 
+def test_a_few_new_columns_go_in_one_by_one_when_the_columns_there_fill_a_review(monkeypatch):
+    # Codex review (columns, round 6): the one set_columns holds the columns already on the plan, so on a plan whose
+    # columns come near what a review holds (999 with 120-character names and 400-character entity ids made 860 KB),
+    # adding one column was refused as too large, where its upsert_column alone is a few hundred bytes.
+    there = [{"columnId": f"col-hand-{k:03d}", "label": f"{k:03d}" + "x" * 117, "shape": "rectangle",
+              "center": {"x": 0.5 + k % 39, "z": 0.5 + k // 39}, "widthMeters": 0.2, "depthMeters": 0.2,
+              "rotationDegrees": 0.0, "heightMeters": 6, "baseElevation": 0, "appearance": {"color": "#8f969c"},
+              "source": {"referenceId": "fp-main", "importId": IMPORT_ID, "entityId": f"{k:03d}" + "e" * 397}}
+             for k in range(900)]
+    doc = apply_facility_layout_operations(
+        layout(), [{"op": "set_columns", "columns": {"version": 1, "columns": there}}])["document"]
+    stored = doc["extensions"]["facilityColumns"]["columns"]
+    as_authored = [{key: value for key, value in row.items() if key != "footprint"} for row in stored]
+    assert conversion._package_bytes([{"op": "set_columns", "columns": {"version": 1, "columns": as_authored}}]) \
+        > conversion.MAX_PACKAGE_BYTES
+    result = convert(drawing(circle("new", (30, 23.5), 0.2)), COLUMNS, HEIGHT, doc=doc)
+    assert result["summary"]["blocked"] is None
+    (change,) = result["operations"]
+    assert change == {"op": "upsert_column", "column": change["column"]}
+    assert change["column"]["columnId"] == result["columns"][0]["candidateId"]
+    after = apply_facility_layout_operations(doc, result["operations"])["document"]
+    rows = after["extensions"]["facilityColumns"]["columns"]
+    assert rows[:900] == stored and [row["columnId"] for row in rows[900:]] == [change["column"]["columnId"]]
+    # Only a few: past UPSERT_COLUMNS new columns the one change stays, and here it is refused as too large.
+    two = drawing(circle("new", (30, 23.5), 0.2), circle("next", (32, 23.5), 0.2))
+    assert [op["op"] for op in convert(two, COLUMNS, HEIGHT, doc=doc)["operations"]] == ["upsert_column"] * 2
+    monkeypatch.setattr(conversion, "UPSERT_COLUMNS", 1)
+    refused = convert(two, COLUMNS, HEIGHT, doc=doc)
+    assert refused["summary"]["blocked"]["code"] == "changes_too_large" and refused["operations"] == []
+    assert refused["summary"]["columns"] == {"new": 2}
+    # A plan whose columns leave room keeps the one change, however few columns are new.
+    small = apply_facility_layout_operations(
+        layout(), [{"op": "set_columns", "columns": {"version": 1, "columns": there[:20]}}])["document"]
+    assert [op["op"] for op in convert(two, COLUMNS, HEIGHT, doc=small)["operations"]] == ["set_columns"]
+
+
+def test_a_round_outline_goes_once_round_its_middle():
+    # Codex review (columns, round 6): an outline of 12 or more corners all one distance from their middle was a round
+    # column even when it drew only part of a circle: 32 corners on a half circle, closed by its straight side, made a
+    # whole round column 0.5 m across, and a quarter circle did too.
+    def on_circle(entity, center, degrees):
+        return poly(entity, "L1", [(center[0] + 0.25 * math.cos(math.radians(a)),
+                                    center[1] + 0.25 * math.sin(math.radians(a))) for a in degrees])
+
+    geometry = drawing(
+        on_circle("half", (2, 2), [180 * k / 31 for k in range(32)]),
+        on_circle("quarter", (6, 2), [90 * k / 15 for k in range(16)]),
+        on_circle("open", (10, 2), [25 * k for k in range(13)]),  # 0 to 300 degrees: the last side spans 60
+        on_circle("uneven", (14, 2), [0, 25, 60, 90, 120, 150, 185, 210, 240, 270, 300, 330]),  # 35 at most
+        on_circle("clockwise", (18, 2), [-15 * k for k in range(24)]),
+        circle("polygon", (22, 2), 0.25, kind="LWPOLYLINE"))
+    result = convert(geometry, COLUMNS, HEIGHT)
+    assert {row["entityId"]: row["reason"] for row in result["unconverted"]} == {
+        "half": "column_shape", "quarter": "column_shape", "open": "column_shape"}
+    rows = {row["sources"][0]: row for row in result["columns"]}
+    assert sorted(rows) == ["clockwise", "polygon", "uneven"]
+    for name, x in (("uneven", 19.0), ("clockwise", 23.0), ("polygon", 27.0)):
+        assert (rows[name]["state"], rows[name]["shape"]) == ("new", "circle")
+        assert rows[name]["diameterMeters"] == pytest.approx(0.5, abs=1e-6)
+        assert xz(rows[name], "center") == pytest.approx((x, 7.0), abs=1e-6)
+
+
 def test_more_columns_than_a_plan_holds_block_the_conversion(monkeypatch):
     monkeypatch.setattr(conversion, "MAX_COLUMNS", 1)
     result = convert(drawing(circle("a", (2, 2), 0.2), circle("b", (6, 2), 0.2)), COLUMNS, HEIGHT)

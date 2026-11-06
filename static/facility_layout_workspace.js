@@ -1896,6 +1896,25 @@
         return proposal.alternatives[proposal.selectedIndex] || null;
     }
 
+    // A record's data as text, its keys in sorted order at every level, so two copies of one record compare equal
+    // whatever order their keys came in: the server returns a saved layout with sorted keys, while a proposed one
+    // keeps the order its operations wrote (a wall's derived panels come last). Otherwise as JSON.stringify.
+    function canonicalJson(value) {
+        if (Array.isArray(value)) {
+            return '[' + value.map(function (item) {
+                return item === undefined || typeof item === 'function' ? 'null' : canonicalJson(item);
+            }).join(',') + ']';
+        }
+        if (value && typeof value === 'object') {
+            return '{' + Object.keys(value).sort().filter(function (key) {
+                return value[key] !== undefined && typeof value[key] !== 'function';
+            }).map(function (key) {
+                return JSON.stringify(key) + ':' + canonicalJson(value[key]);
+            }).join(',') + '}';
+        }
+        return JSON.stringify(value);
+    }
+
     function recordIndex(records, identityKey) {
         const index = new Map();
         (Array.isArray(records) ? records : []).forEach(function (record) {
@@ -1912,7 +1931,7 @@
 
     function placementSpatialSignature(placement) {
         const source = placement || {};
-        return JSON.stringify({
+        return canonicalJson({
             assetId: source.assetId || '',
             assetDefinitionRevision:
                 source.assetDefinitionRevision || '',
@@ -1929,8 +1948,8 @@
         afterIndex.forEach(function (record, identifier) {
             if (!beforeIndex.has(identifier)) {
                 added += 1;
-            } else if (JSON.stringify(beforeIndex.get(identifier))
-                    !== JSON.stringify(record)) {
+            } else if (canonicalJson(beforeIndex.get(identifier))
+                    !== canonicalJson(record)) {
                 changed += 1;
             }
         });
@@ -1953,7 +1972,7 @@
             if (!original) {
                 addedIds.push(identifier);
                 proposedRecords.push(clone(record));
-            } else if (JSON.stringify(original) !== JSON.stringify(record)) {
+            } else if (canonicalJson(original) !== canonicalJson(record)) {
                 changedIds.push(identifier);
                 beforeRecords.push(clone(original));
                 proposedRecords.push(clone(record));

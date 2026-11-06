@@ -2952,6 +2952,37 @@ async function main() {
         'Changes: 1 changed column, 1 removed column.');
     });
 
+    await check('a proposal review compares records by their data, not the order of their keys', async () => {
+        // The saved copy comes back from the server with sorted keys; the proposed one keeps the order its
+        // operations wrote (a wall's derived panels last). Only real differences count.
+        const sorted = value => Array.isArray(value) ? value.map(sorted) : value && typeof value === 'object'
+            ? Object.fromEntries(Object.keys(value).sort().map(key => [key, sorted(value[key])])) : value;
+        const reversed = value => Array.isArray(value) ? value.map(reversed) : value && typeof value === 'object'
+            ? Object.fromEntries(Object.keys(value).reverse().map(key => [key, reversed(value[key])])) : value;
+        const wall = (id, x) => ({ wallId: id, start: { x, z: 5 }, end: { x, z: 9 }, thicknessMeters: 0.2,
+            heightMeters: 3, openings: [{ startMeters: 1, endMeters: 2 }], panels: [{ fromMeters: 0, toMeters: 4 }] });
+        const saved = layout();
+        saved.extensions = Object.assign({}, saved.extensions, {
+            facilityInteriorWalls: { version: 1, walls: [wall('iw-a', 15), wall('iw-b', 20), wall('iw-c', 25)] } });
+        saved.routes = [{ routeId: 'rt-a', label: 'Aisle', centerline: [{ x: 1, y: 0, z: 1 }, { x: 9, y: 0, z: 1 }],
+            corridorWidth: 2 }];
+        const before = sorted(saved);
+        const after = reversed(clone(saved));
+        after.extensions.facilityInteriorWalls.walls.pop();
+        after.zones = (after.zones || []).map(zone => Object.assign({}, zone, { label: zone.label + ' 2' }));
+        const review = workspaceModule.buildLayoutProposalReview(before, after);
+        assert.deepStrictEqual(review.wallChanges, { added: 0, changed: 0, removed: 1 });
+        assert.deepStrictEqual([review.movedPlacementIds, review.changedRouteIds], [[], []]);
+        assert.strictEqual(review.zoneChanges.changed, (saved.zones || []).length);
+        assert.ok(/1 removed wall/.test(workspaceModule.proposalPlainChangeSummary(review, {})));
+        assert.ok(!/changed wall|moved item|changed aisle/.test(workspaceModule.proposalPlainChangeSummary(review, {})));
+        // A real difference still counts, at any depth.
+        const opened = clone(after);
+        opened.extensions.facilityInteriorWalls.walls[0].openings[0].endMeters = 2.5;
+        assert.deepStrictEqual(workspaceModule.buildLayoutProposalReview(before, opened).wallChanges,
+            { added: 0, changed: 1, removed: 1 });
+    });
+
     await check('proposal review diff is stable-ID based and remains pure',
         async () => {
             const saved = layout();

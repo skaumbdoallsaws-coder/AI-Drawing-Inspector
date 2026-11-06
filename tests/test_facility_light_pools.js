@@ -461,6 +461,15 @@ test('a spot light has settings from the lamp lumens and beam: candela, cone, so
     const plain = pools.spotSettings({ kind: 'accent' }, {});
     assert.ok(Math.abs(plain.intensity - accent.intensity) < 1e-9, '700 lm at 30 degrees');
     assert.ok(pools.spotSettings({ kind: 'pendant' }, null).intensity > 0);
+    // An uplight lights dark foliage metres up from below: UPLIGHT_GAIN times brighter than the same lamp
+    // without the mark, with the same cone and reach (2026-11-05: at 1 the patio's palms stayed black).
+    const up = { lumens: 400, beamAngleDegrees: 40, estimateBeamAngleDegrees: 40, accent: true, uplight: true };
+    const uplit = pools.spotSettings({ kind: 'accent' }, up);
+    const same = pools.spotSettings({ kind: 'accent' }, Object.assign({}, up, { uplight: false }));
+    assert.strictEqual(pools.UPLIGHT_GAIN, 10);
+    assert.ok(Math.abs(uplit.intensity - 10 * same.intensity) < 1e-9);
+    assert.deepStrictEqual([uplit.angle, uplit.penumbra, uplit.distance, uplit.decay],
+        [same.angle, same.penumbra, same.distance, same.decay]);
 });
 
 test('the general lighting fill is a map of its pools, gentle, capped, and only below the lamps', () => {

@@ -18,7 +18,7 @@
 // Low lights and uplights (2026-11-05, the gym's garden): an outdoor finish marked low (a bollard, a path light, a
 // lantern) throws its pool from LOW_MIN_HEIGHT up, from each glowing piece with a patch facing down (bulbsOf), and
 // shows no beam; an accent finish marked uplight (a spike light at a palm's foot) is aimed along the patches of its
-// lens that face up.
+// lens that face up, and its spot is UPLIGHT_GAIN times brighter, so the foliage it lights shows.
 (function (root, factory) {
     'use strict';
 
@@ -47,6 +47,10 @@
     // (4,000 lm, 110 degrees) gives about 500 lux on a table 1.7 m below it, which then reads about as lit as under
     // the daytime scene's sun (2.4).
     const LUX_TO_SCENE = 1 / 250;
+    // An uplight lights dark foliage from below, metres up; at LUX_TO_SCENE that light hardly shows (a 400 lm spike
+    // light left the patio's palms black), so its spot is this many times brighter, set by eye on those palms.
+    // Visual only: the coverage estimate keeps the finish's lumens.
+    const UPLIGHT_GAIN = 10;
     const FILL_SPREAD = 2;         // general lighting's fill reaches this many pool radii from a lamp
     const FILL_PEAK = 0.7;         // fill (three's irradiance) under one lamp, a quarter of the daytime sun's
     const FILL_LIMIT = 1.5;        // where many lamps overlap
@@ -406,7 +410,8 @@
     // intensity falls as cos^m off its aim, half its peak at half the beam angle (as the coverage estimate, CC), times
     // LUX_TO_SCENE. The lumens and beam come from the finish's estimate data, else its emission's beam angle, else
     // typical values. The cone runs to 1.5 times half the beam (at most SPOT_MAX_ANGLE) with a soft edge, so it is
-    // about half as bright at half the beam angle; the light fades to nothing at SPOT_REACH.
+    // about half as bright at half the beam angle; the light fades to nothing at SPOT_REACH. An uplight's
+    // (glow.uplight) is UPLIGHT_GAIN times brighter.
     function spotSettings(spot, glow) {
         const kind = spot.kind === 'accent' ? 'accent' : 'pendant';
         const lumens = Number(glow && glow.lumens) > 0 ? Number(glow.lumens) : SPOT_DEFAULT_LUMENS[kind];
@@ -416,7 +421,7 @@
         const m = Math.log(0.5) / Math.log(Math.cos(half));
         const candela = lumens * (m + 1) / (2 * Math.PI);
         return {
-            intensity: candela * LUX_TO_SCENE,
+            intensity: candela * LUX_TO_SCENE * (glow && glow.uplight === true ? UPLIGHT_GAIN : 1),
             angle: Math.min(SPOT_MAX_ANGLE * Math.PI / 180, 1.5 * half),
             penumbra: SPOT_PENUMBRA,
             distance: SPOT_REACH[kind],
@@ -1437,6 +1442,7 @@
         SPOT_MIN_HEIGHT: SPOT_MIN_HEIGHT,
         SPOT_REACH: SPOT_REACH,
         LUX_TO_SCENE: LUX_TO_SCENE,
+        UPLIGHT_GAIN: UPLIGHT_GAIN,
         FILL_SPREAD: FILL_SPREAD,
         FILL_PEAK: FILL_PEAK,
         FILL_LIMIT: FILL_LIMIT,

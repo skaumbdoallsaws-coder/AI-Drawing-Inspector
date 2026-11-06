@@ -1129,8 +1129,10 @@ def test_circles_and_rectangles_on_a_column_layer_become_columns_that_keep_their
     assert (rows["c3"]["widthMeters"], rows["c3"]["depthMeters"], rows["c3"]["rotationDegrees"]) == (0.4, 0.6, 60.0)
     assert (rows["c4"]["shape"], rows["c4"]["diameterMeters"]) == ("circle", 0.6)
     assert [row["state"] for row in result["columns"]] == ["new"] * 4 and result["summary"]["columns"] == {"new": 4}
-    assert [op["op"] for op in result["operations"]] == ["upsert_column"] * 4
-    record = result["operations"][0]["column"]
+    assert [op["op"] for op in result["operations"]] == ["set_columns"]
+    assert [row["columnId"] for row in result["operations"][0]["columns"]["columns"]] == [
+        row["candidateId"] for row in result["columns"]]
+    record = result["operations"][0]["columns"]["columns"][0]
     assert record == {"columnId": result["columns"][0]["candidateId"], "label": "Drawing column 1", "shape": "circle",
                       "center": {"x": 7.0, "z": 8.0}, "diameterMeters": 0.5, "heightMeters": 6.0,
                       "baseElevation": 0.0, "appearance": {"color": "#8f969c"},
@@ -1179,7 +1181,7 @@ def test_a_block_insert_is_one_column_that_keeps_the_insert_and_an_array_is_one_
         ("r/k1", "COL", "rectangle", "new"), ("r/k2", "COL", "rectangle", "new")]
     assert result["columns"][0]["sources"] == ["i1/a", "i1/b", "i1/c"]
     assert result["unconvertedCounts"] == {}
-    assert result["operations"][0]["column"]["source"]["entityId"] == "i1"
+    assert result["operations"][0]["columns"]["columns"][0]["source"]["entityId"] == "i1"
 
 
 def test_what_is_not_a_column_stays_drawing_with_the_reason():
@@ -1220,7 +1222,40 @@ def test_columns_on_the_plan_overlaps_and_odd_sizes_are_refused_and_left_out_one
                       "outside": ("refused", "outside_plan")}
     left_out = convert(geometry, COLUMNS, dict(HEIGHT, excluded=[away]), doc=doc)
     assert [row["state"] for row in left_out["columns"] if row["candidateId"] == away] == ["excluded"]
-    assert len(left_out["operations"]) == len(first["operations"]) - 1
+    (change,) = first["operations"]  # the hand-made column, unchanged, and the new ones
+    assert change["columns"]["columns"][0] == {key: value for key, value in doc["extensions"]["facilityColumns"][
+        "columns"][0].items() if key != "footprint"}
+    assert [row["columnId"] for row in change["columns"]["columns"]] == ["col-hand"] + [
+        row["candidateId"] for row in first["columns"] if row["state"] == "new"]
+    (fewer,) = left_out["operations"]
+    assert len(fewer["columns"]["columns"]) == len(change["columns"]["columns"]) - 1
+
+
+def test_a_conversion_adds_its_columns_in_one_change_with_the_columns_there(monkeypatch):
+    # Codex review (columns, round 5): one upsert_column for each new column recompiled every column on the plan for
+    # each, so adding 500 columns to 500 took 37 s to apply; one set_columns with the same result took 0.6 s.
+    from ai_inspector.facility_layout import columns as columns_module
+    hand_made = [{"columnId": f"col-hand-{k}", "label": f"Hand {k}", "shape": "circle",
+                  "center": {"x": 2.0 + k, "z": 28.0}, "diameterMeters": 0.4, "heightMeters": 6, "baseElevation": 0,
+                  "appearance": {"color": "#8f969c"}} for k in range(20)]
+    doc = apply_facility_layout_operations(
+        layout(), [{"op": "set_columns", "columns": {"version": 1, "columns": hand_made}}])["document"]
+    boxes = [turned_box(f"c{k:02d}", (1 + 2.5 * (k % 10), 1 + 3 * (k // 10)), 0.4, 0.4, 0) for k in range(30)]
+    result = convert(drawing(*boxes), COLUMNS, HEIGHT, doc=doc)
+    assert [op["op"] for op in result["operations"]] == ["set_columns"]
+    compiled = [0]
+    compile_columns = columns_module.compile_columns
+
+    def counted(value, layout, footing=None):
+        compiled[0] += len(value["columns"])
+        return compile_columns(value, layout, footing)
+
+    monkeypatch.setattr(columns_module, "compile_columns", counted)
+    after = apply_facility_layout_operations(doc, result["operations"])["document"]
+    rows = after["extensions"]["facilityColumns"]["columns"]
+    assert rows[:20] == doc["extensions"]["facilityColumns"]["columns"]  # the columns there, unchanged
+    assert [row["columnId"] for row in rows[20:]] == [row["candidateId"] for row in result["columns"]]
+    assert compiled[0] <= 4 * len(rows), compiled  # an upsert for each: 30 compiles of 21 to 50 columns, over 1,000
 
 
 def test_more_columns_than_a_plan_holds_block_the_conversion(monkeypatch):

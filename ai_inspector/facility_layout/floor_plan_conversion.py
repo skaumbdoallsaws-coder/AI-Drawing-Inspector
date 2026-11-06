@@ -1356,7 +1356,7 @@ def _column_shape(ring, kind):
 
 def _columns(entities, layout, reference_id, import_id, column_settings, excluded, floor, work, unconverted, footing):
     """The column candidates (in reading order: by center, z then x) from ENTITIES, the entities on the column layers
-    with their points on the plan, and the number of columns already on the plan. Entities from one block insert
+    with their points on the plan, and the columns already on the plan (as authored: without their outlines). Entities from one block insert
     (the innermost; one copy of an array insert) are one group, the others another: a group's closed outlines that
     no larger one of the group covers are its columns. A column from an insert keeps the insert as its source and
     has all of the insert's entities; leftovers stay drawing with the reason."""
@@ -1480,7 +1480,7 @@ def _columns(entities, layout, reference_id, import_id, column_settings, exclude
         if row["state"] in ("new", "waiting"):
             added.add(len(outlines), middle, middle, reach)
             outlines.append(outline)
-    return rows, len(existing)
+    return rows, [{key: value for key, value in row.items() if key != "footprint"} for row in existing]
 
 
 def _inside_larger(outlines, work):
@@ -1979,8 +1979,9 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     for number, row in enumerate(door_rows, 1):
         row["label"] = f"Drawing door {number}"
 
-    column_rows, existing_columns = _columns(column_entities, layout, reference["referenceId"], import_id,
-                                             settings["columns"], excluded, floor, work, unconverted, footing)
+    column_rows, kept_columns = _columns(column_entities, layout, reference["referenceId"], import_id,
+                                         settings["columns"], excluded, floor, work, unconverted, footing)
+    existing_columns = len(kept_columns)
 
     # Operations, in a fixed order: the outer walls, then walls, then zones, then columns.
     operations = []
@@ -1991,7 +1992,9 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     operations.extend({"op": "upsert_interior_wall", "wall": row["record"]} for row in new_walls)
     operations.extend({"op": "add_zone", "zone": row["record"]} for row in room_rows if row["state"] == "new")
     new_columns = [row for row in column_rows if row["state"] == "new"]
-    operations.extend({"op": "upsert_column", "column": row["record"]} for row in new_columns)
+    if new_columns:  # one change, the columns there unchanged: one for each recompiled every column on the plan
+        operations.append({"op": "set_columns", "columns": {
+            "version": 1, "columns": kept_columns + [row["record"] for row in new_columns]}})
     blocked = None
     if len(existing_walls) + len(new_walls) > MAX_WALLS:
         blocked = {"code": "too_many_walls",

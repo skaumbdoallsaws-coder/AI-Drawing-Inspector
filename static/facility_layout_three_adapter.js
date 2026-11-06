@@ -7787,10 +7787,24 @@
                 const resolved = library && libraryRuntime.resolveAppearance(library, appearance, currentLayout());
                 if (!resolved) return;
                 mesh.updateMatrixWorld(true);
+                // Its projection is its own (a cache of one), not the shared cache's: a column's outline is drawn anew
+                // each time, so a shared entry would never be used again and would stay behind (Codex review).
                 applyObjectFinish(mesh, createFinishMaterialFor(resolved, 1),
-                    resolved.texture ? finishesRuntime.mappingFor(THREE, mesh, resolved) : null);
+                    resolved.texture ? finishesRuntime.mappingFor(THREE, mesh, resolved) : null, new Map());
                 material.dispose();
             });
+        }
+
+        // Columns take their finish when they are drawn, so a finish-only change (a custom finish edited) draws them
+        // again. Their meshes leave the model root here: the layers' own clear leaves that to its callers.
+        function redrawColumns() {
+            if (!state.columnObjects.length) return;
+            state.columnObjects.forEach(function (object) {
+                if (object.parent && typeof object.parent.remove === 'function') object.parent.remove(object);
+            });
+            disposeObjectGraphs(state.columnObjects);
+            state.columnObjects = [];
+            renderColumns();
         }
 
         function renderExteriorFinishes() {
@@ -13996,6 +14010,7 @@
             });
             state.appearanceSceneKey = appearanceOnlyKey(layout);
             state.finishSceneKey = finishOnlyKey(layout);
+            redrawColumns();
             applySelection();
             syncViewportSceneFromLayout();
             renderEquipmentDecals();
@@ -16658,9 +16673,9 @@
             return material;
         }
 
-        function applyObjectFinish(object, material, mapping) {
+        function applyObjectFinish(object, material, mapping, geometryCache) {
             const replaced = finishesRuntime.applyFinishToObject(THREE, object, material, mapping, {
-                geometryCache: state.finishGeometryCache,
+                geometryCache: geometryCache || state.finishGeometryCache,
                 skip: function (candidate) { return isFinishProtectedMaterial(candidate); },
             });
             replaced.forEach(function (old) {

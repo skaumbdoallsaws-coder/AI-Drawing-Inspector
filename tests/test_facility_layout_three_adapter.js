@@ -7438,6 +7438,60 @@ test('a custom finish on a part, changed on its own, is drawn in its new color',
     assert.strictEqual(changed, rebuilt);
 });
 
+// Codex review of the columns, round 2: a column's finish in the finish-only path and in the projection cache.
+const finishedColumn = appearance => ({ columnId: 'col-a', label: 'A', shape: 'rectangle', center: { x: 8, z: 0 },
+    widthMeters: 0.4, depthMeters: 0.4, rotationDegrees: 0, heightMeters: 6, baseElevation: 0, appearance,
+    footprint: [{ x: 7.8, z: -0.2 }, { x: 8.2, z: -0.2 }, { x: 8.2, z: 0.2 }, { x: 7.8, z: 0.2 }] });
+const columnMaterial = id => {
+    let material = null;
+    renderedScene().traverse(object => {
+        if (object.isMesh && object.userData && object.userData.columnId === id) material = object.material;
+    });
+    return material;
+};
+
+test('a column in a custom finish changed on its own is drawn in its new color, as a full rebuild draws it', async () => {
+    // The finish-only path regrouped the placements and left the column in the old color.
+    const scene = color => ({ assetCatalog: [asset('rack', REV_A)], layout: {
+        extensions: Object.assign(coat(color), { facilityColumns: { version: 1, columns: [
+            finishedColumn({ appearanceId: 'custom-coat' })] } }),
+        placements: [placement('other', 'rack', REV_A, 0, 0, 0)] } });
+    const live = await libraryFixture();
+    await drawnScene(live, scene('#c02020'));
+    const red = columnMaterial('col-a').color.getHexString();
+    await drawnScene(live, scene('#2040c0'));
+    const changed = columnMaterial('col-a').color.getHexString();
+    let columns = 0;
+    renderedScene().traverse(object => { if (object.isMesh && object.userData.columnId) columns += 1; });
+    assert.strictEqual(live.adapter.getDiagnostics().columnCount, 1);
+    live.adapter.dispose();
+    const fresh = await libraryFixture();
+    await drawnScene(fresh, scene('#2040c0'));
+    const rebuilt = columnMaterial('col-a').color.getHexString();
+    fresh.adapter.dispose();
+    assert.notStrictEqual(rebuilt, red);
+    assert.strictEqual(changed, rebuilt);
+    assert.strictEqual(columns, 1, 'the old column mesh left the scene');
+});
+
+test('a textured column leaves no projected geometry behind when it is drawn again', async () => {
+    // Each redraw of a wood-finished column (a placement moving) left one more projection in the shared cache.
+    const scene = z => ({ assetCatalog: [asset('rack', REV_A)], layout: {
+        extensions: { facilityColumns: { version: 1, columns: [
+            finishedColumn({ appearanceId: 'wood-oak', grain: 'length' })] } },
+        placements: [placement('mover', 'rack', REV_A, 0, 0, z)] } });
+    const live = await libraryFixture();
+    const sizes = [];
+    for (const z of [0, 1, 2, 3, 4]) {
+        await drawnScene(live, scene(z));
+        sizes.push(live.adapter.getDiagnostics().appearanceLibrary.projectedGeometries);
+    }
+    const material = columnMaterial('col-a');
+    live.adapter.dispose();
+    assert.ok(material.map && material.map.userData.url.endsWith('wood-oak/color.jpg'), 'the column is textured');
+    assert.deepStrictEqual(sizes, sizes.map(() => sizes[0]), 'the cache holds as many after every redraw');
+});
+
 test('a placement switched in place from overview to detail and moved loads its detail, as a full rebuild does', async () => {
     // Codex on a5c91fa: the models on screen were indexed by the representation their placements ask for, read from
     // the live objects, so the overview model was taken for the detail one.

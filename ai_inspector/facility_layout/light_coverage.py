@@ -743,8 +743,10 @@ def estimate(layout, lamps, shape, dark_below=None, walls=()):
         if 0 < height < SMOOTH_BELOW:
             add = _cell_means(add, aim, peak, power, dx, dz, drop, height)
         if len(walls):
+            # Every cell given light, the smoothed ones too: a cell the aim misses can take some near a low lamp, and
+            # it must not reach through a wall (review 2026-11-05).
             add = np.where(_shadowed(lamp, walls, grid_x[r0:r1, c0:c1], grid_z[r0:r1, c0:c1], ground[r0:r1, c0:c1],
-                                     lit_here & inside[r0:r1, c0:c1]), 0.0, add)
+                                     (add > 0) & inside[r0:r1, c0:c1]), 0.0, add)
         if np.where(inside[r0:r1, c0:c1], add, 0.0).max() >= LIGHTING_LUX:
             reaching += 1
         lux[r0:r1, c0:c1] += add

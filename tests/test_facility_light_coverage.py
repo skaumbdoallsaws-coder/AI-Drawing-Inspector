@@ -487,6 +487,19 @@ def test_a_wall_on_the_floor_stops_light_to_lower_ground_behind_it():
     assert walled["grid"]["lux"][:, :15].all()
 
 
+def test_a_low_lamps_spread_light_stops_at_a_wall_too():
+    """Review 2026-11-05: a low lamp's light is spread over each cell, so a cell its aim misses can take some near it,
+    and the wall test only saw the cells the aim reaches: light went through. A 0.3 m, 600 lm lamp 0.2 m west of a
+    3 m wall on x 11, aimed 40 degrees off straight down, away from the wall: none reaches the room behind it."""
+    tilt = math.radians(40)
+    low = lamp(10.8, 0.3, 10.5, aim=(-math.sin(tilt), -math.cos(tilt), 0.0), lumens=600.0, beam=150.0)
+    wall = [(11.0, 4.0, 11.0, 18.0, 0.0, 3.0)]
+    assert estimate({}, [low], box(11, 8, 14, 13), walls=wall)["totals"]["maximum"] == 0
+    both = estimate({}, [low], box(4, 4, 18, 18), walls=wall)
+    xs = both["grid"]["originX"] + np.arange(both["grid"]["cols"]) + 0.5
+    assert not both["grid"]["lux"][:, xs > 11].any() and both["grid"]["lux"][:, xs < 11].any()
+
+
 def test_walls_come_from_wall_placements_and_the_shells_walls():
     records = [wall_record(), wall_record("asset-guard", tags=("machine guard", "panel", "wire mesh"))]
     catalog = {(record["assetId"], record["assetDefinitionRevision"]): record for record in records}

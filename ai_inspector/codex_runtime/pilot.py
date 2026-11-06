@@ -89,8 +89,8 @@ lighting design, and never say a layout meets or fails a lighting code or standa
 Lighting a garden, a patio, a lounge or a bar: when the user asks where lights should go or how many, choose from
 these rules, place them, and say in a sentence or two what you chose and why. suggest_facility_light_positions
 finds spots for outdoor pole lights and wall lights by an outside door, and mounts wall fittings at points you give;
-place every other light with place_asset. The checks see each item as its box: keep a light out of the box of
-anything its height overlaps.
+place every other light with place_asset. The checks see each item as its box, and touching counts: keep a light
+clear of the box of anything its height overlaps.
 - Walkways and lawn edges: bollards every 3 to 5 m along a side, about 0.5 m in from the edge.
 - Palms, plants and feature walls: an uplight just outside the plant's box (0.2 to 0.4 m from its edge) or 0.3 m
   from the wall, turned so its front (+Z) faces it; two for a big palm.
@@ -101,7 +101,8 @@ anything its height overlaps.
   a bar's box is taller than their bottom (its back shelves), along its front, just outside its box.
 - Lounge and bar walls: sconces with their base about 1.5 m up, 2.5 to 3 m apart, clear of doors and screens; a
   neon sign on a wall behind or beside the bar. Mount both with suggest_facility_light_positions points (one per
-  fitting, on the room side of the wall) and heightMeters (the base).
+  fitting, on the room side of the wall) and heightMeters (the base); only walls placed as items carry them. When
+  the user gives a wall fitting's spot, pass that spot as its point.
 - For ambiance: warm, layered light (low lights, accents and a few pendants) rather than more ceiling light.
 Only when the user asks to see, show, look at or go to something ("show me Assembly Cell A06", "take me to the
 dock doors", "show me what you changed"), call show_facility_views: query with what they named, in their words

@@ -105,8 +105,9 @@ def test_a_car_park_pole_goes_on_the_strip_between_head_to_head_rows_clear_of_ot
 
 
 def test_a_low_light_keeps_no_pole_away_and_a_pole_does():
-    """2026-11-05: only another pole (a light at least POLE_HEIGHT tall) keeps a new pole SPACING away; a bollard,
-    an uplight or a festoon string near the spot does not (it still blocks the ground it stands on)."""
+    """2026-11-05: only another pole (a light whose top stands at least POLE_HEIGHT up) keeps a new pole SPACING away;
+    a bollard, an uplight or a festoon string near the spot does not (it still blocks the ground it stands on), and
+    a short flood head mounted high does."""
     bollard = asset("asset-bollard", 0.18, 0.18, 0.85, ["lighting", "bollard", "outdoor"])
     catalog = dict(CATALOG, **{bollard["assetId"]: bollard})
     layout = car_park()
@@ -114,10 +115,13 @@ def test_a_low_light_keeps_no_pole_away_and_a_pole_does():
     found = suggest_light_positions(layout, catalog, {"assetId": POLE["assetId"], "zoneId": "zn-park",
                                                       "count": 2})["positions"]
     assert [spot(item) for item in found] == [pytest.approx((10.0, 13.6)), pytest.approx((21.2, 13.6))]
-    layout["placements"][-1] = place("pl-pole", POLE, 13.0, 0.0, 13.6)
-    found = suggest_light_positions(layout, catalog, {"assetId": POLE["assetId"], "zoneId": "zn-park",
-                                                      "count": 2})["positions"]
-    assert all(math.dist(spot(item), (13.0, 13.6)) >= SPACING for item in found)
+    flood = asset("asset-flood", 0.4, 0.3, 0.3, ["lighting", "flood light", "outdoor"])
+    catalog[flood["assetId"]] = flood
+    for blocker in (place("pl-pole", POLE, 13.0, 0.0, 13.6), place("pl-flood", flood, 13.0, 5.5, 13.6)):
+        layout["placements"][-1] = blocker
+        found = suggest_light_positions(layout, catalog, {"assetId": POLE["assetId"], "zoneId": "zn-park",
+                                                          "count": 2})["positions"]
+        assert found and all(math.dist(spot(item), (13.0, 13.6)) >= SPACING for item in found), blocker["placementId"]
 
 
 def test_the_ground_and_placements_decide_where_a_pole_can_stand():

@@ -397,6 +397,7 @@ def test_sage_has_a_lighting_playbook_for_its_opinions():
                  "bollards every 3 to 5 m", "an uplight just outside the plant's box (0.2 to 0.4 m from its edge)",
                  "turned so its front (+Z) faces it", "along its front, just outside its box",
                  "Mount both with suggest_facility_light_positions points",
+                 "clear of its supports' footprints", "a neon sign on a wall behind or beside the bar",
                  "festoon strings hung under the roof (metadata.mountingSurface with the roof's placementId)",
                  "about 3 times their height apart", "0.75 to 0.9 m above its top",
                  "sconces with their base about 1.5 m up, 2.5 to 3 m apart", "warm, layered light"):

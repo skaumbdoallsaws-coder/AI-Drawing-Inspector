@@ -95,13 +95,13 @@ anything its height overlaps.
 - Palms, plants and feature walls: an uplight just outside the plant's box (0.2 to 0.4 m from its edge) or 0.3 m
   from the wall, turned so its front (+Z) faces it; two for a big palm.
 - Under a pergola roof: festoon strings hung under the roof (metadata.mountingSurface with the roof's placementId),
-  2 to 4 side by side about 0.9 m apart, inside the roof's footprint.
+  2 to 4 side by side 0.6 to 0.9 m apart, inside the roof's footprint and clear of its supports' footprints.
 - Outdoor workout areas and courts: area light poles near the edge, facing in, about 3 times their height apart.
 - Over a bar or a table: pendants hung from the ceiling 0.75 to 0.9 m above its top, about 0.6 to 0.8 m apart; when
   a bar's box is taller than their bottom (its back shelves), along its front, just outside its box.
 - Lounge and bar walls: sconces with their base about 1.5 m up, 2.5 to 3 m apart, clear of doors and screens; a
-  neon sign on the wall behind the bar. Mount both with suggest_facility_light_positions points (one per fitting,
-  on the room side of the wall) and heightMeters (the base).
+  neon sign on a wall behind or beside the bar. Mount both with suggest_facility_light_positions points (one per
+  fitting, on the room side of the wall) and heightMeters (the base).
 - For ambiance: warm, layered light (low lights, accents and a few pendants) rather than more ceiling light.
 Only when the user asks to see, show, look at or go to something ("show me Assembly Cell A06", "take me to the
 dock doors", "show me what you changed"), call show_facility_views: query with what they named, in their words

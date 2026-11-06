@@ -31,7 +31,8 @@ def verify(url, source_document, output):
             page.locator("#trainingTypeRibbonTrigger").click()
             page.locator("#trainingTypeRibbonOption-packaging_shipping").click()
             frame = page.frame_locator("#packagingWorkspaceFrame")
-            frame.get_by_role("button", name="Open", exact=True).click()
+            page.get_by_role("button", name="Document packaging commands", exact=True).click()
+            page.locator("#packaging-menu-open").click()
             frame.locator("#document-list > div").filter(has_text=design["name"]).get_by_role("button", name="Open", exact=True).click()
             expect(frame.locator("#document-name")).to_have_value(design["name"])
             page.locator("#rightRailAgent").click()
@@ -69,13 +70,13 @@ def verify(url, source_document, output):
             names = [r["tool"] for r in evidence["verifiedToolCalls"] if r["ok"]]
             assert all(n in names for n in ("inspect_packaging", "packaging_resources", "estimate_packaging_mass", "edit_packaging", "validate_packaging")), names
             expect(frame.locator("#document-name")).to_be_enabled(timeout=15000)
-            frame.locator("#command-validation").click()
+            page.locator("#packaging-ribbon-validation").click()
             expect(frame.locator("#validation-panel")).to_contain_text("4 / 4 products placed")
             page.screenshot(path=str(output/"after.png"))
-            frame.get_by_role("button", name="Undo", exact=True).click()
+            page.locator("#packaging-ribbon-undo").click()
             expect(frame.locator("#document-status")).to_contain_text("Saved")
             assert page.request.get(api+"/"+document["id"]).json()["design"]["product"]["mass_kg"] is None
-            frame.get_by_role("button", name="Redo", exact=True).click()
+            page.locator("#packaging-ribbon-redo").click()
             expect(frame.locator("#document-status")).to_contain_text("Saved")
             assert abs(page.request.get(api+"/"+document["id"]).json()["design"]["product"]["mass_kg"] - expected_mass) < 1e-9
             assert page.request.get(api+"/"+source_document).json() == original

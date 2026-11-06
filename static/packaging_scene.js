@@ -152,7 +152,12 @@ export class PackagingScene {
     this.resources = new Set(); this.pickable = []; this.frame = 0;
     this.displayMode = 'edges'; this.transparency = 0; this.edgeCache = new Map();
     this.images = new Map(); this.imageQueue = Promise.resolve();
-    this.scene = new THREE.Scene(); this.scene.background = new THREE.Color(0x303438);
+    this.scene = new THREE.Scene();
+    const updateTheme = () => {
+      this.scene.background = new THREE.Color(document.documentElement.dataset.theme === 'light' ? 0xf4f7f9 : 0x363f4a);
+      this.invalidate();
+    };
+    this.scene.background = new THREE.Color(document.documentElement.dataset.theme === 'light' ? 0xf4f7f9 : 0x363f4a);
     this.camera = new THREE.PerspectiveCamera(40, 1, .0001, 1000);
     this.camera.position.set(1, .8, 1.2);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -198,6 +203,8 @@ export class PackagingScene {
     this.renderer.domElement.addEventListener('pointerup', this.pointerUp);
     this.renderer.domElement.addEventListener('webglcontextlost', this.contextLost);
     this.resize();
+    this.themeObserver = new MutationObserver(updateTheme);
+    this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
   }
 
   own(resource) { this.resources.add(resource); return resource; }
@@ -492,7 +499,7 @@ export class PackagingScene {
 
   dispose() {
     this.disposed = true; this.loadVersion++; this.abortController?.abort(); cancelAnimationFrame(this.frame);
-    this.resizeObserver.disconnect(); this.controls.dispose(); this.clear(); this.disposeSource();
+    this.resizeObserver.disconnect(); this.themeObserver.disconnect(); this.controls.dispose(); this.clear(); this.disposeSource();
     this.renderer.domElement.removeEventListener('pointerdown', this.pointerDown);
     this.renderer.domElement.removeEventListener('pointerup', this.pointerUp);
     this.renderer.domElement.removeEventListener('webglcontextlost', this.contextLost);

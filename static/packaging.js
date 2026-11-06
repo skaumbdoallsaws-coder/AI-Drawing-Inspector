@@ -338,7 +338,7 @@ const state = {
   provider: null, providerError: '', quotes: [], quoteIndex: 0, quoteScenario: null, quoteError: '',
   addresses: { origin: blankAddress(), destinations: [blankAddress()] }, quoteForm: null,
   section: false, exploded: false, displayMode: 'edges', transparency: 0,
-  mutationReceipt: null, lastDirtySignal: null, sage: null, conflict: false,
+  mutationReceipt: null, lastDirtySignal: null, lastRibbonSignal: null, sage: null, conflict: false,
   capabilities: [], catalog: null, alternativeReceipt: null
 };
 
@@ -426,7 +426,9 @@ function openPanel(id, { toggle = true, focus = true } = {}) {
 function closePanel() {
   const previous = state.panel;
   state.panel = null; updatePanel();
-  if (previous) $(`command-${previous}`)?.focus({ preventScroll: true });
+  if (previous && document.documentElement.dataset.embedded === 'true') {
+    window.parent.postMessage({ type: 'inspectorpro:packaging-focus', command: previous }, window.location.origin);
+  } else if (previous) $(`command-${previous}`)?.focus({ preventScroll: true });
 }
 
 function updatePanel() {
@@ -443,6 +445,41 @@ function updatePanel() {
     if (control) { control.setAttribute('aria-expanded', String(state.panel === item.id)); control.disabled = state.busy || !!state.sage?.locked; }
   }
   if ($('close-panel')) $('close-panel').disabled = state.busy || !!state.sage?.locked;
+  publishRibbonState();
+}
+
+// Both ribbons dispatch to the same controls, so admission locks and draft checks
+// cannot be bypassed by the host UI.
+const DOCUMENT_COMMANDS = ['new', 'open', 'save', 'undo', 'redo', 'reload', 'pdf'];
+function commandControl(id) {
+  if (PANEL_COMMANDS.some(item => item.id === id)) return $(`command-${id}`);
+  if (DOCUMENT_COMMANDS.includes(id)) return $(`document-${id}`);
+  if (id === 'resume') return $('packaging-resume-editing');
+  return null;
+}
+
+function ribbonState() {
+  const modal = !!document.querySelector('dialog[open]');
+  const commands = {};
+  for (const id of [...PANEL_COMMANDS.map(item => item.id), ...DOCUMENT_COMMANDS, 'resume']) {
+    const node = commandControl(id);
+    commands[id] = { enabled: !!node && !node.disabled && !modal && (id === 'resume' || (!state.busy && !state.sage?.locked)), active: state.panel === id };
+  }
+  return { commands, locked: !!state.sage?.locked };
+}
+
+function publishRibbonState() {
+  if (window.parent === window) return;
+  const signal = JSON.stringify(ribbonState());
+  if (signal === state.lastRibbonSignal) return;
+  state.lastRibbonSignal = signal;
+  window.parent.postMessage({ type: 'inspectorpro:packaging-ribbon' }, window.location.origin);
+}
+
+function executeRibbonCommand(id) {
+  if (!ribbonState().commands[id]?.enabled) return false;
+  commandControl(id).click();
+  return true;
 }
 
 function updateHeader() {
@@ -457,6 +494,7 @@ function updateHeader() {
     button('Reload saved document', reloadDocument, { symbol: 'arrow-clockwise', compact: true, disabled: !doc }),
     button('Download PDF', downloadPDF, { symbol: 'file-export', compact: true, disabled: !doc || hasDraft() })
   );
+  [...actions.children].forEach((node, index) => { node.id = `document-${DOCUMENT_COMMANDS[index]}`; });
   if (state.busy || state.sage?.locked) for (const node of actions.querySelectorAll('button')) node.disabled = true;
   if (state.sage?.locked) {
     const resume = element('button', 'Resume editing'); resume.id = 'packaging-resume-editing'; resume.type = 'button';
@@ -1398,8 +1436,18 @@ function setDisplayMode(mode) {
 
 async function initializeScene() {
   const controls = $('view-actions');
+  const sharedIcon = (node, kind) => {
+    let markup = '';
+    try { markup = window.parent !== window ? window.parent.InspectorProPackagingHost?.viewportIcon?.(kind) : ''; }
+    catch { /* Use local icons if the embedding host is not accessible. */ }
+    if (markup) {
+      const parsed = new DOMParser().parseFromString(markup, 'text/html');
+      node.replaceChildren(...[...parsed.body.childNodes].map(child => document.importNode(child, true)));
+    }
+    return node;
+  };
   const views = element('div', null, 'view-group'); views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Camera views');
-  views.append(button('Fit view', () => state.scene?.fit(), { symbol: 'corners-out', compact: true }));
+  views.append(sharedIcon(button('Fit view', () => state.scene?.fit(), { symbol: 'corners-out', compact: true }), 'zoomfit'));
   for (const [view, label] of [['iso', 'Orbit'], ['top', 'Top'], ['front', 'Front'], ['side', 'Side']]) {
     const b = button(label, () => state.scene?.view(view), { compact: true });
     const img = element('img'); img.src = `/static/assets/view-toolbar-icons/view-${view === 'side' ? 'right' : view}.png`; img.alt = ''; b.append(img); views.append(b);
@@ -1407,10 +1455,20 @@ async function initializeScene() {
   const inspection = element('div', null, 'view-group'); inspection.setAttribute('role', 'group'); inspection.setAttribute('aria-label', 'Inspection views');
   checkbox(inspection, 'Section', false, checked => { state.section = checked; state.scene?.setSection(checked); });
   checkbox(inspection, 'Exploded', false, checked => { state.exploded = checked; state.scene?.setExploded(checked); refreshScene(); state.scene?.fit(); });
+  for (const [index, input] of [...inspection.querySelectorAll('input')].entries()) {
+    const label = input.parentElement, title = index ? 'Exploded' : 'Section';
+    label.title = title; label.classList.add('view-toggle'); input.setAttribute('aria-label', title);
+    label.lastChild.remove();
+    const symbol = icon(index ? 'stack' : 'cube-focus');
+    sharedIcon(symbol, index ? 'explode' : 'section');
+    if (symbol.children.length) symbol.classList.remove('icon');
+    symbol.classList.add('toggle-symbol'); label.append(symbol);
+  }
   const display = element('div', null, 'view-group'), modes = element('div', null, 'display-modes');
   modes.setAttribute('role', 'group'); modes.setAttribute('aria-label', 'Display mode');
   for (const [mode, label, symbol] of [['shaded', 'Gray shaded', 'sphere'], ['edges', 'Shaded with edges', 'cube'], ['wireframe', 'Wireframe', 'bounding-box'], ['appearance', 'Appearance colors', 'mirror']]) {
     const b = button(label, () => setDisplayMode(mode), { symbol, compact: true });
+    sharedIcon(b, `display-${mode}`);
     b.dataset.mode = mode; b.setAttribute('aria-pressed', String(mode === state.displayMode)); modes.append(b);
   }
   const transparency = element('label', 'Transparency', 'transparency-control');
@@ -1439,6 +1497,12 @@ async function initializeScene() {
 
 function boot() {
   try { const theme = localStorage.getItem('inspectorpro.theme'); if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme; } catch { /* Storage may be restricted. */ }
+  if (window.parent !== window && window.frameElement?.id === 'packagingWorkspaceFrame') {
+    document.documentElement.dataset.embedded = 'true';
+    document.querySelector('.package-toolbar').prepend(document.querySelector('.document-name'));
+    $('document-name').setAttribute('aria-label', 'Document name');
+    document.querySelector('.scene-footer').append(document.querySelector('.statusbar'));
+  }
   const close = button('Close panel', closePanel, { compact: true }); close.id = 'close-panel';
   const cross = element('span', '\u00d7'); cross.setAttribute('aria-hidden', 'true'); cross.style.fontSize = '22px'; close.append(cross); $('panel-actions').append(close);
   $('document-name').addEventListener('input', () => {
@@ -1487,6 +1551,8 @@ function boot() {
     });
   });
   window.InspectorProPackaging = Object.freeze({
+    getRibbonState: () => ribbonState(),
+    executeCommand: id => executeRibbonCommand(id),
     getDesktopLifecycleObservation: () => ({
       loaded: true,
       dirty: hasNavigationChanges() || [...document.querySelectorAll('input[type="file"]')].some(input => input.files?.length),
@@ -1497,8 +1563,12 @@ function boot() {
     hasUnsavedChanges: () => hasNavigationChanges() || state.busy,
     confirmNavigation: () => !(hasNavigationChanges() || state.busy) || confirm('Leave Packaging & Shipping? Unsaved changes, session-only addresses or an active request may be lost.')
   });
+  // Dialogs can open without changing the document. Keep the outer ribbon
+  // unavailable until the modal interaction has completed.
+  const modalObserver = new MutationObserver(publishRibbonState);
+  modalObserver.observe(document.body, { attributes: true, attributeFilter: ['open'], subtree: true });
   window.addEventListener('beforeunload', event => { if (hasNavigationChanges() || state.busy || state.sage.locked) { event.preventDefault(); event.returnValue = ''; } });
-  window.addEventListener('pagehide', () => { state.sage.unload(); state.scene?.dispose(); });
+  window.addEventListener('pagehide', () => { modalObserver.disconnect(); state.sage.unload(); state.scene?.dispose(); });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && state.panel && !document.querySelector('dialog[open]') && !state.busy && !state.sage.locked) {
       event.preventDefault(); closePanel(); return;

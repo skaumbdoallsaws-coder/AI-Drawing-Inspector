@@ -7,6 +7,16 @@ Date: 2026-11-05. Status: expanded isolated packaging pilot, including real STEP
 The active updated test host is `http://127.0.0.1:8181/?packagingPilot=1`; standalone workspace: `http://127.0.0.1:8181/packaging`.
 Its data is isolated under `.runtime/packaging-v2-acceptance`. The previous visible demonstration on port 8180 is not the current backend.
 
+### Ribbon And Viewport Consistency
+
+The embedded packaging workspace now uses the main application's shared workflow ribbon, icon assets, command sizing, dropdowns and density. Product, Carton, Contents, Arrange, Appearance, Graphics, Validation and Rates open the existing modeless panels. Document actions, Save and Undo/Redo live in the outer ribbon; narrower windows retain commands in More/Document menus. The duplicated embedded title and ribbon are hidden only when hosted; the standalone editor retains its commands.
+
+The viewport uses a centered heads-up toolbar with the existing view/display icons and hover titles, section/exploded toggles and transparency. Document/package selection stays in one compact context row. Status sits in the footer, and the host theme propagates to the editor and 3D background without remounting the document.
+
+Both ribbons dispatch through the same controls and draft handlers. Busy requests, modal dialogs and Sage admission disable the outer controls; Resume editing still cancels and reconciles through the existing host bridge. No new engineering edit path or model request was introduced.
+
+Verification for this UI increment: 61 packaging JavaScript tests plus 83 desktop lifecycle tests passed. The full-host browser checks passed at 1600/1280/1000 widths, with and without Sage, including modal/lock rejection, focus return, theme sync, canvas pixel changes, no iframe remount and numeric editing when WebGL is unavailable. The existing saved four-pair STEP package was opened for section/top screenshots and its complete saved response remained unchanged. Evidence: `.runtime/packaging-ribbon-release-check/`. Standalone desktop/mobile acceptance also passed, including all eight panels, 390px width, source import, section/exploded views, graphics and Undo: `.runtime/packaging-ribbon-panels-final/`. No live inference or carrier request was made for these UI checks. The regular desktop build remains unchanged.
+
 Implemented since the baseline below:
 
 - Icon ribbon with modeless Product, Carton, Contents, Arrange, Appearance, Graphics, Validation and Rates panels. Closing a panel restores the full viewport; unapplied inputs remain protected.

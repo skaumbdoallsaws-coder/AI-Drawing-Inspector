@@ -32,6 +32,7 @@ def verify(url, output, *, live=False, headed=False):
             page.locator('#trainingTypeRibbonOption-packaging_shipping').click()
             frame = page.frame_locator('#packagingWorkspaceFrame')
             expect(frame.locator('#document-name')).to_be_visible(timeout=30000)
+            page.locator('#packaging-ribbon-product').click()
             frame.locator('#document-name').fill(name)
             asset = Path(__file__).resolve().parents[1] / 'generated/training/racing-bike/part_glb/RB-001_viewer.glb'
             frame.locator('[name="source_file"]').set_input_files(str(asset))
@@ -45,7 +46,7 @@ def verify(url, output, *, live=False, headed=False):
                 frame.locator(f'[name="inner_{axis}"]').fill(str(value))
                 frame.locator(f'[name="outer_{axis}"]').fill(str(value + 4))
             frame.get_by_role('button', name='Apply carton', exact=True).click()
-            frame.get_by_role('button', name='Save', exact=True).click()
+            page.locator('#packaging-ribbon-save').click()
             expect(frame.locator('#document-status')).to_contain_text('Saved')
             documents = page.request.get(url.rstrip('/') + '/api/packaging/documents').json()['documents']
             document_id = next(row['id'] for row in documents if row['name'] == name)

@@ -98,11 +98,20 @@ input[type="range"] { accent-color: var(--accent); }
 .scene-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .package-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--panel); flex: none; }
 .package-picker { flex: 1 1 150px; display: flex; align-items: center; gap: 8px; max-width: 420px; }
-.view-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 10px; background: var(--toolbar); flex: none; }
+.view-toolbar { position: absolute; z-index: 3; top: 6px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 16px); display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 8px; padding: 2px 4px; background: transparent; }
 .view-group, .display-modes { display: flex; align-items: center; gap: 3px; }
 .view-group + .view-group { border-left: 1px solid var(--line); padding-left: 10px; }
-.view-toolbar button { background: transparent; }
+.view-toolbar button { background: transparent; border-color: transparent; color: #4fc3f7; }
+.view-toolbar button.icon-button { width: 32px; height: 32px; flex-basis: 32px; padding: 3px; }
+.view-toolbar button:hover:not(:disabled), .view-toolbar button[aria-pressed="true"] { background: #348bc126; border-color: #54b8ec80; }
 .view-toolbar img { width: 22px; height: 22px; object-fit: contain; }
+.view-toolbar .ribbon-facility-icon { filter: invert(42%) sepia(72%) saturate(1000%) hue-rotate(166deg) brightness(110%) contrast(91%); }
+.view-toolbar svg { width: 24px; height: 24px; display: block; }
+.view-toggle { position: relative; width: 32px; height: 32px; flex: 0 0 32px; padding: 3px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; color: #4fc3f7; }
+.view-toggle:hover, .view-toggle:has(input:checked) { background: #348bc126; border-color: #54b8ec80; }
+.view-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.view-toggle:has(input:focus-visible) { outline: 2px solid var(--accent); }
+.toggle-symbol { pointer-events: none; display: block; }
 .display-modes button { border-radius: 0; }
 .display-modes button:first-child { border-radius: 4px 0 0 4px; }
 .display-modes button:last-child { border-radius: 0 4px 4px 0; }
@@ -112,7 +121,7 @@ input[type="range"] { accent-color: var(--accent); }
 .view-toolbar .check { padding: 0 4px; }
 .viewport { flex: 1; min-height: 0; position: relative; overflow: hidden; background: #303438; isolation: isolate; }
 .viewport canvas { display: block; width: 100%; height: 100%; outline-offset: -3px; touch-action: none; }
-.scene-message { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 1; color: #ecf0f2; background: #222629; padding: 8px 10px; border-left: 3px solid #4fc3f7; pointer-events: none; overflow-wrap: anywhere; }
+.scene-message { position: absolute; bottom: 12px; left: 12px; max-width: calc(100% - 24px); z-index: 1; color: #ecf0f2; background: #222629cc; padding: 6px 10px; border-left: 2px solid #4fc3f7; pointer-events: none; overflow-wrap: anywhere; font-size: 11px; }
 .scene-message:empty { display: none; }
 .scene-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 3px 12px; padding: 5px 10px; background: var(--panel); color: var(--muted); border-top: 1px solid var(--line); font-size: 11px; flex: none; max-height: 58px; overflow: auto; }
 #scene-caption { min-width: 0; overflow-wrap: anywhere; }
@@ -178,3 +187,24 @@ dialog::backdrop { background: #0009; }
 }
 @media (max-height: 620px) and (max-width: 680px) { body { overflow: auto; min-height: 620px; height: auto; } .workspace { min-height: 420px; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+/* The desktop shell owns workflow commands. The iframe owns only its document
+   context, model, and tool panels, matching the other engineering viewports. */
+:root[data-embedded="true"] .app-header,
+:root[data-embedded="true"] .command-ribbon { display: none; }
+:root[data-embedded="true"] { --bg: #242b34; --panel: #20262e; --toolbar: #1d242c; --line: #394654; --input: #171e26; }
+:root[data-embedded="true"][data-theme="light"] { --bg: #e2e5e7; --panel: #f3f5f6; --toolbar: #e6e9ec; --line: #b5bfc7; --input: #fff; }
+:root[data-embedded="true"] .package-toolbar { padding: 4px 10px; gap: 10px; }
+:root[data-embedded="true"] .package-toolbar .document-name { display: flex; align-items: center; gap: 7px; flex: 1 1 180px; max-width: 310px; }
+:root[data-embedded="true"] .package-toolbar input,
+:root[data-embedded="true"] .package-toolbar select,
+:root[data-embedded="true"] .package-toolbar button { min-height: 26px; height: 26px; font-size: 11px; padding-top: 3px; padding-bottom: 3px; }
+:root[data-embedded="true"] .package-picker { max-width: 340px; }
+:root[data-embedded="true"] .scene-footer .statusbar { padding: 0; border: 0; font-size: inherit; background: none; margin-left: auto; }
+:root[data-embedded="true"] #provider-status { display: none; }
+:root[data-embedded="true"] .message { position: absolute; bottom: 32px; right: 12px; z-index: 6; max-width: min(460px, calc(100% - 24px)); border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 2px 8px #0003; }
+@media (max-width: 680px) {
+  :root[data-embedded="true"] .package-toolbar .document-name { max-width: none; }
+  .view-toolbar { gap: 2px 5px; padding: 2px; }
+  .view-toolbar .view-group + .view-group { padding-left: 0; }
+}

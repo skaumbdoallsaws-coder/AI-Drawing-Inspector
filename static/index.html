@@ -5192,6 +5192,39 @@
             min-height: calc(var(--ribbon-btn-h) + 10px);
             overflow: visible;
         }
+        .packaging-ribbon-shell { display: flex; align-items: stretch; width: 100%; min-width: 0; container-type: inline-size; }
+        .packaging-ribbon-shell .packaging-workflow-selector { flex: 0 0 244px; min-width: 244px; width: 244px; padding: 5px 10px; }
+        .packaging-workflow-selector .workflow-type-combobox { width: 224px; min-width: 0; }
+        .packaging-ribbon-commandbar { flex: 1 1 auto; min-width: 0; }
+        .packaging-ribbon-commandbar .ribbon-group { gap: 2px; padding: 5px 6px; }
+        .packaging-ribbon-commandbar .documentation-ribbon-command.is-medium { width: 60px; min-width: 60px; }
+        .packaging-ribbon-commandbar .documentation-command-label { max-width: 60px; white-space: normal; text-align: center; }
+        .packaging-ribbon-commandbar .documentation-ribbon-command.is-compact .documentation-command-label { text-align: left; }
+        .packaging-ribbon-commandbar [data-packaging-command][hidden] { display: none !important; }
+        .packaging-ribbon-commandbar .documentation-ribbon-command[aria-expanded="true"] { background: rgba(42, 144, 209, .15); border-color: rgba(74, 168, 228, .5); }
+        .packaging-ribbon-commandbar [data-documentation-ribbon-group="more"],
+        .packaging-ribbon-commandbar [data-documentation-separator-for="more"] { display: none; }
+        @container (max-width: 1040px) {
+            .packaging-ribbon-commandbar [data-documentation-ribbon-group="finish"],
+            .packaging-ribbon-commandbar [data-documentation-separator-for="finish"],
+            .packaging-ribbon-commandbar [data-documentation-ribbon-group="review"],
+            .packaging-ribbon-commandbar [data-documentation-separator-for="review"] { display: none; }
+            .packaging-ribbon-commandbar [data-documentation-ribbon-group="more"] { display: flex; }
+            .packaging-ribbon-commandbar [data-documentation-separator-for="more"] { display: block; }
+            .packaging-ribbon-shell .packaging-workflow-selector { flex-basis: 208px; min-width: 208px; width: 208px; }
+            .packaging-workflow-selector .workflow-type-combobox { width: 188px; }
+        }
+        @container (max-width: 780px) {
+            .packaging-ribbon-commandbar .documentation-ribbon-command.is-medium { width: 48px; min-width: 48px; }
+            .packaging-ribbon-commandbar .ribbon-group { padding-left: 3px; padding-right: 3px; }
+        }
+        @container (max-width: 650px) {
+            .packaging-ribbon-shell .packaging-workflow-selector { flex-basis: 184px; min-width: 184px; width: 184px; padding-left: 6px; padding-right: 6px; }
+            .packaging-workflow-selector .workflow-type-combobox { width: 172px; }
+            .packaging-ribbon-commandbar .documentation-ribbon-command.is-medium { width: 44px; min-width: 44px; }
+            .packaging-ribbon-commandbar .documentation-ribbon-stack { display: none; }
+            .packaging-ribbon-commandbar #packaging-ribbon-arrange { display: none; }
+        }
         .facility-ribbon-shell {
             width: 100%;
             min-width: 0;
@@ -47212,6 +47245,7 @@
             ribbon.innerHTML = '';
             ribbon.classList.remove('process-map-ribbon');
             ribbon.classList.remove('facility-layout-ribbon');
+            ribbon.classList.remove('packaging-workflow-ribbon');
             ribbon.classList.remove('documentation-workflow-ribbon');
 
             if (state.activeTab === 'drawing') {
@@ -48099,9 +48133,7 @@
                 }
             } else if (state.activeTab === 'training') {
                 if (trainingState.type === 'packaging_shipping') {
-                    const group = _ribbonGroup('Workflow');
-                    group.appendChild(_trainCreateWorkflowTypeSelector());
-                    ribbon.appendChild(group);
+                    _trainRenderPackagingRibbon(ribbon);
                 } else if (trainingState.type === 'documentation') {
                     _renderDocumentationWorkflowRibbon(ribbon);
                 } else if (trainingState.viewportMode === 'process_flow') {
@@ -48146,6 +48178,119 @@
             }
         }
 
+        function _packagingEditorUI() {
+            if (state.activeTab !== 'training' || trainingState.type !== 'packaging_shipping') return null;
+            const frame = document.getElementById('packagingWorkspaceFrame');
+            try {
+                const url = new URL(frame?.contentWindow?.location.href || 'about:blank');
+                if (url.origin !== location.origin || url.pathname !== '/packaging') return null;
+                return frame.contentWindow.InspectorProPackaging || null;
+            } catch (_) { return null; }
+        }
+
+        function _packagingRunCommand(id) {
+            const ran = _packagingEditorUI()?.executeCommand(id);
+            _packagingSyncRibbon();
+            return !!ran;
+        }
+
+        function _packagingSyncRibbon() {
+            const current = _packagingEditorUI()?.getRibbonState();
+            document.querySelectorAll('[data-packaging-command]').forEach(button => {
+                const id = button.dataset.packagingCommand;
+                button.disabled = !current?.commands[id]?.enabled;
+                if (button.hasAttribute('aria-controls')) button.setAttribute('aria-expanded', String(!!current?.commands[id]?.active));
+                if (id === 'resume') button.hidden = !current?.locked;
+            });
+            document.querySelectorAll('[data-packaging-command-menu]').forEach(trigger => {
+                trigger.disabled = !trigger.dataset.packagingCommandMenu.split(',').some(id => current?.commands[id]?.enabled);
+            });
+        }
+
+        function _trainRenderPackagingRibbon(ribbon) {
+            ribbon.classList.add('packaging-workflow-ribbon', 'documentation-workflow-ribbon');
+            const shell = document.createElement('div');
+            shell.className = 'documentation-ribbon-shell packaging-ribbon-shell';
+            const selector = document.createElement('div');
+            selector.className = 'documentation-workflow-selector packaging-workflow-selector';
+            selector.appendChild(_trainCreateWorkflowTypeSelector());
+            const bar = document.createElement('div');
+            bar.className = 'documentation-ribbon-commandbar packaging-ribbon-commandbar';
+            const definitions = {
+                product: ['3dmodel', 'Product', 'Product'],
+                carton: ['facilityAlign', 'Carton', 'Carton'],
+                contents: ['facilityVerticalStack', 'Contents', 'Contents'],
+                arrange: ['facilityAutoArrange', 'Arrange', 'Arrange'],
+                appearance: ['facilityAppearance', 'Appearance', 'Appearance'],
+                graphics: ['facilityDecals', 'Graphics', 'Graphics'],
+                validation: ['facilityFit', 'Validation', 'Validation'],
+                rates: ['facilityFloorMarking', 'Rates', 'Rates'],
+                new: ['properties', 'New', 'New packaging document'],
+                open: ['facilityExportPdf', 'Open', 'Open packaging document'],
+                save: ['facilitySave', 'Save', 'Save packaging document'],
+                undo: ['facilityUndo', 'Undo', 'Undo packaging change'],
+                redo: ['facilityRedo', 'Redo', 'Redo packaging change'],
+                reload: ['facilityRotate', 'Reload', 'Reload saved packaging document'],
+                pdf: ['facilityExportPdf', 'Export PDF', 'Download packaging review PDF'],
+                resume: ['facilityLock', 'Resume', 'Resume packaging editing'],
+            };
+            const panels = ['product', 'carton', 'contents', 'arrange', 'appearance', 'graphics', 'validation', 'rates'];
+            const tag = (node, id) => {
+                node.dataset.packagingCommand = id;
+                if (panels.includes(id)) {
+                    node.setAttribute('aria-haspopup', 'dialog');
+                    node.setAttribute('aria-controls', 'packagingWorkspaceFrame');
+                    node.setAttribute('aria-expanded', 'false');
+                }
+                node.disabled = true;
+                return node;
+            };
+            const command = (id, compact = false) => {
+                const [icon, label, title] = definitions[id];
+                return tag(_documentationRibbonButton(icon, label, title, `packaging-ribbon-${id}`,
+                    () => _packagingRunCommand(id), { size: compact ? 'compact' : 'medium', compact }), id);
+            };
+            const menu = (icon, label, ids) => {
+                const node = _documentationRibbonMenu(icon, label, `${label} packaging commands`, ids.map(id => ({
+                    id: `packaging-menu-${id}`, icon: definitions[id][0], label: definitions[id][1],
+                    title: definitions[id][2], disabled: true, handler: () => _packagingRunCommand(id),
+                })), { size: 'medium' });
+                ids.forEach(id => tag(node.querySelector(`#packaging-menu-${id}`), id));
+                node.querySelector('.documentation-ribbon-menu-trigger').dataset.packagingCommandMenu = ids.join(',');
+                return node;
+            };
+            _documentationAppendRibbonGroup(bar, 'Design', panels.slice(0, 4).map(id => command(id)));
+            _documentationAppendRibbonGroup(bar, 'Finish', panels.slice(4, 6).map(id => command(id)));
+            _documentationAppendRibbonGroup(bar, 'Review', panels.slice(6).map(id => command(id)));
+            _documentationAppendRibbonGroup(bar, 'More', [menu('facilityAutoArrange', 'More', panels.slice(3))]);
+            _documentationAppendRibbonGroup(bar, 'Document', [
+                menu('facilityExportPdf', 'Document', ['new', 'open', 'undo', 'redo', 'reload', 'pdf']),
+                _documentationRibbonStack([command('undo', true), command('redo', true)]),
+                command('save'), command('resume'),
+            ]);
+            shell.append(selector, bar); ribbon.appendChild(shell); _packagingSyncRibbon();
+        }
+
+        window.addEventListener('message', event => {
+            const frame = document.getElementById('packagingWorkspaceFrame');
+            if (event.origin !== location.origin || event.source !== frame?.contentWindow || !_packagingEditorUI()) return;
+            if (event.data?.type === 'inspectorpro:packaging-ribbon') _packagingSyncRibbon();
+            if (event.data?.type === 'inspectorpro:packaging-focus') {
+                const button = [...document.querySelectorAll('[data-packaging-command]')]
+                    .find(node => node.dataset.packagingCommand === event.data.command && node.checkVisibility());
+                const fallback = [...document.querySelectorAll('[data-packaging-command-menu]')]
+                    .find(node => node.dataset.packagingCommandMenu.split(',').includes(event.data.command) && node.checkVisibility());
+                (button || fallback)?.focus({ preventScroll: true });
+            }
+        });
+
+        function _packagingSyncTheme() {
+            if (!_packagingEditorUI()) return;
+            document.getElementById('packagingWorkspaceFrame').contentDocument.documentElement.dataset.theme =
+                document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+        }
+        new MutationObserver(_packagingSyncTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
         let _packagingBridgePromise = null;
         let _packagingActiveTurn = null;
         let _packagingReleasePromise = null;
@@ -48165,6 +48310,13 @@
         }
 
         window.InspectorProPackagingHost = {
+            viewportIcon(kind) {
+                if (['zoomfit', 'section'].includes(kind)) return _viewerToolbarIconMarkup(kind);
+                if (kind === 'explode') return _ribbonIcons.facilityVerticalStack;
+                if (kind === 'display-appearance') return _ribbonIcons.facilityAppearance;
+                const styles = { 'display-shaded': 'shaded', 'display-edges': 'shaded_edges', 'display-wireframe': 'wireframe' };
+                return styles[kind] ? _displayStyleIconSvg(styles[kind]) : '';
+            },
             getDesktopLifecycleObservation() {
                 return {
                     loaded: !!document.getElementById('packagingWorkspaceFrame')
@@ -49895,6 +50047,7 @@
                 const frame = document.createElement('iframe');
                 frame.id = 'packagingWorkspaceFrame';
                 frame.src = '/packaging';
+                frame.addEventListener('load', () => { _packagingSyncRibbon(); _packagingSyncTheme(); });
                 frame.title = 'Packaging and Shipping';
                 frame.style.cssText = 'width:100%;height:100%;min-height:480px;border:0;display:block;';
                 viewportContent.appendChild(frame);

@@ -332,6 +332,21 @@ class _Work:
                 "(hatching, say) or reach too far. Give the wall, room, outline and door roles to fewer layers.")
 
 
+class _Footing:
+    """The layout's footing (ground.layout_footing: its plan, ground and floor), worked out once, when a candidate is
+    first checked against it: worked out for each, a ground of 256 tiles cost 4 ms a candidate (Codex review). A layout
+    it cannot be worked out for refuses each candidate with the reason, as each check did on its own."""
+
+    def __init__(self, layout):
+        self.layout, self.value = layout, None
+
+    def __call__(self):
+        if self.value is None:
+            from .ground import layout_footing
+            self.value = layout_footing(self.layout)
+        return self.value
+
+
 class _Grid:
     """A uniform grid for neighbor searches. A segment widened by a margin is kept in the cells along it, not in every
     cell of the box around it, so a long diagonal line costs its length; every cell and neighbor visited is spent from
@@ -1339,7 +1354,7 @@ def _column_shape(ring, kind):
     return None
 
 
-def _columns(entities, layout, reference_id, import_id, column_settings, excluded, floor, work, unconverted):
+def _columns(entities, layout, reference_id, import_id, column_settings, excluded, floor, work, unconverted, footing):
     """The column candidates (in reading order: by center, z then x) from ENTITIES, the entities on the column layers
     with their points on the plan, and the number of columns already on the plan. Entities from one block insert
     (the innermost; one copy of an array insert) are one group, the others another: a group's closed outlines that
@@ -1457,7 +1472,7 @@ def _columns(entities, layout, reference_id, import_id, column_settings, exclude
             _state(row, "waiting", "column_settings")
         else:
             try:
-                compile_columns({"version": 1, "columns": [record]}, layout)
+                compile_columns({"version": 1, "columns": [record]}, layout, footing())
                 _state(row, "new")
             except ValueError as exc:
                 _state(row, "refused", *_compile_problem(exc))
@@ -1523,6 +1538,7 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
     excluded = set(settings["excluded"])
     unconverted = _Unconverted()
     work = _Work()
+    footing = _Footing(layout)
 
     pieces = {role: [] for role in WALL_ROLES}
     loops = {role: [] for role in LOOP_ROLES}
@@ -1964,7 +1980,7 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
         row["label"] = f"Drawing door {number}"
 
     column_rows, existing_columns = _columns(column_entities, layout, reference["referenceId"], import_id,
-                                             settings["columns"], excluded, floor, work, unconverted)
+                                             settings["columns"], excluded, floor, work, unconverted, footing)
 
     # Operations, in a fixed order: the outer walls, then walls, then zones, then columns.
     operations = []

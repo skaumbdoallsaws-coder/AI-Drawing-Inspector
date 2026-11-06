@@ -1,6 +1,6 @@
 from copy import deepcopy
 import pytest
-from ai_inspector.facility_layout.ground import normalize_ground, supports_footprint
+from ai_inspector.facility_layout.ground import footprint_support, normalize_ground, supports_footprint
 from ai_inspector.facility_layout.plan_settings import shell_with_plan_boundary
 
 
@@ -27,6 +27,23 @@ def test_support_across_tiles_but_not_gaps_slopes_or_wrong_elevation():
     assert not supports_footprint(ground,[(-1,2),(1,2),(1,4),(-1,4)],-1.35)
     ground['surfaces'][1]['minX']=-9
     assert not supports_footprint(ground,points,-1.35)
+
+
+def test_a_ground_worked_out_once_answers_each_footprint_as_it_is_answered_alone():
+    # Codex review (columns, round 4): a conversion checks thousands of footprints against one ground, so its level
+    # regions are worked out once; across tiles, over gaps, slopes and level steps, the answers stay the same.
+    ground=normalize_ground(dict(schemaVersion=1,surfaces=[tile('one',-20,-10,-1.35),tile('two',-10,0,-1.35),
+        tile('ramp',0,10,-1.35,0),tile('high',10,20,2),tile('far',25,30,2)]))
+    stands=footprint_support(ground)
+    answers=set()
+    for x in range(-22,32):
+        for width in (0.5,2,6):
+            for y in (-1.35,0,2):
+                points=[(x,2),(x+width,2),(x+width,4),(x,4)]
+                answer=supports_footprint(ground,points,y)
+                assert stands(points,y)==answer,(x,width,y)
+                answers.add(answer)
+    assert answers=={True,False}
 
 
 @pytest.mark.parametrize('change',[

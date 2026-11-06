@@ -77,24 +77,21 @@ def _source(value) -> dict:
     return {"referenceId": value["referenceId"], "importId": value["importId"], "entityId": entity}
 
 
-def compile_columns(value, layout) -> dict:
-    """VALUE (version 1 and its columns, without footprints) checked against LAYOUT and given its footprints."""
-    from shapely.geometry import Polygon, box
+def compile_columns(value, layout, footing=None) -> dict:
+    """VALUE (version 1 and its columns, without footprints) checked against LAYOUT and given its footprints. FOOTING is
+    LAYOUT's (ground.layout_footing), given by a caller that checks many values against one layout."""
+    from shapely.geometry import Polygon
     from .appearance_library import normalize_appearance
-    from .ground import normalize_ground, supports_footprint
-    from .plan_settings import plan_settings_from_layout
+    from .ground import layout_footing
     if not isinstance(value, Mapping) or set(value) != {"version", "columns"} or type(value["version"]) is not int \
             or value["version"] != 1:
         raise ValueError("Columns require version 1 and columns")
     if not isinstance(value["columns"], list) or len(value["columns"]) > MAX_COLUMNS:
         raise ValueError(f"At most {MAX_COLUMNS} columns are supported")
-    plan = plan_settings_from_layout(layout)
+    footing = footing or layout_footing(layout)
+    plan, stands = footing["plan"], footing["stands"]
     if value["columns"] and not plan:
         raise ValueError("Set plan dimensions before adding columns")
-    ground = (layout.get("extensions") or {}).get("facilityGround")
-    if ground:
-        ground = normalize_ground(ground)
-    floor = float((layout.get("coordinateFrame") or {}).get("floorElevation", 0))
     result, ids = [], set()
     for column in value["columns"]:
         if not isinstance(column, Mapping) or not isinstance(column.get("shape"), str) or column["shape"] not in SHAPES:
@@ -131,11 +128,11 @@ def compile_columns(value, layout) -> dict:
             row["source"] = _source(column["source"])
         outline = footprint(row)
         shape = Polygon(outline)
-        if not box(0, 0, plan["widthMeters"], plan["depthMeters"]).buffer(1e-8).covers(shape):
+        if not footing["area"].covers(shape):
             raise ValueError(f"Column '{row['label']}' extends outside the facility plan")
-        if ground and not supports_footprint(ground, outline, row["baseElevation"]):
+        if stands and not stands(outline, row["baseElevation"]):
             raise ValueError(f"Column '{row['label']}' must stand on a flat ground surface at its base elevation")
-        if not ground and abs(row["baseElevation"] - floor) > 1e-6:
+        if not stands and abs(row["baseElevation"] - float(footing["floor"])) > 1e-6:
             raise ValueError(f"Column '{row['label']}' base must match the floor elevation")
         row["footprint"] = [{"x": round(x, 9), "z": round(z, 9)} for x, z in outline]
         result.append(row)

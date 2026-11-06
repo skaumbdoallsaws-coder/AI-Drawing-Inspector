@@ -1286,6 +1286,43 @@ def test_outlines_nested_without_covering_one_another_are_spent_by_the_corners_c
         convert(rings, COLUMNS, HEIGHT)
 
 
+def tiled_ground(doc, missing=()):
+    """DOC with a level ground of 5 m tiles over its 40 x 30 m plan, but for the tiles (i, j) MISSING."""
+    doc["extensions"]["facilityGround"] = {"schemaVersion": 1, "surfaces": [
+        {"surfaceId": f"g{i}-{j}", "minX": 5.0 * i, "maxX": 5.0 * (i + 1), "minZ": 5.0 * j, "maxZ": 5.0 * (j + 1),
+         "startElevation": 0.0, "endElevation": 0.0, "slopeAxis": "x", "color": "#808080"}
+        for i in range(8) for j in range(6) if (i, j) not in missing]}
+    return doc
+
+
+def counted_grounds(monkeypatch):
+    from ai_inspector.facility_layout import ground
+    calls = [0]
+    normalize = ground.normalize_ground
+
+    def counted(value):
+        calls[0] += 1
+        return normalize(value)
+
+    monkeypatch.setattr(ground, "normalize_ground", counted)
+    return calls
+
+
+def test_column_candidates_are_checked_against_a_ground_worked_out_once(monkeypatch):
+    # Codex review (columns, round 4): each candidate's check worked the layout's ground out again, comparing its
+    # tiles pairwise: 4 ms a candidate on a ground of 256 tiles, 80 s for 20,000 candidates.
+    calls = counted_grounds(monkeypatch)
+    doc = tiled_ground(layout(), missing={(7, 5)})
+    boxes = [turned_box(f"c{k:02d}", (1 + 2.5 * (k % 10), 1 + 3 * (k // 10)), 0.4, 0.4, 0) for k in range(30)]
+    boxes += [turned_box("across", (5, 21), 0.4, 0.4, 0),  # on two tiles, either side of x = 10
+              turned_box("off", (32.5, 22.5), 0.4, 0.4, 0)]  # where the corner tile is missing
+    result = convert(drawing(*boxes), COLUMNS, HEIGHT, doc=doc)
+    states = {row["sources"][0]: (row["state"], row["reason"]) for row in result["columns"]}
+    assert states.pop("off") == ("refused", "invalid") and states.pop("across") == ("new", None)
+    assert set(states.values()) == {("new", None)} and len(states) == 30
+    assert calls[0] == 1, calls
+
+
 def test_one_insert_of_many_columns_lists_its_entities_once_not_once_per_column():
     # Codex review (columns, round 1): each column of an insert listed and sorted all of the insert's entities again,
     # so one insert of N outlines cost N * N lookups before any limit could refuse it.

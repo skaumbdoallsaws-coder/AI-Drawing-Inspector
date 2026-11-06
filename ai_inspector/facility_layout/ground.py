@@ -122,14 +122,19 @@ def _support_regions(serialized):
     return {y: unary_union(polygons) for y, polygons in groups.items()}
 
 
+def _on_one_tile(ground, points, elevation, feature_id=None):
+    """Whether POINTS all lie on one level surface of GROUND at ELEVATION (FEATURE_ID's, when one is given)."""
+    return any(s["startElevation"] == s["endElevation"] and abs(s["startElevation"] - elevation) <= 1e-6
+               and (not feature_id or s["surfaceId"] == feature_id)
+               and all(s["minX"] - 1e-8 <= x <= s["maxX"] + 1e-8 and s["minZ"] - 1e-8 <= z <= s["maxZ"] + 1e-8
+                       for x, z in points)
+               for s in ground["surfaces"])
+
+
 def supports_footprint(ground, points, elevation, feature_id=None):
     """Allow crossing adjacent coplanar tiles, never a gap, slope or level step."""
-    for s in ground["surfaces"]:
-        if (s["startElevation"] == s["endElevation"] and abs(s["startElevation"]-elevation) <= 1e-6
-                and (not feature_id or s["surfaceId"] == feature_id)
-                and all(s["minX"]-1e-8 <= x <= s["maxX"]+1e-8
-                        and s["minZ"]-1e-8 <= z <= s["maxZ"]+1e-8 for x,z in points)):
-            return True
+    if _on_one_tile(ground, points, elevation, feature_id):
+        return True
     from shapely.geometry import Polygon
     value = ground
     if feature_id:
@@ -139,3 +144,44 @@ def supports_footprint(ground, points, elevation, feature_id=None):
     footprint = Polygon(points)
     return any(abs(y - elevation) <= 1e-6 and shape.buffer(1e-8).covers(footprint)
                for y, shape in regions.items())
+
+
+def footprint_support(ground):
+    """supports_footprint(GROUND, points, elevation) as a function of the points and the elevation, for the many
+    footprints of one edit or one conversion: GROUND (normalized, and unchanged while this is used) has its level
+    regions worked out once, when a footprint first crosses its tiles (worked out for each, a footprint across tiles
+    cost 0.7 ms on a ground of 256 tiles: Codex review)."""
+    import shapely
+    from shapely.geometry import Polygon
+    regions = []
+
+    def stands(points, elevation):
+        if _on_one_tile(ground, points, elevation):
+            return True
+        if not regions:
+            found = {y: shape.buffer(1e-8) for y, shape in _support_regions(json.dumps(ground, sort_keys=True)).items()}
+            if found:
+                shapely.prepare(list(found.values()))
+            regions.append(found)
+        footprint = Polygon(points)
+        return any(abs(y - elevation) <= 1e-6 and shape.covers(footprint) for y, shape in regions[0].items())
+
+    return stands
+
+
+def layout_footing(layout):
+    """What the walls and columns of LAYOUT are checked against, worked out once for all of them: its plan
+    (plan_settings_from_layout; None without one), the plan's area as the checks take it (1e-8 wider), how a footprint
+    stands on its ground (footprint_support; None without ground) and its floor elevation, as stored. A conversion
+    checks thousands of candidates against one layout: worked out for each, a ground of 256 tiles cost 4 ms a
+    candidate, its tiles compared pairwise (Codex review)."""
+    import shapely
+    from shapely.geometry import box
+    from .plan_settings import plan_settings_from_layout
+    plan = plan_settings_from_layout(layout)
+    area = box(0, 0, plan["widthMeters"], plan["depthMeters"]).buffer(1e-8) if plan else None
+    if area is not None:
+        shapely.prepare(area)
+    ground = (layout.get("extensions") or {}).get(KEY)
+    return {"plan": plan, "area": area, "stands": footprint_support(normalize_ground(ground)) if ground else None,
+            "floor": (layout.get("coordinateFrame") or {}).get("floorElevation", 0)}

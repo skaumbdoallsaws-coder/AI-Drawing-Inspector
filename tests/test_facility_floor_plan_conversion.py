@@ -1323,6 +1323,20 @@ def test_column_candidates_are_checked_against_a_ground_worked_out_once(monkeypa
     assert calls[0] == 1, calls
 
 
+def test_wall_candidates_are_checked_against_a_ground_worked_out_once(monkeypatch):
+    # As the column candidates (Codex review, columns round 4): each wall candidate's check worked the ground out again.
+    calls = counted_grounds(monkeypatch)
+    doc = tiled_ground(layout(), missing={(7, 5)})
+    lines = []
+    for k in range(8):  # walls 0.2 m thick from x 5 to 13 on the plan, across the tiles' edge at x = 10
+        lines += [line(f"a{k}", "L1", (0, 2.5 * k), (8, 2.5 * k)), line(f"b{k}", "L1", (0, 2.5 * k + 0.2), (8, 2.5 * k + 0.2))]
+    lines += [line("off-a", "L1", (30, 21), (34, 21)), line("off-b", "L1", (30, 21.2), (34, 21.2))]  # no tile there
+    result = convert(drawing(*lines), FACES, WALLS, doc=doc)
+    states = sorted((row["state"], row["reason"] or "") for row in result["walls"])
+    assert states == [("new", "")] * 8 + [("refused", "invalid")], states
+    assert calls[0] == 1, calls
+
+
 def test_one_insert_of_many_columns_lists_its_entities_once_not_once_per_column():
     # Codex review (columns, round 1): each column of an insert listed and sorted all of the insert's entities again,
     # so one insert of N outlines cost N * N lookups before any limit could refuse it.

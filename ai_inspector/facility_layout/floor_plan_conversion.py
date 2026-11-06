@@ -1708,7 +1708,7 @@ def convert(geometry: dict, reference: dict, layout: dict, settings: dict, *, im
             _state(row, "waiting", "wall_settings")
         else:
             try:
-                compile_interior_walls({"version": 1, "walls": [record]}, layout)
+                compile_interior_walls({"version": 1, "walls": [record]}, layout, footing())
                 _state(row, "new")
             except ValueError as exc:
                 _state(row, "refused", *_compile_problem(exc))

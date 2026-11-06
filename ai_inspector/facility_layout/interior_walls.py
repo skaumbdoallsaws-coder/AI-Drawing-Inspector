@@ -10,19 +10,19 @@ PREFIX = "layout-interior-wall-"
 FIELDS = {"wallId", "label", "start", "end", "heightMeters", "thicknessMeters", "baseElevation", "color", "openings"}
 
 
-def compile_interior_walls(value, layout):
-    from shapely.geometry import LineString, box
-    from .plan_settings import plan_settings_from_layout
-    from .ground import supports_footprint, normalize_ground
+def compile_interior_walls(value, layout, footing=None):
+    """VALUE (version 1 and its walls, without panels) checked against LAYOUT and given its panels. FOOTING is
+    LAYOUT's (ground.layout_footing), given by a caller that checks many values against one layout."""
+    from shapely.geometry import LineString
+    from .ground import layout_footing
     if not isinstance(value, Mapping) or set(value) != {"version", "walls"} or type(value["version"]) is not int or value["version"] != 1:
         raise ValueError("Interior walls require version 1 and walls")
     if not isinstance(value["walls"], list) or len(value["walls"]) > 128:
         raise ValueError("At most 128 interior walls are supported")
-    plan = plan_settings_from_layout(layout)
+    footing = footing or layout_footing(layout)
+    plan, stands = footing["plan"], footing["stands"]
     if value["walls"] and not plan:
         raise ValueError("Set plan dimensions before adding interior walls")
-    ground = layout.get("extensions", {}).get("facilityGround")
-    if ground: ground = normalize_ground(ground)
     result, ids = [], set()
     for wall in value["walls"]:
         if not isinstance(wall, Mapping) or set(wall) != FIELDS:
@@ -70,12 +70,12 @@ def compile_interior_walls(value, layout):
         for start, end in spans:
             def along(t): return (a[0]+(b[0]-a[0])*t/length, a[1]+(b[1]-a[1])*t/length)
             shape = LineString([along(start), along(end)]).buffer(thickness/2, cap_style="flat")
-            if not box(0, 0, plan["widthMeters"], plan["depthMeters"]).buffer(1e-8).covers(shape):
+            if not footing["area"].covers(shape):
                 raise ValueError("Interior wall thickness extends outside the facility plan")
             vertices = list(shape.exterior.coords)[:-1]
-            if ground and not supports_footprint(ground, vertices, base):
+            if stands and not stands(vertices, base):
                 raise ValueError("Interior wall must rest on a flat ground surface at its base elevation")
-            if not ground and abs(base-float(layout.get("coordinateFrame", {}).get("floorElevation", 0))) > 1e-6:
+            if not stands and abs(base-float(footing["floor"])) > 1e-6:
                 raise ValueError("Interior wall base must match the floor elevation")
             panels.append([dict(x=round(x,9), z=round(z,9)) for x,z in vertices])
         result.append(dict(wall, label=wall["label"].strip(), start=dict(x=a[0],z=a[1]),end=dict(x=b[0],z=b[1]),

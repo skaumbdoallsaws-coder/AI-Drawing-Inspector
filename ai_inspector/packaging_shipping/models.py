@@ -211,11 +211,47 @@ class Package(Closed):
         return self
 
 
+class CushionRequirement(Closed):
+    """Minimum insert material between every product envelope and each carton wall.
+
+    Measured along each axis from the product face to the wall; any valid insert counts
+    as material. This is a geometric requirement, not a cushioning-performance rating.
+    `material` is the foam a proposal uses when it rebuilds the lining.
+    """
+    floor_m: Annotated[float, Field(ge=0, le=0.2, strict=True)] = 0.0
+    top_m: Annotated[float, Field(ge=0, le=0.2, strict=True)] = 0.0
+    sides_m: Annotated[float, Field(ge=0, le=0.2, strict=True)] = 0.0
+    material: MaterialDensity
+    evidence: Annotated[str, Field(min_length=1, max_length=500)]
+
+    @model_validator(mode="after")
+    def meaningful(self):
+        if not self.evidence.strip():
+            raise ValueError("Record why these cushioning thicknesses are required.")
+        if max(self.floor_m, self.top_m, self.sides_m) <= 0:
+            raise ValueError("Set at least one cushioning thickness, or remove the requirement.")
+        return self
+
+
+class AllowanceRule(Closed):
+    """Packing allowance a proposal assigns to every package it builds."""
+    allowance_kg: Annotated[float, Field(ge=0, le=20, strict=True)]
+    evidence: Annotated[str, Field(min_length=1, max_length=500)]
+
+    @model_validator(mode="after")
+    def documented(self):
+        if not self.evidence.strip():
+            raise ValueError("Record what the per-package allowance includes, even when zero.")
+        return self
+
+
 class Constraints(Closed):
     clearance_m: Annotated[float, Field(ge=0, le=0.2, strict=True)] = 0.02
     gap_m: Annotated[float, Field(ge=0, le=0.2, strict=True)] = 0.01
     allowed_orientations: Annotated[list[Orientation], Field(min_length=1, max_length=6)] = Field(default_factory=lambda: [0])
     contents: Literal["unconfirmed", "ordinary_nonhazardous", "special_handling"] = "unconfirmed"
+    cushion: CushionRequirement | None = None
+    package_allowance: AllowanceRule | None = None
 
 
 class Design(Closed):

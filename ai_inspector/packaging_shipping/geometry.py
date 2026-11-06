@@ -6,12 +6,16 @@ import json
 import math
 from decimal import Decimal, ROUND_HALF_UP
 from .models import Design
-from .components import insert_geometry, intersects_insert_material, contact_evidence
+from .components import insert_geometry, intersects_insert_material, contact_evidence, foam_along
 
 # Matches py3dbp's six orthogonal orientations. These are dimension orders,
 # not arbitrary part scaling or reflections; the viewer supplies rigid rotations.
 ORDERS = ((0, 1, 2), (1, 0, 2), (1, 2, 0), (2, 1, 0), (2, 0, 1), (0, 2, 1))
 TOLERANCE_M = 1e-6
+# Product face -> carton wall checks for a cushion requirement: (axis, toward the +axis wall, field).
+CUSHION_FACES = ((0, False, "sides_m"), (0, True, "sides_m"), (1, False, "floor_m"), (1, True, "top_m"),
+                 (2, False, "sides_m"), (2, True, "sides_m"))
+CUSHION_LABELS = (("floor_m", "floor"), ("top_m", "top"), ("sides_m", "sides"))
 
 
 def digest(value) -> str:
@@ -44,6 +48,8 @@ def assess(design: Design) -> dict:
         findings.append({"code": code, "severity": severity, "message": message, "entity_ids": list(ids)})
 
     product = design.product
+    cushion = design.constraints.cushion
+    cushion_rows = []
     if product is None:
         issue("product_required", "Select a product and confirm its dimensions.")
     elif product.mass_kg is None:
@@ -101,8 +107,36 @@ def assess(design: Design) -> dict:
                                        for i in package.inserts)]
             if unsupported:
                 issue("support_not_verified", "Some elevated products have no detected contact with an insert support. Review the packing sequence and support.", ids, "warning")
-        product_mass = product.mass_kg * len(package.placements) if product and product.mass_kg is not None else None
         shapes = [insert_geometry(x) for x in package.inserts]
+        if cushion is not None and product is not None and package.placements:
+            valid = [x for x, shape in zip(package.inserts, shapes) if shape["valid"]]
+            least = {field: None for field, _ in CUSHION_LABELS}
+            short, unverified = [], []
+            for item in package.placements:
+                box = envelope(item.position_m, oriented(product.dimensions_m, item.orientation))
+                for axis, toward_max, field in CUSHION_FACES:
+                    required = getattr(cushion, field)
+                    if required <= 0:
+                        continue
+                    found = foam_along(box, valid, axis, toward_max, carton.inner_m)
+                    if found is None:
+                        unverified.append(item.id)
+                        continue
+                    least[field] = found if least[field] is None else min(least[field], found)
+                    if found < required - TOLERANCE_M:
+                        short.append(item.id)
+            short, unverified = list(dict.fromkeys(short)), list(dict.fromkeys(unverified))
+            if unverified:
+                issue("cushion_not_verified", f"Cushioning could not be checked within the analysis limit for {len(unverified)} "
+                      "product(s). Simplify the inserts or review them manually.", (package.id, unverified[0]))
+            if short:
+                parts = [f"{label} {least[field] * 1000:.1f} of {getattr(cushion, field) * 1000:.1f} mm" for field, label in CUSHION_LABELS
+                         if least[field] is not None and least[field] < getattr(cushion, field) - TOLERANCE_M]
+                issue("cushion_insufficient", f"Insert material is below the cushion requirement for {len(short)} of "
+                      f"{len(package.placements)} products (least found: {'; '.join(parts)}).", (package.id, short[0]))
+            cushion_rows.append({"package_id": package.id, "verified": not unverified,
+                                 **{field: None if least[field] is None else round(least[field], 9) for field, _ in CUSHION_LABELS}})
+        product_mass = product.mass_kg * len(package.placements) if product and product.mass_kg is not None else None
         insert_mass = sum(shape["net_volume_m3"] * x.density_kg_m3 for shape, x in zip(shapes, package.inserts)) if all(s["valid"] for s in shapes) else None
         allowance = package.allowance_kg
         gross = None if product_mass is None or insert_mass is None or carton.tare_kg is None or allowance is None else product_mass + insert_mass + carton.tare_kg + allowance
@@ -117,7 +151,11 @@ def assess(design: Design) -> dict:
         issue("contents_unconfirmed", "Confirm ordinary non-hazardous contents before requesting parcel rates.")
     issue("protection_not_evaluated", "Envelope fit only. Cushioning, support, removal and transport performance need engineering review.", severity="warning")
     errors = [f for f in findings if f["severity"] == "error"]
-    return {"design_hash": digest(design), "status": "failed" if errors else "needs_review",
-            "rate_ready": not errors, "validation_level": "conservative_bounding_envelopes",
-            "findings": findings, "packages": masses, "placed_quantity": count,
-            "total_gross_kg": sum(x["gross_kg"] for x in masses) if masses and all(x["gross_kg"] is not None for x in masses) else None}
+    result = {"design_hash": digest(design), "status": "failed" if errors else "needs_review",
+              "rate_ready": not errors, "validation_level": "conservative_bounding_envelopes",
+              "findings": findings, "packages": masses, "placed_quantity": count,
+              "total_gross_kg": sum(x["gross_kg"] for x in masses) if masses and all(x["gross_kg"] is not None for x in masses) else None}
+    if cushion is not None:
+        # Least insert material found per direction, per package (geometry only, not a performance rating).
+        result["cushion"] = cushion_rows
+    return result

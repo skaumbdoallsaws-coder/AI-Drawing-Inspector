@@ -130,18 +130,39 @@ def test_inspect_validate_propose_real_solver_do_not_write(env):
     assert validated["data"]["saved"] is True
     proposed = invoke(gw, "propose_packaging", {"expected_revision": 0,
         "cartons": [sample_design().packages[0].carton.model_dump(mode="json")], "max_packages": 1})
-    assert proposed["ok"], proposed
-    assert proposed["data"]["saved"] is False
-    assert proposed["data"]["replaces_existing_packages"] is True
-    assert len(proposed["data"]["candidates"]) == 1
-    candidate = proposed["data"]["candidates"][0]
-    assert len(candidate["design"]["packages"][0]["placements"]) == 1
-    assert candidate["design"]["packages"][0]["inserts"] == []
-    assert candidate["assessment"]["status"] == "failed"  # allowances still need evidence
+    # The saved end pad has no cushion requirement to rebuild from, so the proposal refuses
+    # rather than returning lighter candidates without it.
+    assert_error(proposed, "protection_requirement_needed")
     assert snapshot(env) == before
     assert gw.check()["revision"] == 0
-    assert all(r["ok"] and r["bindingHash"] == gw.binding_key for r in gw.receipts)
+    assert [r["ok"] for r in gw.receipts] == [True, True, False]
+    assert all(r["bindingHash"] == gw.binding_key for r in gw.receipts)
     assert str(env[0].root) not in json.dumps(read)
+
+
+def test_propose_rebuilds_the_cushion_requirement_and_carries_the_allowance(env):
+    service, scope, context, _ = env
+    data = sample_design().model_dump(mode="json")
+    data["constraints"]["cushion"] = {"floor_m": 0.0, "top_m": 0.0, "sides_m": 0.01, "material": {
+        "name": "Foam", "density_kg_m3": 30.0, "evidence": "Foam supplier data"}, "evidence": "End protection"}
+    saved = service.create(scope, Design.model_validate(data))
+    context[0] = replace(context[0], document_id=saved["id"], revision=saved["revision"])
+    gw = gateway(env)
+    before = snapshot(env)
+    proposed = invoke(gw, "propose_packaging", {"expected_revision": 0,
+        "cartons": [sample_design().packages[0].carton.model_dump(mode="json")], "max_packages": 1})
+    assert proposed["ok"], proposed
+    assert proposed["data"]["saved"] is False and proposed["data"]["replaces_existing_packages"] is True
+    assert proposed["data"]["preservation"] == {"cushion": "rebuilt_from_requirement", "allowance": "carried_forward",
+                                                "carton_graphics": "none", "insert_graphics_dropped": 0}
+    candidate, = proposed["data"]["candidates"]
+    package = candidate["design"]["packages"][0]
+    assert len(package["placements"]) == 1
+    assert sorted(i["id"] for i in package["inserts"]) == ["cushion-x-max", "cushion-x-min", "cushion-z-max", "cushion-z-min"]
+    assert package["allowance_kg"] == 0 and package["allowance_evidence"] == "No additional packing"
+    assert candidate["assessment"]["status"] == "needs_review" and candidate["assessment"]["rate_ready"] is True
+    assert snapshot(env) == before
+    assert all(r["ok"] for r in gw.receipts)
 
 
 @pytest.mark.parametrize("orientation", range(6))

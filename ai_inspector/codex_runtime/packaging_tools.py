@@ -62,6 +62,8 @@ _MESSAGES = {
     "cad_evidence_required": "Manual inputs cannot claim verified CAD mass.",
     "cad_mass_unavailable": "GLB sources do not provide verified CAD mass.",
     "product_required": "Select a product before proposing arrangements.",
+    "protection_requirement_needed": ("This design has packing inserts that a proposal would drop. Ask the user for the "
+                                      "minimum cushioning to rebuild, or to remove the inserts, before proposing."),
     "cad_volume_unavailable": "A density estimate requires closed-solid STEP volume.",
     "mass_out_of_range": "The calculated product mass exceeds the supported packaging range. Review source units and density.",
     "image_not_found": "Artwork is unavailable in the admitted workspace.",
@@ -217,14 +219,24 @@ class Candidate(Closed):
     assessment: Assessment
 
 
+class Preservation(Closed):
+    cushion: Literal["rebuilt_from_requirement", "not_required"]
+    allowance: Literal["rule", "carried_forward", "unknown"]
+    carton_graphics: Literal["carried_forward", "not_carried", "none"]
+    insert_graphics_dropped: Count
+
+
 class Proposal(ResultBase):
     saved: Literal[False] = False
     candidates: Annotated[list[Candidate], Field(max_length=3)]
     truncated: bool
     replaces_existing_packages: Literal[True] = True
+    preservation: Preservation
     notice: str = ("Envelope arrangements only, not transport certification or a global optimum. "
-                   "Applying a candidate replaces existing cartons, placements, pads and allowances; "
-                   "restore protective packing and mass allowances and validate again. No rates were requested.")
+                   "Applying a candidate replaces existing cartons, placements, pads and allowances. Each candidate "
+                   "rebuilds the design's cushion requirement as a foam lining; allowances come from the design's "
+                   "allowance rule or the value every saved package shares, otherwise they stay unknown. "
+                   "Validate again before any quote. No rates were requested.")
 
 
 class MutationReceipt(Closed):
@@ -340,7 +352,7 @@ _TOOLS = {
     "estimate_packaging_mass": (MassArguments, _MassSuccess, "Estimate product mass from authorized closed-solid STEP volume and documented density. Returns a proposed Product without saving. Confirm material applies to every included solid and record exclusions."),
     "inspect_packaging": (InspectArguments, _InspectSuccess, "Inspect the bound saved packaging document. package_limit must be 1 or 2, not a findings limit. Follow next_package_offset to read further pages."),
     "validate_packaging": (ValidateArguments, _ValidateSuccess, "Assess saved or proposed design envelopes and provenance without saving. Not transport certification."),
-    "propose_packaging": (ProposeArguments, _ProposeSuccess, "Propose bounded orthogonal arrangements of the saved product without saving or requesting rates. Dimensions are numeric metre arrays, e.g. inner_m: [0.3, 0.2, 0.1], never quoted numbers or unit strings. Existing pads are not preserved."),
+    "propose_packaging": (ProposeArguments, _ProposeSuccess, "Propose bounded orthogonal arrangements of the saved product without saving or requesting rates. Dimensions are numeric metre arrays, e.g. inner_m: [0.3, 0.2, 0.1], never quoted numbers or unit strings. Candidates rebuild the design's cushion requirement as a foam lining; a design with inserts and no cushion requirement is refused."),
     "edit_packaging": (EditArguments, _ChangeSuccess, "Replace the complete saved design at the expected revision, using a unique request_id. Read all package pages first. Requires admitted direct-edit authority."),
     "undo_packaging": (HistoryArguments, _ChangeSuccess, "Undo the latest saved packaging edit at the expected revision. May undo a human edit; requires direct-edit authority."),
     "redo_packaging": (HistoryArguments, _ChangeSuccess, "Redo the latest undone packaging edit at the expected revision. Requires direct-edit authority."),
@@ -605,7 +617,7 @@ class PackagingGateway:
                     self._sources(candidate)
                     candidates.append({"candidate_id": row["candidate_id"], "design": candidate,
                                        "assessment": _assessment(candidate)})
-                data = self._base(refs) | {"candidates": candidates,
+                data = self._base(refs) | {"candidates": candidates, "preservation": proposed["preservation"],
                     "truncated": proposed["truncated"] or len(proposed["candidates"]) > args.limit}
             else:
                 if name == "edit_packaging":

@@ -88,10 +88,11 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Requirement | Status | Evidence or next action |
 | --- | --- | --- |
 | Constrained arrangement search, split cartons | Implemented | py3dbp over up to six carton choices and one to six packages of one carton type. Ranks by package count then outer volume, not cost. |
-| Proposals keep approved protection and packing mass | Open | `packing.propose` rebuilds packages and drops inserts, allowances and graphics. Fix before any cost comparison. |
-| Minimum cushioning and no-contact constraints | Open | Not modelled. |
+| Proposals keep approved protection and packing mass | Locally verified | `constraints.cushion` (floor/top/sides thickness, material, evidence) is rebuilt as a foam lining in every candidate; a design with pads and no requirement is refused (`protection_requirement_needed`), never silently stripped. Allowances come from `constraints.package_allowance` or the value every saved package shares, else stay unknown and block rating. Shared carton graphics are carried; insert graphics are reported as dropped. Payload capacity counts lining and allowance. `tests/test_packaging_preservation.py`. |
+| Minimum cushioning | Locally verified | `cushion_insufficient` / `cushion_not_verified` errors: least insert material between each product envelope and each carton wall along each axis, pocket voids subtracted, round pockets bounded by their square (undercounts, never overcounts), invalid inserts count as no material. Geometry only, not a cushioning-performance rating. |
+| No-contact regions | Open | Not modelled. |
 | Upright/allowed orientations, carton boundaries, known load limits | Locally verified | Domain tests; unknown payload stays a warning. |
-| 1-, 6- and 24-item fixtures: feasible alternatives or clear infeasibility | Open | No 24-item fixture exists. |
+| 1-, 6- and 24-item fixtures: feasible alternatives or clear infeasibility | Locally verified | Synthetic TEST product in the sourced ULINE carton with a cited Ethafoam lining: 1, 6 and 24 items feasible, gross mass matches an independent recomputation; 24 items in an undersized carton return no candidate and an explicit `does_not_fit` rejection. |
 | Sourced stock-carton selection | Open | One ULINE carton and cited PMMA/Ethafoam densities. |
 | Cost-aware comparison with a baseline; cannot win by shrinking CAD, dropping items or protection, ignoring payload or mixing stale/test rates | Open | Saved alternatives compare volume, mass and known material cost; no shipping-cost comparison or baseline. |
 | Pocketed inserts | Locally verified | Domain tests. |
@@ -120,6 +121,15 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Artifact retention, quotas and cleanup | Open | No retention policy for sources, images, quotes or alternatives. |
 | No secrets in evidence, no orphaned workers, offline manual use | Locally verified | Historical native evidence; recheck at release. |
 | Two live carriers or an explicit single-carrier restriction | Blocked | Depends on P2 live access. |
+
+## Progress log
+
+- 2026-11-06, item 1 (proposal preservation): cushion requirement and allowance rule added to
+  `Constraints`; proposals rebuild the lining and keep allowances; the cushion check is part of
+  validation; the Product panel edits both and keeps constraint fields it does not show. Contract
+  change: proposing a design that has pads but no cushion requirement now fails with
+  `protection_requirement_needed` (UI, API and Sage) instead of returning candidates without the
+  pads. Design hashes now include the two new (null by default) fields. Mock/offline evidence only.
 
 ## Unsupported inputs (first release)
 

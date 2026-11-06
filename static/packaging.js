@@ -28,7 +28,8 @@ export function placementCenter(dimensions, placement) {
 
 export function emptyDesign() {
   return { name: 'Untitled package', product: null, quantity: 1,
-    constraints: { clearance_m: .02, gap_m: .01, allowed_orientations: [0], contents: 'unconfirmed' }, packages: [] };
+    constraints: { clearance_m: .02, gap_m: .01, allowed_orientations: [0], contents: 'unconfirmed', cushion: null, package_allowance: null },
+    packages: [] };
 }
 
 export function defaultCarton() {
@@ -641,9 +642,9 @@ async function openMassEstimate() {
   });
 }
 
-function materialCatalogField(form, materials, use, names) {
+function materialCatalogField(form, materials, use, names, { parent = form, name = 'material_catalog' } = {}) {
   const entries = materials.filter(item => item.use === use || item.use === 'both');
-  const select = field(form, 'Material catalog', 'material_catalog', '', { options: [['', 'Custom material'], ...entries.map(item => [item.id, item.material.name])] });
+  const select = field(parent, 'Material catalog', name, '', { options: [['', 'Custom material'], ...entries.map(item => [item.id, item.material.name])] });
   select.addEventListener('change', () => {
     const selected = entries.find(item => item.id === select.value)?.material; if (!selected) return;
     [selected.name, selected.density_kg_m3, selected.evidence].forEach((value, index) => { form.elements.namedItem(names[index]).value = value; });
@@ -690,10 +691,12 @@ function renderProduct(host) {
     if (estimatedProduct || 'mass_calculation' in updated) updated.mass_calculation = basis === 'estimate' && updated.mass_kg === estimate.mass_kg ? clone(estimate.mass_calculation || null) : null;
     const allowed = [...form.querySelectorAll('[name="orientation"]:checked')].map(x => Number(x.value));
     if (!allowed.length) throw new Error('Allow at least one product orientation.');
+    const protection = readProtection(form);
     edit(d => {
       d.product = updated; d.quantity = numeric(form, 'quantity');
-      d.constraints = { clearance_m: mmToM(numeric(form, 'clearance')), gap_m: mmToM(numeric(form, 'gap')),
-        allowed_orientations: allowed, contents: textValue(form, 'contents') };
+      // Spread first: constraint fields this form does not edit must survive an Apply.
+      d.constraints = { ...d.constraints, clearance_m: mmToM(numeric(form, 'clearance')), gap_m: mmToM(numeric(form, 'gap')),
+        allowed_orientations: allowed, contents: textValue(form, 'contents'), ...protection };
     });
   }, product ? 'Apply product' : 'Add manual product');
   field(form, 'Product name', 'product_name', p.name, { maxLength: 160, required: true });
@@ -724,7 +727,56 @@ function renderProduct(host) {
   ORIENTATION_LABELS.forEach((label, i) => { const input = checkbox(checks, label, state.draft.design.constraints.allowed_orientations.includes(i), () => {}); input.name = 'orientation'; input.value = i; });
   orientations.append(checks); form.append(orientations);
   field(form, 'Contents declaration', 'contents', state.draft.design.constraints.contents, { options: [['unconfirmed', 'Unconfirmed'], ['ordinary_nonhazardous', 'Ordinary, non-hazardous'], ['special_handling', 'Special handling required']] });
+  protectionFields(form, state.draft.design.constraints);
   form.append(actions); group.append(form);
+}
+
+function protectionFields(form, constraints) {
+  const cushion = constraints.cushion || null, rule = constraints.package_allowance || null;
+  form.append(element('h3', 'Protection kept by proposals'));
+  form.append(element('p', 'Generated arrangements rebuild this foam lining in every carton, and refuse to drop existing pads without it. Leave every thickness at 0 for no requirement. Geometry only, not a cushioning-performance rating.', 'notice'));
+  const pads = element('div', null, 'two-cols');
+  field(pads, 'Floor cushion (mm)', 'cushion_floor', mToMm(cushion?.floor_m ?? 0), { type: 'number', min: 0, max: 200, required: true });
+  field(pads, 'Top cushion (mm)', 'cushion_top', mToMm(cushion?.top_m ?? 0), { type: 'number', min: 0, max: 200, required: true });
+  field(pads, 'Side cushion (mm)', 'cushion_sides', mToMm(cushion?.sides_m ?? 0), { type: 'number', min: 0, max: 200, required: true });
+  form.append(pads);
+  const material = element('div');
+  field(material, 'Cushion material', 'cushion_material', cushion?.material.name ?? '', { maxLength: 160 });
+  field(material, 'Cushion density (kg/m3)', 'cushion_density', cushion?.material.density_kg_m3 ?? '', { type: 'number', min: .000001, max: 25000 });
+  field(material, 'Cushion density evidence', 'cushion_material_evidence', cushion?.material.evidence ?? '', { multiline: true, maxLength: 500 });
+  form.append(material);
+  if (state.capabilities.includes('material_catalog')) {
+    const catalogButton = button('Cushion material catalog', async () => {
+      const catalog = await working('Loading material catalog...', getCatalog);
+      materialCatalogField(form, catalog.materials, 'insert', ['cushion_material', 'cushion_density', 'cushion_material_evidence'], { parent: material, name: 'cushion_catalog' });
+      catalogButton.remove();
+    }, { symbol: 'stack' }); form.append(catalogButton);
+  }
+  field(form, 'Why these thicknesses', 'cushion_evidence', cushion?.evidence ?? '', { multiline: true, maxLength: 500 });
+  field(form, 'Packing allowance per package (kg)', 'allowance_rule', rule?.allowance_kg ?? '', { type: 'number', min: 0, max: 20 });
+  field(form, 'Allowance evidence', 'allowance_rule_evidence', rule?.evidence ?? '', { multiline: true, maxLength: 500 });
+}
+
+export function readProtection(form) {
+  const thickness = ['cushion_floor', 'cushion_top', 'cushion_sides'].map(name => mmToM(numeric(form, name)));
+  let cushion = null;
+  if (thickness.some(x => x > 0)) {
+    const name = textValue(form, 'cushion_material'), evidence = textValue(form, 'cushion_material_evidence'), reason = textValue(form, 'cushion_evidence');
+    if (!name || !evidence || !reason) throw new Error('Give the cushion material, the source of its density and why these thicknesses are required.');
+    cushion = { floor_m: thickness[0], top_m: thickness[1], sides_m: thickness[2],
+      material: { name, density_kg_m3: numeric(form, 'cushion_density'), evidence }, evidence: reason };
+  }
+  const allowance = numeric(form, 'allowance_rule', true), allowanceEvidence = textValue(form, 'allowance_rule_evidence');
+  if (allowance !== null && !allowanceEvidence) throw new Error('Record what the per-package allowance includes, even when zero.');
+  return { cushion, package_allowance: allowance === null ? null : { allowance_kg: allowance, evidence: allowanceEvidence } };
+}
+
+export function preservationText(preservation) {
+  if (!preservation) return 'packing allowance and pads require review';
+  const cushion = preservation.cushion === 'rebuilt_from_requirement' ? 'foam lining rebuilt from the cushion requirement' : 'no cushion requirement';
+  const allowance = { rule: 'allowance from the design rule', carried_forward: 'allowance carried from the saved packages' }[preservation.allowance] || 'allowance unknown';
+  const graphics = preservation.carton_graphics === 'not_carried' || preservation.insert_graphics_dropped ? ' | some graphics not carried' : '';
+  return `${cushion} | ${allowance}${graphics}`;
 }
 
 async function importSource(file, unit) {
@@ -1052,7 +1104,7 @@ function renderArrange(host) {
     const row = element('article', null, 'candidate');
     row.append(element('h3', `${i + 1}. ${candidate.design.packages[0]?.carton.name || 'Arrangement'}`),
       element('p', `${candidate.package_count} packages | ${numberText(candidate.shipping_volume_m3 * 1000)} L exterior volume`, 'notice'),
-      element('p', `${candidate.assessment.findings.filter(f => f.severity === 'error').length} validation errors | packing allowance and pads require review`, 'notice'),
+      element('p', `${candidate.assessment.findings.filter(f => f.severity === 'error').length} validation errors | ${preservationText(state.candidates.preservation)}`, 'notice'),
       button('Apply candidate', () => {
         flushEditor();
         if (!state.candidates || hasDraft() || state.candidateRevision !== state.draft.document?.revision || state.candidateConfig !== JSON.stringify([state.alternatives, state.maxPackages])) throw new Error('Save changes and regenerate candidates first.');

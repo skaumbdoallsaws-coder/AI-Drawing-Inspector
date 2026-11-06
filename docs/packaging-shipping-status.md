@@ -2,6 +2,8 @@
 
 Date: 2026-11-06. Status: promoted to the local regular desktop build. Earlier sections retain their historical pilot results; the desktop checkpoint below supersedes their deployment status.
 
+P0-P5 completion work continues on branch `packaging-completion-2026-11-06`; requirement-by-requirement status and evidence are tracked in [the completion checklist](packaging-shipping-completion-checklist.md). Nothing from that branch is promoted to the desktop yet.
+
 ## Desktop Promotion Checkpoint
 
 Packaging was merged into the current desktop source after the columns review changes, not copied over them. Normal application mode opts in through `packagingRuntime` in its explicit profile. The optional configuration supplies a dependency directory and a separate STEP interpreter; its persistent documents live under `dataRoot/packaging`. Existing Codex authentication, model-gateway configuration, facility roots and startup layout stay unchanged. Neither Claude's checkout nor saved facility documents are part of the promotion.
@@ -158,7 +160,7 @@ The rate adapter accepts `INSPECTORPRO_PACKAGING_EASYPOST_KEY` from the pilot's 
 | P0 feasibility | Partial: GLB units/bounds and analytic pads verified; solver/adapter selected for the pilot. OpenCascade is unavailable in this Python environment. Native CAD dimension/mass comparison and provider deployment approval remain open. |
 | P1 manual workspace | Implemented and browser-tested for envelopes/GLB and rectangular pads. Full real-product acceptance needs a verified dimension and mass reference; direct CAD/assembly selection is not wired. |
 | P2 live estimates | Adapter and test-mode/failure contracts implemented. Not passed: no credentialed live rate comparison at valid destinations. |
-| P3 alternatives/inserts | Rectangular envelope arrangement implemented. Sourced carton catalog, custom board blank/tare calculation, pockets, no-contact regions, support/removal checks and cost-driven candidate comparison remain open. |
+| P3 alternatives/inserts | Rectangular envelope arrangement implemented. On the completion branch, proposals rebuild a required foam lining and keep packing allowances, with a geometric minimum-cushion check and 1/6/24-item fixtures (locally verified, offline). No-contact regions, support/removal checks and cost-driven candidate comparison remain open. |
 | P4 Sage/deliverables | Gateway, PDF and live chat-driven arrangement passed. Host admission, streaming, safe refresh, memory enforcement and manual Undo/Redo are verified. Broader real-product tasks remain; the agent cannot yet import CAD, request quotes or export reports through tools. No new agent loop was added. |
 | P5 desktop | Not promoted. Requires live acceptance, full affected regressions, dependency/license packaging, worker resource hardening and explicit release approval. |
 | P6 advanced | Deferred. No SolidCraft integration, mixed products, dielines, pallets, crates or freight. |

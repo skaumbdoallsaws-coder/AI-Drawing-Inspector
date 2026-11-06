@@ -77,6 +77,57 @@ def intersects_insert_material(bounds, insert):
     return not any(_inside_void((lower, upper), insert, pocket) for pocket in insert.pockets)
 
 
+CUSHION_WORK_LIMIT = 200_000  # face cells x material pieces for one product face
+
+
+def _overlap(a0, a1, b0, b1):
+    return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def foam_along(bounds, valid_inserts, axis, toward_max, inner):
+    """Least insert material crossed between one product face and its carton wall, in metres.
+
+    The ray runs along `axis` from the product face to the wall, over the whole face.
+    Pass only inserts that `insert_geometry` accepts; invalid ones provide no material.
+    Pocket voids are subtracted, and a cylindrical pocket is bounded by its square prism,
+    so material can be undercounted but never overcounted. Returns None when the face
+    is too detailed to check within the work limit.
+    """
+    lo, hi = bounds
+    start, end = (hi[axis], inner[axis]) if toward_max else (0.0, lo[axis])
+    if end - start <= TOLERANCE_M:
+        return 0.0
+    u, v = (k for k in range(3) if k != axis)
+    pieces = []
+    for insert in valid_inserts:
+        b0 = insert.position_m
+        b1 = tuple(b0[k] + insert.dimensions_m[k] for k in range(3))
+        along = _overlap(b0[axis], b1[axis], start, end)
+        if along <= TOLERANCE_M or _overlap(b0[u], b1[u], lo[u], hi[u]) <= 0 or _overlap(b0[v], b1[v], lo[v], hi[v]) <= 0:
+            continue
+        pieces.append((b0[u], b1[u], b0[v], b1[v], along))
+        for pocket in insert.pockets:
+            p0 = tuple(b0[k] + pocket.position_m[k] for k in range(3))
+            p1 = tuple(p0[k] + pocket.dimensions_m[k] for k in range(3))
+            gone = _overlap(p0[axis], p1[axis], start, end)
+            if gone > 0 and _overlap(p0[u], p1[u], lo[u], hi[u]) > 0 and _overlap(p0[v], p1[v], lo[v], hi[v]) > 0:
+                pieces.append((p0[u], p1[u], p0[v], p1[v], -gone))
+    if not pieces:
+        return 0.0
+    us = sorted({lo[u], hi[u], *(x for p in pieces for x in p[0:2] if lo[u] < x < hi[u])})
+    vs = sorted({lo[v], hi[v], *(x for p in pieces for x in p[2:4] if lo[v] < x < hi[v])})
+    if (len(us) - 1) * (len(vs) - 1) * len(pieces) > CUSHION_WORK_LIMIT:
+        return None
+    least = None
+    for i in range(len(us) - 1):
+        cu = (us[i] + us[i + 1]) / 2
+        for j in range(len(vs) - 1):
+            cv = (vs[j] + vs[j + 1]) / 2
+            total = sum(p[4] for p in pieces if p[0] <= cu <= p[1] and p[2] <= cv <= p[3])
+            least = total if least is None else min(least, total)
+    return max(0.0, least)
+
+
 def contact_evidence(bounds, insert):
     """Only geometric support evidence, never a foam load/cushioning rating."""
     if not insert_geometry(insert)["valid"]:

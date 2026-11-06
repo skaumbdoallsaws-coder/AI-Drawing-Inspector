@@ -376,14 +376,16 @@ def test_py3dbp_respects_orientation_quantity_capacity_and_candidate_readiness()
 def test_py3dbp_unknown_mass_and_deadline_are_not_certification(design, monkeypatch):
     from ai_inspector.packaging_shipping import packing
     data = design.model_dump()
+    data["packages"][0]["inserts"] = []  # pads without a cushion requirement are refused, not dropped
     data["product"].update(mass_kg=None, mass_basis="unknown", mass_evidence="")
     unknown = Design.model_validate(data)
     candidates = propose(unknown, [unknown.packages[0].carton])["candidates"]
     assert candidates
     assert all(not c["assessment"]["rate_ready"] and "mass_unknown" in codes(c["assessment"]) for c in candidates)
+    expect_error("protection_requirement_needed", lambda: propose(design, [design.packages[0].carton]), 409)
     ticks = iter((0, 11, 11))
     monkeypatch.setattr(packing.time, "monotonic", lambda: next(ticks))
-    result = propose(design, [design.packages[0].carton], deadline_seconds=10)
+    result = propose(unknown, [unknown.packages[0].carton], deadline_seconds=10)
     assert result["truncated"] and result["candidates"] == []
 
 

@@ -303,6 +303,34 @@ test('applying a candidate can restore every prior pad, graphic and allowance wi
   assert.ok(source.includes('Replace all package arrangements, pads, graphics and allowances'));
 });
 
+test('proposal protection inputs become closed SI records and blank rules stay absent', () => {
+  const form = values => ({ elements: { namedItem: name => (name in values ? { value: String(values[name]) } : null) } });
+  const zero = { cushion_floor: 0, cushion_top: 0, cushion_sides: 0, allowance_rule: '' };
+  assert.deepEqual(ui.readProtection(form(zero)), { cushion: null, package_allowance: null });
+  assert.throws(() => ui.readProtection(form({ ...zero, cushion_floor: 20, cushion_material: 'TEST foam', cushion_density: 35,
+    cushion_material_evidence: ' ', cushion_evidence: 'TEST drop height' })), /cushion material/);
+  const full = ui.readProtection(form({ cushion_floor: 20, cushion_top: 15, cushion_sides: 10, cushion_material: ' TEST foam ',
+    cushion_density: 35, cushion_material_evidence: 'TEST datasheet', cushion_evidence: 'TEST drop height',
+    allowance_rule: '0.12', allowance_rule_evidence: 'TEST tape' }));
+  // Key order matches the server's Constraints dump, so an unchanged Apply leaves the draft clean.
+  assert.equal(JSON.stringify(full), JSON.stringify({
+    cushion: { floor_m: .02, top_m: .015, sides_m: .01, material: { name: 'TEST foam', density_kg_m3: 35, evidence: 'TEST datasheet' }, evidence: 'TEST drop height' },
+    package_allowance: { allowance_kg: .12, evidence: 'TEST tape' } }));
+  assert.throws(() => ui.readProtection(form({ ...zero, allowance_rule: '0', allowance_rule_evidence: ' ' })), /allowance includes/);
+  assert.deepEqual(Object.keys(ui.emptyDesign().constraints), ['clearance_m', 'gap_m', 'allowed_orientations', 'contents', 'cushion', 'package_allowance']);
+  assert.match(source, /d\.constraints = \{ \.\.\.d\.constraints, /);
+});
+
+test('candidate rows state how protection and allowances were carried', () => {
+  assert.equal(ui.preservationText({ cushion: 'rebuilt_from_requirement', allowance: 'rule', carton_graphics: 'none', insert_graphics_dropped: 0 }),
+    'foam lining rebuilt from the cushion requirement | allowance from the design rule');
+  assert.equal(ui.preservationText({ cushion: 'not_required', allowance: 'unknown', carton_graphics: 'not_carried', insert_graphics_dropped: 0 }),
+    'no cushion requirement | allowance unknown | some graphics not carried');
+  assert.equal(ui.preservationText({ cushion: 'not_required', allowance: 'carried_forward', carton_graphics: 'carried_forward', insert_graphics_dropped: 2 }),
+    'no cushion requirement | allowance carried from the saved packages | some graphics not carried');
+  assert.equal(ui.preservationText(undefined), 'packing allowance and pads require review');
+});
+
 test('reusing a source retains appearance but never inherits mass evidence or calculation from a different source', () => {
   const prior = { name: 'Old', appearance: { color: '#FF0000' }, mass_basis: 'estimate', mass_kg: 4, mass_evidence: 'Old evidence', mass_calculation: { volume_m3: 1 }, source_id: 'old' };
   const metadata = { id: 'src_new', name: 'New source', dimensions_m: [.1, .2, .3], source_revision: 'a'.repeat(64) };

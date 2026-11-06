@@ -94,12 +94,14 @@ def design():
         "name": "Offline MCP shipment", "quantity": 1,
         "product": {"name": "Measured component", "dimensions_m": [0.1, 0.2, 0.15],
                     "mass_kg": 2, "mass_basis": "user_measured", "mass_evidence": "Test scale"},
-        "constraints": {"allowed_orientations": list(range(6)), "contents": "ordinary_nonhazardous"},
+        "constraints": {"allowed_orientations": list(range(6)), "contents": "ordinary_nonhazardous",
+                        "cushion": {"floor_m": 0.02, "material": {"name": "Test foam", "density_kg_m3": 30.0,
+                                    "evidence": "Test supplier data"}, "evidence": "Test floor requirement"}},
         "packages": [{"id": "box_1", "carton": {
             "name": "Test carton", "inner_m": [0.5, 0.5, 0.5], "outer_m": [0.52, 0.52, 0.52],
             "tare_kg": 0.3, "tare_evidence": "Test scale", "max_payload_kg": 20},
             "placements": [{"id": "item_1", "position_m": [0.02, 0.02, 0.02], "orientation": 0}],
-            "inserts": [{"id": "pad_1", "name": "End pad", "dimensions_m": [0.01, 0.5, 0.5],
+            "inserts": [{"id": "pad_1", "name": "Floor pad", "dimensions_m": [0.5, 0.02, 0.5],
                          "position_m": [0, 0, 0], "density_kg_m3": 30,
                          "material_evidence": "Test supplier data"}],
             "allowance_kg": 0, "allowance_evidence": "No additional packing"}],
@@ -264,8 +266,11 @@ def test_discover_inspect_propose_edit_validate_undo_and_redo(host, transport):
                     "cartons": [initial["design"]["packages"][0]["carton"]], "max_packages": 1, "limit": 1})
                 assert proposed["data"]["saved"] is False
                 assert proposed["data"]["replaces_existing_packages"] is True
+                assert proposed["data"]["preservation"]["cushion"] == "rebuilt_from_requirement"
+                assert proposed["data"]["preservation"]["allowance"] == "carried_forward"
                 candidate, = proposed["data"]["candidates"]
                 assert candidate["design"]["packages"][0]["placements"][0]["orientation"] in range(6)
+                assert [i["id"] for i in candidate["design"]["packages"][0]["inserts"]] == ["cushion-floor"]
                 assert host.rows() == before, "Read/propose must not persist anything"
 
                 command = {"expected_revision": 0, "request_id": "mcp-edit-1", "design": candidate["design"]}
@@ -282,7 +287,8 @@ def test_discover_inspect_propose_edit_validate_undo_and_redo(host, transport):
                 assessed = await wire.call("validate_packaging", {"expected_revision": 1})
                 assert assessed["data"]["saved"] is True
                 assert assessed["data"]["assessment"]["design_hash"] == saved["assessment"]["design_hash"]
-                assert assessed["data"]["assessment"]["status"] == "failed"  # candidate lacks allowance evidence
+                # The candidate kept the floor cushion and the saved allowance, so only review warnings remain.
+                assert assessed["data"]["assessment"]["status"] == "needs_review"
 
                 undone = await wire.call("undo_packaging", {"expected_revision": 1, "request_id": "mcp-undo-1"})
                 assert undone["data"]["receipt"]["outcome"] == "committed"

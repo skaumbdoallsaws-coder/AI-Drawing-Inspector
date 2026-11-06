@@ -5040,6 +5040,19 @@ def generate_placement_candidates(
         if host_id is not None
         else {}
     )
+    # And the items hung under the target itself (lanterns under a pergola roof): where the candidate's underside
+    # meets their tops, as at its own spot, they only touch it (2026-11-05 review).
+    hung_records = (
+        _layout_placement_records(
+            {"placements": [
+                item for item in base_placements
+                if _mounting_reference(item).get("hostPlacementId") == target_placement_id
+            ]},
+            catalog,
+        )[0]
+        if target_placement_id is not None
+        else {}
+    )
     candidate_height_interval = _local_height_interval(asset_definition)
     candidate_clearance_templates = _clearance_templates(
         asset_definition,
@@ -5115,6 +5128,10 @@ def generate_placement_candidates(
                     owner_id
                     for owner_id, records in host_records.items()
                     if _top_meets_underside(candidate_records, records)
+                ) | frozenset(
+                    owner_id
+                    for owner_id, records in hung_records.items()
+                    if _top_meets_underside(records, candidate_records)
                 ),
             )
         )

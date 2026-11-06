@@ -851,3 +851,23 @@ def test_a_sage_preview_hangs_a_lamp_under_a_raised_placement_and_keeps_it(tmp_p
         assert refused.value.code == "referenced_object_in_use"
     finally:
         host.close()
+
+
+def test_a_host_with_a_lamp_hung_under_it_keeps_its_own_spot():
+    """2026-11-05 review: the candidate search for a host (a canopy 5 m up) met the lamp hung under it as a collision
+    at its own spot, so it found no alternative at all; the lamp's top only touches the canopy's underside."""
+    from ai_inspector.facility_layout.spatial import generate_placement_candidates
+    canopy = box("asset-test-canopy", 3.0, 3.0, 0.3)
+    lamp = box("asset-test-lamp", 0.3, 0.3, 0.6, ("ceiling",))
+    assets = ASSETS + [canopy, lamp]
+    shell, layout = scene(ceiling=None)
+    layout["placements"] = [placement("pl-canopy", "asset-test-canopy", 15, 10, y=5.0),
+                            placement("pl-lamp", "asset-test-lamp", 15, 10, y=4.4,
+                                      metadata={"mountingSurface": {"surfaceKind": "ceiling", "placementId": "pl-canopy"}})]
+    full = shell_with_plan_boundary(shell, layout)
+    assert [f for f in diagnose_layout(layout, assets, shell=full)["findings"] if f["severity"] == "error"] == []
+    for target, asset, y in (("pl-lamp", lamp, 4.4), ("pl-canopy", canopy, 5.0)):
+        result = generate_placement_candidates(layout, asset, {"x": 15, "y": y, "z": 10}, assets, shell=full,
+                                               enabled_families=("grid",), target_placement_id=target,
+                                               asset_definition_revision="a" * 64)
+        assert result["candidates"] and not result["rejectionCounts"], (target, result["rejectionCounts"])

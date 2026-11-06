@@ -734,6 +734,11 @@ every existing finish draws and counts as before (Factory 02, the game room).
   face up (`lampsOf(geometry, true)`: the share rule upside down), so a spike light at a palm's foot lights the palm.
   Like every accent spot it throws no pool. The coverage check leaves uplights out (they light what they face, not the
   ground) and lists them in the summary as `uplightsNotCounted`.
+- **Wall fittings at points.** `suggest_facility_light_positions` also takes `points` (where each fitting goes, on the
+  room side of a wall) and `heightMeters` (its base): each is mounted on the nearest wall placement's face toward its
+  point, facing into the room, as a wall attachment ready for place_asset. A point that cannot take it (no wall within
+  1 m, past the wall's end, above its top, in a walkway, against something already there) is listed in `notMounted`
+  with the reason. Sage's playbook mounts sconces and a neon sign this way. The shell's own walls are not used.
 - **Finishes** (library 2026.11.05.1): Bollard light warm (`light-bollard-warm`, 150 degrees, 600 lm), Lantern warm
   (`light-lantern-warm`, 120 degrees, 400 lm, about 2700 K) and Garden uplight warm (`light-garden-uplight`, 40
   degrees, 400 lm). Sage is told in one sentence each (list_library).

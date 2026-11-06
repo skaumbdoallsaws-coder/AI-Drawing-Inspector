@@ -198,6 +198,63 @@ def test_a_wall_light_goes_beside_the_door_on_the_outside_of_the_wall(door_wall,
     assert result["positions"] == [] and "No opening" in result["none"]
 
 
+SCONCE = asset("asset-sconce", 0.24, 0.3, 0.5, ["lighting", "sconce", "wall-mounted"])
+
+
+def wall_points(layout, catalog, points, height=1.5, asset_id=SCONCE["assetId"]):
+    arguments = {"assetId": asset_id, "zoneId": "zn-room", "points": [{"x": x, "z": z} for x, z in points]}
+    if height is not None:
+        arguments["heightMeters"] = height
+    return suggest_light_positions(layout, dict(catalog, **{SCONCE["assetId"]: SCONCE}), arguments)
+
+
+def test_wall_fittings_go_at_the_points_given_on_the_room_side_of_the_wall():
+    """2026-11-05 (the gym's bowling room): sconces at points along a room's north wall (its face at z 7.8), 1.5 m up,
+    on the room side, their backs on the wall and facing into the room; the layout checks find no error."""
+    layout, catalog = room("east")
+    result = wall_points(layout, catalog, [(2.0, 7.5), (5.0, 7.7)])
+    assert result["method"] == "wall points" and "notMounted" not in result
+    found = result["positions"]
+    back = 7.8 - 0.003 - 0.15      # the wall's room-side face, the gap, half the sconce's depth
+    assert [spot(item) for item in found] == [pytest.approx((2.0, back)), pytest.approx((5.0, back))]
+    for item in found:
+        relationship = item["placement"]["snapRelationship"]
+        validate_relationship(relationship)
+        assert relationship["supportPlacementId"] == "pl-north" and relationship["face"] == "negative_z"
+        assert relationship["localY"] == pytest.approx(1.5) and item["placement"]["transform"]["position"]["y"] == 1.5
+        q = item["placement"]["transform"]["quaternion"]
+        assert math.degrees(2 * math.atan2(q["y"], q["w"])) % 360 == pytest.approx(180), "facing into the room"
+        assert "facing south" in item["where"]
+        findings = diagnose(layout, dict(catalog, **{SCONCE["assetId"]: SCONCE}), item["placement"])
+        assert not [f for f in findings if f["severity"] == "error"], findings
+    # The east wall's room side faces west; with no height given, as high as the wall allows.
+    ((item,),) = [wall_points(layout, catalog, [(9.4, 6.0)], height=None)["positions"]]
+    assert item["placement"]["snapRelationship"]["face"] == "negative_x"
+    assert item["placement"]["transform"]["position"]["y"] == pytest.approx(3.6 - 0.5 - 0.05)
+
+
+def test_a_point_that_cannot_take_the_fitting_is_listed_with_the_reason():
+    layout, catalog = room("east")
+    shelf = asset("asset-shelf", 1.0, 0.4, 0.6, ["shelf"])
+    catalog[shelf["assetId"]] = shelf
+    layout["placements"].append(place("pl-shelf", shelf, 7.0, 1.3, 7.6))
+    layout["routes"] = [{"routeId": "rt-walk", "corridorWidth": 1.0,
+                         "centerline": [{"x": 3.5, "y": 0, "z": 0}, {"x": 3.5, "y": 0, "z": 7.4}]}]
+    result = wall_points(layout, catalog, [(0.05, 7.5), (3.5, 7.5), (7.0, 7.6), (12.5, 7.5), (2.0, 7.5), (2.1, 7.5)])
+    assert [spot(item) for item in result["positions"]] == [pytest.approx((2.0, 7.647))]
+    why = {(item["point"]["x"], item["point"]["z"]): item["why"] for item in result["notMounted"]}
+    assert "past the end of pl-north" in why[(0.05, 7.5)]
+    assert "walkway" in why[(3.5, 7.5)]
+    assert "run into pl-shelf (pl-shelf)" in why[(7.0, 7.6)]
+    assert "no wall within 1 m" in why[(12.5, 7.5)]
+    assert "the fitting at an earlier point" in why[(2.1, 7.5)]
+    high = wall_points(layout, catalog, [(2.0, 7.5)], height=3.3)
+    assert high["positions"] == [] and "above the top of pl-north (3.60 m)" in high["notMounted"][0]["why"]
+    assert "None of the points" in high["none"]
+    with pytest.raises(ValueError, match="points are for a wall-mounted fitting"):
+        wall_points(layout, catalog, [(2.0, 7.5)], asset_id=POLE["assetId"])
+
+
 def test_a_mount_that_would_stand_in_a_walkway_is_left_out():
     layout, catalog = room("east")
     layout["routes"] = [{"routeId": "rt-door", "corridorWidth": 2.0,
@@ -332,11 +389,14 @@ def test_sage_has_the_tool_with_a_progress_line():
 
 def test_sage_has_a_lighting_playbook_for_its_opinions():
     """2026-11-05 (the gym lighting demo): asked where lights should go or how many, Sage chooses from a few rules
-    and says what it chose; the position helper is only for outdoor poles and wall lights by a door."""
+    and says what it chose; the position helper finds spots for outdoor poles and wall lights by a door, and mounts
+    wall fittings (sconces, a neon sign) at the points Sage gives."""
     from ai_inspector.codex_runtime.pilot import EDIT_INSTRUCTIONS
     text = " ".join(EDIT_INSTRUCTIONS.split())
-    for rule in ("The position helper is only for outdoor pole lights and wall lights by an outside door",
-                 "bollards every 3 to 5 m", "an uplight 0.3 to 0.5 m from the trunk or wall, facing it",
+    for rule in ("mounts wall fittings at points you give", "The checks see each item as its box",
+                 "bollards every 3 to 5 m", "an uplight just outside the plant's box (0.2 to 0.4 m from its edge)",
+                 "turned so its front (+Z) faces it", "along its front, just outside its box",
+                 "Mount both with suggest_facility_light_positions points",
                  "festoon strings hung under the roof (metadata.mountingSurface with the roof's placementId)",
                  "about 3 times their height apart", "0.75 to 0.9 m above its top",
                  "sconces with their base about 1.5 m up, 2.5 to 3 m apart", "warm, layered light"):

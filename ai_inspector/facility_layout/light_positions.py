@@ -14,6 +14,11 @@ light, snapRelationship) for place_asset, from the layout's own geometry:
   two wall segments in line), its back on the wall, as high as the wall allows up to WALL_LIGHT_TOP. A wall has no
   lintel over a gap, so a light "over the door" goes beside it, at the top of the wall. A mount in a walkway, or
   outside every zone that takes equipment, is left out and counted under "skipped".
+- Wall fittings at given points (2026-11-05, the gym's bowling room: sconces, a neon sign): each point is where one
+  goes, on the room side of a wall; it is mounted on the nearest wall's face toward the point, its base heightMeters
+  above the floor, facing into the room. A point that cannot take it (no wall within NEAR_WALL, past the wall's end
+  or across an opening, above the wall's top, in a walkway, outside the zones, against something already there) is
+  listed in notMounted with the reason. Walls are the layout's upright wall placements, not the shell's own walls.
 
 A new pole light standing exactly on one of these spots skips the parking review (cleared_pole_spots, called by
 operation_proposals.prepare): the server checks the spot again itself, by these rules, on the layout as proposed. A
@@ -53,6 +58,7 @@ POLE_HEIGHT = 3.0           # m: a light whose top stands this high is a pole; a
 WALL_LIGHT_TOP = 4.6        # m above the floor, the highest a wall light goes
 WALL_LIGHT_LOWEST = 2.2     # m above the floor, the lowest (above a door head)
 WALL_GAP = 0.003            # m between a wall light's back plate and the wall
+NEAR_WALL = 1.0             # m: a point given for a wall fitting is at most this far from the wall's face
 OPENING = (0.6, 6.0)        # m: a gap this wide between two wall segments in line is an opening
 MATCH = 0.01                # m: a pole this close to a spot stands on it (spots are given to the millimetre)
 EDGES = {"north": (0, 1), "south": (0, -1), "east": (1, 0), "west": (-1, 0)}
@@ -83,13 +89,22 @@ def tool_spec():
         "plate (-Z) on the wall, lens facing down and out, as high as the wall allows up to 4.6 m; a wall has no "
         "lintel over a gap, so a light 'over the door' goes beside it at the top of the wall. Copy a position's "
         "transform and snapRelationship into place_asset exactly (a wall light needs its snapRelationship), with a "
-        "new placementId and instanceLabel. Light fittings come lit. Layout geometry only, not a lighting design.",
+        "new placementId and instanceLabel. Light fittings come lit. Layout geometry only, not a lighting design. "
+        "Inside a room, a wall fitting (a sconce, a neon sign) goes at points: give points, one per fitting, each a "
+        "plan point on the room side of a wall within 1 m of its face, and heightMeters, its base above the floor (a "
+        "sconce about 1.5 m); each is mounted on the nearest wall's face toward its point, facing into the room. One "
+        "that does not fit (past the wall's end or across an opening, above the wall's top, in a walkway, against "
+        "something already there) is listed in notMounted with the reason: give another point or ask the user.",
         "input_schema": {"type": "object", "additionalProperties": False, "required": ["assetId", "zoneId"],
             "properties": {
                 "assetId": {"type": "string", "minLength": 1, "maxLength": 128},
                 "zoneId": {"type": "string", "pattern": "^zn-[A-Za-z0-9][A-Za-z0-9._:-]*$", "maxLength": 128},
                 "edge": {"enum": sorted(EDGES)},
-                "count": {"type": "integer", "minimum": 1, "maximum": 12}}}}
+                "count": {"type": "integer", "minimum": 1, "maximum": 12},
+                "points": {"type": "array", "minItems": 1, "maxItems": 12, "items": {
+                    "type": "object", "additionalProperties": False, "required": ["x", "z"],
+                    "properties": {"x": {"type": "number"}, "z": {"type": "number"}}}},
+                "heightMeters": {"type": "number", "minimum": 0, "maximum": 10}}}}
 
 
 def _definition(record):
@@ -406,9 +421,10 @@ def _inverse(q):
     return (-x, -y, -z, w)
 
 
-def _walls(layout, catalog, area):
-    """The upright walls along the zone's edge: (placement, record, centre, axis, start, end, thickness)."""
-    edge = prep(area.exterior.buffer(0.5))
+def _walls(layout, catalog, area=None):
+    """The upright walls along the zone's edge (every one without AREA): (placement, record, centre, axis, start, end,
+    thickness)."""
+    edge = prep(area.exterior.buffer(0.5)) if area is not None else None
     result = []
     for placement in layout.get("placements", []):
         record = _record_for(catalog, placement)
@@ -419,7 +435,7 @@ def _walls(layout, catalog, area):
         if abs(up[1] - 1) > 1e-6 or abs(float(placement["transform"].get("scale", 1)) - 1) > 1e-8:
             continue
         shape = _footprint(placement, record)
-        if shape is None or not edge.contains(shape.centroid):
+        if shape is None or (edge is not None and not edge.contains(shape.centroid)):
             continue
         centre, axis, half_length, half_width = _axes(shape)
         along = centre[0] * axis[0] + centre[1] * axis[1]
@@ -484,8 +500,9 @@ def _wall_positions(layout, catalog, asset, zone, edge, count):
     return result[:count], skipped
 
 
-def _mount(wall, along, outward, heading, floor, half_width, height, asset):
-    """A wall attachment of ASSET on WALL's outward face, centred ALONG the wall, or None if it does not fit."""
+def _mount(wall, along, outward, heading, floor, half_width, height, asset, base=None):
+    """A wall attachment of ASSET on WALL's outward face, centred ALONG the wall, or None if it does not fit. Its
+    base is BASE (an elevation) when given, else as high as the wall allows up to WALL_LIGHT_TOP."""
     placement, record, centre, axis, start, end, _ = wall
     if along - half_width < start - 1e-9 or along + half_width > end + 1e-9:
         return None
@@ -504,9 +521,10 @@ def _mount(wall, along, outward, heading, floor, half_width, height, asset):
                centre[1] + axis[1] * (along - (centre[0] * axis[0] + centre[1] * axis[1])))
     local = _rotate_vector((on_line[0] - p["x"], 0.0, on_line[1] - p["z"]), _inverse(q))
     top = float(p["y"]) + float(a_high["y"])
-    base = min(top - height - 0.05, floor + WALL_LIGHT_TOP)
-    if base < floor + WALL_LIGHT_LOWEST:
-        return None
+    if base is None:
+        base = min(top - height - 0.05, floor + WALL_LIGHT_TOP)
+        if base < floor + WALL_LIGHT_LOWEST:
+            return None
     local_y = base - float(p["y"])
     positive = face.startswith("positive")
     depth = (float(a_high[normal]) + WALL_GAP - float(b_low["z"]) if positive
@@ -527,6 +545,84 @@ def _mount(wall, along, outward, heading, floor, half_width, height, asset):
             "placement": {"assetId": asset["assetId"], "assetDefinitionRevision": asset["assetDefinitionRevision"],
                           "transform": {"position": position, "quaternion": yaw_quaternion(heading), "scale": 1},
                           "snapRelationship": relationship}}
+
+
+def _point_positions(layout, catalog, asset, zone, points, height_above_floor):
+    """Wall mounts of ASSET at POINTS (where each goes, on the room side of a wall): each on the nearest wall's face
+    toward its point, its base HEIGHT_ABOVE_FLOOR above the zone's floor (or as high as the wall allows), facing away
+    from the wall. Returns (positions, [{point, why}] for the points that cannot take one)."""
+    floor = float(zone.get("floorElevation", 0))
+    low, high = _aabb(asset)
+    half_width, height = float(high["x"]), float(high["y"]) - float(low["y"])
+    half_depth = (float(high["z"]) - float(low["z"])) / 2
+    walls = _walls(layout, catalog)
+    corridors = [LineString([(p["x"], p["z"]) for p in r["centerline"]]).buffer(r["corridorWidth"] / 2)
+                 for r in layout.get("routes", []) if len(r.get("centerline") or []) >= 2 and r.get("corridorWidth", 0) > 0]
+    zoning = _zoning(layout)
+    taken = []    # (placementId, footprint, bottom, top, label) of what a mount could run into
+    for placement in layout.get("placements", []):
+        record = _record_for(catalog, placement)
+        box_low, box_high = _aabb(record) if record is not None else (None, None)
+        shape = _footprint(placement, record) if box_low and box_high else None
+        if shape is not None:
+            y = float(placement["transform"]["position"]["y"])
+            taken.append((placement["placementId"], shape, y + float(box_low["y"]), y + float(box_high["y"]),
+                          _label(placement)))
+    positions, missed = [], []
+    for point in points:
+        px, pz = float(point["x"]), float(point["z"])
+        given = {"x": px, "z": pz}
+        best = None
+        for wall in walls:
+            _, _, centre, axis, start, end, thickness = wall
+            normal = (-axis[1], axis[0])
+            across = (px - centre[0]) * normal[0] + (pz - centre[1]) * normal[1]
+            along = px * axis[0] + pz * axis[1]
+            gap = max(0.0, abs(across) - thickness / 2)
+            if gap <= NEAR_WALL and start - 1e-9 <= along <= end + 1e-9 and (best is None or gap < best[0]):
+                side = 1.0 if across >= 0 else -1.0
+                best = (gap, wall, along, (side * normal[0], side * normal[1]))
+        if best is None:
+            missed.append({"point": given, "why": f"no wall within {NEAR_WALL:g} m of it with the point beside it "
+                                                  "(not past its end)"})
+            continue
+        gap, wall, along, outward = best
+        wall_placement, wall_record = wall[0], wall[1]
+        wall_top = float(wall_placement["transform"]["position"]["y"]) + float(_aabb(wall_record)[1]["y"])
+        base = None if height_above_floor is None else floor + float(height_above_floor)
+        if base is not None and base + height > wall_top + 1e-9:
+            missed.append({"point": given, "why": (f"its top would stand {base + height - floor:.2f} m up, above "
+                                                   f"the top of {_label(wall_placement)} ({wall_top - floor:.2f} m)")})
+            continue
+        heading = math.degrees(math.atan2(outward[0], outward[1])) % 360
+        position = _mount(wall, along, outward, heading, floor, half_width, height, asset, base=base)
+        if position is None:
+            missed.append({"point": given, "why": (f"it would run past the end of {_label(wall_placement)} or "
+                                                   "across an opening: move the point along the wall")
+                           if base is not None else "the wall is too low for it"})
+            continue
+        spot = position["placement"]["transform"]["position"]
+        footprint = _strip((spot["x"], spot["z"]), wall[3], half_width, half_depth)
+        bottom, top = float(spot["y"]) + float(low["y"]), float(spot["y"]) + float(high["y"])
+        if any(corridor.intersects(footprint) for corridor in corridors):
+            missed.append({"point": given, "why": "it would stand in a walkway or route corridor"})
+            continue
+        if not _zoned(footprint, zoning):
+            missed.append({"point": given, "why": "the wall's face there is in no zone that takes equipment"})
+            continue
+        hit = next((item for item in taken if item[0] != wall_placement["placementId"]
+                    and item[1].intersection(footprint).area > 1e-6
+                    and min(top, item[3]) - max(bottom, item[2]) > 1e-6), None)
+        if hit is not None:
+            missed.append({"point": given, "why": f"it would run into {hit[4]} ({hit[0]})"})
+            continue
+        facing = min(EDGES, key=lambda name: math.dist(EDGES[name], outward))
+        position["where"] = (f"on the {facing}-facing side of {_label(wall_placement)} "
+                             f"({wall_placement['placementId']}), {gap:.2f} m from the point given, its base "
+                             f"{bottom - floor:.2f} m up, facing {facing}")
+        taken.append(("(given)", footprint, bottom, top, "the fitting at an earlier point"))
+        positions.append(position)
+    return positions, missed
 
 
 def cleared_pole_spots(layout, catalog, placement_ids):
@@ -578,10 +674,20 @@ def suggest_light_positions(layout, catalog, arguments):
     if not low or not high:
         raise ValueError("This light has no catalog geometry to place.")
     wall = "wall-mounted" in tags
+    points = arguments.get("points")
+    if points and not wall:
+        raise ValueError("points are for a wall-mounted fitting (a sconce, a sign, a wall light). Place a pole where "
+                         "the user says with place_asset, or call this tool without points for clear spots.")
     edge, count = arguments.get("edge"), int(arguments.get("count", 3))
-    positions, skipped = (_wall_positions if wall else _pole_positions)(layout, catalog, asset, zone, edge, count)
+    missed = None
+    if points:
+        positions, missed = _point_positions(layout, catalog, asset, zone, points, arguments.get("heightMeters"))
+        skipped = {}
+    else:
+        positions, skipped = (_wall_positions if wall else _pole_positions)(layout, catalog, asset, zone, edge, count)
     result = {"assetId": asset["assetId"], "assetDefinitionRevision": asset["assetDefinitionRevision"],
-              "zoneId": zone["zoneId"], "method": "wall" if wall else "pole", "edge": edge, "positions": positions,
+              "zoneId": zone["zoneId"], "method": "wall points" if points else "wall" if wall else "pole",
+              "edge": edge, "positions": positions,
               "howToUse": ("For a light with no position from the user, place it with place_asset at one of "
                            "these positions, best first: copy its placement.transform and placement.snapRelationship "
                            "exactly, and add a new placementId, positionMode locked and an instanceLabel. It comes "
@@ -591,7 +697,12 @@ def suggest_light_positions(layout, catalog, arguments):
               "limitations": LIMITATIONS}
     if skipped:
         result["skipped"] = {key: f"{number} {SKIPPED[key]}" for key, number in sorted(skipped.items())}
+    if missed:
+        result["notMounted"] = missed
     if positions:
+        return result
+    if points:
+        result["none"] = "None of the points could take it (see notMounted): give other points or ask the user."
         return result
     if not wall:
         result["none"] = ("No clear spot was found" + (f" within {EDGE_BAND:g} m of the {edge} edge" if edge else "")

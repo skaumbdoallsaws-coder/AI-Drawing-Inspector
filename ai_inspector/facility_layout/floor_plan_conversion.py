@@ -317,8 +317,9 @@ def _transformer(alignment: dict, origin):
 
 
 class _Work:
-    """The neighbor searches one conversion may make (MAX_WORK grid cells and neighbors visited): a drawing whose lines
-    lie too densely or reach too far is refused as too large instead of keeping the server busy."""
+    """The neighbor searches one conversion may make (MAX_WORK grid cells and neighbors visited, and the corners that
+    covering tests compare): a drawing whose lines lie too densely or reach too far is refused as too large instead of
+    keeping the server busy."""
 
     def __init__(self):
         self.left = MAX_WORK
@@ -1361,15 +1362,7 @@ def _columns(entities, layout, reference_id, import_id, column_settings, exclude
                 outlines.append((ring, polygon, entity))
             else:
                 loose.append(entity)
-        held = set()
-        if len(outlines) > 1:
-            tree = STRtree([polygon for _ring, polygon, _entity in outlines])
-            for index, (_ring, polygon, _entity) in enumerate(outlines):
-                near = tree.query(polygon)
-                work.spend(len(near))
-                if any(int(j) != index and outlines[int(j)][1].area > polygon.area + ROUNDING
-                       and outlines[int(j)][1].covers(polygon) for j in near):
-                    held.add(index)
+        held = _inside_larger(outlines, work) if len(outlines) > 1 else set()
         made = []
         for index, (ring, _polygon, entity) in enumerate(outlines):
             if index in held:
@@ -1473,6 +1466,41 @@ def _columns(entities, layout, reference_id, import_id, column_settings, exclude
             added.add(len(outlines), middle, middle, reach)
             outlines.append(outline)
     return rows, len(existing)
+
+
+def _inside_larger(outlines, work):
+    """The indexes of OUTLINES ((ring, polygon, entity) each) that a larger one of them covers. Copies of one outline
+    (drawn over one another, from any corner, either way round) are searched for once, and each outline's area and
+    extent are worked out once: thousands of copies found one another in every search, and each look worked out both
+    areas again (Codex review). Only an outline whose extent holds another's is tested as covering it, and each test
+    is spent by the corners it compares, so many-cornered outlines nested in one another (rings open on one side, say)
+    cannot cost more than the work allows."""
+    from shapely.strtree import STRtree
+    first = {}  # an outline's normalized form -> the first outline drawn so
+    copy_of = [first.setdefault(polygon.normalize().wkb, index)
+               for index, (_ring, polygon, _entity) in enumerate(outlines)]
+    distinct = sorted(first.values())
+    if len(distinct) < 2:
+        return set()
+    shapes = [outlines[index][1] for index in distinct]
+    areas = [shape.area for shape in shapes]
+    extents = [shape.bounds for shape in shapes]
+    corners = [len(outlines[index][0]) for index in distinct]
+    tree = STRtree(shapes)
+    inside = set()
+    for k, shape in enumerate(shapes):
+        near = tree.query(shape)
+        work.spend(len(near))
+        x0, z0, x1, z1 = extents[k]
+        for j in map(int, near):
+            a0, b0, a1, b1 = extents[j]
+            if j == k or areas[j] <= areas[k] + ROUNDING or a0 > x0 or b0 > z0 or a1 < x1 or b1 < z1:
+                continue
+            work.spend(corners[j] + corners[k])
+            if shapes[j].covers(shape):
+                inside.add(distinct[k])
+                break
+    return {index for index, kept in enumerate(copy_of) if kept in inside}
 
 
 def _spent(work, found):

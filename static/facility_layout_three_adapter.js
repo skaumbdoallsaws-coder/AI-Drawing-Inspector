@@ -7787,10 +7787,19 @@
                 const resolved = library && libraryRuntime.resolveAppearance(library, appearance, currentLayout());
                 if (!resolved) return;
                 mesh.updateMatrixWorld(true);
-                // Its projection is its own (a cache of one), not the shared cache's: a column's outline is drawn anew
-                // each time, so a shared entry would never be used again and would stay behind (Codex review).
-                applyObjectFinish(mesh, createFinishMaterialFor(resolved, 1),
-                    resolved.texture ? finishesRuntime.mappingFor(THREE, mesh, resolved) : null, new Map());
+                // The finish is projected in the column's own frame (its outline from 0 up to its height; the mesh
+                // stands at its base), so its mapping comes from that frame's bounds: the world's put a raised
+                // column's cylinder off its middle (Codex review). Its projection is its own (a cache of one), not
+                // the shared cache's: a column's outline is drawn anew each time, so a shared entry would stay behind.
+                let mapping = null;
+                if (resolved.texture) {
+                    geometry.computeBoundingBox();
+                    const box = geometry.boundingBox;
+                    mapping = finishesRuntime.mappingFor(THREE, mesh, resolved, {
+                        min: { x: box.min.x, y: box.min.y, z: box.min.z },
+                        max: { x: box.max.x, y: box.max.y, z: box.max.z } });
+                }
+                applyObjectFinish(mesh, createFinishMaterialFor(resolved, 1), mapping, new Map());
                 material.dispose();
             });
         }

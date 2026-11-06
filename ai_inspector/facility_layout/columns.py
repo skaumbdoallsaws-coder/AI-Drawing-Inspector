@@ -97,7 +97,7 @@ def compile_columns(value, layout) -> dict:
     floor = float((layout.get("coordinateFrame") or {}).get("floorElevation", 0))
     result, ids = [], set()
     for column in value["columns"]:
-        if not isinstance(column, Mapping) or column.get("shape") not in SHAPES:
+        if not isinstance(column, Mapping) or not isinstance(column.get("shape"), str) or column["shape"] not in SHAPES:
             raise ValueError("A column's shape must be rectangle or circle")
         fields = COMMON | SHAPES[column["shape"]]
         if set(column) - {"source"} != fields:

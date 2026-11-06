@@ -66,7 +66,7 @@ def test_rotation_turns_a_column_as_a_compass_heading_turns():
 
 
 @pytest.mark.parametrize("patch", [
-    {"shape": "hexagon"}, {"widthMeters": 0.01}, {"depthMeters": 6}, {"heightMeters": 0.2}, {"heightMeters": True},
+    {"shape": "hexagon"}, {"shape": []}, {"shape": {}}, {"widthMeters": 0.01}, {"depthMeters": 6}, {"heightMeters": 0.2}, {"heightMeters": True},
     {"center": {"x": 0.1, "z": 5}}, {"center": {"x": 10}}, {"baseElevation": 2}, {"label": "  "},
     {"columnId": "c-1"}, {"appearance": {"color": "gold"}}, {"appearance": {"appearanceId": "no-such-finish"}},
     {"diameterMeters": 0.4}, {"footprint": []}, {"source": {"referenceId": "fp-main"}},
@@ -75,6 +75,14 @@ def test_rotation_turns_a_column_as_a_compass_heading_turns():
 def test_a_bad_column_is_refused(patch):
     with pytest.raises(ValueError):
         compile_columns({"version": 1, "columns": [square(**patch)]}, layout())
+
+
+def test_a_shape_that_is_not_a_name_is_refused_as_bad_columns():
+    # Codex review (columns, round 3): a list or an object for the shape failed the dictionary lookup with TypeError,
+    # an internal error instead of the refusal.
+    for shape in ([], {}):
+        with pytest.raises(FacilityLayoutOperationError, match="shape must be rectangle or circle"):
+            apply(layout(), {"op": "upsert_column", "column": square(shape=shape)})
 
 
 def test_ids_are_unique_and_the_limit_holds():

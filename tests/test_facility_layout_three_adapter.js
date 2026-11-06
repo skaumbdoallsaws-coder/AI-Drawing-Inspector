@@ -7492,6 +7492,33 @@ test('a textured column leaves no projected geometry behind when it is drawn aga
     assert.deepStrictEqual(sizes, sizes.map(() => sizes[0]), 'the cache holds as many after every redraw');
 });
 
+test('a column raised on its base wears its finish as it does on the floor', async () => {
+    // Codex review (columns, round 3): the mapping came from the world's bounds and the finish was projected in the
+    // column's own frame, so a column standing 2 m up had its wood wrapped around a line 2 m off its middle. The grain
+    // runs along the column's length, a level line: a cylinder around the upright (the finish's own grain) has no middle
+    // in height to lose.
+    const uvs = async base => {
+        const live = await libraryFixture();
+        await drawnScene(live, { assetCatalog: [asset('rack', REV_A)], layout: {
+            extensions: { facilityColumns: { version: 1, columns: [Object.assign(
+                finishedColumn({ appearanceId: 'wood-oak', mapping: 'cylindrical', grain: 'length' }),
+                { baseElevation: base })] } },
+            placements: [placement('other', 'rack', REV_A, 0, 0, 0)] } });
+        let mesh = null;
+        renderedScene().traverse(object => { if (object.isMesh && object.userData.columnId === 'col-a') mesh = object; });
+        const values = Array.from(mesh.geometry.getAttribute('uv').array);
+        const raised = mesh.position.y;
+        live.adapter.dispose();
+        return { values, raised };
+    };
+    const floor = await uvs(0);
+    const up = await uvs(2);
+    assert.strictEqual(up.raised, 2, 'the column stands 2 m up');
+    assert.strictEqual(up.values.length, floor.values.length);
+    const apart = Math.max(...up.values.map((value, index) => Math.abs(value - floor.values[index])));
+    assert.ok(apart < 1e-6, 'the same wood, 2 m up (' + apart + ' apart)');
+});
+
 test('a placement switched in place from overview to detail and moved loads its detail, as a full rebuild does', async () => {
     // Codex on a5c91fa: the models on screen were indexed by the representation their placements ask for, read from
     // the live objects, so the overview model was taken for the detail one.

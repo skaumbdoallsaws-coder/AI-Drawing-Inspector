@@ -1245,6 +1245,47 @@ def test_a_box_a_little_off_square_is_one_column_whichever_corner_and_way_round_
     assert len(found) == 1, found
 
 
+def test_copies_of_one_outline_are_searched_for_once(monkeypatch):
+    # Codex review (columns, round 3): copies of one outline drawn over one another each found all the others in the
+    # search for outlines inside larger ones, and each look worked out both areas again: 2 * N * N area readings.
+    from shapely.geometry import Polygon
+    readings = [0]
+    area = Polygon.area
+
+    def counted(self):
+        readings[0] += 1
+        return area.fget(self)
+
+    monkeypatch.setattr(Polygon, "area", property(counted))
+    count = 300  # drawn from each corner, either way round: copies all the same
+    copies = [turned_box(f"c{k:03d}", (10, 10), 0.4, 0.4, 0, start=k % 4, reverse=bool(k % 2)) for k in range(count)]
+    alone = convert(drawing(*copies), COLUMNS, HEIGHT)
+    states = [(row["state"], row["reason"]) for row in alone["columns"]]
+    assert states.count(("new", None)) == 1 and states.count(("refused", "duplicate")) == count - 1, states
+    assert readings[0] < 5 * count, readings
+    held = convert(drawing(*copies, turned_box("big", (10, 10), 1.0, 1.0, 0)), COLUMNS, HEIGHT)
+    assert [(row["state"], row["reason"], row["sources"]) for row in held["columns"]] == [("new", None, ["big"])]
+    assert held["unconvertedCounts"] == {"column_inside": count}  # each copy is part of the box that holds it
+
+
+def test_outlines_nested_without_covering_one_another_are_spent_by_the_corners_compared(monkeypatch):
+    # Codex review (columns, round 3): each covering test was spent as one look whatever the corners it compared, so
+    # many-cornered outlines nested in one another cost far more than the work allows. Rings open on one side nest
+    # without covering one another: each lies in the next one's hollow.
+    def opened(entity, radius, steps=200):
+        arc = [math.radians(30 + 300 * k / (steps - 1)) for k in range(steps)]
+        outer = [(12 + radius * math.cos(a), 12 + radius * math.sin(a)) for a in arc]
+        inner = [(12 + 0.9 * radius * math.cos(a), 12 + 0.9 * radius * math.sin(a)) for a in reversed(arc)]
+        return poly(entity, "L1", outer + inner)
+
+    rings = drawing(*(opened(f"r{k:02d}", 1.15 ** k) for k in range(12)))
+    result = convert(rings, COLUMNS, HEIGHT)
+    assert result["columns"] == [] and {row["reason"] for row in result["unconverted"]} == {"column_shape"}
+    monkeypatch.setattr(conversion, "MAX_WORK", 20_000)  # 66 tests, each of 400 corners against 400
+    with pytest.raises(conversion.ConversionTooLargeError, match="too large"):
+        convert(rings, COLUMNS, HEIGHT)
+
+
 def test_one_insert_of_many_columns_lists_its_entities_once_not_once_per_column():
     # Codex review (columns, round 1): each column of an insert listed and sorted all of the insert's entities again,
     # so one insert of N outlines cost N * N lookups before any limit could refuse it.

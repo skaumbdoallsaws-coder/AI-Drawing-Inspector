@@ -388,6 +388,27 @@ def test_a_point_on_the_far_face_of_a_wall_goes_on_the_rooms_side():
     assert item["placement"]["snapRelationship"]["face"] == "positive_z" and "facing north" in item["where"]
 
 
+def test_a_point_on_a_face_the_zone_cannot_choose_keeps_that_face():
+    """Review 2026-11-05 (round 4): on a face, where the zone cannot tell the room side (a partition inside the room,
+    a zone on both sides of the wall, a zone ending far from it), a point keeps the face it lies on; only a point
+    strictly inside the wall is refused."""
+    layout, catalog = room("east")
+    partition = asset("asset-partition", 4.0, 0.2, 3.0, ["wall"])
+    catalog[partition["assetId"]] = partition
+    layout["placements"].append(place("pl-partition", partition, 5.0, 0.0, 4.0))
+    for point, face, facing in (((5.0, 3.9), "negative_z", "south"), ((6.0, 4.1), "positive_z", "north")):
+        ((item,),) = [wall_points(layout, catalog, [point])["positions"]]
+        assert item["placement"]["snapRelationship"]["face"] == face and f"facing {facing}" in item["where"], point
+    inside = wall_points(layout, catalog, [(5.0, 4.05)])
+    assert inside["positions"] == [] and "inside pl-partition" in inside["notMounted"][0]["why"]
+    site = suggest_light_positions(layout, dict(catalog, **{SCONCE["assetId"]: SCONCE}), {
+        "assetId": SCONCE["assetId"], "zoneId": "zn-site", "points": [{"x": 5.0, "z": 7.8}], "heightMeters": 1.5})
+    assert site["positions"][0]["placement"]["snapRelationship"]["face"] == "negative_z"
+    layout["zones"][0]["boundary"] = [{"x": 0, "z": 0}, {"x": 10, "z": 0}, {"x": 10, "z": 5.8}, {"x": 0, "z": 5.8}]
+    ((item,),) = [wall_points(layout, catalog, [(5.0, 7.8)])["positions"]]
+    assert item["placement"]["snapRelationship"]["face"] == "negative_z", "the zone ends 2 m short"
+
+
 def test_a_flat_item_in_the_layout_does_not_stop_the_points():
     """Review 2026-11-05 (round 2): a box with no depth (a flat panel) has no collision volume, so the checks leave it
     out; the helper does too, rather than failing every point on the layout."""

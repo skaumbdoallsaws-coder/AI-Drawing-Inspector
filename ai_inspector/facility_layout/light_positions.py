@@ -18,10 +18,12 @@ light, snapRelationship) for place_asset, from the layout's own geometry:
 - Wall fittings at given points (2026-11-05, the gym's bowling room: sconces, a neon sign; and any wall-mounted
   fitting at a spot the user gives): each point is where one goes, on the side of a wall it is to face; it is mounted
   on the face toward the point of the nearest wall that spans its height (for a point inside a wall or on its face,
-  within ON_FACE, the face toward the zone), its base heightMeters above the floor, facing that side. A point that cannot take it (no wall within NEAR_WALL, past the wall's end or across an opening, above
-  the wall's top or below its bottom, in a walkway, outside the zones, against or touching something already there)
-  is listed in notMounted with the reason. Walls are the layout's upright wall placements, not the shell's own
-  walls, and the shell's walls and columns are not checked here (the preview checks them).
+  within ON_FACE, the face toward the zone; when the zone cannot tell, a point on a face keeps that face), its base
+  heightMeters above the floor, facing that side. A point that cannot take it (no wall within NEAR_WALL, past the
+  wall's end or across an opening, above the wall's top or below its bottom, in a walkway, outside the zones,
+  against or touching something already there) is listed in notMounted with the reason. Walls are the layout's
+  upright wall placements, not the shell's own walls, and the shell's walls and columns are not checked here (the
+  preview checks them).
 
 A new pole light standing exactly on one of these spots skips the parking review (cleared_pole_spots, called by
 operation_proposals.prepare): the server checks the spot again itself, by these rules, on the layout as proposed. A
@@ -651,16 +653,20 @@ def _point_positions(layout, catalog, asset, zone, points, height_above_floor):
         else:
             # A point inside the wall or on a face (a face at a hair's rounding counted either side, review round 3):
             # the face toward the zone (the room), the side whose point 0.3 m off the face is nearer it (a zone may
-            # stop short of the wall); not when both are as near, or the zone is far.
+            # stop short of the wall). When both are as near, or the zone is far, a point on a face keeps that face
+            # (review round 4: a partition inside a room, a zone on both sides) and one inside the wall is refused.
             reach = thickness / 2 + 0.3
             foot = (px - normal[0] * across, pz - normal[1] * across)
             away = {s: area.distance(Point(foot[0] + s * normal[0] * reach, foot[1] + s * normal[1] * reach))
                     for s in (1.0, -1.0)}
             side = min(away, key=away.get)
             if abs(away[1.0] - away[-1.0]) <= 1e-9 or away[side] > NEAR_WALL:
-                missed.append({"point": given,
-                               "why": f"it is inside {label}: give a point on the room side, off its face"})
-                continue
+                if abs(across) > ON_FACE and abs(abs(across) - thickness / 2) <= ON_FACE:
+                    side = 1.0 if across > 0 else -1.0
+                else:
+                    missed.append({"point": given,
+                                   "why": f"it is inside {label}: give a point on the room side, off its face"})
+                    continue
         outward = (side * normal[0], side * normal[1])
         if along - half_width < start - 1e-9 or along + half_width > end + 1e-9:
             missed.append({"point": given, "why": (f"it would run past the end of {label}: move the point along the "

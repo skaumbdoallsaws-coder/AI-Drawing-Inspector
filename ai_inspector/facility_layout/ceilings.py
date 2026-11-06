@@ -11,6 +11,14 @@ A placement hangs from a ceiling when its asset allows it (``coordinateFrame.all
 ceiling and its top (the highest point of its physical volume) at that ceiling's height. Collisions stay 3D, so a
 lamp hung over a table collides with it only where their heights overlap.
 
+A placement may hang under another placement instead, a raised structure such as a pergola roof (2026-11-05):
+``metadata.mountingSurface`` ``{"surfaceKind": "ceiling", "placementId": <host>}`` (the kind may be left out). The
+checks see the host's underside as a ceiling (featureId ``placement-underside-<host>``,
+``spatial._placement_underside_surfaces``): its footprint at the lowest point of its physical volume, which must be at
+least MIN_HEIGHT_METERS above the layout's floorElevation, so nothing hangs under a desk; a missing host is an error
+too. The rules above then apply. An item whose top meets its host's underside touches it without colliding, and
+collides as before with anything else it overlaps.
+
 A ceiling may name a ``finish`` (``FINISHES``): "acoustic-tile" (a white suspended ceiling of 600 mm tiles) or
 "open-deck" (exposed light grey steel joists whose underside is at the height, under a ribbed deck, 2026-11-03);
 without one it is drawn matte charcoal (the 3D view only; the checks ignore it).

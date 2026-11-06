@@ -6,6 +6,9 @@ the zone, is accepted; collisions with the table below stay 3D.
 
 Later the same day: a ceiling may name a finish (how the 3D view draws it), and a zone may have a roof
 (set_zone_roof, the 3D view only).
+
+2026-11-05: a lamp may hang under a raised placement instead (lanterns under the patio pergola roof), held to its
+underside as to a zone ceiling.
 """
 from copy import deepcopy
 import json
@@ -674,5 +677,177 @@ def test_undo_and_redo_of_a_ceiling_and_roof_still_work(tmp_path):
                                               {"op": "set_zone_roof", "zoneId": "zn-lounge", "heightMeters": None}])
         extensions = _lounge(cleared["layout"]).get("extensions") or {}
         assert "ceiling" not in extensions and "roof" not in extensions
+    finally:
+        host.close()
+
+
+# 2026-11-05, for "Hang 4 lanterns under the patio pergola roof": the roof is a placement seated on the pergola's
+# posts, not a zone ceiling. A lantern names it (metadata.mountingSurface placementId) and is held to its underside.
+SEAT, SIDE, POST = 2.1336, 3.6576, 0.15   # m: the gym pergola roof's underside and side, a post's side
+UNDER_ROOF = {"surfaceKind": "ceiling", "placementId": "pl-pergola-roof"}
+
+
+def _pergola_assets():
+    half = SIDE / 2
+    posts = [rectangle(x, z, x + POST, z + POST) for x in (-half, half - POST) for z in (-half, half - POST)]
+    # As the gym's: the roof seats on the posts' tops.
+    seat = {"surfaceId": "pergola-roof-seat", "allowedSides": ["above"], "evidenceStatus": "derived",
+            "localFrame": {"origin": {"x": 0, "y": SEAT, "z": 0}, "xAxis": {"x": 1, "y": 0, "z": 0},
+                           "zAxis": {"x": 0, "y": 0, "z": 1}, "normal": {"x": 0, "y": 1, "z": 0}},
+            "bounds": {"minimumX": -half, "maximumX": half, "minimumZ": -half, "maximumZ": half}}
+    supports = {"assetId": "asset-test-pergola-supports", "category": "workstation",
+                "coordinateFrame": {"allowedMountingSurfaces": ["floor"], "floorAnchor": {"x": 0, "y": 0, "z": 0}},
+                "geometry": {"footprintPolygons": posts, "heightInterval": {"minimumY": 0, "maximumY": SEAT}},
+                "clearances": [], "supportSurfaces": [seat]}
+    return [supports, box("asset-test-pergola-roof", SIDE, SIDE, 0.51),
+            box("asset-test-lantern", 0.3, 0.3, 0.6, ("ceiling",)), box("asset-test-palm", 0.5, 0.5, 1.8)]
+
+
+PERGOLA = _pergola_assets()
+
+
+def _pergola_scene():
+    """The lounge without a zone ceiling, its table at (15, 10) under a pergola: the posts on the floor at its corners
+    and the roof seated on them (a surface attachment, as the gym's), the roof's underside SEAT up."""
+    shell, layout = scene(ceiling=None)
+    roof = placement("pl-pergola-roof", "asset-test-pergola-roof", 15, 10, y=SEAT)
+    roof["snapRelationship"] = {
+        "family": "surface_attachment", "attachmentId": "surface:pl-pergola-roof",
+        "supportPlacementId": "pl-pergola-supports", "surfaceId": "pergola-roof-seat",
+        "surfaceSource": "asset_definition", "localPosition": {"x": 0, "z": 0}, "localRotationDegrees": 0,
+        "normalOffsetMeters": 0, "side": "above", "evidenceStatus": "derived"}
+    layout["placements"] += [placement("pl-pergola-supports", "asset-test-pergola-supports", 15, 10), roof]
+    return shell, layout
+
+
+def _lantern(placement_id, x, z, y=SEAT - 0.6, under=UNDER_ROOF):
+    """A 0.6 m lantern that only hangs; by default its top is at the roof's underside."""
+    return placement(placement_id, "asset-test-lantern", x, z, y=y, metadata={"mountingSurface": dict(under)})
+
+
+def _errors(shell, layout, *added):
+    layout = deepcopy(layout)
+    layout["placements"] += list(added)
+    result = diagnose_layout(layout, ASSETS + PERGOLA, shell=shell_with_plan_boundary(shell, layout))
+    return [item for item in result["findings"] if item["severity"] == "error"]
+
+
+def test_lanterns_hang_under_a_pergola_roof_that_is_a_placement():
+    shell, layout = _pergola_scene()
+    assert _errors(shell, layout) == [], "the pergola stands as the gym's does"
+    # Over the table's corners, from 1.53 m up: items collide only where their heights overlap.
+    lanterns = [_lantern(f"pl-lantern-{n}", x, z) for n, (x, z) in enumerate(((14, 9.7), (16, 9.7), (14, 10.3)), 1)]
+    # The surface kind may be left out: naming a placement to hang under implies the ceiling.
+    lanterns.append(_lantern("pl-lantern-4", 16, 10.3, under={"placementId": "pl-pergola-roof"}))
+    # Their tops touch the roof's underside: contact, not a collision.
+    assert _errors(shell, layout, *lanterns) == []
+
+
+@pytest.mark.parametrize("case, given, message", [
+    ("a gap under the roof", {"y": SEAT - 0.65}, "top does not meet its ceiling"),
+    ("across the roof's edge", {"x": 16.75}, "outside the requested mounting surface"),
+    ("beside the pergola", {"x": 18.5}, "outside the requested mounting surface"),
+    ("under the table", {"x": 12, "z": 5, "y": 1.0, "under": dict(UNDER_ROOF, placementId="pl-table")},
+     "hangs only under a structure whose underside is at least 2 m above the floor"),
+    ("under a missing gazebo", {"x": 12, "z": 5, "under": dict(UNDER_ROOF, placementId="pl-gazebo")},
+     "The placement this item hangs under does not exist."),
+    ("standing on the roof", {"x": 12, "z": 5, "under": dict(UNDER_ROOF, surfaceKind="floor")},
+     "give surfaceKind 'ceiling'"),
+])
+def test_a_lantern_off_its_pergola_roof_is_refused(case, given, message):
+    shell, layout = _pergola_scene()
+    found = _errors(shell, layout, _lantern("pl-lantern", **{"x": 14, "z": 9, **given}))
+    assert [item["code"] for item in found] == ["unsupported_mounting_surface"], found
+    assert message in found[0]["message"]
+
+
+def test_a_lantern_pushed_up_into_the_roof_collides_with_it():
+    shell, layout = _pergola_scene()
+    found = _errors(shell, layout, _lantern("pl-lantern", 14, 9, y=SEAT - 0.55))
+    assert [(item["code"], item["subjectRefs"]) for item in found] == [
+        ("placement_collision", ["pl-lantern", "pl-pergola-roof"]), ("unsupported_mounting_surface", ["pl-lantern"])]
+    assert "top does not meet its ceiling" in found[1]["message"]
+
+
+def test_the_underside_counts_from_the_layout_floor():
+    shell, layout = _pergola_scene()
+    layout["coordinateFrame"]["floorElevation"] = 0.2   # the roof's underside is then 1.93 m above it
+    found = _errors(shell, layout, _lantern("pl-lantern", 14, 9))
+    assert [(item["code"], item["details"]["reason"], item["details"]["hostUndersideY"]) for item in found] == [
+        ("unsupported_mounting_surface", "host_too_low", SEAT)]
+
+
+def test_a_lantern_under_the_roof_still_collides_with_what_it_overlaps():
+    # A 1.8 m palm under it reaches into the lantern (1.53 m to 2.13 m up).
+    shell, layout = _pergola_scene()
+    found = _errors(shell, layout, _lantern("pl-lantern", 14, 9), placement("pl-palm", "asset-test-palm", 14, 9))
+    assert [(item["code"], item["subjectRefs"]) for item in found] == [
+        ("placement_collision", ["pl-lantern", "pl-palm"])]
+
+
+def test_placement_alternatives_for_a_hung_lantern_keep_it_under_its_roof():
+    # The candidate search checks a candidate alone: it is held to the roof as the layout has it.
+    from ai_inspector.facility_layout.spatial import generate_placement_candidates
+    shell, layout = _pergola_scene()
+    layout["placements"].append(_lantern("pl-lantern", 14, 9))
+    asset = next(item for item in PERGOLA if item["assetId"] == "asset-test-lantern")
+    result = generate_placement_candidates(
+        layout, asset, {"x": 14.1, "y": SEAT - 0.6, "z": 9.1}, ASSETS + PERGOLA,
+        shell=shell_with_plan_boundary(shell, layout), enabled_families=("grid",),
+        target_placement_id="pl-lantern", asset_definition_revision="a" * 64)
+    assert len(result["candidates"]) == 1, result["rejectionCounts"]
+    candidate = result["candidates"][0]
+    assert (candidate["transform"]["position"]["x"], candidate["transform"]["position"]["z"]) == (14, 9)
+    assert not [item for item in candidate["findings"] if item["severity"] == "error"]
+
+
+def test_a_sage_preview_hangs_a_lamp_under_a_raised_placement_and_keeps_it(tmp_path):
+    # Sage's own path, as the zone-ceiling preview above: the catalog's workbench stands in for a canopy 5 m up
+    # (overhead, carried by the building) and for a 1 m lamp hung under it.
+    from jsonschema import Draft202012Validator
+    from ai_inspector.codex_runtime.edit_schemas import operation_batch_schema
+    from ai_inspector.facility_layout.host import LocalFacilityLayoutHost, LOCAL_SITE_ID, LOCAL_LAYOUT_ID
+    from ai_inspector.facility_layout.operation_proposals import create
+    schema = operation_batch_schema()
+    variant = next(v for v in schema["properties"]["operations"]["items"]["oneOf"]
+                   if v["properties"]["op"].get("const") == "place_asset")
+    assert "{surfaceKind: 'ceiling', placementId: <that structure's placementId>}" in variant["description"]
+    host = LocalFacilityLayoutHost(tmp_path / "facility", private_assets=False)
+    try:
+        service, principal = host.service, host.principal()
+        bench = next(item for item in host.ensure_bootstrap()["assetCatalog"] if item["assetId"] == "asset-workbench")
+
+        def place(placement_id, y, metadata):
+            return {"op": "place_asset", "placement": {
+                "placementId": placement_id, "assetId": "asset-workbench",
+                "assetDefinitionRevision": bench["assetDefinitionRevision"],
+                "transform": {"position": {"x": 5, "y": y, "z": 5}, "quaternion": {"x": 0, "y": 0, "z": 0, "w": 1},
+                              "scale": 1},
+                "positionMode": "manual", "snapRelationship": None, "metadata": metadata}}
+
+        under = {"mountingSurface": {"surfaceKind": "ceiling", "placementId": "pl-canopy"}}
+        operations = [
+            {"op": "add_zone", "zoneId": "zn-lounge", "zone": {
+                "label": "Lounge", "zoneType": "workcell", "anchors": [], "evidence": [], "floorElevation": 0,
+                "boundary": rectangle(0, 0, 10, 10)}},
+            place("pl-canopy", 5.0, {}), place("pl-lamp", 4.0, under)]
+        assert not list(Draft202012Validator(schema).iter_errors({"operations": operations[1:]}))
+        revision = service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["revision"]
+        proposal = create(service, principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, revision, operations=operations)
+        validation = proposal["alternative"]["validation"]
+        assert validation["spatial"]["metrics"]["errorCount"] == 0, validation
+        assert validation["spatial"]["metrics"]["placementCollisions"] == 0
+        binding = proposal["alternative"]["transactionBinding"]
+        approval = service.approve_layout_proposal(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, proposal["proposalId"],
+            binding, session_id="test-session", idempotency_key="hang-key", explicit_approval=True)
+        saved = service.apply_layout_proposal(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, approval["approvalToken"],
+            binding, session_id="test-session", idempotency_key="hang-key")["layout"]
+        assert next(item for item in saved["placements"] if item["placementId"] == "pl-lamp")["metadata"] == under
+        # The canopy cannot be deleted from over its lamp: the lamp names it.
+        revision = service.get_layout(principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID)["revision"]
+        with pytest.raises(FacilityLayoutError) as refused:
+            create(service, principal, LOCAL_SITE_ID, LOCAL_LAYOUT_ID, revision,
+                   operations=[{"op": "delete_placement", "placementId": "pl-canopy"}])
+        assert refused.value.code == "referenced_object_in_use"
     finally:
         host.close()

@@ -280,12 +280,18 @@ def operation_batch_schema():
         "asset's supportSurfaces (inspect_facility_asset): the item is centred on it at its height, turned to face the "
         "surface's user. To seat a chair at a desk whose facilitySemantics has a workstationSeat, give seatAt "
         "{deskPlacementId}. With either, leave out orientation and give placement.transform as only {scale: 1}.")
+    # Hanging under a placement (ceilings.py): the checks hold the light to that placement's underside.
+    hang_help = (
+        " A light can hang under a raised structure such as a pergola roof: give placement.metadata.mountingSurface "
+        "{surfaceKind: 'ceiling', placementId: <that structure's placementId>}, keep the light inside that "
+        "placement's footprint, and set placement.transform.position.y to the structure's underside (its lowest "
+        "point) minus the asset's height.")
     from ai_inspector.facility_layout.light_positions import USER_POSITION
     operation("place_asset", {"placementId": ref("placementId"), "placement": new_placement,
               "orientation": orientation,
               "attachTo": obj({"supportPlacementId": ref("placementId"), "surfaceId": text(120)}),
               "seatAt": obj({"deskPlacementId": ref("placementId")})}, ["placement"],
-              "Give orientation or placement.transform.quaternion. " + orientation_help + workstation_help +
+              "Give orientation or placement.transform.quaternion. " + orientation_help + workstation_help + hang_help +
               " For part finishes on a new placement (a lens finish, a stack light lamp), read its parts with "
               "inspect_facility_components {assetId}, give this place_asset a placementId, and put "
               "set_component_materials for that placementId after it in the same preview."

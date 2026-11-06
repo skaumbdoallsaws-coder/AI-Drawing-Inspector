@@ -2333,6 +2333,12 @@ def _zone_checks(
     )
 
 
+# A hung item may name the placement it hangs under (a lantern under a pergola roof): metadata.mountingSurface
+# {"surfaceKind": "ceiling", "placementId": <host>}. The checks see the host's underside as a "ceiling" mounting
+# surface with this featureId (_placement_underside_surfaces, ceilings.py).
+PLACEMENT_UNDERSIDE_PREFIX = "placement-underside-"
+
+
 def _mounting_reference(
     placement: Mapping[str, Any],
     allowed: Any = None,
@@ -2343,6 +2349,19 @@ def _mounting_reference(
         raw = metadata.get("mountingSurfaceRef")
         if raw is None:
             raw = metadata.get("mountingSurface")
+    # Only the placement's own metadata names a host, never a snap relationship; naming one implies a ceiling.
+    host = raw.get("placementId") if isinstance(raw, Mapping) else None
+    if host is not None:
+        return {
+            "surfaceKind": str(
+                raw.get("surfaceKind")
+                or raw.get("mountingKind")
+                or raw.get("kind")
+                or "ceiling"
+            ),
+            "featureId": PLACEMENT_UNDERSIDE_PREFIX + str(host),
+            "hostPlacementId": str(host),
+        }
     snap = placement.get("snapRelationship")
     if raw is None and isinstance(snap, Mapping):
         family = snap.get("family") or snap.get("kind")
@@ -2404,6 +2423,133 @@ def _prepare_mounting_surfaces(
         )
         for feature in features
         if isinstance(feature, Mapping)
+    )
+
+
+def _top_meets_underside(
+    item: Sequence[SpatialRecord],
+    host: Sequence[SpatialRecord],
+) -> bool:
+    """Whether an item's top (the highest point of its physical volume, as _mounting_checks measures a hung item) is
+    at the host's underside (the lowest point of the host's), within the mounting check's 1e-6 m: they only touch."""
+    top = [record for record in item if record.record_kind == "physical"] or list(item)
+    bottom = [record for record in host if record.record_kind == "physical"] or list(host)
+    return bool(top and bottom) and abs(
+        max(record.maximum_y for record in top)
+        - min(record.minimum_y for record in bottom)
+    ) <= 1.0e-6
+
+
+def _placement_underside_surfaces(
+    layout: Mapping[str, Any],
+    placements: Mapping[str, Mapping[str, Any]],
+    records_by_placement: Mapping[str, tuple[SpatialRecord, ...]],
+    unchecked: set[str],
+    host_records: Mapping[str, tuple[SpatialRecord, ...]] | None = None,
+) -> tuple[
+    tuple[PreparedSurface, ...],
+    list[dict[str, Any]],
+    set[str],
+    set[tuple[str, str]],
+]:
+    """The undersides that hung items name (metadata.mountingSurface placementId, ceilings.py), as "ceiling" mounting
+    surfaces that _mounting_checks then holds them to: the host's footprint at the lowest point of its physical volume.
+
+    A host that is missing, or whose underside is less than ceilings.MIN_HEIGHT_METERS above the layout's
+    floorElevation (a desk), refuses the item instead, as does naming a host for another surface kind; items in
+    UNCHECKED (stacked, attached or overhead, whose mounting is not checked) are not refused. An item whose top meets
+    the underside of the host it names only touches it: that pair is contact, not a collision. HOST_RECORDS are
+    placements outside the layout that items may name (the candidate search checks a candidate alone).
+    Returns the surfaces, the findings, the refused items and the contact pairs."""
+    from .ceilings import MIN_HEIGHT_METERS
+
+    surfaces: dict[str, PreparedSurface] = {}
+    findings: list[dict[str, Any]] = []
+    refused: set[str] = set()
+    contacts: set[tuple[str, str]] = set()
+    floor: float | None = None
+    for placement_id in sorted(records_by_placement):
+        reference = _mounting_reference(placements.get(placement_id) or {})
+        host_id = reference.get("hostPlacementId")
+        if host_id is None:
+            continue
+        host = [
+            record
+            for record in (
+                records_by_placement.get(host_id)
+                or (host_records or {}).get(host_id)
+                or ()
+            )
+            if record.record_kind == "physical"
+        ]
+        if floor is None:
+            frame = layout.get("coordinateFrame")
+            floor = (
+                _number(frame.get("floorElevation", 0), "coordinateFrame.floorElevation")
+                if isinstance(frame, Mapping)
+                else 0.0
+            )
+        underside = min((record.minimum_y for record in host), default=floor)
+        minimum = floor + MIN_HEIGHT_METERS
+        if host and _top_meets_underside(records_by_placement[placement_id], host):
+            contacts.add(tuple(sorted((placement_id, host_id))))
+        if reference["surfaceKind"] != "ceiling":
+            reason, message = "not_ceiling", (
+                "A placement named in metadata.mountingSurface is one to hang under: give surfaceKind 'ceiling'."
+            )
+        elif not host:
+            reason, message = "host_missing", "The placement this item hangs under does not exist."
+        elif underside < minimum - GEOMETRY_EPSILON:
+            reason, message = "host_too_low", (
+                f"An item hangs only under a structure whose underside is at least {MIN_HEIGHT_METERS:g} m "
+                "above the floor."
+            )
+        else:
+            feature_id = str(reference["featureId"])
+            if feature_id not in surfaces:
+                boundary = _placement_polygon(host)
+                surfaces[feature_id] = (
+                    {
+                        "featureId": feature_id,
+                        "featureKind": "mounting_surface",
+                        "surfaceKind": "ceiling",
+                        "evidence": [],
+                        "geometry": {
+                            "boundary": [{"x": x, "z": z} for x, z in boundary],
+                            "elevation": underside,
+                        },
+                    },
+                    "ceiling",
+                    boundary,
+                )
+            continue
+        if placement_id in unchecked:
+            continue
+        details = {
+            "hostPlacementId": host_id,
+            "reason": reason,
+            "requestedSurfaceKind": reference["surfaceKind"],
+        }
+        if reason == "host_too_low":
+            details.update(
+                hostUndersideY=_rounded(underside),
+                minimumUndersideY=_rounded(minimum),
+            )
+        refused.add(placement_id)
+        findings.append(
+            _finding(
+                "unsupported_mounting_surface",
+                "error",
+                message,
+                subject_refs=(placement_id, host_id if host else ""),
+                details=details,
+            )
+        )
+    return (
+        tuple(surfaces[key] for key in sorted(surfaces)),
+        findings,
+        refused,
+        contacts,
     )
 
 
@@ -3586,8 +3732,11 @@ def diagnose_layout(
     allowed_contact_pairs: set[tuple[str, str]] | None = None,
     _prepared_zones: _PreparedZoneScene | None = None,
     _prepared_surfaces: Sequence[PreparedSurface] | None = None,
+    _host_records: Mapping[str, tuple[SpatialRecord, ...]] | None = None,
 ) -> dict[str, Any]:
-    """Return authoritative deterministic spatial findings for a layout."""
+    """Return authoritative deterministic spatial findings for a layout.
+
+    _host_records: placements outside the layout that its items may hang under (the candidate search)."""
 
     _check_cancel(cancel_check)
     catalog = _asset_catalog(asset_definitions)
@@ -3613,11 +3762,28 @@ def diagnose_layout(
     findings.extend(wall_findings)
     attachment_contact_pairs |= wall_contacts
     attached_placements |= wall_mounted
+    overhead_placements = _overhead_placement_ids(
+        records_by_placement,
+        shell,
+        stacked_upper_placements | attached_placements,
+    )
+    # Items hung under another placement (a lantern under a pergola roof): its underside is their ceiling.
+    hung_surfaces, hung_findings, hung_refused, hung_contact_pairs = (
+        _placement_underside_surfaces(
+            layout,
+            placements,
+            records_by_placement,
+            stacked_upper_placements | attached_placements | overhead_placements,
+            _host_records,
+        )
+    )
+    findings.extend(hung_findings)
     collision_findings, collision_count = _placement_collisions(
         records_by_placement,
         allowed_contact_pairs=(
             stack_contact_pairs
             | attachment_contact_pairs
+            | hung_contact_pairs
             | (allowed_contact_pairs or set())
         ),
     )
@@ -3637,12 +3803,7 @@ def diagnose_layout(
         tuple(_prepared_surfaces)
         if _prepared_surfaces is not None
         else _prepare_mounting_surfaces(shell)
-    )
-    overhead_placements = _overhead_placement_ids(
-        records_by_placement,
-        shell,
-        stacked_upper_placements | attached_placements,
-    )
+    ) + hung_surfaces
     zone_membership: dict[str, tuple[str, ...]] = {}
     for placement_id in sorted(records_by_placement):
         _check_cancel(cancel_check)
@@ -3666,7 +3827,8 @@ def diagnose_layout(
         )
         findings.extend(zone_findings)
         zone_membership[placement_id] = zone_ids
-        if placement_id not in stacked_upper_placements | attached_placements:
+        # A hung item refused for its host has its mounting error already.
+        if placement_id not in stacked_upper_placements | attached_placements | hung_refused:
             findings.extend(
                 _mounting_checks(
                     placement,
@@ -4366,7 +4528,10 @@ def _candidate_cross_findings(
     candidate_clearances: Sequence[SpatialRecord],
     base_physical_index: UniformGridSpatialIndex | None,
     base_clearance_index: UniformGridSpatialIndex | None,
+    *,
+    contact_owner_ids: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
+    """CONTACT_OWNER_IDS: placements the candidate only touches as allowed (the one it hangs under)."""
     findings: list[dict[str, Any]] = []
     candidate_id = candidate_records[0].owner_id
     physical_hits: set[str] = set()
@@ -4376,6 +4541,7 @@ def _candidate_cross_findings(
                 obstacle = base_physical_index.record(record_id)
                 if (
                     obstacle.owner_id not in physical_hits
+                    and obstacle.owner_id not in contact_owner_ids
                     and _record_pair_intersects(record, obstacle)
                 ):
                     physical_hits.add(obstacle.owner_id)
@@ -4859,6 +5025,21 @@ def generate_placement_candidates(
     rejection_counts: dict[str, int] = {}
     baseline_metrics: dict[str, Any] | None = None
     candidate_surfaces = _prepare_mounting_surfaces(shell)
+    # A target hung under another placement is held to that placement as the base layout has it (the candidate
+    # layout holds the candidate alone); a candidate whose top meets its underside only touches it.
+    host_id = (
+        _mounting_reference(existing_target).get("hostPlacementId")
+        if existing_target is not None
+        else None
+    )
+    host_records = (
+        _layout_placement_records(
+            {"placements": [item for item in base_placements if item.get("placementId") == host_id]},
+            catalog,
+        )[0]
+        if host_id is not None
+        else {}
+    )
     candidate_height_interval = _local_height_interval(asset_definition)
     candidate_clearance_templates = _clearance_templates(
         asset_definition,
@@ -4904,6 +5085,7 @@ def generate_placement_candidates(
             cancel_check=cancel_check,
             _prepared_zones=candidate_zone_scene,
             _prepared_surfaces=candidate_surfaces,
+            _host_records=host_records,
         )
         candidate_transform = placement.get("transform")
         if not isinstance(candidate_transform, Mapping):
@@ -4929,6 +5111,11 @@ def generate_placement_candidates(
                 candidate_clearances,
                 base_physical_index,
                 base_clearance_index,
+                contact_owner_ids=frozenset(
+                    owner_id
+                    for owner_id, records in host_records.items()
+                    if _top_meets_underside(candidate_records, records)
+                ),
             )
         )
         findings = sort_findings(findings)

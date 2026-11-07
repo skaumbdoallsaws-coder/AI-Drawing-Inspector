@@ -24,6 +24,9 @@ EXPECTED = {"viewer": {READ}, "editor": ALL, "approver": {READ}, "catalog_curato
 QUOTE_ROUTES = {("POST", "/api/packaging/documents/{doc_id}/quotes"), ("POST", "/api/packaging/documents/{doc_id}/alternatives/{alt_id}/quotes"),
                 ("POST", "/api/packaging/documents/{doc_id}/scenarios"), ("DELETE", "/api/packaging/documents/{doc_id}/scenarios/{scenario_id}")}
 ACCOUNT_ROUTES = {("PUT", "/api/packaging/account"), ("DELETE", "/api/packaging/account"), ("POST", "/api/packaging/account/carrier-accounts")}
+# Recovery drafts are an editor's own unsaved work, so even reading them needs packaging.edit. The editor only asks for
+# them when it may edit (recoveryEnabled in static/packaging.js); these are the only reads that need more than read.
+DRAFT_PATHS = {"/api/packaging/drafts", "/api/packaging/drafts/{draft_id}"}
 
 
 def principal(*roles):
@@ -72,14 +75,14 @@ def refused(client, method, path):
 
 def test_routes_require_the_dedicated_action_for_each_method(tmp_path):
     app, current, found = routes(tmp_path)
-    assert QUOTE_ROUTES | ACCOUNT_ROUTES <= set(found)
+    assert QUOTE_ROUTES | ACCOUNT_ROUTES <= set(found) and {("GET", path) for path in DRAFT_PATHS} <= set(found)
     assert any(method == "GET" for method, _ in found) and any(method != "GET" for method, _ in found)
     with TestClient(app) as client:
         for role, expected in EXPECTED.items():
             current["principal"] = principal(role)
             for method, path in found:
                 needed = QUOTE if (method, path) in QUOTE_ROUTES else ACCOUNT if (method, path) in ACCOUNT_ROUTES \
-                    else READ if method in {"GET", "HEAD"} else EDIT
+                    else EDIT if path in DRAFT_PATHS else READ if method in {"GET", "HEAD"} else EDIT
                 allowed = READ in expected and needed in expected
                 assert refused(client, method, path) != allowed, (role, method, path)
 
@@ -102,7 +105,8 @@ def test_quote_and_account_routes_ask_for_their_own_action(tmp_path, monkeypatch
         current["principal"] = principal("approver")
         assert set(granted(current["principal"])) == {READ, QUOTE}
         for method, path in found:
-            assert refused(client, method, path) == (method != "GET" and (method, path) not in QUOTE_ROUTES), (method, path)
+            writes = method != "GET" or path in DRAFT_PATHS
+            assert refused(client, method, path) == (writes and (method, path) not in QUOTE_ROUTES), (method, path)
         current["principal"] = principal("editor")
         assert set(granted(current["principal"])) == {READ, EDIT, ACCOUNT}
         for method, path in found:

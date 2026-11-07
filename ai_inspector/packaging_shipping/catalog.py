@@ -34,7 +34,7 @@ def uline_carton(sku, inside, outside, pounds, bundle, slug):
         supplier="ULINE", sku=sku, source_url=source)
     return {"id": "uline-" + sku.lower(), "carton": carton.model_dump(mode="json"),
             "grade": "200 lb test; meets ASTM D5118 (supplier statements)", "checked_at": CARTONS_CHECKED,
-            "purchase_multiple": bundle, "dimension_tolerance_m": .125 * INCH_M}
+            "purchase_multiple": bundle, "outer_tolerance_m": .125 * INCH_M}  # ULINE states it for outside dimensions only.
 
 
 def catalog():

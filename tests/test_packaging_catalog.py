@@ -27,7 +27,7 @@ def test_every_carton_is_a_sourced_uline_record_with_its_page_values():
         assert carton["source_url"].startswith(f"https://www.uline.com/Product/Detail/{sku}/Corrugated-Boxes-200-Test/")
         assert carton["tare_evidence"].endswith(f"Checked {CARTONS_CHECKED}. {carton['source_url']}")
         assert entry["checked_at"] == CARTONS_CHECKED and entry["grade"].startswith("200 lb test")
-        assert entry["purchase_multiple"] in {10, 20, 25} and entry["dimension_tolerance_m"] == pytest.approx(.125 * INCH_M)
+        assert entry["purchase_multiple"] in {10, 20, 25} and entry["outer_tolerance_m"] == pytest.approx(.125 * INCH_M)
         # The pages state outside = inside + 3/8 in on length and width and + 5/8 in on height (X/Y/Z = L/H/W).
         grow = [(o - i) / INCH_M for i, o in zip(carton["inner_m"], carton["outer_m"])]
         assert grow == pytest.approx([.375, .625, .375])

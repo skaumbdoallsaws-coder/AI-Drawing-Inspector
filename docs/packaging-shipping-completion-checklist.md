@@ -48,7 +48,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 
 | Requirement | Status | Evidence or next action |
 | --- | --- | --- |
-| Dependency choices: py3dbp (MIT), trimesh (MIT), reportlab (BSD), OCP STEP worker, EasyPost | Implemented | In use and promoted locally. Third-party license/notice review and redistribution remain P5 work. |
+| Dependency choices: py3dbp (MIT), trimesh (MIT), reportlab (BSD), OCP STEP worker, EasyPost | Implemented | In use and promoted locally. Third-party license/notice review and redistribution remain open; inventory in `docs/packaging-shipping-dependencies.md`. |
 | Provider choice with current terms and services | Blocked | EasyPost remains the only adapter. Terms re-read 2026-11-06 from EasyPost's docs and API Addendum v4.3 (effective 2026-10-30): rating creates a Shipment (an external write); three rating calls are included per purchased label, then $0.02 per additional call; address verification $0.02 beyond one per label; SmartRate $0.03; test mode contacts no carrier. This workflow buys no labels, so production rating calls are expected to be billed (inference, shown as the fee notice). Needs the user's account choice and permission for metered calls. |
 | Documented unsupported inputs | Implemented | `/api/packaging/status` lists unsupported capabilities; consolidated list below. |
 | Real CAD import with dimension check | Locally verified | Five-solid STEP: bounds and closed-solid volume; original bytes unchanged (STEP batch, real sample). |
@@ -117,7 +117,9 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Promotion into the regular desktop | Implemented | User-approved local promotion at `3ce2b05`; not a gate pass. Next promotion needs approval. |
 | Recoverable draft checkpoints, outstanding-operation reconciliation, safe shutdown/restart | Partly done (editor and store; native guard unchanged) | Recovery drafts (`/api/packaging/drafts`, `packaging.edit`, capability `draft_recovery`): the editor checkpoints its unsaved design 1.5 s after each change, records an in-flight save (request ID) in a checkpoint before sending it, and removes the checkpoint after a save or discard. Drafts belong to one user and scope, one per saved document, at most 10 (refused beyond, never silently dropped), bounded by the 1 MB request limit, and never change a document. On start and from **Open**, **Recover unsaved work** lists each draft against the saved store: an interrupted save that landed is reported as saved and its draft removed (no second revision); one that never arrived is restored and **Save** replays its original request ID, so it cannot apply twice; a draft behind a newer revision (for example after a Sage turn) loads only after a confirmation; **Discard** asks first. Not kept: values typed but not applied, session-only addresses, selected files and open dialogs (said in the dialog); an import interrupted mid-request is not resumed by the editor (Sources shows whether it finished; not tested here). `tests/test_packaging_recovery.py`, a UI unit test, `tests/verify_packaging_recovery_ui.py` (`.runtime/packaging-recovery-ui-04`: crash with unsaved edits, lost save response, save that never arrived, newer revision, discarded new draft, checkpoint that could not be written). A checkpoint that cannot be written is reported in the message and the header until the next one is written. Remaining: the native close/reload guard and the host's backend-loss check are unchanged and still block departure with a mounted editor; letting a checkpointed editor close needs a host/desktop change with native tests and approval before the next promotion. |
 | Legacy managed runtime transition path | Open (needs a user decision) | Needs an explicit supported/unsupported decision with tests before enabling packaging there. Recommendation: unsupported for the first release, failing closed with a message. |
-| Dependency/license/security review, clean Windows install, missing-dependency behaviour | Open | Local development deployment only. |
+| Missing-dependency behaviour | Locally verified | A missing optional component disables only its feature: GLB import (`source_runtime_unavailable`), arrangement proposals (`arrangement_unavailable`) and the PDF report (`report_unavailable`) answer 503 with a feature message instead of a bad-file or server error, and `/api/packaging/status` lists `glb_import_runtime_missing`, `arrangement_runtime_missing` or `pdf_report_runtime_missing`. `tests/test_packaging_missing_components.py` runs the real GLB worker with an empty dependency folder. STEP, carrier key store and native profile cases were already covered; see `docs/packaging-shipping-dependencies.md`. |
+| Dependency/license/security inventory | Inventory done; license review open | `docs/packaging-shipping-dependencies.md`: versions, declared licenses, license-text presence, process boundaries. Gaps: the STEP wheel carries 70 native DLLs (Open CASCADE, LibRaw, FreeImage, FreeType and others) with no license or notice text; py3dbp and cadquery-ocp ship no license file; pywin32 is used but not declared. Not legal clearance. |
+| Clean Windows install | Open (blocked) | Needs a clean Windows machine or VM; not attempted. |
 | Artifact retention, quotas and cleanup | Open | Bounded today: 20 saved alternatives and 200 research evidence records per document, 10 recovery drafts per user (removed on save or discard). No retention policy for sources, images, quote snapshots or quote attempts. |
 | No secrets in evidence, no orphaned workers, offline manual use | Locally verified | Historical native evidence; recheck at release. |
 | Two live carriers or an explicit single-carrier restriction | Blocked | Depends on P2 live access. |
@@ -223,6 +225,14 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   boolean fields (an extra field broke the host contract tests and was removed). The native guard
   is unchanged; no desktop app was launched or restarted.
 
+- 2026-11-06, item 8a (missing components and dependency inventory): GLB import, arrangement
+  proposals and the PDF report now report a missing component as unavailable in this installation
+  (503 with a feature message; Sage gets the same code), and the status lists it. Evidence: 4 new
+  tests (one runs the real GLB worker with an empty dependency folder), 14 of 14 dependency tests,
+  domain 483, report 77, host 107, Codex 144. The inventory tool reported 0 machine blockers for both packaging requirement
+  files; it does not see transitive packages or the STEP wheel's native DLLs, which carry no license
+  text. No license decision was made.
+
 ## Unsupported inputs (first release)
 
 Mixed products in one design; arbitrary contour or fitted inserts; dielines; pallets, crates
@@ -258,3 +268,5 @@ PO Box addresses; US territories and military (APO/FPO/DPO) addresses, which nee
 - A decision on the legacy managed runtime's unattached transition path: supported or unsupported
   for packaging in the first release (recommended: unsupported, failing closed).
 - Review of the eight ULINE carton records transcribed from the supplier pages on 2026-11-06.
+- License decisions for the STEP runtime's bundled libraries (Open CASCADE and LibRaw are LGPL;
+  FreeImage and FreeType are dual-licensed) before any redistribution.

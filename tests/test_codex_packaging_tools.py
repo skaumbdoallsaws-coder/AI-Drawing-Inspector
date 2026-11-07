@@ -664,3 +664,19 @@ def test_existing_runtime_credential_hook_is_rechecked_before_writes(env):
     assert_error(result, "codex_packaging_context_changed")
     assert gw.closed and "private" not in json.dumps(result)
     assert env[0].get(env[1], env[2][0].document_id)["revision"] == 0
+
+
+def test_missing_arrangement_solver_is_reported_to_sage(env, monkeypatch):
+    import builtins
+    real = builtins.__import__
+
+    def guarded(name, *args, **kwargs):
+        if name.split(".")[0] == "py3dbp":
+            raise ModuleNotFoundError("No module named 'py3dbp'", name=name)
+        return real(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded)
+    result = invoke(gateway(env), "propose_packaging", {"expected_revision": 0,
+        "cartons": [sample_design().packages[0].carton.model_dump(mode="json")]})
+    assert_error(result, "arrangement_unavailable")
+    assert "Manual packing still works" in result["error"]["message"]

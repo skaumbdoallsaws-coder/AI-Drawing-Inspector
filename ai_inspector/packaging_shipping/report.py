@@ -55,11 +55,16 @@ def packing_order(box):
 
 
 def render_report(document, quotes=(), evidence=()):
-    from reportlab.lib import colors
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
-    from reportlab.graphics.shapes import Drawing, Rect, String
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle
+        from reportlab.graphics.shapes import Drawing, Rect, String
+    except ImportError:
+        from .service import PackagingError
+        raise PackagingError("report_unavailable", "PDF reports are not available in this installation: the ReportLab "
+                             "component is missing. The saved design is unchanged.", 503) from None
     from .components import insert_geometry, pocket_volume
     from .geometry import oriented
     from .models import Insert

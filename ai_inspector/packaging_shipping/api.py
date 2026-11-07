@@ -33,6 +33,21 @@ DRAFT_NOTICE = ("Recovery drafts keep unsaved design changes in this computer's 
                 "discard them. Session-only addresses, selected files and open dialogs are not kept.")
 
 
+def missing_components(glb_root):
+    """Optional components absent from this installation. Each disables one feature, which then fails with a
+    clear message; nothing is imported here. The GLB parser runs isolated with only its dependency root."""
+    from importlib.machinery import PathFinder
+    from importlib.util import find_spec
+    missing = []
+    if any(PathFinder.find_spec(name, [str(glb_root)]) is None for name in ("numpy", "trimesh", "PIL")):
+        missing.append("glb_import_runtime_missing")
+    if find_spec("py3dbp") is None:
+        missing.append("arrangement_runtime_missing")
+    if find_spec("reportlab") is None:
+        missing.append("pdf_report_runtime_missing")
+    return missing
+
+
 async def bounded_body(request, limit):
     data = bytearray()
     async for chunk in request.stream():
@@ -153,7 +168,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
                 "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios", "draft_recovery", "research_evidence"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
                 "quote_rules": {"destinations": DESTINATION_RULES, "ship_date": SHIP_DATE_BASIS, "fees": FEES_NOTICE,
                                 "price_bases": PRICE_BASES},
-                "unsupported": ["verified_cad_material_mass", "arbitrary_contour_cutouts", "transport_certification", "freight", "future_ship_dates"] + ([] if step else ["step_runtime_not_configured"]) + ([] if sage else ["sage_chat_execution"])}
+                "unsupported": ["verified_cad_material_mass", "arbitrary_contour_cutouts", "transport_certification", "freight", "future_ship_dates"] + ([] if step else ["step_runtime_not_configured"]) + ([] if sage else ["sage_chat_execution"]) + missing_components(source_runtime.dependency_root)}
 
     @router.get("/api/packaging/catalog")
     def get_catalog(_=Depends(scope)):

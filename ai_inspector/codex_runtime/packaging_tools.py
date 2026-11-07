@@ -68,6 +68,7 @@ _MESSAGES = {
     "cad_evidence_required": "Manual inputs cannot claim verified CAD mass.",
     "cad_mass_unavailable": "GLB sources do not provide verified CAD mass.",
     "product_required": "Select a product before proposing arrangements.",
+    "arrangement_unavailable": "Arrangement proposals are not available in this installation. Manual packing still works.",
     "protection_requirement_needed": ("This design has packing inserts that a proposal would drop. Ask the user for the "
                                       "minimum cushioning to rebuild, or to remove the inserts, before proposing."),
     "cad_volume_unavailable": "A density estimate requires closed-solid STEP volume.",

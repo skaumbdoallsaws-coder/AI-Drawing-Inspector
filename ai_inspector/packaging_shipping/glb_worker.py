@@ -64,6 +64,10 @@ if __name__ == '__main__':
     if not dependencies.is_absolute() or not dependencies.is_dir() or not job.is_absolute():
         raise SystemExit(2)
     sys.path.append(str(dependencies))
-    meta, glb = convert((job / 'input.glb').read_bytes(), 'Imported product', float(sys.argv[3]))
+    try:
+        meta, glb = convert((job / 'input.glb').read_bytes(), 'Imported product', float(sys.argv[3]))
+    except ImportError:
+        # A parser component is missing from the dependency root: the host reports the installation, not the file.
+        raise SystemExit(3) from None
     (job / 'metadata.json').write_text(json.dumps(meta, allow_nan=False), encoding='utf-8')
     (job / 'normalized.glb').write_bytes(glb)

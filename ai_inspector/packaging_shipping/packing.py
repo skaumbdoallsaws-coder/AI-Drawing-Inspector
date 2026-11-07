@@ -75,7 +75,11 @@ def carton_graphics(design):
 
 
 def propose(design: Design, cartons, max_packages=3, deadline_seconds=10):
-    from py3dbp import Packer, Bin, Item
+    try:
+        from py3dbp import Packer, Bin, Item
+    except ImportError:
+        raise PackagingError("arrangement_unavailable", "Arrangement proposals are not available in this installation: "
+                             "the py3dbp component is missing. Manual packing still works.", 503) from None
     if not design.product:
         raise PackagingError("product_required", "Select a product before arranging packages.", 400)
     p = design.product

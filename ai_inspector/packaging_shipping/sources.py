@@ -83,6 +83,9 @@ async def import_glb_isolated(payload, name, meters_per_unit, root, *, runtime=N
             if asyncio.current_task().cancelling():
                 raise
             raise PackagingError("source_timeout", "Model import exceeded its time limit. Use a smaller static GLB.", 422)
+        if process.returncode == 3:
+            raise PackagingError("source_runtime_unavailable", "Model import is not available in this installation: a "
+                                 "required component is missing. Manual dimensions still work.", 503)
         if process.returncode != 0 or not (job / "metadata.json").is_file():
             raise PackagingError("source_invalid", "The model could not be imported. Check its format, units and complexity.", 422)
         metadata = json.loads((job / "metadata.json").read_text(encoding="utf-8"))

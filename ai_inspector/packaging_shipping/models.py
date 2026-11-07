@@ -344,6 +344,34 @@ class RevisionCommand(Closed):
     request_id: Identity
 
 
+class PendingSave(Closed):
+    """A save the editor had sent but not seen complete when the checkpoint was taken."""
+    kind: Literal["create", "edit"]
+    request_id: Identity
+
+
+class DraftCheckpoint(Closed):
+    """Unsaved editor work kept for recovery. It is never a saved revision: Save still validates and revises.
+
+    The design is kept as the editor held it, which may be incomplete (an empty name, for example), so it is
+    checked only for shape here and fully validated when it is saved."""
+    document_id: Identity | None = None
+    base_revision: Annotated[int, Field(ge=0, strict=True)] | None = None
+    design: dict
+    pending: PendingSave | None = None
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if (self.document_id is None) != (self.base_revision is None):
+            raise ValueError("A saved document's checkpoint needs its base revision; a new document has neither.")
+        if self.pending is not None and (self.pending.kind == "create") != (self.document_id is None):
+            raise ValueError("A pending create belongs to a new document and a pending edit to a saved one.")
+        name, packages = self.design.get("name"), self.design.get("packages")
+        if not isinstance(name, str) or len(name) > 160 or not isinstance(packages, list) or len(packages) > 100:
+            raise ValueError("The checkpoint does not hold a packaging design.")
+        return self
+
+
 class PackingRequest(Closed):
     expected_revision: Annotated[int, Field(ge=0, strict=True)]
     cartons: Annotated[list[Carton], Field(min_length=1, max_length=6)]

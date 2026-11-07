@@ -511,6 +511,30 @@ test('research evidence shows its basis, values and review state, and links only
   assert.match(source, /await loadQuoteAttempts\(\); await loadScenarios\(\); await loadEvidence\(\);/);
 });
 
+test('recovery drafts restore unsaved work, drop work already saved and ask before restoring over a newer revision', () => {
+  const design = { name: 'TEST', packages: [] }, edited = { name: 'TEST edited', packages: [] };
+  const saved = { revision: 3, design: { name: 'TEST', packages: [] } };
+  assert.equal(ui.recoveryAction({ status: 'saved', design: edited }, saved), 'completed');
+  assert.equal(ui.recoveryAction({ status: 'new', design }, null), 'restore_new');
+  assert.equal(ui.recoveryAction({ status: 'document_missing', design }, null), 'restore_new');
+  assert.equal(ui.recoveryAction({ status: 'current', design }, saved), 'completed');
+  assert.equal(ui.recoveryAction({ status: 'behind', design }, saved), 'completed');
+  assert.equal(ui.recoveryAction({ status: 'current', design: edited }, saved), 'restore');
+  assert.equal(ui.recoveryAction({ status: 'behind', design: edited }, saved), 'restore_behind');
+  const at = '2026-11-06T12:00:00Z';
+  assert.match(ui.recoveryText({ status: 'behind', base_revision: 2, current_revision: 3, pending: null, updated_at: at }),
+    /^Unsaved changes to revision 2; the document is now at revision 3 \| checkpoint /);
+  assert.match(ui.recoveryText({ status: 'current', base_revision: 2, pending: { kind: 'edit', request_id: 'edit_x' }, updated_at: at }),
+    /^Unsaved changes to revision 2 \| a save was interrupted \| checkpoint /);
+  assert.match(ui.recoveryText({ status: 'new', pending: { kind: 'create', request_id: 'create_x' }, updated_at: at }),
+    /^New document, not saved \| a save was interrupted \| /);
+  assert.match(ui.recoveryText({ status: 'saved', updated_at: at }), /^Saved before the interruption \| /);
+  // Every save records its request in a checkpoint before sending it, so an interrupted save can be reconciled.
+  assert.match(source, /await checkpoint\(\);\s+result = await request\('\/documents'/);
+  assert.match(source, /await checkpoint\(\);\s+result = await request\(docPath\(\)/);
+  assert.deepEqual(ui.testState.recovery.offered, false);
+});
+
 test('Sage quote scenarios send the Rates panel body and show Sage only city-level places', () => {
   const address = { name: 'TEST ONLY', street1: '1 Test Street', street2: '', city: 'Dallas', state: 'TX', zip: '75201', residential: true };
   const addresses = { origin: { ...address, city: 'Chicago', state: 'IL', zip: '60601', residential: false }, destinations: [address] };

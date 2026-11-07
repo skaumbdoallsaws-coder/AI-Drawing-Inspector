@@ -10,11 +10,12 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.routing import APIRoute
+from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from .geometry import assess, digest
 from .admission import PackagingAdmission
-from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave, BaselineSelect, ScenarioAuthorization, EvidenceReview
+from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave, BaselineSelect, ScenarioAuthorization, EvidenceReview, DraftCheckpoint
 from .evidence import NOTICE as EVIDENCE_NOTICE
 from .quoting import QuoteDesk
 from .comparison import compare as compare_designs, scenarios as quoted_scenarios
@@ -23,9 +24,13 @@ from .permissions import ACCOUNT, EDIT, QUOTE, READ, granted, permits
 from .packing import propose
 from .destinations import RULES as DESTINATION_RULES
 from .rating import FEES_NOTICE, PRICE_BASES, SHIP_DATE_BASIS
-from .service import PackagingError, PackagingService
+from .service import CREATE_ID, PackagingError, PackagingService
 from .sources import MAX_BYTES, GlbRuntime, glb_runtime, import_glb_isolated
 from .step_import import StepRuntime, StepImportError, import_step
+
+
+DRAFT_NOTICE = ("Recovery drafts keep unsaved design changes in this computer's packaging store until you save or "
+                "discard them. Session-only addresses, selected files and open dialogs are not kept.")
 
 
 async def bounded_body(request, limit):
@@ -104,6 +109,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         return dependency
 
     scope, quote_scope, account_scope = scoped(), scoped(QUOTE), scoped(ACCOUNT)
+    draft_scope = scoped(EDIT)  # Recovery drafts are editing work, read back only by editors.
 
     if admission is not None:
         async def editor_body(request):
@@ -144,7 +150,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         return {"workflow": "packaging_shipping", "pilot": True,
                 "rating": desk.status(resolved),
                 "permissions": granted(resolved),
-                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios", "research_evidence"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
+                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios", "draft_recovery", "research_evidence"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
                 "quote_rules": {"destinations": DESTINATION_RULES, "ship_date": SHIP_DATE_BASIS, "fees": FEES_NOTICE,
                                 "price_bases": PRICE_BASES},
                 "unsupported": ["verified_cad_material_mass", "arbitrary_contour_cutouts", "transport_certification", "freight", "future_ship_dates"] + ([] if step else ["step_runtime_not_configured"]) + ([] if sage else ["sage_chat_execution"])}
@@ -357,6 +363,28 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
     async def carrier_accounts(_=Depends(account_scope), resolved=Depends(principal)):
         # POST: this contacts the provider, so it needs the packaging client header and account rights.
         return await desk.carrier_accounts(resolved)
+
+    def draft_identity(draft_id):
+        try:
+            return CREATE_ID.validate_python(draft_id)
+        except ValidationError:
+            raise PackagingError("draft_id_invalid", "Use a bounded alphanumeric draft ID.", 422) from None
+
+    @router.get("/api/packaging/drafts")
+    def list_drafts(s=Depends(draft_scope), resolved=Depends(principal)):
+        return {"drafts": service.drafts(s, resolved.principal_id), "notice": DRAFT_NOTICE}
+
+    @router.get("/api/packaging/drafts/{draft_id}")
+    def get_draft(draft_id: str, s=Depends(draft_scope), resolved=Depends(principal)):
+        return service.draft(s, resolved.principal_id, draft_identity(draft_id))
+
+    @router.put("/api/packaging/drafts/{draft_id}")
+    def put_draft(draft_id: str, checkpoint: DraftCheckpoint, s=Depends(draft_scope), resolved=Depends(principal)):
+        return service.save_draft(s, resolved.principal_id, draft_identity(draft_id), checkpoint)
+
+    @router.delete("/api/packaging/drafts/{draft_id}")
+    def delete_draft(draft_id: str, s=Depends(draft_scope), resolved=Depends(principal)):
+        return service.remove_draft(s, resolved.principal_id, draft_identity(draft_id))
 
     @router.get("/api/packaging/documents/{doc_id}/report.pdf")
     def report(doc_id: str, revision: int, s=Depends(scope), resolved=Depends(principal)):

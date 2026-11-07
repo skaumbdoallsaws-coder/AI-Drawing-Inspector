@@ -16,6 +16,7 @@ from .models import Design, Product, MassCalculation, Identity
 
 SCHEMA_VERSION = 2
 CREATE_ID = TypeAdapter(Identity)
+MAX_DRAFTS = 10  # Recovery checkpoints per user and scope; refused, never silently dropped, beyond this.
 
 
 class PackagingError(Exception):
@@ -86,6 +87,9 @@ class PackagingService:
                     name TEXT NOT NULL, revision INTEGER NOT NULL, design TEXT NOT NULL,
                     created TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
                     PRIMARY KEY(scope,document_id,id), UNIQUE(scope,document_id,request_id));
+                CREATE TABLE IF NOT EXISTS drafts (
+                    scope TEXT NOT NULL, owner TEXT NOT NULL, id TEXT NOT NULL, document_id TEXT,
+                    updated TEXT NOT NULL, checkpoint TEXT NOT NULL, PRIMARY KEY(scope,owner,id));
                 CREATE TABLE IF NOT EXISTS research_evidence (
                     scope TEXT NOT NULL, document_id TEXT NOT NULL, id TEXT NOT NULL,
                     created TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY(scope,document_id,id));
@@ -403,6 +407,70 @@ class PackagingService:
             quote_id = "quote_" + uuid4().hex
             db.execute("INSERT INTO quotes VALUES(?,?,?,?,?)", (scope, doc_id, quote_id, revision, encode(result)))
         return {**result, "id": quote_id, "revision": revision}
+
+    def save_draft(self, scope, owner, draft_id, checkpoint):
+        """Replace one owner's recovery checkpoint; one per saved document. It never changes a document."""
+        record = checkpoint.model_dump(mode="json")
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if checkpoint.document_id is not None:
+                self._row(db, scope, checkpoint.document_id)
+                db.execute("DELETE FROM drafts WHERE scope=? AND owner=? AND document_id=? AND id<>?",
+                           (scope, owner, checkpoint.document_id, draft_id))
+            exists = db.execute("SELECT 1 FROM drafts WHERE scope=? AND owner=? AND id=?", (scope, owner, draft_id)).fetchone()
+            count = db.execute("SELECT COUNT(*) FROM drafts WHERE scope=? AND owner=?", (scope, owner)).fetchone()[0]
+            if not exists and count >= MAX_DRAFTS:
+                raise PackagingError("draft_limit", f"At most {MAX_DRAFTS} unsaved drafts are kept for recovery. "
+                                     "Save or discard one first.", 409)
+            stamp = now()
+            db.execute("INSERT OR REPLACE INTO drafts VALUES(?,?,?,?,?,?)",
+                       (scope, owner, draft_id, checkpoint.document_id, stamp, encode(record)))
+        return {"id": draft_id, "updated_at": stamp}
+
+    def drafts(self, scope, owner):
+        """This owner's recovery checkpoints, newest first, each with how it relates to the saved documents."""
+        with self.db() as db:
+            rows = db.execute("SELECT id,updated,checkpoint FROM drafts WHERE scope=? AND owner=? ORDER BY updated DESC, rowid DESC",
+                              (scope, owner)).fetchall()
+            return [self._draft(db, scope, row) for row in rows]
+
+    def draft(self, scope, owner, draft_id):
+        with self.db() as db:
+            row = db.execute("SELECT id,updated,checkpoint FROM drafts WHERE scope=? AND owner=? AND id=?",
+                             (scope, owner, draft_id)).fetchone()
+            if not row:
+                raise PackagingError("draft_not_found", "This recovery draft no longer exists.", 404)
+            return self._draft(db, scope, row) | {"design": json.loads(row[2])["design"]}
+
+    def remove_draft(self, scope, owner, draft_id):
+        """Idempotent: the editor removes its checkpoint after every save or discard."""
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            removed = db.execute("DELETE FROM drafts WHERE scope=? AND owner=? AND id=?", (scope, owner, draft_id)).rowcount
+        return {"removed": draft_id, "existed": bool(removed)}
+
+    @staticmethod
+    def _draft(db, scope, row):
+        """saved: the interrupted save completed; current: the document is still at the draft's base revision;
+        behind: the document changed since; new: never saved; document_missing: the document is not in this scope."""
+        checkpoint = json.loads(row[2])
+        doc_id, base, pending = checkpoint["document_id"], checkpoint["base_revision"], checkpoint["pending"]
+        result = {"id": row[0], "updated_at": row[1], "name": checkpoint["design"].get("name", ""), "document_id": doc_id,
+                  "base_revision": base, "pending": pending, "current_revision": None, "saved_document_id": None}
+        if doc_id is None:
+            created = pending and db.execute("SELECT result FROM create_receipts WHERE scope=? AND request_id=?",
+                                             (scope, pending["request_id"])).fetchone()
+            if created:
+                saved = json.loads(created[0])
+                return result | {"status": "saved", "saved_document_id": saved["id"]}
+            return result | {"status": "new"}
+        current = db.execute("SELECT revision FROM documents WHERE scope=? AND id=?", (scope, doc_id)).fetchone()
+        if current is None:
+            return result | {"status": "document_missing"}
+        landed = pending and db.execute("SELECT 1 FROM receipts WHERE scope=? AND document_id=? AND request_id=?",
+                                        (scope, doc_id, pending["request_id"])).fetchone()
+        status = "saved" if landed else "current" if current[0] == base else "behind"
+        return result | {"status": status, "current_revision": current[0], "saved_document_id": doc_id if landed else None}
 
     def quote_history(self, scope, doc_id, *, account_ref=None, account_known=False):
         """Recent quotes. A quote is stale when the revision, the design hash it priced or, when the

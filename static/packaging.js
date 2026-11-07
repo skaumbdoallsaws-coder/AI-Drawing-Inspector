@@ -169,6 +169,26 @@ export function evidenceFacts(record) {
 // Only public web links open; anything else is shown as text.
 export const evidenceLink = url => /^https?:\/\//i.test(String(url || '')) ? String(url) : null;
 
+// Recovery: what to do with a checkpoint, given the saved document it belongs to (null when there is none).
+// completed: the work is already saved; restore: unsaved changes on the same revision; restore_behind: the
+// document changed since, so ask first; restore_new: load as a new, unsaved document.
+export function recoveryAction(draft, saved) {
+  if (draft.status === 'saved') return 'completed';
+  if (draft.status === 'new' || draft.status === 'document_missing') return 'restore_new';
+  if (saved && JSON.stringify(saved.design) === JSON.stringify(draft.design)) return 'completed';
+  return draft.status === 'behind' ? 'restore_behind' : 'restore';
+}
+
+export function recoveryText(draft) {
+  const when = `checkpoint ${new Date(draft.updated_at).toLocaleString()}`;
+  const interrupted = draft.pending ? ' | a save was interrupted' : '';
+  if (draft.status === 'saved') return `Saved before the interruption | ${when}`;
+  if (draft.status === 'new') return `New document, not saved${interrupted} | ${when}`;
+  if (draft.status === 'document_missing') return `The saved document is not available; restore as a new document | ${when}`;
+  if (draft.status === 'behind') return `Unsaved changes to revision ${draft.base_revision}; the document is now at revision ${draft.current_revision}${interrupted} | ${when}`;
+  return `Unsaved changes to revision ${draft.base_revision}${interrupted} | ${when}`;
+}
+
 export function messageSummary(messages) {
   const seen = new Set(), lines = [];
   for (const m of messages || []) {
@@ -427,7 +447,8 @@ const state = {
   addresses: { origin: blankAddress(), destinations: [blankAddress()] }, quoteForm: null,
   section: false, exploded: false, displayMode: 'edges', transparency: 0,
   mutationReceipt: null, lastDirtySignal: null, lastRibbonSignal: null, sage: null, conflict: false,
-  capabilities: [], catalog: null, alternativeReceipt: null, scenarios: [], evidence: [], evidenceNotice: ''
+  capabilities: [], catalog: null, alternativeReceipt: null, scenarios: [], evidence: [], evidenceNotice: '',
+  permissions: [], recovery: { id: null, stored: false, last: '', timer: null, failed: false, offered: false, chain: Promise.resolve() }
 };
 
 function blankAddress() { return { name: '', street1: '', street2: '', city: '', state: '', zip: '', country: 'US', residential: false }; }
@@ -469,6 +490,125 @@ async function working(message, action) {
 function edit(change) {
   if (state.sage?.locked) throw new Error('The packaging editor is locked for the active response.');
   state.draft.edit(change);
+}
+
+// Only editors keep recovery drafts; a viewer's local changes cannot be saved anyway.
+const recoveryEnabled = () => state.capabilities.includes('draft_recovery') && state.permissions.includes('packaging.edit');
+
+function saveFingerprint() {
+  const doc = state.draft.document;
+  return JSON.stringify(doc ? { revision: doc.revision, design: state.draft.design } : { create: state.draft.design });
+}
+
+// A save in flight belongs to the checkpoint only while the draft still matches what was sent.
+function checkpointPayload() {
+  const doc = state.draft.document, receipt = state.mutationReceipt;
+  const pending = receipt?.pending && receipt.fingerprint === saveFingerprint() ? receipt.pending : null;
+  return { document_id: doc?.id ?? null, base_revision: doc ? doc.revision : null, design: state.draft.design, pending };
+}
+
+function scheduleCheckpoint(delay = 1500) {
+  if (!recoveryEnabled()) return;
+  clearTimeout(state.recovery.timer);
+  state.recovery.timer = setTimeout(() => { checkpoint(); }, delay);
+}
+
+// Checkpoints run one at a time, so an older one never lands after a newer one.
+function checkpoint(options) {
+  state.recovery.chain = state.recovery.chain.then(() => writeCheckpoint(options));
+  return state.recovery.chain;
+}
+
+// Keeps the latest unsaved draft in the packaging store and removes it once nothing is unsaved. Never throws:
+// a failure is shown in the header and retried on the next change. Values typed but not applied are not kept.
+async function writeCheckpoint({ keepalive = false } = {}) {
+  if (!recoveryEnabled()) return;
+  clearTimeout(state.recovery.timer);
+  const recovery = state.recovery, payload = checkpointPayload();
+  try {
+    if (!state.draft.dirty && !payload.pending) {
+      if (recovery.id && recovery.stored) {
+        await request(`/drafts/${encodeURIComponent(recovery.id)}`, { method: 'DELETE', keepalive });
+        recovery.stored = false; recovery.last = '';
+      }
+    } else {
+      const text = JSON.stringify(payload);
+      if (text === recovery.last && recovery.stored) return;
+      recovery.id ||= uid('draft');
+      await request(`/drafts/${encodeURIComponent(recovery.id)}`, { method: 'PUT', body: payload, keepalive });
+      recovery.stored = true; recovery.last = text;
+    }
+    if (recovery.failed) { recovery.failed = false; updateHeader(); }
+  } catch (error) {
+    if (!recovery.failed) {
+      recovery.failed = true; updateHeader();
+      notify(`Unsaved changes are not checkpointed for recovery: ${error.message}`, true);
+    }
+  }
+}
+
+async function offerRecovery() {
+  if (!recoveryEnabled() || state.recovery.offered) return;
+  state.recovery.offered = true;
+  const data = await request('/drafts').catch(() => null);
+  if (data?.drafts.length) showRecovery(data);
+}
+
+function showRecovery(data) {
+  resourceDialog('Recover unsaved work', body => {
+    body.append(element('p', data.notice, 'notice'));
+    data.drafts.forEach((draft, index) => {
+      const row = element('div', null, 'document-row'), info = element('div');
+      info.append(element('strong', draft.name || 'Untitled package'), element('p', recoveryText(draft)));
+      const label = draft.status === 'saved' ? 'Open saved document' : 'Restore';
+      const restore = button(label, () => invoke(() => restoreDraft(draft.id)), { primary: index === 0 });
+      restore.setAttribute('aria-label', `${label} ${index + 1}`);
+      const discard = button('Discard', () => invoke(() => discardDraft(draft)));
+      discard.setAttribute('aria-label', `Discard draft ${index + 1}`);
+      const actions = element('div', null, 'actions'); actions.append(restore, discard);
+      row.append(info, actions); body.append(row);
+    });
+  });
+}
+
+async function restoreDraft(id) {
+  if (hasNavigationChanges() && !confirm('Replace the current unsaved changes with the recovered draft?')) return;
+  const done = await working('Recovering unsaved work...', async () => {
+    const draft = await request(`/drafts/${encodeURIComponent(id)}`);
+    const target = draft.saved_document_id || (['current', 'behind'].includes(draft.status) ? draft.document_id : null);
+    const saved = target ? await request(`/documents/${encodeURIComponent(target)}`) : null;
+    const action = recoveryAction(draft, saved);
+    if (action === 'restore_behind' && !confirm(`This draft was made from revision ${draft.base_revision}, and the saved document is now at revision ${saved.revision}. Load it as unsaved changes on top of revision ${saved.revision}? Saving it replaces that revision's design; saved Undo can return to it.`)) return false;
+    resetDocumentState(); state.formDirty = false;
+    if (saved) state.draft.accept(saved); else state.draft.reset();
+    if (action === 'completed') {
+      await request(`/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      Object.assign(state.recovery, { id: null, stored: false, last: '' });
+      await loadQuotes();
+      notify(`These changes were already saved (revision ${saved.revision}). The recovery draft was removed.`);
+      return true;
+    }
+    state.draft.edit(design => { for (const key of Object.keys(design)) delete design[key]; Object.assign(design, clone(draft.design)); });
+    if (draft.pending && (action === 'restore' || draft.status === 'new')) {
+      // Saving replays the interrupted request under its original ID, so it cannot apply twice.
+      state.mutationReceipt = { fingerprint: saveFingerprint(), id: draft.pending.request_id, pending: draft.pending };
+    }
+    Object.assign(state.recovery, { id: draft.id, stored: true, last: '' });
+    if (saved) await loadQuotes();
+    notify('Recovered unsaved changes. Review them, then Save.');
+    return true;
+  });
+  if (!done) return;
+  $('resource-dialog')?.close(); render(); renderRates(); state.scene?.fit();
+}
+
+async function discardDraft(draft) {
+  if (!confirm(`Discard the recovered draft "${draft.name || 'Untitled package'}"? Its unsaved changes cannot be recovered afterwards.`)) return;
+  await request(`/drafts/${encodeURIComponent(draft.id)}`, { method: 'DELETE' });
+  if (state.recovery.id === draft.id) Object.assign(state.recovery, { id: null, stored: false, last: '' });
+  const data = await request('/drafts');
+  if (data.drafts.length) showRecovery(data);
+  else { $('resource-dialog')?.close(); notify('Recovery draft discarded.'); }
 }
 
 function createForm(onApply, label = 'Apply changes') {
@@ -573,7 +713,8 @@ function executeRibbonCommand(id) {
 
 function updateHeader() {
   const draft = state.draft, doc = draft.document;
-  $('document-status').textContent = `${doc ? `Revision ${doc.revision}` : 'New document'} | ${state.sage?.locked ? 'Locked for chat' : state.busy ? 'Working...' : hasDraft() ? 'Unsaved changes' : doc ? 'Saved' : 'Not saved'}`;
+  $('document-status').textContent = `${doc ? `Revision ${doc.revision}` : 'New document'} | ${state.sage?.locked ? 'Locked for chat' : state.busy ? 'Working...' : hasDraft() ? 'Unsaved changes' : doc ? 'Saved' : 'Not saved'}${state.recovery.failed ? ' | Recovery checkpoint failed' : ''}`;
+  scheduleCheckpoint();
   const actions = $('document-actions'); actions.replaceChildren();
   actions.append(
     button('New', newDocument), button('Open', openDocuments),
@@ -1510,6 +1651,12 @@ async function openDocuments() {
       desc.append(element('strong', doc.name), element('p', `Revision ${doc.revision} | ${new Date(doc.updated_at).toLocaleString()}`));
       row.append(desc, button('Open', () => loadDocument(doc.id))); list.append(row);
     });
+    const drafts = recoveryEnabled() ? await request('/drafts').catch(() => null) : null;
+    if (drafts?.drafts.length) {
+      const row = element('div', null, 'document-row'), desc = element('div');
+      desc.append(element('strong', `Unsaved drafts: ${drafts.drafts.length}`), element('p', 'Kept for recovery until saved or discarded.'));
+      row.append(desc, button('Recover unsaved work', () => { $('open-dialog').close(); showRecovery(drafts); })); list.prepend(row);
+    }
     notify('');
   });
   $('open-dialog').showModal();
@@ -1538,18 +1685,20 @@ async function saveDocument() {
     let result;
     if (!state.draft.document) {
       const fingerprint = JSON.stringify({ create: state.draft.design });
-      if (state.mutationReceipt?.fingerprint !== fingerprint) state.mutationReceipt = { fingerprint, id: uid('create') };
+      if (state.mutationReceipt?.fingerprint !== fingerprint) { const id = uid('create'); state.mutationReceipt = { fingerprint, id, pending: { kind: 'create', request_id: id } }; }
+      await checkpoint();
       result = await request('/documents', { method: 'POST', body: state.draft.design, idempotencyKey: state.mutationReceipt.id });
     }
     else {
       // Keep the receipt on network failure so an exact retry is idempotent.
       const fingerprint = JSON.stringify({ revision: state.draft.document.revision, design: state.draft.design });
-      if (state.mutationReceipt?.fingerprint !== fingerprint) state.mutationReceipt = { fingerprint, id: uid('edit') };
+      if (state.mutationReceipt?.fingerprint !== fingerprint) { const id = uid('edit'); state.mutationReceipt = { fingerprint, id, pending: { kind: 'edit', request_id: id } }; }
+      await checkpoint();
       result = await request(docPath(), { method: 'PUT', body: { expected_revision: state.draft.document.revision, request_id: state.mutationReceipt.id, design: state.draft.design } });
     }
     state.draft.accept(result); state.mutationReceipt = null; state.quoteError = ''; notify(`Saved revision ${result.revision}.`);
   });
-  render();
+  render(); scheduleCheckpoint(0);
 }
 
 async function historyAction(action) {
@@ -1737,7 +1886,7 @@ async function revokeScenario(id) {
 
 async function refreshProvider() {
   await working('Checking carrier provider...', async () => {
-    try { const data = await request('/status'); state.provider = data.rating; state.capabilities = data.capabilities || []; state.quoteRules = data.quote_rules || null; state.providerError = ''; notify('Provider status updated.'); }
+    try { const data = await request('/status'); state.provider = data.rating; state.capabilities = data.capabilities || []; state.permissions = data.permissions || []; state.quoteRules = data.quote_rules || null; state.providerError = ''; notify('Provider status updated.'); }
     catch (error) { state.provider = null; state.providerError = `Provider status unavailable: ${error.message}`; throw error; }
     finally { state.addresses = captureAddresses(); }
   }).finally(() => {
@@ -2075,7 +2224,11 @@ function boot() {
   const modalObserver = new MutationObserver(publishRibbonState);
   modalObserver.observe(document.body, { attributes: true, attributeFilter: ['open'], subtree: true });
   window.addEventListener('beforeunload', event => { if (hasNavigationChanges() || state.busy || state.sage.locked) { event.preventDefault(); event.returnValue = ''; } });
-  window.addEventListener('pagehide', () => { modalObserver.disconnect(); state.sage.unload(); state.scene?.dispose(); });
+  window.addEventListener('pagehide', () => {
+    // Best effort; the debounced checkpoints are the real mechanism (keepalive bodies are size-limited).
+    if (recoveryEnabled() && (state.draft.dirty || state.recovery.stored)) writeCheckpoint({ keepalive: true });
+    modalObserver.disconnect(); state.sage.unload(); state.scene?.dispose();
+  });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && state.panel && !document.querySelector('dialog[open]') && !state.busy && !state.sage.locked) {
       event.preventDefault(); closePanel(); return;
@@ -2086,7 +2239,7 @@ function boot() {
       event.preventDefault(); invoke(() => historyAction(event.shiftKey ? 'redo' : 'undo'));
     }
   });
-  render(); renderRates(); initializeScene(); invoke(refreshProvider);
+  render(); renderRates(); initializeScene(); invoke(async () => { await refreshProvider(); await offerRecovery(); });
 }
 
 if (typeof document !== 'undefined' && document.getElementById('document-actions') && document.getElementById('package-select')) boot();

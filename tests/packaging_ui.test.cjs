@@ -456,6 +456,52 @@ test('quote freshness names account changes and requests carry only chosen optio
   assert.equal(ui.priceText(null, undefined), '-');
 });
 
+test('saved designs are quoted only under a complete session scenario', () => {
+  const address = { street1: '1 Test Street', city: 'Testville', state: 'MN', zip: '55401' };
+  assert.equal(ui.scenarioComplete({ origin: address, destinations: [address] }), true);
+  assert.equal(ui.scenarioComplete({ origin: address, destinations: [] }), false);
+  assert.equal(ui.scenarioComplete({ origin: { ...address, street1: ' ' }, destinations: [address] }), false);
+  assert.equal(ui.scenarioComplete({ origin: address, destinations: [address, { ...address, zip: '' }] }), false);
+  assert.equal(ui.scenarioComplete(undefined), false);
+  assert.match(source, /Quote this design/);
+  assert.match(source, /Set as baseline/);
+  assert.match(source, /Use current design as baseline/);
+  assert.match(source, /Unless this exact scenario was already priced, this creates \$\{shipments\} provider shipment\(s\)/);
+});
+
+test('comparison rows keep unknowns visible and follow the ranking', () => {
+  const scenario = { destinations: [{ city: 'Testville', state: 'MN', zip: '55401', residential: true }, { city: 'Testburg', state: 'IL', zip: '60601', residential: false }],
+    modes: ['test'], quotes: 2, quoted_at: '2026-11-06T10:00:00+00:00', current_account: false };
+  assert.equal(ui.scenarioLabel(scenario), 'Testville, MN 55401 (residential); Testburg, IL 60601 | test | 2 quote(s) | latest 2026-11-06T10:00:00+00:00 | other carrier account');
+  assert.equal(ui.differenceText('-4.66', 'USD'), 'USD -4.66 (lower)');
+  assert.equal(ui.differenceText('2.10', 'USD'), 'USD +2.10 (higher)');
+  assert.equal(ui.differenceText('0.00', 'USD'), 'USD 0.00 (same)');
+  assert.equal(ui.differenceText(null, 'USD'), '-');
+  const comparison = { service: { currency: 'USD' }, baseline: { ready: true }, ranking: ['alt_b', 'current'],
+    reasons: { not_quoted: 'No saved quote matches.' }, caveats: { materials_unknown: 'Material cost is unknown.' },
+    rows: [
+      { ref: 'current', order: 0, name: 'Current', baseline: true, eligible: true, package_count: 2, gross_kg: 1.3, shipping_total: '27.48',
+        materials_usd: null, total: null, shipping_difference: null, reasons: [], caveats: ['materials_unknown'] },
+      { ref: 'alt_a', order: 1, name: 'A', baseline: false, eligible: false, package_count: 1, gross_kg: null, shipping_total: null,
+        materials_usd: null, total: null, shipping_difference: null, reasons: ['not_quoted'], caveats: [] },
+      { ref: 'alt_b', order: 2, name: 'B', baseline: false, eligible: true, package_count: 1, gross_kg: 1.15, shipping_total: '18.14',
+        materials_usd: '1.50', total: '19.64', shipping_difference: '-9.34', reasons: [], caveats: [] }] };
+  assert.deepEqual(ui.comparisonOrder(comparison).map(row => row.ref), ['alt_b', 'current', 'alt_a']);
+  assert.deepEqual(ui.comparisonCells(comparison.rows[0], comparison),
+    ['Current', 'Baseline', '2', '1.300 kg', 'USD 27.48', '-', '-', '-', 'Materials unknown']);
+  assert.deepEqual(ui.comparisonCells(comparison.rows[1], comparison),
+    ['A', 'Not compared', '1', 'Unknown', '-', '-', '-', '-', 'No saved quote matches.']);
+  assert.deepEqual(ui.comparisonCells(comparison.rows[2], comparison),
+    ['B', 'Compared', '1', '1.150 kg', 'USD 18.14', 'USD 1.50', 'USD 19.64', 'USD -9.34 (lower)', '']);
+  assert.equal(ui.comparisonCells(comparison.rows[0], { ...comparison, baseline: { ready: false } })[1], 'Baseline (not ready)');
+  const mixed = { ...comparison.rows[1], reasons: ['not_quoted'], caveats: ['test_mode', 'parcel_sum'] };
+  assert.equal(ui.comparisonCells(mixed, comparison)[8], 'No saved quote matches. Test mode, Parcel sum');
+  assert.match(source, /resourceDialog\('Compare costs', body => \{/);
+  assert.match(source, /\}, \{ wide: true \}\);/);
+  assert.match(source, /Reads saved quotes only\. No provider request is made\./);
+  assert.match(source, /No saving is claimed: savings are stated only for production-mode quotes against a ready baseline\./);
+});
+
 test('carrier messages show one help line per carrier and category, never carrier text', () => {
   const messages = [
     { carrier: 'TEST Carrier', category: 'address', help: 'Check the address.', message: 'TEST 1 Private Street' },

@@ -98,6 +98,44 @@ export function priceText(currency, amount) {
   return amount == null ? '-' : `${currency || ''} ${amount}`.trim();
 }
 
+export function scenarioComplete(addresses) {
+  const filled = a => Boolean(a) && ['street1', 'city', 'state', 'zip'].every(key => String(a[key] ?? '').trim());
+  const destinations = addresses?.destinations || [];
+  return filled(addresses?.origin) && destinations.length > 0 && destinations.every(filled);
+}
+
+export function scenarioLabel(scenario) {
+  const places = (scenario.destinations || []).map(d => `${d.city}, ${d.state} ${d.zip}${d.residential ? ' (residential)' : ''}`).join('; ');
+  const parts = [places || 'No destinations', (scenario.modes || []).join('/') || 'mode unknown', `${scenario.quotes} quote(s)`, `latest ${scenario.quoted_at}`];
+  if (!scenario.current_account) parts.push('other carrier account');
+  return parts.join(' | ');
+}
+
+export function differenceText(value, currency) {
+  if (value == null) return '-';
+  const n = Number(value);
+  return `${currency} ${n > 0 ? '+' : ''}${value} ${n < 0 ? '(lower)' : n > 0 ? '(higher)' : '(same)'}`;
+}
+
+export const CAVEAT_LABELS = { test_mode: 'Test mode', materials_unknown: 'Materials unknown', payload_unknown: 'Payload unknown',
+  parcel_sum: 'Parcel sum', currency_differs: 'Currency differs', quote_dates_differ: 'Quoted over 24 h apart' };
+
+export function comparisonCells(row, comparison) {
+  const currency = comparison.service?.currency || '';
+  const status = row.baseline ? (comparison.baseline.ready ? 'Baseline' : 'Baseline (not ready)') : row.eligible ? 'Compared' : 'Not compared';
+  const labels = row.caveats.map(code => CAVEAT_LABELS[code] || code).join(', ');
+  const notes = [...row.reasons.map(code => comparison.reasons[code] || code), labels].filter(Boolean).join(' ');
+  return [row.name, status, String(row.package_count), row.gross_kg == null ? 'Unknown' : `${Number(row.gross_kg).toFixed(3)} kg`,
+    priceText(currency, row.shipping_total), priceText('USD', row.materials_usd), priceText(currency, row.total),
+    differenceText(row.shipping_difference, currency), notes];
+}
+
+export function comparisonOrder(comparison) {
+  const ranked = new Map(comparison.ranking.map((ref, i) => [ref, i]));
+  const place = row => ranked.has(row.ref) ? ranked.get(row.ref) : comparison.ranking.length + row.order;
+  return [...comparison.rows].sort((a, b) => place(a) - place(b));
+}
+
 export function quoteBody(revision, addresses, accounts, options, refresh) {
   const chosen = {};
   if (options.delivery_confirmation) chosen.delivery_confirmation = options.delivery_confirmation;
@@ -594,7 +632,7 @@ function section(host, heading) {
   const group = element('section', null, 'editor-section'); group.append(element('h2', heading)); host.append(group); return group;
 }
 
-function resourceDialog(title, build) {
+function resourceDialog(title, build, { wide = false } = {}) {
   notify('');
   let dialog = $('resource-dialog');
   if (!dialog) {
@@ -602,7 +640,7 @@ function resourceDialog(title, build) {
     dialog.addEventListener('close', () => { dialog.replaceChildren(); updateHeader(); });
     dialog.addEventListener('cancel', event => { if (state.busy) event.preventDefault(); });
   }
-  dialog.replaceChildren(); dialog.setAttribute('aria-labelledby', 'resource-title');
+  dialog.replaceChildren(); dialog.setAttribute('aria-labelledby', 'resource-title'); dialog.classList.toggle('wide', wide);
   const header = element('div', null, 'dialog-header'), heading = element('h2', title); heading.id = 'resource-title';
   const close = button('Close dialog', () => dialog.close(), { compact: true }); close.append(element('span', '\u00d7'));
   header.append(heading, close); const body = element('div', null, 'resource-body'); dialog.append(header, body);
@@ -1161,11 +1199,91 @@ async function openCartonCatalog(forArrangement) {
   });
 }
 
+async function setBaseline(ref) {
+  const result = await working('Saving the comparison baseline...', () => request(`${docPath()}/comparison/baseline`, { method: 'PUT', body: { baseline: ref } }));
+  notify(ref === 'current' ? 'The current design is the comparison baseline.' : 'Saved design set as the comparison baseline.');
+  return result.baseline;
+}
+
+async function quoteSavedDesign(alternative) {
+  state.addresses = captureAddresses(); state.quoteOptions = captureQuoteOptions();
+  if (!state.provider?.configured) throw new Error('Carrier provider is not configured. No rates are available.');
+  if (!scenarioComplete(state.addresses)) throw new Error('Enter the origin and destinations in Rates first. Saved designs are quoted under the same scenario as the current design.');
+  if (!alternative.assessment.rate_ready) throw new Error('This saved design has validation errors and cannot be rated.');
+  const shipments = alternative.design.packages.length * state.addresses.destinations.length;
+  if (!confirm(`Request rates for "${alternative.name}"? Unless this exact scenario was already priced, this creates ${shipments} provider shipment(s) for rating, which can be billed for a production account. No postage is purchased.`)) return;
+  const result = await working('Requesting carrier estimates for the saved design...', () => request(`${docPath()}/alternatives/${encodeURIComponent(alternative.id)}/quotes`, {
+    method: 'POST', body: quoteBody(state.draft.document.revision, state.addresses, state.quoteAccounts, state.quoteOptions, false) }));
+  await loadQuoteAttempts();
+  notify(result.reused ? 'This saved design was already priced for this scenario. No provider request was made.'
+    : `Carrier quote received for the saved design (${result.provider_shipments_created ?? 0} provider shipment(s) created). No postage was purchased.`);
+}
+
+async function openComparison() {
+  flushEditor();
+  if (!state.draft.document || hasDraft()) throw new Error('Save the document before comparing costs.');
+  const base = `${docPath()}/comparison`;
+  const listing = await working('Loading saved quotes...', () => request(base));
+  resourceDialog('Compare costs', body => {
+    body.append(element('p', 'Reads saved quotes only. No provider request is made.', 'metadata'));
+    if (!listing.scenarios.length) {
+      body.append(element('p', 'No comparable quotes yet. Quote the current design in Rates, then quote saved designs under the same scenario.', 'notice'));
+      return;
+    }
+    const form = element('form', null, 'form-grid'); form.addEventListener('submit', event => event.preventDefault());
+    const scenario = field(form, 'Scenario', 'comparison_scenario', listing.scenarios[0].scenario_hash,
+      { options: listing.scenarios.map(item => [item.scenario_hash, scenarioLabel(item)]) });
+    const services = element('div'), results = element('div');
+    form.append(services); body.append(form, results);
+    let chosen = null;
+    const key = item => JSON.stringify([item.carrier, item.service, item.account_id, item.currency]);
+    const draw = comparison => {
+      services.replaceChildren(); results.replaceChildren();
+      if (comparison.services.length) {
+        const select = field(services, 'Service (the same for every design)', 'comparison_service', comparison.service ? key(comparison.service) : '',
+          { options: comparison.services.map(item => [key(item), `${item.carrier} ${item.service} | ${rateAccountLabel(item)} | baseline ${item.currency} ${item.baseline_amount}`]) });
+        select.addEventListener('change', () => { const [carrier, service, account_id, currency] = JSON.parse(select.value); chosen = { carrier, service, account_id, currency }; invoke(load); });
+      }
+      const ready = comparison.baseline.ready;
+      results.append(element('p', `Baseline: ${comparison.baseline.name}${ready ? '' : ' - cannot be compared: ' + comparison.baseline.reasons.map(code => comparison.reasons[code] || code).join(' ')}`, ready ? 'metadata' : 'warning'));
+      const wrap = element('div', null, 'rate-table-wrap'), table = element('table', null, 'comparison-table'); table.setAttribute('aria-label', 'Design cost comparison');
+      const head = element('thead'), hr = element('tr');
+      for (const title of ['Design', 'Status', 'Packages', 'Gross', 'Shipping', 'Materials', 'Known total', 'Shipping vs baseline', 'Notes']) {
+        const th = element('th', title); th.scope = 'col'; hr.append(th);
+      }
+      head.append(hr); const rows = element('tbody');
+      for (const row of comparisonOrder(comparison)) {
+        const tr = element('tr');
+        comparisonCells(row, comparison).forEach((text, i) => tr.append(element('td', text, i === 8 ? 'notes' : i >= 1 ? 'rate-amount' : '')));
+        rows.append(tr);
+      }
+      table.append(head, rows); wrap.append(table); results.append(wrap);
+      for (const [code, text] of Object.entries(comparison.caveats)) results.append(element('p', `${CAVEAT_LABELS[code] || code}: ${text}`, 'metadata'));
+      if (comparison.savings_claimed) {
+        const claims = comparison.rows.filter(row => row.claim);
+        if (!claims.length) results.append(element('p', 'No compared design is cheaper than the baseline for this service.', 'notice'));
+        for (const row of claims) results.append(element('p', row.claim.text, 'notice'));
+      } else results.append(element('p', 'No saving is claimed: savings are stated only for production-mode quotes against a ready baseline.', 'warning'));
+      results.append(element('p', comparison.notice, 'notice'));
+    };
+    const load = async () => {
+      const params = new URLSearchParams({ scenario_hash: scenario.value });
+      if (chosen) for (const [name, value] of Object.entries(chosen)) params.set(name, value);
+      const data = await working('Comparing saved quotes...', () => request(`${base}?${params}`));
+      draw(data.comparison);
+      notify(`Compared ${data.comparison.rows.length} designs from saved quotes. No provider request was made.`);
+    };
+    scenario.addEventListener('change', () => { chosen = null; invoke(load); });
+    invoke(load);
+  }, { wide: true });
+}
+
 async function openAlternatives() {
   flushEditor();
   if (!state.draft.document || hasDraft()) throw new Error('Save the document before opening saved designs.');
   const path = `${docPath()}/alternatives`, revision = state.draft.document.revision;
-  const data = await working('Loading saved designs...', () => request(path));
+  const [data, compared] = await working('Loading saved designs...', () => Promise.all([request(path), request(`${docPath()}/comparison`).catch(() => null)]));
+  let baseline = compared?.baseline?.baseline || 'current';
   resourceDialog('Saved designs', (body, dialog) => {
     const form = element('form', null, 'form-grid'); form.addEventListener('submit', event => event.preventDefault());
     field(form, 'Snapshot name', 'alternative_name', '', { required: true, maxLength: 160 });
@@ -1179,21 +1297,28 @@ async function openAlternatives() {
       state.alternativeReceipt = null; if (!data.alternatives.some(item => item.id === saved.id)) data.alternatives.push(saved);
       form.reset(); draw(); notify('Design snapshot saved.');
     }, { primary: true })); body.append(form);
+    const tools = element('div', null, 'actions'), baselineText = element('p', null, 'metadata');
+    tools.append(button('Compare costs', () => { dialog.close(); return openComparison(); }, { symbol: 'stack' }),
+      button('Use current design as baseline', async () => { baseline = await setBaseline('current'); draw(); }));
+    body.append(tools, baselineText);
     const list = element('div'); body.append(list);
     const draw = () => {
       list.replaceChildren();
+      const named = data.alternatives.find(item => item.id === baseline);
+      baselineText.textContent = `Comparison baseline: ${named ? named.name : 'current design'}`;
       if (!data.alternatives.length) list.append(element('p', 'No saved design snapshots.', 'notice'));
       for (const alternative of data.alternatives) {
         const row = element('div', null, 'document-row'), info = element('div'), c = alternative.comparison;
         info.append(element('strong', alternative.name), element('p', `Revision ${alternative.base_revision} | ${c.carton_count} cartons | ${massText(c.total_gross_kg)} gross`),
-          element('p', `${numberText(c.outer_volume_m3 * 1000)} L exterior | Materials ${c.materials_cost_usd == null ? 'unknown' : 'USD ' + numberText(c.materials_cost_usd, 2)} | Shipping not quoted`, 'notice'),
+          element('p', `${numberText(c.outer_volume_m3 * 1000)} L exterior | Materials ${c.materials_cost_usd == null ? 'unknown' : 'USD ' + numberText(c.materials_cost_usd, 2)}${alternative.id === baseline ? ' | Baseline' : ''}`, 'notice'),
           element('p', `${alternative.assessment.status} | ${alternative.assessment.findings.length} findings`, 'notice'));
         row.append(info, button('Apply saved design', async () => {
           if (hasDraft() || state.draft.document.revision !== revision) throw new Error('Document changed. Reopen saved designs after saving or reloading.');
           if (!confirm('Replace the full document with this saved design? The saved edit can be undone.')) return;
           edit(d => Object.assign(d, clone(alternative.design))); state.componentId = null; state.graphicId = null;
           state.candidates = null; dialog.close(); await saveDocument(); state.scene?.fit();
-        })); list.append(row);
+        }), button('Quote this design', () => quoteSavedDesign(alternative), { symbol: 'arrow-clockwise', disabled: !alternative.assessment.rate_ready }),
+        button('Set as baseline', async () => { baseline = await setBaseline(alternative.id); draw(); }, { disabled: alternative.id === baseline })); list.append(row);
       }
     }; draw();
   });
@@ -1403,6 +1528,7 @@ function renderRates() {
     for (const text of [state.quoteRules.ship_date, ...Object.values(state.quoteRules.destinations || {}), state.quoteRules.fees]) rules.append(element('p', text, 'notice'));
     provider.append(rules);
   }
+  if (state.capabilities.includes('cost_comparison') && state.draft.document) provider.append(button('Compare costs', openComparison, { symbol: 'stack' }));
   if (state.capabilities.includes('carrier_account_discovery') && state.provider?.configured) {
     provider.append(button('Carrier accounts', openCarrierAccounts, { symbol: 'stack' }));
   }

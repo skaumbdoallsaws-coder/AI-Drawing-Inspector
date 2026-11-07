@@ -87,14 +87,14 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 
 | Requirement | Status | Evidence or next action |
 | --- | --- | --- |
-| Constrained arrangement search, split cartons | Implemented | py3dbp over up to six carton choices and one to six packages of one carton type. Ranks by package count then outer volume, not cost. |
+| Constrained arrangement search, split cartons | Implemented | py3dbp over up to six carton choices and one to six packages of one carton type. Candidates rank by package count then outer volume; cost ranking happens in the saved-design comparison below. |
 | Proposals keep approved protection and packing mass | Locally verified | `constraints.cushion` (floor/top/sides thickness, material, evidence) is rebuilt as a foam lining in every candidate; a design with pads and no requirement is refused (`protection_requirement_needed`), never silently stripped. Allowances come from `constraints.package_allowance` or the value every saved package shares, else stay unknown and block rating. Shared carton graphics are carried; insert graphics are reported as dropped. Payload capacity counts lining and allowance. `tests/test_packaging_preservation.py`. |
 | Minimum cushioning | Locally verified | `cushion_insufficient` / `cushion_not_verified` errors: least insert material between each product envelope and each carton wall along each axis, pocket voids subtracted, round pockets bounded by their square (undercounts, never overcounts), invalid inserts count as no material. Geometry only, not a cushioning-performance rating. |
 | No-contact regions | Open | Not modelled. |
 | Upright/allowed orientations, carton boundaries, known load limits | Locally verified | Domain tests; unknown payload stays a warning. |
 | 1-, 6- and 24-item fixtures: feasible alternatives or clear infeasibility | Locally verified | Synthetic TEST product in the sourced ULINE carton with a cited Ethafoam lining: 1, 6 and 24 items feasible, gross mass matches an independent recomputation; 24 items in an undersized carton return no candidate and an explicit `does_not_fit` rejection. |
 | Sourced stock-carton selection | Open | One ULINE carton and cited PMMA/Ethafoam densities. |
-| Cost-aware comparison with a baseline; cannot win by shrinking CAD, dropping items or protection, ignoring payload or mixing stale/test rates | Open | Saved alternatives compare volume, mass and known material cost; no shipping-cost comparison or baseline. |
+| Cost-aware comparison with a baseline; cannot win by shrinking CAD, dropping items or protection, ignoring payload or mixing stale/test rates | Locally verified | `comparison.py` compares the current design and saved designs against a stored baseline on the account rate only, for one scenario, carrier account, mode and service. A design is ranked only when it keeps the baseline's product (dimensions, mass, source), quantity, constraints, protection (insert mass when no cushion requirement exists), packing allowance and payload evidence, passes validation and has a quote with the exact fingerprint; quotes for an edited design, a replaced account, another scenario or the other mode never match. Unknown material cost stays out of totals. Savings are stated only for production-mode quotes and name the baseline, quote dates, account and destinations. Saved designs can be quoted under the session scenario with reuse and the attempt audit. Mock only: `tests/test_packaging_comparison.py` and the headless `tests/verify_packaging_comparison_ui.py`. No live price difference has been measured. |
 | Pocketed inserts | Locally verified | Domain tests. |
 
 ## P4 - Sage execution and deliverables
@@ -144,6 +144,17 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   baseline, all with pytest's temp directory inside OneDrive, and 0 of 10 outside it. The
   difference is not conclusive and the credential change adds no file or database access;
   the test runner's temp directory now lives outside OneDrive.
+- 2026-11-06, item 3a (cost comparison): saved designs can be quoted
+  (`POST .../alternatives/{id}/quotes`, same reuse, refresh and audit rules as the document);
+  a baseline is stored per document (`PUT .../comparison/baseline`); `GET .../comparison`
+  reads saved quotes only and returns the integrity reasons, caveats, Decimal totals, signed
+  differences, a deterministic ranking and, for production quotes only, savings that name the
+  baseline, dates, account and destinations. New additive tables `alternative_quotes` and
+  `comparison_baselines`; schema version unchanged and the `quotes` table untouched, so older
+  builds neither see nor misread alternative quotes. UI: Quote this design, Set as baseline and
+  a Compare costs dialog. Evidence: 9 mock-transport tests (anti-gaming variants included) and
+  a headless browser check (`.runtime/packaging-comparison-ui-01`, no page errors, no external
+  requests). No live carrier result exists.
 
 ## Unsupported inputs (first release)
 

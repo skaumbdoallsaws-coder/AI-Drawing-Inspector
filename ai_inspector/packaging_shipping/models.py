@@ -296,6 +296,10 @@ class DensityRequest(Closed):
     exclusions: Annotated[str, Field(max_length=500)] = ""
 
 
+class BaselineSelect(Closed):
+    baseline: Annotated[str, Field(pattern=r"^(current|alt_[a-f0-9]{32})$")]
+
+
 class AlternativeSave(Closed):
     expected_revision: Annotated[int, Field(ge=0, strict=True)]
     request_id: Identity

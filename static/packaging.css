@@ -148,6 +148,10 @@ th { color: var(--muted); font-weight: 500; }
 details summary { cursor: pointer; padding: 6px 0; color: var(--muted); }
 dialog { color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; width: min(640px, calc(100% - 24px)); max-height: 80dvh; }
 dialog::backdrop { background: #0009; }
+dialog.wide { width: min(1120px, calc(100% - 24px)); }
+.comparison-table th, .comparison-table td { overflow-wrap: normal; }
+.comparison-table th { white-space: nowrap; }
+.comparison-table td.notes { min-width: 200px; color: var(--muted); }
 .dialog-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
 #resource-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
 #resource-dialog .dialog-header { flex: none; }

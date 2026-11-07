@@ -74,6 +74,13 @@ class PackagingService:
                     finished TEXT, outcome TEXT NOT NULL, requests_sent INTEGER NOT NULL,
                     responses_received INTEGER NOT NULL, shipments_created INTEGER NOT NULL,
                     error_code TEXT, quote_id TEXT, PRIMARY KEY(scope,document_id,id));
+                CREATE TABLE IF NOT EXISTS alternative_quotes (
+                    scope TEXT NOT NULL, document_id TEXT NOT NULL, alternative_id TEXT NOT NULL,
+                    id TEXT NOT NULL, revision INTEGER NOT NULL, result TEXT NOT NULL,
+                    PRIMARY KEY(scope,document_id,id));
+                CREATE TABLE IF NOT EXISTS comparison_baselines (
+                    scope TEXT NOT NULL, document_id TEXT NOT NULL, baseline TEXT NOT NULL,
+                    selected TEXT NOT NULL, PRIMARY KEY(scope,document_id));
                 CREATE TABLE IF NOT EXISTS alternatives (
                     scope TEXT NOT NULL, document_id TEXT NOT NULL, id TEXT NOT NULL,
                     name TEXT NOT NULL, revision INTEGER NOT NULL, design TEXT NOT NULL,
@@ -311,6 +318,78 @@ class PackagingService:
         with self.db() as db:
             self._row(db, scope, doc_id)
             return [self._alternative(r) for r in db.execute("SELECT * FROM alternatives WHERE scope=? AND document_id=? ORDER BY rowid", (scope, doc_id))]
+
+    def alternative_design(self, scope, doc_id, alt_id):
+        with self.db() as db:
+            self._row(db, scope, doc_id)
+            row = db.execute("SELECT design FROM alternatives WHERE scope=? AND document_id=? AND id=?", (scope, doc_id, alt_id)).fetchone()
+        if row is None:
+            raise PackagingError("alternative_not_found", "Saved design not found.", 404)
+        return Design.model_validate_json(row["design"])
+
+    def find_alternative_quote(self, scope, doc_id, alt_id, fingerprint):
+        """Saved designs are immutable, so an identical fingerprint is reusable at any document revision."""
+        with self.db() as db:
+            for r in db.execute("SELECT * FROM alternative_quotes WHERE scope=? AND document_id=? AND alternative_id=? "
+                                "ORDER BY rowid DESC LIMIT 50", (scope, doc_id, alt_id)):
+                result = json.loads(r["result"])
+                if result.get("fingerprint") == fingerprint:
+                    return {**result, "id": r["id"], "revision": r["revision"]}
+        return None
+
+    def save_alternative_quote(self, scope, doc_id, alt_id, revision, result):
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._row(db, scope, doc_id)
+            if db.execute("SELECT 1 FROM alternatives WHERE scope=? AND document_id=? AND id=?", (scope, doc_id, alt_id)).fetchone() is None:
+                raise PackagingError("alternative_not_found", "Saved design not found.", 404)
+            quote_id = "altquote_" + uuid4().hex
+            result = {**result, "alternative_id": alt_id}
+            db.execute("INSERT INTO alternative_quotes VALUES(?,?,?,?,?,?)", (scope, doc_id, alt_id, quote_id, revision, encode(result)))
+        return {**result, "id": quote_id, "revision": revision}
+
+    def set_baseline(self, scope, doc_id, baseline):
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._row(db, scope, doc_id)
+            if baseline != "current" and db.execute("SELECT 1 FROM alternatives WHERE scope=? AND document_id=? AND id=?",
+                                                    (scope, doc_id, baseline)).fetchone() is None:
+                raise PackagingError("alternative_not_found", "Saved design not found.", 404)
+            db.execute("INSERT OR REPLACE INTO comparison_baselines VALUES(?,?,?,?)", (scope, doc_id, baseline, now()))
+        return self.baseline(scope, doc_id)
+
+    def baseline(self, scope, doc_id):
+        with self.db() as db:
+            self._row(db, scope, doc_id)
+            row = db.execute("SELECT baseline, selected FROM comparison_baselines WHERE scope=? AND document_id=?", (scope, doc_id)).fetchone()
+        return {"baseline": row["baseline"], "selected_at": row["selected"]} if row else {"baseline": "current", "selected_at": None}
+
+    def comparison_inputs(self, scope, doc_id):
+        """The current design, saved designs, the stored baseline and the newest saved quote per fingerprint."""
+        with self.db() as db:
+            row = self._row(db, scope, doc_id)
+            saved = [(r["id"], r["name"], r["design"]) for r in
+                     db.execute("SELECT id, name, design FROM alternatives WHERE scope=? AND document_id=? ORDER BY rowid", (scope, doc_id))]
+            quotes = {}
+            for table in ("quotes", "alternative_quotes"):
+                for r in db.execute(f"SELECT id, result FROM {table} WHERE scope=? AND document_id=? ORDER BY rowid DESC LIMIT 200", (scope, doc_id)):
+                    result = json.loads(r["result"])
+                    fingerprint = result.get("fingerprint")
+                    if not fingerprint or "scenario_hash" not in result:
+                        continue  # Quotes saved before fingerprints existed cannot be matched exactly.
+                    if fingerprint not in quotes or result["quoted_at"] > quotes[fingerprint]["quoted_at"]:
+                        quotes[fingerprint] = {**result, "id": r["id"]}
+            stored = db.execute("SELECT baseline FROM comparison_baselines WHERE scope=? AND document_id=?", (scope, doc_id)).fetchone()
+        # Assess outside the connection so no read lock is held while validating.
+        current = Design.model_validate_json(row["design"])
+        candidates = [{"ref": "current", "name": f"Current design (revision {row['revision']})", "design": current,
+                       "assessment": assess(current)}]
+        for alt_id, name, raw in saved:
+            design = Design.model_validate_json(raw)
+            candidates.append({"ref": alt_id, "name": name, "design": design, "assessment": assess(design)})
+        refs = {c["ref"] for c in candidates}
+        baseline = stored["baseline"] if stored and stored["baseline"] in refs else "current"
+        return candidates, quotes, baseline
 
     def save_quotes(self, scope, doc_id, revision, result):
         with self.db() as db:

@@ -7,14 +7,15 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.routing import APIRoute
 from starlette.concurrency import run_in_threadpool
 
-from .geometry import digest
+from .geometry import assess, digest
 from .admission import PackagingAdmission
-from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave
+from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave, BaselineSelect
+from .comparison import compare as compare_designs, scenarios as quoted_scenarios
 from .catalog import catalog
 from .packing import propose
 from .destinations import RULES as DESTINATION_RULES
@@ -151,7 +152,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
             step = False
         return {"workflow": "packaging_shipping", "pilot": True,
                 "rating": account(resolved).status() if credential_factory else provider.status(),
-                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
+                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
                 "quote_rules": {"destinations": DESTINATION_RULES, "ship_date": SHIP_DATE_BASIS, "fees": FEES_NOTICE,
                                 "price_bases": PRICE_BASES},
                 "unsupported": ["verified_cad_material_mass", "arbitrary_contour_cutouts", "transport_certification", "freight", "future_ship_dates"] + ([] if step else ["step_runtime_not_configured"]) + ([] if sage else ["sage_chat_execution"])}
@@ -290,40 +291,82 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
     def quote_attempts(doc_id: str, s=Depends(scope)):
         return service.quote_attempts(s, doc_id) | {"fees_notice": FEES_NOTICE}
 
+    async def priced(s, doc_id, revision, design, assessment, body, resolved, find, save):
+        """Reuse an identical saved quote unless refresh is asked for; otherwise rate and audit the attempt."""
+        selected, credential = current_provider(resolved)
+        if credential:
+            credential.check()
+        selected.preflight(design, assessment, body)
+        fingerprint = selected.fingerprint(assessment, body)
+        if not body.refresh:
+            # The identical scenario was already priced for this design and account: no new shipments.
+            saved = find(fingerprint)
+            if saved is not None:
+                return {**saved, "reused": True}
+        attempt_id = service.begin_quote_attempt(s, doc_id, revision, fingerprint)
+        counts, outcome, error_code, quote_id = {}, "failed", None, None
+        try:
+            result = await selected.quote(design, assessment, body, counts)
+            if credential:
+                credential.check()
+            saved = save(result)
+            outcome, quote_id = "saved", saved["id"]
+            return {**saved, "reused": False}
+        except PackagingError as exc:
+            error_code = exc.code
+            raise
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        finally:
+            service.finish_quote_attempt(s, doc_id, attempt_id, outcome, counts, error_code=error_code, quote_id=quote_id)
+
     @router.post("/api/packaging/documents/{doc_id}/quotes")
     async def quote(doc_id: str, body: QuoteRequest, s=Depends(scope), resolved=Depends(principal)):
         if quote_lock.locked():
             raise PackagingError("quote_in_progress", "A quote request is already running. Wait before retrying.", 429)
         current = service.get(s, doc_id, body.expected_revision)
         async with quote_lock:
-            selected, credential = current_provider(resolved)
-            if credential:
-                credential.check()
-            design = Design.model_validate(current["design"])
-            selected.preflight(design, current["assessment"], body)
-            fingerprint = selected.fingerprint(current["assessment"], body)
-            if not body.refresh:
-                # The identical scenario was already priced at this revision and account: no new shipments.
-                saved = service.find_quote(s, doc_id, body.expected_revision, fingerprint)
-                if saved is not None:
-                    return {**saved, "reused": True}
-            attempt_id = service.begin_quote_attempt(s, doc_id, body.expected_revision, fingerprint)
-            counts, outcome, error_code, quote_id = {}, "failed", None, None
-            try:
-                result = await selected.quote(design, current["assessment"], body, counts)
-                if credential:
-                    credential.check()
-                saved = service.save_quotes(s, doc_id, body.expected_revision, result)
-                outcome, quote_id = "saved", saved["id"]
-                return {**saved, "reused": False}
-            except PackagingError as exc:
-                error_code = exc.code
-                raise
-            except asyncio.CancelledError:
-                outcome = "cancelled"
-                raise
-            finally:
-                service.finish_quote_attempt(s, doc_id, attempt_id, outcome, counts, error_code=error_code, quote_id=quote_id)
+            revision = body.expected_revision
+            return await priced(s, doc_id, revision, Design.model_validate(current["design"]), current["assessment"], body, resolved,
+                                lambda fingerprint: service.find_quote(s, doc_id, revision, fingerprint),
+                                lambda result: service.save_quotes(s, doc_id, revision, result))
+
+    @router.post("/api/packaging/documents/{doc_id}/alternatives/{alt_id}/quotes")
+    async def quote_alternative(doc_id: str, alt_id: str, body: QuoteRequest, s=Depends(scope), resolved=Depends(principal)):
+        if quote_lock.locked():
+            raise PackagingError("quote_in_progress", "A quote request is already running. Wait before retrying.", 429)
+        service.get(s, doc_id, body.expected_revision)
+        design = service.alternative_design(s, doc_id, alt_id)
+        async with quote_lock:
+            revision = body.expected_revision
+            return await priced(s, doc_id, revision, design, await asyncio.to_thread(assess, design), body, resolved,
+                                lambda fingerprint: service.find_alternative_quote(s, doc_id, alt_id, fingerprint),
+                                lambda result: service.save_alternative_quote(s, doc_id, alt_id, revision, result))
+
+    @router.put("/api/packaging/documents/{doc_id}/comparison/baseline")
+    def comparison_baseline(doc_id: str, body: BaselineSelect, s=Depends(scope)):
+        return service.set_baseline(s, doc_id, body.baseline)
+
+    @router.get("/api/packaging/documents/{doc_id}/comparison")
+    def comparison(doc_id: str, s=Depends(scope), resolved=Depends(principal),
+                   scenario_hash: str | None = Query(None, pattern=r"^[a-f0-9]{64}$"),
+                   carrier: str | None = Query(None, max_length=100),
+                   service_name: str | None = Query(None, alias="service", max_length=100),
+                   account_id: str = Query("", max_length=100),
+                   currency: str | None = Query(None, pattern=r"^[A-Z]{3}$")):
+        """Reads saved quotes only; no provider request is made."""
+        chosen = (carrier, service_name, currency)
+        if any(v is not None for v in chosen) and not all(v is not None for v in chosen):
+            raise PackagingError("comparison_service_incomplete", "Name the carrier, service and currency together.", 422)
+        account_ref, known = current_account(resolved)
+        if not known:
+            raise PackagingError("carrier_credentials_unavailable", "The carrier account could not be read, so saved quotes cannot be matched.", 503)
+        candidates, quotes, baseline = service.comparison_inputs(s, doc_id)
+        selection = None if carrier is None else (carrier, service_name, account_id, currency)
+        return {"baseline": {**service.baseline(s, doc_id), "baseline": baseline}, "account_ref": account_ref,
+                "scenarios": quoted_scenarios(quotes, account_ref),
+                "comparison": None if scenario_hash is None else compare_designs(baseline, candidates, quotes, scenario_hash, account_ref, selection)}
 
     @router.post("/api/packaging/account/carrier-accounts")
     async def carrier_accounts(_=Depends(scope), resolved=Depends(principal)):

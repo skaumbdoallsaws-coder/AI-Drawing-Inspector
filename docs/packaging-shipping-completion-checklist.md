@@ -340,6 +340,16 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   passed twice with inference disabled (`.runtime/pc-live/dry-01`, `dry-02`; no page errors). The
   live turn waits for that profile's sign-in; none is stored yet. Sage was not run.
 
+- 2026-11-07, regression on this branch (all 34 packaging test files, run in memory-gated batches with
+  the desktop dependency folder first on the path; no carrier key in the environment): domain 484
+  passed, host 112, STEP 59 (the real assembly included), Sage tools 144, JavaScript 217, catalog 34,
+  recovery 22, storage 6, library 12, comparison 9, rating hardening 30, credentials 56, missing
+  components 19, desktop profile 22; Sage quotes, Sage research, destinations, no-contact and report identity 59. The permission test failed twice
+  in the first pass: it predates recovery drafts and expected every read to need only
+  `packaging.read`, while reading drafts deliberately needs `packaging.edit` (the editor only asks
+  when it may edit). The drafts routes are now declared in the test; it now passes (5), and permissions with rating hardening and comparison pass 44. No product
+  change. Mock and offline only: no live carrier, Sage or research request.
+
 ## Unsupported inputs (first release)
 
 Mixed products in one design; arbitrary contour or fitted inserts; dielines; pallets, crates

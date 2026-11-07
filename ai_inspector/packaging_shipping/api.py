@@ -25,7 +25,7 @@ from .packing import propose
 from .destinations import RULES as DESTINATION_RULES
 from .rating import FEES_NOTICE, PRICE_BASES, SHIP_DATE_BASIS
 from .service import CREATE_ID, PackagingError, PackagingService
-from .sources import MAX_BYTES, GlbRuntime, glb_runtime, import_glb_isolated
+from .sources import MAX_BYTES, GlbRuntime, glb_runtime, import_glb_isolated, sweep_stale_jobs
 from .step_import import StepRuntime, StepImportError, import_step
 
 
@@ -99,6 +99,15 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
 
     def geometry_runtime():
         return step_runtime or StepRuntime.from_environment()
+
+    # Import job folders outlive their import only when a host stopped mid-import.
+    sweep_stale_jobs(service.root / "import-jobs", "glb-")
+    try:
+        step_work = getattr(geometry_runtime(), "work_root", None)  # Host-configured only; never the system temp.
+    except (StepImportError, ValueError):
+        step_work = None
+    if step_work is not None:
+        sweep_stale_jobs(step_work, "step-")
 
     account, current_account = desk.account, desk.current_account
 

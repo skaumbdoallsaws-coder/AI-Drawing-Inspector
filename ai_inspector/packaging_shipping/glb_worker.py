@@ -2,12 +2,16 @@
 from io import BytesIO
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
 import sys
 import warnings
 
 MAX_BYTES = 24 * 1024 * 1024
+CPU_SECONDS = 30  # The host stops a live import after 25 s; this also ends a worker whose host has stopped.
+MEMORY_BYTES = 1536 * 1024 * 1024
+_JOB = None
 
 
 class ImportRejected(Exception):
@@ -57,12 +61,64 @@ def convert(payload, name, meters_per_unit):
     return metadata, normalized
 
 
+def limit_resources():
+    """OS-enforced CPU (and, on Windows, memory) limits for this worker. Returns False if they cannot be set."""
+    global _JOB
+    if os.name != 'nt':
+        import resource
+        resource.setrlimit(resource.RLIMIT_CPU, (CPU_SECONDS,) * 2)
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        return True
+    import ctypes
+    from ctypes import wintypes
+
+    class Basic(ctypes.Structure):
+        _fields_ = [('process_time', ctypes.c_int64), ('job_time', ctypes.c_int64),
+                    ('flags', wintypes.DWORD), ('min_ws', ctypes.c_size_t), ('max_ws', ctypes.c_size_t),
+                    ('processes', wintypes.DWORD), ('affinity', ctypes.c_size_t),
+                    ('priority', wintypes.DWORD), ('scheduling', wintypes.DWORD)]
+
+    class IO(ctypes.Structure):
+        _fields_ = [(key, ctypes.c_uint64) for key in (
+            'read_ops', 'write_ops', 'other_ops', 'read_bytes', 'write_bytes', 'other_bytes')]
+
+    class Extended(ctypes.Structure):
+        _fields_ = [('basic', Basic), ('io', IO), ('process_memory', ctypes.c_size_t),
+                    ('job_memory', ctypes.c_size_t), ('peak_process', ctypes.c_size_t),
+                    ('peak_job', ctypes.c_size_t)]
+
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateJobObjectW.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR)
+    kernel.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD)
+    kernel.SetInformationJobObject.restype = wintypes.BOOL
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    job = kernel.CreateJobObjectW(None, None)
+    info = Extended()
+    info.basic.flags = 0x2 | 0x8 | 0x100 | 0x2000  # CPU time, one process, memory, kill on close.
+    info.basic.process_time = CPU_SECONDS * 10_000_000
+    info.basic.processes = 1
+    info.process_memory = MEMORY_BYTES
+    if (not job or not kernel.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info))
+            or not kernel.AssignProcessToJobObject(job, kernel.GetCurrentProcess())):
+        if job:
+            kernel.CloseHandle(job)
+        return False
+    _JOB = job  # Held for the worker's lifetime.
+    return True
+
+
 if __name__ == '__main__':
     # This argument comes from the native startup binding, never upload metadata.
     # Append a directory directly: no site.addsitedir, .pth or sitecustomize.
     dependencies, job = Path(sys.argv[1]), Path(sys.argv[2])
     if not dependencies.is_absolute() or not dependencies.is_dir() or not job.is_absolute():
         raise SystemExit(2)
+    if not limit_resources():
+        raise SystemExit(4)  # Never parse without limits.
     sys.path.append(str(dependencies))
     try:
         meta, glb = convert((job / 'input.glb').read_bytes(), 'Imported product', float(sys.argv[3]))

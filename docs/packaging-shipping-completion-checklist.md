@@ -120,8 +120,8 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Missing-dependency behaviour | Locally verified | A missing optional component disables only its feature: GLB import (`source_runtime_unavailable`), arrangement proposals (`arrangement_unavailable`) and the PDF report (`report_unavailable`) answer 503 with a feature message instead of a bad-file or server error, and `/api/packaging/status` lists `glb_import_runtime_missing`, `arrangement_runtime_missing` or `pdf_report_runtime_missing`. `tests/test_packaging_missing_components.py` runs the real GLB worker with an empty dependency folder. STEP, carrier key store and native profile cases were already covered; see `docs/packaging-shipping-dependencies.md`. |
 | Dependency/license/security inventory | Inventory done; license review open | `docs/packaging-shipping-dependencies.md`: versions, declared licenses, license-text presence, process boundaries. Gaps: the STEP wheel carries 70 native DLLs (Open CASCADE, LibRaw, FreeImage, FreeType and others) with no license or notice text; py3dbp and cadquery-ocp ship no license file; pywin32 is used but not declared. Not legal clearance. |
 | Clean Windows install | Open (blocked) | Needs a clean Windows machine or VM; not attempted. |
-| Artifact retention, quotas and cleanup | Open | Bounded today: 20 saved alternatives and 200 research evidence records per document, 10 recovery drafts per user (removed on save or discard). No retention policy for sources, images, quote snapshots or quote attempts. |
-| No secrets in evidence, no orphaned workers, offline manual use | Locally verified | Historical native evidence; recheck at release. |
+| Artifact retention, quotas and cleanup | Open (needs a retention decision) | Cleanup of interrupted import job folders is done (see the row below). Bounded today: 20 saved alternatives and 200 research evidence records per document, 10 recovery drafts per user (removed on save or discard). No retention policy for sources, images, quote snapshots or quote attempts. |
+| No secrets in evidence, no orphaned workers, offline manual use | Locally verified | Historical native evidence; recheck at release. The GLB worker now limits itself like the STEP worker (30 s CPU, one process, 1.5 GiB on Windows) and refuses to parse without limits, so a worker whose host stopped ends by itself; job folders left by a stopped host are removed at startup after an hour (`tests/test_packaging_worker_dependencies.py`). |
 | Two live carriers or an explicit single-carrier restriction | Blocked | Depends on P2 live access. |
 
 ## Progress log
@@ -232,6 +232,12 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   domain 483, report 77, host 107, Codex 144. The inventory tool reported 0 machine blockers for both packaging requirement
   files; it does not see transitive packages or the STEP wheel's native DLLs, which carry no license
   text. No license decision was made.
+
+- 2026-11-06, item 8b (worker limits and job cleanup): the GLB import worker applies CPU, process
+  and (Windows) memory limits to itself before parsing, as the STEP worker does, and exits with a
+  distinct code if it cannot; leftover job folders older than an hour are removed at startup.
+  Evidence: 5 new tests (one reads the job limits from inside the real worker), dependency tests 19
+  of 19, domain 483, host 112, report 77, recovery 12, Codex 144.
 
 ## Unsupported inputs (first release)
 

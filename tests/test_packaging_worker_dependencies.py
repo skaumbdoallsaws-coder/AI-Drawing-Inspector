@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from ai_inspector.facility_layout.authorization import FacilityPrincipal
 from ai_inspector.packaging_shipping import sources, api
+from ai_inspector.packaging_shipping import glb_worker as sources_worker
 from ai_inspector.packaging_shipping.service import PackagingError, PackagingService
 from ai_inspector.packaging_shipping.sources import GlbRuntime
 
@@ -135,3 +136,67 @@ def test_step_worker_disables_site_processing(tmp_path, monkeypatch):
     with pytest.raises(step_import.StepImportError):
         asyncio.run(step_import.import_step(b'ISO-10303-21;HEADER;ENDSEC;DATA;ENDSEC;END-ISO-10303-21;', runtime=runtime))
     assert json.loads(evidence.read_text()) == {'no_site': 1, 'isolated': 1}
+
+
+JOB_PROBE = """import ctypes, json
+from ctypes import wintypes
+from pathlib import Path
+class Basic(ctypes.Structure):
+    _fields_ = [('process_time', ctypes.c_int64), ('job_time', ctypes.c_int64), ('flags', wintypes.DWORD),
+                ('min_ws', ctypes.c_size_t), ('max_ws', ctypes.c_size_t), ('processes', wintypes.DWORD),
+                ('affinity', ctypes.c_size_t), ('priority', wintypes.DWORD), ('scheduling', wintypes.DWORD)]
+class IO(ctypes.Structure):
+    _fields_ = [(key, ctypes.c_uint64) for key in ('a', 'b', 'c', 'd', 'e', 'f')]
+class Extended(ctypes.Structure):
+    _fields_ = [('basic', Basic), ('io', IO), ('process_memory', ctypes.c_size_t), ('job_memory', ctypes.c_size_t),
+                ('peak_process', ctypes.c_size_t), ('peak_job', ctypes.c_size_t)]
+kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+kernel.QueryInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p)
+kernel.QueryInformationJobObject.restype = wintypes.BOOL
+info = Extended()
+ok = kernel.QueryInformationJobObject(None, 9, ctypes.byref(info), ctypes.sizeof(info), None)
+Path('metadata.json').write_text(json.dumps({'ok': bool(ok), 'flags': info.basic.flags, 'cpu': info.basic.process_time,
+                                             'processes': info.basic.processes, 'memory': info.process_memory}))
+Path('normalized.glb').write_bytes(b'glTF-test-fixture')
+raise SystemExit(0)
+"""
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows job-object limits')
+def test_real_worker_parses_only_under_cpu_and_memory_limits(bound, tmp_path):
+    # A synthetic parser module reads the job limits from inside the real worker, after they were applied.
+    (bound / 'numpy.py').write_text(JOB_PROBE, encoding='ascii')
+    value, _ = asyncio.run(sources.import_glb_isolated(b'fixture', 'fixture', 1, tmp_path / 'state'))
+    assert value['ok'] is True and value['flags'] & 0x210A == 0x210A
+    assert value['cpu'] == sources_worker.CPU_SECONDS * 10_000_000 and value['processes'] == 1
+    assert value['memory'] == sources_worker.MEMORY_BYTES
+
+
+@pytest.mark.parametrize('exit_code, code, status', [
+    (3, 'source_runtime_unavailable', 503), (4, 'source_limits_unavailable', 503), (1, 'source_invalid', 422)])
+def test_worker_exit_codes_name_the_installation_or_the_file(tmp_path, monkeypatch, exit_code, code, status):
+    worker = tmp_path / 'exit.py'
+    worker.write_text(f'raise SystemExit({exit_code})\n', encoding='ascii')
+    monkeypatch.setattr(sources, '_WORKER', worker)
+    with pytest.raises(PackagingError) as caught:
+        asyncio.run(sources.import_glb_isolated(b'fixture', 'fixture', 1, tmp_path / 'state', runtime=GlbRuntime(tmp_path)))
+    assert (caught.value.code, caught.value.status) == (code, status)
+    assert list((tmp_path / 'state/import-jobs').iterdir()) == []
+
+
+def test_startup_removes_only_stale_job_folders(tmp_path):
+    from ai_inspector.packaging_shipping.step_import import StepRuntime
+    service = PackagingService(tmp_path / 'state')
+    imports, steps = service.root / 'import-jobs', tmp_path / 'step-jobs'
+    old = os.path.getmtime(tmp_path) - 2 * sources.STALE_JOB_SECONDS
+    for folder, names in ((imports, ('glb-old', 'glb-new', 'other-old')), (steps, ('step-old', 'step-new'))):
+        for name in names:
+            (folder / name).mkdir(parents=True)
+            (folder / name / 'input.bin').write_bytes(b'TEST')
+            if name.endswith('-old'):
+                os.utime(folder / name, (old, old))
+    principal = FacilityPrincipal('fixture', 'local', ('site-local',), ('editor',))
+    api.create_router(service, principal_resolver=lambda _: principal, static_root=tmp_path, rating=object(),
+                      step_runtime=StepRuntime(Path(sys.executable), steps))
+    assert sorted(p.name for p in imports.iterdir()) == ['glb-new', 'other-old']
+    assert sorted(p.name for p in steps.iterdir()) == ['step-new']

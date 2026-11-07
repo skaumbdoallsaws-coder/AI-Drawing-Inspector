@@ -4,15 +4,38 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import sysconfig
 from tempfile import TemporaryDirectory
+import time
 
 from .service import PackagingError
 from .glb_worker import MAX_BYTES, ImportRejected, convert
 
 _WORKER = Path(__file__).with_name('glb_worker.py')
+STALE_JOB_SECONDS = 3600
+
+
+def sweep_stale_jobs(directory, prefix, *, now=None):
+    """Remove job folders that a stopped host left behind: only `prefix` folders untouched for an hour, which
+    no live import can own (imports finish or time out within minutes). Links and junctions are skipped."""
+    directory = Path(directory)
+    linked = lambda path: path.is_symlink() or getattr(path, 'is_junction', lambda: False)()
+    if not directory.is_dir() or linked(directory):
+        return 0
+    cutoff = (time.time() if now is None else now) - STALE_JOB_SECONDS
+    removed = 0
+    for entry in directory.iterdir():
+        try:
+            if not entry.name.startswith(prefix) or linked(entry) or not entry.is_dir() or entry.stat().st_mtime > cutoff:
+                continue
+            shutil.rmtree(entry)
+            removed += 1
+        except OSError:
+            continue
+    return removed
 _RUNTIME = None
 
 
@@ -83,6 +106,9 @@ async def import_glb_isolated(payload, name, meters_per_unit, root, *, runtime=N
             if asyncio.current_task().cancelling():
                 raise
             raise PackagingError("source_timeout", "Model import exceeded its time limit. Use a smaller static GLB.", 422)
+        if process.returncode == 4:
+            raise PackagingError("source_limits_unavailable", "Model import could not set its resource limits on this "
+                                 "computer, so the model was not opened.", 503)
         if process.returncode == 3:
             raise PackagingError("source_runtime_unavailable", "Model import is not available in this installation: a "
                                  "required component is missing. Manual dimensions still work.", 503)

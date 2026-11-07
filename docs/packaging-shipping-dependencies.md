@@ -85,8 +85,14 @@ the message above.
 
 - Both import workers run as the signed-in Windows user. Process isolation is not an OS security sandbox.
 - GLB worker: isolated interpreter flags, an environment reduced to the job folder and system paths, no
-  console window, a 25 s limit with kill and reap, and a job folder removed afterwards. Covered by
+  console window, a 25 s limit with kill and reap, and a job folder removed afterwards. Before parsing,
+  it puts itself under OS limits: 30 s of CPU, one process and, on Windows, 1.5 GiB of memory (a job
+  object, like the STEP worker). If the limits cannot be set it does not parse
+  (`source_limits_unavailable`). A worker whose host stopped therefore ends by itself. Covered by
   `test_packaging_worker_dependencies.py` and `test_packaging_shipping.py`.
+- Job folders left by a host that stopped mid-import (`glb-*` under the packaging store, `step-*` under
+  a host-configured STEP work folder, never the system temp folder) are removed at startup once they are
+  an hour old. Links and junctions are skipped.
 - STEP worker: separate interpreter without site processing, output, file and time limits, and at most two
   imports at once.
 - Carrier keys are protected with Windows DPAPI for the current user. Account discovery returns a

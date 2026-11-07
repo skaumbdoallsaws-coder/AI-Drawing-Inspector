@@ -66,7 +66,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Overlap reported; missing mass never zero | Locally verified | Domain tests. |
 | Source CAD unchanged; Undo restores the complete design | Locally verified | STEP tests hash the original; service Undo/Redo tests. |
 | Works without Sage or a carrier connection | Locally verified | Manual flows and tests run with no key or model. |
-| Direct selection of an existing app part/assembly and configuration | Open | Sources are uploads (GLB/STEP). A small source adapter for selected assemblies is section E work. |
+| Direct selection of an existing app part/assembly and configuration | Locally verified (editor and API; not yet in the native app) | `library.py`: the editor's InspectorPro library dialog lists parts (`<part>.json` + `<part>_colored.glb`) and assemblies (`assemblies/<assembly>_assembly.json` + model) from the host's own library folder, read-only. Requests name an entry, revision, configuration and the record digest shown; the browser never supplies paths, files, sizes or masses. Only the configuration active at extraction has geometry; other recorded configurations are listed as not extracted and refused. The model runs through the isolated GLB worker, part envelopes are cross-checked against the extracted SOLIDWORKS box (2 mm or 2%), library masses are not imported, and the stored copy records kind, ID, revision, configuration and both digests (shown in the report; `library-status` says current, changed or unavailable). Real library, read-only: all 9 parts agree with their boxes (largest difference 1.52 mm, part 100004) and both assemblies import. Tests: `tests/test_packaging_library.py` (12). Sage has no library tool yet. |
 
 ## P2 - First end-to-end shipping estimate
 
@@ -255,6 +255,11 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   records `parcel_sent`, and the fee notice states that each production rating call is expected to
   cost $0.02 when no labels are bought. Evidence: 93 rating, comparison, hardening and report tests
   (mock transport only).
+
+- 2026-11-06, item 1a (existing part/assembly and configuration): editor dialog, list/import/status
+  routes and report provenance for the host's inspection library. Evidence: 12 library tests; the real
+  library (read-only, throwaway store) imported 9 of 9 parts within 1.52 mm of their extracted boxes and
+  both assemblies; regression: domain 484, JS 189, desktop 22, recovery 12, credentials 56 (mock/offline).
 
 ## Unsupported inputs (first release)
 

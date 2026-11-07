@@ -15,6 +15,8 @@ from starlette.concurrency import run_in_threadpool
 
 from .geometry import assess, digest
 from .admission import PackagingAdmission
+from .library import InspectionLibrary
+from .models import LibrarySourceRequest
 from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave, BaselineSelect, ScenarioAuthorization, EvidenceReview, DraftCheckpoint
 from .evidence import NOTICE as EVIDENCE_NOTICE
 from .quoting import QuoteDesk
@@ -81,7 +83,8 @@ class PackagingRoute(APIRoute):
 
 def create_router(service: PackagingService, *, principal_resolver, static_root: Path, rating=None,
                   admission: PackagingAdmission | None = None, sage_enabled: Callable[[], bool] | None = None,
-                  credential_factory=None, step_runtime=None, source_runtime=None, quotes: QuoteDesk | None = None):
+                  credential_factory=None, step_runtime=None, source_runtime=None, quotes: QuoteDesk | None = None,
+                  library_root: Path | None = None):
     if admission is not None and (not isinstance(admission, PackagingAdmission) or admission.service is not service):
         raise ValueError("Packaging admission must use this router's service instance.")
     if quotes is not None and (not isinstance(quotes, QuoteDesk) or quotes.service is not service
@@ -92,6 +95,8 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
     source_runtime = glb_runtime() if source_runtime is None else source_runtime
     if not isinstance(source_runtime, GlbRuntime):
         raise TypeError('A host-configured GlbRuntime is required')
+    # The host's own inspection library folder, read-only. Requests name entries; they never supply paths.
+    library = InspectionLibrary(library_root, max_model_bytes=MAX_BYTES) if library_root is not None else None
     router = APIRouter(route_class=PackagingRoute)
     # One provider path, lock and audit for the Rates panel and Sage (the host passes the same desk to both).
     desk = quotes or QuoteDesk(service, rating=rating, credential_factory=credential_factory)
@@ -174,7 +179,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         return {"workflow": "packaging_shipping", "pilot": True,
                 "rating": desk.status(resolved),
                 "permissions": granted(resolved),
-                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios", "draft_recovery", "research_evidence"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
+                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios", "draft_recovery", "research_evidence"] + (["library_sources"] if library else []) + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
                 "quote_rules": {"destinations": DESTINATION_RULES, "ship_date": SHIP_DATE_BASIS, "fees": FEES_NOTICE,
                                 "price_bases": PRICE_BASES},
                 "unsupported": ["verified_cad_material_mass", "arbitrary_contour_cutouts", "transport_certification", "freight", "future_ship_dates"] + ([] if step else ["step_runtime_not_configured"]) + ([] if sage else ["sage_chat_execution"]) + missing_components(source_runtime.dependency_root)}
@@ -273,6 +278,33 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
             return service.store_source(s, metadata, result.glb_bytes)
         except StepImportError as exc:
             raise PackagingError(exc.code, exc.message, exc.status_code) from None
+
+    def library_required():
+        if library is None:
+            raise PackagingError("library_unavailable", "The InspectorPro library is not available in this installation.", 503)
+        return library
+
+    @router.get("/api/packaging/library")
+    def library_entries(kind: str | None = None, q: str = "", _=Depends(scope)):
+        return library_required().entries(kind, q)
+
+    @router.post("/api/packaging/sources/library")
+    async def library_source(body: LibrarySourceRequest, s=Depends(scope)):
+        chosen_library = library_required()
+        if job_lock.locked():
+            raise PackagingError("geometry_busy", "A packaging calculation is already running.", 429)
+        chosen = await asyncio.to_thread(chosen_library.model, body.kind, body.id, body.revision, body.configuration,
+                                         body.record_sha256)
+        async with job_lock:
+            metadata, glb = await import_glb_isolated(chosen.model, body.id, 1.0, service.root, runtime=source_runtime)
+        return service.store_source(s, chosen_library.source_metadata(chosen, metadata), glb)
+
+    @router.get("/api/packaging/sources/{source_id}/library-status")
+    def library_status(source_id: str, s=Depends(scope)):
+        reference = service.source_metadata(s, source_id).get("library")
+        if not reference:
+            raise PackagingError("library_source_required", "This source was not imported from the InspectorPro library.", 409)
+        return library_required().status(reference) | {"library": reference}
 
     @router.get("/api/packaging/sources")
     def sources(s=Depends(scope)):
@@ -416,8 +448,13 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         current = service.get(s, doc_id, revision)
         # Same staleness as the Rates panel: revision, design hash and, when readable, the configured account.
         account_ref, known = current_account(resolved)
+        product = current["design"].get("product") or {}
+        try:
+            source = service.source_metadata(s, product["source_id"]) if product.get("source_id") else None
+        except PackagingError:
+            source = None
         payload = render_report(current, service.quote_history(s, doc_id, account_ref=account_ref, account_known=known),
-                                service.evidence(s, doc_id))
+                                service.evidence(s, doc_id), source=source)
         return Response(payload, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="packaging-review.pdf"'})
 
     return router

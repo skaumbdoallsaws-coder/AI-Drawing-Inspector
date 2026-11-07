@@ -54,7 +54,7 @@ def packing_order(box):
     return sorted(items, key=lambda item: (round(item[0][1], 6), item[1], round(item[0][2], 6), round(item[0][0], 6), item[3]["id"]))
 
 
-def render_report(document, quotes=(), evidence=()):
+def render_report(document, quotes=(), evidence=(), source=None):
     try:
         from reportlab.lib import colors
         from reportlab.lib.styles import getSampleStyleSheet
@@ -124,6 +124,12 @@ def render_report(document, quotes=(), evidence=()):
         para(f"{p['name']} | Quantity: {design['quantity']} | Dimensions X/Y/Z (mm): {millimetres(p['dimensions_m'])}")
         para(f"Mass per item: {number(p['mass_kg'])} kg | Basis: {p['mass_basis']} | Evidence: {p['mass_evidence'] or 'Missing'}")
         para(f"Source: {p['source_id'] or 'Manual geometry'} | Source revision: {p['source_revision'] or 'Not available'}")
+        library = (source or {}).get("library") if (source or {}).get("id") == p["source_id"] else None
+        if library:
+            para(f"InspectorPro library {library['kind']} {library['id']} | Revision: {library['revision'] or 'not recorded'} | "
+                 f"Configuration: {library['configuration'] or 'as extracted (name not recorded)'} | "
+                 f"Record SHA-256: {library['record_sha256'][:16]}... | Model SHA-256: {library['model_sha256'][:16]}...")
+            para(f"Geometry evidence: {source.get('geometry_evidence') or 'Not recorded'}")
         calculation = p.get("mass_calculation")
         if calculation:
             material = calculation["material"]

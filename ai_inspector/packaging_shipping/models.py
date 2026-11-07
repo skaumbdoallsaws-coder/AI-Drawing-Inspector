@@ -378,6 +378,15 @@ class PackingRequest(Closed):
     max_packages: Annotated[int, Field(ge=1, le=6, strict=True)] = 3
 
 
+class LibrarySourceRequest(Closed):
+    """An InspectorPro library entry, named only: the host reads the model from its own library folder."""
+    kind: Literal["part", "assembly"]
+    id: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")]
+    revision: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{0,16}$")] = ""
+    configuration: Annotated[str, Field(max_length=160)] = ""
+    record_sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+
+
 class DensityRequest(Closed):
     source_revision: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
     material: MaterialDensity

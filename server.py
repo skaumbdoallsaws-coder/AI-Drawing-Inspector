@@ -1699,6 +1699,7 @@ if os.getenv("INSPECTORPRO_PACKAGING_ENABLED", "").strip().lower() in {"1", "tru
         admission=_PACKAGING_ADMISSION,
         sage_enabled=lambda: _codex_packaging_enabled(),
         quotes=_PACKAGING_QUOTES,
+        library_root=LIBRARY_DIR,  # Read-only: parts and assemblies the packaging editor can choose as its product.
     ))
 
 

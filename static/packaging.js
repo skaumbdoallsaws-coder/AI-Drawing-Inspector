@@ -833,12 +833,72 @@ async function openSources() {
       const row = element('div', null, 'document-row'), info = element('div');
       info.append(element('strong', meta.name), element('p', dimensionText(meta.dimensions_m)), element('code', meta.id));
       if (meta.volume_m3) info.append(element('p', `Solid volume: ${numberText(meta.volume_m3 * 1e6)} cm3`));
-      row.append(info, button('Use source', () => {
+      if (meta.library) info.append(element('p', `InspectorPro library ${libraryLabel(meta.library)}`));
+      row.append(info);
+      if (meta.library && state.capabilities.includes('library_sources')) row.append(button('Check library', async () => {
+        const status = await working('Checking the library...', () => request(`/sources/${encodeURIComponent(meta.id)}/library-status`));
+        notify(status.message, status.status !== 'current');
+      }));
+      row.append(button('Use source', () => {
         if (state.draft.design.product && !confirm('Replace the product in every placement and reset its mass evidence?')) return;
         edit(d => { d.product = productFromSource(meta, d.product || {}); }); dialog.close(); render(); state.scene?.fit();
       })); body.append(row);
     }
   });
+}
+
+function libraryLabel(entry) {
+  const name = `${entry.kind === 'part' ? 'part' : 'assembly'} ${entry.id}${entry.revision ? ` rev ${entry.revision}` : ''}`;
+  return 'configuration' in entry ? `${name}, configuration ${entry.configuration || 'as extracted (name not recorded)'}` : name;
+}
+
+function libraryRow(entry, dialog) {
+  const row = element('div', null, 'document-row'), info = element('div');
+  const label = `${entry.kind === 'part' ? 'Part' : 'Assembly'} ${entry.id}${entry.revision ? ` rev ${entry.revision}` : ''}`;
+  info.append(element('strong', entry.name === entry.id ? label : `${label} - ${entry.name}`));
+  if (entry.extracted_bounds_m) info.append(element('p', `Extracted size: ${dimensionText(entry.extracted_bounds_m)}`));
+  const form = element('form', null, 'form-grid'); form.addEventListener('submit', event => event.preventDefault());
+  const choices = entry.configurations.map(c => [c.name, !c.name ? 'As extracted (name not recorded)' : c.available ? `${c.name} (active at extraction)` : `${c.name} (not extracted)`]);
+  const chosen = entry.configurations.find(c => c.available);
+  const configuration = field(form, 'Configuration', 'library_configuration', chosen ? chosen.name : '', { options: choices });
+  [...configuration.options].forEach((option, i) => { option.disabled = !entry.configurations[i].available; });
+  info.append(form);
+  if (!entry.importable) info.append(element('p', entry.reason, 'warning'));
+  row.append(info, button('Use as product', async () => {
+    if (state.draft.design.product && !confirm('Replace the product for every existing placement? Mass provenance will be reset.')) return;
+    const meta = await working('Importing the library model...', () => request('/sources/library', { method: 'POST', body: {
+      kind: entry.kind, id: entry.id, revision: entry.revision, configuration: configuration.value, record_sha256: entry.record_sha256 } }));
+    edit(d => { d.product = productFromSource(meta, d.product || {}); });
+    dialog.close(); render(); state.scene?.fit();
+    notify('Library model imported. Product mass is unknown.');
+  }, { primary: true, disabled: !entry.importable || !chosen }));
+  return row;
+}
+
+async function openLibrary() {
+  flushEditor();
+  let data = await working('Loading the InspectorPro library...', () => request('/library'));
+  resourceDialog('InspectorPro library', (body, dialog) => {
+    body.append(element('p', data.notice, 'notice'));
+    const filter = element('form', null, 'form-grid'); filter.addEventListener('submit', event => event.preventDefault());
+    const search = field(filter, 'Search part or assembly', 'library_search', '', { maxLength: 160 });
+    const kind = field(filter, 'Show', 'library_kind', '', { options: [['', 'Parts and assemblies'], ['part', 'Parts'], ['assembly', 'Assemblies']] });
+    const list = element('div'); body.append(filter, list);
+    const show = () => {
+      const needle = search.value.trim().toLowerCase();
+      const entries = data.entries.filter(e => (!kind.value || e.kind === kind.value) && (!needle || `${e.id} ${e.name}`.toLowerCase().includes(needle)));
+      list.replaceChildren(...entries.map(entry => libraryRow(entry, dialog)));
+      if (!entries.length) list.append(element('p', data.entries.length ? 'No entries match.' : 'No parts or assemblies with an extracted 3D model were found.', 'notice'));
+      if (data.truncated) list.append(element('p', 'Only the first 500 entries are listed. Search to narrow the list.', 'notice'));
+    };
+    let pending = null, wide = data.truncated;
+    search.addEventListener('input', () => {
+      if (!wide) return show();
+      clearTimeout(pending);  // A large library is searched on the host, not only in the first page.
+      pending = setTimeout(() => invoke(async () => { data = await request(`/library?q=${encodeURIComponent(search.value.trim())}`); show(); }), 300);
+    });
+    kind.addEventListener('change', show); show();
+  }, { wide: true });
 }
 
 async function openMassEstimate() {
@@ -898,6 +958,7 @@ function renderProduct(host) {
   });
   upload.addEventListener('submit', event => event.preventDefault()); source.append(upload);
   if (state.capabilities.includes('saved_alternatives')) source.append(button('Imported sources', openSources, { symbol: 'stack' }));
+  if (state.capabilities.includes('library_sources')) source.append(button('InspectorPro library', openLibrary, { symbol: 'cube' }));
   if (product?.source_id) {
     const meta = element('div', null, 'metadata');
     meta.append(element('span', 'Imported source | dimensions locked'), element('code', product.source_id), element('span', 'Source revision'), element('code', product.source_revision));

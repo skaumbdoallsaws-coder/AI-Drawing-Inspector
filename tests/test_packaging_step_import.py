@@ -263,6 +263,16 @@ def test_names_and_comments_are_not_external_references(runtime):
     importer._preflight(data, runtime)
 
 
+def test_a_worker_without_its_geometry_component_is_reported_as_unavailable(runtime):
+    """The test interpreter has no OCP: STEP is unavailable in this installation, not a bad or unsafe file."""
+    with pytest.raises(StepImportError) as error:
+        run(SIMPLE_STEP, runtime)
+    assert (error.value.code, error.value.status_code) == ("step_runtime_unavailable", 503)
+    assert "not available in this installation" in error.value.message
+    assert "Manual dimensions still work" in error.value.message and "safely" not in error.value.message
+    assert_clean(runtime)
+
+
 def test_explicit_runtime_configuration_and_no_credentials(runtime, monkeypatch):
     with pytest.raises(StepImportError) as error:
         StepRuntime.from_environment({})

@@ -38,6 +38,15 @@ _WORKER_ERRORS = {"step_invalid", "step_open_geometry", "step_units_unknown", "s
                   "step_runtime_unavailable", "step_resource_limits_unavailable", "step_worker_failed"}
 
 
+# A missing component is reported as unavailable in this installation, never as a bad or unsafe file.
+UNAVAILABLE = {
+    "step_runtime_unavailable": "STEP import is not available in this installation: its geometry component is "
+                                "missing or could not start. Manual dimensions still work.",
+    "step_resource_limits_unavailable": "STEP import is not available in this installation: the geometry worker's "
+                                        "resource limits could not be applied. Manual dimensions still work.",
+}
+
+
 class StepImportError(RuntimeError):
     def __init__(self, code: str, message: str, status_code: int = 422):
         super().__init__(message)
@@ -336,7 +345,7 @@ async def _run(runtime, directory, cancel_event):
             raise asyncio.CancelledError("STEP import cancelled")
         return process.returncode
     except OSError as exc:
-        raise StepImportError("step_runtime_unavailable", "The configured geometry worker could not start.", 503) from exc
+        raise StepImportError("step_runtime_unavailable", UNAVAILABLE["step_runtime_unavailable"], 503) from exc
     finally:
         cancelled_during_cleanup = False
         if process is not None:
@@ -389,8 +398,9 @@ async def import_step(data: bytes, *, runtime: StepRuntime, cancel_event=None) -
                     code = None
                 if type(code) is not str or code not in _WORKER_ERRORS:
                     code = "step_worker_failed"
-                status = 503 if code in {"step_runtime_unavailable", "step_resource_limits_unavailable"} else 422
-                raise StepImportError(code, "STEP geometry could not be imported safely (" + code + ").", status)
+                if code in UNAVAILABLE:
+                    raise StepImportError(code, UNAVAILABLE[code], 503)
+                raise StepImportError(code, "STEP geometry could not be imported safely (" + code + ").", 422)
             metadata = _metadata(raw, revision, runtime)
             output = directory / "model.glb"
             if not output.is_file() or output.is_symlink() or output.stat().st_size > runtime.max_glb_bytes:

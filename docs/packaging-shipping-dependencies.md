@@ -148,7 +148,7 @@ installation, not as a bad file or a server fault. `GET /api/packaging/status` l
 | Missing | Status entry | When used | Test |
 | --- | --- | --- | --- |
 | STEP runtime not configured | `step_runtime_not_configured` | STEP option hidden; upload `step_runtime_unavailable` (503) | `test_packaging_step_import.py` |
-| STEP worker cannot start | - | `step_runtime_unavailable` (503) | Not tested |
+| STEP worker cannot start, or starts without its geometry component (OCP) | - | `step_runtime_unavailable` (503), "STEP import is not available in this installation ... Manual dimensions still work." | `test_packaging_step_import.py` (real worker under an interpreter without OCP); native missing-components run |
 | numpy, trimesh or Pillow absent from the GLB worker's folder | `glb_import_runtime_missing` | `source_runtime_unavailable` (503), "Manual dimensions still work." | `test_packaging_missing_components.py` (real worker, empty folder) |
 | py3dbp | `arrangement_runtime_missing` | `arrangement_unavailable` (503) in the editor and to Sage, "Manual packing still works." | `test_packaging_missing_components.py`, `test_codex_packaging_tools.py` |
 | reportlab | `pdf_report_runtime_missing` | `report_unavailable` (503); the saved design is unchanged | `test_packaging_missing_components.py` |

@@ -19,6 +19,8 @@ playwright                # Browser automation for Scout web search
 elevenlabs                # TTS voice synthesis for agent voices
 anthropic                 # Claude API for agents
 openai                    # Whisper API fallback + FAI fill
+httpx                     # Packaging & Shipping carrier rating (also installed by openai)
+pywin32; sys_platform == "win32"  # Packaging carrier key store (Windows DPAPI); needs this environment's site-packages
 python-dotenv             # .env file loading
 PyMuPDF==1.27.2.3         # PDF rendering; pilot blocked pending AGPL/commercial license disposition
 python-docx==1.2.0        # Editable prototype operations-manual working copy (MIT)

@@ -11,7 +11,7 @@ import sys
 
 from desktop.runtime.profile import local_path
 
-PACKAGES = ('py3dbp', 'trimesh', 'reportlab')
+PACKAGES = ('py3dbp', 'trimesh', 'reportlab', 'numpy', 'PIL')  # numpy and PIL: the GLB worker imports them directly.
 KEYS = {'schemaVersion', 'dependencyRoot'}
 ENV_DEFAULTS = {
     'INSPECTORPRO_PACKAGING_ENABLED': '0',

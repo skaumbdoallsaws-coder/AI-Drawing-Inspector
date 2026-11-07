@@ -1,31 +1,54 @@
 # Packaging & Shipping dependency, license and missing-component review
 
-Status: **inventory and missing-component behaviour done; license review and clean install open.**
-Recorded 2026-11-06 from the installed packages in this worktree's test environment. This is an
-engineering inventory, not legal clearance: no redistribution obligation is decided here.
+Status: **dependencies declared, exact-version license texts collected, missing-component behaviour
+done. Redistribution clearance and the clean install are open.**
+Recorded 2026-11-06. This is an engineering record, not legal clearance: no redistribution obligation
+is decided here.
+
+## Local development testing and redistribution are separate
+
+- **Local development testing** (this machine, test profiles, the user's own desktop) installs these
+  components from their public package indexes for the user's own use. Nothing is passed to anyone
+  else, so no redistribution obligation applies to that testing, and none of the items below blocks it.
+- **Redistribution** (an installer, a bundled runtime folder or a copied machine given to anyone else)
+  conveys the components and their native libraries. That needs the decisions under "Redistribution
+  obligations" first. Nothing in this branch builds or ships such a bundle.
 
 ## Components
 
 Declared licenses are read from installed package metadata. "License text" says whether the installed
-package carries a license file.
+package carries a license file; the collected upstream texts are listed in the next section.
 
-| Component | Version | Runs in | Declared license | License text | Used for |
-| --- | --- | --- | --- | --- | --- |
-| py3dbp | 1.1.2 | Host process | MIT (classifier only) | **No** | Arrangement proposals |
-| reportlab | 5.1.0 | Host process | BSD | Yes | Draft PDF report |
-| charset-normalizer | 3.5.2 | Host process (reportlab) | MIT | Yes | reportlab dependency |
-| pywin32 | 312 | Host process | PSF | Yes | Carrier key store (Windows DPAPI) |
-| httpx | 0.28.1 | Host process | BSD-3-Clause | not checked | Carrier rating requests |
-| fastapi / starlette / pydantic / uvicorn | 0.124.0 / 0.50.0 / 2.12.4 / 0.38.0 | Host process | MIT / BSD-3 / MIT / BSD-3 | not checked | Application host (not packaging-specific) |
-| trimesh | 5.2.0 | GLB worker | MIT | Yes | GLB parsing and normalisation |
-| numpy | 2.5.4 | GLB worker | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | Yes | trimesh dependency |
-| pillow | 13.0.0 | GLB worker | MIT-CMU | Yes | Embedded textures |
-| cadquery-ocp-novtk | 7.9.3.1.1 | STEP worker (Python 3.11) | Apache-2.0 | **No** | STEP import (OpenCascade) |
-| cadquery-ocp-proxy | 7.9.3.1.1 | STEP worker | Apache-2.0 | **No** | OCP import shim |
-| three.js | 0.184.0 | Editor (browser) | MIT | Yes (`static/vendor/three/0.184.0`) | 3D view, OrbitControls, GLTFLoader |
-| EasyPost API | service | Carrier provider | Service terms | n/a | Quote-only rating; fees in the rating notice |
+| Component | Version | Runs in | Declared license | License text | Declared in | Used for |
+| --- | --- | --- | --- | --- | --- | --- |
+| py3dbp | 1.1.2 | Host process | MIT (classifier only) | **No** (collected upstream) | `requirements-packaging.txt` | Arrangement proposals |
+| reportlab | 5.1.0 | Host process | BSD | Yes | `requirements-packaging.txt` | Draft PDF report |
+| charset-normalizer | 3.5.2 | Host process (reportlab) | MIT | Yes | reportlab's own dependency | reportlab dependency |
+| trimesh | 5.2.0 | GLB worker | MIT | Yes | `requirements-packaging.txt` | GLB parsing and normalisation |
+| numpy | 2.5.4 | GLB worker | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | Yes | `requirements-packaging.txt` (added 2026-11-06) | Imported directly by the worker |
+| pillow | 13.0.0 | GLB worker | MIT-CMU | Yes | `requirements-packaging.txt` (added 2026-11-06) | Embedded textures |
+| pywin32 | 312 | Host process (Windows) | PSF | Yes | `requirements.txt`, Windows only (added 2026-11-06) | Carrier key store (Windows DPAPI) |
+| httpx | 0.28.1 | Host process | BSD-3-Clause | not checked | `requirements.txt` (added 2026-11-06; also installed by openai) | Carrier rating requests |
+| fastapi / starlette / pydantic / uvicorn | 0.124.0 / 0.50.0 / 2.12.4 / 0.38.0 | Host process | MIT / BSD-3 / MIT / BSD-3 | not checked | `requirements.txt` | Application host (not packaging-specific) |
+| cadquery-ocp-novtk | 7.9.3.1.1 | STEP worker (Python 3.11) | Apache-2.0 | **No** (collected upstream) | `requirements-packaging-step.txt` | STEP import (OpenCascade) |
+| cadquery-ocp-proxy | 7.9.3.1.1 | STEP worker | Apache-2.0 | **No** (collected upstream) | `requirements-packaging-step.txt` | OCP import shim |
+| three.js | 0.184.0 | Editor (browser) | MIT | Yes (`static/vendor/three/0.184.0`) | vendored | 3D view, OrbitControls, GLTFLoader |
+| EasyPost API | service | Carrier provider | Service terms | n/a | n/a | Quote-only rating; fees in the rating notice |
 
 Test-only, not shipped: pdfplumber 0.11.8 (MIT), Playwright 1.56.0 (Apache-2.0) and its browser.
+
+Why the declarations were needed:
+
+- numpy and Pillow were in the desktop runtime folder only because trimesh and reportlab pull them in.
+  The GLB worker imports both directly, so they are now pinned at the versions that folder ships, and
+  the native profile check (`desktop/runtime/packaging_config.py`, `desktop/src/packaging-config.cjs`)
+  now requires them too, so a folder without them is rejected when the profile loads, not on first import.
+- pywin32 was present in the test environment but listed nowhere. It must be installed in the
+  application interpreter's own site-packages: its startup `.pth` file does not run from the packaging
+  runtime folder, which is added without site processing.
+- httpx is imported directly by the rating adapter. It was only present because openai depends on it.
+  It is declared in `requirements.txt` rather than the packaging runtime folder, so the folder (first on
+  the path) cannot shadow the version openai uses.
 
 Where each one comes from:
 
@@ -39,27 +62,82 @@ Where each one comes from:
 
 `tools/inventory_facility_python_dependencies.py --requirements requirements-packaging.txt` (and the same
 for `requirements-packaging-step.txt`) records 0 machine blockers for both files. That tool reads only the
-listed packages' metadata. It does not see transitive packages (numpy, pillow, charset-normalizer) or the
-native libraries described below, so 0 blockers is not a clearance.
+listed packages' metadata. It does not see transitive packages or the native libraries described below,
+so 0 blockers is not a clearance.
 
-## Native libraries inside the STEP wheel
+## Exact-version license texts (collected 2026-11-06)
 
-`cadquery-ocp-novtk` installs 70 DLLs in `cadquery_ocp_novtk.libs` and ships no license or notice text for
-any of them. The upstream projects publish these licenses; check them against the exact builds before
-redistributing:
+The texts were collected for the exact versions shipped, from each project's tagged source or the
+conda-forge build the wheel used. The wheel was built by CadQuery/ocp-build-system tag v7.9.3.1.1, which
+compiles OCCT tag V7_9_3 with one CMake patch and takes the other native libraries from conda-forge.
 
-| Libraries | Upstream license (to confirm) |
-| --- | --- |
-| Open CASCADE Technology (46 `TK*` toolkits) | LGPL-2.1 with the Open CASCADE exception |
-| LibRaw (`raw`) | LGPL-2.1 or CDDL-1.0 |
-| FreeImage | GPL-2.0/GPL-3.0 or the FreeImage Public License |
-| FreeType | FreeType License or GPL-2.0 |
-| OpenEXR, Iex, IlmThread, OpenEXRCore, Imath | BSD-3-Clause |
-| libtiff, libpng16, zlib, libjpeg (`jpeg8`) | libtiff, libpng, zlib and IJG/BSD-style licenses |
-| OpenJPEG (`openjp2`), OpenJPH | BSD-2-Clause |
-| libwebp, libwebpmux, libsharpyuv | BSD-3-Clause |
-| zstd, lcms2, LERC, liblzma, libdeflate | BSD-3/GPL-2.0, MIT, Apache-2.0, 0BSD/public domain, MIT |
-| `msvcp140`, `vcomp140` | Microsoft Visual C++ redistributable terms |
+- Location: `.runtime/pc-licenses/upstream/` in this worktree, with `manifest.json` (component, exact
+  version, SPDX expression, version evidence, and for each file its source URL, retrieval time and
+  SHA-256). Kept out of git: these are downloaded third-party texts for the release decision, not
+  application code.
+- Checks (re-run separately from the collection): 40 files, 0 SHA-256 mismatches, no unlisted or missing
+  files, and all 70 DLLs in `cadquery_ocp_novtk.libs` are assigned to a component. Nothing downloaded
+  was executed or unpacked.
+- Versions marked "inferred" have no version string in the binary: the DLL link time matches one
+  conda-forge build and the packages that use it pin the same version.
+
+| Component | Exact version | License (SPDX) | Texts | Open point |
+| --- | --- | --- | --- | --- |
+| Open CASCADE Technology (46 `TK*` DLLs) | 7.9.3 | LGPL-2.1-only WITH OCCT-exception-1.0 | 2 | Source offer; "uses Open CASCADE Technology" notice |
+| FreeImage | 3.18.0 | FreeImage OR GPL-2.0-only OR GPL-3.0-only | 3 | License choice; conda-forge patched it |
+| jxrlib (inside FreeImage.dll) | 1.1 | BSD-2-Clause | 2 | No upstream license file exists |
+| FreeType | 2.12.1 | FTL OR GPL-2.0-or-later | 3 | License choice; FTL needs a credit line |
+| OpenEXR (Iex, IlmThread, OpenEXR, OpenEXRCore) | 3.4.12 | BSD-3-Clause, plus PATENTS | 2 | Choice for the DWA files |
+| Imath | 3.2.2 (inferred) | BSD-3-Clause | 1 | - |
+| libjpeg-turbo (`jpeg8`) | 3.1.4.1 | IJG AND BSD-3-Clause AND Zlib | 2 | IJG credit sentence |
+| Little CMS (lcms2) | 2.19 | MIT | 1 | - |
+| LERC | 4.1.0 (inferred) | Apache-2.0, plus NOTICE | 2 | NOTICE must be reproduced |
+| liblzma | 5.8.3 | 0BSD | 2 | - |
+| libpng | 1.6.58 | libpng-2.0 | 1 | - |
+| libwebp, libwebpmux, libsharpyuv | 1.6.0 | BSD-3-Clause, plus PATENTS | 2 | Ship PATENTS |
+| OpenJPEG (`openjp2`) | 2.5.4 | BSD-2-Clause | 1 | - |
+| OpenJPH | 0.27.3 | BSD-2-Clause | 1 | - |
+| LibRaw | 0.21.5 | LGPL-2.1-only OR CDDL-1.0 | 3 | License choice; texts of code embedded in LibRaw not collected |
+| LibTIFF | 4.7.1 | libtiff | 1 | - |
+| zlib | 1.3.2 | Zlib | 1 | - |
+| zstd | 1.5.7 | BSD-3-Clause OR GPL-2.0-only | 2 | Elect BSD-3-Clause |
+| libdeflate | 1.25 (inferred) | MIT | 1 | - |
+| Microsoft VC++ runtime (`msvcp140`, `vcomp140`) | 14.51.36231.0 | Microsoft Visual C++ runtime terms | URLs only | Needs the distributor's own Visual Studio license |
+| RapidJSON (inside TKDEGLTF.dll and OCP.pyd) | 1.1.0.post20240409 (inferred) | MIT | 1 | - |
+| pybind11 (inside OCP.pyd) | 2.13.6 (inferred) | BSD-3-Clause | 1 | BSD notice |
+| {fmt} (inside OCP.pyd) | 12.0.0 or 12.1.0 | MIT with binary exception | 0 | Version not determinable |
+| OCP bindings | 7.9.3.1.1 | Apache-2.0 AND BSD-3-Clause-LBNL | 2 | BSD notice for `pystreambuf.h` |
+| cadquery-ocp-novtk wheel | 7.9.3.1.1 | Apache-2.0 | 1 | Wheel lacks its intended LICENSE |
+| cadquery-ocp-proxy wheel | 7.9.3.1.1 | Apache-2.0 | 1 | - |
+| py3dbp | 1.1.2 | MIT | 1 | No release tag; MIT text has no copyright line |
+
+## Redistribution obligations (unresolved; a person must decide)
+
+None of these blocks local development testing. Each blocks redistribution until decided:
+
+1. **LGPL components** (Open CASCADE, and LibRaw if its LGPL option is chosen): ship the corresponding
+   source with the application or a written offer valid for three years. For Open CASCADE that is tag
+   V7_9_3 plus the ocp-build-system patch and build scripts. The license terms must allow reverse
+   engineering for debugging the modified library. The wheel's packaging tool renamed every DLL to
+   `<name>-<hash>.dll`; counsel should confirm that users can still replace the LGPL libraries.
+2. **Open CASCADE exception**: the documentation needs a prominent notice that the product uses Open
+   CASCADE Technology.
+3. **License choices**: FreeImage (FreeImage Public License, which for this patched copy also needs a
+   notice of where its source is), FreeType (FTL, which requires a credit line), LibRaw (LGPL-2.1 or
+   CDDL-1.0, either with a source-availability statement), zstd (BSD-3-Clause), and the OpenEXR DWA
+   files (BSD with DreamWorks' patent grant, or Apache-2.0).
+4. **Notices to include in a release**: the FreeImage credit sentence, the Independent JPEG Group
+   sentence, the LERC NOTICE, the libwebp and OpenEXR PATENTS files, and the BSD notices for pybind11,
+   jxrlib and OCP's `pystreambuf.h`.
+5. **Not collected**: texts for code inside LibRaw (dcraw, DCB/FBDD, X3F and Adobe DNG SDK parts),
+   which exist only in its source headers; {fmt}, whose exact version cannot be determined.
+6. **Microsoft runtime DLLs**: their signatures are valid, so the contents are unmodified (only
+   renamed). Redistributing them requires the distributor's own Visual Studio license; the manifest
+   records the Visual Studio 2026 distributable-code page.
+7. **Wheel metadata**: the cadquery-ocp-novtk wheel lacks the LICENSE it was meant to include (a build
+   script bug), and its Apache-2.0 metadata does not cover the bundled DLLs.
+8. **py3dbp**: the repository has no tags; commit e69bbfa matches the installed files byte for byte. Its
+   MIT text has no copyright line, so the attribution wording needs confirming.
 
 ## Missing components
 
@@ -75,11 +153,8 @@ installation, not as a bad file or a server fault. `GET /api/packaging/status` l
 | py3dbp | `arrangement_runtime_missing` | `arrangement_unavailable` (503) in the editor and to Sage, "Manual packing still works." | `test_packaging_missing_components.py`, `test_codex_packaging_tools.py` |
 | reportlab | `pdf_report_runtime_missing` | `report_unavailable` (503); the saved design is unchanged | `test_packaging_missing_components.py` |
 | pywin32 (carrier key store) | - | `carrier_secure_store_unavailable`; no key is stored or read | `test_packaging_credentials.py` |
-| httpx | - | The packaging API cannot load, so a host with packaging enabled does not start | Not tested. httpx is installed with the application's `openai` dependency. |
-| py3dbp, trimesh or reportlab absent from a native profile's runtime folder | - | Profile rejected: `desktop_packaging_config_invalid` | `desktop/tests` (existing) |
-
-The native profile check does not cover numpy or Pillow. If either is absent, GLB import fails at use with
-the message above.
+| httpx | - | The packaging API cannot load, so a host with packaging enabled does not start | Not tested. Declared in `requirements.txt`. |
+| py3dbp, trimesh, reportlab, numpy or Pillow absent from a native profile's runtime folder | - | Profile rejected: `desktop_packaging_config_invalid` | `desktop/tests` |
 
 ## Process boundaries
 
@@ -100,11 +175,6 @@ the message above.
 
 ## Open before a release
 
-1. Collect license and notice texts for the 70 STEP DLLs, py3dbp and cadquery-ocp. Decide how LGPL
-   components (Open CASCADE, LibRaw) are noticed and kept replaceable, and which option applies to
-   FreeImage and FreeType. A person must make these decisions.
-2. Declare pywin32 (Windows only) for the carrier key store. It is present in the test environment but no
-   requirements file lists it.
-3. Optionally add numpy and Pillow to the native runtime check, in both `desktop/runtime/packaging_config.py`
-   and `desktop/src/packaging-config.cjs`. This is a desktop change and needs native tests.
-4. Install on a clean Windows machine. Not attempted: no clean machine or VM is available here.
+1. The redistribution decisions above. A person (with counsel where needed) must make them; until
+   then no installer or bundled runtime may be given to anyone else.
+2. Install on a clean Windows machine. Not attempted: no clean machine or VM is available here.

@@ -2,7 +2,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { localPath } = require('./runtime-settings.cjs');
-const PACKAGES = ['py3dbp', 'trimesh', 'reportlab'];
+const PACKAGES = ['py3dbp', 'trimesh', 'reportlab', 'numpy', 'PIL']; // numpy and PIL: the GLB worker imports them directly.
 const KEYS = ['schemaVersion', 'dependencyRoot'];
 const normalize = value => process.platform === 'win32' ? value.toLowerCase() : value;
 const overlaps = (a, b) => {

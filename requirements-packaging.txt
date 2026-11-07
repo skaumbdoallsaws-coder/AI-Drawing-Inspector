@@ -2,3 +2,6 @@
 py3dbp==1.1.2
 trimesh==5.2.0
 reportlab==5.1.0
+# Imported directly by the isolated GLB worker (pinned to the versions the desktop runtime folder ships).
+numpy==2.5.4
+pillow==13.0.0

@@ -27,7 +27,7 @@ async function fixture(t) {
     profile[key] = path.join(root, key); await fs.mkdir(profile[key]);
   }
   const dependencyRoot = path.join(root, 'deps'), geometryPython = path.join(root, 'step-venv', 'python.exe');
-  for (const name of ['py3dbp', 'trimesh', 'reportlab']) {
+  for (const name of ['py3dbp', 'trimesh', 'reportlab', 'numpy', 'PIL']) {
     await fs.mkdir(path.join(dependencyRoot, name), { recursive: true });
     await fs.writeFile(path.join(dependencyRoot, name, '__init__.py'), '');
   }
@@ -70,7 +70,7 @@ test('Packaging rejects malformed schemas and paths with bounded errors', async 
 
 test('Every declared app package is required and must be a file', async t => {
   const f = await fixture(t);
-  for (const name of ['py3dbp', 'trimesh', 'reportlab']) {
+  for (const name of ['py3dbp', 'trimesh', 'reportlab', 'numpy', 'PIL']) {
     const file = path.join(f.config.dependencyRoot, name, '__init__.py');
     await fs.unlink(file);
     await assert.rejects(f.load({ ...f.profile, packagingRuntime: f.config }));

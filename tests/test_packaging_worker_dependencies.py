@@ -108,9 +108,9 @@ def test_router_captures_startup_binding_and_ignores_request_paths(bound, tmp_pa
 
 
 def test_native_startup_reuses_validated_root_and_disabled_clears_binding(bound, tmp_path):
-    from desktop.runtime.packaging_config import configure_packaging
+    from desktop.runtime.packaging_config import PACKAGES, configure_packaging
     from desktop.runtime.application_profile import ApplicationProfile
-    for name in ('py3dbp', 'trimesh', 'reportlab'):
+    for name in PACKAGES:
         (bound / name).mkdir()
         (bound / name / '__init__.py').touch()
     value = {}

@@ -13,7 +13,7 @@ def fixture(tmp_path):
         target.mkdir()
         roots[key] = str(target)
     dependencies = tmp_path / 'dependencies'
-    for name in ('py3dbp', 'trimesh', 'reportlab'):
+    for name in ('py3dbp', 'trimesh', 'reportlab', 'numpy', 'PIL'):
         folder = dependencies / name
         folder.mkdir(parents=True)
         (folder / '__init__.py').write_text('')

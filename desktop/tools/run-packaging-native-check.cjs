@@ -16,7 +16,7 @@ async function main() {
   const result = await runOwnedChild({ executable: electron,
     args: [path.join(__dirname, 'packaging-native-entry.cjs'), '--profile-file', profileFile,
       '--python', python, '--acceptance-output', output], cwd: root, env,
-    logPath: path.join(path.dirname(output), 'driver.log'), timeoutMs: 540000 });
+    logPath: path.join(path.dirname(output), 'driver.log'), timeoutMs: 600000 });  // The runner's maximum; the full run restarts the backend three times.
   console.log(JSON.stringify(result));
   if (!result.ok) process.exitCode = 1;
   else {

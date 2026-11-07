@@ -78,6 +78,21 @@ def test_host_gives_sage_its_quote_desk_only_for_the_same_service(route, monkeyp
     assert seen[0] is desk and seen[1:] == [None, None]
 
 
+def test_host_enables_packaging_research_with_the_web_research_flag(route, monkeypatch):
+    request, _, _, _ = route
+    seen = []
+
+    async def run(req, saved, admitted, **kw):
+        seen.append(kw.get("research"))
+        return {"response": "Checked", "tool_source": "codex_packaging"}
+    monkeypatch.setattr(packaging_pilot, "inspect_packaging", run)
+    monkeypatch.delenv("INSPECTORPRO_CODEX_WEB_RESEARCH", raising=False)
+    asyncio.run(server.agent_chat(request, None))
+    monkeypatch.setenv("INSPECTORPRO_CODEX_WEB_RESEARCH", "0")
+    asyncio.run(server.agent_chat(request, None))
+    assert seen == [True, False]
+
+
 def test_disabled_packaging_never_falls_back(route, monkeypatch):
     monkeypatch.setenv("INSPECTORPRO_CODEX_PACKAGING", "0")
     monkeypatch.setattr(server, "_agent_chat_impl", lambda *_: pytest.fail("No legacy fallback"))

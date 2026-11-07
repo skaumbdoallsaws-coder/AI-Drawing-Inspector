@@ -360,6 +360,11 @@ class BaselineSelect(Closed):
     baseline: Annotated[str, Field(pattern=r"^(current|alt_[a-f0-9]{32})$")]
 
 
+class EvidenceReview(Closed):
+    """The user's review of one public-source evidence record; it never edits a design."""
+    status: Literal["unreviewed", "accepted", "rejected"]
+
+
 class AlternativeSave(Closed):
     expected_revision: Annotated[int, Field(ge=0, strict=True)]
     request_id: Identity

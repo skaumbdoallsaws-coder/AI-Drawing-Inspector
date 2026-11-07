@@ -111,6 +111,16 @@ results show city, state and residential status only. Each provider request is r
 the scenario's shipment budget first, recorded in the attempt audit and in the turn receipt as
 an `external` request, and is not reversible by Undo.
 
+Research tools exist when the host enables public research (`INSPECTORPRO_CODEX_WEB_RESEARCH`,
+default on, as for Documentation) and the principal has `packaging.edit`. They reuse
+`research_tools.PublicResearchSession`: generic public queries only (the gateway also refuses
+packaging IDs and the design or product name), a source must be read before it is relied on,
+and at most four provider requests are made per turn. `record_packaging_evidence` stores facts
+from a page read in the same turn as unreviewed evidence for the document; the app attaches the
+source link, title and retrieval time from the research receipt. Evidence is reviewed by the
+user in the Validation panel and never edits the design, passes validation or approves
+anything. Research requests are recorded as `external` requests in the turn receipts.
+
 ## Required Host Admission
 
 `PackagingContext` is a frozen dataclass populated by the authenticated host:

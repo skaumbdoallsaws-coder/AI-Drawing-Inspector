@@ -86,6 +86,9 @@ class PackagingService:
                     name TEXT NOT NULL, revision INTEGER NOT NULL, design TEXT NOT NULL,
                     created TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
                     PRIMARY KEY(scope,document_id,id), UNIQUE(scope,document_id,request_id));
+                CREATE TABLE IF NOT EXISTS research_evidence (
+                    scope TEXT NOT NULL, document_id TEXT NOT NULL, id TEXT NOT NULL,
+                    created TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY(scope,document_id,id));
             """)
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
@@ -448,6 +451,62 @@ class PackagingService:
                        "shipments_created=?, error_code=?, quote_id=? WHERE scope=? AND document_id=? AND id=?",
                        (now(), outcome, int(counts.get("requests_sent", 0)), int(counts.get("responses_received", 0)),
                         int(counts.get("shipments_created", 0)), error_code, quote_id, scope, doc_id, attempt_id))
+
+    def add_evidence(self, scope, doc_id, records):
+        """Store checked public-source records as unreviewed evidence; the design and its revision are
+        untouched. Returns one entry per record: the stored record, or None when the document holds it."""
+        from .evidence import MAX_PER_DOCUMENT, key
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._row(db, scope, doc_id)
+            existing = [json.loads(r["record"]) for r in db.execute(
+                "SELECT record FROM research_evidence WHERE scope=? AND document_id=?", (scope, doc_id))]
+            seen, stored = {key(r) for r in existing}, []
+            for record in records:
+                if key(record) in seen:
+                    stored.append(None)
+                    continue
+                seen.add(key(record))
+                stored.append({**record, "id": "ev_" + uuid4().hex, "recorded_at": now(), "review_status": "unreviewed",
+                               "reviewed_at": None, "reviewed_by": None})
+            fresh = [item for item in stored if item]
+            if len(existing) + len(fresh) > MAX_PER_DOCUMENT:
+                raise PackagingError("evidence_limit", "This document holds the maximum research evidence. Remove rejected records first.", 409)
+            for item in fresh:
+                db.execute("INSERT INTO research_evidence VALUES(?,?,?,?,?)",
+                           (scope, doc_id, item["id"], item["recorded_at"], encode(item)))
+        return stored
+
+    def evidence(self, scope, doc_id):
+        with self.db() as db:
+            self._row(db, scope, doc_id)
+            return [json.loads(r["record"]) for r in db.execute(
+                "SELECT record FROM research_evidence WHERE scope=? AND document_id=? ORDER BY rowid", (scope, doc_id))]
+
+    def review_evidence(self, scope, doc_id, evidence_id, status, reviewer):
+        """Mark a record accepted, rejected or unreviewed again. Review never changes a design."""
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._row(db, scope, doc_id)
+            row = db.execute("SELECT record FROM research_evidence WHERE scope=? AND document_id=? AND id=?",
+                             (scope, doc_id, evidence_id)).fetchone()
+            if row is None:
+                raise PackagingError("evidence_not_found", "Research evidence not found.", 404)
+            reviewed = status != "unreviewed"
+            item = {**json.loads(row["record"]), "review_status": status, "reviewed_at": now() if reviewed else None,
+                    "reviewed_by": reviewer if reviewed else None}
+            db.execute("UPDATE research_evidence SET record=? WHERE scope=? AND document_id=? AND id=?",
+                       (encode(item), scope, doc_id, evidence_id))
+        return item
+
+    def remove_evidence(self, scope, doc_id, evidence_id):
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._row(db, scope, doc_id)
+            if db.execute("DELETE FROM research_evidence WHERE scope=? AND document_id=? AND id=?",
+                          (scope, doc_id, evidence_id)).rowcount != 1:
+                raise PackagingError("evidence_not_found", "Research evidence not found.", 404)
+        return {"removed": evidence_id}
 
     def quote_attempts(self, scope, doc_id, limit=20):
         """Provider attempts for this document, newest first; unfinished ones are reported as interrupted."""

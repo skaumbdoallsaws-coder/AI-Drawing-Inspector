@@ -41520,7 +41520,8 @@ async def agent_chat(
                 principal_resolver=lambda: _FACILITY_LAYOUT_HOST.resolve_principal(http_request),
                 normalized=normalize_agent_context(request.inspection_context or request.context or {})["flat"],
                 text_sink=_AGENT_CHAT_STREAM_SINK.get(), status_sink=_AGENT_CHAT_STATUS_SINK.get(),
-                memory_context=memory_context, quotes=packaging_quotes)
+                memory_context=memory_context, quotes=packaging_quotes,
+                research=os.getenv("INSPECTORPRO_CODEX_WEB_RESEARCH", "1") == "1")
         except PilotError as exc:
             error = {"code": exc.code, "message": str(exc), "retryable": False}
             if isinstance(getattr(exc, "packaging_result", None), dict):

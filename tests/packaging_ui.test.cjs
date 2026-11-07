@@ -497,6 +497,20 @@ test('product face mapping follows the viewer rotation for every dimension order
   }
 });
 
+test('research evidence shows its basis, values and review state, and links only public pages', () => {
+  const record = { kind: 'material_density', subject: 'Cast PMMA sheet', claim: 'Density: 1.19 g/cm3', claim_basis: 'source_quote',
+    value: 1.19, unit: 'g/cm3', sku_or_grade: null, effective_date: null, confidence: 'high', review_status: 'unreviewed' };
+  assert.deepEqual(ui.evidenceFacts(record), ['Quoted from the page', 'Value 1.19 g/cm3', 'Sage confidence: high', 'Unreviewed']);
+  assert.deepEqual(ui.evidenceFacts({ ...record, claim_basis: 'provider_summary', value: null, unit: null, sku_or_grade: '32 ECT',
+    effective_date: '2025-01-01', review_status: 'accepted' }),
+    ['Provider summary of the page, not a quotation', 'SKU/grade 32 ECT', 'Effective 2025-01-01', 'Sage confidence: high', 'Accepted by you']);
+  assert.equal(ui.evidenceLink('https://example.com/datasheet'), 'https://example.com/datasheet');
+  assert.equal(ui.evidenceLink('javascript:alert(1)'), null);
+  assert.equal(ui.evidenceLink('file:///C:/private.step'), null);
+  assert.match(source, /link\.target = '_blank'; link\.rel = 'noopener noreferrer';/);
+  assert.match(source, /await loadQuoteAttempts\(\); await loadScenarios\(\); await loadEvidence\(\);/);
+});
+
 test('Sage quote scenarios send the Rates panel body and show Sage only city-level places', () => {
   const address = { name: 'TEST ONLY', street1: '1 Test Street', street2: '', city: 'Dallas', state: 'TX', zip: '75201', residential: true };
   const addresses = { origin: { ...address, city: 'Chicago', state: 'IL', zip: '60601', residential: false }, destinations: [address] };

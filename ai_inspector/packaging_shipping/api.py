@@ -14,7 +14,8 @@ from starlette.concurrency import run_in_threadpool
 
 from .geometry import assess, digest
 from .admission import PackagingAdmission
-from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave, BaselineSelect, ScenarioAuthorization
+from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave, BaselineSelect, ScenarioAuthorization, EvidenceReview
+from .evidence import NOTICE as EVIDENCE_NOTICE
 from .quoting import QuoteDesk
 from .comparison import compare as compare_designs, scenarios as quoted_scenarios
 from .catalog import catalog
@@ -143,7 +144,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         return {"workflow": "packaging_shipping", "pilot": True,
                 "rating": desk.status(resolved),
                 "permissions": granted(resolved),
-                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
+                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios", "research_evidence"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
                 "quote_rules": {"destinations": DESTINATION_RULES, "ship_date": SHIP_DATE_BASIS, "fees": FEES_NOTICE,
                                 "price_bases": PRICE_BASES},
                 "unsupported": ["verified_cad_material_mass", "arbitrary_contour_cutouts", "transport_certification", "freight", "future_ship_dates"] + ([] if step else ["step_runtime_not_configured"]) + ([] if sage else ["sage_chat_execution"])}
@@ -277,6 +278,18 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
     def quotes(doc_id: str, s=Depends(scope), resolved=Depends(principal)):
         account_ref, known = current_account(resolved)
         return {"quotes": service.quote_history(s, doc_id, account_ref=account_ref, account_known=known)}
+
+    @router.get("/api/packaging/documents/{doc_id}/evidence")
+    def research_evidence(doc_id: str, s=Depends(scope)):
+        return {"evidence": service.evidence(s, doc_id), "notice": EVIDENCE_NOTICE}
+
+    @router.put("/api/packaging/documents/{doc_id}/evidence/{evidence_id}/review")
+    def review_research_evidence(doc_id: str, evidence_id: str, body: EvidenceReview, s=Depends(scope), resolved=Depends(principal)):
+        return service.review_evidence(s, doc_id, evidence_id, body.status, resolved.principal_id)
+
+    @router.delete("/api/packaging/documents/{doc_id}/evidence/{evidence_id}")
+    def remove_research_evidence(doc_id: str, evidence_id: str, s=Depends(scope)):
+        return service.remove_evidence(s, doc_id, evidence_id)
 
     @router.get("/api/packaging/documents/{doc_id}/quote-attempts")
     def quote_attempts(doc_id: str, s=Depends(scope)):

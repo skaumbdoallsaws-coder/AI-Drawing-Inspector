@@ -152,6 +152,23 @@ export function scenarioBody(addresses, accounts, options, shipments, minutes) {
 // What Sage sees of an address: never a name, street or ZIP code.
 export const sagePlace = address => `${address.city}, ${address.state}${address.residential ? ' (residential)' : ''}`;
 
+const EVIDENCE_KINDS = { carton_sku: 'Carton SKU', material_density: 'Material density', cushioning_guidance: 'Cushioning guidance', comparable_packaging: 'Comparable packaging' };
+
+// What a research record states and how it was found: a quoted page passage or the provider's summary of the page.
+export function evidenceFacts(record) {
+  const facts = [record.claim_basis === 'source_quote' ? 'Quoted from the page' : 'Provider summary of the page, not a quotation'];
+  if (record.value != null) facts.push(`Value ${record.value}${record.unit ? ` ${record.unit}` : ''}`);
+  else if (record.unit) facts.push(`Unit ${record.unit}`);
+  if (record.sku_or_grade) facts.push(`SKU/grade ${record.sku_or_grade}`);
+  if (record.effective_date) facts.push(`Effective ${record.effective_date}`);
+  facts.push(`Sage confidence: ${record.confidence}`);
+  facts.push(record.review_status === 'accepted' ? 'Accepted by you' : record.review_status === 'rejected' ? 'Rejected by you' : 'Unreviewed');
+  return facts;
+}
+
+// Only public web links open; anything else is shown as text.
+export const evidenceLink = url => /^https?:\/\//i.test(String(url || '')) ? String(url) : null;
+
 export function messageSummary(messages) {
   const seen = new Set(), lines = [];
   for (const m of messages || []) {
@@ -410,7 +427,7 @@ const state = {
   addresses: { origin: blankAddress(), destinations: [blankAddress()] }, quoteForm: null,
   section: false, exploded: false, displayMode: 'edges', transparency: 0,
   mutationReceipt: null, lastDirtySignal: null, lastRibbonSignal: null, sage: null, conflict: false,
-  capabilities: [], catalog: null, alternativeReceipt: null, scenarios: []
+  capabilities: [], catalog: null, alternativeReceipt: null, scenarios: [], evidence: [], evidenceNotice: ''
 };
 
 function blankAddress() { return { name: '', street1: '', street2: '', city: '', state: '', zip: '', country: 'US', residential: false }; }
@@ -1462,6 +1479,7 @@ function renderValidation() {
     }));
     list.append(row);
   }); findings.append(list);
+  renderEvidence(host);
 }
 
 async function newDocument() {
@@ -1475,7 +1493,7 @@ function resetDocumentState() {
   state.alternatives = [defaultCarton()]; state.alternativeIndex = 0; state.maxPackages = 3; state.candidateConfig = null;
   state.quotes = []; state.quoteIndex = 0; state.quoteScenario = null; state.quoteError = ''; state.mutationReceipt = null;
   state.quoteAccounts = []; state.quoteOptions = { delivery_confirmation: null, saturday_delivery: false }; state.quoteAttempts = null;
-  state.scenarios = [];
+  state.scenarios = []; state.evidence = []; state.evidenceNotice = '';
   state.addresses = { origin: blankAddress(), destinations: [blankAddress()] }; state.editor = 'product'; state.review = 'validation';
   state.panel = null;
   state.graphicId = null; state.appearanceTarget = 'product';
@@ -1761,7 +1779,55 @@ async function openCarrierAccount() {
 async function loadQuotes() {
   try { const data = await request(`${docPath()}/quotes`); state.quotes = data.quotes; state.quoteIndex = 0; }
   catch (error) { state.quoteError = `Quote history unavailable: ${error.message}`; }
-  await loadQuoteAttempts(); await loadScenarios();
+  await loadQuoteAttempts(); await loadScenarios(); await loadEvidence();
+}
+
+async function loadEvidence() {
+  if (!state.draft.document || !state.capabilities.includes('research_evidence')) { state.evidence = []; return; }
+  try { const data = await request(`${docPath()}/evidence`); state.evidence = data.evidence; state.evidenceNotice = data.notice; }
+  catch { state.evidence = null; }
+}
+
+function renderEvidence(host) {
+  const records = state.evidence;
+  if (!(records === null || records?.length || state.capabilities.includes('sage_chat_execution'))) return;
+  const group = section(host, `Research evidence (${records?.length ?? 0})`); group.id = 'research-evidence';
+  group.append(element('p', state.evidenceNotice || 'Public-source evidence recorded by Sage is unreviewed until you accept it.', 'notice'));
+  if (records === null) { group.append(element('p', 'Research evidence could not be loaded.', 'warning')); return; }
+  if (!records.length) { group.append(element('p', 'No research evidence recorded. Ask Sage to research carton sizes, material densities or cushioning guidance; it records the sources it reads here.', 'notice')); return; }
+  const list = element('ul', null, 'findings');
+  records.forEach((record, index) => {
+    const n = index + 1, row = element('li', null, `finding evidence ${record.review_status}`);
+    row.append(element('strong', `${n}. ${EVIDENCE_KINDS[record.kind] || 'Evidence'}: ${record.subject}`), element('p', `Claim: ${record.claim}`));
+    row.append(element('p', evidenceFacts(record).join(' | '), 'metadata'));
+    const href = evidenceLink(record.source?.url), source = element('p', null, 'metadata');
+    const link = element(href ? 'a' : 'span', record.source?.title || record.source?.url || 'Source');
+    if (href) { link.href = href; link.target = '_blank'; link.rel = 'noopener noreferrer'; }
+    source.append(document.createTextNode('Source: '), link,
+      document.createTextNode(record.source?.retrieved_at ? ` | retrieved ${String(record.source.retrieved_at).slice(0, 10)} UTC` : ''));
+    row.append(source);
+    const actions = element('div', null, 'actions'), named = (node, label) => { node.title = label; node.setAttribute('aria-label', label); return node; };
+    if (record.review_status === 'unreviewed') {
+      actions.append(named(button('Accept', () => reviewEvidence(record, 'accepted')), `Accept evidence ${n}`),
+        named(button('Reject', () => reviewEvidence(record, 'rejected')), `Reject evidence ${n}`));
+    } else actions.append(named(button('Mark unreviewed', () => reviewEvidence(record, 'unreviewed')), `Mark evidence ${n} unreviewed`));
+    actions.append(button(`Remove evidence ${n}`, () => removeEvidence(record), { symbol: 'trash', compact: true }));
+    row.append(actions); list.append(row);
+  });
+  group.append(list);
+}
+
+async function reviewEvidence(record, status) {
+  await working('Saving evidence review...', () => request(`${docPath()}/evidence/${encodeURIComponent(record.id)}/review`, { method: 'PUT', body: { status } }));
+  await loadEvidence(); renderValidation();
+  notify(status === 'accepted' ? `Accepted evidence: ${record.subject}. The design was not changed.`
+    : status === 'rejected' ? `Rejected evidence: ${record.subject}. The design was not changed.` : `Evidence marked unreviewed: ${record.subject}.`);
+}
+
+async function removeEvidence(record) {
+  if (!confirm(`Remove research evidence "${record.subject}"? It cannot be restored; Sage can record it again from a new read.`)) return;
+  await working('Removing research evidence...', () => request(`${docPath()}/evidence/${encodeURIComponent(record.id)}`, { method: 'DELETE' }));
+  await loadEvidence(); renderValidation(); notify(`Removed research evidence: ${record.subject}.`);
 }
 
 async function requestQuotes(refresh = false) {

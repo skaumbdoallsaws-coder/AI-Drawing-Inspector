@@ -233,9 +233,12 @@ def host(tmp_path, monkeypatch):
                 "method": "notifications/initialized", "params": {}})
             assert notification.status_code == 202
             listing = await rpc("tools/list", {})
+            # Public research is on by default (INSPECTORPRO_CODEX_WEB_RESEARCH, as for Documentation); no
+            # research call is made in this offline test.
             assert {tool["name"] for tool in listing["tools"]} == {
                 "inspect_packaging", "validate_packaging", "propose_packaging",
-                "edit_packaging", "undo_packaging", "redo_packaging", "packaging_resources", "estimate_packaging_mass"}
+                "edit_packaging", "undo_packaging", "redo_packaging", "packaging_resources", "estimate_packaging_mass",
+                "search_public_sources", "read_public_source", "record_packaging_evidence"}
             inspected = await call("inspect_packaging", {"expected_revision": 0})
             design = {key: deepcopy(inspected[key])
                       for key in ("name", "product", "quantity", "constraints", "packages")}

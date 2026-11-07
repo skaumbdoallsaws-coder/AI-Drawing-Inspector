@@ -402,8 +402,8 @@ class QuoteOptions(Closed):
         return options
 
 
-class QuoteRequest(Closed):
-    expected_revision: Annotated[int, Field(ge=0, strict=True)]
+class QuoteScenario(Closed):
+    """Everything that defines a rated scenario, independent of revision and refresh."""
     origin: Address
     destinations: Annotated[list[Address], Field(min_length=1, max_length=3)]
     # Future-date rating is refused until the provider documents that rates honor it.
@@ -411,8 +411,6 @@ class QuoteRequest(Closed):
     carrier_accounts: Annotated[list[CarrierAccountId], Field(max_length=10)] = Field(default_factory=list)
     services: Annotated[list[ServiceFilter], Field(max_length=20)] = Field(default_factory=list)
     options: QuoteOptions = Field(default_factory=QuoteOptions)
-    # False reuses a saved quote for the identical scenario; True explicitly requests new rates.
-    refresh: Annotated[bool, Field(strict=True)] = False
 
     @model_validator(mode="after")
     def distinct(self):
@@ -430,3 +428,18 @@ class QuoteRequest(Closed):
                 "carrier_accounts": sorted(self.carrier_accounts),
                 "services": sorted([s.carrier, s.service] for s in self.services),
                 "options": self.options.provider_options()}
+
+
+class QuoteRequest(QuoteScenario):
+    expected_revision: Annotated[int, Field(ge=0, strict=True)]
+    # False reuses a saved quote for the identical scenario; True explicitly requests new rates.
+    refresh: Annotated[bool, Field(strict=True)] = False
+
+
+class ScenarioAuthorization(QuoteScenario):
+    """Session addresses the user lets Sage quote by scenario ID, within a shipment budget and time limit.
+
+    Kept in server memory only; Sage sees the ID and city-level labels, never street addresses.
+    """
+    sage_shipments: Annotated[int, Field(ge=1, le=12, strict=True)]
+    minutes: Annotated[int, Field(ge=5, le=240, strict=True)] = 60

@@ -21,7 +21,8 @@ ALL = {READ, EDIT, QUOTE, ACCOUNT}
 # What each frozen Facility Layout role could do in packaging before the dedicated names existed.
 EXPECTED = {"viewer": {READ}, "editor": ALL, "approver": {READ}, "catalog_curator": set(), "authority_curator": set(),
             "admin": ALL, "layout_admin": ALL, "facility_authority_admin": set()}
-QUOTE_ROUTES = {("POST", "/api/packaging/documents/{doc_id}/quotes"), ("POST", "/api/packaging/documents/{doc_id}/alternatives/{alt_id}/quotes")}
+QUOTE_ROUTES = {("POST", "/api/packaging/documents/{doc_id}/quotes"), ("POST", "/api/packaging/documents/{doc_id}/alternatives/{alt_id}/quotes"),
+                ("POST", "/api/packaging/documents/{doc_id}/scenarios"), ("DELETE", "/api/packaging/documents/{doc_id}/scenarios/{scenario_id}")}
 ACCOUNT_ROUTES = {("PUT", "/api/packaging/account"), ("DELETE", "/api/packaging/account"), ("POST", "/api/packaging/account/carrier-accounts")}
 
 

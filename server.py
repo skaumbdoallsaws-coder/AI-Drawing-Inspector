@@ -1678,6 +1678,7 @@ if os.getenv("INSPECTORPRO_PACKAGING_ENABLED", "").strip().lower() in {"1", "tru
     from ai_inspector.packaging_shipping.admission import PackagingAdmission
     from ai_inspector.packaging_shipping.service import PackagingService
     from ai_inspector.packaging_shipping.credentials import EasyPostCredentialStore, carrier_owner
+    from ai_inspector.packaging_shipping.quoting import QuoteDesk
     _PACKAGING_SERVICE = PackagingService(
         Path(os.getenv("INSPECTORPRO_PACKAGING_ROOT", str(REPO_ROOT / ".runtime" / "packaging")))
     )
@@ -1689,13 +1690,15 @@ if os.getenv("INSPECTORPRO_PACKAGING_ENABLED", "").strip().lower() in {"1", "tru
             _PACKAGING_ACCOUNTS[identity] = EasyPostCredentialStore(
                 _PACKAGING_SERVICE.root / "carrier-credentials", identity, enabled=True)
         return _PACKAGING_ACCOUNTS[identity]
+    # One carrier path for the Rates panel and Sage: same provider lock, quote reuse and audit.
+    _PACKAGING_QUOTES = QuoteDesk(_PACKAGING_SERVICE, credential_factory=_packaging_account)
     app.include_router(create_packaging_router(
         _PACKAGING_SERVICE,
         principal_resolver=_FACILITY_PRINCIPAL_RESOLVER,
         static_root=REPO_ROOT / "static",
         admission=_PACKAGING_ADMISSION,
         sage_enabled=lambda: _codex_packaging_enabled(),
-        credential_factory=_packaging_account,
+        quotes=_PACKAGING_QUOTES,
     ))
 
 
@@ -41509,11 +41512,15 @@ async def agent_chat(
         try:
             prepare_memory = _AGENT_MEMORY_ENVELOPE_PREPARER.get()
             memory_context = prepare_memory({}) if prepare_memory else ""
+            # Quote tools only with the host's QuoteDesk for this same service; otherwise Sage gets none.
+            packaging_quotes = globals().get("_PACKAGING_QUOTES")
+            if getattr(packaging_quotes, "service", None) is not _PACKAGING_SERVICE:
+                packaging_quotes = None
             return await inspect_packaging(request, _PACKAGING_SERVICE, _PACKAGING_ADMISSION,
                 principal_resolver=lambda: _FACILITY_LAYOUT_HOST.resolve_principal(http_request),
                 normalized=normalize_agent_context(request.inspection_context or request.context or {})["flat"],
                 text_sink=_AGENT_CHAT_STREAM_SINK.get(), status_sink=_AGENT_CHAT_STATUS_SINK.get(),
-                memory_context=memory_context)
+                memory_context=memory_context, quotes=packaging_quotes)
         except PilotError as exc:
             error = {"code": exc.code, "message": str(exc), "retryable": False}
             if isinstance(getattr(exc, "packaging_result", None), dict):

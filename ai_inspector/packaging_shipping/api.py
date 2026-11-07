@@ -14,13 +14,14 @@ from starlette.concurrency import run_in_threadpool
 
 from .geometry import assess, digest
 from .admission import PackagingAdmission
-from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave, BaselineSelect
+from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave, BaselineSelect, ScenarioAuthorization
+from .quoting import QuoteDesk
 from .comparison import compare as compare_designs, scenarios as quoted_scenarios
 from .catalog import catalog
 from .permissions import ACCOUNT, EDIT, QUOTE, READ, granted, permits
 from .packing import propose
 from .destinations import RULES as DESTINATION_RULES
-from .rating import EasyPostRating, FEES_NOTICE, PRICE_BASES, SHIP_DATE_BASIS
+from .rating import FEES_NOTICE, PRICE_BASES, SHIP_DATE_BASIS
 from .service import PackagingError, PackagingService
 from .sources import MAX_BYTES, GlbRuntime, glb_runtime, import_glb_isolated
 from .step_import import StepRuntime, StepImportError, import_step
@@ -59,43 +60,26 @@ class PackagingRoute(APIRoute):
 
 def create_router(service: PackagingService, *, principal_resolver, static_root: Path, rating=None,
                   admission: PackagingAdmission | None = None, sage_enabled: Callable[[], bool] | None = None,
-                  credential_factory=None, step_runtime=None, source_runtime=None):
+                  credential_factory=None, step_runtime=None, source_runtime=None, quotes: QuoteDesk | None = None):
     if admission is not None and (not isinstance(admission, PackagingAdmission) or admission.service is not service):
         raise ValueError("Packaging admission must use this router's service instance.")
+    if quotes is not None and (not isinstance(quotes, QuoteDesk) or quotes.service is not service
+                               or rating is not None or credential_factory is not None):
+        raise ValueError("Give the rating provider and credential store to the QuoteDesk, which must use this router's service.")
     if sage_enabled is not None and not callable(sage_enabled):
         raise ValueError("sage_enabled must be a host callback.")
     source_runtime = glb_runtime() if source_runtime is None else source_runtime
     if not isinstance(source_runtime, GlbRuntime):
         raise TypeError('A host-configured GlbRuntime is required')
     router = APIRouter(route_class=PackagingRoute)
-    provider = rating or EasyPostRating()
+    # One provider path, lock and audit for the Rates panel and Sage (the host passes the same desk to both).
+    desk = quotes or QuoteDesk(service, rating=rating, credential_factory=credential_factory)
     job_lock = asyncio.Lock()
-    quote_lock = asyncio.Lock()
 
     def geometry_runtime():
         return step_runtime or StepRuntime.from_environment()
 
-    def account(resolved):
-        if credential_factory is None:
-            raise PackagingError("carrier_secure_store_disabled", "This host has not enabled local carrier account storage.", 403)
-        return credential_factory(resolved)
-
-    def current_provider(resolved):
-        """A fresh provider for each request when a credential store is configured, never cached."""
-        if credential_factory is None:
-            return provider, None
-        credential = account(resolved).resolve()
-        return EasyPostRating(key=credential.api_key.get_secret_value(), account_ref=credential.account_ref), credential
-
-    def current_account(resolved):
-        """(account_ref, known) for staleness; unknown when the store cannot be read."""
-        if credential_factory is None:
-            return provider.account_ref, True
-        try:
-            status = account(resolved).status()
-        except PackagingError:
-            return None, False
-        return status.get("account_ref"), status.get("source") != "unavailable"
+    account, current_account = desk.account, desk.current_account
 
     def principal(request: Request):
         if request.url.hostname not in {"127.0.0.1", "localhost", "::1", "testserver"}:
@@ -157,9 +141,9 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         except StepImportError:
             step = False
         return {"workflow": "packaging_shipping", "pilot": True,
-                "rating": account(resolved).status() if credential_factory else provider.status(),
+                "rating": desk.status(resolved),
                 "permissions": granted(resolved),
-                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
+                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
                 "quote_rules": {"destinations": DESTINATION_RULES, "ship_date": SHIP_DATE_BASIS, "fees": FEES_NOTICE,
                                 "price_bases": PRICE_BASES},
                 "unsupported": ["verified_cad_material_mass", "arbitrary_contour_cutouts", "transport_certification", "freight", "future_ship_dates"] + ([] if step else ["step_runtime_not_configured"]) + ([] if sage else ["sage_chat_execution"])}
@@ -298,58 +282,39 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
     def quote_attempts(doc_id: str, s=Depends(scope)):
         return service.quote_attempts(s, doc_id) | {"fees_notice": FEES_NOTICE}
 
-    async def priced(s, doc_id, revision, design, assessment, body, resolved, find, save):
-        """Reuse an identical saved quote unless refresh is asked for; otherwise rate and audit the attempt."""
-        selected, credential = current_provider(resolved)
-        if credential:
-            credential.check()
-        selected.preflight(design, assessment, body)
-        fingerprint = selected.fingerprint(assessment, body)
-        if not body.refresh:
-            # The identical scenario was already priced for this design and account: no new shipments.
-            saved = find(fingerprint)
-            if saved is not None:
-                return {**saved, "reused": True}
-        attempt_id = service.begin_quote_attempt(s, doc_id, revision, fingerprint)
-        counts, outcome, error_code, quote_id = {}, "failed", None, None
-        try:
-            result = await selected.quote(design, assessment, body, counts)
-            if credential:
-                credential.check()
-            saved = save(result)
-            outcome, quote_id = "saved", saved["id"]
-            return {**saved, "reused": False}
-        except PackagingError as exc:
-            error_code = exc.code
-            raise
-        except asyncio.CancelledError:
-            outcome = "cancelled"
-            raise
-        finally:
-            service.finish_quote_attempt(s, doc_id, attempt_id, outcome, counts, error_code=error_code, quote_id=quote_id)
-
     @router.post("/api/packaging/documents/{doc_id}/quotes")
     async def quote(doc_id: str, body: QuoteRequest, s=Depends(quote_scope), resolved=Depends(principal)):
-        if quote_lock.locked():
-            raise PackagingError("quote_in_progress", "A quote request is already running. Wait before retrying.", 429)
+        desk.busy()
         current = service.get(s, doc_id, body.expected_revision)
-        async with quote_lock:
-            revision = body.expected_revision
-            return await priced(s, doc_id, revision, Design.model_validate(current["design"]), current["assessment"], body, resolved,
+        revision = body.expected_revision
+        return await desk.price(s, doc_id, revision, Design.model_validate(current["design"]), current["assessment"], body, resolved,
                                 lambda fingerprint: service.find_quote(s, doc_id, revision, fingerprint),
                                 lambda result: service.save_quotes(s, doc_id, revision, result))
 
     @router.post("/api/packaging/documents/{doc_id}/alternatives/{alt_id}/quotes")
     async def quote_alternative(doc_id: str, alt_id: str, body: QuoteRequest, s=Depends(quote_scope), resolved=Depends(principal)):
-        if quote_lock.locked():
-            raise PackagingError("quote_in_progress", "A quote request is already running. Wait before retrying.", 429)
+        desk.busy()
         service.get(s, doc_id, body.expected_revision)
         design = service.alternative_design(s, doc_id, alt_id)
-        async with quote_lock:
-            revision = body.expected_revision
-            return await priced(s, doc_id, revision, design, await asyncio.to_thread(assess, design), body, resolved,
+        revision = body.expected_revision
+        return await desk.price(s, doc_id, revision, design, await asyncio.to_thread(assess, design), body, resolved,
                                 lambda fingerprint: service.find_alternative_quote(s, doc_id, alt_id, fingerprint),
                                 lambda result: service.save_alternative_quote(s, doc_id, alt_id, revision, result))
+
+    @router.post("/api/packaging/documents/{doc_id}/scenarios")
+    def authorize_scenario(doc_id: str, body: ScenarioAuthorization, s=Depends(quote_scope), resolved=Depends(principal)):
+        """Lets Sage quote these session addresses by ID. Held in memory only; nothing is sent until Sage quotes."""
+        service.get(s, doc_id)
+        return desk.scenarios.create(s, doc_id, resolved.principal_id, body)
+
+    @router.get("/api/packaging/documents/{doc_id}/scenarios")
+    def authorized_scenarios(doc_id: str, s=Depends(scope), resolved=Depends(principal)):
+        service.get(s, doc_id)
+        return {"scenarios": desk.scenarios.list(s, doc_id, resolved.principal_id)}
+
+    @router.delete("/api/packaging/documents/{doc_id}/scenarios/{scenario_id}")
+    def revoke_scenario(doc_id: str, scenario_id: str, s=Depends(quote_scope), resolved=Depends(principal)):
+        return desk.scenarios.revoke(s, doc_id, resolved.principal_id, scenario_id)
 
     @router.put("/api/packaging/documents/{doc_id}/comparison/baseline")
     def comparison_baseline(doc_id: str, body: BaselineSelect, s=Depends(scope)):
@@ -378,13 +343,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
     @router.post("/api/packaging/account/carrier-accounts")
     async def carrier_accounts(_=Depends(account_scope), resolved=Depends(principal)):
         # POST: this contacts the provider, so it needs the packaging client header and account rights.
-        if quote_lock.locked():
-            raise PackagingError("quote_in_progress", "A provider request is already running. Wait before retrying.", 429)
-        async with quote_lock:
-            selected, credential = current_provider(resolved)
-            if credential:
-                credential.check()
-            return await selected.carrier_accounts()
+        return await desk.carrier_accounts(resolved)
 
     @router.get("/api/packaging/documents/{doc_id}/report.pdf")
     def report(doc_id: str, revision: int, s=Depends(scope)):

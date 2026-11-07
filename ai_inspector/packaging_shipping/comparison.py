@@ -120,10 +120,10 @@ def _place(destination):
     return f"{destination['city']}, {destination['state']} {destination['zip']}"
 
 
-def compare(baseline_ref, candidates, quotes, scenario_hash, account_ref, service=None):
+def compare(baseline_ref, candidates, quotes, scenario_hash, account_ref, service=None, place=_place):
     """candidates: [{"ref", "name", "design", "assessment"}] in display order, including the baseline.
     quotes: {fingerprint: saved quote}. service: (carrier, service, account_id, currency) or None for the
-    baseline's cheapest common service."""
+    baseline's cheapest common service. place labels destinations in the claim text (Sage omits ZIP codes)."""
     baseline = next(c for c in candidates if c["ref"] == baseline_ref)
 
     def quote_for(candidate):
@@ -197,7 +197,7 @@ def compare(baseline_ref, candidates, quotes, scenario_hash, account_ref, servic
         if row["total"] is not None and base_row["total"] is not None:
             row["total_difference"] = str(Decimal(row["total"]) - Decimal(base_row["total"]))
         if production and difference < 0:
-            places = [_place(d["destination"]) for d in row["destinations"]]
+            places = [place(d["destination"]) for d in row["destinations"]]
             row["claim"] = {
                 "baseline": base_row["name"], "baseline_ref": base_row["ref"], "baseline_quoted_at": base_row["quote"]["quoted_at"],
                 "quoted_at": row["quote"]["quoted_at"], "account_ref": account_ref, **_service(service),

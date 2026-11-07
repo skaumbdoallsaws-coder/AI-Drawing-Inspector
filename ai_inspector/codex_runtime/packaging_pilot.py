@@ -48,6 +48,25 @@ certify cushioning, stacking, stability, support, removal, dangerous-goods eligi
 Answer concisely: what changed, what the validator confirmed, and any inputs still needed. Never claim shipping
 rates, protection certification, optimal cost or an optimal arrangement without supporting tool results.
 """
+NO_QUOTES = ("Arbitrary product-shaped cavities, mixed products, arbitrary rotations, web research, label purchase and carrier\n"
+             "quotes are not available through these tools yet. Rate requests use the manual Rates panel.\n")
+QUOTES = """Arbitrary product-shaped cavities, mixed products, arbitrary rotations, web research and label purchase are not
+available. Carrier quotes: packaging_quote_scenarios lists the quote scenarios the user authorized in the Rates panel, by
+ID with city and state only; never ask for, guess or repeat street addresses. quote_packaging prices the saved design, or a
+saved alternative_id, for one authorized scenario through the host's carrier provider. Pass the design_hash from the latest
+inspection or alternatives listing. Keep refresh false to reuse a saved quote; new rates create provider shipments within
+the scenario's budget and can be billed, and nothing buys postage or labels. If no scenario is authorized or its budget is
+used up, ask the user to authorize one in the Rates panel. compare_packaging reads saved quotes only: report its
+differences, quote dates, mode and service as given, never estimated or percentage savings, and never call test-mode
+prices live carrier prices. A design is comparable only when compare_packaging marks it eligible.
+"""
+assert NO_QUOTES in INSTRUCTIONS
+
+
+def instructions_for(gateway):
+    """Quote guidance only when this turn's gateway exposes the quote tools."""
+    names = {spec["name"] for spec in gateway.specs}
+    return INSTRUCTIONS.replace(NO_QUOTES, QUOTES) if "packaging_quote_scenarios" in names else INSTRUCTIONS
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}")
 
 
@@ -73,9 +92,11 @@ def _evidence(gateway, *, settings, effort, runtime=None):
         and type(row["validation"].get("revision")) is int
         and row["validation"]["revision"] == revision
         for row in receipts)
+    external = [row["external"] for row in receipts if row.get("external")]
     return {"documentId": binding["document_id"], "revision": revision,
             "initialRevision": binding["initial_revision"], "selectionId": binding["selection"],
             "verifiedToolCalls": receipts, "mutations": mutations, "mutationOutcome": outcome,
+            **({"externalRequests": external} if external else {}),
             "checkedPackaging": checked,
             "authMode": settings.auth_mode, "apiFallback": False, "reasoningEffort": effort,
             "runtimeTimeline": getattr(runtime, "timeline", [])}
@@ -100,7 +121,7 @@ async def _drain(task):
 
 async def inspect_packaging(request, service, admission, *, principal_resolver, normalized,
                             text_sink=None, status_sink=None, settings=None, transport_factory=AppServer,
-                            memory_context=""):
+                            memory_context="", quotes=None):
     """Execute one admitted turn; a revoked editor cancels inference and drains writes."""
     settings = settings or PilotSettings.from_environment()
     effort = reasoning_effort(getattr(request, "reasoning_effort", None))
@@ -140,7 +161,7 @@ async def inspect_packaging(request, service, admission, *, principal_resolver, 
     try:
         gateway = create_packaging_gateway(service, current_context=turn.current_context, turn_id=turn_id,
             mutation_guard=turn.mutation_guard, max_calls=settings.max_calls,
-            timeout=settings.timeout_seconds, status_sink=progress)
+            timeout=settings.timeout_seconds, status_sink=progress, quotes=quotes)
         key, subscription = await prepare_credentials(settings)
         gateway.check()
         if subscription:
@@ -172,7 +193,7 @@ async def inspect_packaging(request, service, admission, *, principal_resolver, 
             "currentRequest": request.message}, ensure_ascii=True)
         watcher = asyncio.create_task(watch())
         work = asyncio.create_task(run_gateway_turn(settings=settings, gateway=gateway, journal=journal,
-            binding=binding, message=message, instructions=INSTRUCTIONS +
+            binding=binding, message=message, instructions=instructions_for(gateway) +
                 f"\nBudget: {settings.max_calls} tool calls, {settings.timeout_seconds} seconds.\n",
             effort=effort, api_key=key, subscription=subscription, text_sink=text_sink, status_sink=progress,
             transport_factory=transport_factory, on_phase=phase))

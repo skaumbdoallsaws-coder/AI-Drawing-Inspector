@@ -59,6 +59,25 @@ def test_admitted_packaging_precedes_legacy_and_receives_sinks(route, monkeypatc
         server._AGENT_CHAT_STREAM_SINK.reset(token)
 
 
+def test_host_gives_sage_its_quote_desk_only_for_the_same_service(route, monkeypatch):
+    from ai_inspector.packaging_shipping.quoting import QuoteDesk
+    request, service, _, _ = route
+    seen = []
+
+    async def run(req, saved, admitted, **kw):
+        seen.append(kw.get("quotes"))
+        return {"response": "Checked", "tool_source": "codex_packaging"}
+    monkeypatch.setattr(packaging_pilot, "inspect_packaging", run)
+    desk = QuoteDesk(service)
+    monkeypatch.setattr(server, "_PACKAGING_QUOTES", desk, raising=False)
+    asyncio.run(server.agent_chat(request, None))
+    monkeypatch.setattr(server, "_PACKAGING_QUOTES", QuoteDesk(PackagingService(service.root.parent / "other")), raising=False)
+    asyncio.run(server.agent_chat(request, None))
+    monkeypatch.delattr(server, "_PACKAGING_QUOTES", raising=False)
+    asyncio.run(server.agent_chat(request, None))
+    assert seen[0] is desk and seen[1:] == [None, None]
+
+
 def test_disabled_packaging_never_falls_back(route, monkeypatch):
     monkeypatch.setenv("INSPECTORPRO_CODEX_PACKAGING", "0")
     monkeypatch.setattr(server, "_agent_chat_impl", lambda *_: pytest.fail("No legacy fallback"))

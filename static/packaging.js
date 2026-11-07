@@ -143,6 +143,15 @@ export function quoteBody(revision, addresses, accounts, options, refresh) {
   return { expected_revision: revision, ...addresses, carrier_accounts: [...accounts], options: chosen, refresh: refresh === true };
 }
 
+// The scenario a user lets Sage quote: the Rates panel body without revision or refresh, plus a budget and time limit.
+export function scenarioBody(addresses, accounts, options, shipments, minutes) {
+  const { expected_revision: _revision, refresh: _refresh, ...scenario } = quoteBody(0, addresses, accounts, options, false);
+  return { ...scenario, sage_shipments: shipments, minutes };
+}
+
+// What Sage sees of an address: never a name, street or ZIP code.
+export const sagePlace = address => `${address.city}, ${address.state}${address.residential ? ' (residential)' : ''}`;
+
 export function messageSummary(messages) {
   const seen = new Set(), lines = [];
   for (const m of messages || []) {
@@ -401,7 +410,7 @@ const state = {
   addresses: { origin: blankAddress(), destinations: [blankAddress()] }, quoteForm: null,
   section: false, exploded: false, displayMode: 'edges', transparency: 0,
   mutationReceipt: null, lastDirtySignal: null, lastRibbonSignal: null, sage: null, conflict: false,
-  capabilities: [], catalog: null, alternativeReceipt: null
+  capabilities: [], catalog: null, alternativeReceipt: null, scenarios: []
 };
 
 function blankAddress() { return { name: '', street1: '', street2: '', city: '', state: '', zip: '', country: 'US', residential: false }; }
@@ -1466,6 +1475,7 @@ function resetDocumentState() {
   state.alternatives = [defaultCarton()]; state.alternativeIndex = 0; state.maxPackages = 3; state.candidateConfig = null;
   state.quotes = []; state.quoteIndex = 0; state.quoteScenario = null; state.quoteError = ''; state.mutationReceipt = null;
   state.quoteAccounts = []; state.quoteOptions = { delivery_confirmation: null, saturday_delivery: false }; state.quoteAttempts = null;
+  state.scenarios = [];
   state.addresses = { origin: blankAddress(), destinations: [blankAddress()] }; state.editor = 'product'; state.review = 'validation';
   state.panel = null;
   state.graphicId = null; state.appearanceTarget = 'product';
@@ -1638,7 +1648,73 @@ function renderRates() {
   form.addEventListener('submit', event => { event.preventDefault(); invoke(() => requestQuotes(false)); });
   const addressChanged = () => { updateHeader(); updateFreshness(); };
   form.addEventListener('input', addressChanged); form.addEventListener('change', addressChanged); host.append(form);
+  if (sageQuoting() && state.draft.document) renderScenarios(host);
   host.append(element('div', null, 'review-section')); host.lastChild.id = 'quote-results'; renderQuoteResults(); updateHeader();
+}
+
+const sageQuoting = () => state.capabilities.includes('sage_quote_scenarios') && state.capabilities.includes('sage_chat_execution');
+
+async function loadScenarios() {
+  if (!sageQuoting() || !state.draft.document) { state.scenarios = []; return; }
+  try { state.scenarios = (await request(`${docPath()}/scenarios`)).scenarios; }
+  catch { state.scenarios = null; }
+}
+
+function renderScenarios(host) {
+  const box = element('div', null, 'review-section'); box.id = 'sage-scenarios';
+  box.append(element('h3', 'Sage quoting'));
+  box.append(element('p', 'Sage can request rates for these addresses only after you allow it here. Sage sees a scenario ID with city, state and residential status, never names, streets or ZIP codes. The addresses stay in server memory for this session only.', 'notice'));
+  if (state.scenarios === null) box.append(element('p', 'Sage quote scenarios could not be loaded.', 'warning'));
+  for (const s of state.scenarios || []) {
+    const row = element('div', null, 'actions');
+    row.append(element('p', `${s.id}: ${s.origin} to ${s.destinations.join('; ')} | ${s.shipments_remaining} of ${s.sage_shipments} provider shipment(s) left | expires in ${Math.ceil(s.expires_in_s / 60)} min`, 'metadata'),
+      button(`Revoke ${s.id}`, () => revokeScenario(s.id), { symbol: 'trash', compact: true }));
+    box.append(row);
+  }
+  const actions = element('div', null, 'actions');
+  actions.append(button('Allow Sage to quote these addresses', openSageScenario, { symbol: 'lock-simple', disabled: hasDraft() }),
+    button('Refresh quotes and Sage scenarios', async () => {
+      await working('Refreshing quotes...', loadQuotes); state.addresses = captureAddresses(); renderRates();
+      notify('Saved quotes and Sage scenarios refreshed. No provider request was made.');
+    }, { symbol: 'arrow-clockwise', compact: true }));
+  box.append(actions); host.append(box);
+}
+
+async function openSageScenario() {
+  if (!state.quoteForm.reportValidity()) return;
+  flushEditor();
+  if (!state.draft.document || state.draft.dirty) { render(); throw new Error('Save the document before allowing Sage to quote.'); }
+  if (!state.provider?.configured) throw new Error('Carrier provider is not configured. Sage cannot request rates.');
+  state.addresses = captureAddresses(); state.quoteOptions = captureQuoteOptions();
+  const addresses = state.addresses, accounts = [...state.quoteAccounts], options = { ...state.quoteOptions };
+  const perQuote = state.draft.document.design.packages.length * addresses.destinations.length;
+  resourceDialog('Allow Sage to quote', (body, dialog) => {
+    body.append(element('p', 'Sage will see only:', 'metadata'));
+    const seen = element('ul'); seen.append(element('li', `Origin: ${sagePlace(addresses.origin)}`));
+    addresses.destinations.forEach((d, i) => seen.append(element('li', `Destination ${i + 1}: ${sagePlace(d)}`)));
+    body.append(seen, element('p', `Each new quote sends these full addresses and the saved package to the carrier provider and creates ${perQuote} provider shipment(s) for rating, one per package and destination. Production rating can be billed (see Quote rules). A saved quote for the same design and scenario is reused without a new request. Sage cannot buy postage or labels.`, 'notice'));
+    const form = element('form', null, 'form-grid'); form.addEventListener('submit', event => event.preventDefault());
+    const budget = field(form, 'Provider shipments Sage may create', 'sage_shipments', String(Math.min(12, Math.max(1, perQuote))), { type: 'number', min: 1, max: 12, step: 1, required: true });
+    const minutes = field(form, 'Allow for minutes', 'sage_minutes', '60', { type: 'number', min: 5, max: 240, step: 1, required: true });
+    const failure = element('p', '', 'error'); failure.setAttribute('role', 'alert');
+    const actions = element('div', null, 'actions');
+    actions.append(button('Allow Sage', async () => {
+      if (!form.reportValidity()) return;
+      failure.textContent = '';
+      try {
+        const created = await working('Authorizing Sage quotes...', () => request(`${docPath()}/scenarios`, { method: 'POST',
+          body: scenarioBody(addresses, accounts, options, Number(budget.value), Number(minutes.value)) }));
+        dialog.close(); await loadScenarios(); renderRates();
+        notify(`Sage may quote scenario ${created.id}: up to ${created.sage_shipments} provider shipment(s) for ${Math.round(created.expires_in_s / 60)} min. Nothing was sent yet.`);
+      } catch (error) { failure.textContent = error.message; }
+    }, { primary: true }), button('Cancel', () => dialog.close()));
+    form.append(actions, failure); body.append(form);
+  });
+}
+
+async function revokeScenario(id) {
+  await working('Revoking Sage quote scenario...', () => request(`${docPath()}/scenarios/${encodeURIComponent(id)}`, { method: 'DELETE' }));
+  await loadScenarios(); state.addresses = captureAddresses(); renderRates(); notify(`Sage can no longer quote scenario ${id}.`);
 }
 
 async function refreshProvider() {
@@ -1685,7 +1761,7 @@ async function openCarrierAccount() {
 async function loadQuotes() {
   try { const data = await request(`${docPath()}/quotes`); state.quotes = data.quotes; state.quoteIndex = 0; }
   catch (error) { state.quoteError = `Quote history unavailable: ${error.message}`; }
-  await loadQuoteAttempts();
+  await loadQuoteAttempts(); await loadScenarios();
 }
 
 async function requestQuotes(refresh = false) {

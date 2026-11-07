@@ -100,8 +100,16 @@ Proposals replace existing packages, including pads and allowance evidence. The
 result explicitly warns about this; it is not a protective-packaging design or
 transport certification. Selecting a candidate is not an approval or a save.
 Saving it requires a separate authorized `edit_packaging` call and current
-revision. There are no create/import/quote/purchase tools. Resource discovery is scope-bound,
+revision. There are no create/import/purchase tools. Resource discovery is scope-bound,
 and report links are generated for the admitted document revision only.
+
+Quote tools exist only when the host passes its `QuoteDesk` (the same object the Rates panel
+routes use) to the turn. `packaging_quote_scenarios` and `compare_packaging` read scenario
+labels and saved quotes; `quote_packaging` also needs `packaging.quote` and a scenario the user
+authorized in the Rates panel for this document. Sage passes a scenario ID, never an address;
+results show city, state and residential status only. Each provider request is reserved from
+the scenario's shipment budget first, recorded in the attempt audit and in the turn receipt as
+an `external` request, and is not reversible by Undo.
 
 ## Required Host Admission
 

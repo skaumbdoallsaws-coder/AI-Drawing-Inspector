@@ -53,7 +53,7 @@ Implemented since the baseline below:
 - Current-user Windows DPAPI carrier account storage and manual account endpoints. Saved credentials, replacement and removal are distinct from environment fallback; no secrets enter Sage tools or document JSON. Live carrier credentials are still absent.
 - Malformed, oversized and excessively nested editor transitions invalidate the old admission rather than leaving Sage authorized to edit a previous selection. Non-binary mutation body limits apply regardless of JSON content type.
 - Desktop observation includes the actual packaging iframe, unapplied fields, selected files, requests, dialogs and Sage admission/reconciliation. This is a fail-closed guard, not native draft recovery: an open packaging workspace must be exited before native close/reload/restart is allowed.
-- Sage can discover scoped sources/catalog/alternatives, calculate a documented STEP density estimate, edit all supported document fields and provide a revision-specific PDF download link. File upload and carrier requests remain manual UI operations; no shell, account-secret or shipment-purchase tool is exposed.
+- Sage can discover scoped sources/catalog/alternatives, calculate a documented STEP density estimate, edit all supported document fields and provide a revision-specific PDF download link. File upload and carrier requests remain manual UI operations; no shell, account-secret or shipment-purchase tool is exposed. (Completion branch, mock-verified only: Sage can request quotes for scenarios the user authorizes in the Rates panel; see `packaging-shipping-completion-checklist.md`.)
 - Expanded draft PDF with density/exclusions, carton provenance, net insert/pocket details, graphics schedule, findings and revision-bound quote snapshots.
 
 ### Real Acceptance
@@ -73,7 +73,7 @@ Implemented since the baseline below:
 - Full native Electron acceptance, recoverable packaging workspace integration and dependency/license deployment checks. Lifecycle contract tests do not substitute for launching an isolated release snapshot. No change to the production desktop profile, Claude's copy, or saved facility layouts.
 - The new observation guard covers normal application mode and the facility-attached managed runtime. The legacy managed runtime's unattached transition path does not invoke that observer. Do not enable packaging in that mode until its transition contract is extended and tested.
 - Direct selected-assembly/configuration integration, manufacturing-ready packing/removal instructions, additional stock-carton records and storage retention/quota policy are still broader release work. No-contact regions are implemented on the completion branch.
-- Sage does not yet initiate carrier requests or upload files. It uses already authorized uploaded sources and the same validated editing service.
+- Sage does not yet initiate carrier requests or upload files. It uses already authorized uploaded sources and the same validated editing service. (Completion branch: a scenario-bound quote tool exists and has passed mock tests only.)
 - Complex contour inserts, mixed products, cushioning simulation, dielines, SolidCraft, pallets/crates/freight and shipment purchase remain outside this increment.
 
 ### Optional STEP Runtime

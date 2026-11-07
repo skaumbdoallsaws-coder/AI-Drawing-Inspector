@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from ai_inspector.facility_layout.authorization import local_facility_principal
 from ai_inspector.packaging_shipping import api as packaging_api
+from ai_inspector.packaging_shipping import quoting as packaging_quoting
 from ai_inspector.packaging_shipping.api import create_router
 from ai_inspector.packaging_shipping.geometry import assess
 from ai_inspector.packaging_shipping.models import QuoteRequest
@@ -293,7 +294,7 @@ def store_app(tmp_path, monkeypatch, handle):
     from ai_inspector.packaging_shipping.credentials import EasyPostCredentialStore
     monkeypatch.delenv("INSPECTORPRO_PACKAGING_EASYPOST_KEY", raising=False)
     MockedRating.transport = httpx.MockTransport(handle)
-    monkeypatch.setattr(packaging_api, "EasyPostRating", MockedRating)
+    monkeypatch.setattr(packaging_quoting, "EasyPostRating", MockedRating)
     cipher = Fernet(Fernet.generate_key())
     store = EasyPostCredentialStore(tmp_path / "account", "test-owner", enabled=True,
         protect=lambda raw, entropy: cipher.encrypt(raw), unprotect=lambda raw, entropy: cipher.decrypt(raw))

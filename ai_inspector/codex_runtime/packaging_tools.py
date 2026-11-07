@@ -16,17 +16,20 @@ import time
 from typing import Annotated, Callable, ContextManager, Literal
 
 from anyio import CancelScope
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, model_validator
 
 from ai_inspector.facility_layout.authorization import FacilityPrincipal
+from ai_inspector.packaging_shipping.comparison import compare as compare_designs, scenarios as quoted_scenarios
 from ai_inspector.packaging_shipping.geometry import assess, digest
 from ai_inspector.packaging_shipping.models import (
     Closed, Constraints, Design, Edit, Identity, Package, PackingRequest,
-    Product, RevisionCommand,
+    Product, ProviderName, RevisionCommand,
     DensityRequest, Dimensions, MaterialDensity, Carton,
 )
 from ai_inspector.packaging_shipping.packing import propose
-from ai_inspector.packaging_shipping.permissions import EDIT, READ, permits
+from ai_inspector.packaging_shipping.permissions import EDIT, QUOTE, READ, permits
+from ai_inspector.packaging_shipping.quoting import QuoteDesk, place
+from ai_inspector.packaging_shipping.rating import FEES_NOTICE
 from ai_inspector.packaging_shipping.service import PackagingError, PackagingService
 from .policy import PilotError
 
@@ -68,6 +71,25 @@ _MESSAGES = {
     "cad_volume_unavailable": "A density estimate requires closed-solid STEP volume.",
     "mass_out_of_range": "The calculated product mass exceeds the supported packaging range. Review source units and density.",
     "image_not_found": "Artwork is unavailable in the admitted workspace.",
+    "scenario_not_found": ("No quote scenario with this ID is authorized for this user and document; it may have expired or "
+                           "been revoked. Ask the user to authorize one in the Rates panel."),
+    "scenario_budget_exhausted": ("This quote needs more provider shipments than the scenario has left. Ask the user to "
+                                  "authorize a new scenario in the Rates panel."),
+    "quote_design_changed": "The design hash does not match the design to quote. Inspect or list alternatives again first.",
+    "quote_in_progress": "Another quote request is running. Wait for it before retrying once.",
+    "provider_not_configured": "Carrier rating is not configured on this host. The user can add a carrier account in the Rates panel.",
+    "carrier_secure_store_disabled": "This host has not enabled carrier account storage.",
+    "carrier_secure_store_unavailable": "The carrier account store is unavailable on this computer.",
+    "carrier_credentials_unavailable": "The carrier account could not be read. Ask the user to check it in the Rates panel.",
+    "carrier_credentials_invalid": "The carrier rejected the configured account. Ask the user to check it in the Rates panel.",
+    "carrier_credentials_changed": "The carrier account changed during the request. No quote was saved.",
+    "package_not_rate_ready": "Validation reports errors, so this design cannot be rated.",
+    "quote_budget_exceeded": "At most 12 package/destination combinations can be quoted per request.",
+    "quote_timeout": "Rating exceeded its time budget. No quote was saved; some provider shipments may already exist.",
+    "carrier_unavailable": "Carrier rates could not be verified. No quote was saved; some provider shipments may already exist.",
+    "carrier_request_failed": "The carrier provider refused the request. No quote was saved.",
+    "carrier_response_invalid": "The carrier provider returned an unusable response. No quote was saved.",
+    "alternative_not_found": "The saved alternative is unavailable.",
 }
 
 
@@ -350,6 +372,223 @@ class _MassSuccess(Closed):
     data: MassEstimate
 
 
+ScenarioId = Annotated[str, Field(pattern=r"^scn_[a-f0-9]{24}$")]
+Money = Annotated[str, Field(max_length=32, pattern=r"^-?\d{1,12}(\.\d{1,8})?$")]
+Label = Annotated[str, Field(min_length=1, max_length=140)]
+Stamp = Annotated[str, Field(min_length=10, max_length=40)]
+Currency = Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
+ProviderLabel = Annotated[str, Field(max_length=100)]
+QuoteMode = Literal["test", "production"]
+
+
+class ScenarioArguments(ReadArguments):
+    pass
+
+
+class QuoteArguments(ReadArguments):
+    scenario_id: ScenarioId
+    alternative_id: Identity | None = None
+    expected_design_hash: Hash
+    refresh: Annotated[bool, Field(strict=True)] = False
+
+
+class ServicePick(Closed):
+    carrier: ProviderName
+    service: ProviderName
+    account_id: Annotated[str, Field(max_length=100)] = ""
+    currency: Currency
+
+
+class CompareArguments(ReadArguments):
+    scenario_id: ScenarioId | None = None
+    scenario_hash: Hash | None = None
+    service: ServicePick | None = None
+
+    @model_validator(mode="after")
+    def one_scenario(self):
+        if (self.scenario_id is None) == (self.scenario_hash is None):
+            raise ValueError("Give scenario_id or scenario_hash.")
+        return self
+
+
+class AuthorizedScenario(Closed):
+    id: ScenarioId
+    scenario_hash: Hash
+    origin: Label
+    destinations: Annotated[list[Label], Field(min_length=1, max_length=3)]
+    sage_shipments: Annotated[int, Field(ge=1, le=12)]
+    shipments_remaining: Annotated[int, Field(ge=0, le=12)]
+    expires_in_s: Count
+
+
+class QuotedScenario(Closed):
+    scenario_hash: Hash
+    destinations: Annotated[list[Label], Field(max_length=3)]
+    quoted_at: Stamp
+    modes: Annotated[list[QuoteMode], Field(max_length=2)]
+    quotes: Count
+    current_account: bool
+
+
+class Scenarios(ResultBase):
+    authorized: Annotated[list[AuthorizedScenario], Field(max_length=8)]
+    quoted: Annotated[list[QuotedScenario], Field(max_length=10)]
+    can_quote: bool
+    notice: str = ("Scenario IDs stand for addresses the user entered in the Rates panel; only city, state and residential "
+                   "status are shown. quote_packaging contacts the carrier provider within a scenario's shipment budget and "
+                   "may be billed; compare_packaging reads saved quotes only. Nothing can buy postage or labels.")
+
+
+class QuoteTotal(Closed):
+    carrier: ProviderLabel
+    service: ProviderLabel
+    account_id: ProviderLabel
+    currency: Currency
+    mode: QuoteMode
+    amount: Money
+    list_amount: Money | None
+    retail_amount: Money | None
+    delivery_days: Annotated[int, Field(ge=0, le=365)] | None
+
+
+class QuotedDestination(Closed):
+    destination: Label
+    notes: Annotated[list[Annotated[str, Field(max_length=60)]], Field(max_length=5)]
+    parcels: Annotated[int, Field(ge=0, le=12)]
+    carrier_messages: Count
+    excluded_rates: Count
+    totals: Annotated[list[QuoteTotal], Field(max_length=12)]
+    more_services: Count
+
+
+class QuoteSnapshot(ResultBase):
+    quote_id: Identity
+    quoted_at: Stamp
+    design_ref: Identity
+    design_hash: Hash
+    scenario_id: ScenarioId
+    scenario_hash: Hash
+    account_ref: Annotated[str, Field(max_length=64)] | None
+    mode: QuoteMode | None
+    reused: bool
+    provider_shipments_created: Count
+    shipments_remaining: Count
+    destinations: Annotated[list[QuotedDestination], Field(max_length=3)]
+    fees_notice: Annotated[str, Field(max_length=1000)]
+    notice: str = ("Saved estimates only; no postage or label was bought. Per-service totals are sums of separate parcel "
+                   "estimates, cheapest first. Test-mode prices are not live carrier prices. Use compare_packaging for "
+                   "differences against the baseline.")
+
+
+class ServiceRef(Closed):
+    carrier: ProviderLabel
+    service: ProviderLabel
+    account_id: ProviderLabel
+    currency: Currency
+
+
+class ServiceOption(ServiceRef):
+    baseline_amount: Money
+
+
+class QuoteRef(Closed):
+    id: Identity | None
+    quoted_at: Stamp
+    mode: QuoteMode | None
+
+
+class DestinationAmount(Closed):
+    destination: Label
+    amount: Money
+
+
+class ComparisonRow(Closed):
+    ref: Identity
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+    baseline: bool
+    design_hash: Hash
+    package_count: Count
+    placed_quantity: Count
+    gross_kg: Number | None
+    quote: QuoteRef | None
+    destinations: Annotated[list[DestinationAmount], Field(max_length=3)] | None
+    shipping_total: Money | None
+    materials_usd: Money | None
+    total: Money | None
+    reasons: Annotated[list[Annotated[str, Field(max_length=40)]], Field(max_length=12)]
+    caveats: Annotated[list[Annotated[str, Field(max_length=40)]], Field(max_length=8)]
+    eligible: bool
+    shipping_difference: Money | None
+    total_difference: Money | None
+    claim: Annotated[str, Field(max_length=900)] | None
+
+
+class Comparison(ResultBase):
+    scenario_hash: Hash
+    account_ref: Annotated[str, Field(max_length=64)] | None
+    service: ServiceRef | None
+    services: Annotated[list[ServiceOption], Field(max_length=20)]
+    baseline_ref: Identity
+    baseline_ready: bool
+    rows: Annotated[list[ComparisonRow], Field(max_length=21)]
+    ranking: Annotated[list[Identity], Field(max_length=21)]
+    savings_claimed: bool
+    reasons: dict[str, str]
+    caveats: dict[str, str]
+    notice: str
+
+
+class _ScenariosSuccess(Closed):
+    ok: Literal[True] = True
+    data: Scenarios
+
+
+class _QuoteSuccess(Closed):
+    ok: Literal[True] = True
+    data: QuoteSnapshot
+
+
+class _CompareSuccess(Closed):
+    ok: Literal[True] = True
+    data: Comparison
+
+
+def _quote_view(saved, scenario_id, design_ref, remaining):
+    """A saved quote for Sage: city-level destinations and per-service totals; no address lines or provider IDs."""
+    destinations = []
+    for result in saved["results"]:
+        totals = result["totals"]
+        destinations.append({"destination": place(result["destination"]),
+            "notes": [note["code"] for note in result.get("notes", [])][:5], "parcels": len(result["parcels"]),
+            "carrier_messages": sum(p["carrier_error_count"] for p in result["parcels"]),
+            "excluded_rates": sum(p["excluded_rate_count"] for p in result["parcels"]),
+            "totals": [{key: t[key] for key in ("carrier", "service", "account_id", "currency", "mode", "amount",
+                                                "list_amount", "retail_amount", "delivery_days")} for t in totals[:12]],
+            "more_services": max(0, len(totals) - 12)})
+    return {"quote_id": saved["id"], "quoted_at": saved["quoted_at"], "design_ref": design_ref,
+            "design_hash": saved["design_hash"], "scenario_id": scenario_id, "scenario_hash": saved["scenario_hash"],
+            "account_ref": saved.get("account_ref"), "mode": saved.get("mode"), "reused": saved["reused"],
+            "provider_shipments_created": 0 if saved["reused"] else saved.get("provider_shipments_created", 0),
+            "shipments_remaining": remaining, "destinations": destinations,
+            "fees_notice": saved.get("fees_notice", FEES_NOTICE)}
+
+
+def _comparison_view(result):
+    rows = []
+    for r in result["rows"]:
+        rows.append({key: r[key] for key in ("ref", "name", "baseline", "design_hash", "package_count", "placed_quantity",
+                                            "gross_kg", "quote", "shipping_total", "materials_usd", "total", "reasons",
+                                            "caveats", "eligible", "shipping_difference", "total_difference")} | {
+            "destinations": None if r["destinations"] is None else [
+                {"destination": place(d["destination"]), "amount": d["amount"]} for d in r["destinations"]],
+            "claim": None if r["claim"] is None else r["claim"]["text"]})
+    return {"scenario_hash": result["scenario_hash"], "account_ref": result["account_ref"], "service": result["service"],
+            "services": result["services"][:20], "baseline_ref": result["baseline"]["ref"],
+            "baseline_ready": result["baseline"]["ready"], "rows": rows, "ranking": result["ranking"],
+            "savings_claimed": result["savings_claimed"], "reasons": result["reasons"], "caveats": result["caveats"],
+            "notice": result["notice"]}
+
+
 _TOOLS = {
     "packaging_resources": (ResourceArguments, _ResourceSuccess, "Read scoped imported sources, cited material/carton catalog, saved alternatives or a revision-bound draft PDF download link. Paginated; never imports local files or accesses credentials. Use edit_packaging to select a source or apply an alternative."),
     "estimate_packaging_mass": (MassArguments, _MassSuccess, "Estimate product mass from authorized closed-solid STEP volume and documented density. Returns a proposed Product without saving. Confirm material applies to every included solid and record exclusions."),
@@ -359,18 +598,24 @@ _TOOLS = {
     "edit_packaging": (EditArguments, _ChangeSuccess, "Replace the complete saved design at the expected revision, using a unique request_id. Read all package pages first. Requires admitted direct-edit authority."),
     "undo_packaging": (HistoryArguments, _ChangeSuccess, "Undo the latest saved packaging edit at the expected revision. May undo a human edit; requires direct-edit authority."),
     "redo_packaging": (HistoryArguments, _ChangeSuccess, "Redo the latest undone packaging edit at the expected revision. Requires direct-edit authority."),
+    "packaging_quote_scenarios": (ScenarioArguments, _ScenariosSuccess, "List the quote scenarios the user authorized for Sage in the Rates panel (IDs, city and state, remaining provider-shipment budget, expiry) and the scenarios that already have saved quotes. Contacts no provider."),
+    "quote_packaging": (QuoteArguments, _QuoteSuccess, "Request carrier rates for the saved design, or a saved alternative_id, and one authorized scenario_id, through the same service as the Rates panel. Pass the design_hash from the latest inspection or alternatives listing. Reuses an identical saved quote unless refresh is true; new rates create provider shipments within the scenario budget and may be billed. Never buys postage or labels."),
+    "compare_packaging": (CompareArguments, _CompareSuccess, "Compare saved quotes of the current and saved designs against the user's baseline for one scenario_id or scenario_hash, on the account rate for the same account, mode and service. Reads saved quotes only. Report its differences and claim text as given."),
 }
 _WRITES = frozenset({"edit_packaging", "undo_packaging", "redo_packaging"})
+_QUOTING = frozenset({"packaging_quote_scenarios", "quote_packaging", "compare_packaging"})
+_EXTERNAL = frozenset({"quote_packaging"})  # Sends shipment data to the provider; not a document write, not undoable.
 
 
-def tool_specs(*, direct_edit=False):
+def tool_specs(*, direct_edit=False, quoting=False, quote=False):
     """Fresh closed schemas; the gateway, not the caller/model, chooses capability."""
     from pydantic import TypeAdapter
-    return [{"name": name, "description": description, "read_only": name not in _WRITES,
+    return [{"name": name, "description": description, "read_only": name not in _WRITES and name not in _EXTERNAL,
              "input_schema": arguments.model_json_schema(),
              "output_schema": {"type": "object", **TypeAdapter(success | Failure).json_schema()}}
             for name, (arguments, success, description) in _TOOLS.items()
-            if direct_edit or name not in _WRITES]
+            if (direct_edit or name not in _WRITES) and (quoting or name not in _QUOTING)
+            and (quote or name not in _EXTERNAL)]
 
 
 def _arguments(name, value):
@@ -438,8 +683,9 @@ class PackagingGateway:
 
     def __init__(self, service: PackagingService, *, current_context: Callable[[], PackagingContext],
                  turn_id: str, mutation_guard: Callable[[], ContextManager] | None = None,
-                 max_calls=8, timeout=120, status_sink=None):
+                 max_calls=8, timeout=120, status_sink=None, quotes: QuoteDesk | None = None):
         if (not isinstance(service, PackagingService) or not callable(current_context)
+                or (quotes is not None and (not isinstance(quotes, QuoteDesk) or quotes.service is not service))
                 or not isinstance(turn_id, str) or not _ID.fullmatch(turn_id)
                 or type(max_calls) is not int or not 1 <= max_calls <= 24
                 or type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 240
@@ -466,7 +712,16 @@ class PackagingGateway:
             self._direct_edit = context.direct_edit_authorized and permits(context.principal, EDIT)
             if self._direct_edit and mutation_guard is None:
                 raise _error("codex_packaging_context_invalid")
-            self._specs = tool_specs(direct_edit=self._direct_edit)
+            self.quotes, self._principal = quotes, context.principal
+            # Quote tools need the host's QuoteDesk; quote_packaging also needs packaging.quote. Each
+            # provider request still needs a scenario the user authorized in the Rates panel.
+            self._specs = tool_specs(direct_edit=self._direct_edit, quoting=quotes is not None,
+                                     quote=quotes is not None and permits(context.principal, QUOTE))
+            if quotes is not None:
+                self.server_instructions = type(self).server_instructions.replace(
+                    "billing, shipping-label or provider tools", "billing or shipping-label tools") + (
+                    " Carrier quotes use only scenario IDs the user authorized; addresses stay with the host and"
+                    " quotes never buy postage. Report compare_packaging differences as given, never estimated savings.")
             self._names = frozenset(spec["name"] for spec in self._specs)
             self.check()
         except Exception as exc:
@@ -611,6 +866,28 @@ class PackagingGateway:
                 target = args.design if args.design is not None else design
                 data = self._base(self._sources(target)) | {"saved": args.design is None,
                     "assessment": _assessment(target, args.findings_offset, args.findings_limit)}
+            elif name == "packaging_quote_scenarios":
+                account_ref, _ = self.quotes.current_account(self._principal)
+                _, quotes, _ = self.service.comparison_inputs(self._scope, self._document_id)
+                data = self._base(refs) | {
+                    "authorized": self.quotes.scenarios.list(self._scope, self._document_id, self._principal.principal_id),
+                    "quoted": [{"scenario_hash": g["scenario_hash"], "destinations": [place(d) for d in g["destinations"][:3]],
+                                "quoted_at": g["quoted_at"], "modes": g["modes"], "quotes": g["quotes"],
+                                "current_account": g["current_account"]} for g in quoted_scenarios(quotes, account_ref)[:10]],
+                    "can_quote": "quote_packaging" in self._names}
+            elif name == "compare_packaging":
+                scenario_hash = args.scenario_hash
+                if args.scenario_id is not None:
+                    scenario_hash = self.quotes.scenarios.get(self._scope, self._document_id, self._principal.principal_id,
+                                                              args.scenario_id).scenario_hash
+                account_ref, known = self.quotes.current_account(self._principal)
+                if not known:
+                    raise _error("carrier_credentials_unavailable")
+                candidates, quotes, baseline = self.service.comparison_inputs(self._scope, self._document_id)
+                pick = args.service
+                result = compare_designs(baseline, candidates, quotes, scenario_hash, account_ref,
+                    None if pick is None else (pick.carrier, pick.service, pick.account_id, pick.currency), place=place)
+                data = self._base(refs) | _comparison_view(result)
             elif name == "propose_packaging":
                 proposed = propose(design, args.cartons, args.max_packages,
                                    deadline_seconds=min(10, max(0, self.deadline - time.monotonic())))
@@ -652,6 +929,51 @@ class PackagingGateway:
             self._checked()
             return data
 
+    async def _quote(self, args, external):
+        """Carrier rates through the host QuoteDesk: the Rates panel's provider path, lock, reuse and audit."""
+        current, design, refs = await asyncio.to_thread(self._checked)
+        if args.expected_revision != self._revision:
+            raise _error("revision_conflict")
+        scope, doc, revision, owner = self._scope, self._document_id, self._revision, self._principal.principal_id
+        alternative = args.alternative_id
+        if alternative is None:
+            target, assessment = design, current["assessment"]
+        else:
+            target = await asyncio.to_thread(self.service.alternative_design, scope, doc, alternative)
+            refs = await asyncio.to_thread(self._sources, target)
+            assessment = await asyncio.to_thread(assess, target)
+        if assessment["design_hash"] != args.expected_design_hash:
+            raise _error("quote_design_changed")
+        scenario = self.quotes.scenarios.get(scope, doc, owner, args.scenario_id)
+        external.update(kind="carrier_quote", scenario_id=scenario.id, design_ref=alternative or "current",
+                        design_hash=assessment["design_hash"], scenario_hash=scenario.scenario_hash,
+                        shipments_reserved=0, provider_shipments_created=0, outcome="not_started")
+
+        def reserve(shipments):
+            self.quotes.scenarios.reserve(scope, doc, owner, scenario.id, shipments)
+            external.update(shipments_reserved=shipments, outcome="started")
+
+        if alternative is None:
+            find = lambda fingerprint: self.service.find_quote(scope, doc, revision, fingerprint)
+            save = lambda result: self.service.save_quotes(scope, doc, revision, result)
+        else:
+            find = lambda fingerprint: self.service.find_alternative_quote(scope, doc, alternative, fingerprint)
+            save = lambda result: self.service.save_alternative_quote(scope, doc, alternative, revision, result)
+        self._admission()
+        try:
+            saved = await self.quotes.price(scope, doc, revision, target, assessment,
+                                            scenario.request(revision, args.refresh), self._principal, find, save,
+                                            reserve=reserve)
+        except BaseException as exc:
+            if external["outcome"] == "started":
+                external["outcome"] = "interrupted" if isinstance(exc, asyncio.CancelledError) else "failed"
+            raise
+        external.update(outcome="reused" if saved["reused"] else "saved", quote_id=saved["id"], mode=saved.get("mode"),
+                        provider_shipments_created=0 if saved["reused"] else saved.get("provider_shipments_created", 0))
+        await asyncio.to_thread(self._checked)
+        return self._base(refs) | _quote_view(saved, scenario.id, alternative or "current",
+                                              self.quotes.scenarios.remaining(scope, doc, owner, scenario.id))
+
     async def call(self, name, arguments):
         try:
             async with self.lock:
@@ -661,7 +983,7 @@ class PackagingGateway:
             raise
 
     async def _call(self, name, arguments):
-        started, argument_hash, mutation = time.monotonic(), None, {}
+        started, argument_hash, mutation, external = time.monotonic(), None, {}, {}
         validation = None
         try:
             self._active()
@@ -680,7 +1002,8 @@ class PackagingGateway:
                 async with asyncio.timeout(max(0, self.deadline - time.monotonic())):
                     await self.status_sink("codex_packaging")
             self._active()
-            work = asyncio.create_task(asyncio.to_thread(self._run, name, args, mutation))
+            work = asyncio.create_task(self._quote(args, external) if name in _EXTERNAL
+                                       else asyncio.to_thread(self._run, name, args, mutation))
             try:
                 async with asyncio.timeout(max(0, self.deadline - time.monotonic())):
                     data = await asyncio.shield(work)
@@ -711,7 +1034,7 @@ class PackagingGateway:
                 validation = {"saved": result["data"]["saved"], "revision": result["data"]["document"]["revision"]}
         except asyncio.CancelledError:
             self.closed = True
-            self._receipt(name, argument_hash, started, "codex_run_closed", mutation)
+            self._receipt(name, argument_hash, started, "codex_run_closed", mutation, external=external)
             raise
         except Exception as exc:
             code = "codex_run_closed" if isinstance(exc, TimeoutError) else getattr(exc, "code", "codex_tool_failed")
@@ -721,19 +1044,20 @@ class PackagingGateway:
             result = Failure(error={"code": code, "message": _MESSAGES[code]},
                              mutation=mutation or None).model_dump(mode="json", exclude_none=True)
         self._receipt(name, argument_hash, started, result.get("error", {}).get("code"), mutation,
-                      validation=validation)
+                      validation=validation, external=external)
         return result
 
-    def _receipt(self, name, argument_hash, started, code, mutation, *, validation=None):
+    def _receipt(self, name, argument_hash, started, code, mutation, *, validation=None, external=None):
         if len(self.receipts) < self.max_calls + 1:
             self.receipts.append({"tool": name if isinstance(name, str) and name in self._names else "denied",
                 "ok": code is None, "argumentHash": argument_hash, "bindingHash": self.binding_key,
                 "durationMs": round((time.monotonic() - started) * 1000), "errorCode": code,
                 "mutation": deepcopy(mutation) or None,
-                **({"validation": deepcopy(validation)} if validation is not None else {})})
+                **({"validation": deepcopy(validation)} if validation is not None else {}),
+                **({"external": deepcopy(external)} if external else {})})
 
 
 def create_packaging_gateway(service, *, current_context, turn_id, mutation_guard=None,
-                             max_calls=8, timeout=120, status_sink=None):
+                             max_calls=8, timeout=120, status_sink=None, quotes=None):
     return PackagingGateway(service, current_context=current_context, turn_id=turn_id,
-        mutation_guard=mutation_guard, max_calls=max_calls, timeout=timeout, status_sink=status_sink)
+        mutation_guard=mutation_guard, max_calls=max_calls, timeout=timeout, status_sink=status_sink, quotes=quotes)

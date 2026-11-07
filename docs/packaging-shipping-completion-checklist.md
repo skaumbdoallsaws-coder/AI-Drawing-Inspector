@@ -103,7 +103,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | --- | --- | --- |
 | Sage tools over the same service | Locally verified | Historical live chat checkpoint (inspect/propose/edit/validate/Undo, density estimate, PDF link). |
 | Sage research with stored citations | Open | Packaging Sage has no research tool. Reuse `ai_inspector/research/web.py` and the existing workflow pattern. |
-| Sage quote using the same service, scenario IDs instead of addresses, explicit transmission authorization | Open | No quote tool. |
+| Sage quote using the same service, scenario IDs instead of addresses, explicit transmission authorization | Locally verified (mock only) | `quoting.py` `QuoteDesk` is the one provider path, lock, quote reuse and attempt audit for the Rates panel, saved-design quotes and Sage (the host passes the same desk to the router and the Sage turn). The user authorizes a scenario in the Rates panel (**Allow Sage to quote these addresses**: a dialog lists exactly what Sage sees, city, state and residential status, and sets a provider-shipment budget of 1-12 and a 5-240 minute limit); addresses stay in server memory for that user and document only and are never stored. Sage tools: `packaging_quote_scenarios` (IDs and city-level labels, no provider call), `quote_packaging` (scenario ID, expected revision, design hash, optional saved alternative, refresh; needs `packaging.quote`; shipments are reserved from the budget before any provider request and are not refunded on failure) and `compare_packaging` (saved quotes only, deterministic comparison, claim text without ZIP codes). Results and receipts carry no name, street or ZIP code; the provider still receives the full addresses. Quote receipts are recorded as `external` requests, separate from document edits and Undo. Revoke removes a scenario at once. `tests/test_codex_packaging_quotes.py`, `tests/verify_packaging_sage_quote_ui.py` (a scripted gateway call stands in for Sage). No live Sage turn or live carrier request has been made. |
 | Dedicated packaging permissions | Locally verified | `permissions.py`: `packaging.read`, `packaging.edit`, `packaging.quote` (external, possibly billed provider requests) and `packaging.account` (carrier credentials and account discovery). The API, editor admission and Sage gateway ask only for these. The frozen Facility Layout roles are unchanged; each action is derived from the layout action packaging checked before (read from `layout.read`, the others from `layout.edit`, `*` grants all), so no role gains or loses access. Quote and account routes ask for their own action (proved by remapping the derivation in a test). `/api/packaging/status` reports the caller's packaging permissions. Narrowing, for example carrier accounts for administrators only, is a product decision left to the user. `tests/test_packaging_permissions.py`. |
 | Live six-part Minneapolis example with too-small carton, missing mass and stale revision | Blocked | Needs carrier access and permission for a bounded live Sage/rating test. Mock tests do not satisfy it. |
 | Report: BOM, source revisions, quantities, materials, findings, timestamped quotes | Implemented | Draft PDF. |
@@ -170,6 +170,15 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   role keeps exactly its previous access (matrix over every known role and every packaging
   route). Quote and account routes no longer share the generic edit check. The desktop's local
   principal is `admin`, so nothing changes there.
+- 2026-11-06, item 5a (Sage quotes): the Rates panel routes now call a shared `QuoteDesk`
+  (`quoting.py`), and the host hands the same desk to Sage turns, so manual and Sage quotes
+  share one provider lock, reuse rule and attempt audit (a test holds the lock and both are
+  refused). Sage quotes only scenarios the user authorized in the Rates panel, bound to the
+  user, document, saved revision and the design hash Sage names, within a shipment budget and
+  expiry. Evidence, all MOCK ONLY (httpx.MockTransport, synthetic TEST addresses): 10 domain and
+  gateway tests, a host wiring test, 1 UI unit test and a headless browser check
+  (`.runtime/packaging-sage-quote-ui-02`, no page errors, no external requests; the browser check
+  calls the gateway tool directly instead of running Sage). Research tools (item 5b) remain.
 
 ## Unsupported inputs (first release)
 

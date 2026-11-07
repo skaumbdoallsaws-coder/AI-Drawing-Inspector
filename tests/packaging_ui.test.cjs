@@ -497,6 +497,19 @@ test('product face mapping follows the viewer rotation for every dimension order
   }
 });
 
+test('Sage quote scenarios send the Rates panel body and show Sage only city-level places', () => {
+  const address = { name: 'TEST ONLY', street1: '1 Test Street', street2: '', city: 'Dallas', state: 'TX', zip: '75201', residential: true };
+  const addresses = { origin: { ...address, city: 'Chicago', state: 'IL', zip: '60601', residential: false }, destinations: [address] };
+  const body = ui.scenarioBody(addresses, ['ca_TEST_A'], { delivery_confirmation: 'SIGNATURE', saturday_delivery: false }, 4, 30);
+  assert.deepEqual(body, { origin: addresses.origin, destinations: [address], carrier_accounts: ['ca_TEST_A'],
+    options: { delivery_confirmation: 'SIGNATURE' }, sage_shipments: 4, minutes: 30 });
+  assert.equal(ui.sagePlace(address), 'Dallas, TX (residential)');
+  assert.equal(ui.sagePlace(addresses.origin), 'Chicago, IL');
+  assert.doesNotMatch(ui.sagePlace(address), /75201|Test Street|TEST ONLY/);
+  assert.match(source, /const sageQuoting = \(\) => state\.capabilities\.includes\('sage_quote_scenarios'\) && state\.capabilities\.includes\('sage_chat_execution'\);/);
+  assert.match(source, /if \(sageQuoting\(\) && state\.draft\.document\) renderScenarios\(host\);/);
+});
+
 test('saved designs are quoted only under a complete session scenario', () => {
   const address = { street1: '1 Test Street', city: 'Testville', state: 'MN', zip: '55401' };
   assert.equal(ui.scenarioComplete({ origin: address, destinations: [address] }), true);

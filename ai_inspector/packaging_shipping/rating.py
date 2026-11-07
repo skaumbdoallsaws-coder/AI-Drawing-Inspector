@@ -4,14 +4,16 @@ Provider behaviour relied on here (EasyPost docs, checked 2026-11-06): rating
 creates a Shipment, which is an external write even though nothing is bought.
 Each Rate carries `rate` (the rate available to this account), `list_rate`
 (published, non-negotiated) and `retail_rate` (in-store, no account). Carrier
-failures arrive in `messages` as carrier free text. Test-mode keys do not
-contact carriers. Listing carrier accounts needs a production key and returns
-credential fields, which never leave this module.
+failures arrive in `messages` as carrier free text. Negotiated rates appear only
+in production mode; test-mode rates are not live carrier quotes. Parcel
+dimensions are inches to one decimal place and weights are ounces (Parcel
+docs). Listing carrier accounts needs a production key and returns credential
+fields, which never leave this module.
 """
 from __future__ import annotations
 
 import asyncio
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_CEILING, Decimal, InvalidOperation
 import hashlib
 import os
 import re
@@ -50,9 +52,25 @@ PRICE_BASES = {
 }
 SHIP_DATE_BASIS = ("Provider default: rated as of the request. Future ship dates are refused because EasyPost does "
                    "not document that rates honor a later date.")
-FEES_NOTICE = ("Each package and destination creates one EasyPost shipment for rating. Production rating can be billed: "
-               "EasyPost's API addendum (v4.3) includes three rating calls per purchased label and lists $0.02 for each "
-               "additional call. This workflow purchases no labels. Test-mode responses are not live carrier quotes.")
+FEES_NOTICE = ("Each package and destination creates one EasyPost shipment for rating. EasyPost's API addendum (v4.3) "
+               "includes three rating calls per purchased label and charges $0.02 for each additional call. This workflow "
+               "purchases no labels, so unless labels are bought elsewhere on the account, each production rating call "
+               "costs $0.02. Test-mode rates are not live carrier quotes; negotiated rates appear only in production mode.")
+
+
+def _round_up(value, step):
+    exact = Decimal(repr(value)).quantize(Decimal("0.000000001"))  # Drop binary noise (10.000000000000002) first.
+    return float(exact.quantize(Decimal(step), rounding=ROUND_CEILING))
+
+
+def parcel_inches(metres):
+    """A parcel dimension as EasyPost takes it: inches to one decimal place, rounded up, never smaller."""
+    return _round_up(metres / INCH_M, "0.1")
+
+
+def parcel_ounces(kilograms):
+    """A parcel weight in ounces, rounded up at six decimals, so a parcel is never rated lighter."""
+    return _round_up(kilograms / OUNCE_KG, "0.000001")
 
 
 # Provider error codes named in EasyPost's error reference; the error message text is never read.
@@ -258,9 +276,10 @@ class EasyPostRating:
                     parcels = []
                     for package, mass in zip(design.packages, assessment["packages"]):
                         dims = sorted(package.carton.outer_m, reverse=True)
+                        parcel = {"length": parcel_inches(dims[0]), "width": parcel_inches(dims[1]),
+                                  "height": parcel_inches(dims[2]), "weight": parcel_ounces(mass["gross_kg"])}
                         shipment = {"from_address": request.origin.model_dump(), "to_address": destination.model_dump(),
-                                    "parcel": {"length": round(dims[0] / INCH_M, 6), "width": round(dims[1] / INCH_M, 6),
-                                               "height": round(dims[2] / INCH_M, 6), "weight": round(mass["gross_kg"] / OUNCE_KG, 6)}}
+                                    "parcel": dict(parcel)}
                         if accounts:
                             shipment["carrier_accounts"] = accounts
                         if options:
@@ -296,6 +315,8 @@ class EasyPostRating:
                                     continue
                                 rates.append(parsed)
                             parcels.append({"package_id": package.id, "mode": mode, "rates": rates,
+                                            "parcel_sent": {"length_in": parcel["length"], "width_in": parcel["width"],
+                                                            "height_in": parcel["height"], "weight_oz": parcel["weight"]},
                                             "excluded_rate_count": excluded, "carrier_error_count": len(messages),
                                             "carrier_messages": [_message(m) for m in messages[:MAX_MESSAGES]],
                                             "provider_id": _provider_text(raw.get("id", ""), optional=True)})

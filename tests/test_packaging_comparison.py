@@ -1,7 +1,7 @@
 """Deterministic cost comparison against a baseline (P3). MOCK ONLY: synthetic TEST designs and
 httpx.MockTransport replies priced by a fixed weight formula. Nothing here is a real provider
 response, address or price, and no saving shown here is evidence of a live saving."""
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 import json
 
 import httpx
@@ -44,8 +44,9 @@ def priced(calls, state=None):
 
 
 def expected_shipping(design, destinations=2, service="TEST Ground"):
-    """Independent recomputation from the design's gross masses, as the adapter rounds them."""
-    per = sum((price(round(p["gross_kg"] / OUNCE_KG, 6), service) for p in assess(design)["packages"]), Decimal(0))
+    """Independent recomputation from the design's gross masses: ounces rounded up at six decimals."""
+    ounces = lambda kg: float(Decimal(repr(kg / OUNCE_KG)).quantize(Decimal("1e-9")).quantize(Decimal("1e-6"), rounding=ROUND_CEILING))
+    per = sum((price(ounces(p["gross_kg"]), service) for p in assess(design)["packages"]), Decimal(0))
     return per * destinations
 
 

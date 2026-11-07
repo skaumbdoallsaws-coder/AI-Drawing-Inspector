@@ -1859,7 +1859,7 @@ async function openSageScenario() {
     body.append(element('p', 'Sage will see only:', 'metadata'));
     const seen = element('ul'); seen.append(element('li', `Origin: ${sagePlace(addresses.origin)}`));
     addresses.destinations.forEach((d, i) => seen.append(element('li', `Destination ${i + 1}: ${sagePlace(d)}`)));
-    body.append(seen, element('p', `Each new quote sends these full addresses and the saved package to the carrier provider and creates ${perQuote} provider shipment(s) for rating, one per package and destination. Production rating can be billed (see Quote rules). A saved quote for the same design and scenario is reused without a new request. Sage cannot buy postage or labels.`, 'notice'));
+    body.append(seen, element('p', `Each new quote sends these full addresses and the saved package to the carrier provider and creates ${perQuote} provider shipment(s) for rating, one per package and destination. EasyPost bills production rating calls (see Quote rules). A saved quote for the same design and scenario is reused without a new request. Sage cannot buy postage or labels.`, 'notice'));
     const form = element('form', null, 'form-grid'); form.addEventListener('submit', event => event.preventDefault());
     const budget = field(form, 'Provider shipments Sage may create', 'sage_shipments', String(Math.min(12, Math.max(1, perQuote))), { type: 'number', min: 1, max: 12, step: 1, required: true });
     const minutes = field(form, 'Allow for minutes', 'sage_minutes', '60', { type: 'number', min: 5, max: 240, step: 1, required: true });
@@ -2060,6 +2060,7 @@ function renderQuoteResults() {
     } else block.append(element('p', 'No common service across every package. See individual parcel responses.', 'warning'));
     for (const parcel of result.parcels) {
       const details = element('details'); details.append(element('summary', `${parcel.package_id} | ${parcel.mode} | ${parcel.rates.length} rates${parcel.carrier_error_count ? ` | ${parcel.carrier_error_count} carrier messages` : ''}`));
+      if (parcel.parcel_sent) details.append(element('p', `Rated as ${parcel.parcel_sent.length_in} x ${parcel.parcel_sent.width_in} x ${parcel.parcel_sent.height_in} in, ${parcel.parcel_sent.weight_oz} oz (outside size and gross weight, rounded up).`, 'metadata'));
       if (parcel.carrier_error_count) details.append(element('p', `${parcel.carrier_error_count} carrier messages reported. Some services may be unavailable.`, 'warning'));
       for (const line of messageSummary(parcel.carrier_messages)) details.append(element('p', line, 'warning'));
       if (parcel.excluded_rate_count) details.append(element('p', `${parcel.excluded_rate_count} rates outside the selected accounts or services were left out.`, 'notice'));

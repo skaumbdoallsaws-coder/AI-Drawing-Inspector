@@ -9,7 +9,7 @@ import pytest
 
 from ai_inspector.packaging_shipping.geometry import assess
 from ai_inspector.packaging_shipping.models import Design, QuoteRequest
-from ai_inspector.packaging_shipping.rating import EasyPostRating
+from ai_inspector.packaging_shipping.rating import EasyPostRating, parcel_inches, parcel_ounces
 from ai_inspector.packaging_shipping.service import PackagingError, PackagingService
 from tools.run_packaging_pilot import create_app
 
@@ -68,6 +68,25 @@ def assert_packaging_error(provider, code, *, design=None, request=None, status=
     return caught.value
 
 
+def test_parcels_are_sent_at_provider_precision_never_smaller_or_lighter():
+    # EasyPost takes inches to one decimal. Binary noise in an exact size never adds a tenth.
+    assert [parcel_inches(x * 0.0254) for x in (10, 8.375, 6.375, 4.625, 12.01)] == [10.0, 8.4, 6.4, 4.7, 12.1]
+    assert parcel_inches(0.2) == 7.9 and parcel_ounces(0.65) == 22.928076 and parcel_ounces(16 * 0.028349523125) == 16.0
+    sent = []
+
+    def handle(request):
+        sent.append(json.loads(request.content)["shipment"]["parcel"])
+        return httpx.Response(200, json=shipment())
+
+    value = make_design().model_dump(mode="json")  # A ULINE S-4080 carton: 8 x 6 x 4 in inside.
+    value["packages"][0]["carton"].update(inner_m=[8 * 0.0254, 6 * 0.0254, 4 * 0.0254],
+                                          outer_m=[8.375 * 0.0254, 6.375 * 0.0254, 4.625 * 0.0254])
+    result = run_quote(adapter(handle), Design.model_validate(value))
+    assert sent == [{"length": 8.4, "width": 6.4, "height": 4.7, "weight": 22.928076}]
+    assert result["results"][0]["parcels"][0]["parcel_sent"] == {
+        "length_in": 8.4, "width_in": 6.4, "height_in": 4.7, "weight_oz": 22.928076}
+
+
 def test_quote_uses_external_inches_gross_ounces_and_test_mode_only():
     calls = []
 
@@ -79,8 +98,7 @@ def test_quote_uses_external_inches_gross_ounces_and_test_mode_only():
         assert set(body) == {"shipment"}
         assert set(body["shipment"]) == {"from_address", "to_address", "parcel"}
         parcel = body["shipment"]["parcel"]
-        assert parcel == {"length": 10.0, "width": 8.0, "height": 6.0,
-                          "weight": round(0.65 / 0.028349523125, 6)}
+        assert parcel == {"length": 10.0, "width": 8.0, "height": 6.0, "weight": 22.928076}  # 22.9280752... rounded up
         assert body["shipment"]["from_address"]["residential"] is False
         assert body["shipment"]["to_address"]["residential"] is True
         assert "Authorization" in request.headers

@@ -49,7 +49,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Requirement | Status | Evidence or next action |
 | --- | --- | --- |
 | Dependency choices: py3dbp (MIT), trimesh (MIT), reportlab (BSD), OCP STEP worker, EasyPost | Implemented | In use and promoted locally. Third-party license/notice review and redistribution remain open; inventory in `docs/packaging-shipping-dependencies.md`. |
-| Provider choice with current terms and services | Blocked | EasyPost remains the only adapter. Terms re-read 2026-11-06 from EasyPost's docs and API Addendum v4.3 (effective 2026-10-30): rating creates a Shipment (an external write); three rating calls are included per purchased label, then $0.02 per additional call; address verification $0.02 beyond one per label; SmartRate $0.03; test mode contacts no carrier. This workflow buys no labels, so production rating calls are expected to be billed (inference, shown as the fee notice). Needs the user's account choice and permission for metered calls. |
+| Provider choice with current terms and services | Decided: EasyPost first (user, 2026-11-06); live use blocked on credentials | EasyPost remains the only adapter; no other adapter is built. Terms re-read 2026-11-06 by a separate reader from EasyPost's own pages (API Addendum v4.3, effective 2026-10-30; Master Customer Agreement v6.1; Parcel, authentication and carrier docs). Read on the page: rating creates a Shipment (an external write); three rating calls are included per purchased label, then $0.02 per call, charged monthly from the Wallet; label fee $0.08 after 3,000 a month; BYOCA plan $20 a month; address verification $0.02 (US) beyond one per label (this workflow requests none); test rating is free; negotiated rates appear only in production; parcel dimensions are inches to one decimal. From search snippets only (EasyPost's support site refused the reader): production shipments need a positive Wallet balance; card top-ups cost 3.75%; test mode returns retail or near-retail rates. Not stated anywhere official: whether test mode contacts carriers (the old claim that it does not was removed from the code). This workflow buys no labels, so each production rating call is expected to cost $0.02 (the fee notice says so). Parcels are now sent in inches to one decimal and ounces, both rounded up, and each quote records the parcel as sent. Needs the user's account and permission for metered calls. |
 | Documented unsupported inputs | Implemented | `/api/packaging/status` lists unsupported capabilities; consolidated list below. |
 | Real CAD import with dimension check | Locally verified | Five-solid STEP: bounds and closed-solid volume; original bytes unchanged (STEP batch, real sample). |
 | Mass compared with the source CAD application's value | Blocked | Only a PMMA density estimate exists (1.726 kg for four pairs). Needs the CAD-reported mass or a scale measurement from the user. |
@@ -247,6 +247,14 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 - 2026-11-06, item 9b (carton records): an independent reader re-checked the nine ULINE records
   against the supplier pages (two separate reads per page): no mismatches. The tolerance field is
   renamed `outer_tolerance_m` because ULINE states it for outside dimensions only.
+
+- 2026-11-06, item 9c (EasyPost terms and parcel precision): a separate reader re-read EasyPost's
+  pages (verified on the page vs. search snippet recorded in the provider row). EasyPost takes
+  parcel dimensions in inches to one decimal; the adapter sent six decimals. Dimensions are now
+  rounded up to 0.1 in and weights up at six decimals (never smaller or lighter), each parcel
+  records `parcel_sent`, and the fee notice states that each production rating call is expected to
+  cost $0.02 when no labels are bought. Evidence: 93 rating, comparison, hardening and report tests
+  (mock transport only).
 
 ## Unsupported inputs (first release)
 

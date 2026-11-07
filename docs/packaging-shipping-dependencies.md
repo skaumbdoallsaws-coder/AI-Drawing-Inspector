@@ -45,7 +45,9 @@ Why the declarations were needed:
   now requires them too, so a folder without them is rejected when the profile loads, not on first import.
 - pywin32 was present in the test environment but listed nowhere. It must be installed in the
   application interpreter's own site-packages: its startup `.pth` file does not run from the packaging
-  runtime folder, which is added without site processing.
+  runtime folder, which is added without site processing. Observed 2026-11-07: the regular desktop's
+  interpreter (`C:\Python314`) does not have it, and `win32crypt` does not import there even with the
+  packaging runtime folder on the path, so that desktop cannot store a carrier key until it is installed.
 - httpx is imported directly by the rating adapter. It was only present because openai depends on it.
   It is declared in `requirements.txt` rather than the packaging runtime folder, so the folder (first on
   the path) cannot shadow the version openai uses.

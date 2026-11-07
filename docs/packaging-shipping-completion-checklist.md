@@ -114,7 +114,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Requirement | Status | Evidence or next action |
 | --- | --- | --- |
 | Ribbon panels, viewport conventions, display modes, decals | Locally verified | Historical browser and native checks. Native, `.runtime/pc-native/full-02`: an imported PNG and lettering on the carton render in the viewport, save with the document and appear in the report's graphic schedule. |
-| Promotion into the regular desktop | Implemented | User-approved local promotion at `3ce2b05`; not a gate pass. Next promotion needs approval. |
+| Promotion into the regular desktop | Implemented; next promotion prepared, awaiting approval | User-approved local promotion at `3ce2b05`; not a gate pass. The next one (this branch) is planned under "Promotion plan" below and has not been run. |
 | Recoverable draft checkpoints, outstanding-operation reconciliation, safe shutdown/restart | Locally verified (store, editor and native guard; not yet in the promoted desktop) | Recovery drafts (`/api/packaging/drafts`, `packaging.edit`, capability `draft_recovery`): the editor checkpoints its unsaved design 1.5 s after each change, records an in-flight save (request ID) in a checkpoint before sending it, and removes the checkpoint after a save or discard. A checkpoint also keeps values typed but not applied (the open panel's fields, at most 300; never file inputs or addresses) and an import in progress (recorded before its request is sent). Drafts belong to one user and scope, one per saved document, at most 10 (refused beyond, never silently dropped), bounded by the 1 MB request limit, and never change a document. On start and from **Open**, **Recover unsaved work** lists each draft against the saved store, including whether its design differs from the saved one: an interrupted save that landed is reported as saved and its draft removed (no second revision); one that never arrived is restored and **Save** replays its original request ID, so it cannot apply twice; a draft behind a newer revision loads only after a confirmation; typed values come back unapplied in their panel; an interrupted import is reported as finished (choose the stored model in Imported sources) or not finished (import it again; never re-run automatically); **Discard** asks first. Native close, reload and **Restart backend** proceed over a mounted editor whose exact state is clean or is its stored recovery draft: the main process first asks the editor to store its newest state (best effort; it authorizes nothing), then the usual two observations decide, with the stored checkpoint version in the fingerprint. Still blocking: Sage turns, admission and reconciliation; save conflicts; open packaging dialogs; running quotes, reports and proposals; selected files; session-only addresses (never stored); typed values whose form cannot be captured; and any state that is not yet in a stored checkpoint or whose last checkpoint failed. The managed runtime bridge keeps the strict rule. After a backend loss, a clean or checkpointed editor no longer blocks **Restart backend** or **Close Packaging**; work not checkpointed before the backend stopped still blocks (it cannot be stored then). Evidence: `tests/test_packaging_recovery.py` (22), UI unit tests, native lifecycle, close and title-bar tests (161), `tests/verify_packaging_recovery_ui.py` (`.runtime/pc-tests/ui-recovery-06`, six cases) and `tests/verify_packaging_departure_ui.py` (`.runtime/pc-tests/ui-departure-14`: typed values, departure preparation, uncovered states, an import that never arrived and one that finished after the editor closed). Native, in an isolated profile (`desktop/tools/packaging-native-entry.cjs`, `.runtime/pc-native/full-02`): Reload and Restart backend over checkpointed unsaved work proceed without a question, Reload offers the work back with its typed values, Restart keeps the editor; a native Close over checkpointed work quits, and the next start offers it back (`evidence-recover`); restored and saved each time. Not yet in the promoted desktop. |
 | Legacy managed runtime transition path | Done: unsupported for the first release (user decision, 2026-11-06) | Packaging is explicitly off there. The runtime window never adds the workflow, its backend forces `INSPECTORPRO_PACKAGING_ENABLED` and `INSPECTORPRO_CODEX_PACKAGING` to 0, and its boundary refuses `/packaging`, `/api/packaging/*` and `/static/packaging*` with `desktop_packaging_unsupported` before any other check. Tests: `desktop/tests/test_desktop_runtime_boundary.py`, `test_desktop_runtime_lifecycle.py`, `packaging-configuration.test.cjs`. The regular desktop application is the supported host. |
 | Missing-dependency behaviour | Locally verified | A missing optional component disables only its feature: GLB import (`source_runtime_unavailable`), arrangement proposals (`arrangement_unavailable`) and the PDF report (`report_unavailable`) answer 503 with a feature message instead of a bad-file or server error, and `/api/packaging/status` lists `glb_import_runtime_missing`, `arrangement_runtime_missing` or `pdf_report_runtime_missing`. `tests/test_packaging_missing_components.py` runs the real GLB worker with an empty dependency folder. STEP, carrier key store and native profile cases were already covered; see `docs/packaging-shipping-dependencies.md`. Native (`.runtime/pc-native/missing-02`): with ReportLab and py3dbp present but not importable and a STEP interpreter without OCP, each feature said it is not available in this installation when used, the saved design stayed unchanged, and manual editing and saving kept working. The status list reports presence, not importability, so such a damaged package is reported when used rather than in `unsupported`. A package folder missing from a native profile's runtime still stops the whole desktop from starting (`desktop_packaging_config_invalid`); whether to start without Packaging instead is open. |
@@ -331,6 +331,15 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   No carrier key, Sage or external request; the source STEP was unchanged. Not covered natively yet:
   choosing a library part (browser-verified), live Sage and live rates. Clean-Windows install: no host.
 
+- 2026-11-07, item 3 (live Sage), prepared, not yet live: `tests/verify_packaging_sage_rack_live.py`
+  runs against this worktree's own pilot host with the isolated profile `.runtime/pc-live` (its own
+  ChatGPT sign-in, ChatGPT plan, no API key or fallback). It imports the real rack STEP, applies the
+  cited PMMA estimate, creates a TEST document at the four-pair quantity and puts one prompt in Sage's
+  composer (inspect, catalog, 25.4 mm Ethafoam 220 as a labelled test assumption, cartons, arrange,
+  apply, validate, save, review PDF; no rates or research). The dry run, which stops before sending,
+  passed twice with inference disabled (`.runtime/pc-live/dry-01`, `dry-02`; no page errors). The
+  live turn waits for that profile's sign-in; none is stored yet. Sage was not run.
+
 ## Unsupported inputs (first release)
 
 Mixed products in one design; arbitrary contour or fitted inserts; dielines; pallets, crates
@@ -382,3 +391,42 @@ are reused.
 - Redistribution decisions for the STEP runtime's bundled libraries before any installer or bundle
   is given to anyone (list in `docs/packaging-shipping-dependencies.md`); not needed for local testing.
 - A clean Windows machine or VM for the install test.
+- Decision: the desktop's own interpreter (`C:\Python314`) has no pywin32, so the regular desktop
+  refuses to store a carrier key ("Current-user Windows credential protection is unavailable.").
+  Either install it there (`C:\Python314\python.exe -m pip install --user pywin32==312`, a change to
+  that Python) before using Rates in the desktop, or keep live carrier tests on the isolated pilot.
+- Decision: a package folder missing from a native profile's runtime stops the whole desktop from
+  starting (`desktop_packaging_config_invalid`). Recommended: start without Packaging and say why.
+
+## Promotion plan (prepared 2026-11-07; not run, needs approval)
+
+Checked read-only on 2026-11-07:
+
+- The regular desktop runs the real checkout on `ui-bridge-telemetry-unified-2026-05-18` at
+  `4c37436` with no tracked changes. That commit is an ancestor of this branch, so the update is a
+  fast-forward. None of the files this branch adds exists there untracked.
+- Packaging is already enabled in the regular profile (`packagingRuntime`, since `3ce2b05`), so no
+  profile change is needed. The profile check now also requires numpy and PIL in the dependency
+  folder; the shared `.runtime/packaging-runtime-20261106/dependencies` has numpy 2.5.4 and pillow
+  13.0.0. That the regular profile points there is confirmed just before the restart; if it does
+  not, the desktop would refuse to start, so nothing is restarted until it is confirmed.
+- The packaging store only gains tables (`CREATE TABLE IF NOT EXISTS`); its schema version stays 2
+  and no existing table changes, so the current build still opens the store after a rollback.
+- Without pywin32 in the desktop's interpreter, everything except storing a carrier key works.
+
+Steps, each only after approval:
+
+1. Re-check that the real checkout is clean and still at `4c37436`; stop and report if not.
+2. Create the backup branch `before-packaging-completion-20261107` at `4c37436` there.
+3. Check the desktop for unsaved work (layouts, packaging, open dialogs); ask for a save first.
+4. Fast-forward: `git merge --ff-only packaging-completion-2026-11-06` (no reset, no force).
+5. Close the desktop normally and start it again through `desktop_app.py`; confirm the protected
+   backend is ready and the page's `?v=` asset versions are the new files.
+6. Read-only smoke check: Packaging opens, `/api/packaging/status` lists the expected
+   capabilities, and no document is created or changed in the regular store.
+7. Rollback, only on the user's word: close normally, `git reset --keep
+   before-packaging-completion-20261107` (it refuses to discard local changes), start again.
+   The store needs no migration back.
+
+Not covered by the promotion: live Sage (isolated profile), live rates (account, addresses and
+budget), and the clean-Windows install.

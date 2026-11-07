@@ -17,7 +17,8 @@ from .admission import PackagingAdmission
 from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave
 from .catalog import catalog
 from .packing import propose
-from .rating import EasyPostRating
+from .destinations import RULES as DESTINATION_RULES
+from .rating import EasyPostRating, FEES_NOTICE, PRICE_BASES, SHIP_DATE_BASIS
 from .service import PackagingError, PackagingService
 from .sources import MAX_BYTES, GlbRuntime, glb_runtime, import_glb_isolated
 from .step_import import StepRuntime, StepImportError, import_step
@@ -77,6 +78,23 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
             raise PackagingError("carrier_secure_store_disabled", "This host has not enabled local carrier account storage.", 403)
         return credential_factory(resolved)
 
+    def current_provider(resolved):
+        """A fresh provider for each request when a credential store is configured, never cached."""
+        if credential_factory is None:
+            return provider, None
+        credential = account(resolved).resolve()
+        return EasyPostRating(key=credential.api_key.get_secret_value(), account_ref=credential.account_ref), credential
+
+    def current_account(resolved):
+        """(account_ref, known) for staleness; unknown when the store cannot be read."""
+        if credential_factory is None:
+            return provider.account_ref, True
+        try:
+            status = account(resolved).status()
+        except PackagingError:
+            return None, False
+        return status.get("account_ref"), status.get("source") != "unavailable"
+
     def principal(request: Request):
         if request.url.hostname not in {"127.0.0.1", "localhost", "::1", "testserver"}:
             raise HTTPException(403, "Packaging pilot is restricted to the local application.")
@@ -133,7 +151,9 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
             step = False
         return {"workflow": "packaging_shipping", "pilot": True,
                 "rating": account(resolved).status() if credential_factory else provider.status(),
-                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
+                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
+                "quote_rules": {"destinations": DESTINATION_RULES, "ship_date": SHIP_DATE_BASIS, "fees": FEES_NOTICE,
+                                "price_bases": PRICE_BASES},
                 "unsupported": ["verified_cad_material_mass", "arbitrary_contour_cutouts", "transport_certification", "freight", "future_ship_dates"] + ([] if step else ["step_runtime_not_configured"]) + ([] if sage else ["sage_chat_execution"])}
 
     @router.get("/api/packaging/catalog")
@@ -262,8 +282,13 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         return service.image(s, image_id)[0]
 
     @router.get("/api/packaging/documents/{doc_id}/quotes")
-    def quotes(doc_id: str, s=Depends(scope)):
-        return {"quotes": service.quote_history(s, doc_id)}
+    def quotes(doc_id: str, s=Depends(scope), resolved=Depends(principal)):
+        account_ref, known = current_account(resolved)
+        return {"quotes": service.quote_history(s, doc_id, account_ref=account_ref, account_known=known)}
+
+    @router.get("/api/packaging/documents/{doc_id}/quote-attempts")
+    def quote_attempts(doc_id: str, s=Depends(scope)):
+        return service.quote_attempts(s, doc_id) | {"fees_notice": FEES_NOTICE}
 
     @router.post("/api/packaging/documents/{doc_id}/quotes")
     async def quote(doc_id: str, body: QuoteRequest, s=Depends(scope), resolved=Depends(principal)):
@@ -271,14 +296,45 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
             raise PackagingError("quote_in_progress", "A quote request is already running. Wait before retrying.", 429)
         current = service.get(s, doc_id, body.expected_revision)
         async with quote_lock:
-            credential = account(resolved).resolve() if credential_factory else None
-            selected = EasyPostRating(key=credential.api_key.get_secret_value()) if credential else provider
+            selected, credential = current_provider(resolved)
             if credential:
                 credential.check()
-            result = await selected.quote(Design.model_validate(current["design"]), current["assessment"], body)
+            design = Design.model_validate(current["design"])
+            selected.preflight(design, current["assessment"], body)
+            fingerprint = selected.fingerprint(current["assessment"], body)
+            if not body.refresh:
+                # The identical scenario was already priced at this revision and account: no new shipments.
+                saved = service.find_quote(s, doc_id, body.expected_revision, fingerprint)
+                if saved is not None:
+                    return {**saved, "reused": True}
+            attempt_id = service.begin_quote_attempt(s, doc_id, body.expected_revision, fingerprint)
+            counts, outcome, error_code, quote_id = {}, "failed", None, None
+            try:
+                result = await selected.quote(design, current["assessment"], body, counts)
+                if credential:
+                    credential.check()
+                saved = service.save_quotes(s, doc_id, body.expected_revision, result)
+                outcome, quote_id = "saved", saved["id"]
+                return {**saved, "reused": False}
+            except PackagingError as exc:
+                error_code = exc.code
+                raise
+            except asyncio.CancelledError:
+                outcome = "cancelled"
+                raise
+            finally:
+                service.finish_quote_attempt(s, doc_id, attempt_id, outcome, counts, error_code=error_code, quote_id=quote_id)
+
+    @router.post("/api/packaging/account/carrier-accounts")
+    async def carrier_accounts(_=Depends(scope), resolved=Depends(principal)):
+        # POST: this contacts the provider, so it needs the packaging client header and edit rights.
+        if quote_lock.locked():
+            raise PackagingError("quote_in_progress", "A provider request is already running. Wait before retrying.", 429)
+        async with quote_lock:
+            selected, credential = current_provider(resolved)
             if credential:
                 credential.check()
-            return service.save_quotes(s, doc_id, body.expected_revision, result)
+            return await selected.carrier_accounts()
 
     @router.get("/api/packaging/documents/{doc_id}/report.pdf")
     def report(doc_id: str, revision: int, s=Depends(scope)):

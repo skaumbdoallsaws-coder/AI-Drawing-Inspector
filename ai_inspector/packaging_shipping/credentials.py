@@ -40,6 +40,13 @@ from pydantic import SecretStr
 from .service import PackagingError
 
 
+def account_reference(source, generation):
+    """Opaque, non-secret identity of the configured account; changes when the key is replaced or removed."""
+    if not generation:
+        return None
+    return hashlib.sha256(f"InspectorPro/Packaging/account-ref/v1/{source}/{generation}".encode()).hexdigest()[:32]
+
+
 ENVIRONMENT_KEY = "INSPECTORPRO_PACKAGING_EASYPOST_KEY"
 ValidationOutcome = Literal["valid", "invalid_key", "account_disabled", "unavailable"]
 _OUTCOMES = {"valid", "invalid_key", "account_disabled", "unavailable"}
@@ -97,6 +104,8 @@ class EasyPostCredential:
     source: str
     account_alias: str
     _check: Callable[[], None] = field(repr=False, compare=False)
+    # Opaque, non-secret identity; changes whenever the stored key is replaced or removed.
+    account_ref: str | None = None
 
     def check(self):
         """Recheck removal, replacement, and any explicit validation denial."""
@@ -297,6 +306,7 @@ class EasyPostCredentialStore:
             state = selected["validation"] if configured else "not_configured"
             return {"provider": "EasyPost", "configured": configured, "source": selected["source"],
                     "account_alias": selected["account_alias"], "validation": state,
+                    "account_ref": account_reference(selected["source"], selected["generation"]) if configured else None,
                     "account_disabled": state == "account_disabled",
                     "quote_enabled": configured and state in {"not_validated", "valid"},
                     "secure_store_enabled": self.enabled, "purchases_enabled": False,
@@ -339,7 +349,8 @@ class EasyPostCredentialStore:
                         raise _error("carrier_credentials_changed")
                     self._require_key(current)
 
-            return EasyPostCredential(SecretStr(selected["key"]), source, selected["account_alias"], check)
+            return EasyPostCredential(SecretStr(selected["key"]), source, selected["account_alias"], check,
+                                      account_reference(source, generation))
 
     async def validate(self, validator: CredentialValidator, *, timeout_seconds=15):
         """Explicit, bounded host-supplied account check; no implicit network client.
@@ -383,4 +394,5 @@ class EasyPostCredentialStore:
         from .rating import EasyPostRating
         credential = self.resolve()
         credential.check()
-        return EasyPostRating(key=credential.api_key.get_secret_value(), transport=transport)
+        return EasyPostRating(key=credential.api_key.get_secret_value(), transport=transport,
+                              account_ref=credential.account_ref)

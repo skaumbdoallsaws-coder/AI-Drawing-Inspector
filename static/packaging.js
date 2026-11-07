@@ -87,9 +87,31 @@ export async function request(path, { method = 'GET', body, raw = false, content
 
 export function quoteFreshness(quote, revision, dirty, scenarioMatches) {
   if (!quote) return 'No quotes';
+  if (!dirty && quote.revision === revision && quote.stale_reason === 'account_changed') return 'Stale: carrier account changed';
+  if (!dirty && quote.revision === revision && quote.stale_reason === 'account_removed') return 'Stale: carrier account removed';
   if (dirty || quote.stale || quote.revision !== revision) return 'Stale: package changed';
   if (!scenarioMatches) return 'Stale: address scenario changed or not loaded';
   return 'Current saved revision';
+}
+
+export function priceText(currency, amount) {
+  return amount == null ? '-' : `${currency || ''} ${amount}`.trim();
+}
+
+export function quoteBody(revision, addresses, accounts, options, refresh) {
+  const chosen = {};
+  if (options.delivery_confirmation) chosen.delivery_confirmation = options.delivery_confirmation;
+  if (options.saturday_delivery) chosen.saturday_delivery = true;
+  return { expected_revision: revision, ...addresses, carrier_accounts: [...accounts], options: chosen, refresh: refresh === true };
+}
+
+export function messageSummary(messages) {
+  const seen = new Set(), lines = [];
+  for (const m of messages || []) {
+    const key = `${m.carrier || ''}|${m.category}`;
+    if (!seen.has(key)) { seen.add(key); lines.push(`${m.carrier || 'Carrier'}: ${m.help}`); }
+  }
+  return lines;
 }
 
 export function rateAccountLabel(rate) {
@@ -337,6 +359,7 @@ const state = {
   editor: 'product', review: 'validation', panel: null, packageId: null, componentId: null, appearanceTarget: 'product', graphicId: null, scene: null,
   alternatives: [defaultCarton()], alternativeIndex: 0, maxPackages: 3, candidates: null, candidateRevision: null, candidateConfig: null,
   provider: null, providerError: '', quotes: [], quoteIndex: 0, quoteScenario: null, quoteError: '',
+  quoteAccounts: [], quoteOptions: { delivery_confirmation: null, saturday_delivery: false }, quoteRules: null, quoteAttempts: null,
   addresses: { origin: blankAddress(), destinations: [blankAddress()] }, quoteForm: null,
   section: false, exploded: false, displayMode: 'edges', transparency: 0,
   mutationReceipt: null, lastDirtySignal: null, lastRibbonSignal: null, sage: null, conflict: false,
@@ -1230,6 +1253,7 @@ function resetDocumentState() {
   state.packageId = null; state.componentId = null; state.candidates = null; state.candidateRevision = null;
   state.alternatives = [defaultCarton()]; state.alternativeIndex = 0; state.maxPackages = 3; state.candidateConfig = null;
   state.quotes = []; state.quoteIndex = 0; state.quoteScenario = null; state.quoteError = ''; state.mutationReceipt = null;
+  state.quoteAccounts = []; state.quoteOptions = { delivery_confirmation: null, saturday_delivery: false }; state.quoteAttempts = null;
   state.addresses = { origin: blankAddress(), destinations: [blankAddress()] }; state.editor = 'product'; state.review = 'validation';
   state.panel = null;
   state.graphicId = null; state.appearanceTarget = 'product';
@@ -1335,6 +1359,38 @@ function captureAddresses() {
   return { origin: read('origin'), destinations: state.addresses.destinations.map((_, i) => read(`destination${i}`)) };
 }
 
+function captureQuoteOptions() {
+  if (!state.quoteForm) return state.quoteOptions;
+  return { delivery_confirmation: textValue(state.quoteForm, 'delivery_confirmation') || null,
+    saturday_delivery: state.quoteForm.elements.namedItem('saturday_delivery')?.checked === true };
+}
+
+const quoteScenarioValue = () => JSON.stringify([captureAddresses(), state.quoteAccounts, captureQuoteOptions()]);
+
+async function openCarrierAccounts() {
+  if (!confirm('List the carrier accounts enabled for this EasyPost key? This contacts EasyPost but creates no shipment, and needs a production key.')) return;
+  state.addresses = captureAddresses(); state.quoteOptions = captureQuoteOptions();
+  const data = await working('Listing carrier accounts...', () => request('/account/carrier-accounts', { method: 'POST', body: {} }));
+  resourceDialog('Carrier accounts', (body, dialog) => {
+    body.append(element('p', data.notice || '', 'notice'));
+    if (!data.carrier_accounts.length) body.append(element('p', 'No carrier accounts were listed.', 'warning'));
+    const form = element('form', null, 'form-grid'); form.addEventListener('submit', event => event.preventDefault());
+    const checks = data.carrier_accounts.map(account => {
+      const input = checkbox(form, `${account.readable || account.type || 'Carrier'} | ${account.description || account.reference || account.id}`, state.quoteAccounts.includes(account.id), () => {});
+      input.value = account.id; return input;
+    });
+    const actions = element('div', null, 'actions');
+    actions.append(button('Rate selected accounts', () => { state.quoteAccounts = checks.filter(c => c.checked).map(c => c.value); dialog.close(); renderRates(); }, { primary: true }),
+      button('Rate all enabled accounts', () => { state.quoteAccounts = []; dialog.close(); renderRates(); }));
+    form.append(actions); body.append(form);
+  });
+}
+
+async function loadQuoteAttempts() {
+  try { state.quoteAttempts = await request(`${docPath()}/quote-attempts`); }
+  catch { state.quoteAttempts = null; }
+}
+
 function renderRates() {
   const host = $('rates-panel'); host.replaceChildren();
   const provider = section(host, 'Rate provider');
@@ -1342,6 +1398,15 @@ function renderRates() {
   provider.append(element('p', providerNotice(state.provider), 'notice'), button('Refresh provider status', refreshProvider, { symbol: 'arrow-clockwise' }));
   if (state.provider?.secure_store_enabled) provider.append(button('Carrier account', openCarrierAccount, { symbol: 'cube' }));
   if (state.provider?.account_alias) provider.append(element('p', `${state.provider.account_alias} | ${state.provider.validation || 'Not validated'}`, 'metadata'));
+  if (state.quoteRules) {
+    const rules = element('details'); rules.append(element('summary', 'Quote rules and provider fees'));
+    for (const text of [state.quoteRules.ship_date, ...Object.values(state.quoteRules.destinations || {}), state.quoteRules.fees]) rules.append(element('p', text, 'notice'));
+    provider.append(rules);
+  }
+  if (state.capabilities.includes('carrier_account_discovery') && state.provider?.configured) {
+    provider.append(button('Carrier accounts', openCarrierAccounts, { symbol: 'stack' }));
+  }
+  provider.append(element('p', state.quoteAccounts.length ? `Rating ${state.quoteAccounts.length} selected carrier account(s): ${state.quoteAccounts.join(', ')}` : 'Rating every carrier account enabled for this key.', 'metadata'));
   const form = element('form', null, 'form-grid'); state.quoteForm = form;
   addressFields(form, 'Origin', 'origin', state.addresses.origin);
   state.addresses.destinations.forEach((address, i) => addressFields(form, `Destination ${i + 1}`, `destination${i}`, address));
@@ -1349,8 +1414,15 @@ function renderRates() {
   actions.append(button('Add destination', () => { state.addresses = captureAddresses(); state.addresses.destinations.push(blankAddress()); renderRates(); }, { disabled: state.addresses.destinations.length >= 3 }),
     button('Remove last destination', () => { state.addresses = captureAddresses(); state.addresses.destinations.pop(); renderRates(); }, { symbol: 'trash', compact: true, disabled: state.addresses.destinations.length <= 1 }));
   form.append(actions);
-  const quoteButton = button('Compare rates', requestQuotes, { primary: true }); quoteButton.id = 'quote-button'; form.append(quoteButton);
-  form.addEventListener('submit', event => { event.preventDefault(); invoke(requestQuotes); });
+  const options = element('fieldset'); options.append(element('legend', 'Shipment options'));
+  field(options, 'Delivery confirmation', 'delivery_confirmation', state.quoteOptions.delivery_confirmation || '',
+    { options: [['', 'Carrier default'], ['NO_SIGNATURE', 'No signature'], ['SIGNATURE', 'Signature'], ['ADULT_SIGNATURE', 'Adult signature']] });
+  const saturday = checkbox(options, 'Saturday delivery', state.quoteOptions.saturday_delivery, () => {}); saturday.name = 'saturday_delivery';
+  form.append(options);
+  form.append(element('p', 'Compare rates shows the saved quote when this exact scenario was already priced. Otherwise each package and destination creates one provider shipment for rating; production rating can be billed (see Quote rules). No postage is purchased.', 'metadata'));
+  const quoteButton = button('Compare rates', () => requestQuotes(false), { primary: true }); quoteButton.id = 'quote-button'; form.append(quoteButton);
+  const refreshButton = button('Refresh rates', () => requestQuotes(true), { symbol: 'arrow-clockwise' }); refreshButton.id = 'quote-refresh-button'; form.append(refreshButton);
+  form.addEventListener('submit', event => { event.preventDefault(); invoke(() => requestQuotes(false)); });
   const addressChanged = () => { updateHeader(); updateFreshness(); };
   form.addEventListener('input', addressChanged); form.addEventListener('change', addressChanged); host.append(form);
   host.append(element('div', null, 'review-section')); host.lastChild.id = 'quote-results'; renderQuoteResults(); updateHeader();
@@ -1358,7 +1430,7 @@ function renderRates() {
 
 async function refreshProvider() {
   await working('Checking carrier provider...', async () => {
-    try { const data = await request('/status'); state.provider = data.rating; state.capabilities = data.capabilities || []; state.providerError = ''; notify('Provider status updated.'); }
+    try { const data = await request('/status'); state.provider = data.rating; state.capabilities = data.capabilities || []; state.quoteRules = data.quote_rules || null; state.providerError = ''; notify('Provider status updated.'); }
     catch (error) { state.provider = null; state.providerError = `Provider status unavailable: ${error.message}`; throw error; }
     finally { state.addresses = captureAddresses(); }
   }).finally(() => {
@@ -1400,35 +1472,43 @@ async function openCarrierAccount() {
 async function loadQuotes() {
   try { const data = await request(`${docPath()}/quotes`); state.quotes = data.quotes; state.quoteIndex = 0; }
   catch (error) { state.quoteError = `Quote history unavailable: ${error.message}`; }
+  await loadQuoteAttempts();
 }
 
-async function requestQuotes() {
+async function requestQuotes(refresh = false) {
   if (!state.quoteForm.reportValidity()) return;
   flushEditor();
   if (!state.draft.document || state.draft.dirty) { render(); throw new Error('Save the document before requesting rates.'); }
   if (!state.provider?.configured) throw new Error('Carrier provider is not configured. No rates are available.');
   if (!state.draft.document.assessment.rate_ready) throw new Error('Resolve the validation errors before requesting rates.');
-  state.addresses = captureAddresses(); const scenario = JSON.stringify(state.addresses);
-  await working('Requesting carrier estimates...', async () => {
+  state.addresses = captureAddresses(); state.quoteOptions = captureQuoteOptions(); const scenario = quoteScenarioValue();
+  const shipments = state.draft.document.design.packages.length * state.addresses.destinations.length;
+  if (refresh && !confirm(`Request new rates? This creates ${shipments} new provider shipment(s) for rating, which can be billed for a production account. No postage is purchased.`)) return;
+  await working(refresh ? 'Requesting new carrier estimates...' : 'Requesting carrier estimates...', async () => {
     try {
-      const result = await request(`${docPath()}/quotes`, { method: 'POST', body: { expected_revision: state.draft.document.revision, ...state.addresses } });
-      state.quotes.unshift(result); state.quotes = state.quotes.slice(0, 10); state.quoteIndex = 0;
-      state.quoteScenario = { id: result.id, value: scenario }; state.quoteError = ''; notify('Carrier quote response received. No postage was purchased.');
+      const result = await request(`${docPath()}/quotes`, { method: 'POST', body: quoteBody(state.draft.document.revision, state.addresses, state.quoteAccounts, state.quoteOptions, refresh) });
+      const existing = state.quotes.findIndex(q => q.id === result.id);
+      if (existing >= 0) { state.quotes[existing] = { ...state.quotes[existing], ...result }; state.quoteIndex = existing; }
+      else { state.quotes.unshift(result); state.quotes = state.quotes.slice(0, 10); state.quoteIndex = 0; }
+      state.quoteScenario = { id: result.id, value: scenario }; state.quoteError = '';
+      notify(result.reused ? 'Showing the saved quote for this exact scenario. No provider request was made; use Refresh rates for new rates.'
+        : `Carrier quote response received (${result.provider_shipments_created ?? 0} provider shipment(s) created). No postage was purchased.`);
     } catch (error) { state.quoteError = `Latest request failed: ${error.message}`; throw error; }
-    finally { renderQuoteResults(); }
+    finally { await loadQuoteAttempts(); renderQuoteResults(); }
   });
 }
 
 function updateFreshness() {
   const quote = state.quotes[state.quoteIndex];
-  const sameScenario = quote && state.quoteScenario?.id === quote.id && state.quoteScenario.value === JSON.stringify(captureAddresses());
+  const sameScenario = quote && state.quoteScenario?.id === quote.id && state.quoteScenario.value === quoteScenarioValue();
   const label = $('quote-freshness');
   if (label) {
     label.textContent = `${state.quoteError ? 'Previous quote | ' : ''}${quoteFreshness(quote, state.draft.document?.revision, hasDraft(), sameScenario)}`;
     label.className = !hasDraft() && sameScenario && quote?.revision === state.draft.document?.revision && !quote?.stale ? 'good' : 'warning';
   }
-  const b = $('quote-button');
-  if (b) b.disabled = state.busy || !state.provider?.configured || !state.draft.document?.assessment.rate_ready || hasDraft();
+  for (const b of [$('quote-button'), $('quote-refresh-button')]) {
+    if (b) b.disabled = state.busy || !state.provider?.configured || !state.draft.document?.assessment.rate_ready || hasDraft();
+  }
   const assessment = $('validation-panel');
   if (assessment) assessment.setAttribute('data-stale', String(hasDraft()));
   renderValidation();
@@ -1438,13 +1518,16 @@ function rateTable(rates, total = false) {
   const wrap = element('div', null, 'rate-table-wrap'), table = element('table');
   table.setAttribute('aria-label', total ? 'All-package rate totals' : 'Individual parcel rates');
   const head = element('thead'), hr = element('tr');
-  for (const title of ['Service', total ? 'Parcel sum' : 'Rate', 'Mode']) { const th = element('th', title); th.scope = 'col'; hr.append(th); } head.append(hr);
+  for (const title of ['Service', total ? 'Account rate sum' : 'Account rate', 'List', 'Retail', 'Mode']) { const th = element('th', title); th.scope = 'col'; hr.append(th); } head.append(hr);
   const body = element('tbody');
   rates.forEach(rate => {
     const row = element('tr'), service = element('td');
     service.append(element('strong', rate.carrier), element('div', rate.service), element('div', rateAccountLabel(rate), 'rate-account muted'));
     if (rate.delivery_days != null) service.append(element('div', `${rate.delivery_days} days`, 'muted'));
-    row.append(service, element('td', `${rate.currency} ${rate.amount}`, 'rate-amount'), element('td', rate.mode, rate.mode === 'test' ? 'warning' : ''));
+    row.append(service, element('td', priceText(rate.currency, rate.amount), 'rate-amount'),
+      element('td', priceText(total ? rate.currency : rate.list_currency, rate.list_amount), 'rate-amount muted'),
+      element('td', priceText(total ? rate.currency : rate.retail_currency, rate.retail_amount), 'rate-amount muted'),
+      element('td', rate.mode === 'test' ? 'test (not live)' : rate.mode, rate.mode === 'test' ? 'warning' : ''));
     body.append(row);
   });
   table.append(head, body); wrap.append(table); return wrap;
@@ -1460,20 +1543,36 @@ function renderQuoteResults() {
   select.addEventListener('change', () => { state.quoteIndex = Number(select.value); renderQuoteResults(); });
   const freshness = element('p'); freshness.id = 'quote-freshness'; host.append(freshness);
   host.append(element('p', `${quote.provider} | ${quote.ship_date_basis || ''}`, 'notice'));
+  if (quote.mode) host.append(element('p', quote.mode === 'test' ? 'Test mode: these are not live carrier quotes.' : 'Production account rates.', quote.mode === 'test' ? 'warning' : 'notice'));
+  if (quote.provider_shipments_created != null) host.append(element('p', `${quote.provider_shipments_created} provider shipment(s) were created to rate this quote. No postage was purchased.`, 'metadata'));
+  if (quote.price_bases) host.append(element('p', Object.values(quote.price_bases).join(' '), 'metadata'));
+  for (const note of quote.origin_notes || []) host.append(element('p', `Origin: ${note.message}`, 'warning'));
   for (const result of quote.results || []) {
     const block = element('section', null, 'review-section');
     block.append(element('h3', `${result.destination.city}, ${result.destination.state} ${result.destination.zip}`));
+    for (const note of result.notes || []) block.append(element('p', note.message, 'warning'));
     if (result.totals.length) {
       block.append(rateTable(result.totals, true), element('p', 'Sum of separate parcel estimates, not a consolidated shipment quote.', 'notice'));
     } else block.append(element('p', 'No common service across every package. See individual parcel responses.', 'warning'));
     for (const parcel of result.parcels) {
       const details = element('details'); details.append(element('summary', `${parcel.package_id} | ${parcel.mode} | ${parcel.rates.length} rates${parcel.carrier_error_count ? ` | ${parcel.carrier_error_count} carrier messages` : ''}`));
       if (parcel.carrier_error_count) details.append(element('p', `${parcel.carrier_error_count} carrier messages reported. Some services may be unavailable.`, 'warning'));
+      for (const line of messageSummary(parcel.carrier_messages)) details.append(element('p', line, 'warning'));
+      if (parcel.excluded_rate_count) details.append(element('p', `${parcel.excluded_rate_count} rates outside the selected accounts or services were left out.`, 'notice'));
       details.append(parcel.rates.length ? rateTable(parcel.rates) : element('p', 'Provider returned no rates for this parcel.', 'warning')); block.append(details);
     }
     host.append(block);
   }
-  if (quote.notice) host.append(element('p', quote.notice, 'notice')); updateFreshness();
+  if (quote.notice) host.append(element('p', quote.notice, 'notice'));
+  if (quote.fees_notice) host.append(element('p', quote.fees_notice, 'notice'));
+  const audit = state.quoteAttempts;
+  if (audit) {
+    host.append(element('p', `Quote requests for this document created ${audit.total_shipments_created} provider shipment(s) in ${audit.attempt_count} attempt(s).`, 'metadata'));
+    const interrupted = audit.attempts.filter(a => a.outcome === 'interrupted').length;
+    if (interrupted) host.append(element('p', `${interrupted} attempt(s) were interrupted; their provider shipments are unknown.`, 'warning'));
+    if (audit.total_unconfirmed_requests) host.append(element('p', `${audit.total_unconfirmed_requests} provider request(s) got no response; the provider may still have created shipments for them.`, 'warning'));
+  }
+  updateFreshness();
 }
 
 function refreshScene() {

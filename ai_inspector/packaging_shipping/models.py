@@ -1,6 +1,7 @@
 """Closed, SI-unit contracts shared by manual editing and Sage."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -313,7 +314,55 @@ class Address(Closed):
     residential: Annotated[bool, Field(strict=True)]
 
 
+CarrierAccountId = Annotated[str, Field(pattern=r"^ca_[A-Za-z0-9_]{1,64}$")]
+ProviderName = Annotated[str, Field(min_length=1, max_length=60, pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._&/+-]*$")]
+
+
+class ServiceFilter(Closed):
+    """Exact carrier and service names as the provider returns them."""
+    carrier: ProviderName
+    service: ProviderName
+
+
+class QuoteOptions(Closed):
+    """Documented EasyPost shipment options that affect rating; omitted when left at default."""
+    delivery_confirmation: Literal["NO_SIGNATURE", "SIGNATURE", "ADULT_SIGNATURE"] | None = None
+    saturday_delivery: Annotated[bool, Field(strict=True)] = False
+
+    def provider_options(self):
+        options = {}
+        if self.delivery_confirmation is not None:
+            options["delivery_confirmation"] = self.delivery_confirmation
+        if self.saturday_delivery:
+            options["saturday_delivery"] = True
+        return options
+
+
 class QuoteRequest(Closed):
     expected_revision: Annotated[int, Field(ge=0, strict=True)]
     origin: Address
     destinations: Annotated[list[Address], Field(min_length=1, max_length=3)]
+    # Future-date rating is refused until the provider documents that rates honor it.
+    ship_date: date | None = None
+    carrier_accounts: Annotated[list[CarrierAccountId], Field(max_length=10)] = Field(default_factory=list)
+    services: Annotated[list[ServiceFilter], Field(max_length=20)] = Field(default_factory=list)
+    options: QuoteOptions = Field(default_factory=QuoteOptions)
+    # False reuses a saved quote for the identical scenario; True explicitly requests new rates.
+    refresh: Annotated[bool, Field(strict=True)] = False
+
+    @model_validator(mode="after")
+    def distinct(self):
+        if len(set(self.carrier_accounts)) != len(self.carrier_accounts):
+            raise ValueError("List each carrier account once.")
+        if len({(s.carrier, s.service) for s in self.services}) != len(self.services):
+            raise ValueError("List each carrier service once.")
+        return self
+
+    def scenario(self):
+        """Everything that defines the rated scenario, independent of revision and refresh."""
+        return {"origin": self.origin.model_dump(mode="json"),
+                "destinations": [d.model_dump(mode="json") for d in self.destinations],
+                "ship_date": None if self.ship_date is None else self.ship_date.isoformat(),
+                "carrier_accounts": sorted(self.carrier_accounts),
+                "services": sorted([s.carrier, s.service] for s in self.services),
+                "options": self.options.provider_options()}

@@ -49,7 +49,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Requirement | Status | Evidence or next action |
 | --- | --- | --- |
 | Dependency choices: py3dbp (MIT), trimesh (MIT), reportlab (BSD), OCP STEP worker, EasyPost | Implemented | In use and promoted locally. Third-party license/notice review and redistribution remain P5 work. |
-| Provider choice with current terms and services | Open | EasyPost is the only adapter. Current account prerequisites, fees, test/production behaviour and carrier coverage are being rechecked (P2 notes below). |
+| Provider choice with current terms and services | Blocked | EasyPost remains the only adapter. Terms re-read 2026-11-06 from EasyPost's docs and API Addendum v4.3 (effective 2026-10-30): rating creates a Shipment (an external write); three rating calls are included per purchased label, then $0.02 per additional call; address verification $0.02 beyond one per label; SmartRate $0.03; test mode contacts no carrier. This workflow buys no labels, so production rating calls are expected to be billed (inference, shown as the fee notice). Needs the user's account choice and permission for metered calls. |
 | Documented unsupported inputs | Implemented | `/api/packaging/status` lists unsupported capabilities; consolidated list below. |
 | Real CAD import with dimension check | Locally verified | Five-solid STEP: bounds and closed-solid volume; original bytes unchanged (STEP batch, real sample). |
 | Mass compared with the source CAD application's value | Blocked | Only a PMMA density estimate exists (1.726 kg for four pairs). Needs the CAD-reported mass or a scale measurement from the user. |
@@ -73,12 +73,12 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Requirement | Status | Evidence or next action |
 | --- | --- | --- |
 | Quote-only adapter, no purchase endpoint | Locally verified | `rating.py` creates shipments for rates only; mock-transport tests. |
-| Ship date, selected carrier accounts, service constraints, options in the request | Open | `QuoteRequest` has revision, origin and up to three destinations only. Add, or block clearly where semantics are unverified. |
-| Price basis: account rate vs list vs retail | Open | Only `rate` is kept. Keep the price types separate and never mix them in a comparison. |
-| Actionable, sanitized carrier failures | Open | Provider messages are only counted. |
-| Supported US destinations (contiguous, AK/HI, PO boxes, military, territories) | Open | Any two-letter state and ZIP is accepted. Define and test the supported set; reject or explain the rest. |
-| Complete request fingerprint, duplicate prevention, explicit refresh, account-change staleness | Open | Quotes go stale by revision only. Repeated identical requests create new provider shipments. |
-| Sanitized carrier-account discovery | Open | No discovery endpoint. Allowlisted IDs/aliases/capabilities only, never raw provider objects. |
+| Ship date, selected carrier accounts, service constraints, options in the request | Locally verified | `QuoteRequest` adds `carrier_accounts` (up to 10 `ca_` IDs), `services` (carrier + service filters), `options` (delivery confirmation, Saturday delivery) and `refresh`. Accounts and options are sent only when chosen; rates outside the selection are dropped and counted. A `ship_date` is refused (`ship_date_unsupported`) because EasyPost does not document that rates honor a later date. Mock transports only. |
+| Price basis: account rate vs list vs retail | Locally verified | Each rate keeps the account rate (`rate`), list rate and retail rate as separate fields, each with its own currency; a basis without an explicit currency is dropped, never assumed. Totals sum a basis only when every parcel has it in the same currency, and the UI shows the three in separate columns. Mock only: which bases EasyPost returns for a given account is unverified. |
+| Actionable, sanitized carrier failures | Locally verified | Carrier messages become a category (address, package, account, service, other) with help text, an allowlisted carrier name and account ID; carrier free text is never returned or stored. HTTP rejections show only an allowlisted provider error code (for example `PARCEL.PARAMETERS.INVALID`) with help. Mock only: the categories are keyword-based and real message wording is unverified. |
+| Supported US destinations (contiguous, AK/HI, PO boxes, military, territories) | Locally verified | `destinations.py`: the 50 states and DC are rated; Alaska and Hawaii are rated with a note; territories (PR, GU, VI, AS, MP, UM, FM, MH, PW) and military addresses (AA/AE/AP, APO/FPO/DPO) are refused because rating needs customs data this pilot does not collect; PO Box street lines and unknown state codes are refused. Checked for the origin and every destination before any provider request. Carrier coverage of AK/HI is not verified. |
+| Complete request fingerprint, duplicate prevention, explicit refresh, account-change staleness | Locally verified | Fingerprint: provider, adapter, design hash, scenario hash (addresses with residential status, accounts, services, options, ship date) and an opaque account reference that changes when the key is replaced or removed. An identical request at the same revision returns the saved quote (`reused: true`) without a provider call; `refresh: true` (UI "Refresh rates", with a confirm naming the shipment count) asks again. History reports `stale_reason` (revision_changed, design_changed, account_changed, account_removed). Every provider attempt is audited at `/quote-attempts`: requests sent, responses, shipments created, unconfirmed requests and outcome, including failed and interrupted attempts. Mock only. |
+| Sanitized carrier-account discovery | Locally verified | `POST /api/packaging/account/carrier-accounts` (packaging client header and edit permission) keeps id, type, readable name, description, reference and billing type only; credential fields, logos and malformed entries are discarded and key-like text is blanked. Refusals (403, `MODE.UNAUTHORIZED`) and rejected keys are explained. Mock only: the response shape and the production-key requirement come from EasyPost's docs, not a live call. |
 | Change of design invalidates quotes | Locally verified | Revision-bound history marks other revisions stale. |
 | Live quotes for one approved package to three valid US addresses, two carriers | Blocked | Needs a privately entered key, approved addresses with residential/commercial status, a confirmed gross weight and permission for metered calls. |
 | Explain differences from a carrier website's retail quote | Blocked | Needs live rates; requires the price-basis work above. |
@@ -130,6 +130,20 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   change: proposing a design that has pads but no cushion requirement now fails with
   `protection_requirement_needed` (UI, API and Sage) instead of returning candidates without the
   pads. Design hashes now include the two new (null by default) fields. Mock/offline evidence only.
+- 2026-11-06, item 2 (rating hardening): request options, separate price bases, sanitized
+  failure categories and provider error codes, US destination rules, fingerprints with reuse and
+  explicit refresh, account/design staleness, an attempt audit with fee disclosure and sanitized
+  carrier-account discovery; the Rates panel shows all of them. New store table
+  `quote_attempts` (additive, schema version unchanged); the `quotes` table is unchanged, so an
+  older build can still read and write it. Contract changes: quote history entries may carry
+  `stale_reason`; `/api/packaging/status` adds `quote_rules`; a non-null `ship_date` is refused.
+  Evidence: `tests/test_packaging_rating_hardening.py` and `tests/test_packaging_destinations.py`
+  with mock transports; no request reached EasyPost and no live carrier result exists.
+  Test note: the existing `test_separate_instances_replace_atomically` (four threads writing
+  one SQLite file) failed 2 of 24 runs on this branch and 0 of 28 runs of the committed
+  baseline, all with pytest's temp directory inside OneDrive, and 0 of 10 outside it. The
+  difference is not conclusive and the credential change adds no file or database access;
+  the test runner's temp directory now lives outside OneDrive.
 
 ## Unsupported inputs (first release)
 
@@ -137,6 +151,7 @@ Mixed products in one design; arbitrary contour or fitted inserts; dielines; pal
 and freight; hazardous or special-handling contents as ordinary parcels; international
 shipments; verified CAD material mass; GLB as physical volume evidence; label or postage
 purchase, pickups and payment; future ship dates (until provider semantics are verified).
+PO Box addresses; US territories and military (APO/FPO/DPO) addresses, which need customs data.
 
 ## Credential-independent work order
 

@@ -68,6 +68,12 @@ class PackagingService:
                 CREATE TABLE IF NOT EXISTS images (
                     scope TEXT NOT NULL, id TEXT NOT NULL, metadata TEXT NOT NULL,
                     png BLOB NOT NULL, PRIMARY KEY(scope,id));
+                CREATE TABLE IF NOT EXISTS quote_attempts (
+                    scope TEXT NOT NULL, document_id TEXT NOT NULL, id TEXT NOT NULL,
+                    revision INTEGER NOT NULL, fingerprint TEXT NOT NULL, started TEXT NOT NULL,
+                    finished TEXT, outcome TEXT NOT NULL, requests_sent INTEGER NOT NULL,
+                    responses_received INTEGER NOT NULL, shipments_created INTEGER NOT NULL,
+                    error_code TEXT, quote_id TEXT, PRIMARY KEY(scope,document_id,id));
                 CREATE TABLE IF NOT EXISTS alternatives (
                     scope TEXT NOT NULL, document_id TEXT NOT NULL, id TEXT NOT NULL,
                     name TEXT NOT NULL, revision INTEGER NOT NULL, design TEXT NOT NULL,
@@ -316,8 +322,76 @@ class PackagingService:
             db.execute("INSERT INTO quotes VALUES(?,?,?,?,?)", (scope, doc_id, quote_id, revision, encode(result)))
         return {**result, "id": quote_id, "revision": revision}
 
-    def quote_history(self, scope, doc_id):
+    def quote_history(self, scope, doc_id, *, account_ref=None, account_known=False):
+        """Recent quotes. A quote is stale when the revision, the design hash it priced or, when the
+        caller knows the configured account, the account changed. Quotes saved without a field fall
+        back to the revision check."""
         with self.db() as db:
-            current = self._row(db, scope, doc_id)["revision"]
-            return [{**json.loads(r["result"]), "id": r["id"], "revision": r["revision"], "stale": r["revision"] != current}
-                    for r in db.execute("SELECT * FROM quotes WHERE scope=? AND document_id=? ORDER BY rowid DESC LIMIT 10", (scope, doc_id))]
+            row = self._row(db, scope, doc_id)
+            current, design_hash = row["revision"], digest(Design.model_validate_json(row["design"]))
+            history = []
+            for r in db.execute("SELECT * FROM quotes WHERE scope=? AND document_id=? ORDER BY rowid DESC LIMIT 10", (scope, doc_id)):
+                result = json.loads(r["result"])
+                reason = None
+                if r["revision"] != current:
+                    reason = "revision_changed"
+                elif "design_hash" in result and result["design_hash"] != design_hash:
+                    reason = "design_changed"
+                elif account_known and "account_ref" in result and result["account_ref"] != account_ref:
+                    reason = "account_changed" if account_ref else "account_removed"
+                history.append({**result, "id": r["id"], "revision": r["revision"], "stale": reason is not None,
+                                **({"stale_reason": reason} if reason else {})})
+            return history
+
+    def find_quote(self, scope, doc_id, revision, fingerprint):
+        """The latest saved quote with this exact fingerprint at this revision, or None."""
+        with self.db() as db:
+            self._row(db, scope, doc_id)
+            for r in db.execute("SELECT * FROM quotes WHERE scope=? AND document_id=? AND revision=? ORDER BY rowid DESC LIMIT 50",
+                                (scope, doc_id, revision)):
+                result = json.loads(r["result"])
+                if result.get("fingerprint") == fingerprint:
+                    return {**result, "id": r["id"], "revision": r["revision"]}
+        return None
+
+    def begin_quote_attempt(self, scope, doc_id, revision, fingerprint):
+        """Record a provider attempt before any request, so interrupted attempts stay visible."""
+        attempt_id = "attempt_" + uuid4().hex
+        with self.db() as db:
+            self._row(db, scope, doc_id)
+            db.execute("INSERT INTO quote_attempts VALUES(?,?,?,?,?,?,NULL,'running',0,0,0,NULL,NULL)",
+                       (scope, doc_id, attempt_id, revision, fingerprint, now()))
+        return attempt_id
+
+    def finish_quote_attempt(self, scope, doc_id, attempt_id, outcome, counts, *, error_code=None, quote_id=None):
+        with self.db() as db:
+            db.execute("UPDATE quote_attempts SET finished=?, outcome=?, requests_sent=?, responses_received=?, "
+                       "shipments_created=?, error_code=?, quote_id=? WHERE scope=? AND document_id=? AND id=?",
+                       (now(), outcome, int(counts.get("requests_sent", 0)), int(counts.get("responses_received", 0)),
+                        int(counts.get("shipments_created", 0)), error_code, quote_id, scope, doc_id, attempt_id))
+
+    def quote_attempts(self, scope, doc_id, limit=20):
+        """Provider attempts for this document, newest first; unfinished ones are reported as interrupted."""
+        with self.db() as db:
+            self._row(db, scope, doc_id)
+            rows = db.execute("SELECT * FROM quote_attempts WHERE scope=? AND document_id=? ORDER BY rowid DESC LIMIT ?",
+                              (scope, doc_id, limit)).fetchall()
+            total = db.execute("SELECT COALESCE(SUM(shipments_created),0), COUNT(*), COALESCE(SUM(requests_sent - responses_received),0) "
+                               "FROM quote_attempts WHERE scope=? AND document_id=?",
+                               (scope, doc_id)).fetchone()
+        def outcome(r):
+            if r["outcome"] != "running":
+                return r["outcome"]
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(r["started"])).total_seconds()
+            # The provider budget is 65 s; anything older never finished (crash or forced exit).
+            return "running" if age < 120 else "interrupted"
+
+        attempts = [{"id": r["id"], "revision": r["revision"], "fingerprint": r["fingerprint"], "started": r["started"],
+                     "finished": r["finished"], "outcome": outcome(r),
+                     "requests_sent": r["requests_sent"], "responses_received": r["responses_received"],
+                     "shipments_created": r["shipments_created"], "error_code": r["error_code"], "quote_id": r["quote_id"],
+                     # Sent without a response (timeout, dropped connection): the provider may still have created shipments.
+                     "unconfirmed_requests": r["requests_sent"] - r["responses_received"]}
+                    for r in rows]
+        return {"attempts": attempts, "total_shipments_created": total[0], "attempt_count": total[1],
+                "total_unconfirmed_requests": total[2]}

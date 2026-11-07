@@ -439,6 +439,41 @@ test('quotes are stale for edited forms, changed revisions, or unknown address s
   assert.match(ui.quoteFreshness(quote, 2, false, false), /scenario/);
 });
 
+test('quote freshness names account changes and requests carry only chosen options', () => {
+  const quote = { revision: 2, stale: true };
+  assert.equal(ui.quoteFreshness({ ...quote, stale_reason: 'account_changed' }, 2, false, true), 'Stale: carrier account changed');
+  assert.equal(ui.quoteFreshness({ ...quote, stale_reason: 'account_removed' }, 2, false, true), 'Stale: carrier account removed');
+  assert.equal(ui.quoteFreshness({ ...quote, stale_reason: 'account_changed' }, 3, false, true), 'Stale: package changed');
+  assert.equal(ui.quoteFreshness({ ...quote, stale_reason: 'design_changed' }, 2, false, true), 'Stale: package changed');
+  const addresses = { origin: { zip: '55401' }, destinations: [{ zip: '60601' }] };
+  assert.deepEqual(ui.quoteBody(4, addresses, [], { delivery_confirmation: null, saturday_delivery: false }, false),
+    { expected_revision: 4, ...addresses, carrier_accounts: [], options: {}, refresh: false });
+  assert.deepEqual(ui.quoteBody(4, addresses, ['ca_TEST_A'], { delivery_confirmation: 'SIGNATURE', saturday_delivery: true }, 'yes'),
+    { expected_revision: 4, ...addresses, carrier_accounts: ['ca_TEST_A'], options: { delivery_confirmation: 'SIGNATURE', saturday_delivery: true }, refresh: false });
+  assert.equal(ui.quoteBody(4, addresses, [], {}, true).refresh, true);
+  assert.equal(ui.priceText('USD', '4.10'), 'USD 4.10');
+  assert.equal(ui.priceText('USD', null), '-');
+  assert.equal(ui.priceText(null, undefined), '-');
+});
+
+test('carrier messages show one help line per carrier and category, never carrier text', () => {
+  const messages = [
+    { carrier: 'TEST Carrier', category: 'address', help: 'Check the address.', message: 'TEST 1 Private Street' },
+    { carrier: 'TEST Carrier', category: 'address', help: 'Check the address.' },
+    { carrier: null, category: 'other', help: 'Unrecognised problem.' },
+  ];
+  assert.deepEqual(ui.messageSummary(messages), ['TEST Carrier: Check the address.', 'Carrier: Unrecognised problem.']);
+  assert.deepEqual(ui.messageSummary(undefined), []);
+  assert.doesNotMatch(ui.messageSummary(messages).join(' '), /Private Street/);
+  assert.match(source, /Refresh rates/);
+  assert.match(source, /new provider shipment\(s\) for rating, which can be billed/);
+  assert.match(source, /No provider request was made; use Refresh rates for new rates/);
+  assert.match(source, /Test mode: these are not live carrier quotes/);
+  assert.match(source, /got no response; the provider may still have created shipments/);
+  assert.match(source, /Origin: \$\{note\.message\}/);
+  assert.match(source, /request\('\/account\/carrier-accounts', \{ method: 'POST'/);
+});
+
 test('same carrier and service remain distinguishable by carrier account', () => {
   const base = { carrier: 'Carrier', service: 'Ground', amount: '12.50', currency: 'USD', mode: 'test' };
   assert.equal(ui.rateAccountLabel({ ...base, account_id: 'ca_first' }), 'Account: ca_first');

@@ -120,7 +120,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Missing-dependency behaviour | Locally verified | A missing optional component disables only its feature: GLB import (`source_runtime_unavailable`), arrangement proposals (`arrangement_unavailable`) and the PDF report (`report_unavailable`) answer 503 with a feature message instead of a bad-file or server error, and `/api/packaging/status` lists `glb_import_runtime_missing`, `arrangement_runtime_missing` or `pdf_report_runtime_missing`. `tests/test_packaging_missing_components.py` runs the real GLB worker with an empty dependency folder. STEP, carrier key store and native profile cases were already covered; see `docs/packaging-shipping-dependencies.md`. |
 | Dependency/license/security inventory | Declared and texts collected; redistribution clearance open (needs a person) | `docs/packaging-shipping-dependencies.md`. Declared: numpy 2.5.4 and pillow 13.0.0 (imported directly by the GLB worker) in `requirements-packaging.txt`, and both now required by the native profile check; httpx and pywin32 (Windows only, must live in the app's own site-packages) in `requirements.txt`. Exact-version license texts for 27 components (all 70 STEP DLLs, OCP, the wheels and py3dbp) collected locally with a manifest of sources and SHA-256s; re-verified: 40 files, 0 mismatches, 70 of 70 DLLs assigned. Unresolved redistribution obligations are listed there (LGPL source offers for Open CASCADE and LibRaw, license choices for FreeImage, FreeType, LibRaw, zstd and OpenEXR DWA, required notices, Microsoft runtime terms). Local development testing does not depend on them. Not legal clearance. |
 | Clean Windows install | Open (blocked) | Needs a clean Windows machine or VM; not attempted. |
-| Artifact retention, quotas and cleanup | Open (needs a retention decision) | Cleanup of interrupted import job folders is done (see the row below). Bounded today: 20 saved alternatives and 200 research evidence records per document, 10 recovery drafts per user (removed on save or discard). No retention policy for sources, images, quote snapshots or quote attempts. |
+| Artifact retention, quotas and cleanup | Locally verified (decision of 2026-11-06 implemented) | `storage.py`. Nothing is deleted automatically: documents, alternatives, recovery drafts, edit and create receipts, quotes and quote attempts are never removed. Per-workspace limits, configurable in the editor's Storage dialog (defaults 100 imported models or 2 GiB, 500 artwork images or 512 MiB; bounds 1-10,000 / 64 MiB-64 GiB and 1-50,000 / 16 MiB-16 GiB), refuse new imports with `source_storage_full` / `image_storage_full` and delete nothing. A model or image already stored adds nothing. Remove unused lists only models and images that no document (including Undo and Redo history), alternative, recovery draft, edit or create receipt, quote, comparison baseline or research record names, keeps anything imported in the last hour, and deletes exactly the list the user confirmed (by its digest; a changed list is refused with `storage_changed`); each removal is logged. Receipts stay, so duplicate-request protection and interrupted-operation reconciliation are unchanged. Interrupted import job folders are cleaned separately (row below). Tests: `tests/test_packaging_storage.py` (6). |
 | No secrets in evidence, no orphaned workers, offline manual use | Locally verified | Historical native evidence; recheck at release. The GLB worker now limits itself like the STEP worker (30 s CPU, one process, 1.5 GiB on Windows) and refuses to parse without limits, so a worker whose host stopped ends by itself; job folders left by a stopped host are removed at startup after an hour (`tests/test_packaging_worker_dependencies.py`). |
 | Two live carriers or an explicit single-carrier restriction | Blocked | Depends on P2 live access. |
 
@@ -266,6 +266,11 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   re-verified (40 files, 0 SHA-256 mismatches, 70 of 70 DLLs assigned); redistribution obligations
   listed separately from local testing. Evidence: desktop 22, JS 189, worker/missing-component 19.
 
+- 2026-11-06, item 6 (retention): storage limits and the confirmed Remove unused, as decided.
+  Evidence: 6 storage tests; regression with it: domain 484, host 112, Sage tools 144, recovery 12,
+  credentials 56, rating 93, library 12, catalog 34, worker 19, desktop 22, JS 189 (one wording pin
+  updated) - all mock/offline.
+
 ## Unsupported inputs (first release)
 
 Mixed products in one design; arbitrary contour or fitted inserts; dielines; pallets, crates
@@ -274,24 +279,14 @@ shipments; verified CAD material mass; GLB as physical volume evidence; label or
 purchase, pickups and payment; future ship dates (until provider semantics are verified).
 PO Box addresses; US territories and military (APO/FPO/DPO) addresses, which need customs data.
 
-## Retention proposal (awaiting a decision)
+## Retention decision (2026-11-06, implemented)
 
-Nothing below is implemented: deleting stored records is the user's decision.
-
-Growing without a bound today, per scope: imported sources (normalised GLB, up to 48 MiB each,
-deduplicated by content), surface images (deduplicated), quote snapshots and provider attempts per
-document, edit receipts (each keeps a full copy of the saved document so a replayed request returns
-the same result), create receipts and documents (there is no delete route).
-
-1. Sources and images: a per-scope cap (for example 100 sources or 2 GiB; 500 images or 512 MiB)
-   that refuses new imports with a message, plus **Remove unused**, which deletes only items that
-   no document, saved alternative, recovery draft or Undo step references.
-2. Quote snapshots and attempts: keep them, because they record external requests and fees. If a cap
-   is wanted, refuse new rating requests beyond 1,000 attempts per document instead of deleting.
-3. Edit receipts: keep the newest 200 per document. An older request replayed without its receipt
-   fails on its stale expected revision, so it cannot apply twice. Keep create receipts: a create
-   has no revision check.
-4. No automatic deletion of documents.
+Conservative defaults: no automatic deletion of saved documents, referenced assets, recovery drafts or
+quote and fee history. Storage limits refuse new imports instead of deleting, start at the proposed
+source and image limits, and are configurable per workspace. Remove unused runs only when the user
+confirms the exact list. Receipts needed to reconcile interrupted operations are never pruned, so
+duplicate-request protection is preserved. The store file does not shrink after removals; freed pages
+are reused.
 
 ## Credential-independent work order
 
@@ -319,5 +314,4 @@ the same result), create receipts and documents (there is no delete route).
   is billed by that provider), with the questions to research.
 - Redistribution decisions for the STEP runtime's bundled libraries before any installer or bundle
   is given to anyone (list in `docs/packaging-shipping-dependencies.md`); not needed for local testing.
-- A retention decision (see "Retention proposal"): caps, Remove unused, receipt pruning.
 - A clean Windows machine or VM for the install test.

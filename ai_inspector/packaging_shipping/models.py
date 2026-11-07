@@ -378,6 +378,19 @@ class PackingRequest(Closed):
     max_packages: Annotated[int, Field(ge=1, le=6, strict=True)] = 3
 
 
+class StorageLimits(Closed):
+    """Per-workspace import limits. A full workspace refuses new imports; nothing is deleted to make room."""
+    sources: Annotated[int, Field(ge=1, le=10_000, strict=True)]
+    source_bytes: Annotated[int, Field(ge=64 * 1024 ** 2, le=64 * 1024 ** 3, strict=True)]
+    images: Annotated[int, Field(ge=1, le=50_000, strict=True)]
+    image_bytes: Annotated[int, Field(ge=16 * 1024 ** 2, le=16 * 1024 ** 3, strict=True)]
+
+
+class RemoveUnused(Closed):
+    """The digest of the exact unused list the user reviewed and confirmed."""
+    digest: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+
+
 class LibrarySourceRequest(Closed):
     """An InspectorPro library entry, named only: the host reads the model from its own library folder."""
     kind: Literal["part", "assembly"]

@@ -8,11 +8,14 @@ import json
 from hashlib import sha256
 from pathlib import Path
 import sqlite3
+import time
 from uuid import uuid4
 from pydantic import TypeAdapter, ValidationError
 
 from .geometry import assess, digest
 from .models import Design, Product, MassCalculation, Identity
+from .storage import DEFAULT_LIMITS, KINDS as STORAGE_KINDS, NOTICE as STORAGE_NOTICE, RECENT_SECONDS, REFERENCE, \
+    REFERENCED_BY, SCHEMA as STORAGE_SCHEMA, size_text, unused_digest
 
 SCHEMA_VERSION = 2
 CREATE_ID = TypeAdapter(Identity)
@@ -93,7 +96,7 @@ class PackagingService:
                 CREATE TABLE IF NOT EXISTS research_evidence (
                     scope TEXT NOT NULL, document_id TEXT NOT NULL, id TEXT NOT NULL,
                     created TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY(scope,document_id,id));
-            """)
+            """ + STORAGE_SCHEMA)  # Added tables only: earlier builds still open this store.
             db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     @contextmanager
@@ -249,8 +252,88 @@ class PackagingService:
         metadata = deepcopy(metadata)
         metadata["id"] = source_id
         with self.db() as db:
-            db.execute("INSERT OR IGNORE INTO sources VALUES(?,?,?,?)", (scope, source_id, encode(metadata), glb))
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM sources WHERE scope=? AND id=?", (scope, source_id)).fetchone():
+                self._admit(db, scope, "source", len(glb))  # A model already stored adds nothing.
+                db.execute("INSERT INTO sources VALUES(?,?,?,?)", (scope, source_id, encode(metadata), glb))
+            self._imported(db, scope, "source", source_id)
             return json.loads(db.execute("SELECT metadata FROM sources WHERE scope=? AND id=?", (scope, source_id)).fetchone()[0])
+
+    def _limits(self, db, scope):
+        row = db.execute("SELECT value FROM storage_settings WHERE scope=? AND key='limits'", (scope,)).fetchone()
+        return {**DEFAULT_LIMITS, **(json.loads(row[0]) if row else {})}
+
+    def _usage(self, db, scope):
+        usage = {}
+        for table, blob in STORAGE_KINDS.values():
+            count, size = db.execute(f"SELECT COUNT(*), COALESCE(SUM(LENGTH({blob})), 0) FROM {table} WHERE scope=?", (scope,)).fetchone()
+            usage[table] = {"count": count, "bytes": size}
+        return usage
+
+    def _admit(self, db, scope, kind, size):
+        """Refuse a new import beyond this workspace's limits. Nothing is deleted to make room."""
+        limits, used = self._limits(db, scope), self._usage(db, scope)[STORAGE_KINDS[kind][0]]
+        count, total = ("sources", "source_bytes") if kind == "source" else ("images", "image_bytes")
+        if used["count"] + 1 > limits[count] or used["bytes"] + size > limits[total]:
+            what = "imported models" if kind == "source" else "artwork images"
+            raise PackagingError(f"{kind}_storage_full", f"This workspace has reached its storage limit for {what} "
+                                 f"({limits[count]} items or {size_text(limits[total])}). Remove unused items in Storage, "
+                                 "or raise the limit there. Nothing was deleted.", 409)
+
+    @staticmethod
+    def _imported(db, scope, kind, item_id):
+        db.execute("INSERT OR REPLACE INTO asset_imports VALUES(?,?,?,?)", (scope, kind, item_id, time.time()))
+
+    @staticmethod
+    def _referenced(db):
+        found = set()
+        for table, columns in REFERENCED_BY:
+            for row in db.execute(f"SELECT {', '.join(columns)} FROM {table}"):
+                for value in row:
+                    if isinstance(value, str):
+                        found.update(REFERENCE.findall(value))
+        return found
+
+    def _storage(self, db, scope):
+        referenced, cutoff = self._referenced(db), time.time() - RECENT_SECONDS
+        imported = {(r["kind"], r["id"]): r["imported"] for r in db.execute(
+            "SELECT kind,id,imported FROM asset_imports WHERE scope=?", (scope,))}
+        unused, recent = [], []
+        for kind, (table, blob) in STORAGE_KINDS.items():
+            for row in db.execute(f"SELECT id, metadata, LENGTH({blob}) AS size FROM {table} WHERE scope=? ORDER BY rowid", (scope,)):
+                if row["id"] in referenced:
+                    continue
+                meta = json.loads(row["metadata"])
+                name = meta.get("name") or (f"{meta['width']} x {meta['height']} px" if "width" in meta and "height" in meta else row["id"])
+                item = {"kind": kind, "id": row["id"], "name": str(name)[:160], "bytes": row["size"]}
+                (recent if imported.get((kind, row["id"]), 0) > cutoff else unused).append(item)
+        return {"limits": self._limits(db, scope), "defaults": dict(DEFAULT_LIMITS), "usage": self._usage(db, scope),
+                "unused": unused, "recent_unused": recent, "unused_digest": unused_digest(unused), "notice": STORAGE_NOTICE}
+
+    def storage(self, scope):
+        with self.db() as db:
+            return self._storage(db, scope)
+
+    def set_storage_limits(self, scope, limits):
+        with self.db() as db:
+            db.execute("INSERT OR REPLACE INTO storage_settings VALUES(?,?,?)", (scope, "limits", encode(limits.model_dump())))
+            return self._storage(db, scope)
+
+    def remove_unused(self, scope, confirmed_digest):
+        """Delete exactly the unused list the user confirmed; refuse if it changed since it was listed."""
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current = self._storage(db, scope)
+            if current["unused_digest"] != confirmed_digest:
+                raise PackagingError("storage_changed", "Storage changed after it was listed. Review the unused items again.", 409)
+            removed_at = now()
+            for item in current["unused"]:
+                db.execute(f"DELETE FROM {STORAGE_KINDS[item['kind']][0]} WHERE scope=? AND id=?", (scope, item["id"]))
+                db.execute("DELETE FROM asset_imports WHERE scope=? AND kind=? AND id=?", (scope, item["kind"], item["id"]))
+            if current["unused"]:
+                db.execute("INSERT INTO storage_removals VALUES(?,?,?,?)", (scope, uuid4().hex, removed_at, encode(current["unused"])))
+            return {"removed": current["unused"], "bytes": sum(item["bytes"] for item in current["unused"]),
+                    "removed_at": removed_at, "storage": self._storage(db, scope)}
 
     def sources(self, scope):
         with self.db() as db:
@@ -279,7 +362,11 @@ class PackagingService:
         image_id = "img_" + sha256(png).hexdigest()[:32]
         metadata = {**metadata, "id": image_id}
         with self.db() as db:
-            db.execute("INSERT OR IGNORE INTO images VALUES(?,?,?,?)", (scope, image_id, encode(metadata), png))
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM images WHERE scope=? AND id=?", (scope, image_id)).fetchone():
+                self._admit(db, scope, "image", len(png))
+                db.execute("INSERT INTO images VALUES(?,?,?,?)", (scope, image_id, encode(metadata), png))
+            self._imported(db, scope, "image", image_id)
         return metadata
 
     def image(self, scope, image_id):

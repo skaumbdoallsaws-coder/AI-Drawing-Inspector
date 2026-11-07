@@ -604,7 +604,7 @@ test('carrier messages show one help line per carrier and category, never carrie
   assert.deepEqual(ui.messageSummary(undefined), []);
   assert.doesNotMatch(ui.messageSummary(messages).join(' '), /Private Street/);
   assert.match(source, /Refresh rates/);
-  assert.match(source, /new provider shipment\(s\) for rating, which can be billed/);
+  assert.match(source, /new provider shipment\(s\) for rating\. With a production account EasyPost bills each one \(\$0\.02 when no labels are bought\)\. No postage is purchased\./);
   assert.match(source, /No provider request was made; use Refresh rates for new rates/);
   assert.match(source, /Test mode: these are not live carrier quotes/);
   assert.match(source, /got no response; the provider may still have created shipments/);

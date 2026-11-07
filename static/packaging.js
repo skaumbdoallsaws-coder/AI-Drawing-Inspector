@@ -901,6 +901,49 @@ async function openLibrary() {
   }, { wide: true });
 }
 
+const MIB = 1024 * 1024;
+const bytesText = value => value >= 1024 * MIB ? `${(value / (1024 * MIB)).toFixed(1)} GiB` : `${(value / MIB).toFixed(1)} MiB`;
+
+async function openStorage() {
+  flushEditor();
+  let data = await working('Loading storage...', () => request('/storage'));
+  resourceDialog('Storage', body => {
+    const draw = () => {
+      const { usage, limits } = data;
+      body.replaceChildren(element('p', data.notice, 'notice'),
+        element('p', `Imported models: ${usage.sources.count} of ${limits.sources}, ${bytesText(usage.sources.bytes)} of ${bytesText(limits.source_bytes)}`, 'metadata'),
+        element('p', `Artwork images: ${usage.images.count} of ${limits.images}, ${bytesText(usage.images.bytes)} of ${bytesText(limits.image_bytes)}`, 'metadata'));
+      const form = element('form', null, 'form-grid'); form.addEventListener('submit', event => event.preventDefault());
+      field(form, 'Imported model limit', 'limit_sources', limits.sources, { type: 'number', min: 1, max: 10000, step: 1, required: true });
+      field(form, 'Imported model storage (MiB)', 'limit_source_mib', limits.source_bytes / MIB, { type: 'number', min: 64, max: 65536, step: 1, required: true });
+      field(form, 'Artwork image limit', 'limit_images', limits.images, { type: 'number', min: 1, max: 50000, step: 1, required: true });
+      field(form, 'Artwork image storage (MiB)', 'limit_image_mib', limits.image_bytes / MIB, { type: 'number', min: 16, max: 16384, step: 1, required: true });
+      form.append(button('Save limits', async () => {
+        if (!form.reportValidity()) return;
+        data = await working('Saving storage limits...', () => request('/storage/limits', { method: 'PUT', body: {
+          sources: numeric(form, 'limit_sources'), source_bytes: numeric(form, 'limit_source_mib') * MIB,
+          images: numeric(form, 'limit_images'), image_bytes: numeric(form, 'limit_image_mib') * MIB } }));
+        draw(); notify('Storage limits saved. Nothing was deleted.');
+      }));
+      body.append(element('h3', 'Limits'), form, element('h3', 'Unused items'));
+      if (data.unused.length) {
+        const list = element('ul');
+        for (const item of data.unused) list.append(element('li', `${item.kind === 'source' ? 'Model' : 'Image'}: ${item.name} (${bytesText(item.bytes)})`));
+        body.append(list);
+      } else body.append(element('p', 'Nothing unused to remove.', 'notice'));
+      if (data.recent_unused.length) body.append(element('p', `${data.recent_unused.length} unused item(s) imported in the last hour are kept for now.`, 'notice'));
+      if (!data.unused.length) return;
+      const total = data.unused.reduce((sum, item) => sum + item.bytes, 0);
+      body.append(button(`Remove ${data.unused.length} unused`, async () => {
+        if (!confirm(`Permanently remove ${data.unused.length} unused item(s), ${bytesText(total)}? Documents, alternatives, Undo history, recovery drafts, receipts and quotes keep everything they use. This cannot be undone.`)) return;
+        const result = await working('Removing unused items...', () => request('/storage/remove-unused', { method: 'POST', body: { digest: data.unused_digest } }));
+        data = result.storage; draw(); notify(`Removed ${result.removed.length} unused item(s), ${bytesText(result.bytes)}.`);
+      }, { danger: true, symbol: 'trash' }));
+    };
+    draw();
+  });
+}
+
 async function openMassEstimate() {
   flushEditor(); render();
   const product = state.draft.design.product;
@@ -959,6 +1002,7 @@ function renderProduct(host) {
   upload.addEventListener('submit', event => event.preventDefault()); source.append(upload);
   if (state.capabilities.includes('saved_alternatives')) source.append(button('Imported sources', openSources, { symbol: 'stack' }));
   if (state.capabilities.includes('library_sources')) source.append(button('InspectorPro library', openLibrary, { symbol: 'cube' }));
+  if (state.capabilities.includes('storage_limits')) source.append(button('Storage', openStorage, { symbol: 'stack' }));
   if (product?.source_id) {
     const meta = element('div', null, 'metadata');
     meta.append(element('span', 'Imported source | dimensions locked'), element('code', product.source_id), element('span', 'Source revision'), element('code', product.source_revision));
@@ -2048,7 +2092,7 @@ async function requestQuotes(refresh = false) {
   if (!state.draft.document.assessment.rate_ready) throw new Error('Resolve the validation errors before requesting rates.');
   state.addresses = captureAddresses(); state.quoteOptions = captureQuoteOptions(); const scenario = quoteScenarioValue();
   const shipments = state.draft.document.design.packages.length * state.addresses.destinations.length;
-  if (refresh && !confirm(`Request new rates? This creates ${shipments} new provider shipment(s) for rating, which can be billed for a production account. No postage is purchased.`)) return;
+  if (refresh && !confirm(`Request new rates? This creates ${shipments} new provider shipment(s) for rating. With a production account EasyPost bills each one ($0.02 when no labels are bought). No postage is purchased.`)) return;
   await working(refresh ? 'Requesting new carrier estimates...' : 'Requesting carrier estimates...', async () => {
     try {
       const result = await request(`${docPath()}/quotes`, { method: 'POST', body: quoteBody(state.draft.document.revision, state.addresses, state.quoteAccounts, state.quoteOptions, refresh) });

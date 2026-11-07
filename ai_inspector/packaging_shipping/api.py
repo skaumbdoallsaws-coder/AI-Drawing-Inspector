@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from .geometry import assess, digest
 from .admission import PackagingAdmission
 from .library import InspectionLibrary
-from .models import LibrarySourceRequest
+from .models import LibrarySourceRequest, RemoveUnused, StorageLimits
 from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave, BaselineSelect, ScenarioAuthorization, EvidenceReview, DraftCheckpoint
 from .evidence import NOTICE as EVIDENCE_NOTICE
 from .quoting import QuoteDesk
@@ -179,7 +179,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         return {"workflow": "packaging_shipping", "pilot": True,
                 "rating": desk.status(resolved),
                 "permissions": granted(resolved),
-                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios", "draft_recovery", "research_evidence"] + (["library_sources"] if library else []) + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
+                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios", "draft_recovery", "research_evidence", "storage_limits"] + (["library_sources"] if library else []) + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
                 "quote_rules": {"destinations": DESTINATION_RULES, "ship_date": SHIP_DATE_BASIS, "fees": FEES_NOTICE,
                                 "price_bases": PRICE_BASES},
                 "unsupported": ["verified_cad_material_mass", "arbitrary_contour_cutouts", "transport_certification", "freight", "future_ship_dates"] + ([] if step else ["step_runtime_not_configured"]) + ([] if sage else ["sage_chat_execution"]) + missing_components(source_runtime.dependency_root)}
@@ -278,6 +278,18 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
             return service.store_source(s, metadata, result.glb_bytes)
         except StepImportError as exc:
             raise PackagingError(exc.code, exc.message, exc.status_code) from None
+
+    @router.get("/api/packaging/storage")
+    def storage(s=Depends(scope)):
+        return service.storage(s)
+
+    @router.put("/api/packaging/storage/limits")
+    def storage_limits(body: StorageLimits, s=Depends(scope)):
+        return service.set_storage_limits(s, body)
+
+    @router.post("/api/packaging/storage/remove-unused")
+    def remove_unused(body: RemoveUnused, s=Depends(scope)):
+        return service.remove_unused(s, body.digest)
 
     def library_required():
         if library is None:

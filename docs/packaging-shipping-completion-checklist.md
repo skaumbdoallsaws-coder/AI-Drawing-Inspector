@@ -107,7 +107,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Dedicated packaging permissions | Locally verified | `permissions.py`: `packaging.read`, `packaging.edit`, `packaging.quote` (external, possibly billed provider requests) and `packaging.account` (carrier credentials and account discovery). The API, editor admission and Sage gateway ask only for these. The frozen Facility Layout roles are unchanged; each action is derived from the layout action packaging checked before (read from `layout.read`, the others from `layout.edit`, `*` grants all), so no role gains or loses access. Quote and account routes ask for their own action (proved by remapping the derivation in a test). `/api/packaging/status` reports the caller's packaging permissions. Narrowing, for example carrier accounts for administrators only, is a product decision left to the user. `tests/test_packaging_permissions.py`. |
 | Live six-part Minneapolis example with too-small carton, missing mass and stale revision | Blocked | Needs carrier access and permission for a bounded live Sage/rating test. Mock tests do not satisfy it. |
 | Report: BOM, source revisions, quantities, materials, findings, timestamped quotes | Implemented | Draft PDF. |
-| Report: packing sequence, packed vs exploded views, quote identity (design, scenario, account, mode) | Open | The report states that the sequence is unverified; only the first current quote is printed without its fingerprint. |
+| Report: packing sequence, packed vs exploded views, quote identity (design, scenario, account, mode) | Locally verified | `report.py` now prints: a packed-assembly statement (every dimension, position, projection and mass describes the packed carton; exploded or transparent editor views are display aids; rating uses each packed carton's outer dimensions and gross mass; the editor caption already says "exploded view, positions unchanged"); a check-status table (carton fit/lid closure on envelopes, overlaps, minimum cushion, no-contact gaps, payload and allowed orientations as PASSED (geometric) / FAILED / NEEDS REVIEW / NOT REQUIRED from the saved findings; support and packing/removal access always NEEDS REVIEW; drop, vibration, compression and stacking NOT EVALUATED); the protection requirements (contents declaration, allowed orientations, clearance and gap, cushion thicknesses with lining material and sources, least insert material found or "not required", package allowance rule, no-contact regions and their results); a proposed packing order per package derived from saved positions (lowest bottom face first, inserts before products at equal height, then Z, X, ID; close the carton) marked not verified, with insertion/removal access needing review; accepted and unreviewed research evidence with basis, value, source URL and retrieval time (rejected records counted only); and every quote at the current revision, newest per fingerprint, with quote ID, quoted time, provider, mode, design hash, scenario hash, account reference and fingerprint. The report route applies the Rates panel's staleness (revision, design, carrier account changed/removed); stale snapshots print their identity and reason but no amounts. Totals are labelled as sums of per-package account rates, not consolidated or all-in prices, with the fees notice. `tests/test_packaging_report_identity.py` (pdfplumber text of rendered PDFs, offline). Not reviewed by a packaging engineer. |
 
 ## P5 - Desktop release validation
 
@@ -189,6 +189,14 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   (`.runtime/packaging-research-ui-02`, no page errors, no external requests; scripted gateway calls
   stand in for Sage). The enforced-host acceptance test now expects the three research tools,
   because the web-research flag defaults on.
+- 2026-11-06, item 6 (report): the draft PDF gains quote identity for every current quote (newest
+  per fingerprint; stale ones show identity and reason without amounts, using the Rates panel's
+  account-aware staleness), a check-status table, protection requirements, a proposed packing
+  order derived from saved positions (marked not verified), a packed-assembly statement and
+  reviewed research evidence. Evidence: `tests/test_packaging_report_identity.py` (5 tests, offline
+  synthetic TEST data, PDF text via pdfplumber); existing report tests unchanged and passing; a
+  rendered sample was inspected page by page (`.runtime/packaging-report-item6`). No live quote is
+  involved; amounts in the tests are synthetic.
 
 ## Unsupported inputs (first release)
 

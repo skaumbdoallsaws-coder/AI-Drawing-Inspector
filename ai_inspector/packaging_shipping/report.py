@@ -2,8 +2,59 @@
 from io import BytesIO
 from xml.sax.saxutils import escape
 
+STATUS = {"passed": "PASSED (geometric)", "failed": "FAILED", "needs_review": "NEEDS REVIEW",
+          "not_evaluated": "NOT EVALUATED", "not_required": "NOT REQUIRED"}
+CONTENTS = {"unconfirmed": "Not confirmed", "ordinary_nonhazardous": "Ordinary, non-hazardous (declared by the user)",
+            "special_handling": "Special handling (not supported as ordinary parcels)"}
+STALE = {"revision_changed": "revision changed", "design_changed": "design changed",
+         "account_changed": "carrier account changed", "account_removed": "carrier account removed"}
+KINDS = {"carton_sku": "Carton SKU", "material_density": "Material density", "cushioning_guidance": "Cushioning guidance",
+         "comparable_packaging": "Comparable packaging"}
 
-def render_report(document, quotes=()):
+
+def check_rows(design, assessment):
+    """(check, status, basis) from the saved assessment. Geometry passes are envelope-level only."""
+    codes = {f.get("code") for f in assessment["findings"]}
+    constraints = design.get("constraints") or {}
+    placed = any(box["placements"] for box in design["packages"])
+
+    def status(failed=(), review=(), required=True):
+        if not required:
+            return "not_required"
+        if not placed:
+            return "not_evaluated"
+        return "failed" if codes & set(failed) else "needs_review" if codes & set(review) else "passed"
+
+    return [
+        ("Carton fit: product and insert envelopes inside the usable carton, so the lid closes on them",
+         status({"outside_usable_carton", "insert_outside_carton"}), "Bounding envelopes and the recorded clearance"),
+        ("Product and insert envelopes do not overlap",
+         status({"envelope_overlap", "insert_overlap"}), "Bounding envelopes and the recorded gap"),
+        ("Minimum cushion between products and carton walls",
+         status({"cushion_insufficient"}, {"cushion_not_verified"}, bool(constraints.get("cushion"))),
+         "Insert material along each axis; not a cushioning-performance rating"),
+        ("No-contact regions keep their air gap",
+         status({"no_contact_violated", "no_contact_area_outside"}, {"no_contact_faces_down"}, bool(constraints.get("no_contact"))),
+         "Air-gap zones on the recorded product faces"),
+        ("Carton payload limit", status({"payload_exceeded"}, {"load_limit_unknown"}), "Declared carton payload capacity"),
+        ("Products only in allowed orientations", status({"orientation_forbidden"}),
+         "Allowed orthogonal orientations: " + ", ".join(str(o) for o in constraints.get("allowed_orientations", [0]))),
+        ("Support of elevated products", "needs_review",
+         "Elevated products without detected insert contact" if "support_not_verified" in codes
+         else "Contact detection only; load support is not verified"),
+        ("Packing and removal access", "needs_review", "Not evaluated; see each package's proposed packing order"),
+        ("Drop, vibration, compression and stacking performance", "not_evaluated",
+         "Requires engineering review and transport testing"),
+    ]
+
+
+def packing_order(box):
+    """Inserts and products, lowest bottom face first; at equal height inserts first, then by Z, X and ID."""
+    items = [(x["position_m"], 0, "Insert", x) for x in box["inserts"]] + [(x["position_m"], 1, "Product", x) for x in box["placements"]]
+    return sorted(items, key=lambda item: (round(item[0][1], 6), item[1], round(item[0][2], 6), round(item[0][0], 6), item[3]["id"]))
+
+
+def render_report(document, quotes=(), evidence=()):
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import inch
@@ -37,9 +88,9 @@ def render_report(document, quotes=()):
     def position(values):
         return ", ".join(f"{value * 1000:.2f}" for value in values)
 
-    def table(rows):
+    def table(rows, widths=(2.7, .5, 3.8)):
         result = Table([[Paragraph(escape(str(cell)), styles["BodyText"]) for cell in row] for row in rows],
-                       colWidths=[2.7 * inch, .5 * inch, 3.8 * inch], repeatRows=1, hAlign="LEFT")
+                       colWidths=[width * inch for width in widths], repeatRows=1, hAlign="LEFT")
         result.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e7edf2")),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -55,6 +106,13 @@ def render_report(document, quotes=()):
     para("DRAFT FOR ENGINEERING REVIEW. Bounding-envelope checks do not certify cushioning, packing access, stacking strength or transport performance. "
          "Detected geometric contact is not verification of load support or cushioning. Material properties, support, packing sequence and transport testing require engineering review before release.")
     para(f"Saved assessment: {assessment['status']} | Validation level: {assessment['validation_level']}")
+    para("Packed assembly: all dimensions, positions, projections and masses in this report describe the packed carton contents. "
+         "Exploded or transparent views in the editor are display aids only; rate requests use each packed carton's outer "
+         "dimensions and gross mass.")
+    para("Check status", "Heading2", keep_with_next=True)
+    table([["Check", "Status", "Basis"]] + [[check, STATUS[state], basis] for check, state, basis in check_rows(design, assessment)],
+          widths=(2.8, 1.55, 2.65))
+    para("PASSED means the saved geometry meets the recorded requirement on bounding envelopes. It is not a protective-performance result.")
     p = design["product"]
     if p:
         para("Product", "Heading2")
@@ -70,6 +128,49 @@ def render_report(document, quotes=()):
             para(f"Density evidence: {material['evidence']}")
             para(f"Calculation exclusions: {calculation['exclusions'] or 'None recorded; review required'}")
             para("This is a documented estimate, not a measured item mass. The source revision and exclusions remain part of its basis.")
+    constraints = design.get("constraints") or {}
+    para("Protection requirements", "Heading2")
+    para(f"Contents declaration: {CONTENTS.get(constraints.get('contents'), 'Not recorded')}")
+    para("Allowed product orientations (orthogonal index; 0 is the product as modelled): "
+         + ", ".join(str(o) for o in constraints.get("allowed_orientations", [0])))
+    if "clearance_m" in constraints:
+        para(f"Minimum clearance from product envelopes to carton walls: {constraints['clearance_m'] * 1000:.2f} mm | "
+             f"Minimum gap between product envelopes: {constraints.get('gap_m', 0) * 1000:.2f} mm")
+    cushion = constraints.get("cushion")
+    if cushion:
+        material = cushion["material"]
+        para(f"Minimum cushion (insert material between every product envelope and each carton wall): floor {cushion['floor_m'] * 1000:.2f} mm | "
+             f"top {cushion['top_m'] * 1000:.2f} mm | sides {cushion['sides_m'] * 1000:.2f} mm. Lining material for rebuilt proposals: "
+             f"{material['name']}, {number(material['density_kg_m3'])} kg/m3 (density source: {material['evidence']}).")
+        para(f"Cushion requirement source: {cushion['evidence']}")
+        def least(row, field):  # The assessment measures only required directions.
+            if cushion[field] <= 0:
+                return "not required"
+            return "not determined" if row.get(field) is None else f"{row[field] * 1000:.2f} mm"
+        for row in assessment.get("cushion") or []:
+            para(f"Package {row['package_id']}: least insert material found: floor {least(row, 'floor_m')} | top {least(row, 'top_m')} | "
+                 f"sides {least(row, 'sides_m')}{'' if row.get('verified') else ' | not fully verified'}")
+    else:
+        para("No minimum-cushion requirement is recorded.")
+    rule = constraints.get("package_allowance")
+    if rule:
+        para(f"Package allowance rule: {number(rule['allowance_kg'])} kg per package, applied to every package a proposal builds. "
+             f"Source: {rule['evidence']}")
+    else:
+        para("No package allowance rule is recorded; each package's own allowance applies.")
+    regions = constraints.get("no_contact") or []
+    if not regions:
+        para("No no-contact regions are recorded.")
+    for region in regions:
+        area = region.get("area")
+        where = "whole face" if not area else (f"area u {area['u_m'][0] * 1000:.2f}-{area['u_m'][1] * 1000:.2f} mm, "
+                                              f"v {area['v_m'][0] * 1000:.2f}-{area['v_m'][1] * 1000:.2f} mm")
+        para(f"No-contact region {region['id']}: {region['name']} | Product face {region['face']} ({where}) | "
+             f"Air gap {region['air_gap_m'] * 1000:.2f} mm | Source: {region['evidence']}")
+    for row in assessment.get("no_contact") or []:
+        para(f"Package {row['package_id']}, region {row['region_id']}: {row['touching']} of {row['products']} products have material, "
+             f"a wall or another product within the air gap; {row['facing_down']} face the carton floor.")
+    para("These are geometric requirements checked on bounding envelopes. Cushioning, drop, vibration and compression performance are not evaluated.")
     saved_totals = {entry["package_id"]: entry for entry in assessment["packages"]}
     for box in design["packages"]:
         totals = saved_totals.get(box["id"], {})
@@ -146,7 +247,15 @@ def render_report(document, quotes=()):
         para("Placement schedule", "Heading3")
         for placement in box["placements"]:
             para(f"{placement['id']}: minimum-corner position X/Y/Z (mm): {position(placement['position_m'])}; orthogonal orientation {placement['orientation']}.")
-        para("Packing sequence must be reviewed before release. This report records positions, not a verified insertion/removal sequence.")
+        para("Proposed packing order (derived from saved positions; not verified)", "Heading3", keep_with_next=True)
+        steps = packing_order(box)
+        for n, (where, _, kind, item) in enumerate(steps, 1):
+            name = f" ({item['name']})" if kind == "Insert" else ""
+            para(f"{n}. {kind} {item['id']}{name}: bottom face at Y {where[1] * 1000:.2f} mm.")
+        para(f"{len(steps) + 1}. Close the carton. Lid closure is checked on bounding envelopes only.")
+        para("Order rule: lowest bottom face first; at equal height, inserts before products, then by Z and X. "
+             "Whether each item can be inserted and removed in this order is not evaluated and needs review.")
+        para("Packing sequence must be reviewed before release. This report records positions and a derived order, not a verified insertion/removal sequence.")
         para("Surface graphic schedule", "Heading3")
         if not box.get("graphics"):
             para("No surface graphics are recorded for this package.")
@@ -163,17 +272,62 @@ def render_report(document, quotes=()):
     para("Validation findings", "Heading2")
     for finding in assessment["findings"]:
         para(f"{finding['severity'].upper()}: {finding['message']} {' / '.join(finding['entity_ids'])}")
+    para("Public-source evidence", "Heading2")
+    shown = [r for r in evidence if r.get("review_status") in ("accepted", "unreviewed")]
+    if not evidence:
+        para("No research evidence is recorded for this document.")
+    for record in shown:
+        accepted = record["review_status"] == "accepted"
+        para(f"{KINDS.get(record.get('kind'), 'Evidence')}: {record['subject']} | {'ACCEPTED by the user' if accepted else 'UNREVIEWED'} | "
+             f"Sage confidence: {record.get('confidence')}", keep_with_next=True)
+        basis = "quoted from the page" if record.get("claim_basis") == "source_quote" else "provider summary of the page, not a quotation"
+        para(f"Claim ({basis}): {record['claim']}", keep_with_next=True)
+        details = [f"Value: {record['value']:g}{' ' + record['unit'] if record.get('unit') else ''}" if record.get("value") is not None else None,
+                   f"SKU/grade: {record['sku_or_grade']}" if record.get("sku_or_grade") else None,
+                   f"Effective: {record['effective_date']}" if record.get("effective_date") else None]
+        if any(details):
+            para(" | ".join(d for d in details if d), keep_with_next=True)
+        source = record.get("source") or {}
+        para(f"Source: {source.get('title') or 'Untitled'} | {source.get('url')} | retrieved {source.get('retrieved_at') or 'not recorded'}"
+             + (f" | page date: {source['page_age']}" if source.get("page_age") else ""))
+    if len(shown) < len(evidence):
+        para(f"{len(evidence) - len(shown)} rejected record(s) are not shown.")
+    if evidence:
+        para("Evidence is supporting information only. It does not edit the design, pass validation or certify packaging.")
     para("Carrier estimates", "Heading2")
-    current_quotes = [q for q in quotes if q["revision"] == document["revision"]]
+    current_quotes, superseded, seen = [], 0, set()
+    for quote in quotes:  # Newest first; one snapshot per identity (design, scenario, account).
+        if quote["revision"] != document["revision"]:
+            continue
+        identity = quote.get("fingerprint")
+        if identity in seen:
+            superseded += 1
+            continue
+        seen.add(identity)
+        current_quotes.append(quote)
     if not current_quotes:
         para("No quotes are saved for this revision. No shipping price has been inferred.")
-    for quote in current_quotes[:1]:
-        para(f"{quote['provider']} | {quote['quoted_at']} | {quote['notice']}")
+    for quote in current_quotes:
+        modes = sorted({rate["mode"] for result in quote["results"] for rate in result["totals"]})
+        para(f"{quote['provider']} | {quote['quoted_at']} | {quote['notice']}", keep_with_next=True)
+        para(f"Quote {quote.get('id') or 'ID not recorded'} | Mode: {quote.get('mode') or ', '.join(modes) or 'not recorded'} | "
+             f"Design hash: {quote.get('design_hash') or 'not recorded'} | Scenario hash: {quote.get('scenario_hash') or 'not recorded'} | "
+             f"Account reference: {quote.get('account_ref') or 'not recorded'} | Fingerprint: {quote.get('fingerprint') or 'not recorded'}",
+             keep_with_next=True)
+        if quote.get("stale"):
+            para(f"STALE ({STALE.get(quote.get('stale_reason'), 'no longer current')}): amounts are not shown. This snapshot is not a current price.")
+            continue
         for result in quote["results"]:
             dest = result["destination"]
-            para(f"Destination: {dest['city']}, {dest['state']} {dest['zip']}")
+            para(f"Destination: {dest['city']}, {dest['state']} {dest['zip']}{' (residential)' if dest.get('residential') else ''}")
             for rate in result["totals"]:
                 para(f"{rate['mode'].upper()} | {rate['carrier']} {rate['service']} | Account {rate.get('account_id') or 'not supplied'}: {rate['amount']} {rate['currency']} | {rate['basis']}")
+        para("Each amount adds one account rate per package for that carrier service. It is not a consolidated or all-in price; "
+             "carrier adjustments and API fees may apply.")
+        if quote.get("fees_notice"):
+            para(quote["fees_notice"])
+    if superseded:
+        para(f"{superseded} older quote(s) at this revision with the same identity, or with no recorded identity, are not shown; the newest is printed.")
     def footer(canvas, doc):
         canvas.setFont("Helvetica", 8)
         canvas.setFillColor(colors.HexColor("#53616b"))

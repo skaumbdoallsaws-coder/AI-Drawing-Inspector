@@ -359,10 +359,13 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         return await desk.carrier_accounts(resolved)
 
     @router.get("/api/packaging/documents/{doc_id}/report.pdf")
-    def report(doc_id: str, revision: int, s=Depends(scope)):
+    def report(doc_id: str, revision: int, s=Depends(scope), resolved=Depends(principal)):
         from .report import render_report
         current = service.get(s, doc_id, revision)
-        payload = render_report(current, service.quote_history(s, doc_id))
+        # Same staleness as the Rates panel: revision, design hash and, when readable, the configured account.
+        account_ref, known = current_account(resolved)
+        payload = render_report(current, service.quote_history(s, doc_id, account_ref=account_ref, account_known=known),
+                                service.evidence(s, doc_id))
         return Response(payload, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="packaging-review.pdf"'})
 
     return router

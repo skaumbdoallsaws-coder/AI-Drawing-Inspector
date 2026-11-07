@@ -32,7 +32,7 @@ async function transitionStep(label, action, timeoutMs = 10000, onTimeout = () =
 async function authorizeTransition({ kind, observe, confirmDiscard, step = transitionStep }) {
   const initial = validateObservation(await step('Workflow observation', observe, 5000));
   if (initial.busy || initial.pending) return { allowed: false, reason: initial.affected.includes('packaging')
-    ? 'Packaging & Shipping is open. Save your changes, then choose Document > Close Packaging before closing, reloading, or restarting. Active Sage work must finish cancellation and reconciliation first.'
+    ? 'Packaging & Shipping has work that is not in its recovery draft: an active or finishing Sage response, a save conflict, an open packaging dialog, a running quote, report or proposal, a selected file, or session-only addresses (never stored). Finish or clear it and retry, or Save and choose Document > Close Packaging. Active Sage work must finish cancellation and reconciliation first.'
     : 'Finish or cancel the active operation before ' + kind + '.' };
   // Restart preserves the live renderer; close and reload destroy its draft.
   if (kind !== 'restart' && initial.dirty && !await step('Unsaved work confirmation', signal => confirmDiscard(initial, signal), 60000)) return { allowed: false, cancelled: true };

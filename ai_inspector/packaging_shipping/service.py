@@ -527,7 +527,8 @@ class PackagingService:
                              (scope, owner, draft_id)).fetchone()
             if not row:
                 raise PackagingError("draft_not_found", "This recovery draft no longer exists.", 404)
-            return self._draft(db, scope, row) | {"design": json.loads(row[2])["design"]}
+            checkpoint = json.loads(row[2])
+            return self._draft(db, scope, row) | {"design": checkpoint["design"], "unapplied": checkpoint.get("unapplied")}
 
     def remove_draft(self, scope, owner, draft_id):
         """Idempotent: the editor removes its checkpoint after every save or discard."""
@@ -537,13 +538,36 @@ class PackagingService:
         return {"removed": draft_id, "existed": bool(removed)}
 
     @staticmethod
+    def _finished_import(db, scope, importing):
+        """The model an interrupted import stored after it started, if any: the same library entry, or a file import
+        of the same name. Newest first; None when it did not finish (or finished before this build recorded imports)."""
+        rows = db.execute("SELECT s.id, s.metadata FROM sources s JOIN asset_imports a ON a.scope=s.scope AND a.kind='source' "
+                          "AND a.id=s.id WHERE s.scope=? AND a.imported>=? ORDER BY a.imported DESC LIMIT 50",
+                          (scope, importing["started_at"] - 5)).fetchall()
+        wanted = importing.get("library")
+        for source_id, raw in rows:
+            meta = json.loads(raw)
+            reference = meta.get("library")
+            if wanted and reference and all(reference.get(key) == wanted[key] for key in ("kind", "id", "revision", "configuration")):
+                return {"id": source_id, "name": meta.get("name", "")}
+            if not wanted and not reference and meta.get("name") in (importing["name"], importing["name"].strip()[:160]):
+                return {"id": source_id, "name": meta.get("name", "")}
+        return None
+
+    @staticmethod
     def _draft(db, scope, row):
         """saved: the interrupted save completed; current: the document is still at the draft's base revision;
-        behind: the document changed since; new: never saved; document_missing: the document is not in this scope."""
+        behind: the document changed since; new: never saved; document_missing: the document is not in this scope.
+        design_changed says whether the draft's design differs from the saved one (None when there is none to compare):
+        a draft kept only for typed values or an unfinished import has no design changes."""
         checkpoint = json.loads(row[2])
         doc_id, base, pending = checkpoint["document_id"], checkpoint["base_revision"], checkpoint["pending"]
         result = {"id": row[0], "updated_at": row[1], "name": checkpoint["design"].get("name", ""), "document_id": doc_id,
-                  "base_revision": base, "pending": pending, "current_revision": None, "saved_document_id": None}
+                  "base_revision": base, "pending": pending, "current_revision": None, "saved_document_id": None,
+                  "design_changed": None}
+        unapplied, importing = checkpoint.get("unapplied"), checkpoint.get("importing")  # Absent in older drafts.
+        result |= {"unapplied_fields": len(unapplied["fields"]) if unapplied else 0, "unapplied_editor": unapplied and unapplied["editor"],
+                   "importing": importing, "import_result": importing and PackagingService._finished_import(db, scope, importing)}
         if doc_id is None:
             created = pending and db.execute("SELECT result FROM create_receipts WHERE scope=? AND request_id=?",
                                              (scope, pending["request_id"])).fetchone()
@@ -551,13 +575,16 @@ class PackagingService:
                 saved = json.loads(created[0])
                 return result | {"status": "saved", "saved_document_id": saved["id"]}
             return result | {"status": "new"}
-        current = db.execute("SELECT revision FROM documents WHERE scope=? AND id=?", (scope, doc_id)).fetchone()
+        current = db.execute("SELECT revision, design FROM documents WHERE scope=? AND id=?", (scope, doc_id)).fetchone()
         if current is None:
             return result | {"status": "document_missing"}
         landed = pending and db.execute("SELECT 1 FROM receipts WHERE scope=? AND document_id=? AND request_id=?",
                                         (scope, doc_id, pending["request_id"])).fetchone()
         status = "saved" if landed else "current" if current[0] == base else "behind"
-        return result | {"status": status, "current_revision": current[0], "saved_document_id": doc_id if landed else None}
+        saved = Design.model_validate_json(current[1]).model_dump(mode="json")  # As the editor received it.
+        changed = checkpoint["design"] != saved  # By value: the editor sends 37 where the saved design has 37.0.
+        return result | {"status": status, "current_revision": current[0], "saved_document_id": doc_id if landed else None,
+                         "design_changed": changed}
 
     def quote_history(self, scope, doc_id, *, account_ref=None, account_known=False):
         """Recent quotes. A quote is stale when the revision, the design hash it priced or, when the

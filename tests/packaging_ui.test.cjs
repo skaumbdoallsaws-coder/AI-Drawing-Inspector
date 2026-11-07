@@ -529,6 +529,20 @@ test('recovery drafts restore unsaved work, drop work already saved and ask befo
   assert.match(ui.recoveryText({ status: 'new', pending: { kind: 'create', request_id: 'create_x' }, updated_at: at }),
     /^New document, not saved \| a save was interrupted \| /);
   assert.match(ui.recoveryText({ status: 'saved', updated_at: at }), /^Saved before the interruption \| /);
+  // Typed but unapplied values and an unfinished import are named, with whether the import finished.
+  // A field count is not a count of changed values, so only the panel is named.
+  const typed = { status: 'current', base_revision: 2, pending: null, updated_at: at, unapplied_fields: 3, unapplied_editor: 'carton',
+    importing: { kind: 'glb', name: 'TEST bracket.glb' }, import_result: null, design_changed: true };
+  assert.match(ui.recoveryText(typed), /^Unsaved changes to revision 2 \| values typed in the carton panel, not applied \| an import of "TEST bracket\.glb" did not finish \| checkpoint /);
+  assert.match(ui.recoveryText({ ...typed, unapplied_fields: 0, design_changed: false, import_result: { id: 'src_x', name: 'TEST bracket.glb' } }),
+    /^Revision 2, no design changes \| an interrupted import of "TEST bracket\.glb" finished \| checkpoint /);
+  assert.match(ui.recoveryText({ ...typed, design_changed: false, pending: { kind: 'edit', request_id: 'edit_x' } }),
+    /^Unsaved changes to revision 2 \| a save was interrupted \| /);  // An interrupted save is never described as no change.
+  assert.match(ui.recoveryText({ status: 'saved', updated_at: at, unapplied_fields: 1, unapplied_editor: 'product' }),
+    /^Saved before the interruption \| values typed in the product panel, not applied \| checkpoint /);
+  // Imports are in the checkpoint before their request is sent; a save names its activity for departure coverage.
+  assert.match(source, /await beginImport\(\{ kind: step \? 'step' : 'glb', name \}\);\s+try \{/);
+  assert.match(source, /state\.activity = 'save';/);
   // Every save records its request in a checkpoint before sending it, so an interrupted save can be reconciled.
   assert.match(source, /await checkpoint\(\);\s+result = await request\('\/documents'/);
   assert.match(source, /await checkpoint\(\);\s+result = await request\(docPath\(\)/);

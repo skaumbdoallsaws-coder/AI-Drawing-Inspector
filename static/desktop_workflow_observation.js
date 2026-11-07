@@ -74,11 +74,33 @@
             throw failure('desktop_workflow_coverage_unavailable');
         }
     }
-    function withPackaging(sources, host) {
+    // Recovery coverage, for the native application's close, reload and restart only. Covered means leaving now
+    // loses nothing: no host Sage work, and the mounted editor itself proves that its exact current state is its
+    // stored recovery draft (or that nothing is unsaved). Any doubt, error or missing hook means not covered.
+    function packagingCoverage(host) {
+        try {
+            const owner = host?.InspectorProPackagingHost;
+            const flags = owner ? checkedFlags(owner.getDesktopLifecycleObservation()) : empty();
+            if (flags.dirty || flags.busy || flags.pending) return { covered: false, token: '' };
+            const frames = host.document.querySelectorAll('#packagingWorkspaceFrame');
+            if (frames.length > 1) return { covered: false, token: '' };
+            if (!frames.length) return { covered: true, token: 'unmounted' };
+            const adapter = frames[0].contentWindow?.InspectorProPackaging;
+            const coverage = typeof adapter?.getDepartureCoverage === 'function' ? adapter.getDepartureCoverage() : null;
+            if (coverage?.covered !== true || typeof coverage.token !== 'string' || coverage.token.length > 200) return { covered: false, token: '' };
+            return { covered: true, token: coverage.token };
+        } catch (_) {
+            return { covered: false, token: '' };
+        }
+    }
+    function withPackaging(sources, host, { recovery = false } = {}) {
         const observed = observePackaging(host);
-        const packaging = sources && Object.hasOwn(sources, 'packaging')
-            ? mergeFlags(sources.packaging, observed) : observed;
+        const reported = sources && Object.hasOwn(sources, 'packaging') ? checkedFlags(sources.packaging) : empty();
+        let packaging = mergeFlags(reported, observed);
         packaging.pending = FLAGS.some(key => packaging[key]);
+        // The strict observation above still runs first; only a proven-covered editor stops blocking.
+        if (recovery && packaging.pending && !reported.dirty && !reported.busy && !reported.pending
+                && packagingCoverage(host).covered) packaging = empty();
         return { ...sources, packaging };
     }
     function capture(sources, rendererGeneration) {
@@ -116,5 +138,5 @@
         return checked;
     }
     // Empty means no observed work, not recovery coverage for a loaded workflow.
-    return Object.freeze({ capture, assertEmpty, observePackaging, withPackaging, WORKFLOWS });
+    return Object.freeze({ capture, assertEmpty, observePackaging, withPackaging, packagingCoverage, WORKFLOWS });
 }));

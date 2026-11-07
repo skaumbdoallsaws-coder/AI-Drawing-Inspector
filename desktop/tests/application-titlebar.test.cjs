@@ -47,7 +47,7 @@ test('native preload installs header-only drag regions and a registration-only b
   }
   assert.match(css, /-webkit-app-region: no-drag/);
   assert.deepEqual(exposed.map(([name, api]) => [name, Object.keys(api)]), [
-    ['InspectorProNativeApplication', ['registerLifecycleObserver', 'registerPackagingClose']],
+    ['InspectorProNativeApplication', ['registerLifecycleObserver', 'registerPackagingClose', 'registerDeparturePreparation']],
   ]);
   const api = exposed[0][1];
   assert.equal(Object.isFrozen(api), true);
@@ -55,7 +55,7 @@ test('native preload installs header-only drag regions and a registration-only b
     assert.equal(api[name], undefined, 'No renderer IPC or native action capability: ' + name);
   }
   let callbacks = 0;
-  for (const name of ['registerLifecycleObserver', 'registerPackagingClose']) {
+  for (const name of ['registerLifecycleObserver', 'registerPackagingClose', 'registerDeparturePreparation']) {
     for (const invalid of [null, {}, 'arbitrary-channel']) assert.throws(() => api[name](invalid));
     api[name](() => { callbacks++; });
     assert.throws(() => api[name](() => {}), /already registered/);

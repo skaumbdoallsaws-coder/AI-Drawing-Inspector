@@ -49,8 +49,11 @@ function between(source, start, end) {
 function actualPackagingFixture() {
   const f = packagingFixture({ mounted: false });
   const files = [], addresses = { origin: {}, destinations: [{}] };
-  const childState = { draft: { dirty: false }, formDirty: false, busy: false,
-    conflict: false, sage: { locked: false, admission: null, closing: null } };
+  const childState = { draft: { dirty: false, document: null, design: { name: 'TEST', packages: [] } }, formDirty: false, busy: false,
+    conflict: false, sage: { locked: false, admission: null, closing: null },
+    capabilities: [], permissions: [], mutationReceipt: null, importing: null, activity: null, editorForm: null,
+    editor: 'product', packageId: null, componentId: null, graphicId: null,
+    recovery: { id: null, stored: false, last: '', version: 0, failed: false } };
   f.childDocument.querySelectorAll = selector => {
     assert.equal(selector, 'input[type="file"]'); return files;
   };
@@ -66,6 +69,7 @@ function actualPackagingFixture() {
   addresses.origin = clone(childContext.blankAddress());
   addresses.destinations[0] = clone(childContext.blankAddress());
   vm.runInContext(between(packagingSource, 'const hasDraft =', 'function notify('), childContext);
+  vm.runInContext(between(packagingSource, 'const recoveryEnabled =', 'function scheduleCheckpoint('), childContext);
   vm.runInContext(between(packagingSource, 'window.InspectorProPackaging = Object.freeze({', '\n  });')
     + '\n});', childContext);
   f.host.InspectorProDesktopWorkflowObservation = observation;
@@ -353,7 +357,7 @@ test('actual host and child hooks also block the managed runtime bridge route', 
 });
 
 function applicationFixture(options = {}) {
-  const f = actualPackagingFixture(), events = [], replies = [], dialogs = [], departureReplies = [];
+  const f = actualPackagingFixture(), events = [], replies = [], dialogs = [], departureReplies = [], preparations = [];
   const mainHandlers = new Map(), rendererHandlers = new Map();
   const receipt = { terminationConfirmed: true, stdioClosed: true, resourcesClosed: true };
   let destroyed = false, requests = 0;
@@ -367,12 +371,16 @@ function applicationFixture(options = {}) {
           rendererHandlers.get(channel)({}, id);
         } else if (channel === 'ip-application-close-packaging') {
           if (!options.dropDeparture) rendererHandlers.get(channel)({}, id);
+        } else if (channel === 'ip-application-prepare-departure') {
+          preparations.push('requested');
+          if (!options.dropPreparation) rendererHandlers.get(channel)({}, id);
         } else if (channel !== 'ip-application-transition-status') events.push(channel);
       } },
   };
   const main = vm.createContext({ window, app: { quit: () => events.push('quit') },
     ipcMain: { on: (channel, callback) => mainHandlers.set(channel, callback) },
-    randomUUID: () => 'observation-' + requests, setTimeout, clearTimeout, path,
+    randomUUID: () => 'observation-' + requests + '-' + preparations.length,
+    setTimeout: (callback, ms) => setTimeout(callback, options.fastTimers ? Math.min(ms, 30) : ms), clearTimeout, path,
     closing: false, transition: false, booted: true, closeRequested: false, transitionStatus: null, backendUnavailable: false,
     trusted: event => event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame,
     browser: null, browserPromise: null, documents: null, chatgptAccount: null, acceptanceOutput: null,
@@ -396,6 +404,7 @@ function applicationFixture(options = {}) {
     ipcRenderer: { on: (channel, callback) => rendererHandlers.set(channel, callback),
       send(channel, id, value) {
         if (channel === 'ip-application-observed') replies.push(clone(value));
+        else if (channel === 'ip-application-departure-prepared') preparations.push(clone(value));
         else { assert.equal(channel, 'ip-application-packaging-closed'); departureReplies.push(clone(value)); }
         mainHandlers.get(channel)({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, id, clone(value));
       } },
@@ -404,12 +413,12 @@ function applicationFixture(options = {}) {
   const registration = html.match(/window\.InspectorProNativeApplication\.registerLifecycleObserver\(_desktopObserveApplication\);/);
   assert.ok(registration, 'actual index observer registration');
   vm.runInContext(registration[0], f.hostContext);
-  return Object.assign(f, { main, events, replies, dialogs, departureReplies, mainHandlers, rendererHandlers, nativeWindow: window, closed: () => destroyed });
+  return Object.assign(f, { main, events, replies, dialogs, departureReplies, preparations, preload, mainHandlers, rendererHandlers,
+    nativeWindow: window, closed: () => destroyed });
 }
 
 for (const kind of ['close', 'reload', 'restart']) {
   for (const [name, mutate] of [
-    ['mounted saved editor', f => { f.frames.push(f.frame); }],
     ['unapplied fields', f => { f.frames.push(f.frame); f.childState.formDirty = true; }],
     ['selected file', f => { f.frames.push(f.frame); f.files.push({ files: [{}] }); }],
     ['busy request', f => { f.frames.push(f.frame); f.childState.busy = true; }],
@@ -460,7 +469,7 @@ test('application observation accepts all eleven workflows plus facility within 
   f.hostContext._trainFacilitySheets = { observation: () => ({ dirty: false, busy: false, pending: true }) };
   await f.main.change('close');
   assert.equal(f.replies[0].affected.length, 12);
-  assert.match(f.dialogs[0].message, /Packaging & Shipping is open.*Document > Close Packaging/);
+  assert.match(f.dialogs[0].message, /Packaging & Shipping has work that is not in its recovery draft.*Document > Close Packaging/);
   assert.deepEqual(f.events, []);
 });
 
@@ -518,13 +527,13 @@ test('backend interruption notice explains how to reveal the native menu while t
   assert.deepEqual(events, [['network', false], ['ip-application-freeze', true]]);
   assert.equal(notices.length, 1);
   assert.match(notices[0].detail, /Press Alt, then Document > Close Packaging/);
-  assert.match(notices[0].detail, /Unsaved or unresolved packaging work stays blocked; draft recovery is not available/);
+  assert.match(notices[0].detail, /clean or already in its recovery draft does not block Backend > Restart backend/);
+  assert.match(notices[0].detail, /not checkpointed before the backend stopped keeps Close and Restart blocked/);
 });
 
 test('saved backend-loss native departure unmounts without unfreezing, then fresh close succeeds', async () => {
   const f = departureFixture({ frozen: true });
-  await f.main.change('restart');
-  assert.deepEqual(f.events, []); assert.equal(f.read().pending, true);
+  assert.equal(f.read().pending, true);  // The strict observation still sees the mounted editor.
   assert.equal(await f.main.closePackaging(), true);
   assert.equal(f.frames.length, 0); assert.equal(f.hostContext.state.activeTab, 'drawing');
   assert.equal(f.host.document.documentElement.inert, true);
@@ -664,4 +673,145 @@ test('PDF action reports request dispatch, not unconfirmed native download succe
   vm.runInContext(between(packagingSource, 'async function downloadPDF()', '\nfunction '), context);
   await context.downloadPDF();
   assert.deepEqual(actions, ['download-request']); assert.deepEqual(messages, ['PDF export requested.']);
+});
+
+// Recovery coverage (item 1b). The fixture runs the actual editor coverage code, host hooks, observation module,
+// preload and main transition code; no Electron process, backend or store is involved.
+function stored(f, changes = {}) {
+  const state = f.childState;
+  Object.assign(state, { capabilities: ['draft_recovery'], permissions: ['packaging.edit'] }, changes);
+  state.recovery = { id: 'draft_test', stored: true, failed: false, version: 3,
+    last: JSON.stringify(f.childContext.checkpointPayload()) };
+  return f;
+}
+
+function editorForm(fields) {
+  return { form: { elements: fields.map(([name, value, type = 'text']) => ({ name, type, value, checked: value === true })) } };
+}
+
+for (const kind of ['close', 'reload', 'restart']) {
+  test('actual application IPC ' + kind + ' proceeds over a mounted editor that loses nothing', async () => {
+    const f = applicationFixture(); f.frames.push(f.frame);
+    await f.main.change(kind);
+    assert.equal(f.replies.length, 2); assert.equal(f.replies[0].pending, false);
+    assert.equal(f.dialogs.some(value => value.title === 'Unsaved work'), false);
+    assert.ok(kind === 'close' ? f.closed() : f.events.includes(kind === 'reload' ? 'navigate' : 'restart') || f.events.includes('reload'));
+  });
+}
+
+for (const [name, changes] of [
+  ['unsaved changes', { draft: { dirty: true, document: null, design: { name: 'TEST draft', packages: [] } } }],
+  ['unapplied fields', { formDirty: true, editor: 'carton', editorForm: editorForm([['carton_name', 'TEST typed'], ['inner_0', '310']]) }],
+  ['an interrupted save', { busy: true, activity: 'save', draft: { dirty: true, document: null, design: { name: 'TEST', packages: [] } },
+    mutationReceipt: { fingerprint: JSON.stringify({ create: { name: 'TEST', packages: [] } }), id: 'create-1', pending: { kind: 'create', request_id: 'create-1' } } }],
+  ['an unfinished import', { busy: true, activity: 'import', importing: { kind: 'glb', name: 'TEST.glb', started_at: 1 } }],
+]) test('native close proceeds over ' + name + ' already stored as the recovery draft', async () => {
+  const f = stored(applicationFixture(), changes); f.frames.push(f.frame);
+  if (name === 'an unfinished import') f.files.push({ files: [{ name: 'TEST.glb' }] });  // The file being imported.
+  const coverage = f.child.InspectorProPackaging.getDepartureCoverage();
+  assert.deepEqual(clone(coverage.reasons), []); assert.equal(coverage.draft, 'draft_test');  // From the editor's realm.
+  await f.main.change('close');
+  assert.equal(f.closed(), true); assert.equal(f.dialogs.some(value => value.title === 'Unsaved work'), false);
+  assert.equal(f.replies[0].pending, false); assert.equal(f.replies[0].affected.includes('packaging'), false);
+});
+
+for (const [name, mutate, reason] of [
+  ['changes after the stored checkpoint', f => { f.childState.draft.design = { name: 'TEST changed', packages: [] }; }, 'not_checkpointed'],
+  ['a failed last checkpoint', f => { f.childState.recovery.failed = true; }, 'not_checkpointed'],
+  ['recovery unavailable for this role', f => { f.childState.permissions = ['packaging.read']; }, 'not_checkpointed'],
+  ['unapplied fields without their form', f => { f.childState.formDirty = true; f.childState.editorForm = null; }, 'unapplied_unavailable'],
+  ['a running quote or report', f => { f.childState.busy = true; f.childState.activity = null; }, 'busy'],
+  ['a selected file', f => { f.files.push({ files: [{ name: 'TEST.glb' }] }); }, 'selected_file'],
+  ['session-only addresses', f => { f.addresses.origin.street1 = 'TEST session-only'; }, 'addresses'],
+  ['an open dialog', f => { f.dialog = {}; }, 'dialog'],
+  ['a save conflict', f => { f.childState.conflict = true; }, 'conflict'],
+  ['a Sage lock', f => { f.childState.sage.locked = true; }, 'sage'],
+  ['a Sage admission', f => { f.childState.sage.admission = {}; }, 'sage'],
+]) test('native close stays blocked by ' + name + ' even with a stored recovery draft', async () => {
+  const f = stored(applicationFixture(), { draft: { dirty: true, document: null, design: { name: 'TEST', packages: [] } } });
+  f.frames.push(f.frame); mutate(f);
+  assert.ok(f.child.InspectorProPackaging.getDepartureCoverage().reasons.includes(reason));
+  await f.main.change('close');
+  assert.equal(f.closed(), false); assert.deepEqual(f.events, []);
+  assert.equal(f.replies.length, 1); assert.ok(f.replies[0].affected.includes('packaging'));
+  assert.match(f.dialogs[0].message, /not in its recovery draft/);
+});
+
+for (const [name, mutate] of [
+  ['an active host turn', f => { f.hostContext._packagingActiveTurn = {}; }],
+  ['a host release', f => { f.hostContext._packagingReleasePromise = Promise.resolve(); }],
+  ['a missing coverage hook', f => { f.child.InspectorProPackaging = { ...f.child.InspectorProPackaging, getDepartureCoverage: undefined }; }],
+  ['a throwing coverage hook', f => { f.child.InspectorProPackaging = { ...f.child.InspectorProPackaging, getDepartureCoverage: () => { throw new Error('x'); } }; }],
+  ['a forged coverage token', f => { f.child.InspectorProPackaging = { ...f.child.InspectorProPackaging, getDepartureCoverage: () => ({ covered: true, token: 'x'.repeat(201) }) }; }],
+]) test('covered editor work still blocks with ' + name, async () => {
+  const f = stored(applicationFixture()); f.frames.push(f.frame); mutate(f);
+  await f.main.change('restart');
+  assert.deepEqual(f.events, []); assert.ok(f.replies[0].affected.includes('packaging'));
+});
+
+test('second observation rejects coverage lost after the first', async () => {
+  const f = applicationFixture({ beforeObservation: (state, count) => {
+    if (count === 2) state.childState.draft = { dirty: true, document: null, design: { name: 'TEST late', packages: [] } };
+  } });
+  f.frames.push(f.frame);
+  await f.main.change('close');
+  assert.equal(f.replies.length, 2); assert.equal(f.replies[0].pending, false); assert.equal(f.replies[1].pending, true);
+  assert.equal(f.closed(), false); assert.deepEqual(f.events, []);
+});
+
+test('the fingerprint changes when a covered draft is stored again', async () => {
+  const f = stored(applicationFixture({ beforeObservation: (state, count) => {
+    if (count === 2) state.childState.recovery.version += 1;  // Same flags, a newer stored checkpoint.
+  } }), { draft: { dirty: true, document: null, design: { name: 'TEST', packages: [] } } });
+  f.frames.push(f.frame);
+  await f.main.change('close');
+  assert.equal(f.replies.length, 2); assert.notEqual(f.replies[0].fingerprint, f.replies[1].fingerprint);
+  assert.equal(f.closed(), false);
+});
+
+test('the managed runtime bridge path stays strict for a covered editor', () => {
+  const f = stored(actualPackagingFixture(), { draft: { dirty: true, document: null, design: { name: 'TEST', packages: [] } } });
+  f.frames.push(f.frame);
+  assert.equal(f.child.InspectorProPackaging.getDepartureCoverage().covered, true);
+  assert.equal(observation.withPackaging(emptySources(), f.host).packaging.pending, true);
+  assert.equal(observation.withPackaging(emptySources(), f.host, { recovery: true }).packaging.pending, false);
+  assert.throws(() => observation.assertEmpty(observation.capture(observation.withPackaging(emptySources(), f.host), 'r'), 'r'), uncovered);
+});
+
+test('departure preparation is asked first, best effort, and authorizes nothing', async () => {
+  for (const [name, register, expected] of [
+    ['prepared', f => f.host.InspectorProNativeApplication.registerDeparturePreparation(async () => true), [{ prepared: true }]],
+    ['throwing', f => f.host.InspectorProNativeApplication.registerDeparturePreparation(async () => { throw new Error('x'); }), [{ prepared: false }]],
+    ['unregistered', () => {}, [{ prepared: false }]],
+  ]) {
+    const f = applicationFixture(); register(f);
+    f.frames.push(f.frame); f.childState.busy = true;  // Uncovered: preparation cannot make it covered.
+    await f.main.change('close');
+    assert.deepEqual(f.preparations, ['requested', ...expected], name);
+    assert.equal(f.closed(), false); assert.ok(f.replies[0].affected.includes('packaging'));
+  }
+  const silent = applicationFixture({ dropPreparation: true, fastTimers: true });
+  await silent.main.change('close');
+  assert.deepEqual(silent.preparations, ['requested']); assert.equal(silent.closed(), true);  // Its deadline passed; observation decided.
+});
+
+test('backend-loss departure unmounts a covered dirty editor without a discard prompt', async () => {
+  const f = stored(departureFixture({ frozen: true, discard: true }), { draft: { dirty: true, document: null, design: { name: 'TEST', packages: [] } } });
+  assert.equal(await f.main.closePackaging(), true);
+  assert.equal(f.frames.length, 0); assert.deepEqual(f.prompts, []);
+  assert.equal(f.host.document.documentElement.inert, true); assert.equal(f.main.backendUnavailable, true);
+});
+
+test('backend-loss Restart proceeds over a covered mounted editor and keeps it mounted', async () => {
+  const f = stored(departureFixture({ frozen: true }), { draft: { dirty: true, document: null, design: { name: 'TEST', packages: [] } } });
+  await f.main.change('restart');
+  assert.ok(f.events.includes('restart')); assert.equal(f.frames.length, 1); assert.equal(f.main.backendUnavailable, false);
+});
+
+test('healthy Close Packaging leaves a covered editor without asking and says where the work is', () => {
+  const f = stored(departureFixture({ discard: false }), { draft: { dirty: true, document: null, design: { name: 'TEST', packages: [] } } });
+  const toasts = []; f.host._toast = (...args) => toasts.push(args);
+  assert.equal(f.host.InspectorProPackagingHost.closeWorkspace(), true);
+  assert.equal(f.frames.length, 0); assert.deepEqual(f.prompts, []);
+  assert.match(toasts[0][0], /kept as a recovery draft/);
 });

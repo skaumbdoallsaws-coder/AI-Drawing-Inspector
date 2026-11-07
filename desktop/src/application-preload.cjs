@@ -79,6 +79,7 @@ new MutationObserver(() => {
 }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['open', 'aria-modal', 'class', 'hidden'] });
 let observe = null;
 let closePackaging = null;
+let prepareDeparture = null;
 contextBridge.exposeInMainWorld('InspectorProNativeApplication', Object.freeze({
   registerLifecycleObserver(callback) {
     if (typeof callback !== 'function' || observe) throw new Error('Lifecycle observer is already registered or invalid');
@@ -87,6 +88,10 @@ contextBridge.exposeInMainWorld('InspectorProNativeApplication', Object.freeze({
   registerPackagingClose(callback) {
     if (typeof callback !== 'function' || closePackaging) throw new Error('Packaging close handler is already registered or invalid');
     closePackaging = callback;
+  },
+  registerDeparturePreparation(callback) {
+    if (typeof callback !== 'function' || prepareDeparture) throw new Error('Departure preparation is already registered or invalid');
+    prepareDeparture = callback;
   },
 }));
 ipcRenderer.on('ip-application-observe', (_event, id) => {
@@ -107,6 +112,14 @@ ipcRenderer.on('ip-application-close-packaging', (_event, request) => {
     result = { closed: false, reason: String(error.message || 'Packaging remains open.').slice(0, 500) };
   }
   ipcRenderer.send('ip-application-packaging-closed', request.id, result);
+});
+// Best effort, before the observations of a native close, reload or restart: the page may store packaging work as
+// its recovery draft first. The reply carries no workflow state and authorizes nothing.
+ipcRenderer.on('ip-application-prepare-departure', (_event, request) => {
+  if (!request || typeof request.id !== 'string' || !Number.isFinite(request.expiresAt) || Date.now() >= request.expiresAt) return;
+  Promise.resolve().then(() => (prepareDeparture ? prepareDeparture() : false))
+    .then(value => value === true, () => false)
+    .then(prepared => { if (Date.now() < request.expiresAt) ipcRenderer.send('ip-application-departure-prepared', request.id, { prepared }); });
 });
 let transitionNotice = null;
 ipcRenderer.on('ip-application-transition-status', (_event, detail) => {

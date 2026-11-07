@@ -344,6 +344,44 @@ class RevisionCommand(Closed):
     request_id: Identity
 
 
+class LibrarySourceRequest(Closed):
+    """An InspectorPro library entry, named only: the host reads the model from its own library folder."""
+    kind: Literal["part", "assembly"]
+    id: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")]
+    revision: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{0,16}$")] = ""
+    configuration: Annotated[str, Field(max_length=160)] = ""
+    record_sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
+
+
+FieldName = Annotated[str, Field(pattern=r"^[A-Za-z0-9_]{1,64}$")]
+EditorRef = Annotated[str, Field(max_length=96)]
+
+
+class UnappliedFields(Closed):
+    """Values typed in the open editor form but not applied when the checkpoint was taken, in form order.
+    Recovery puts them back as typed and still unapplied; nothing here validates or applies them."""
+    editor: Literal["product", "carton", "contents", "arrange", "appearance", "graphics"]
+    package_id: EditorRef | None = None
+    component_id: EditorRef | None = None
+    graphic_id: EditorRef | None = None
+    fields: Annotated[list[tuple[FieldName, Annotated[str, Field(max_length=4000)] | bool]], Field(max_length=300)]
+
+
+class ActiveImport(Closed):
+    """An import the editor had started but not seen finish when the checkpoint was taken. Recovery uses it to
+    say whether the import finished and which stored model it produced; it is never re-run automatically."""
+    kind: Literal["glb", "step", "library"]
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+    started_at: Annotated[float, Field(ge=0, le=1e11, allow_inf_nan=False)]  # Seconds, the host machine's clock.
+    library: LibrarySourceRequest | None = None
+
+    @model_validator(mode="after")
+    def library_entry(self):
+        if (self.kind == "library") != (self.library is not None):
+            raise ValueError("A library import names its entry; a file import does not.")
+        return self
+
+
 class PendingSave(Closed):
     """A save the editor had sent but not seen complete when the checkpoint was taken."""
     kind: Literal["create", "edit"]
@@ -359,6 +397,8 @@ class DraftCheckpoint(Closed):
     base_revision: Annotated[int, Field(ge=0, strict=True)] | None = None
     design: dict
     pending: PendingSave | None = None
+    unapplied: UnappliedFields | None = None
+    importing: ActiveImport | None = None
 
     @model_validator(mode="after")
     def consistent(self):
@@ -389,15 +429,6 @@ class StorageLimits(Closed):
 class RemoveUnused(Closed):
     """The digest of the exact unused list the user reviewed and confirmed."""
     digest: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
-
-
-class LibrarySourceRequest(Closed):
-    """An InspectorPro library entry, named only: the host reads the model from its own library folder."""
-    kind: Literal["part", "assembly"]
-    id: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")]
-    revision: Annotated[str, Field(pattern=r"^[A-Za-z0-9._-]{0,16}$")] = ""
-    configuration: Annotated[str, Field(max_length=160)] = ""
-    record_sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 
 
 class DensityRequest(Closed):

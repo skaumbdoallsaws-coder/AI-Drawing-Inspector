@@ -144,3 +144,89 @@ def test_draft_routes_need_packaging_edit_and_leave_documents_unchanged(tmp_path
     with app_for(service, viewer) as client:
         assert client.get("/api/packaging/drafts").status_code == 403
         assert client.put("/api/packaging/drafts/draft_viewer", json=body, headers=HEADERS).status_code == 403
+
+
+def unapplied(**fields):
+    return {"editor": "carton", "package_id": "box_1", "fields": [["carton_name", "TEST typed, not applied"], ["inner_0", "31"],
+                                                                  ["inner_0", "32"], ["fragile", True]], **fields}
+
+
+def test_unapplied_fields_and_an_unfinished_import_are_kept_as_typed(tmp_path):
+    """Values typed but not applied come back exactly, in form order (repeated names kept); nothing applies them."""
+    service = PackagingService(tmp_path / "store")
+    scope = "scope-a"
+    importing = {"kind": "glb", "name": "TEST bracket.glb", "started_at": 1_800_000_000.5}
+    service.save_draft(scope, OWNER, "draft_typed", checkpoint(unapplied=unapplied(), importing=importing))
+    listed = service.drafts(scope, OWNER)[0]
+    assert (listed["unapplied_fields"], listed["unapplied_editor"], listed["importing"], listed["import_result"]) == (
+        4, "carton", {**importing, "library": None}, None)
+    assert "unapplied" not in listed and "TEST typed" not in str(listed)  # A summary; only the draft carries typed values.
+    assert service.draft(scope, OWNER, "draft_typed")["unapplied"] == unapplied(component_id=None, graphic_id=None)
+    service.save_draft(scope, OWNER, "draft_plain", checkpoint())
+    plain = next(row for row in service.drafts(scope, OWNER) if row["id"] == "draft_plain")
+    assert (plain["unapplied_fields"], plain["unapplied_editor"], plain["importing"], plain["import_result"]) == (0, None, None, None)
+    assert plain["design_changed"] is None  # New: nothing saved to compare with.
+
+
+def test_a_draft_says_whether_its_design_differs_from_the_saved_document(tmp_path):
+    """A draft kept only for typed values or an unfinished import is not described as unsaved design changes."""
+    service = PackagingService(tmp_path / "store")
+    scope = "scope-a"
+    product = {"name": "TEST block", "dimensions_m": [0.1, 0.2, 0.3], "mass_kg": 2.0, "mass_basis": "user_measured",
+               "mass_evidence": "TEST scale reading"}
+    doc = service.create(scope, Design.model_validate(design("TEST saved") | {"product": product}))
+    same = service.get(scope, doc["id"])["design"]
+    same["product"]["mass_kg"] = 2  # A browser sends a whole-number float back as 2, not 2.0.
+    service.save_draft(scope, OWNER, "draft_same", checkpoint(document_id=doc["id"], base_revision=0, design=same,
+                                                              importing={"kind": "glb", "name": "TEST.glb", "started_at": 1.0}))
+    row = service.drafts(scope, OWNER)[0]
+    assert (row["status"], row["design_changed"]) == ("current", False)
+    service.save_draft(scope, OWNER, "draft_same", checkpoint(document_id=doc["id"], base_revision=0, design=design("TEST saved", 2)))
+    assert service.drafts(scope, OWNER)[0]["design_changed"] is True
+
+
+@pytest.mark.parametrize("fields", [
+    {"unapplied": unapplied(editor="rates")},  # Address fields are session-only and never kept.
+    {"unapplied": unapplied(fields=[["bad name", "x"]])},
+    {"unapplied": unapplied(fields=[["carton_name", "x" * 4001]])},
+    {"unapplied": unapplied(fields=[["carton_name", "x"]] * 301)},
+    {"importing": {"kind": "library", "name": "TEST", "started_at": 1.0}},  # A library import names its entry.
+    {"importing": {"kind": "glb", "name": "", "started_at": 1.0}},
+    {"importing": {"kind": "glb", "name": "TEST", "started_at": 1.0, "path": "C:/private/model.glb"}},
+])
+def test_unapplied_and_import_records_are_bounded(fields):
+    with pytest.raises(ValidationError):
+        checkpoint(**fields)
+
+
+def test_an_interrupted_import_reports_the_model_it_stored_after_it_started(tmp_path):
+    import sqlite3
+    from hashlib import sha256
+    service = PackagingService(tmp_path / "store")
+    scope = "scope-a"
+
+    def stored(name, library=None, at=None):
+        meta = {"name": name, "dimensions_m": [0.1, 0.06, 0.04], "source_revision": sha256(name.encode()).hexdigest(),
+                "mass_basis": "unknown", "mass_kg": None, **({"library": library} if library else {})}
+        made = service.store_source(scope, meta, b"G" * 64)
+        if at is not None:
+            with sqlite3.connect(service.path) as db:
+                db.execute("UPDATE asset_imports SET imported=? WHERE id=?", (at, made["id"]))
+        return made
+
+    entry = {"kind": "part", "id": "TEST-100", "revision": "A", "configuration": "Long", "record_sha256": "a" * 64}
+    older = stored("TEST bracket.glb", at=1_000.0)  # The same name, imported before this import started.
+    service.save_draft(scope, OWNER, "draft_file", checkpoint(importing={"kind": "glb", "name": "TEST bracket.glb", "started_at": 2_000.0}))
+    service.save_draft(scope, OWNER, "draft_library", checkpoint(importing={"kind": "library", "name": "Part TEST-100 rev A",
+                                                                          "started_at": 2_000.0, "library": entry}))
+    rows = {row["id"]: row for row in service.drafts(scope, OWNER)}
+    assert rows["draft_file"]["import_result"] is None and rows["draft_library"]["import_result"] is None
+    stored("TEST other.glb", at=2_010.0)  # Finished after the start, but a different file.
+    finished = stored("TEST bracket.glb ", at=2_020.0)  # The STEP route trims names; both spellings match.
+    by_library = stored("Part TEST-100 rev A - TEST bracket (Long)", library={**entry, "format": "inspectorpro-inspection-library/v1"}, at=2_030.0)
+    rows = {row["id"]: row for row in service.drafts(scope, OWNER)}
+    assert rows["draft_file"]["import_result"] is None or rows["draft_file"]["import_result"]["id"] != older["id"]
+    assert rows["draft_library"]["import_result"] == {"id": by_library["id"], "name": by_library["name"]}
+    service.save_draft(scope, OWNER, "draft_file", checkpoint(importing={"kind": "glb", "name": "TEST bracket.glb ", "started_at": 2_000.0}))
+    assert {row["id"]: row for row in service.drafts(scope, OWNER)}["draft_file"]["import_result"]["id"] == finished["id"]
+    assert all(row["import_result"] is None for row in service.drafts("scope-b", OWNER))  # Never another workspace's model.

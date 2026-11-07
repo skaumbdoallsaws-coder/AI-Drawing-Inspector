@@ -22343,6 +22343,9 @@
             if (window.InspectorProNativeApplication) {
                 window.InspectorProNativeApplication.registerLifecycleObserver(_desktopObserveApplication);
                 window.InspectorProNativeApplication.registerPackagingClose(_packagingCloseWorkspace);
+                if (typeof window.InspectorProNativeApplication.registerDeparturePreparation === 'function') {
+                    window.InspectorProNativeApplication.registerDeparturePreparation(_desktopPrepareDeparture);
+                }
             }
             // Attach event listeners synchronously FIRST so UI is interactive immediately
             setupEventListeners();
@@ -22405,7 +22408,8 @@
         function _desktopObserveApplication() {
             const observer = window.InspectorProDesktopWorkflowObservation;
             if (typeof observer?.withPackaging !== 'function') throw new Error('desktop_workflow_coverage_unavailable');
-            const rows = observer.withPackaging(_desktopInspectOtherWorkflows(), window);
+            // Recovery-aware: a packaging editor whose exact state is its stored recovery draft does not block.
+            const rows = observer.withPackaging(_desktopInspectOtherWorkflows(), window, { recovery: true });
             const facility = _trainFacilityLayoutAuthoringApp?.session?.getState();
             rows.facility = _trainFacilitySheets ? _trainFacilitySheets.observation() : {
                 dirty: !!facility?.dirty,
@@ -22420,8 +22424,16 @@
                 pending: Object.values(rows).some(row => row.pending),
                 affected,
                 fingerprint: JSON.stringify({ rows, draft: facility?.draftRevision,
-                    history: facility?.commandJournalHash, proposal: facility?.designProposalDraft }),
+                    history: facility?.commandJournalHash, proposal: facility?.designProposalDraft,
+                    packagingRecovery: observer.packagingCoverage?.(window)?.token ?? '' }),
             };
+        }
+
+        // Best effort before a native close, reload or restart: the packaging editor stores its current state as
+        // its recovery draft now, so the observation that follows can find it covered. It authorizes nothing.
+        async function _desktopPrepareDeparture() {
+            const editor = _packagingEditorUI();
+            return typeof editor?.prepareDeparture === 'function' ? (await editor.prepareDeparture()) === true : false;
         }
 
         function _desktopInspectOtherWorkflows() {
@@ -48377,7 +48389,13 @@
                 });
                 return false;
             }
-            return !guard || guard.confirmNavigation();
+            let kept = null;
+            try { kept = guard?.getDepartureCoverage?.() || null; } catch (_) { kept = null; }
+            const allowed = !guard || guard.confirmNavigation();
+            if (allowed && kept?.covered && kept.draft && window._toast) {
+                window._toast('Unsaved packaging work was kept as a recovery draft. Reopen Packaging & Shipping to restore it.', 'info', 6000);
+            }
+            return allowed;
         }
 
         function _packagingCloseWorkspace({ cleanOnly = false } = {}) {
@@ -48387,14 +48405,15 @@
                 throw new Error('Packaging state is unavailable. The workspace was kept open.');
             }
             observation.observePackaging(window);
-            // Backend-loss departure is synchronous and cannot revoke an admission,
-            // discard a draft, or declare a mounted editor recoverable.
+            // Backend-loss departure is synchronous and cannot revoke an admission or discard a draft. It unmounts
+            // only a clean editor, or one whose exact state is already its stored recovery draft (covered).
             if (cleanOnly || document.documentElement.inert) {
                 const rows = [window.InspectorProPackagingHost.getDesktopLifecycleObservation(),
                     guard.getDesktopLifecycleObservation()];
                 if (rows.some(row => row?.loaded !== true
-                        || ['dirty', 'busy', 'pending'].some(key => row[key] !== false))) {
-                    throw new Error('Packaging has unsaved or unresolved work. Keep this window open; backend-loss draft recovery is not available.');
+                        || ['dirty', 'busy', 'pending'].some(key => row[key] !== false))
+                        && observation.packagingCoverage?.(window)?.covered !== true) {
+                    throw new Error('Packaging has work that is not in its recovery draft. Keep this window open; it cannot be stored while the backend is unavailable.');
                 }
             }
             switchTab('drawing');

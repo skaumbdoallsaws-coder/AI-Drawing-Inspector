@@ -55,6 +55,7 @@ function fixture(options = {}) {
     browser: null, browserPromise: null, documents: null, chatgptAccount: null, acceptanceOutput: null,
     transitionStep: step, authorizeTransition: args => authorizeTransition({ ...args, step }),
     observe: options.observe || (async () => clean),
+    prepareDeparture: options.prepareDeparture || (async () => false),
     network: { setEnabled: value => events.push(['network', value]), getEvidence: () => ({}) },
     dialog: { showMessageBox: async (_window, args) => {
       dialogs.push(args);
@@ -335,7 +336,25 @@ test('preload keeps a dismissible text notice above the shutdown overlay without
   assert.equal(nodes[2].children[0].textContent, 'The window was kept open. <unsafe>');
   nodes[2].children[1].handlers.click();
   assert(nodes[2].removed);
-  assert.deepEqual(exposed, [['InspectorProNativeApplication', ['registerLifecycleObserver', 'registerPackagingClose']]]);
+  assert.deepEqual(exposed, [['InspectorProNativeApplication', ['registerLifecycleObserver', 'registerPackagingClose', 'registerDeparturePreparation']]]);
+});
+
+test('departure preparation runs before both observations and never authorizes a blocked close', async () => {
+  for (const prepared of [true, false]) {
+    const order = [];
+    const f = fixture({ prepareDeparture: async () => { order.push('prepare'); return prepared; },
+      observe: async () => { order.push('observe'); return { ...clean, pending: true, affected: ['packaging'] }; } });
+    await f.request('window');
+    await until(() => f.notices.length > 1);
+    assert.deepEqual(order, ['prepare', 'observe']);
+    assert.equal(f.closed(), false); assert(!f.events.includes('stop-backend'));
+  }
+  const order = [];
+  const f = fixture({ prepareDeparture: async () => { order.push('prepare'); return false; },
+    observe: async () => { order.push('observe'); return clean; } });
+  await f.request('window');
+  await until(() => f.closed());
+  assert.deepEqual(order, ['prepare', 'observe', 'observe']);
 });
 
 test('an already-committed shutdown gives a visible reason for a menu close', async () => {

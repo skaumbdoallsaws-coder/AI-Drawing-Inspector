@@ -180,12 +180,16 @@ export function recoveryAction(draft, saved) {
 }
 
 export function recoveryText(draft) {
-  const when = `checkpoint ${new Date(draft.updated_at).toLocaleString()}`;
+  const extras = [draft.unapplied_fields ? `values typed in the ${draft.unapplied_editor || 'editor'} panel, not applied` : '',
+    draft.importing ? (draft.import_result ? `an interrupted import of "${draft.importing.name}" finished` : `an import of "${draft.importing.name}" did not finish`) : '']
+    .filter(Boolean).map(text => ` | ${text}`).join('');
+  const when = `${extras ? extras.slice(3) + ' | ' : ''}checkpoint ${new Date(draft.updated_at).toLocaleString()}`;
   const interrupted = draft.pending ? ' | a save was interrupted' : '';
   if (draft.status === 'saved') return `Saved before the interruption | ${when}`;
   if (draft.status === 'new') return `New document, not saved${interrupted} | ${when}`;
   if (draft.status === 'document_missing') return `The saved document is not available; restore as a new document | ${when}`;
   if (draft.status === 'behind') return `Unsaved changes to revision ${draft.base_revision}; the document is now at revision ${draft.current_revision}${interrupted} | ${when}`;
+  if (draft.design_changed === false && !draft.pending) return `Revision ${draft.base_revision}, no design changes | ${when}`;
   return `Unsaved changes to revision ${draft.base_revision}${interrupted} | ${when}`;
 }
 
@@ -448,7 +452,8 @@ const state = {
   section: false, exploded: false, displayMode: 'edges', transparency: 0,
   mutationReceipt: null, lastDirtySignal: null, lastRibbonSignal: null, sage: null, conflict: false,
   capabilities: [], catalog: null, alternativeReceipt: null, scenarios: [], evidence: [], evidenceNotice: '',
-  permissions: [], recovery: { id: null, stored: false, last: '', timer: null, failed: false, offered: false, chain: Promise.resolve() }
+  importing: null, activity: null,
+  permissions: [], recovery: { id: null, stored: false, last: '', version: 0, timer: null, failed: false, offered: false, chain: Promise.resolve() }
 };
 
 function blankAddress() { return { name: '', street1: '', street2: '', city: '', state: '', zip: '', country: 'US', residential: false }; }
@@ -482,7 +487,7 @@ async function working(message, action) {
   $('workspace').setAttribute('aria-busy', 'true');
   try { return await action(); }
   finally {
-    state.busy = false; disabled.forEach(([node, wasDisabled]) => { if (node.isConnected) node.disabled = wasDisabled; });
+    state.busy = false; state.activity = null; disabled.forEach(([node, wasDisabled]) => { if (node.isConnected) node.disabled = wasDisabled; });
     $('workspace').setAttribute('aria-busy', 'false'); updateHeader(); updateFreshness();
   }
 }
@@ -500,11 +505,67 @@ function saveFingerprint() {
   return JSON.stringify(doc ? { revision: doc.revision, design: state.draft.design } : { create: state.draft.design });
 }
 
-// A save in flight belongs to the checkpoint only while the draft still matches what was sent.
+// A save in flight belongs to the checkpoint only while the draft still matches what was sent. Values typed but
+// not applied, and an import the editor started but has not seen finish, belong to it too.
 function checkpointPayload() {
   const doc = state.draft.document, receipt = state.mutationReceipt;
   const pending = receipt?.pending && receipt.fingerprint === saveFingerprint() ? receipt.pending : null;
-  return { document_id: doc?.id ?? null, base_revision: doc ? doc.revision : null, design: state.draft.design, pending };
+  return { document_id: doc?.id ?? null, base_revision: doc ? doc.revision : null, design: state.draft.design, pending,
+    unapplied: captureUnapplied(), importing: state.importing };
+}
+
+// The open editor form's typed but unapplied values, in form order (repeated names kept). Recovery puts them
+// back as typed and still unapplied. File inputs are never captured.
+function captureUnapplied() {
+  const form = state.formDirty ? state.editorForm?.form : null;
+  if (!form) return null;
+  const fields = [];
+  for (const input of form.elements) {
+    if (!/^[A-Za-z0-9_]{1,64}$/.test(input.name || '') || input.type === 'file') continue;
+    fields.push([input.name, input.type === 'checkbox' ? input.checked : String(input.value ?? '').slice(0, 4000)]);
+    if (fields.length === 300) break;
+  }
+  return { editor: state.editor, package_id: state.packageId ?? null, component_id: state.componentId ?? null,
+    graphic_id: state.graphicId ?? null, fields };
+}
+
+// Whether leaving now loses nothing: nothing is unsaved, or the editor's exact current state (unsaved changes,
+// unapplied fields, an interrupted save or an unfinished import) is its stored recovery draft. The native
+// application closes, reloads or restarts over a covered editor; every other state keeps the guard. Read-only.
+function departureCoverage() {
+  const reasons = [];
+  if (state.sage?.locked || state.sage?.admission || state.sage?.closing) reasons.push('sage');
+  if (state.conflict) reasons.push('conflict');
+  if (document.querySelector('dialog[open]')) reasons.push('dialog');
+  if (state.busy && !['save', 'import'].includes(state.activity)) reasons.push('busy');  // Quotes, reports, proposals.
+  if (hasAddressInputs()) reasons.push('addresses');  // Session-only by design: never stored.
+  if (hasSelectedFiles() && !(state.busy && state.activity === 'import')) reasons.push('selected_file');  // Not storable.
+  const payload = checkpointPayload();
+  if (state.formDirty && !payload.unapplied) reasons.push('unapplied_unavailable');
+  const unsaved = !!(state.draft.dirty || state.formDirty || payload.pending || payload.importing);
+  if (unsaved && !(recoveryEnabled() && state.recovery.stored && !state.recovery.failed
+      && state.recovery.last === JSON.stringify(payload))) reasons.push('not_checkpointed');
+  return { covered: !reasons.length, reasons, draft: unsaved ? state.recovery.id : null,
+    token: `${state.recovery.id || ''}:${state.recovery.version}:${unsaved ? 1 : 0}` };
+}
+
+// Before a native close, reload or restart: store the current state now rather than after the debounce, so the
+// observation that follows can find it covered. Grants nothing and never throws.
+async function prepareDeparture() {
+  if (!recoveryEnabled() || state.sage?.locked) return false;
+  await checkpoint();
+  return true;
+}
+
+// An import is put in the recovery draft before its request is sent, so a close or restart during it loses
+// nothing: recovery later says whether it finished and where its model is. It is never re-run automatically.
+async function beginImport(details) {
+  state.activity = 'import'; state.importing = { ...details, started_at: Date.now() / 1000 };
+  await checkpoint();
+}
+
+function endImport() {
+  state.importing = null; scheduleCheckpoint(0);
 }
 
 function scheduleCheckpoint(delay = 1500) {
@@ -520,23 +581,23 @@ function checkpoint(options) {
 }
 
 // Keeps the latest unsaved draft in the packaging store and removes it once nothing is unsaved. Never throws:
-// a failure is shown in the header and retried on the next change. Values typed but not applied are not kept.
+// a failure is shown in the header and retried on the next change.
 async function writeCheckpoint({ keepalive = false } = {}) {
   if (!recoveryEnabled()) return;
   clearTimeout(state.recovery.timer);
   const recovery = state.recovery, payload = checkpointPayload();
   try {
-    if (!state.draft.dirty && !payload.pending) {
+    if (!state.draft.dirty && !payload.pending && !payload.unapplied && !payload.importing) {
       if (recovery.id && recovery.stored) {
         await request(`/drafts/${encodeURIComponent(recovery.id)}`, { method: 'DELETE', keepalive });
-        recovery.stored = false; recovery.last = '';
+        recovery.stored = false; recovery.last = ''; recovery.version += 1;
       }
     } else {
       const text = JSON.stringify(payload);
       if (text === recovery.last && recovery.stored) return;
       recovery.id ||= uid('draft');
       await request(`/drafts/${encodeURIComponent(recovery.id)}`, { method: 'PUT', body: payload, keepalive });
-      recovery.stored = true; recovery.last = text;
+      recovery.stored = true; recovery.last = text; recovery.version += 1;
     }
     if (recovery.failed) { recovery.failed = false; updateHeader(); }
   } catch (error) {
@@ -581,25 +642,60 @@ async function restoreDraft(id) {
     if (action === 'restore_behind' && !confirm(`This draft was made from revision ${draft.base_revision}, and the saved document is now at revision ${saved.revision}. Load it as unsaved changes on top of revision ${saved.revision}? Saving it replaces that revision's design; saved Undo can return to it.`)) return false;
     resetDocumentState(); state.formDirty = false;
     if (saved) state.draft.accept(saved); else state.draft.reset();
-    if (action === 'completed') {
+    const extras = !!(draft.unapplied || draft.importing);  // Typed values or an unfinished import outlive a completed save.
+    if (action === 'completed' && !extras) {
       await request(`/drafts/${encodeURIComponent(id)}`, { method: 'DELETE' });
       Object.assign(state.recovery, { id: null, stored: false, last: '' });
       await loadQuotes();
       notify(`These changes were already saved (revision ${saved.revision}). The recovery draft was removed.`);
-      return true;
+      return { draft: null };
     }
-    state.draft.edit(design => { for (const key of Object.keys(design)) delete design[key]; Object.assign(design, clone(draft.design)); });
-    if (draft.pending && (action === 'restore' || draft.status === 'new')) {
-      // Saving replays the interrupted request under its original ID, so it cannot apply twice.
-      state.mutationReceipt = { fingerprint: saveFingerprint(), id: draft.pending.request_id, pending: draft.pending };
+    if (action !== 'completed') {
+      state.draft.edit(design => { for (const key of Object.keys(design)) delete design[key]; Object.assign(design, clone(draft.design)); });
+      if (draft.pending && (action === 'restore' || draft.status === 'new')) {
+        // Saving replays the interrupted request under its original ID, so it cannot apply twice.
+        state.mutationReceipt = { fingerprint: saveFingerprint(), id: draft.pending.request_id, pending: draft.pending };
+      }
     }
     Object.assign(state.recovery, { id: draft.id, stored: true, last: '' });
     if (saved) await loadQuotes();
-    notify('Recovered unsaved changes. Review them, then Save.');
-    return true;
+    return { draft, completed: action === 'completed' };
   });
   if (!done) return;
   $('resource-dialog')?.close(); render(); renderRates(); state.scene?.fit();
+  if (!done.draft) return;  // Already saved and nothing else kept; the message says so.
+  const { draft } = done, typed = restoreUnapplied(draft.unapplied);
+  const revision = state.draft.document?.revision;
+  const notes = [!done.completed ? 'Recovered unsaved changes. Review them, then Save.' : draft.status === 'saved'
+    ? `The interrupted save completed (revision ${revision}).` : `Revision ${revision} is open; it has no other unsaved changes.`];
+  if (typed) notes.push(`Values typed in the ${draft.unapplied.editor} panel are back, still unapplied: Apply or Reset them.`);
+  else if (draft.unapplied) notes.push('The typed values could not be put back: their panel is not in this draft.');
+  if (draft.importing) notes.push(draft.import_result ? `The interrupted import of "${draft.importing.name}" finished: choose it in Imported sources.`
+    : `The import of "${draft.importing.name}" did not finish. Import it again.`);
+  notify(notes.join(' '));
+}
+
+// Puts recovered values back into their editor panel exactly as typed. Nothing is applied or validated here.
+function restoreUnapplied(unapplied) {
+  if (!unapplied?.fields?.length) return 0;
+  try {
+    Object.assign(state, { packageId: unapplied.package_id ?? null, componentId: unapplied.component_id ?? null, graphicId: unapplied.graphic_id ?? null });
+    if (unapplied.package_id && !selectedPackage()) return 0;
+    state.editor = unapplied.editor; state.panel = unapplied.editor; renderEditor(); updatePanel();
+    const form = state.editorForm?.form; if (!form) return 0;
+    const seen = new Map(); let restored = 0;
+    for (const [name, value] of unapplied.fields) {
+      const index = seen.get(name) ?? 0; seen.set(name, index + 1);
+      const input = [...form.elements].filter(node => node.name === name && node.type !== 'file')[index];
+      if (!input || input.disabled || input.readOnly) continue;
+      if (input.type === 'checkbox') input.checked = value === true; else input.value = String(value);
+      restored += 1;
+    }
+    if (restored) { state.formDirty = true; updatePanel(); updateHeader(); updateFreshness(); }
+    return restored;
+  } catch (_) {
+    return 0;
+  }
 }
 
 async function discardDraft(draft) {
@@ -866,10 +962,16 @@ function libraryRow(entry, dialog) {
   if (!entry.importable) info.append(element('p', entry.reason, 'warning'));
   row.append(info, button('Use as product', async () => {
     if (state.draft.design.product && !confirm('Replace the product for every existing placement? Mass provenance will be reset.')) return;
-    const meta = await working('Importing the library model...', () => request('/sources/library', { method: 'POST', body: {
-      kind: entry.kind, id: entry.id, revision: entry.revision, configuration: configuration.value, record_sha256: entry.record_sha256 } }));
-    edit(d => { d.product = productFromSource(meta, d.product || {}); });
-    dialog.close(); render(); state.scene?.fit();
+    const body = { kind: entry.kind, id: entry.id, revision: entry.revision, configuration: configuration.value, record_sha256: entry.record_sha256 };
+    dialog.close();  // An open dialog keeps a native close blocked; the import itself is in the recovery draft.
+    await working('Importing the library model...', async () => {
+      await beginImport({ kind: 'library', name: (entry.name === entry.id ? label : `${label} - ${entry.name}`).slice(0, 200), library: body });
+      try {
+        const meta = await request('/sources/library', { method: 'POST', body });
+        edit(d => { d.product = productFromSource(meta, d.product || {}); });
+      } finally { endImport(); }
+    });
+    render(); state.scene?.fit();
     notify('Library model imported. Product mass is unknown.');
   }, { primary: true, disabled: !entry.importable || !chosen }));
   return row;
@@ -1207,10 +1309,14 @@ async function importSource(file, unit) {
   if (!step && file.size > 24 * 1024 * 1024) throw new Error('GLB import is limited to 24 MiB.');
   if (state.draft.design.product && !confirm('Replace the product for every existing placement? Mass provenance will be reset.')) return;
   await working('Importing source geometry...', async () => {
-    const path = step ? `/sources/step?name=${encodeURIComponent(file.name.slice(0, 160))}` : `/sources?name=${encodeURIComponent(file.name.slice(0, 160))}&meters_per_unit=${unit}`;
-    const meta = await request(path, { method: 'POST', body: file, raw: true, contentType: step ? 'application/step' : 'model/gltf-binary' });
-    edit(d => { d.product = productFromSource(meta, d.product || {}); });
-    notify('Source imported. Product mass is unknown.');
+    const name = file.name.slice(0, 160);
+    await beginImport({ kind: step ? 'step' : 'glb', name });
+    try {
+      const path = step ? `/sources/step?name=${encodeURIComponent(name)}` : `/sources?name=${encodeURIComponent(name)}&meters_per_unit=${unit}`;
+      const meta = await request(path, { method: 'POST', body: file, raw: true, contentType: step ? 'application/step' : 'model/gltf-binary' });
+      edit(d => { d.product = productFromSource(meta, d.product || {}); });
+      notify('Source imported. Product mass is unknown.');
+    } finally { endImport(); }
   });
   render(); state.scene?.fit();
 }
@@ -1788,6 +1894,7 @@ async function saveDocument() {
   if (state.draft.document && !state.draft.dirty) { render(); return; }
   await working('Saving and validating document...', async () => {
     let result;
+    state.activity = 'save';  // Its receipt is in the recovery draft before the request is sent.
     if (!state.draft.document) {
       const fingerprint = JSON.stringify({ create: state.draft.design });
       if (state.mutationReceipt?.fingerprint !== fingerprint) { const id = uid('create'); state.mutationReceipt = { fingerprint, id, pending: { kind: 'create', request_id: id } }; }
@@ -2323,7 +2430,11 @@ function boot() {
     }),
     isLocked: () => state.sage.locked,
     hasUnsavedChanges: () => hasNavigationChanges() || state.busy,
-    confirmNavigation: () => !(hasNavigationChanges() || state.busy) || confirm('Leave Packaging & Shipping? Unsaved changes, selected files, session-only addresses or an active request may be lost.')
+    getDepartureCoverage: () => { try { return departureCoverage(); } catch (_) { return { covered: false, reasons: ['unavailable'], draft: null, token: '' }; } },
+    prepareDeparture: () => prepareDeparture(),
+    // An idle, covered editor leaves without asking: its exact state is its stored recovery draft, or nothing is unsaved.
+    confirmNavigation: () => (!state.busy && departureCoverage().covered) || !(hasNavigationChanges() || state.busy)
+      || confirm('Leave Packaging & Shipping? Unsaved changes, selected files, session-only addresses or an active request may be lost.')
   });
   // Dialogs can open without changing the document. Keep the outer ribbon
   // unavailable until the modal interaction has completed.

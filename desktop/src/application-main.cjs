@@ -134,6 +134,23 @@ async function closePackaging() {
     closeRequested = false;
   }
 }
+const departures = new Map();
+// Best effort before a native close, reload or restart: the page may store current packaging work as its recovery
+// draft now. It never authorizes anything; the two observations that follow decide.
+function prepareDeparture() {
+  return new Promise(resolve => {
+    const id = randomUUID(), expiresAt = Date.now() + 8000;
+    const done = prepared => { clearTimeout(timer); departures.delete(id); resolve(prepared); };
+    const timer = setTimeout(() => done(false), 8000);
+    departures.set(id, { done, expiresAt });
+    try { window.webContents.send('ip-application-prepare-departure', { id, expiresAt }); } catch (_) { done(false); }
+  });
+}
+ipcMain.on('ip-application-departure-prepared', (event, id, value) => {
+  if (!trusted(event)) return;
+  const item = departures.get(id); if (!item || Date.now() >= item.expiresAt) return;
+  item.done(value?.prepared === true);
+});
 function transitionNotice(detail) {
   transitionStatus = detail;
   if (!window || window.isDestroyed()) return;
@@ -212,6 +229,7 @@ async function change(kind, destination) {
   try {
     browser?.suspend(true, 'application-transition');
     if (kind === 'close') transitionNotice('Checking for unsaved work before closing...');
+    await prepareDeparture();  // Best effort; grants nothing.
     const authorized = await authorizeTransition({ kind, observe, confirmDiscard: async (state, signal) => {
       const result = await dialog.showMessageBox(window, { type: 'warning', title: 'Unsaved work', signal,
         message: kind === 'close' ? 'Close without saving your changes?' : 'Reload without saving your changes?',
@@ -292,7 +310,7 @@ async function start() {
       backendUnavailable = true;
       network?.setEnabled(false); window.webContents.send('ip-application-freeze', true);
       void message('The backend stopped. Your draft remains in this window.',
-        'If Packaging & Shipping is open and clean, use the native menu: Press Alt, then Document > Close Packaging. Then try Backend > Restart backend. Unsaved or unresolved packaging work stays blocked; draft recovery is not available. No pending operation is automatically repeated.');
+        'Packaging & Shipping work that is clean or already in its recovery draft does not block Backend > Restart backend. To close the editor first, use the native menu: Press Alt, then Document > Close Packaging. Packaging work that was not checkpointed before the backend stopped keeps Close and Restart blocked; it cannot be stored now. No pending operation is automatically repeated.');
     }
   }});
   await runtime.start();

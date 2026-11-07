@@ -121,7 +121,9 @@ def configure_environment(profile):
         INSPECTORPRO_SPECIFICATION_SHEET_ROOT=str(data / 'specification-sheets'), INSPECTORPRO_WORK_INSTRUCTION_ROOT=str(data / 'work-instructions'),
         HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', INSPECTORPRO_FACILITY_PRIVATE_ASSETS='0',
         INSPECTORPRO_FACILITY_LAYOUT_VIEWER_V2='1', INSPECTORPRO_INDUSTRIAL_ASSET_LIBRARY='1',
-        INSPECTORPRO_FACILITY_LAYOUT_CONSTRUCTION_SAGE='0')
+        INSPECTORPRO_FACILITY_LAYOUT_CONSTRUCTION_SAGE='0',
+        # Packaging & Shipping is unsupported in this runtime for the first release; the boundary refuses it too.
+        INSPECTORPRO_PACKAGING_ENABLED='0', INSPECTORPRO_CODEX_PACKAGING='0')
     os.environ.clear(); os.environ.update(env)
     sys.dont_write_bytecode = True
     # sys.path already contains the interpreter's configured user site; retain

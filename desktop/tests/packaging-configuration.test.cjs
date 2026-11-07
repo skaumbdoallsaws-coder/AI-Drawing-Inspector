@@ -8,6 +8,14 @@ const { loadApplicationProfile } = require('../src/application-profile.cjs');
 const { childEnvironment } = require('../src/runtime-supervisor.cjs');
 const { isolatePackagingEnvironment } = require('../src/packaging-config.cjs');
 
+test('the legacy managed runtime never opens the packaging workflow', async () => {
+  // Packaging is unsupported there for the first release; only the application window adds the pilot flag.
+  const runtime = await fs.readFile(path.resolve(__dirname, '../src/runtime-main.cjs'), 'utf8');
+  const application = await fs.readFile(path.resolve(__dirname, '../src/application-main.cjs'), 'utf8');
+  assert.equal(/packaging/i.test(runtime), false);
+  assert.match(application, /if \(profile\.packagingRuntime\) url\.searchParams\.set\('packagingPilot', '1'\);/);
+});
+
 async function fixture(t) {
   const parent = path.resolve(__dirname, '../.runtime/packaging-config-tests');
   await fs.mkdir(parent, { recursive: true });

@@ -57,6 +57,15 @@ class DesktopRuntimeLifecycleTests(unittest.TestCase):
                 self.assertTrue(sys.dont_write_bytecode)
         finally: sys.dont_write_bytecode = previous
 
+    def test_runtime_environment_keeps_packaging_disabled(self):
+        import sys
+        previous = sys.dont_write_bytecode
+        try:
+            with patch.dict(os.environ, {'INSPECTORPRO_PACKAGING_ENABLED': '1', 'INSPECTORPRO_CODEX_PACKAGING': '1'}):
+                configure_environment(self.profile)
+                self.assertEqual((os.environ['INSPECTORPRO_PACKAGING_ENABLED'], os.environ['INSPECTORPRO_CODEX_PACKAGING']), ('0', '0'))
+        finally: sys.dont_write_bytecode = previous
+
     def test_ready_follows_listening_and_shutdown_receipt_follows_actual_cleanup(self):
         control = PrivateControl(io.BytesIO()); outputs = []
         events, application = self.events, self.app

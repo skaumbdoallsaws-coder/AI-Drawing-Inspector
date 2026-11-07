@@ -87,6 +87,16 @@ class DesktopRuntimeBoundaryTests(unittest.TestCase):
             with self.subTest(path=path): self.assertEqual(self.call(path, method, token=True)[0], 403)
         self.assertEqual(self.calls, [])
 
+    def test_packaging_is_refused_as_unsupported_in_this_runtime(self):
+        for path, method in [('/packaging', 'GET'), ('/api/packaging', 'GET'), ('/api/packaging/status', 'GET'),
+                             ('/api/packaging/documents', 'POST'), ('/static/packaging.html', 'GET'),
+                             ('/static/packaging.js', 'GET'), ('/static/packaging_scene.js', 'GET')]:
+            with self.subTest(path=path):
+                status, body, _ = self.call(path, method, token=True)
+                self.assertEqual((status, json.loads(body)['error']['code']), (403, 'desktop_packaging_unsupported'))
+        self.assertEqual(self.call('/static/private.js', 'GET', token=True)[0], 200)  # Other assets are unchanged.
+        self.assertEqual([call['path'] for call in self.calls], ['/static/private.js'])
+
     def test_acceptance_preview_is_exact_document_only_and_never_enables_save(self):
         self.assertEqual(self.call('/api/facility-layouts/site-local/fl-isolated/preview', 'POST', token=True, value={})[0], 200)
         self.assertEqual(self.call('/api/facility-layouts/site-local/fl-other/preview', 'POST', token=True, value={})[0], 403)

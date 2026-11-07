@@ -29,6 +29,12 @@ READ_ROUTES = {'/', '/favicon.ico', '/api/profiles', '/api/facility-layout-boots
                '/api/industrial-assets', '/api/agent/chat/streaming-status'}
 
 
+def packaging_path(path):
+    """Packaging & Shipping is not supported in this managed runtime for the first release: its page, assets and
+    API are refused with their own code, whatever the server's own configuration says."""
+    return path in {'/packaging', '/api/packaging'} or path.startswith(('/packaging/', '/api/packaging/', '/static/packaging'))
+
+
 def permitted(profile, method, path):
     if method in {'GET', 'HEAD'}:
         return path in READ_ROUTES or path.startswith(('/static/', '/generated/')) or (
@@ -176,6 +182,7 @@ class DesktopBoundary:
                 return await JSONResponse(result, headers={'Cache-Control': 'no-store'})(scope, receive, send)
             except Exception:
                 return await response('desktop_recovery_unresolved', 409)(scope, receive, send)
+        if packaging_path(path): return await response('desktop_packaging_unsupported')(scope, receive, send)
         if not permitted(self.profile, method, path): return await response('desktop_capability_not_accepted')(scope, receive, send)
         if method == 'POST' and path.startswith('/api/facility-layout-design/'):
             try:

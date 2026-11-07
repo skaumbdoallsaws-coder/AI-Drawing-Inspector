@@ -116,7 +116,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Ribbon panels, viewport conventions, display modes, decals | Locally verified | Historical browser and native checks. |
 | Promotion into the regular desktop | Implemented | User-approved local promotion at `3ce2b05`; not a gate pass. Next promotion needs approval. |
 | Recoverable draft checkpoints, outstanding-operation reconciliation, safe shutdown/restart | Partly done (editor and store; native guard unchanged) | Recovery drafts (`/api/packaging/drafts`, `packaging.edit`, capability `draft_recovery`): the editor checkpoints its unsaved design 1.5 s after each change, records an in-flight save (request ID) in a checkpoint before sending it, and removes the checkpoint after a save or discard. Drafts belong to one user and scope, one per saved document, at most 10 (refused beyond, never silently dropped), bounded by the 1 MB request limit, and never change a document. On start and from **Open**, **Recover unsaved work** lists each draft against the saved store: an interrupted save that landed is reported as saved and its draft removed (no second revision); one that never arrived is restored and **Save** replays its original request ID, so it cannot apply twice; a draft behind a newer revision (for example after a Sage turn) loads only after a confirmation; **Discard** asks first. Not kept: values typed but not applied, session-only addresses, selected files and open dialogs (said in the dialog); an import interrupted mid-request is not resumed by the editor (Sources shows whether it finished; not tested here). `tests/test_packaging_recovery.py`, a UI unit test, `tests/verify_packaging_recovery_ui.py` (`.runtime/packaging-recovery-ui-04`: crash with unsaved edits, lost save response, save that never arrived, newer revision, discarded new draft, checkpoint that could not be written). A checkpoint that cannot be written is reported in the message and the header until the next one is written. Remaining: the native close/reload guard and the host's backend-loss check are unchanged and still block departure with a mounted editor; letting a checkpointed editor close needs a host/desktop change with native tests and approval before the next promotion. |
-| Legacy managed runtime transition path | Open (needs a user decision) | Needs an explicit supported/unsupported decision with tests before enabling packaging there. Recommendation: unsupported for the first release, failing closed with a message. |
+| Legacy managed runtime transition path | Done: unsupported for the first release (user decision, 2026-11-06) | Packaging is explicitly off there. The runtime window never adds the workflow, its backend forces `INSPECTORPRO_PACKAGING_ENABLED` and `INSPECTORPRO_CODEX_PACKAGING` to 0, and its boundary refuses `/packaging`, `/api/packaging/*` and `/static/packaging*` with `desktop_packaging_unsupported` before any other check. Tests: `desktop/tests/test_desktop_runtime_boundary.py`, `test_desktop_runtime_lifecycle.py`, `packaging-configuration.test.cjs`. The regular desktop application is the supported host. |
 | Missing-dependency behaviour | Locally verified | A missing optional component disables only its feature: GLB import (`source_runtime_unavailable`), arrangement proposals (`arrangement_unavailable`) and the PDF report (`report_unavailable`) answer 503 with a feature message instead of a bad-file or server error, and `/api/packaging/status` lists `glb_import_runtime_missing`, `arrangement_runtime_missing` or `pdf_report_runtime_missing`. `tests/test_packaging_missing_components.py` runs the real GLB worker with an empty dependency folder. STEP, carrier key store and native profile cases were already covered; see `docs/packaging-shipping-dependencies.md`. |
 | Dependency/license/security inventory | Inventory done; license review open | `docs/packaging-shipping-dependencies.md`: versions, declared licenses, license-text presence, process boundaries. Gaps: the STEP wheel carries 70 native DLLs (Open CASCADE, LibRaw, FreeImage, FreeType and others) with no license or notice text; py3dbp and cadquery-ocp ship no license file; pywin32 is used but not declared. Not legal clearance. |
 | Clean Windows install | Open (blocked) | Needs a clean Windows machine or VM; not attempted. |
@@ -239,6 +239,11 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   Evidence: 5 new tests (one reads the job limits from inside the real worker), dependency tests 19
   of 19, domain 483, host 112, report 77, recovery 12, Codex 144.
 
+- 2026-11-06, item 9a (legacy managed runtime): per the user's decision, packaging is unsupported
+  there and refused explicitly (environment flags forced off, boundary code
+  `desktop_packaging_unsupported`). Evidence: 18 runtime boundary/lifecycle tests, 7 desktop
+  configuration tests.
+
 ## Unsupported inputs (first release)
 
 Mixed products in one design; arbitrary contour or fitted inserts; dielines; pallets, crates
@@ -290,8 +295,6 @@ the same result), create receipts and documents (there is no delete route).
 - Permission for a bounded live Sage and rating test, and later for desktop promotion.
 - Permission for a bounded live Sage research turn (it uses the configured research provider and
   is billed by that provider), with the questions to research.
-- A decision on the legacy managed runtime's unattached transition path: supported or unsupported
-  for packaging in the first release (recommended: unsupported, failing closed).
 - Review of the eight ULINE carton records transcribed from the supplier pages on 2026-11-06.
 - License decisions for the STEP runtime's bundled libraries (Open CASCADE and LibRaw are LGPL;
   FreeImage and FreeType are dual-licensed) before any redistribution.

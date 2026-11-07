@@ -247,6 +247,25 @@ shipments; verified CAD material mass; GLB as physical volume evidence; label or
 purchase, pickups and payment; future ship dates (until provider semantics are verified).
 PO Box addresses; US territories and military (APO/FPO/DPO) addresses, which need customs data.
 
+## Retention proposal (awaiting a decision)
+
+Nothing below is implemented: deleting stored records is the user's decision.
+
+Growing without a bound today, per scope: imported sources (normalised GLB, up to 48 MiB each,
+deduplicated by content), surface images (deduplicated), quote snapshots and provider attempts per
+document, edit receipts (each keeps a full copy of the saved document so a replayed request returns
+the same result), create receipts and documents (there is no delete route).
+
+1. Sources and images: a per-scope cap (for example 100 sources or 2 GiB; 500 images or 512 MiB)
+   that refuses new imports with a message, plus **Remove unused**, which deletes only items that
+   no document, saved alternative, recovery draft or Undo step references.
+2. Quote snapshots and attempts: keep them, because they record external requests and fees. If a cap
+   is wanted, refuse new rating requests beyond 1,000 attempts per document instead of deleting.
+3. Edit receipts: keep the newest 200 per document. An older request replayed without its receipt
+   fails on its stale expected revision, so it cannot apply twice. Keep create receipts: a create
+   has no revision check.
+4. No automatic deletion of documents.
+
 ## Credential-independent work order
 
 1. Proposal preservation of protection and packing mass, with a deterministic test that a
@@ -276,3 +295,5 @@ PO Box addresses; US territories and military (APO/FPO/DPO) addresses, which nee
 - Review of the eight ULINE carton records transcribed from the supplier pages on 2026-11-06.
 - License decisions for the STEP runtime's bundled libraries (Open CASCADE and LibRaw are LGPL;
   FreeImage and FreeType are dual-licensed) before any redistribution.
+- A retention decision (see "Retention proposal"): caps, Remove unused, receipt pruning.
+- A clean Windows machine or VM for the install test.

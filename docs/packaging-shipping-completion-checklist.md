@@ -286,6 +286,24 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   (`application-panel.test.cjs`, `workflow-source-observation.test.cjs`) each fail one test identically
   on the branch base 4c37436; they are not caused by this work. No desktop app was launched or restarted.
 
+- 2026-11-07, item 4 (real straight rack/pusher, read-only): `tests/verify_packaging_real_rack.py`
+  (`.runtime/pc-tests/rack-3`; CAD hashes unchanged before and after, nothing copied). The STEP product
+  structure confirms one pair per file: the top assembly holds one Rack Assembly (Front Rail, Rack Base
+  Rail, Tile Backrest, Tile Support Panel) and one Straight Pusher; 5 solids; no mass, density or
+  material entities. Independent checks agree: the five separately exported part files sum to the
+  assembly's BRep volume (362.64 cm3; difference below 1e-15), the worker's tessellation matches it
+  within 0.0015% with identical extents (508.00 x 29.74 x 79.25 mm), and every part's box matches its
+  drawing (Straight Pusher 508 x 34 x 4.75 mm; rack parts 508 x 50 / 23 / 32.5 / 22.5 x 4.75 mm, read
+  only from the rack-part sheets of the scallop drawing package). The Straight Pusher drawing's title
+  block says inches while its values are millimetres. Mass stays an estimate: 0.4315 kg per pair at
+  the cited typical PMMA density, excluding magnets, adhesive and finish (1.726 kg for four pairs,
+  2.589 kg for six). Packing, offline, with a labelled test protection assumption (1 in Ethafoam 220
+  on every face): one, four and six pairs each fit one ULINE S-4415 24 x 12 x 6 in (S-15039 and
+  S-4219 also fit; the 20, 18 and 16 in cartons do not). Foam 0.514 kg (typical density) and carton
+  0.522 kg (supplier unit weight); gross mass stays unavailable because the packing allowance is
+  unknown. For four and six pairs the assessment flags elevated pairs without detected insert support
+  (they would rest on each other). Reports for all three quantities were exported.
+
 ## Unsupported inputs (first release)
 
 Mixed products in one design; arbitrary contour or fitted inserts; dielines; pallets, crates
@@ -322,11 +340,18 @@ are reused.
 - A carrier API account (EasyPost unless another is chosen), its key entered privately in the
   Rates account form, and permission for any enrollment, funding or metered calls.
 - Origin and three destination addresses with residential/commercial status.
-- The product, configuration and quantity to quote, and an approved gross weight or a
-  measured/CAD mass reference.
-- Permission for a bounded live Sage and rating test, and later for desktop promotion.
-- Permission for a bounded live Sage research turn (it uses the configured research provider and
-  is billed by that provider), with the questions to research.
+- The product, configuration and quantity to quote (the four-pair straight rack/pusher set is
+  prepared offline; see the item 4 log entry), and an approved gross weight or a measured mass.
+- Physical facts CAD cannot give for the rack/pusher: a scale weight of one finished pair (magnets
+  and adhesive included) or the magnet count, size and grade per pair; the packing materials actually
+  used (sleeves, bags or dividers between pairs, tape, labels) with their weights, or one weighed
+  packed carton; the protection to design for (the offline runs used 1 in Ethafoam 220 as a labelled
+  test assumption); and the carton actually used.
+- A ChatGPT sign-in for the isolated live Sage test profile (the desktop's sign-in is not reused),
+  and later permission for desktop promotion.
+- Permission for a bounded live Sage research turn, with the questions to research. With a
+  ChatGPT-plan sign-in, research runs on that plan's usage: no API key and no API fallback. An
+  API-key or Anthropic research configuration would be billed by that provider separately.
 - Redistribution decisions for the STEP runtime's bundled libraries before any installer or bundle
   is given to anyone (list in `docs/packaging-shipping-dependencies.md`); not needed for local testing.
 - A clean Windows machine or VM for the install test.

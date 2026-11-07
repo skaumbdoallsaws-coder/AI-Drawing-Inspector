@@ -26,6 +26,7 @@ from ai_inspector.packaging_shipping.models import (
     DensityRequest, Dimensions, MaterialDensity, Carton,
 )
 from ai_inspector.packaging_shipping.packing import propose
+from ai_inspector.packaging_shipping.permissions import EDIT, READ, permits
 from ai_inspector.packaging_shipping.service import PackagingError, PackagingService
 from .policy import PilotError
 
@@ -121,7 +122,7 @@ def _identity(context):
             or type(context.pending_operations) is not int or context.pending_operations != 0):
         raise _error("codex_saved_document_required")
     p = context.principal
-    if not p.permits("layout.read"):
+    if not permits(p, READ):
         raise _error("codex_tool_denied")
     return {"protocol": "packaging-tools-v1", "workflow": WORKFLOW,
             "tenant": p.tenant_id, "principal": p.principal_id,
@@ -462,7 +463,7 @@ class PackagingGateway:
             self.binding_key = digest(json.loads(self._binding_bytes))
             self._scope = packaging_scope(context.principal)
             self._document_id = context.document_id
-            self._direct_edit = context.direct_edit_authorized and context.principal.permits("layout.edit")
+            self._direct_edit = context.direct_edit_authorized and permits(context.principal, EDIT)
             if self._direct_edit and mutation_guard is None:
                 raise _error("codex_packaging_context_invalid")
             self._specs = tool_specs(direct_edit=self._direct_edit)

@@ -17,6 +17,7 @@ from .admission import PackagingAdmission
 from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave, BaselineSelect
 from .comparison import compare as compare_designs, scenarios as quoted_scenarios
 from .catalog import catalog
+from .permissions import ACCOUNT, EDIT, QUOTE, READ, granted, permits
 from .packing import propose
 from .destinations import RULES as DESTINATION_RULES
 from .rating import EasyPostRating, FEES_NOTICE, PRICE_BASES, SHIP_DATE_BASIS
@@ -105,14 +106,19 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         if request.method not in {"GET", "HEAD"} and request.headers.get("x-inspectorpro-request") != "packaging":
             raise HTTPException(403, "Use the InspectorPro packaging client.")
         resolved = principal_resolver(request)
-        if not resolved.permits("layout.read"):
+        if not permits(resolved, READ):
             raise HTTPException(403, "Your application role does not permit this operation.")
         return resolved
 
-    def scope(request: Request, resolved=Depends(principal)):
-        if request.method not in {"GET", "HEAD"} and not resolved.permits("layout.edit"):
-            raise HTTPException(403, "Your application role does not permit this operation.")
-        return digest({"tenant": resolved.tenant_id, "sites": sorted(resolved.allowed_site_ids), "workflow": "packaging_shipping"})
+    def scoped(action=None):
+        """Reads need packaging.read and other methods packaging.edit, unless the route names its action."""
+        def dependency(request: Request, resolved=Depends(principal)):
+            if not permits(resolved, action or (READ if request.method in {"GET", "HEAD"} else EDIT)):
+                raise HTTPException(403, "Your application role does not permit this operation.")
+            return digest({"tenant": resolved.tenant_id, "sites": sorted(resolved.allowed_site_ids), "workflow": "packaging_shipping"})
+        return dependency
+
+    scope, quote_scope, account_scope = scoped(), scoped(QUOTE), scoped(ACCOUNT)
 
     if admission is not None:
         async def editor_body(request):
@@ -152,6 +158,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
             step = False
         return {"workflow": "packaging_shipping", "pilot": True,
                 "rating": account(resolved).status() if credential_factory else provider.status(),
+                "permissions": granted(resolved),
                 "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison"] + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
                 "quote_rules": {"destinations": DESTINATION_RULES, "ship_date": SHIP_DATE_BASIS, "fees": FEES_NOTICE,
                                 "price_bases": PRICE_BASES},
@@ -166,7 +173,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         return account(resolved).status()
 
     @router.put("/api/packaging/account")
-    async def replace_account(request: Request, _=Depends(scope), resolved=Depends(principal)):
+    async def replace_account(request: Request, _=Depends(account_scope), resolved=Depends(principal)):
         try:
             raw = await bounded_body(request, 8192)
             body = json.loads(raw)
@@ -177,7 +184,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         return account(resolved).replace(body["api_key"], account_alias=body["account_alias"])
 
     @router.delete("/api/packaging/account")
-    def remove_account(_=Depends(scope), resolved=Depends(principal)):
+    def remove_account(_=Depends(account_scope), resolved=Depends(principal)):
         return account(resolved).remove()
 
     @router.get("/api/packaging/documents")
@@ -322,7 +329,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
             service.finish_quote_attempt(s, doc_id, attempt_id, outcome, counts, error_code=error_code, quote_id=quote_id)
 
     @router.post("/api/packaging/documents/{doc_id}/quotes")
-    async def quote(doc_id: str, body: QuoteRequest, s=Depends(scope), resolved=Depends(principal)):
+    async def quote(doc_id: str, body: QuoteRequest, s=Depends(quote_scope), resolved=Depends(principal)):
         if quote_lock.locked():
             raise PackagingError("quote_in_progress", "A quote request is already running. Wait before retrying.", 429)
         current = service.get(s, doc_id, body.expected_revision)
@@ -333,7 +340,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
                                 lambda result: service.save_quotes(s, doc_id, revision, result))
 
     @router.post("/api/packaging/documents/{doc_id}/alternatives/{alt_id}/quotes")
-    async def quote_alternative(doc_id: str, alt_id: str, body: QuoteRequest, s=Depends(scope), resolved=Depends(principal)):
+    async def quote_alternative(doc_id: str, alt_id: str, body: QuoteRequest, s=Depends(quote_scope), resolved=Depends(principal)):
         if quote_lock.locked():
             raise PackagingError("quote_in_progress", "A quote request is already running. Wait before retrying.", 429)
         service.get(s, doc_id, body.expected_revision)
@@ -369,8 +376,8 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
                 "comparison": None if scenario_hash is None else compare_designs(baseline, candidates, quotes, scenario_hash, account_ref, selection)}
 
     @router.post("/api/packaging/account/carrier-accounts")
-    async def carrier_accounts(_=Depends(scope), resolved=Depends(principal)):
-        # POST: this contacts the provider, so it needs the packaging client header and edit rights.
+    async def carrier_accounts(_=Depends(account_scope), resolved=Depends(principal)):
+        # POST: this contacts the provider, so it needs the packaging client header and account rights.
         if quote_lock.locked():
             raise PackagingError("quote_in_progress", "A provider request is already running. Wait before retrying.", 429)
         async with quote_lock:

@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ai_inspector.facility_layout.authorization import FacilityPrincipal
 from .geometry import digest
+from .permissions import EDIT, READ, permits
 from .service import PackagingError, PackagingService
 
 
@@ -136,7 +137,7 @@ class PackagingAdmission:
 
     @staticmethod
     def _principal(principal):
-        if not isinstance(principal, FacilityPrincipal) or not principal.permits("layout.read"):
+        if not permits(principal, READ):
             raise _error("editor_not_authorized", "Your application role does not permit packaging admission.", 403)
 
     def _invalidate(self, editor):
@@ -306,7 +307,7 @@ class PackagingAdmission:
                 raise _error("editor_identity_changed", "The admitted host session or conversation changed.")
             if editor.started:
                 raise _error("editor_turn_active", "This editor admission has already been consumed by a turn.")
-            if direct_edit_authorized and not principal.permits("layout.edit"):
+            if direct_edit_authorized and not permits(principal, EDIT):
                 raise _error("editor_edit_denied", "Direct packaging edits are not authorized for this principal.", 403)
             key = (_owner(principal), session_id, conversation_id, turn_id)
             if key in self._used_turns:
@@ -388,8 +389,8 @@ class PackagingTurn:
             principal = self._current_principal()
         except Exception:
             raise _error("editor_identity_changed", "Packaging host authorization is no longer available.") from None
-        if (not _same_principal(principal, self._editor.principal) or not principal.permits("layout.read")
-                or (self._direct_edit and not principal.permits("layout.edit"))
+        if (not _same_principal(principal, self._editor.principal) or not permits(principal, READ)
+                or (self._direct_edit and not permits(principal, EDIT))
                 or packaging_scope(principal) != self._editor.scope):
             raise _error("editor_identity_changed", "Packaging host authorization changed.")
         return principal

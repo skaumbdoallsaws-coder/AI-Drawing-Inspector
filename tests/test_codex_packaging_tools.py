@@ -280,6 +280,37 @@ def test_untrusted_payload_limits_and_denied_tools(env):
     assert_error(invoke(gw, args=recursive), "codex_tool_arguments_invalid")
 
 
+def test_schema_rejections_name_the_fields_without_values_and_receipts_keep_them(env):
+    # The live turn of 2026-11-07 lost 6 of 19 calls to one generic rejection; the model must see what to correct.
+    gw = gateway(env, max_calls=8)
+    value = "do-not-echo-" + "v" * 30
+    result = invoke(gw, "validate_packaging", {"expected_revision": 0, "findings_limit": 100, "candidate_id": value})
+    assert_error(result, "codex_tool_arguments_invalid")
+    message = result["error"]["message"]
+    assert message.startswith(tools._MESSAGES["codex_tool_arguments_invalid"])
+    assert "findings_limit: Input should be less than or equal to 50" in message
+    assert "candidate_id: not a field of this tool" in message and value not in message
+    assert gw.receipts[-1]["argumentHash"] is None and gw.receipts[-1]["errorCode"] == "codex_tool_arguments_invalid"
+    assert sorted(gw.receipts[-1]["argumentErrors"]) == ["candidate_id:extra_forbidden", "findings_limit:less_than_equal"]
+
+    missing = invoke(gw, "packaging_resources", {"expected_revision": 0, "limit": 10})
+    assert "resource: Field required" in missing["error"]["message"]
+    assert "limit: Input should be less than or equal to 2" in missing["error"]["message"]
+
+    design = sample_design().model_dump(mode="json")
+    design["packages"][0]["placements"] = [{"id": "x" * 200, "position_m": "here", "orientation": 9, "extra": value}] * 6
+    crowded = invoke(gw, "validate_packaging", {"expected_revision": 0, "design": design})
+    assert_error(crowded, "codex_tool_arguments_invalid")
+    assert len(crowded["error"]["message"]) <= 300 and crowded["error"]["message"].isascii()
+    assert value not in crowded["error"]["message"] and len(gw.receipts[-1]["argumentErrors"]) <= 4
+
+    # Rejections that are not schema findings keep the generic text and record no fields.
+    assert invoke(gw, args=[])["error"]["message"] == tools._MESSAGES["codex_tool_arguments_invalid"]
+    assert "argumentErrors" not in gw.receipts[-1]
+    assert invoke(gw, "validate_packaging", {"expected_revision": 0})["ok"] is True
+    assert "argumentErrors" not in gw.receipts[-1]
+
+
 def test_imported_glb_is_scoped_immutable_and_returns_only_reference(env):
     import trimesh
     service, scope, context, _ = env

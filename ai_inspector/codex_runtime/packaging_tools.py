@@ -801,8 +801,27 @@ def _arguments(name, value):
             raise ValueError()
         parsed = _TOOLS[name][0].model_validate_json(raw, strict=True)
         return parsed, digest(json.loads(raw))
+    except ValidationError as exc:  # A ValueError too, so it is caught first.
+        raise _argument_error(exc) from None
     except (ValueError, TypeError, OverflowError, RecursionError):
         raise _error("codex_tool_arguments_invalid") from None
+
+
+def _argument_error(exc):
+    """The schema rejection with its failing fields and constraints named, so the model can correct the call in one
+    retry instead of guessing (each guess spends a call and model time from the turn's budget). Field paths and the
+    validator's own constraint text only; an unexpected field is named without its value. Bounded to the error
+    message's 300 characters; the receipt keeps path:type pairs."""
+    problems, kinds = [], []
+    for item in exc.errors(include_url=False, include_context=False, include_input=False)[:4]:
+        path = ".".join(str(part) for part in item.get("loc", ())) or "arguments"
+        kind = str(item.get("type", "invalid"))
+        problems.append(path + ": " + ("not a field of this tool" if kind == "extra_forbidden" else str(item.get("msg", "invalid"))))
+        kinds.append(re.sub(r"[^\x20-\x7e]", "?", path + ":" + kind)[:120])
+    message = re.sub(r"[^\x20-\x7e]", "?", _MESSAGES["codex_tool_arguments_invalid"] + " Correct: " + "; ".join(problems))
+    error = _error("codex_tool_arguments_invalid")
+    error.hint, error.problems = (message if len(message) <= 300 else message[:297] + "..."), kinds
+    return error
 
 
 def _assessment(design, offset=0, limit=20):
@@ -1191,7 +1210,7 @@ class PackagingGateway:
 
     async def _call(self, name, arguments):
         started, argument_hash, mutation, external = time.monotonic(), None, {}, {}
-        validation = None
+        validation = problems = None
         try:
             self._active()
             if self.calls >= self.max_calls:
@@ -1249,20 +1268,24 @@ class PackagingGateway:
             code = code if code in _MESSAGES else "codex_tool_failed"
             if code == "codex_run_closed" or mutation.get("outcome") in {"unknown", "committed"}:
                 self.closed = True
-            result = Failure(error={"code": code, "message": _MESSAGES[code]},
+            hint = getattr(exc, "hint", None) if code == "codex_tool_arguments_invalid" else None
+            problems = getattr(exc, "problems", None) if hint else None
+            result = Failure(error={"code": code, "message": hint if isinstance(hint, str) and len(hint) <= 300
+                                    else _MESSAGES[code]},
                              mutation=mutation or None).model_dump(mode="json", exclude_none=True)
         self._receipt(name, argument_hash, started, result.get("error", {}).get("code"), mutation,
-                      validation=validation, external=external)
+                      validation=validation, external=external, problems=problems)
         return result
 
-    def _receipt(self, name, argument_hash, started, code, mutation, *, validation=None, external=None):
+    def _receipt(self, name, argument_hash, started, code, mutation, *, validation=None, external=None, problems=None):
         if len(self.receipts) < self.max_calls + 1:
             self.receipts.append({"tool": name if isinstance(name, str) and name in self._names else "denied",
                 "ok": code is None, "argumentHash": argument_hash, "bindingHash": self.binding_key,
                 "durationMs": round((time.monotonic() - started) * 1000), "errorCode": code,
                 "mutation": deepcopy(mutation) or None,
                 **({"validation": deepcopy(validation)} if validation is not None else {}),
-                **({"external": deepcopy(external)} if external else {})})
+                **({"external": deepcopy(external)} if external else {}),
+                **({"argumentErrors": list(problems)} if problems else {})})
 
 
 def create_packaging_gateway(service, *, current_context, turn_id, mutation_guard=None,

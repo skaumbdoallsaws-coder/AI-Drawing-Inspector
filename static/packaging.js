@@ -62,6 +62,13 @@ export class DraftDocument {
   }
 }
 
+// In the desktop application its own guard decides close, reload and restart (it asks first, or proceeds over a stored
+// recovery draft), as for the facility editor. A browser unload prompt there would only cancel an authorized reload
+// silently, because Electron cancels any unload a beforeunload handler blocks.
+export function desktopGuarded(win) {
+  try { return win.parent !== win && !!win.parent.InspectorProNativeApplication; } catch (_) { return false; }
+}
+
 export function errorMessage(body, status) {
   if (body?.error?.message) return String(body.error.message);
   if (typeof body?.detail === 'string') return body.detail;
@@ -2440,7 +2447,7 @@ function boot() {
   // unavailable until the modal interaction has completed.
   const modalObserver = new MutationObserver(publishRibbonState);
   modalObserver.observe(document.body, { attributes: true, attributeFilter: ['open'], subtree: true });
-  window.addEventListener('beforeunload', event => { if (hasNavigationChanges() || state.busy || state.sage.locked) { event.preventDefault(); event.returnValue = ''; } });
+  window.addEventListener('beforeunload', event => { if (!desktopGuarded(window) && (hasNavigationChanges() || state.busy || state.sage.locked)) { event.preventDefault(); event.returnValue = ''; } });
   window.addEventListener('pagehide', () => {
     // Best effort; the debounced checkpoints are the real mechanism (keepalive bodies are size-limited).
     if (recoveryEnabled() && (state.draft.dirty || state.recovery.stored)) writeCheckpoint({ keepalive: true });

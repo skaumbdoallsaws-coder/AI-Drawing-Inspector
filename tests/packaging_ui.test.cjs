@@ -637,6 +637,14 @@ test('same carrier and service remain distinguishable by carrier account', () =>
   assert.match(source, /Individual parcel rates/);
 });
 
+test('inside the desktop application its guard, not a browser prompt, decides unloading the editor', () => {
+  assert.equal(ui.desktopGuarded({ parent: { InspectorProNativeApplication: {} } }), true);
+  const alone = {}; alone.parent = alone;
+  assert.equal(ui.desktopGuarded(alone), false);  // Not embedded: the browser prompt stays.
+  assert.equal(ui.desktopGuarded({ parent: { InspectorProNativeApplication: undefined } }), false);  // A browser host.
+  assert.equal(ui.desktopGuarded({ get parent() { throw new Error('Blocked a frame with origin'); } }), false);
+});
+
 test('assets, icons, and Three imports stay local; server strings never enter HTML sinks', () => {
   const html = fs.readFileSync(path.join(root, 'static/packaging.html'), 'utf8');
   const css = fs.readFileSync(path.join(root, 'static/packaging.css'), 'utf8');
@@ -648,6 +656,7 @@ test('assets, icons, and Three imports stay local; server strings never enter HT
   assert.doesNotMatch(html + source + sceneSource + css, /https?:\/\//);
   assert.doesNotMatch(css, /gradient\(/);
   assert.match(source, /beforeunload/); assert.match(source, /confirmNavigation/);
+  assert.match(source, /'beforeunload', event => \{ if \(!desktopGuarded\(window\) && \(hasNavigationChanges\(\)/);
   assert.match(source, /dimensions_m: p.source_id \? clone\(p.dimensions_m\)/);
   assert.match(sceneSource, /new GLTFLoader\(\)\.parseAsync/);
   assert.doesNotMatch(sceneSource, /(?:sourceModel|loaded|rotation)\.scale/);

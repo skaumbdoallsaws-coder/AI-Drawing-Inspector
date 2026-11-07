@@ -6,7 +6,9 @@
 //    Close over checkpointed unsaved work, which leaves packaging-recovery-expected.json for the next run;
 //  - recover: with that file present, the restarted application must offer the work back, restore it and save it;
 //  - missing (fixture.expectMissing): each component withheld on purpose must fail clearly when used, while manual
-//    editing and saving keep working.
+//    editing and saving keep working;
+//  - unavailable (fixture.expectUnavailable): the profile asks for Packaging but its runtime is unusable; the
+//    application must still start and say why, with Packaging off, or only STEP import for an unusable STEP Python.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const zlib = require('node:zlib');
@@ -51,7 +53,8 @@ require.cache[driver].exports = { run: async ({ window, profile, output, observe
   assert.ok(profile.profileId.startsWith('packaging-native-'));
   const expectedFile = path.join(profile.dataRoot, 'packaging-recovery-expected.json');
   const expected = await fs.readFile(expectedFile, 'utf8').then(JSON.parse, () => null);
-  const mode = fixture.expectMissing?.length ? 'missing' : expected && !expected.recovered ? 'recover' : 'full';
+  const mode = fixture.expectUnavailable ? 'unavailable' : fixture.expectMissing?.length ? 'missing'
+    : expected && !expected.recovered ? 'recover' : 'full';
   const hash = bytes => createHash('sha256').update(bytes).digest('hex');
   const original = fixture.stepSource ? hash(await fs.readFile(fixture.stepSource)) : null;
   const report = { status: 'running', mode, checks: [], captures: [], sourceUnchanged: false, liveQuotes: false, liveInference: false };
@@ -414,9 +417,47 @@ require.cache[driver].exports = { run: async ({ window, profile, output, observe
     if (original) { report.sourceUnchanged = hash(await fs.readFile(fixture.stepSource)) === original; assert.equal(report.sourceUnchanged, true); }
   }
 
+  async function unavailable() {
+    report.stage = 'unavailable'; await persist();
+    const step = fixture.expectUnavailable === 'step-python';
+    assert.equal(profile.packagingUnavailable, fixture.expectUnavailable);
+    assert.equal(!!profile.packagingRuntime, step, 'Unexpected packaging runtime: ' + JSON.stringify(profile.packagingRuntime));
+    if (step) assert.equal(profile.packagingRuntime.geometryPython, undefined, 'The unusable STEP Python was kept');
+    assert.equal(new URL(window.webContents.getURL()).searchParams.get('packagingPilot'), step ? '1' : null);
+    const banner = `document.querySelector(':root > div[role="status"]')`;
+    await until(`!!${banner}`, 'No startup notice');
+    report.notice = (await js(`${banner}.textContent`)).replace(/Dismiss$/, '');
+    assert.ok(report.notice.startsWith(step ? 'STEP import is off for this session' : 'Packaging & Shipping is off for this session'), report.notice);
+    if (!step) assert.ok(report.notice.includes('missing the ' + fixture.expectUnavailable.slice(8) + ' package'), report.notice);
+    await until(`!!document.querySelector('[data-tab="training"]')`, 'Application did not load', 120000);
+    await capture('01-startup-notice');
+    report.checks.push('the profile asked for Packaging with an unusable runtime; the application started and said why');
+    if (!step) {
+      await click(selector('[data-tab="training"]'));
+      await click(selector('#trainingTypeRibbonTrigger'));
+      await until(`!!document.querySelector('[id^="trainingTypeRibbonOption-"]')`, 'Workflow types did not open');
+      report.offeredTypes = await js(`[...document.querySelectorAll('[id^="trainingTypeRibbonOption-"]')].map(e=>e.id.slice(25))`);
+      assert.equal(report.offeredTypes.includes('packaging_shipping'), false, 'Packaging still offered');
+      assert.ok(report.offeredTypes.includes('facility_layout'), 'Other workflow types missing');
+      await capture('02-workflows-without-packaging');
+      report.checks.push('Packaging & Shipping is not offered; the other workflow types are');
+      return;
+    }
+    await mount();
+    const status = await api('/status');
+    report.statusUnsupported = status.unsupported; report.statusCapabilities = status.capabilities;
+    assert.ok(status.unsupported.includes('step_runtime_not_configured'), 'STEP still configured');
+    assert.equal(status.capabilities.includes('step_import'), false, 'STEP import still offered');
+    await manualProduct('TEST native without STEP', 2);
+    await click(button('Add carton')); await command('save'); await saved();
+    assert.ok((await current()).design.packages.length >= 1, 'Manual carton not saved');
+    await capture('02-manual-work-without-step');
+    report.checks.push('only STEP import is off; manual editing and saving in Packaging still work');
+  }
+
   try {
     window.maximize(); window.webContents.setBackgroundThrottling(false);
-    await ({ full, recover, missing })[mode]();
+    await ({ full, recover, missing, unavailable })[mode]();
     await prompts();
     report.status = 'passed'; report.stage = 'complete';
   } catch (error) {

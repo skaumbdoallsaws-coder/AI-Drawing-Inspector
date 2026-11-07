@@ -42,12 +42,19 @@ Why the declarations were needed:
 - numpy and Pillow were in the desktop runtime folder only because trimesh and reportlab pull them in.
   The GLB worker imports both directly, so they are now pinned at the versions that folder ships, and
   the native profile check (`desktop/runtime/packaging_config.py`, `desktop/src/packaging-config.cjs`)
-  now requires them too, so a folder without them is rejected when the profile loads, not on first import.
-- pywin32 was present in the test environment but listed nowhere. It must be installed in the
-  application interpreter's own site-packages: its startup `.pth` file does not run from the packaging
-  runtime folder, which is added without site processing. Observed 2026-11-07: the regular desktop's
-  interpreter (`C:\Python314`) does not have it, and `win32crypt` does not import there even with the
-  packaging runtime folder on the path, so that desktop cannot store a carrier key until it is installed.
+  now requires them too, so a folder without them is caught when the profile loads, not on first import.
+  Since 2026-11-07 that turns Packaging off for the session with a notice naming the missing package,
+  and the rest of the desktop starts (see "Missing components").
+- pywin32 was present in the test environment but listed nowhere. Its startup `.pth` file must be
+  processed, so it cannot come from the packaging runtime folder, which is added without site
+  processing. Checked 2026-11-07, correcting an earlier note of the same day: the regular desktop's
+  interpreter (`C:\Python314`) has no pywin32 of its own, but that desktop's profile configures Sage
+  (`codexRuntime`), and its backend adds Sage's verified dependency bundle (`codex-pilot-deps`,
+  pywin32 312) as a site directory at startup (`desktop/runtime/codex_config.py`). In that setup the
+  carrier key store saved, read back and removed a made-up value in a scratch folder, so that desktop
+  can store a carrier key while Sage is configured; a desktop profile without `codexRuntime` cannot
+  (`carrier_secure_store_unavailable`). No second pywin32 was installed into the interpreter's user
+  site: it would load ahead of Sage's tested copy, which the ChatGPT account store also uses.
 - httpx is imported directly by the rating adapter. It was only present because openai depends on it.
   It is declared in `requirements.txt` rather than the packaging runtime folder, so the folder (first on
   the path) cannot shadow the version openai uses.
@@ -154,9 +161,10 @@ installation, not as a bad file or a server fault. `GET /api/packaging/status` l
 | numpy, trimesh or Pillow absent from the GLB worker's folder | `glb_import_runtime_missing` | `source_runtime_unavailable` (503), "Manual dimensions still work." | `test_packaging_missing_components.py` (real worker, empty folder) |
 | py3dbp | `arrangement_runtime_missing` | `arrangement_unavailable` (503) in the editor and to Sage, "Manual packing still works." | `test_packaging_missing_components.py`, `test_codex_packaging_tools.py` |
 | reportlab | `pdf_report_runtime_missing` | `report_unavailable` (503); the saved design is unchanged | `test_packaging_missing_components.py` |
-| pywin32 (carrier key store) | - | `carrier_secure_store_unavailable`; no key is stored or read | `test_packaging_credentials.py` |
+| pywin32 (carrier key store) | - | `carrier_secure_store_unavailable`; no key is stored or read. In the desktop it comes from Sage's dependency bundle, so a profile without Sage has no carrier key store | `test_packaging_credentials.py` |
 | httpx | - | The packaging API cannot load, so a host with packaging enabled does not start | Not tested. Declared in `requirements.txt`. |
-| py3dbp, trimesh, reportlab, numpy or Pillow absent from a native profile's runtime folder | - | Profile rejected: `desktop_packaging_config_invalid` | `desktop/tests` |
+| py3dbp, trimesh, reportlab, numpy or Pillow absent from a native profile's runtime folder, or an unusable runtime folder, settings or storage folder | - | The desktop starts with Packaging off and says why once (reason `package:<name>`, `dependency-folder`, `settings` or `storage`); nothing from the refused runtime is used. Enabling Packaging (`tools/enable_desktop_packaging.py`) still refuses it | `desktop/tests`; native `.runtime/pc-native/unavail-pkg-01` |
+| The STEP Python named by a native profile is missing or not allowed | - | Packaging starts without STEP import (`step_runtime_not_configured`) and the window says why; manual packing and saving work | `desktop/tests`; native `.runtime/pc-native/unavail-step-01` |
 
 ## Process boundaries
 

@@ -12,6 +12,7 @@ import sys
 from desktop.runtime.profile import local_path
 
 PACKAGES = ('py3dbp', 'trimesh', 'reportlab', 'numpy', 'PIL')  # numpy and PIL: the GLB worker imports them directly.
+REASONS = ('settings', 'dependency-folder', 'storage', 'step-python', *('package:' + name for name in PACKAGES))
 KEYS = {'schemaVersion', 'dependencyRoot'}
 ENV_DEFAULTS = {
     'INSPECTORPRO_PACKAGING_ENABLED': '0',
@@ -43,16 +44,27 @@ def _overlaps(a, b):
 
 
 def validate_config(value, profile):
+    """Strict. A refusal carries .reason, the first check that failed, from REASONS and never with a value; the
+    Electron loader checks in the same order."""
+    reason = 'settings'
     try:
         if (not isinstance(value, dict) or not KEYS <= set(value) or set(value) - KEYS - {'geometryPython'}
                 or type(value['schemaVersion']) not in (int, float) or value['schemaVersion'] != 1):
             raise ValueError()
+        reason = 'dependency-folder'
         dependencies = _path(value['dependencyRoot'])
+        reason = 'storage'
         stores = [_path(profile[key]) for key in ('dataRoot', 'facilityRoot', 'libraryRoot')]
-        if (not dependencies.is_dir() or any(not root.is_dir() for root in stores)
-                or any(_overlaps(dependencies, root) for root in stores)
-                or any(not _path(str(dependencies / name / '__init__.py')).is_file() for name in PACKAGES)):
+        if any(not root.is_dir() for root in stores):
             raise ValueError()
+        reason = 'dependency-folder'
+        if not dependencies.is_dir() or any(_overlaps(dependencies, root) for root in stores):
+            raise ValueError()
+        for name in PACKAGES:
+            reason = 'package:' + name
+            if not _path(str(dependencies / name / '__init__.py')).is_file():
+                raise ValueError()
+        reason = 'storage'
         root = _path(str(stores[0] / 'packaging'))
         for target in (root, _path(str(root / 'step-jobs'))):
             if target.exists() and not target.is_dir():
@@ -61,13 +73,32 @@ def validate_config(value, profile):
             raise ValueError()
         result = dict(value, dependencyRoot=str(dependencies))
         if 'geometryPython' in value:
+            reason = 'step-python'
             python = _path(value['geometryPython'])
             if not python.is_file() or any(_overlaps(python, store) for store in [*stores, dependencies]):
                 raise ValueError()
             result['geometryPython'] = str(python)
         return result
     except Exception:
-        raise ValueError('desktop_packaging_config_invalid') from None
+        error = ValueError('desktop_packaging_config_invalid')
+        error.reason = reason
+        raise error from None
+
+
+def load_runtime(value, profile):
+    """Startup never depends on Packaging. Returns (config or None, reason or None): an unusable runtime turns
+    Packaging off for this session, or only STEP import when just the STEP Python is unusable, and nothing from a
+    refused runtime is used. Enabling Packaging (tools/enable_desktop_packaging.py) stays strict."""
+    try:
+        return validate_config(value, profile), None
+    except ValueError as exc:
+        reason = getattr(exc, 'reason', 'settings')
+    if reason == 'step-python':
+        try:
+            return validate_config({k: v for k, v in value.items() if k != 'geometryPython'}, profile), reason
+        except ValueError:
+            pass
+    return None, reason
 
 
 def configure_packaging(profile, *, environment=None, search_path=None):
@@ -82,7 +113,10 @@ def configure_packaging(profile, *, environment=None, search_path=None):
     configure_glb_runtime()
     if 'packagingRuntime' not in profile.value:
         return
-    config = validate_config(profile.value['packagingRuntime'], profile.value)
+    # The loader already turned an unusable runtime off; this covers a runtime that broke since. It stays off.
+    config, _ = load_runtime(profile.value['packagingRuntime'], profile.value)
+    if config is None:
+        return
     configure_glb_runtime(config['dependencyRoot'])
     paths = sys.path if search_path is None else search_path
     if config['dependencyRoot'] not in paths:

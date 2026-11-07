@@ -12,7 +12,7 @@ import uuid
 import pytest
 
 from desktop.runtime.application_profile import ApplicationProfile, load_application_profile
-from desktop.runtime.packaging_config import ENV_DEFAULTS, PACKAGES, configure_packaging, validate_config
+from desktop.runtime.packaging_config import ENV_DEFAULTS, PACKAGES, REASONS, configure_packaging, validate_config
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -75,21 +75,64 @@ def test_optional_profile_keeps_identity_and_creates_no_state(fixture):
     assert not (Path(f.profile['dataRoot']) / 'packaging').exists()
 
 
-def test_malformed_configs_are_rejected_without_echoing_values(fixture):
-    for config in invalid_configs(fixture):
-        with pytest.raises(ValueError, match='^desktop_packaging_config_invalid$'):
-            fixture.load(dict(fixture.profile, packagingRuntime=config))
+def test_malformed_configs_are_refused_without_echoing_values_and_never_stop_startup(fixture):
+    f = fixture
+    binding = f.load(f.profile).store_binding
+    without_step = {k: v for k, v in f.config.items() if k != 'geometryPython'}
+    for config in invalid_configs(f):
+        with pytest.raises(ValueError, match='^desktop_packaging_config_invalid$') as refused:
+            validate_config(config, f.profile)
+        assert refused.value.reason in REASONS
+        loaded = f.load(dict(f.profile, packagingRuntime=config))
+        assert loaded.packaging_unavailable == refused.value.reason
+        assert loaded.store_binding == binding
+        if refused.value.reason == 'step-python':
+            assert loaded.value['packagingRuntime'] == without_step
+        else:
+            assert 'packagingRuntime' not in loaded.value
+
+
+@pytest.mark.parametrize('damage, reason', [('package', 'package:trimesh'), ('folder', 'dependency-folder'),
+                                            ('storage', 'storage'), ('step', 'step-python')])
+def test_unusable_runtime_starts_without_packaging_and_names_the_reason(fixture, damage, reason):
+    f = fixture
+    if damage == 'package':
+        shutil.rmtree(Path(f.config['dependencyRoot']) / 'trimesh')
+    elif damage == 'folder':
+        shutil.rmtree(f.config['dependencyRoot'])
+    elif damage == 'storage':
+        (Path(f.profile['dataRoot']) / 'packaging').write_bytes(b'')
+    else:
+        Path(f.config['geometryPython']).unlink()
+    profile = f.load(dict(f.profile, packagingRuntime=f.config))
+    assert profile.packaging_unavailable == reason
+    env, paths = {}, ['base-app-deps']
+    configure_packaging(profile, environment=env, search_path=paths)
+    if damage == 'step':
+        # Only STEP import is off: manual packing, reports and the dependency folder stay in use.
+        assert profile.value['packagingRuntime'] == {k: v for k, v in f.config.items() if k != 'geometryPython'}
+        assert env['INSPECTORPRO_PACKAGING_ENABLED'] == '1' and env['INSPECTORPRO_PACKAGING_GEOMETRY_PYTHON'] == ''
+        assert paths == ['base-app-deps', f.config['dependencyRoot']]
+    else:
+        assert 'packagingRuntime' not in profile.value
+        assert env == ENV_DEFAULTS and paths == ['base-app-deps']
+    with pytest.raises(ValueError, match='^desktop_packaging_config_invalid$'):
+        validate_config(f.config, f.profile)  # Enabling Packaging stays strict.
 
 
 @pytest.mark.parametrize('name', PACKAGES)
 def test_each_required_package_must_be_a_regular_file(fixture, name):
     module = Path(fixture.config['dependencyRoot']) / name / '__init__.py'
     module.unlink()
-    with pytest.raises(ValueError, match='desktop_packaging_config_invalid'):
+    with pytest.raises(ValueError, match='desktop_packaging_config_invalid') as refused:
         validate_config(fixture.config, fixture.profile)
+    assert refused.value.reason == 'package:' + name
     module.mkdir()
-    with pytest.raises(ValueError, match='desktop_packaging_config_invalid'):
+    with pytest.raises(ValueError, match='desktop_packaging_config_invalid') as refused:
         validate_config(fixture.config, fixture.profile)
+    assert refused.value.reason == 'package:' + name
+    loaded = fixture.load(dict(fixture.profile, packagingRuntime=fixture.config))
+    assert 'packagingRuntime' not in loaded.value and loaded.packaging_unavailable == 'package:' + name
 
 
 @pytest.mark.parametrize('target', ['packaging', 'packaging/step-jobs'])
@@ -97,19 +140,23 @@ def test_state_paths_cannot_be_files(fixture, target):
     file = Path(fixture.profile['dataRoot']) / target
     file.parent.mkdir(parents=True, exist_ok=True)
     file.touch()
-    with pytest.raises(ValueError, match='desktop_packaging_config_invalid'):
+    with pytest.raises(ValueError, match='desktop_packaging_config_invalid') as refused:
         validate_config(fixture.config, fixture.profile)
+    assert refused.value.reason == 'storage'
 
 
 def test_dependencies_and_geometry_cannot_overlap_stores_or_each_other(fixture):
     f = fixture
     for key in ('dataRoot', 'facilityRoot', 'libraryRoot'):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as refused:
             validate_config(f.config, dict(f.profile, **{key: f.config['dependencyRoot']}))
-        with pytest.raises(ValueError):
+        assert refused.value.reason == 'dependency-folder'
+        with pytest.raises(ValueError) as refused:
             validate_config(f.config, dict(f.profile, **{key: str(Path(f.config['geometryPython']).parent)}))
-    with pytest.raises(ValueError):
+        assert refused.value.reason == 'step-python'
+    with pytest.raises(ValueError) as refused:
         validate_config(dict(f.config, geometryPython=str(Path(f.config['dependencyRoot']) / 'py3dbp/__init__.py')), f.profile)
+    assert refused.value.reason == 'step-python'
 
 
 def test_disabled_scrubs_inheritance_and_blocks_dotenv_without_touching_auth(fixture):
@@ -154,13 +201,15 @@ def test_enabled_uses_selected_data_root_and_separate_step_runtime(fixture, geom
     assert not root.exists()
 
 
-def test_invalid_runtime_fails_closed_before_dependency_injection(fixture):
+def test_invalid_runtime_stays_off_before_dependency_injection(fixture):
+    # Reached only when a runtime broke after the profile loaded: Packaging stays off and nothing is injected.
+    from ai_inspector.packaging_shipping import sources
     env = {key: '1' for key in ENV_DEFAULTS}
     paths = []
-    with pytest.raises(ValueError):
-        configure_packaging(ApplicationProfile(dict(fixture.profile, packagingRuntime={})), environment=env, search_path=paths)
+    configure_packaging(ApplicationProfile(dict(fixture.profile, packagingRuntime={})), environment=env, search_path=paths)
     assert env == ENV_DEFAULTS
     assert paths == []
+    assert sources._RUNTIME is None
 
 
 def test_chatgpt_configuration_is_unchanged_and_no_credential_reader_runs(fixture, monkeypatch):
@@ -247,7 +296,8 @@ def test_node_and_python_loaders_agree_on_same_profiles(fixture):
         files.append(str(file))
         try:
             loaded = load_application_profile(file)
-            expected.append({'valid': True, 'config': loaded.value.get('packagingRuntime')})
+            expected.append({'valid': True, 'config': loaded.value.get('packagingRuntime'),
+                             'unavailable': loaded.packaging_unavailable})
         except ValueError:
             expected.append({'valid': False})
     script = """const {loadApplicationProfile} = require('./desktop/src/application-profile.cjs');
@@ -255,7 +305,7 @@ let input = ''; process.stdin.on('data', b => input += b);
 process.stdin.on('end', async () => {
   const results = [];
   for (const file of JSON.parse(input)) {
-    try { const p = await loadApplicationProfile(file); results.push({valid: true, config: p.packagingRuntime ?? null}); }
+    try { const p = await loadApplicationProfile(file); results.push({valid: true, config: p.packagingRuntime ?? null, unavailable: p.packagingUnavailable ?? null}); }
     catch (_) { results.push({valid: false}); }
   }
   process.stdout.write(JSON.stringify(results));
@@ -264,4 +314,6 @@ process.stdin.on('end', async () => {
                             cwd=ROOT, timeout=30, check=True,
                             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
     assert json.loads(result.stdout) == expected
-    assert all(not item['valid'] for item in expected[4:])
+    # Every refused runtime still starts the application, with Packaging (or only STEP) off and a reason.
+    assert all(item['valid'] and item['unavailable'] is None for item in expected[:4])
+    assert all(item['valid'] and item['unavailable'] in REASONS for item in expected[4:])

@@ -5,6 +5,7 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { parseRuntimeOptions, localPath } = require('./runtime-settings.cjs');
 const { loadApplicationProfile } = require('./application-profile.cjs');
+const { packagingNotice } = require('./packaging-config.cjs');
 const { createManagedRuntime } = require('./runtime-supervisor.cjs');
 const { createApplicationNetwork } = require('./application-network.cjs');
 const { installApplicationLinks } = require('./application-links.cjs');
@@ -366,6 +367,9 @@ async function start() {
   if (profile.packagingRuntime) url.searchParams.set('packagingPilot', '1');
   await window.loadURL(url.href);
   booted = true; window.show(); window.focus();
+  // The profile asked for Packaging but its runtime is unusable: say why once, without blocking anything else.
+  const packagingUnavailable = packagingNotice(profile.packagingUnavailable);
+  if (packagingUnavailable) window.webContents.send('ip-application-transition-status', packagingUnavailable);
   if (options.acceptanceOutput || options.workflowAcceptanceOutput || options.browserAcceptanceOutput || options.generationAcceptanceOutput || options.codexAcceptanceOutput) {
     let acceptanceTimer;
     const output = options.codexAcceptanceOutput || options.generationAcceptanceOutput || options.browserAcceptanceOutput || options.workflowAcceptanceOutput || options.acceptanceOutput;

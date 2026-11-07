@@ -16,6 +16,7 @@ KEYS = {'schemaVersion', 'mode', 'profileId', 'origin', 'dataRoot', 'backendId',
 @dataclass(frozen=True)
 class ApplicationProfile:
     value: dict
+    packaging_unavailable: str | None = None  # Why the requested Packaging (or only its STEP import) is off.
 
     @property
     def data(self): return Path(self.value['dataRoot'])
@@ -66,7 +67,13 @@ def load_application_profile(file):
     if 'codexRuntime' in value:
         from desktop.runtime.codex_config import validate_config
         value['codexRuntime'] = validate_config(value['codexRuntime'], value)
+    unavailable = None
     if 'packagingRuntime' in value:
-        from desktop.runtime.packaging_config import validate_config
-        value['packagingRuntime'] = validate_config(value['packagingRuntime'], value)
-    return ApplicationProfile(value)
+        # Packaging never stops the application from starting; see load_runtime.
+        from desktop.runtime.packaging_config import load_runtime
+        runtime, unavailable = load_runtime(value['packagingRuntime'], value)
+        if runtime is None:
+            del value['packagingRuntime']
+        else:
+            value['packagingRuntime'] = runtime
+    return ApplicationProfile(value, unavailable)

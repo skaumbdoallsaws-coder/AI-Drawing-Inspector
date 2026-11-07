@@ -29,7 +29,12 @@ async function loadApplicationProfile(file) {
     p.modelGateway = Object.freeze({ configPath, dependencyRoot });
   }
   if (Object.hasOwn(p, 'codexRuntime')) p.codexRuntime = await require('./codex-config.cjs').validateCodexConfig(p.codexRuntime, p);
-  if (Object.hasOwn(p, 'packagingRuntime')) p.packagingRuntime = await require('./packaging-config.cjs').validatePackagingConfig(p.packagingRuntime, p);
+  if (Object.hasOwn(p, 'packagingRuntime')) {
+    // Packaging never stops the application from starting; see loadPackagingRuntime.
+    const { runtime, unavailable } = await require('./packaging-config.cjs').loadPackagingRuntime(p.packagingRuntime, p);
+    if (runtime) p.packagingRuntime = runtime; else delete p.packagingRuntime;
+    if (unavailable) p.packagingUnavailable = unavailable;
+  }
   const binding = [p.backendId, p.storeId, p.facilityRoot, p.libraryRoot].join('\n');
   return Object.freeze({ ...p, profileFile: file, stateRoot: path.join(p.dataRoot, 'desktop-client'),
     partition: 'persist:ip-application-' + createHash('sha256').update(binding).digest('hex').slice(0, 32) });

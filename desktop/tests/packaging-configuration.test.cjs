@@ -6,7 +6,8 @@ const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { loadApplicationProfile } = require('../src/application-profile.cjs');
 const { childEnvironment } = require('../src/runtime-supervisor.cjs');
-const { isolatePackagingEnvironment } = require('../src/packaging-config.cjs');
+const { isolatePackagingEnvironment, validatePackagingConfig, packagingNotice } = require('../src/packaging-config.cjs');
+const REASON = /^(settings|dependency-folder|storage|step-python|package:(py3dbp|trimesh|reportlab|numpy|PIL))$/;
 
 test('the legacy managed runtime never opens the packaging workflow', async () => {
   // Packaging is unsupported there for the first release; only the application window adds the pilot flag.
@@ -51,8 +52,9 @@ test('Packaging is optional, keeps identity, and uses presence as startup URL op
   await assert.rejects(fs.stat(path.join(f.profile.dataRoot, 'packaging')), { code: 'ENOENT' });
 });
 
-test('Packaging rejects malformed schemas and paths with bounded errors', async t => {
-  const f = await fixture(t);
+test('Packaging refuses malformed schemas and paths with bounded reasons, and never stops startup', async t => {
+  const f = await fixture(t), baseline = await f.load(f.profile);
+  const { geometryPython, ...withoutStep } = f.config;
   const invalid = [null, false, [], {}, { schemaVersion: 1 }, { dependencyRoot: f.config.dependencyRoot }];
   for (const [key, values] of Object.entries({
     schemaVersion: [true, false, 0, 2, 1.5, '1', null], enabled: [true, false], apiKey: ['synthetic-secret'],
@@ -64,7 +66,14 @@ test('Packaging rejects malformed schemas and paths with bounded errors', async 
       path.join(f.root, 'missing'), f.config.geometryPython, f.config.dependencyRoot + path.sep + '..' + path.sep + 'deps'],
   })) for (const value of values) invalid.push({ ...f.config, [key]: value });
   for (const packagingRuntime of invalid) {
-    await assert.rejects(f.load({ ...f.profile, packagingRuntime }), { message: 'desktop_packaging_config_invalid' });
+    const refused = await validatePackagingConfig(packagingRuntime, baseline).then(() => null, error => error);
+    assert.equal(refused?.message, 'desktop_packaging_config_invalid');
+    assert.match(refused.reason, REASON);
+    const loaded = await f.load({ ...f.profile, packagingRuntime });
+    assert.equal(loaded.packagingUnavailable, refused.reason);
+    assert.equal(loaded.partition, baseline.partition);
+    if (refused.reason === 'step-python') assert.deepEqual(loaded.packagingRuntime, withoutStep);
+    else assert.equal(loaded.packagingRuntime, undefined);
   }
 });
 
@@ -72,30 +81,55 @@ test('Every declared app package is required and must be a file', async t => {
   const f = await fixture(t);
   for (const name of ['py3dbp', 'trimesh', 'reportlab', 'numpy', 'PIL']) {
     const file = path.join(f.config.dependencyRoot, name, '__init__.py');
-    await fs.unlink(file);
-    await assert.rejects(f.load({ ...f.profile, packagingRuntime: f.config }));
-    await fs.mkdir(file);
-    await assert.rejects(f.load({ ...f.profile, packagingRuntime: f.config }));
+    const off = async () => {
+      await assert.rejects(validatePackagingConfig(f.config, await f.load(f.profile)), { reason: 'package:' + name });
+      const loaded = await f.load({ ...f.profile, packagingRuntime: f.config });
+      assert.equal(loaded.packagingRuntime, undefined); assert.equal(loaded.packagingUnavailable, 'package:' + name);
+    };
+    await fs.unlink(file); await off();
+    await fs.mkdir(file); await off();
     await fs.rmdir(file); await fs.writeFile(file, '');
   }
 });
 
 test('Packaging refuses linked dependencies/state and overlapping stores/geometry', async t => {
   const f = await fixture(t), link = path.join(f.root, 'linked-deps');
+  const off = async (profile, reason) => {
+    const loaded = await f.load(profile);
+    assert.equal(loaded.packagingRuntime, undefined); assert.equal(loaded.packagingUnavailable, reason);
+  };
   await fs.symlink(f.config.dependencyRoot, link, 'junction');
-  await assert.rejects(f.load({ ...f.profile, packagingRuntime: { ...f.config, dependencyRoot: link } }));
+  await off({ ...f.profile, packagingRuntime: { ...f.config, dependencyRoot: link } }, 'dependency-folder');
   for (const key of ['dataRoot', 'facilityRoot', 'libraryRoot']) {
-    await assert.rejects(f.load({ ...f.profile, [key]: f.config.dependencyRoot, packagingRuntime: f.config }));
+    await off({ ...f.profile, [key]: f.config.dependencyRoot, packagingRuntime: f.config }, 'dependency-folder');
   }
-  await assert.rejects(f.load({ ...f.profile, packagingRuntime: { ...f.config,
-    geometryPython: path.join(f.config.dependencyRoot, 'py3dbp', '__init__.py') } }));
+  const stepOff = await f.load({ ...f.profile, packagingRuntime: { ...f.config,
+    geometryPython: path.join(f.config.dependencyRoot, 'py3dbp', '__init__.py') } });
+  assert.equal(stepOff.packagingUnavailable, 'step-python');
+  assert.deepEqual(stepOff.packagingRuntime, { schemaVersion: 1, dependencyRoot: f.config.dependencyRoot });
   const state = path.join(f.profile.dataRoot, 'packaging');
   await fs.symlink(f.profile.facilityRoot, state, 'junction');
-  await assert.rejects(f.load({ ...f.profile, packagingRuntime: f.config }));
+  await off({ ...f.profile, packagingRuntime: f.config }, 'storage');
   await fs.unlink(state);
   await fs.mkdir(state);
   await fs.writeFile(path.join(state, 'step-jobs'), '');
-  await assert.rejects(f.load({ ...f.profile, packagingRuntime: f.config }));
+  await off({ ...f.profile, packagingRuntime: f.config }, 'storage');
+});
+
+test('The window says once, in bounded ASCII, why Packaging or STEP import is off', async () => {
+  assert.equal(packagingNotice(null), null);
+  assert.match(packagingNotice('package:trimesh'),
+    /^Packaging & Shipping is off for this session: its dependency folder is missing the trimesh package\. The rest/);
+  assert.match(packagingNotice('step-python'), /^STEP import is off for this session: .* Manual packing, reports and the rest/);
+  for (const reason of ['settings', 'dependency-folder', 'storage', 'step-python', 'package:PIL', 'package:../x', 'unknown']) {
+    const text = packagingNotice(reason);
+    assert.equal(/[^\x20-\x7e]/.test(text), false, reason);
+    assert.ok(text.length < 400 && !text.includes('../x'), reason);
+    assert.match(text, /restart InspectorPro\.$/);
+  }
+  const application = await fs.readFile(path.resolve(__dirname, '../src/application-main.cjs'), 'utf8');
+  assert.match(application, /const packagingUnavailable = packagingNotice\(profile\.packagingUnavailable\);/);
+  assert.match(application, /if \(packagingUnavailable\) window\.webContents\.send\('ip-application-transition-status', packagingUnavailable\);/);
 });
 
 test('Child sanitization removes inherited Packaging but leaves Codex/ChatGPT isolation intact', () => {

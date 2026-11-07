@@ -332,6 +332,9 @@ class _ChangeSuccess(Closed):
     data: ChangeResult
 
 
+CATALOG_PAGE = 6  # Cartons per catalog page; Resources.cartons holds at most six.
+
+
 class ResourceArguments(ReadArguments):
     resource: Literal["sources", "catalog", "alternatives", "report", "evidence"]
     offset: Annotated[int, Field(ge=0, le=200, strict=True)] = 0
@@ -729,7 +732,7 @@ def _comparison_view(result):
 
 
 _TOOLS = {
-    "packaging_resources": (ResourceArguments, _ResourceSuccess, "Read scoped imported sources, cited material/carton catalog, saved alternatives or a revision-bound draft PDF download link. Paginated; never imports local files or accesses credentials. Use edit_packaging to select a source or apply an alternative."),
+    "packaging_resources": (ResourceArguments, _ResourceSuccess, "Read scoped imported sources, cited material/carton catalog, saved alternatives or a revision-bound draft PDF download link. Paginated; the catalog returns every material and six cartons per page, smallest first; never imports local files or accesses credentials. Use edit_packaging to select a source or apply an alternative."),
     "estimate_packaging_mass": (MassArguments, _MassSuccess, "Estimate product mass from authorized closed-solid STEP volume and documented density. Returns a proposed Product without saving. Confirm material applies to every included solid and record exclusions."),
     "inspect_packaging": (InspectArguments, _InspectSuccess, "Inspect the bound saved packaging document. package_limit must be 1 or 2, not a findings limit. Follow next_package_offset to read further pages."),
     "validate_packaging": (ValidateArguments, _ValidateSuccess, "Assess saved or proposed design envelopes and provenance without saving. Not transport certification."),
@@ -1002,7 +1005,11 @@ class PackagingGateway:
                 if args.resource == "catalog":
                     from ai_inspector.packaging_shipping.catalog import catalog
                     entries = catalog()
-                    data.update(materials=entries["materials"], cartons=[Carton.model_validate(c["carton"]) for c in entries["cartons"]], notice=entries["notice"])
+                    # Every material, and cartons six per page, smallest inner volume first.
+                    cartons = entries["cartons"]
+                    end = min(len(cartons), args.offset + CATALOG_PAGE)
+                    data.update(materials=entries["materials"], cartons=[Carton.model_validate(c["carton"]) for c in cartons[args.offset:end]],
+                                next_offset=end if end < len(cartons) else None, notice=entries["notice"])
                 elif args.resource == "report":
                     data["report_url"] = f"/api/packaging/documents/{self._document_id}/report.pdf?revision={self._revision}"
                     data["notice"] = "Download generates a draft PDF for this exact revision. A later edit makes this link stale; request a fresh link."

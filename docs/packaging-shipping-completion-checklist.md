@@ -93,7 +93,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | No-contact regions | Locally verified | `constraints.no_contact`: up to 12 regions, each a product face or a rectangle on it (product axes, before packing orientation), an air gap and required evidence. `no_contact_violated` (error) when packing material, a carton wall or another product lies within the gap straight out from the region; pocket voids count as air, invalid inserts as material. Faces follow the viewer's rigid rotation for every dimension order (one table asserted in both the Python and the JS tests). A region facing the carton floor is flagged for review, since support is not modelled beyond insert contact. Proposals reserve the gap on both faces of each affected axis and are revalidated; a carton that only fits without the gap is not proposed. The comparison treats changed regions as changed constraints. Geometric clearance only, not a protective-performance rating. `tests/test_packaging_no_contact.py`, headless `tests/verify_packaging_no_contact_ui.py`. |
 | Upright/allowed orientations, carton boundaries, known load limits | Locally verified | Domain tests; unknown payload stays a warning. |
 | 1-, 6- and 24-item fixtures: feasible alternatives or clear infeasibility | Locally verified | Synthetic TEST product in the sourced ULINE carton with a cited Ethafoam lining: 1, 6 and 24 items feasible, gross mass matches an independent recomputation; 24 items in an undersized carton return no candidate and an explicit `does_not_fit` rejection. |
-| Sourced stock-carton selection | Open | One ULINE carton and cited PMMA/Ethafoam densities. |
+| Sourced stock-carton selection | Locally verified | `catalog.py` now holds nine ULINE 200 lb test kraft cartons (S-4080 8x6x4, S-4103 10x8x6, S-4120 12x10x8, S-4187 18x12x6, S-4235 16x12x8, S-4415 24x12x6, S-4196 20x14x10, S-15039 22x18x8, S-4219 24x18x12 in), smallest inner volume first, each with the values its product page states: inside L x W x H, outside dimensions with the +/- 1/8 in tolerance, unit weight, bundle quantity, "200 LB. TEST" and "Meets ASTM D5118"; source URL and check date 2026-11-06 (S-15039 re-read, unchanged). No price, payload limit or board blank is recorded; the notice says 200 lb test is a burst grade, not a load limit. The eight new records were transcribed by Claude from the supplier pages and still need the user's review. Selection: the editor's Carton catalog dialog and Sage's `packaging_resources` (every material, six cartons per page with `next_offset`) feed the existing proposer, which ranks feasible cartons with the rebuilt lining. `tests/test_packaging_catalog.py` (page-value consistency, a unit-weight-versus-board-area transcription guard, proposer choosing S-4187 over three cartons that cannot hold a lined 0.30 m TEST bar), `tests/verify_packaging_catalog_ui.py` (`.runtime/packaging-catalog-ui-02`, own app and throwaway store). One supplier only; cushioning materials unchanged. |
 | Cost-aware comparison with a baseline; cannot win by shrinking CAD, dropping items or protection, ignoring payload or mixing stale/test rates | Locally verified | `comparison.py` compares the current design and saved designs against a stored baseline on the account rate only, for one scenario, carrier account, mode and service. A design is ranked only when it keeps the baseline's product (dimensions, mass, source), quantity, constraints, protection (insert mass when no cushion requirement exists), packing allowance and payload evidence, passes validation and has a quote with the exact fingerprint; quotes for an edited design, a replaced account, another scenario or the other mode never match. Unknown material cost stays out of totals. Savings are stated only for production-mode quotes and name the baseline, quote dates, account and destinations. Saved designs can be quoted under the session scenario with reuse and the attempt audit. Mock only: `tests/test_packaging_comparison.py` and the headless `tests/verify_packaging_comparison_ui.py`. No live price difference has been measured. |
 | Pocketed inserts | Locally verified | Domain tests. |
 
@@ -197,6 +197,23 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   synthetic TEST data, PDF text via pdfplumber); existing report tests unchanged and passing; a
   rendered sample was inspected page by page (`.runtime/packaging-report-item6`). No live quote is
   involved; amounts in the tests are synthetic.
+- 2026-11-06, item 7a (catalog): nine sourced ULINE 200 lb test cartons, read from the supplier
+  pages on 2026-11-06, sorted by inner volume; Sage pages them six at a time. Evidence: 3 catalog
+  tests plus updated extension, preservation and Sage resource tests (34 passed together), and a
+  self-contained browser check (`.runtime/packaging-catalog-ui-02`). Incident, recorded for the
+  owner: `tests/verify_packaging_resources_ui.py` defaults to a running host at
+  `127.0.0.1:8181`, and one run of it reached the packaging-shipping worktree's long-running
+  `run_packaging_sage_pilot.py --live --port 8181` pilot. It created TEST document
+  `pkg_60ffccbf8f76464d82b03144ff5843e3` ("TEST resources f79f0487", seven revisions, one uploaded
+  TEST image, one saved snapshot) in that pilot's store, the same kind of record four earlier runs
+  of that script left there, and stopped at its STEP step before the carrier-account steps. No
+  account, quote, research or Sage request was made, and the run tested that pilot's code, not this
+  branch. Nothing was deleted; removal is the owner's call. Separately, the domain batch failed
+  once (1 of 7 domain runs this session) in `test_packaging_credentials.py::
+  test_separate_instances_replace_atomically` (four threads replacing the sealed credential store:
+  `carrier_credentials_unavailable`); the file passed 5 of 5 reruns and the next domain run passed
+  483 of 483. The store and the test are unchanged on this branch; recorded as intermittent, not
+  fixed.
 
 ## Unsupported inputs (first release)
 

@@ -97,7 +97,7 @@ def verify(url: str, output: Path):
             panel("carton")
             page.get_by_role("button", name="Carton catalog", exact=True).click()
             expect(page.locator("#resource-dialog")).to_contain_text("Payload Unknown")
-            page.get_by_role("button", name="Use carton", exact=True).first.click()
+            page.locator("#resource-dialog .document-row").filter(has_text="ULINE S-15039").get_by_role("button", name="Use carton", exact=True).click()
             save()
             assert saved()["design"]["packages"][0]["carton"]["sku"] == "S-15039"
             page.locator('[name="tare_method"]').select_option("blank")

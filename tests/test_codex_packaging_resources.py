@@ -13,6 +13,12 @@ def test_catalog_and_report_are_read_only_and_revision_bound(env):
     assert result["ok"], result
     assert len(result["data"]["materials"]) == 7
     assert result["data"]["cartons"][0]["cost_usd"] is None
+    first, offset = result["data"]["cartons"], result["data"]["next_offset"]
+    rest = invoke(gw, "packaging_resources", {"expected_revision": 0, "resource": "catalog", "offset": offset})
+    assert rest["ok"], rest
+    skus = [c["sku"] for c in first + rest["data"]["cartons"]]
+    assert (len(first), offset, rest["data"]["next_offset"]) == (6, 6, None)
+    assert skus == ["S-4080", "S-4103", "S-4120", "S-4187", "S-4235", "S-4415", "S-4196", "S-15039", "S-4219"]
     report = invoke(gw, "packaging_resources", {"expected_revision": 0, "resource": "report"})
     assert report["ok"], report
     assert report["data"]["report_url"].endswith("report.pdf?revision=0")

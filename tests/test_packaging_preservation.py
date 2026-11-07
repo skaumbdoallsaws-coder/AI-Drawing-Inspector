@@ -229,7 +229,7 @@ def test_overly_detailed_inserts_are_reported_unverified_not_passed(monkeypatch)
 
 def stock_design(quantity):
     stock = catalog()
-    carton = Carton.model_validate(stock["cartons"][0]["carton"])
+    carton = Carton.model_validate(next(c for c in stock["cartons"] if c["id"] == "uline-s-15039")["carton"])
     foam = next(m["material"] for m in stock["materials"] if m["use"] == "insert")
     data = design_data(quantity=quantity, inserts=False)
     data["constraints"]["cushion"] = CUSHION | {"material": MaterialDensity.model_validate(foam).model_dump(mode="json")}

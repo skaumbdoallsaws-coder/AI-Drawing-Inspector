@@ -96,7 +96,7 @@ def test_images_are_normalized_trimmed_and_scope_checked(service):
     assert service.store_image("scope", image_bytes()) == image
     with pytest.raises(PackagingError):
         service.image("other", image["id"])
-    carton = catalog()["cartons"][0]["carton"]
+    carton = next(c for c in catalog()["cartons"] if c["id"] == "uline-s-15039")["carton"]
     design = Design(packages=[{"id": "box", "carton": carton, "graphics": [{"id": "logo", "kind": "image", "image_id": image["id"]}]}])
     document = service.create("scope", design)
     assert document["design"]["packages"][0]["graphics"][0]["image_id"] == image["id"]
@@ -146,10 +146,10 @@ def test_catalog_has_si_conversions_and_no_fabricated_prices_or_payloads():
     entries = catalog()
     pmma = entries["materials"][0]["material"]
     assert pmma["density_kg_m3"] == 1190
-    box = entries["cartons"][0]["carton"]
+    box = next(c for c in entries["cartons"] if c["id"] == "uline-s-15039")["carton"]
     assert box["inner_m"] == pytest.approx([.5588, .2032, .4572])
     assert box["tare_kg"] == pytest.approx(1.82 * .45359237)
-    assert box["cost_usd"] is None and box["max_payload_kg"] is None
+    assert all(c["carton"]["cost_usd"] is None and c["carton"]["max_payload_kg"] is None for c in entries["cartons"])
 
 
 def test_api_step_images_inventory_and_request_limits(service, monkeypatch):

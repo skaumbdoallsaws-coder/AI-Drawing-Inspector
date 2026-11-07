@@ -16,6 +16,8 @@ TOLERANCE_M = 1e-6
 CUSHION_FACES = ((0, False, "sides_m"), (0, True, "sides_m"), (1, False, "floor_m"), (1, True, "top_m"),
                  (2, False, "sides_m"), (2, True, "sides_m"))
 CUSHION_LABELS = (("floor_m", "floor"), ("top_m", "top"), ("sides_m", "sides"))
+# Product faces in the product's own axes, before any packing orientation: (product axis, outward toward +axis).
+FACES = {"x_min": (0, False), "x_max": (0, True), "y_min": (1, False), "y_max": (1, True), "z_min": (2, False), "z_max": (2, True)}
 
 
 def digest(value) -> str:
@@ -40,6 +42,40 @@ def envelope(position, dimensions):
     return tuple(position), tuple(p + d for p, d in zip(position, dimensions))
 
 
+def product_axes(orientation):
+    """Per product axis: (carton axis, mirrored), matching the viewer's rigid rotation.
+
+    Carton axis i shows product axis ORDERS[o][i]. For odd dimension orders the viewer mirrors
+    carton X so the rotation stays proper (orientationRows in static/packaging.js).
+    """
+    order = ORDERS[orientation]
+    odd = sum(1 for i in range(3) for j in range(i + 1, 3) if order[i] > order[j]) % 2
+    return tuple((order.index(a), bool(odd) and order.index(a) == 0) for a in range(3))
+
+
+def no_contact_zone(box, dimensions, orientation, region):
+    """The air a no-contact region needs in carton axes: its area, extended air_gap_m out of the face.
+
+    Returns (zone, carton axis, toward the carton's +axis wall).
+    """
+    axes = product_axes(orientation)
+    lower, upper = list(box[0]), list(box[1])
+    axis, outward = FACES[region.face]
+    if region.area is not None:
+        for k, (start, end) in zip((k for k in range(3) if k != axis), (region.area.u_m, region.area.v_m)):
+            i, mirrored = axes[k]
+            if mirrored:
+                start, end = dimensions[k] - end, dimensions[k] - start
+            lower[i], upper[i] = box[0][i] + start, box[0][i] + end
+    i, mirrored = axes[axis]
+    toward_max = outward != mirrored
+    if toward_max:
+        lower[i], upper[i] = box[1][i], box[1][i] + region.air_gap_m
+    else:
+        lower[i], upper[i] = box[0][i] - region.air_gap_m, box[0][i]
+    return (tuple(lower), tuple(upper)), i, toward_max
+
+
 def assess(design: Design) -> dict:
     findings = []
     masses = []
@@ -50,6 +86,15 @@ def assess(design: Design) -> dict:
     product = design.product
     cushion = design.constraints.cushion
     cushion_rows = []
+    regions, region_rows = [], []
+    if product is not None:
+        for region in design.constraints.no_contact:
+            axis = FACES[region.face][0]
+            others = [product.dimensions_m[k] for k in range(3) if k != axis]
+            if region.area is not None and (region.area.u_m[1] > others[0] + TOLERANCE_M or region.area.v_m[1] > others[1] + TOLERANCE_M):
+                issue("no_contact_area_outside", f"No-contact region {region.name} extends beyond its product face.", (region.id,))
+            else:
+                regions.append(region)
     if product is None:
         issue("product_required", "Select a product and confirm its dimensions.")
     elif product.mass_kg is None:
@@ -107,6 +152,25 @@ def assess(design: Design) -> dict:
                                        for i in package.inserts)]
             if unsupported:
                 issue("support_not_verified", "Some elevated products have no detected contact with an insert support. Review the packing sequence and support.", ids, "warning")
+        if regions and package.placements:
+            products = [(item.id, envelope(item.position_m, oriented(product.dimensions_m, item.orientation))) for item in package.placements]
+            for region in regions:
+                touching, down = [], 0
+                for item, (item_id, box) in zip(package.placements, products):
+                    zone, axis, toward_max = no_contact_zone(box, product.dimensions_m, item.orientation, region)
+                    wall = zone[1][axis] > carton.inner_m[axis] + TOLERANCE_M if toward_max else zone[0][axis] < -TOLERANCE_M
+                    if (wall or any(other_id != item_id and overlaps(zone, other) for other_id, other in products)
+                            or any(intersects_insert_material(zone, insert) for insert in package.inserts)):
+                        touching.append(item_id)
+                    down += axis == 1 and not toward_max
+                if touching:
+                    issue("no_contact_violated", f"Packing material, a carton wall or another product is within the {region.air_gap_m * 1000:.1f} mm "
+                          f"air gap of no-contact region {region.name} for {len(touching)} of {len(package.placements)} products.", (touching[0], region.id))
+                if down:
+                    issue("no_contact_faces_down", f"No-contact region {region.name} faces the carton floor for {down} products. Support is not "
+                          "modelled beyond insert contact; confirm how the product is held off this region.", (package.id, region.id), "warning")
+                region_rows.append({"package_id": package.id, "region_id": region.id, "products": len(package.placements),
+                                    "touching": len(touching), "facing_down": down})
         shapes = [insert_geometry(x) for x in package.inserts]
         if cushion is not None and product is not None and package.placements:
             valid = [x for x, shape in zip(package.inserts, shapes) if shape["valid"]]
@@ -158,4 +222,6 @@ def assess(design: Design) -> dict:
     if cushion is not None:
         # Least insert material found per direction, per package (geometry only, not a performance rating).
         result["cushion"] = cushion_rows
+    if design.constraints.no_contact:
+        result["no_contact"] = region_rows
     return result

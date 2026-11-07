@@ -224,6 +224,7 @@ class Preservation(Closed):
     allowance: Literal["rule", "carried_forward", "unknown"]
     carton_graphics: Literal["carried_forward", "not_carried", "none"]
     insert_graphics_dropped: Count
+    no_contact: Literal["air_gap_reserved", "not_required"]
 
 
 class Proposal(ResultBase):
@@ -234,7 +235,8 @@ class Proposal(ResultBase):
     preservation: Preservation
     notice: str = ("Envelope arrangements only, not transport certification or a global optimum. "
                    "Applying a candidate replaces existing cartons, placements, pads and allowances. Each candidate "
-                   "rebuilds the design's cushion requirement as a foam lining; allowances come from the design's "
+                   "rebuilds the design's cushion requirement as a foam lining and keeps no-contact air gaps clear; "
+                   "allowances come from the design's "
                    "allowance rule or the value every saved package shares, otherwise they stay unknown. "
                    "Validate again before any quote. No rates were requested.")
 

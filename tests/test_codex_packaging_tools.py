@@ -154,7 +154,7 @@ def test_propose_rebuilds_the_cushion_requirement_and_carries_the_allowance(env)
     assert proposed["ok"], proposed
     assert proposed["data"]["saved"] is False and proposed["data"]["replaces_existing_packages"] is True
     assert proposed["data"]["preservation"] == {"cushion": "rebuilt_from_requirement", "allowance": "carried_forward",
-                                                "carton_graphics": "none", "insert_graphics_dropped": 0}
+                                                "carton_graphics": "none", "insert_graphics_dropped": 0, "no_contact": "not_required"}
     candidate, = proposed["data"]["candidates"]
     package = candidate["design"]["packages"][0]
     assert len(package["placements"]) == 1

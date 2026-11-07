@@ -90,7 +90,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Constrained arrangement search, split cartons | Implemented | py3dbp over up to six carton choices and one to six packages of one carton type. Candidates rank by package count then outer volume; cost ranking happens in the saved-design comparison below. |
 | Proposals keep approved protection and packing mass | Locally verified | `constraints.cushion` (floor/top/sides thickness, material, evidence) is rebuilt as a foam lining in every candidate; a design with pads and no requirement is refused (`protection_requirement_needed`), never silently stripped. Allowances come from `constraints.package_allowance` or the value every saved package shares, else stay unknown and block rating. Shared carton graphics are carried; insert graphics are reported as dropped. Payload capacity counts lining and allowance. `tests/test_packaging_preservation.py`. |
 | Minimum cushioning | Locally verified | `cushion_insufficient` / `cushion_not_verified` errors: least insert material between each product envelope and each carton wall along each axis, pocket voids subtracted, round pockets bounded by their square (undercounts, never overcounts), invalid inserts count as no material. Geometry only, not a cushioning-performance rating. |
-| No-contact regions | Open | Not modelled. |
+| No-contact regions | Locally verified | `constraints.no_contact`: up to 12 regions, each a product face or a rectangle on it (product axes, before packing orientation), an air gap and required evidence. `no_contact_violated` (error) when packing material, a carton wall or another product lies within the gap straight out from the region; pocket voids count as air, invalid inserts as material. Faces follow the viewer's rigid rotation for every dimension order (one table asserted in both the Python and the JS tests). A region facing the carton floor is flagged for review, since support is not modelled beyond insert contact. Proposals reserve the gap on both faces of each affected axis and are revalidated; a carton that only fits without the gap is not proposed. The comparison treats changed regions as changed constraints. Geometric clearance only, not a protective-performance rating. `tests/test_packaging_no_contact.py`, headless `tests/verify_packaging_no_contact_ui.py`. |
 | Upright/allowed orientations, carton boundaries, known load limits | Locally verified | Domain tests; unknown payload stays a warning. |
 | 1-, 6- and 24-item fixtures: feasible alternatives or clear infeasibility | Locally verified | Synthetic TEST product in the sourced ULINE carton with a cited Ethafoam lining: 1, 6 and 24 items feasible, gross mass matches an independent recomputation; 24 items in an undersized carton return no candidate and an explicit `does_not_fit` rejection. |
 | Sourced stock-carton selection | Open | One ULINE carton and cited PMMA/Ethafoam densities. |
@@ -155,6 +155,16 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   a Compare costs dialog. Evidence: 9 mock-transport tests (anti-gaming variants included) and
   a headless browser check (`.runtime/packaging-comparison-ui-01`, no page errors, no external
   requests). No live carrier result exists.
+- 2026-11-06, item 3b (no-contact regions): regions, the geometric check, proposals that keep
+  the gap and a No-contact regions dialog in the Product panel. Sage edits regions through the
+  existing full-design edit; its proposal summary now reports whether gaps were reserved.
+  Fix found while adding the field: item 1 had added `cushion` and `package_allowance` to
+  every serialized design, which changed the hash of every design saved before this branch and
+  would have marked their quotes stale (`design_changed`). Unset optional protections are now
+  left out of the serialized form, so a design that never used them hashes exactly as at
+  `4c37436` (pinned in a test), and the UI writes the same canonical form so an unchanged
+  Apply is not an edit. Evidence: 9 domain tests, 3 UI unit tests and a headless browser check
+  (`.runtime/packaging-no-contact-ui-01`, no page errors, no external requests).
 
 ## Unsupported inputs (first release)
 

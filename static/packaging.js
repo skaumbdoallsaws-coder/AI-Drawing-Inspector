@@ -28,7 +28,7 @@ export function placementCenter(dimensions, placement) {
 
 export function emptyDesign() {
   return { name: 'Untitled package', product: null, quantity: 1,
-    constraints: { clearance_m: .02, gap_m: .01, allowed_orientations: [0], contents: 'unconfirmed', cushion: null, package_allowance: null },
+    constraints: { clearance_m: .02, gap_m: .01, allowed_orientations: [0], contents: 'unconfirmed' },
     packages: [] };
 }
 
@@ -756,8 +756,8 @@ function renderProduct(host) {
     edit(d => {
       d.product = updated; d.quantity = numeric(form, 'quantity');
       // Spread first: constraint fields this form does not edit must survive an Apply.
-      d.constraints = { ...d.constraints, clearance_m: mmToM(numeric(form, 'clearance')), gap_m: mmToM(numeric(form, 'gap')),
-        allowed_orientations: allowed, contents: textValue(form, 'contents'), ...protection };
+      d.constraints = compactConstraints({ ...d.constraints, clearance_m: mmToM(numeric(form, 'clearance')), gap_m: mmToM(numeric(form, 'gap')),
+        allowed_orientations: allowed, contents: textValue(form, 'contents'), ...protection });
     });
   }, product ? 'Apply product' : 'Add manual product');
   field(form, 'Product name', 'product_name', p.name, { maxLength: 160, required: true });
@@ -789,6 +789,10 @@ function renderProduct(host) {
   orientations.append(checks); form.append(orientations);
   field(form, 'Contents declaration', 'contents', state.draft.design.constraints.contents, { options: [['unconfirmed', 'Unconfirmed'], ['ordinary_nonhazardous', 'Ordinary, non-hazardous'], ['special_handling', 'Special handling required']] });
   protectionFields(form, state.draft.design.constraints);
+  form.append(element('h3', 'No-contact regions'));
+  const regions = state.draft.design.constraints.no_contact || [];
+  form.append(element('p', regions.length ? regions.map(regionText).join('; ') : 'No regions set.', 'metadata'));
+  form.append(button('Edit no-contact regions', openNoContact, { symbol: 'cube-focus' }));
   form.append(actions); group.append(form);
 }
 
@@ -837,7 +841,90 @@ export function preservationText(preservation) {
   const cushion = preservation.cushion === 'rebuilt_from_requirement' ? 'foam lining rebuilt from the cushion requirement' : 'no cushion requirement';
   const allowance = { rule: 'allowance from the design rule', carried_forward: 'allowance carried from the saved packages' }[preservation.allowance] || 'allowance unknown';
   const graphics = preservation.carton_graphics === 'not_carried' || preservation.insert_graphics_dropped ? ' | some graphics not carried' : '';
-  return `${cushion} | ${allowance}${graphics}`;
+  const regions = preservation.no_contact === 'air_gap_reserved' ? ' | no-contact air gaps kept clear' : '';
+  return `${cushion} | ${allowance}${regions}${graphics}`;
+}
+
+export const FACE_LABELS = { x_min: 'X min face', x_max: 'X max face', y_min: 'Y min face (bottom when upright)',
+  y_max: 'Y max face (top when upright)', z_min: 'Z min face', z_max: 'Z max face' };
+// The two product axes an area runs along on each face, in X, Y, Z order (u, then v).
+export const FACE_AXES = { x: ['Y', 'Z'], y: ['X', 'Z'], z: ['X', 'Y'] };
+
+// The server leaves unset optional protections out of a design; match it so an unchanged Apply is not an edit.
+export function compactConstraints(constraints) {
+  const next = { ...constraints };
+  for (const key of ['cushion', 'package_allowance']) if (next[key] == null) delete next[key];
+  if (!next.no_contact?.length) delete next.no_contact;
+  return next;
+}
+
+export function regionText(region) {
+  const [u, v] = FACE_AXES[region.face[0]];
+  const area = region.area ? `${u} ${mToMm(region.area.u_m[0])}-${mToMm(region.area.u_m[1])} mm, ${v} ${mToMm(region.area.v_m[0])}-${mToMm(region.area.v_m[1])} mm`
+    : 'whole face';
+  return `${region.name}: ${FACE_LABELS[region.face]}, ${area}, air gap ${mToMm(region.air_gap_m)} mm`;
+}
+
+export function readRegion(form, existing) {
+  const name = textValue(form, 'region_name'), face = textValue(form, 'region_face'), evidence = textValue(form, 'region_evidence');
+  if (!name || !evidence) throw new Error('Name the region and record why it must not be touched.');
+  if (!FACE_LABELS[face]) throw new Error('Choose a product face.');
+  const range = ['region_u0', 'region_u1', 'region_v0', 'region_v1'].map(key => numeric(form, key, true));
+  let area = null;
+  if (range.some(value => value !== null)) {
+    if (range.some(value => value === null)) throw new Error('Give all four area limits, or leave them all blank for the whole face.');
+    const [u0, u1, v0, v1] = range.map(mmToM);
+    if (u0 < 0 || v0 < 0 || u0 >= u1 || v0 >= v1) throw new Error('Each area range needs a start of 0 or more, below its end.');
+    area = { u_m: [u0, u1], v_m: [v0, v1] };
+  }
+  const ids = new Set(existing.map(region => region.id));
+  let n = existing.length + 1; while (ids.has(`nc_${n}`)) n += 1;
+  return { id: `nc_${n}`, name, face, area, air_gap_m: mmToM(numeric(form, 'region_gap')), evidence };
+}
+
+function openNoContact() {
+  flushEditor();
+  resourceDialog('No-contact regions', body => {
+    body.append(element('p', "Faces use the product's own axes, before any packing orientation. No packing material, carton wall or other product may come within a region's air gap, measured straight out from the face. Generated arrangements keep these gaps clear. Geometry only, not a protective-performance rating.", 'notice'));
+    const list = element('div'); body.append(list);
+    const setRegions = change => edit(d => { d.constraints = compactConstraints({ ...d.constraints, no_contact: change(d.constraints.no_contact || []) }); });
+    const draw = () => {
+      list.replaceChildren();
+      const regions = state.draft.design.constraints.no_contact || [];
+      if (!regions.length) list.append(element('p', 'No regions set.', 'notice'));
+      for (const region of regions) {
+        const row = element('div', null, 'document-row'), info = element('div');
+        info.append(element('strong', regionText(region)), element('p', region.evidence));
+        row.append(info, button(`Remove ${region.name}`, () => {
+          setRegions(regions => regions.filter(item => item.id !== region.id)); render(); draw();
+          notify('No-contact region removed from the draft. Save to keep the change.');
+        }, { danger: true })); list.append(row);
+      }
+    };
+    const form = element('form', null, 'form-grid'); form.append(element('h3', 'Add a region'));
+    field(form, 'Region name', 'region_name', '', { maxLength: 160, required: true });
+    const face = field(form, 'Product face', 'region_face', 'y_max', { options: Object.entries(FACE_LABELS) });
+    field(form, 'Air gap (mm)', 'region_gap', 5, { type: 'number', min: 1, max: 200, required: true });
+    const area = element('fieldset'); area.append(element('legend', 'Area on the face (optional; blank for the whole face)'));
+    const axes = element('p', null, 'metadata'), spans = element('div', null, 'two-cols');
+    for (const [key, label] of [['region_u0', 'First axis from (mm)'], ['region_u1', 'First axis to (mm)'], ['region_v0', 'Second axis from (mm)'], ['region_v1', 'Second axis to (mm)']]) {
+      field(spans, label, key, '', { type: 'number', min: 0, max: 5000 });
+    }
+    const describe = () => { const [u, v] = FACE_AXES[face.value[0]]; axes.textContent = `Measured from the face's low corner: first axis ${u}, second axis ${v}.`; };
+    face.addEventListener('change', describe); describe();
+    area.append(axes, spans); form.append(area);
+    field(form, 'Why this region must not be touched', 'region_evidence', '', { multiline: true, maxLength: 500, required: true });
+    form.addEventListener('submit', event => { event.preventDefault(); invoke(() => {
+      if (!form.reportValidity()) throw new Error('Check the highlighted fields.');
+      const region = readRegion(form, state.draft.design.constraints.no_contact || []);
+      setRegions(regions => [...regions, region]);
+      for (const key of ['region_name', 'region_evidence', 'region_u0', 'region_u1', 'region_v0', 'region_v1']) form.elements.namedItem(key).value = '';
+      render(); draw();
+      notify('No-contact region added to the draft. Save to keep the change.');
+    }); });
+    form.append(button('Add region', () => form.requestSubmit(), { primary: true }));
+    body.append(form); draw();
+  });
 }
 
 async function importSource(file, unit) {

@@ -317,8 +317,8 @@ test('proposal protection inputs become closed SI records and blank rules stay a
     cushion: { floor_m: .02, top_m: .015, sides_m: .01, material: { name: 'TEST foam', density_kg_m3: 35, evidence: 'TEST datasheet' }, evidence: 'TEST drop height' },
     package_allowance: { allowance_kg: .12, evidence: 'TEST tape' } }));
   assert.throws(() => ui.readProtection(form({ ...zero, allowance_rule: '0', allowance_rule_evidence: ' ' })), /allowance includes/);
-  assert.deepEqual(Object.keys(ui.emptyDesign().constraints), ['clearance_m', 'gap_m', 'allowed_orientations', 'contents', 'cushion', 'package_allowance']);
-  assert.match(source, /d\.constraints = \{ \.\.\.d\.constraints, /);
+  assert.deepEqual(Object.keys(ui.emptyDesign().constraints), ['clearance_m', 'gap_m', 'allowed_orientations', 'contents']);
+  assert.match(source, /d\.constraints = compactConstraints\(\{ \.\.\.d\.constraints, /);
 });
 
 test('candidate rows state how protection and allowances were carried', () => {
@@ -454,6 +454,47 @@ test('quote freshness names account changes and requests carry only chosen optio
   assert.equal(ui.priceText('USD', '4.10'), 'USD 4.10');
   assert.equal(ui.priceText('USD', null), '-');
   assert.equal(ui.priceText(null, undefined), '-');
+});
+
+test('constraints match the server form so an unchanged Apply is not an edit', () => {
+  const base = { clearance_m: .02, gap_m: .01, allowed_orientations: [0], contents: 'unconfirmed' };
+  assert.deepEqual(ui.compactConstraints({ ...base, cushion: null, package_allowance: null, no_contact: [] }), base);
+  const region = { id: 'nc_1', name: 'Lens', face: 'y_max', area: null, air_gap_m: .005, evidence: 'TEST' };
+  assert.deepEqual(Object.keys(ui.compactConstraints({ ...base, cushion: null, no_contact: [region] })),
+    ['clearance_m', 'gap_m', 'allowed_orientations', 'contents', 'no_contact']);
+  const draft = new ui.DraftDocument();
+  draft.accept({ id: 'pkg_compact', revision: 1, design: ui.emptyDesign() });
+  assert.equal(draft.edit(d => { d.constraints = ui.compactConstraints({ ...d.constraints, cushion: null, package_allowance: null }); }), false);
+  assert.equal(draft.dirty, false);
+  assert.match(source, /d\.constraints = compactConstraints\(\{ \.\.\.d\.constraints, clearance_m/);
+});
+
+test('no-contact regions read from the dialog and describe their face area', () => {
+  const values = { region_name: ' Lens ', region_face: 'z_max', region_gap: '4', region_u0: '', region_u1: '', region_v0: '', region_v1: '',
+    region_evidence: ' TEST polished face ' };
+  const form = data => ({ elements: { namedItem: name => (name in data ? { value: data[name] } : null) } });
+  assert.deepEqual(ui.readRegion(form(values), []),
+    { id: 'nc_1', name: 'Lens', face: 'z_max', area: null, air_gap_m: .004, evidence: 'TEST polished face' });
+  const part = ui.readRegion(form({ ...values, region_u0: '10', region_u1: '30', region_v0: '0', region_v1: '20' }), [{ id: 'nc_2' }]);
+  assert.deepEqual([part.id, part.area], ['nc_3', { u_m: [.01, .03], v_m: [0, .02] }]);
+  assert.equal(ui.regionText(part), 'Lens: Z max face, X 10-30 mm, Y 0-20 mm, air gap 4 mm');
+  assert.equal(ui.regionText({ ...part, face: 'x_min', area: null }), 'Lens: X min face, whole face, air gap 4 mm');
+  assert.throws(() => ui.readRegion(form({ ...values, region_u0: '10' }), []), /all four area limits/);
+  assert.throws(() => ui.readRegion(form({ ...values, region_u0: '30', region_u1: '10', region_v0: '0', region_v1: '5' }), []), /below its end/);
+  assert.throws(() => ui.readRegion(form({ ...values, region_evidence: ' ' }), []), /must not be touched/);
+  assert.equal(ui.preservationText({ cushion: 'not_required', allowance: 'rule', carton_graphics: 'none', insert_graphics_dropped: 0, no_contact: 'air_gap_reserved' }),
+    'no cushion requirement | allowance from the design rule | no-contact air gaps kept clear');
+});
+
+test('product face mapping follows the viewer rotation for every dimension order', () => {
+  // [carton axis, mirrored] per product axis; must equal FACE_MAPPING in tests/test_packaging_no_contact.py.
+  const expected = [[[0, false], [1, false], [2, false]], [[1, false], [0, true], [2, false]], [[2, false], [0, false], [1, false]],
+    [[2, false], [1, false], [0, true]], [[1, false], [2, false], [0, false]], [[0, true], [2, false], [1, false]]];
+  for (let o = 0; o < 6; o += 1) {
+    const rows = ui.orientationRows(o);
+    const mapping = [0, 1, 2].map(a => { const i = rows.findIndex(row => row[a] !== 0); return [i, rows[i][a] < 0]; });
+    assert.deepEqual(mapping, expected[o], `orientation ${o}`);
+  }
 });
 
 test('saved designs are quoted only under a complete session scenario', () => {

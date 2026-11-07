@@ -87,7 +87,7 @@ def test_candidates_rebuild_the_lining_and_keep_every_mass_term(quantity):
     design = Design.model_validate(design_data(quantity=quantity))
     result = propose(design, [Carton.model_validate(carton_data())], max_packages=3)
     assert result["preservation"] == {"cushion": "rebuilt_from_requirement", "allowance": "carried_forward",
-                                      "carton_graphics": "none", "insert_graphics_dropped": 0}
+                                      "carton_graphics": "none", "insert_graphics_dropped": 0, "no_contact": "not_required"}
     assert result["candidates"]
     for candidate in result["candidates"]:
         packed = Design.model_validate(candidate["design"])

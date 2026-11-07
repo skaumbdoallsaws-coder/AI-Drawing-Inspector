@@ -11,14 +11,14 @@ from __future__ import annotations
 from decimal import Decimal
 import math
 import time
-from .geometry import assess, digest
+from .geometry import FACES, ORDERS, assess, digest
 from .models import Design, Insert, Package, Placement
 from .service import PackagingError
 
 # A candidate with any of these findings is not a feasible arrangement.
 GEOMETRIC_ERRORS = {"orientation_forbidden", "outside_usable_carton", "envelope_overlap", "payload_exceeded",
                     "quantity_mismatch", "insert_overlap", "insert_outside_carton", "cushion_insufficient",
-                    "cushion_not_verified"}
+                    "cushion_not_verified", "no_contact_violated", "no_contact_area_outside"}
 MIN_BODY_M = 1e-6
 
 
@@ -88,6 +88,11 @@ def propose(design: Design, cartons, max_packages=3, deadline_seconds=10):
     allowance_kg, allowance_evidence, allowance_basis = package_allowance(design)
     graphics, graphics_basis = carton_graphics(design)
     dropped_insert_graphics = sum(1 for package in design.packages for g in package.graphics if g.target == "insert")
+    # Air kept on both faces of every product axis with a no-contact region, so any rotation keeps it.
+    reserve = [0.0, 0.0, 0.0]
+    for region in c.no_contact:
+        axis = FACES[region.face][0]
+        reserve[axis] = max(reserve[axis], region.air_gap_m)
     start = time.monotonic()
     results, rejected = [], []
 
@@ -103,9 +108,11 @@ def propose(design: Design, cartons, max_packages=3, deadline_seconds=10):
                 "elapsed_ms": round((time.monotonic() - start) * 1000), "rejected": rejected[:6],
                 "preservation": {"cushion": "rebuilt_from_requirement" if cushion else "not_required",
                                  "allowance": allowance_basis, "carton_graphics": graphics_basis,
-                                 "insert_graphics_dropped": dropped_insert_graphics},
+                                 "insert_graphics_dropped": dropped_insert_graphics,
+                                 "no_contact": "air_gap_reserved" if c.no_contact else "not_required"},
                 "notice": "Feasible envelope arrangements, not a global optimum or a protective-performance rating. "
                           + ("Each candidate rebuilds the required foam lining. " if cushion else "No cushion requirement is set. ")
+                          + ("No-contact air gaps are kept clear around every product. " if c.no_contact else "")
                           + ("Packing allowances are unknown until confirmed." if allowance_basis == "unknown"
                              else "Confirm packing allowances before quoting.")}
 
@@ -134,14 +141,16 @@ def propose(design: Design, cartons, max_packages=3, deadline_seconds=10):
             for b in range(num):
                 packer.add_bin(Bin(f"box_{b + 1}", *(x * 1000 for x in usable), 1000 if capacity is None else capacity))
             for i in range(design.quantity):
-                packer.add_item(ConstrainedItem(f"item_{i + 1}", *((x + c.gap_m) * 1000 for x in p.dimensions_m), p.mass_kg or 0))
+                packer.add_item(ConstrainedItem(f"item_{i + 1}", *((x + 2 * reserve[k] + c.gap_m) * 1000 for k, x in enumerate(p.dimensions_m)),
+                                                p.mass_kg or 0))
             packer.pack(distribute_items=True, number_of_decimals=3)
             if packer.items:
                 continue
             candidate = design.model_copy(deep=True)
             candidate.packages = [Package(
                 id=b.name, carton=carton.model_copy(deep=True),
-                placements=[Placement(id=i.name, position_m=tuple(round(float(x) / 1000 + lower[k], 9) for k, x in enumerate(i.position)),
+                placements=[Placement(id=i.name, position_m=tuple(round(float(x) / 1000 + lower[k] + reserve[ORDERS[i.rotation_type][k]], 9)
+                                                         for k, x in enumerate(i.position)),
                                       orientation=i.rotation_type) for i in b.items],
                 inserts=[x.model_copy(deep=True) for x in pads],
                 allowance_kg=allowance_kg, allowance_evidence=allowance_evidence,

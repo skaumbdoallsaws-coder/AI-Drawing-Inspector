@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 Scalar = Annotated[float, Field(ge=0, le=10000, allow_inf_nan=False, strict=True)]
 Length = Annotated[float, Field(gt=0, le=5, allow_inf_nan=False, strict=True)]
@@ -246,6 +246,47 @@ class AllowanceRule(Closed):
         return self
 
 
+FaceName = Literal["x_min", "x_max", "y_min", "y_max", "z_min", "z_max"]
+FaceOffset = Annotated[float, Field(ge=0, le=5, allow_inf_nan=False, strict=True)]
+
+
+class FaceArea(Closed):
+    """Rectangle on a product face, in metres from the face's low corner.
+
+    u_m and v_m run along the face's two other product axes in X, Y, Z order:
+    Y and Z for an X face, X and Z for a Y face, X and Y for a Z face.
+    """
+    u_m: tuple[FaceOffset, FaceOffset]
+    v_m: tuple[FaceOffset, FaceOffset]
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.u_m[0] >= self.u_m[1] or self.v_m[0] >= self.v_m[1]:
+            raise ValueError("Each no-contact area range needs a start below its end.")
+        return self
+
+
+class NoContactRegion(Closed):
+    """A product face, or a rectangle on it, that nothing may touch.
+
+    Faces use the product's own axes, before any packing orientation. No packing material,
+    carton wall or other product may lie within air_gap_m of the region, measured straight
+    out from the face. A geometric clearance requirement, not a protective-performance rating.
+    """
+    id: Identity
+    name: Text
+    face: FaceName
+    area: FaceArea | None = None
+    air_gap_m: Annotated[float, Field(ge=0.001, le=0.2, strict=True)]
+    evidence: Annotated[str, Field(min_length=1, max_length=500)]
+
+    @model_validator(mode="after")
+    def documented(self):
+        if not self.evidence.strip():
+            raise ValueError("Record why this region must not be touched.")
+        return self
+
+
 class Constraints(Closed):
     clearance_m: Annotated[float, Field(ge=0, le=0.2, strict=True)] = 0.02
     gap_m: Annotated[float, Field(ge=0, le=0.2, strict=True)] = 0.01
@@ -253,6 +294,25 @@ class Constraints(Closed):
     contents: Literal["unconfirmed", "ordinary_nonhazardous", "special_handling"] = "unconfirmed"
     cushion: CushionRequirement | None = None
     package_allowance: AllowanceRule | None = None
+    no_contact: Annotated[list[NoContactRegion], Field(max_length=12)] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def distinct_regions(self):
+        if len({r.id for r in self.no_contact}) != len(self.no_contact):
+            raise ValueError("No-contact region IDs must be unique.")
+        return self
+
+    @model_serializer(mode="wrap")
+    def compact(self, handler) -> dict:
+        """Unset optional protections are left out, so a design that never used them keeps the
+        hash, and with it the saved quotes, it had before these fields existed."""
+        data = handler(self)
+        for key in ("cushion", "package_allowance"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        if not data.get("no_contact"):
+            data.pop("no_contact", None)
+        return data
 
 
 class Design(Closed):

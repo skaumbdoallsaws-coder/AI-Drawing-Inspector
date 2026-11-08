@@ -81,6 +81,20 @@ remain in the test copy; the desktop source and its layout store are untouched.
 - SC2: property drawing/typed coordinates/edge lengths, setbacks, street/rear
   edges, entrances and building move/rotation. Pose edits preserve geography
   and interior coordinates. Revision checks, undo/redo and save/reopen verified.
+- Hand placement (Claude, 2026-11-07, built in a worktree of the real repo at
+  the user's request, not in the test copy): the footprint is moved and turned
+  PowerPoint-style. A click on it selects it: a dashed outline and a round
+  rotation handle above its far (plan-top) edge appear, and the Building
+  settings open. Dragging the selected footprint moves it with the map still;
+  dragging the handle turns it about its centre (the bearing shows while
+  turning; Shift snaps to 15 degrees). Each release is one undoable
+  "Position building on site" edit through `set_building_pose`. There are no
+  corner, edge or centre handles: the size is the plan's and never changes.
+  A click on empty map or Esc deselects (Esc during a drag puts it back);
+  dragging an unselected footprint still pans the map; measuring, drawing and
+  read-only proposals ignore it. The typed X, Z and bearing fields and "Move
+  building on the photo" are unchanged, and the fields follow a drag live.
+  Tests: `tests/test_facility_site_footprint.js`.
 - SC3: seven outdoor area kinds, three surfaces, geometry checks and metrics,
   rendered in Site and real WebGL 3D. Dock openings reuse the existing editor.
   The 3D compass and site top view use true north.

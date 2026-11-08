@@ -134,6 +134,51 @@
         });
     }
 
+    // Placing the footprint by hand, PowerPoint-style: it only moves and turns. Its size is the plan's and
+    // never changes here; the pose (x, z, bearing) is all that is edited, as with the typed fields.
+    const MAX_OFFSET_METERS = 5000;  // the server's limit (site_context.py MAX_OFFSET_METERS)
+    const ROTATE_SNAP_DEGREES = 15;
+    const DEGREE_SIGN = String.fromCharCode(176);
+    const toMillimeters = value => Math.round(value * 1000) / 1000;
+
+    function movedPose(pose, dx, dz) {
+        const clamp = value => Math.max(-MAX_OFFSET_METERS, Math.min(MAX_OFFSET_METERS, toMillimeters(value)));
+        return { x: clamp(Number(pose.x) + dx), z: clamp(Number(pose.z) + dz), bearingDegrees: Number(pose.bearingDegrees) };
+    }
+
+    // Turning about the footprint's centre. The bearing changes by the angle the pointer has swept around the
+    // centre since the drag began, so grabbing the handle a little off its middle does not make the building jump.
+    // snap (Shift) rounds to 15 degree steps; bearings keep 0.1 degree, the typed field's step.
+    function turnedPose(pose, size, start, point, snap) {
+        const center = buildingToProperty(pose, size.width / 2, size.depth / 2);
+        const angle = p => Math.atan2(p.x - center.x, p.z - center.z) * 180 / Math.PI;
+        let bearing = Number(pose.bearingDegrees) + angle(point) - angle(start);
+        if (snap) bearing = Math.round(bearing / ROTATE_SNAP_DEGREES) * ROTATE_SNAP_DEGREES;
+        bearing = (Math.round((((bearing % 360) + 360) % 360) * 10) / 10) % 360;
+        const offset = buildingToProperty({ x: 0, z: 0, bearingDegrees: bearing }, size.width / 2, size.depth / 2);
+        return { x: toMillimeters(center.x - offset.x), z: toMillimeters(center.z - offset.z), bearingDegrees: bearing };
+    }
+
+    function samePose(a, b) {
+        return Boolean(a && b) && ['x', 'z', 'bearingDegrees'].every(key => Math.abs(Number(a[key]) - Number(b[key])) < 1e-6);
+    }
+
+    function formatBearing(bearing) {
+        return (Math.round(Number(bearing) * 10) / 10).toFixed(1) + DEGREE_SIGN;
+    }
+
+    // The rotation handle's mark: a clockwise arrow around (cx, cy), in SVG units (y down).
+    function rotateGlyph(cx, cy, r) {
+        const end = 210 * Math.PI / 180;
+        const along = [-Math.sin(end), Math.cos(end)];  // the way the arrow travels where it ends
+        const out = [Math.cos(end), Math.sin(end)];
+        const at = (u, v) => [cx + out[0] * r + along[0] * u + out[0] * v, cy + out[1] * r + along[1] * u + out[1] * v];
+        const text = p => p.map(value => value.toFixed(4)).join(' ');
+        const start = [cx + r * Math.cos(-Math.PI / 3), cy + r * Math.sin(-Math.PI / 3)];
+        return 'M' + text(start) + ' A' + r.toFixed(4) + ' ' + r.toFixed(4) + ' 0 1 1 ' + text(at(0, 0))
+            + ' M' + text(at(-r * 0.15, r * 0.5)) + ' L' + text(at(r * 0.55, 0)) + ' L' + text(at(-r * 0.15, -r * 0.5));
+    }
+
     function imageRect(image) {
         const corners = image.corners;
         return {
@@ -338,6 +383,9 @@
             key: '', address: '', coordinates: '', photoSource: 'standard', measure: [], measureHover: null,
             hiddenLayers: {}, overlayOpacity: 0.8, notice: '',
             section: 'location', propertyDraft: null, poseDraft: null, sketch: [],
+            // The footprint selected on the map: outline, rotation handle, and dragging it moves it.
+            // selectionReturn: how the pane was before a click on the map selected it, to restore on deselect.
+            buildingSelected: false, selectionReturn: null, poseFields: null,
             // The settings pane folds away once the site is placed (null: folded whenever a site is placed).
             collapsed: null,
             areaDraft: null,
@@ -456,6 +504,51 @@
                         minZ: Math.min.apply(null, zs) - 40, maxZ: Math.max.apply(null, zs) + 40 };
                 }());
             state.view = viewForBox(box, size());
+        }
+
+        function openSection(section) {
+            const site = state.site;
+            state.section = section; state.mode = 'idle'; state.sketch = []; state.notice = '';
+            state.propertyDraft = site.property ? copy(site.property) : null;
+            state.poseDraft = copy(site.buildingPose);
+        }
+
+        // The footprint takes clicks and drags only between other tasks: never while measuring, drawing, picking
+        // a point or changing the location, and never in a read-only proposal.
+        function buildingEditable() {
+            return Boolean(state.site) && !state.readOnly && !state.changing && state.mode === 'idle';
+        }
+
+        // Selecting the footprint on the map opens its Building settings (the typed X, Z and bearing).
+        function selectBuilding() {
+            if (state.buildingSelected || !buildingEditable()) return;
+            state.selectionReturn = { section: state.section, collapsed: state.collapsed };
+            state.buildingSelected = true;
+            if (state.section !== 'building') openSection('building');
+            state.collapsed = false;
+            renderPanel(); renderCanvas();
+        }
+
+        // Deselecting puts the pane back as the selecting click found it, unless typed values wait to be applied.
+        function clearSelection() {
+            const back = state.selectionReturn;
+            state.buildingSelected = false; state.selectionReturn = null;
+            if (!back || !state.site || !samePose(state.poseDraft, state.site.buildingPose)) return;
+            if (back.section !== state.section) openSection(back.section);
+            state.collapsed = back.collapsed;
+        }
+
+        function deselectBuilding() {
+            if (!state.buildingSelected) return;
+            clearSelection();
+            renderPanel(); renderCanvas();
+        }
+
+        // The user's own Hide or Site click wins over the pane state a deselect would restore.
+        function setCollapsed(value) {
+            state.collapsed = value;
+            if (state.selectionReturn) state.selectionReturn.collapsed = value;
+            renderPanel();
         }
 
         function screenToProperty(clientX, clientY) {
@@ -611,23 +704,18 @@
                 points: pointsText(state.sketch), class: 'ip-flw-site-sketch', 'stroke-width': 2 * mpp }));
             const posedSite = state.poseDraft ? Object.assign({}, site, { buildingPose: state.poseDraft }) : site;
             const outline = buildingOutline(state.layout, posedSite);
+            const editable = buildingEditable();
+            const selected = editable && state.buildingSelected;
             outlineLayer.appendChild(svgNode('polygon', {
-                class: 'ip-flw-site-building',
+                class: 'ip-flw-site-building' + (editable ? ' ip-flw-site-building-editable' : '')
+                    + (selected ? ' ip-flw-site-building-selected' : ''),
                 points: pointsText(outline), 'data-site-pose': 'move',
                 'stroke-width': 2.5 * mpp,
             }));
-            if (state.section === 'building' && !state.readOnly) {
-                const dimensions = planSize(state.layout);
-                const pose = posedSite.buildingPose;
-                const center = buildingToProperty(pose, dimensions.width / 2, dimensions.depth / 2);
-                const handle = buildingToProperty(pose, dimensions.width / 2, dimensions.depth + 20 * mpp);
-                outlineLayer.appendChild(svgNode('line', { x1: center.x, y1: -center.z, x2: handle.x, y2: -handle.z,
-                    stroke: '#eed084', 'stroke-width': 1.5 * mpp }));
-                [['move', center], ['rotate', handle]].forEach(function (entry) {
-                    outlineLayer.appendChild(svgNode('circle', { cx: entry[1].x, cy: -entry[1].z, r: 7 * mpp,
-                        class: 'ip-flw-site-handle', 'data-site-pose': entry[0], 'stroke-width': 2 * mpp }));
-                });
-            }
+            if (selected) renderSelection(posedSite.buildingPose, mpp);
+            const posing = state.drag && state.drag.moved ? state.drag.kind : '';
+            element.classList.toggle('ip-flw-site-moving', posing === 'move');
+            element.classList.toggle('ip-flw-site-rotating', posing === 'rotate');
             const tick = 6 * mpp;
             outlineLayer.appendChild(svgNode('path', {
                 class: 'ip-flw-site-origin', 'stroke-width': 1.5 * mpp,
@@ -646,6 +734,42 @@
             element.classList.toggle('ip-flw-site-tracing', state.mode === 'trace');
             renderMeasure();
             renderTraceBox();
+        }
+
+        // The selected footprint: an outline just outside it and a rotation handle above its far edge (the plan's
+        // top), turning with it. No corner or edge handles: the plan sets the size.
+        function renderSelection(pose, mpp) {
+            if (![pose.x, pose.z, pose.bearingDegrees].every(value => Number.isFinite(Number(value)))) return;
+            const size = planSize(state.layout);
+            const gap = 5 * mpp;
+            const frame = pointsText([[-gap, -gap], [size.width + gap, -gap], [size.width + gap, size.depth + gap],
+                [-gap, size.depth + gap]].map(corner => buildingToProperty(pose, corner[0], corner[1])));
+            outlineLayer.appendChild(svgNode('polygon', { class: 'ip-flw-site-selection-halo', points: frame,
+                'stroke-width': 3.5 * mpp }));
+            outlineLayer.appendChild(svgNode('polygon', { class: 'ip-flw-site-selection', points: frame,
+                'stroke-width': 1.5 * mpp, 'stroke-dasharray': [6 * mpp, 4 * mpp].join(' ') }));
+            const base = buildingToProperty(pose, size.width / 2, size.depth + gap);
+            const handle = buildingToProperty(pose, size.width / 2, size.depth + gap + 24 * mpp);
+            outlineLayer.appendChild(svgNode('line', { class: 'ip-flw-site-rotate-stalk', x1: base.x, y1: -base.z,
+                x2: handle.x, y2: -handle.z, 'stroke-width': 2 * mpp }));
+            const knob = svgNode('circle', { class: 'ip-flw-site-rotate', cx: handle.x, cy: -handle.z, r: 9 * mpp,
+                'stroke-width': 2 * mpp, 'data-site-pose': 'rotate' });
+            const tip = svgNode('title', {});
+            tip.textContent = 'Drag to turn the building (Shift: 15 degree steps)';
+            knob.appendChild(tip);
+            outlineLayer.appendChild(knob);
+            outlineLayer.appendChild(svgNode('path', { class: 'ip-flw-site-rotate-glyph',
+                d: rotateGlyph(handle.x, -handle.z, 4.5 * mpp), 'stroke-width': 1.6 * mpp }));
+            if (state.drag && state.drag.kind === 'rotate' && state.drag.moved) {
+                // The bearing while turning, just beyond the handle, clear of the building whichever way it faces.
+                const reach = Math.hypot(handle.x - base.x, handle.z - base.z) || 1;
+                const away = 26 * mpp / reach;
+                const label = svgNode('text', { class: 'ip-flw-site-angle', 'font-size': 13 * mpp, 'stroke-width': 3.5 * mpp,
+                    x: handle.x + (handle.x - base.x) * away, y: -(handle.z + (handle.z - base.z) * away),
+                    'text-anchor': 'middle', 'dominant-baseline': 'middle' });
+                label.textContent = formatBearing(pose.bearingDegrees);
+                outlineLayer.appendChild(label);
+            }
         }
 
         // The box being dragged in trace mode.
@@ -693,12 +817,13 @@
             element.setAttribute('aria-busy', String(state.busy));
             panel.textContent = '';
             state.metricsHost = null;
+            state.poseFields = null;
             const site = state.site;
             const folding = Boolean(site) && !state.changing && !state.readOnly;
             const collapsed = folding && (state.collapsed === null ? true : state.collapsed);
             panel.classList.toggle('ip-flw-site-panel-collapsed', collapsed);
             if (collapsed) {
-                const open = button('Site', function () { state.collapsed = false; renderPanel(); },
+                const open = button('Site', function () { setCollapsed(false); },
                     { className: 'ip-flw-site-button ip-flw-site-expand', 'aria-expanded': 'false',
                         title: 'Show the site settings' });
                 open.disabled = false;
@@ -708,7 +833,7 @@
             if (folding) {
                 const head = node('div', { className: 'ip-flw-site-head' });
                 head.appendChild(node('span', { className: 'ip-flw-site-head-title' }, 'Site'));
-                const hide = button('Hide', function () { state.collapsed = true; renderPanel(); },
+                const hide = button('Hide', function () { setCollapsed(true); },
                     { className: 'ip-flw-site-button ip-flw-site-collapse', 'aria-expanded': 'true',
                         title: 'Hide the site settings' });
                 hide.disabled = false;
@@ -723,9 +848,10 @@
                 const tabs = node('div', { className: 'ip-flw-site-sections', role: 'group', 'aria-label': 'Site settings' });
                 ['location', 'property', 'building', 'areas', 'layers'].forEach(function (section) {
                     tabs.appendChild(button(section[0].toUpperCase() + section.slice(1), function () {
-                        state.section = section; state.mode = 'idle'; state.sketch = []; state.notice = '';
-                        state.propertyDraft = site.property ? copy(site.property) : null;
-                        state.poseDraft = copy(site.buildingPose); renderPanel(); renderCanvas();
+                        openSection(section);
+                        // The Building settings are the selected footprint's: opening them selects it.
+                        state.buildingSelected = section === 'building'; state.selectionReturn = null;
+                        renderPanel(); renderCanvas();
                     }, { 'aria-pressed': String(state.section === section) }));
                 });
                 panel.appendChild(tabs);
@@ -858,9 +984,17 @@
 
         function setMode(mode) {
             if (mode !== 'measure') { state.measure = []; state.measureHover = null; }
+            if (mode !== 'idle' && state.buildingSelected) clearSelection();  // measuring or drawing: deselect
             state.mode = mode;
             renderPanel();
             renderCanvas();
+        }
+
+        // While dragging, the typed fields follow the footprint.
+        function syncPoseFields() {
+            const fields = state.poseFields;
+            if (!fields || !state.poseDraft) return;
+            Object.keys(fields).forEach(function (key) { fields[key].value = String(state.poseDraft[key]); });
         }
 
         function numberField(label, value, change, min, max) {
@@ -902,9 +1036,19 @@
 
         function renderBuildingPanel() {
             const pose = state.poseDraft || (state.poseDraft = copy(state.site.buildingPose));
-            numberField('Building X (m)', pose.x, value => { pose.x = value; renderCanvas(); }, -5000, 5000);
-            numberField('Building Z (m)', pose.z, value => { pose.z = value; renderCanvas(); }, -5000, 5000);
-            numberField('True bearing (degrees)', pose.bearingDegrees, value => { pose.bearingDegrees = value; renderCanvas(); }, -360, 360);
+            // Typed values edit the current draft, so a drag after typing keeps them, and a drag updates the fields.
+            const edit = key => value => {
+                state.poseDraft = Object.assign({}, state.poseDraft || state.site.buildingPose, { [key]: value });
+                renderCanvas();
+            };
+            state.poseFields = {
+                x: numberField('Building X (m)', pose.x, edit('x'), -MAX_OFFSET_METERS, MAX_OFFSET_METERS),
+                z: numberField('Building Z (m)', pose.z, edit('z'), -MAX_OFFSET_METERS, MAX_OFFSET_METERS),
+                bearingDegrees: numberField('True bearing (degrees)', pose.bearingDegrees, edit('bearingDegrees'), -360, 360),
+            };
+            panel.appendChild(node('p', { className: 'ip-flw-site-hint' }, state.buildingSelected
+                ? 'Drag the building on the photo to move it, or its round handle to turn it (Shift: 15 degree steps).'
+                : 'Click the building on the photo to move or turn it by hand.'));
             panel.appendChild(button('Apply building position', commitPose));
             if (typeof options.onOpenWalls === 'function') panel.appendChild(button('Walls and dock openings', options.onOpenWalls));
             renderMetrics();
@@ -1242,7 +1386,16 @@
         }
 
         async function commitPose() {
-            await run('Positioning building...', () => session.setBuildingPose(copy(state.poseDraft)));
+            const result = await run('Positioning building...', () => session.setBuildingPose(copy(state.poseDraft)));
+            renderPanel(); renderCanvas();
+            return result;
+        }
+
+        // A drag that cannot be saved puts the footprint back where it was saved; the error stays on show.
+        async function commitDraggedPose() {
+            const result = await commitPose();
+            if (result.ok || !state.site || state.destroyed || state.drag) return;
+            state.poseDraft = copy(state.site.buildingPose);
             renderPanel(); renderCanvas();
         }
 
@@ -1472,9 +1625,12 @@
                 if (selected) { state.areaDraft = copy(selected); renderPanel(); renderCanvas(); }
             } else if (vertex !== null && state.section === 'property' && state.mode !== 'boundary') {
                 state.drag.kind = 'vertex'; state.drag.index = Number(vertex); state.drag.property = copy(state.propertyDraft);
-            } else if (poseMode && state.section === 'building') {
+            } else if (poseMode && state.buildingSelected && buildingEditable()) {
+                // The selected footprint: its body moves it, the round handle turns it.
                 state.drag.kind = poseMode; state.drag.pose = copy(state.poseDraft || state.site.buildingPose);
                 state.drag.start = screenToProperty(event.clientX, event.clientY);
+            } else if (poseMode === 'move' && buildingEditable()) {
+                state.drag.selects = true;  // a click selects the footprint; a drag across it still pans the map
             }
             if (typeof svg.setPointerCapture === 'function') svg.setPointerCapture(event.pointerId);
         });
@@ -1495,15 +1651,14 @@
             } else if (drag.kind === 'vertex') {
                 const boundary = copy(drag.property.boundary); boundary[drag.index] = point;
                 state.propertyDraft = replaceBoundary(drag.property, boundary);
-            } else if (drag.kind === 'move') {
-                state.poseDraft = Object.assign({}, drag.pose, { x: drag.pose.x + point.x - drag.start.x,
-                    z: drag.pose.z + point.z - drag.start.z });
-            } else if (drag.kind === 'rotate') {
-                const dimensions = planSize(state.layout);
-                const center = buildingToProperty(drag.pose, dimensions.width / 2, dimensions.depth / 2);
-                const bearing = (Math.atan2(point.x - center.x, point.z - center.z) * 180 / Math.PI + 360) % 360;
-                const offset = buildingToProperty({ x: 0, z: 0, bearingDegrees: bearing }, dimensions.width / 2, dimensions.depth / 2);
-                state.poseDraft = { x: center.x - offset.x, z: center.z - offset.z, bearingDegrees: bearing };
+            } else if (drag.kind === 'move' || drag.kind === 'rotate') {
+                // Past the 3 px threshold only, so a click on the selected footprint never nudges it. The map
+                // stays still: only the pose changes.
+                if (!drag.moved) return;
+                state.poseDraft = drag.kind === 'move'
+                    ? movedPose(drag.pose, point.x - drag.start.x, point.z - drag.start.z)
+                    : turnedPose(drag.pose, planSize(state.layout), drag.start, point, event.shiftKey);
+                syncPoseFields();
             } else if (state.mode !== 'boundary' && state.mode !== 'area') {
                 state.view.cx = drag.cx - dx * state.view.mpp;
                 state.view.cz = drag.cz + dy * state.view.mpp;
@@ -1523,7 +1678,8 @@
                 return;
             }
             if (drag && drag.moved && drag.kind) {
-                if (drag.kind === 'area-vertex') commitArea(); else if (drag.kind === 'vertex') commitProperty(); else commitPose();
+                if (drag.kind === 'area-vertex') commitArea(); else if (drag.kind === 'vertex') commitProperty();
+                else { renderCanvas(); commitDraggedPose(); }  // the redraw drops the angle readout
                 return;
             }
             if (drag && !drag.moved && (state.mode === 'boundary' || state.mode === 'area')) {
@@ -1543,10 +1699,23 @@
             }
             if (drag && !drag.moved && state.mode === 'pick') {
                 moveBuildingTo(screenToProperty(event.clientX, event.clientY));
+                return;
+            }
+            // A click: on the footprint selects it; anywhere else on the map deselects it.
+            if (drag && !drag.moved && state.mode === 'idle') {
+                if (drag.selects) selectBuilding();
+                else if (!drag.kind && state.buildingSelected) deselectBuilding();
             }
         });
         element.addEventListener('keydown', function (event) {
             if (event.key === 'Escape' && state.flight) { state.flight.cancel(); return; }
+            if (event.key === 'Escape' && state.drag && (state.drag.kind === 'move' || state.drag.kind === 'rotate')) {
+                // Esc mid-drag puts the footprint back where it was saved and keeps it selected.
+                state.drag = null; state.poseDraft = copy(state.site.buildingPose);
+                renderPanel(); renderCanvas(); return;
+            }
+            if (event.key === 'Escape' && state.buildingSelected && state.mode === 'idle' && !state.drag
+                && !panel.contains(event.target)) { deselectBuilding(); return; }
             if (event.key === 'Escape') { state.sketch = []; state.drag = null; setMode('idle'); }
             if (event.key === 'Enter' && (state.mode === 'boundary' || state.mode === 'area') && !panel.contains(event.target)) finishBoundary();
         });
@@ -1558,7 +1727,7 @@
         svg.addEventListener('dblclick', function () { if (state.mode === 'boundary' || state.mode === 'area') finishBoundary(); });
         svg.addEventListener('pointercancel', function () {
             state.drag = null; state.propertyDraft = state.site.property ? copy(state.site.property) : null;
-            state.poseDraft = copy(state.site.buildingPose); renderCanvas();
+            state.poseDraft = copy(state.site.buildingPose); syncPoseFields(); renderCanvas();
         });
 
         return {
@@ -1567,6 +1736,7 @@
                 const readOnly = Boolean(settings && settings.readOnly);
                 if (state.readOnly !== readOnly || (state.layout && state.layout.layoutId !== (layout && layout.layoutId))) {
                     state.areaDraft = null;
+                    state.buildingSelected = false; state.selectionReturn = null;
                     state.sketch = []; state.drag = null; state.mode = 'idle';
                     if (state.flight) state.flight.cancel();
                     if (state.request) state.request.abort();
@@ -1593,6 +1763,7 @@
                 if (!site) {
                     state.view = null;
                     state.mode = 'idle';
+                    state.buildingSelected = false; state.selectionReturn = null;
                     state.confirmRemove = false;
                 } else if (!previous || firstImageId(previous) !== firstImageId(site)) {
                     state.view = null;
@@ -1616,6 +1787,10 @@
             hide: function () {
                 state.visible = false;
                 if (state.flight) state.flight.cancel();
+                // A footprint drag cut short by leaving the view is not saved, so it is not shown either.
+                if (state.drag && (state.drag.kind === 'move' || state.drag.kind === 'rotate') && state.site) {
+                    state.poseDraft = copy(state.site.buildingPose);
+                }
                 state.mode = 'idle'; state.sketch = []; state.drag = null;
             },
             fit: function () {
@@ -1646,6 +1821,9 @@
         buildingToProperty: buildingToProperty,
         propertyToBuilding: propertyToBuilding,
         buildingOutline: buildingOutline,
+        movedPose: movedPose,
+        turnedPose: turnedPose,
+        formatBearing: formatBearing,
         imageRect: imageRect,
         latLonAt: latLonAt,
         geoPoint: geoPoint,

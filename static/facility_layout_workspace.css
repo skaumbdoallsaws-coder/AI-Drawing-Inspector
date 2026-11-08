@@ -4624,9 +4624,31 @@ html[data-theme="dark"] .ip-flw-site-view {
     stroke: var(--ip-flw-accent);
 }
 
+/* The footprint placed by hand: click to select, drag to move, turn by the round handle. Never resized. */
+.ip-flw-site-building-editable { cursor: pointer; }
+.ip-flw-site-building-selected { cursor: move; }
+.ip-flw-site-selection-halo { fill: none; stroke: rgb(16 24 28 / 72%); pointer-events: none; }
+.ip-flw-site-selection { fill: none; stroke: #ffffff; pointer-events: none; }
+.ip-flw-site-rotate-stalk { stroke: var(--ip-flw-accent); pointer-events: none; }
+.ip-flw-site-rotate { fill: #ffffff; stroke: var(--ip-flw-accent); cursor: grab; }
+.ip-flw-site-rotate-glyph {
+    fill: none;
+    stroke: var(--ip-flw-accent);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+.ip-flw-site-angle { fill: #ffffff; stroke: #172025; paint-order: stroke; font-weight: 700; pointer-events: none; }
+.ip-flw-site-view.ip-flw-site-moving,
+.ip-flw-site-view.ip-flw-site-moving * { cursor: move; }
+.ip-flw-site-view.ip-flw-site-rotating,
+.ip-flw-site-view.ip-flw-site-rotating * { cursor: grabbing; }
+
 .ip-flw-site-origin {
     fill: none;
     stroke: #ffffff;
+    /* Drawn over the footprint (at its centre by default): a click there must reach the building. */
+    pointer-events: none;
 }
 
 .ip-flw-site-panel {

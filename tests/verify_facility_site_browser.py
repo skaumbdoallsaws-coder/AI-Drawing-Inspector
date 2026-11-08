@@ -89,7 +89,8 @@ def main():
         assert page.evaluate(SITE)==before
         page.evaluate(APP+'.session.redo()');idle(page)
         assert page.evaluate(SITE)==after
-        handle=page.locator('circle[data-site-pose="move"]').bounding_box()
+        # The Building section selects the footprint, and the selected footprint itself is the move target.
+        handle=page.locator('polygon.ip-flw-site-building-selected').bounding_box()
         page.mouse.move(handle['x']+handle['width']/2,handle['y']+handle['height']/2)
         page.mouse.down();page.mouse.move(handle['x']+handle['width']/2+35,handle['y']+handle['height']/2,steps=8);page.mouse.up();idle(page)
         assert page.evaluate(SITE+'.buildingPose.x') > after['buildingPose']['x']

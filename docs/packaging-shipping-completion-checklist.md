@@ -80,7 +80,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Complete request fingerprint, duplicate prevention, explicit refresh, account-change staleness | Locally verified | Fingerprint: provider, adapter, design hash, scenario hash (addresses with residential status, accounts, services, options, ship date) and an opaque account reference that changes when the key is replaced or removed. An identical request at the same revision returns the saved quote (`reused: true`) without a provider call; `refresh: true` (UI "Refresh rates", with a confirm naming the shipment count) asks again. History reports `stale_reason` (revision_changed, design_changed, account_changed, account_removed). Every provider attempt is audited at `/quote-attempts`: requests sent, responses, shipments created, unconfirmed requests and outcome, including failed and interrupted attempts. Mock only. |
 | Sanitized carrier-account discovery | Locally verified | `POST /api/packaging/account/carrier-accounts` (packaging client header and `packaging.account`) keeps id, type, readable name, description, reference and billing type only; credential fields, logos and malformed entries are discarded and key-like text is blanked. Refusals (403, `MODE.UNAUTHORIZED`) and rejected keys are explained. Mock only: the response shape and the production-key requirement come from EasyPost's docs, not a live call. |
 | Change of design invalidates quotes | Locally verified | Revision-bound history marks other revisions stale. |
-| Live quotes for one approved package to three valid US addresses, two carriers | Blocked | Needs a privately entered key, approved addresses with residential/commercial status, a confirmed gross weight and permission for metered calls. |
+| Live quotes for one approved package to three valid US addresses, two carriers | Blocked | Since 2026-11-07 two separate things. (1) A Test-mode connection test on the synthetic ordinary-parcel document pkg_7f1cf9dcaa45431db77d3c38972200b8 (not a real product), after the user confirms the saved key is a Test key, records that mode and separately approves the test; it checks connectivity and rate display only, does not satisfy this gate and is never clearance to ship the racks. (2) The rack's shipping qualification, unresolved: contents unconfirmed until the magnet field reading and a USPS ruling (2026-11-07 log entries). No Production request or purchase is approved. |
 | Explain differences from a carrier website's retail quote | Blocked | Needs live rates; requires the price-basis work above. |
 
 ## P3 - Packaging alternatives and simple inserts
@@ -114,7 +114,7 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
 | Requirement | Status | Evidence or next action |
 | --- | --- | --- |
 | Ribbon panels, viewport conventions, display modes, decals | Locally verified | Historical browser and native checks. Native, `.runtime/pc-native/full-02`: an imported PNG and lettering on the carton render in the viewport, save with the document and appear in the report's graphic schedule. |
-| Promotion into the regular desktop | Promoted 2026-11-07 with the user's approval (`f4721b0`); read-only smoke check passed | Earlier user-approved promotion at `3ce2b05`. This branch was fast-forwarded into the regular checkout and the desktop started on it; see "Promotion" below. A promotion is not a gate pass: live rates and the clean-Windows install remain open. |
+| Promotion into the regular desktop | Promoted 2026-11-07 with the user's approval (`f4721b0`); read-only smoke check passed. Gaps 1-5 and the contents guard ported 2026-11-08 with the user's approval (`7a85d5d`); desktop smoke and controls check passed | Earlier user-approved promotion at `3ce2b05`. This branch was fast-forwarded into the regular checkout and the desktop started on it; see "Promotion" below. The 2026-11-08 port and its rollback rules are under "Desktop port" below. A promotion is not a gate pass: live rates and the clean-Windows install remain open. |
 | Recoverable draft checkpoints, outstanding-operation reconciliation, safe shutdown/restart | Locally verified (store, editor and native guard; not yet in the promoted desktop) | Recovery drafts (`/api/packaging/drafts`, `packaging.edit`, capability `draft_recovery`): the editor checkpoints its unsaved design 1.5 s after each change, records an in-flight save (request ID) in a checkpoint before sending it, and removes the checkpoint after a save or discard. A checkpoint also keeps values typed but not applied (the open panel's fields, at most 300; never file inputs or addresses) and an import in progress (recorded before its request is sent). Drafts belong to one user and scope, one per saved document, at most 10 (refused beyond, never silently dropped), bounded by the 1 MB request limit, and never change a document. On start and from **Open**, **Recover unsaved work** lists each draft against the saved store, including whether its design differs from the saved one: an interrupted save that landed is reported as saved and its draft removed (no second revision); one that never arrived is restored and **Save** replays its original request ID, so it cannot apply twice; a draft behind a newer revision loads only after a confirmation; typed values come back unapplied in their panel; an interrupted import is reported as finished (choose the stored model in Imported sources) or not finished (import it again; never re-run automatically); **Discard** asks first. Native close, reload and **Restart backend** proceed over a mounted editor whose exact state is clean or is its stored recovery draft: the main process first asks the editor to store its newest state (best effort; it authorizes nothing), then the usual two observations decide, with the stored checkpoint version in the fingerprint. Still blocking: Sage turns, admission and reconciliation; save conflicts; open packaging dialogs; running quotes, reports and proposals; selected files; session-only addresses (never stored); typed values whose form cannot be captured; and any state that is not yet in a stored checkpoint or whose last checkpoint failed. The managed runtime bridge keeps the strict rule. After a backend loss, a clean or checkpointed editor no longer blocks **Restart backend** or **Close Packaging**; work not checkpointed before the backend stopped still blocks (it cannot be stored then). Evidence: `tests/test_packaging_recovery.py` (22), UI unit tests, native lifecycle, close and title-bar tests (161), `tests/verify_packaging_recovery_ui.py` (`.runtime/pc-tests/ui-recovery-06`, six cases) and `tests/verify_packaging_departure_ui.py` (`.runtime/pc-tests/ui-departure-14`: typed values, departure preparation, uncovered states, an import that never arrived and one that finished after the editor closed). Native, in an isolated profile (`desktop/tools/packaging-native-entry.cjs`, `.runtime/pc-native/full-02`): Reload and Restart backend over checkpointed unsaved work proceed without a question, Reload offers the work back with its typed values, Restart keeps the editor; a native Close over checkpointed work quits, and the next start offers it back (`evidence-recover`); restored and saved each time. Not yet in the promoted desktop. |
 | Legacy managed runtime transition path | Done: unsupported for the first release (user decision, 2026-11-06) | Packaging is explicitly off there. The runtime window never adds the workflow, its backend forces `INSPECTORPRO_PACKAGING_ENABLED` and `INSPECTORPRO_CODEX_PACKAGING` to 0, and its boundary refuses `/packaging`, `/api/packaging/*` and `/static/packaging*` with `desktop_packaging_unsupported` before any other check. Tests: `desktop/tests/test_desktop_runtime_boundary.py`, `test_desktop_runtime_lifecycle.py`, `packaging-configuration.test.cjs`. The regular desktop application is the supported host. |
 | Missing-dependency behaviour | Locally verified | A missing optional component disables only its feature: GLB import (`source_runtime_unavailable`), arrangement proposals (`arrangement_unavailable`) and the PDF report (`report_unavailable`) answer 503 with a feature message instead of a bad-file or server error, and `/api/packaging/status` lists `glb_import_runtime_missing`, `arrangement_runtime_missing` or `pdf_report_runtime_missing`. `tests/test_packaging_missing_components.py` runs the real GLB worker with an empty dependency folder. STEP, carrier key store and native profile cases were already covered; see `docs/packaging-shipping-dependencies.md`. Native (`.runtime/pc-native/missing-02`): with ReportLab and py3dbp present but not importable and a STEP interpreter without OCP, each feature said it is not available in this installation when used, the saved design stayed unchanged, and manual editing and saving kept working. The status list reports presence, not importability, so such a damaged package is reported when used rather than in `unsupported`. Since 2026-11-07 (user decision) a native profile whose packaging runtime is unusable still starts: Packaging is off for that session, or only STEP import for an unusable STEP Python, and the window says why once; enabling Packaging stays strict. Native: `.runtime/pc-native/unavail-pkg-01` (trimesh folder removed: the notice named it, Packaging was not offered, the other workflow types were) and `unavail-step-01` (STEP Python missing: STEP import off, manual packing saved). |
@@ -390,6 +390,124 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
   when it may edit). The drafts routes are now declared in the test; it now passes (5), and permissions with rating hardening and comparison pass 44. No product
   change. Mock and offline only: no live carrier, Sage or research request.
 
+- 2026-11-07, P2 connection-test preparation in the regular desktop (no EasyPost request; no Production
+  request or purchase approved): one rack test document (four pairs, ULINE S-4415, 1 in Ethafoam 220
+  lining). Revision 1 is the user-approved provisional 2.782 kg baseline (estimate; 0.020 kg tape and
+  label allowance; magnets, adhesive, finish and manufacturing variation excluded), also saved in the
+  document as an immutable alternative. Revision 2 moves pairs 3 and 4 to the far side lining and adds a
+  10 mm layer divider and eight restraint blocks (end spacers, centre blocks, top retainers): +148 g of
+  Ethafoam 220, 2.930 kg, not approved for quoting. The app finds support for every pair; an offline
+  check finds zero predicted translational clearance in all six directions under the bounding-box model
+  (rotation, foam compression and shipping protection remain unverified), 10 mm of foam between stacked
+  pairs and a held 95.5 mm gap between side-by-side pairs. Outside dimensions are ULINE's listed
+  24 3/8 x 12 3/8 x 6 5/8 in, sent as 24.4 x 6.7 x 12.4 in (EasyPost takes one decimal); USPS bills this
+  carton at 17 lb dimensional weight (Postal Bulletin 22705). Magnet rules researched (49 CFR
+  173.21(d); USPS Publication 52, August 2026: sections 327 and 349, Packaging Instruction 9B and
+  Appendix D; UPS variation 5X-07; FedEx service guide; IATA PI 953 text is not public). For USPS, a
+  packed carton below 0.002 gauss or 0.5 degrees of compass deviation at 7 ft is not magnetized
+  material. Above that, air is limited (49 CFR forbids more than 0.00525 gauss at 15 ft on aircraft,
+  and Publication 52 conflicts on the range in between), and USPS surface mail with unconfined fields
+  must be marked "Surface Only" and "Magnetic - Keep 7 Feet Away From Navigational Equipment".
+  Ground Advantage is surface; Priority Mail and Priority Mail Express count as air. An eCFR search
+  found no 49 CFR magnet limit for highway. Nothing is measured, so the contents classification stays
+  unconfirmed.
+- 2026-11-07, the user's decisions after the magnet research: keep the USPS surface-marking
+  correction; record the 349.42 / 349.6 inconsistency and get a USPS ruling (PCSC, Publication 52 213
+  and 215.2) before any eligibility rule; keep the connection test apart from the rack's shipping
+  qualification. A synthetic ordinary-parcel document, pkg_7f1cf9dcaa45431db77d3c38972200b8 (12 x 8 x
+  6 in, 1.300 kg, every value synthetic, its ordinary contents a test assumption), was added to the
+  desktop for the Test-mode connection test; the rack document is unchanged (revision 2, contents
+  unconfirmed). The five gaps continue in the worktree branch packaging-gaps-2026-11-07 while the
+  field reading is pending. The user opened PHMSA interpretation 09-0084 (2011): it informs the
+  research, but its discussion of the 2011 ICAO rules does not verify current IATA rules.
+- 2026-11-07, gaps 1-5 implemented in the worktree branch packaging-gaps-2026-11-07 (from `dc6c199`;
+  uncommitted, not ported):
+  - Every saved quote records its weight basis, its contents record and the key mode.
+  - Products take added masses, each with its own basis; unknown ones are listed and left out.
+  - A weighed packed carton becomes the rated weight.
+  - The user records the key as test or production. Nothing is sent while the mode is unrecorded.
+    EasyPost reports the mode only in a response, so a wrong record shows only after the first request
+    has been sent, and that request cannot be undone. The mismatch stops that quote there, nothing is
+    retried, and every later request is refused.
+  - Magnetized and special-handling contents are reported as unsupported, with the documented carrier
+    requirements listed and no eligibility rule applied.
+  - Predicted translational clearance per product in six directions under the bounding-box model,
+    against an optional restraint requirement.
+  Offline checks: revision 2 of the rack has zero predicted translational clearance in every direction
+  under the bounding-box model; rotation, foam compression and shipping protection remain unverified.
+  In the baseline alternative the model predicts up to 85.5 mm of clearance, and pairs reach each
+  other. Both rack hashes and the synthetic document's hash are unchanged.
+  Tests: every packaging test file ran; 5 of 1,023 Python tests failed only because their exact
+  expectations predate the new movement warning and check row. Those were updated, and the 7 changed
+  files re-ran with 462 passed. JS: 218 passed. The browser verify scripts were updated for the key
+  mode but not run.
+- 2026-11-08, the gaps branch committed in two scoped commits, `89faa1b` (backend) and `42af949` (UI
+  controls and guards); not ported:
+  - The packaging UI has controls for every gap: key mode (Rates > Carrier account > Record key mode),
+    added masses, the weighed packed carton, the contents basis, a movement requirement, the
+    per-product clearance table, and each quote's weight basis, contents and key mode. No account-API
+    call is needed.
+  - Test-assumption contents can be quoted only with a key recorded as test; otherwise they are refused
+    before any request. The rack's classification is unchanged (unconfirmed).
+  - Mode protection: a response-mode mismatch stops that quote and refuses every later request (also
+    after a failed store write; recording the same mode again does not clear it). It cannot undo or
+    prevent the request that revealed it. Nothing is retried.
+  - Restraint wording: "zero predicted translational clearance under the bounding-box model"; rotation,
+    foam compression and shipping protection remain unverified. The entries above were corrected.
+  - Fixed: the first Save click straight after typing in a field was lost (present before this work).
+  Tests, offline and mock only (they do not verify the carrier integration): the full packaging suite,
+  1,032 Python and 226 JS tests, passed. Browser checks passed: comparison, Sage quote, recovery and the
+  new gap-controls check (mode selection, save and reopen, mass overrides, quote provenance, blocked
+  magnetized contents, a mismatch that sends nothing more). With the user's uncommitted UI work in a
+  throwaway worktree: 227 JS tests, 73 related Python tests (plus 28 subtests) and the four browser
+  checks passed. The port is prepared with backup and rollback in
+  `C:\Users\might\Documents\InspectorPro-Packaging\notes` (not run). The USPS ruling request stays a
+  draft there, with placeholders for the product facts; not sent. The stale 8179, 8180 and 8181 pilots
+  were stopped; their stores are unchanged.
+- 2026-11-08, contents guard, release candidate and desktop port (the user's list of that day):
+  - Contents guard (`74df54d`): Sage may recommend a classification but cannot change the contents,
+    their basis or their evidence. Its edit, undo and redo are refused before anything is written
+    (`contents_change_needs_user`). The user's create, edit, undo, redo and saved-alternative paths
+    change them only with explicit confirmation (`contents_confirmation_required`; the editor asks
+    once and resends under the same request ID). The backend checks inside the write transaction,
+    and a contract test requires every production caller to name its author (user or Sage).
+  - Release candidate `7a85d5d`: `dc6c199`, then `56459f1`, a scoped checkpoint of the user's
+    uncommitted UI work (24 modified and 109 untracked files, byte for byte; unrelated files left out),
+    then the four packaging commits. Tests on that exact tree, offline and mock only: 1,064 Python
+    tests (plus 28 subtests) and 228 JS tests passed; the user's facility and viewport tests passed
+    (13 node tests, the ribbon organization script, 138 workspace checks, 3 theme checks); nine
+    in-process browser checks passed (gaps, comparison, Sage quote, recovery, catalog, departure,
+    research, no-contact, viewport). Against isolated servers instead of the former 8181 instance
+    (a fresh store each, no carrier key, outbound connections refused except loopback, the desktop's
+    dependency bundle for model import): panels and resources passed, and no outbound connection was
+    attempted. `tests/verify_packaging_browser.py` fails at its first form step on the candidate and
+    identically at `dc6c199` with that commit's own copy: it predates the panel UI (`15965c1`) and
+    expects the product form open on load. It was not changed.
+  - Port, 14:07: the desktop was closed normally (nothing unsaved). Backup in
+    `C:\Users\might\Documents\InspectorPro-Backups\2026-11-08-before-packaging-gaps-port` and branch
+    `before-packaging-gaps-20261108` at `dc6c199`; the branch then moved `dc6c199` -> `7a85d5d` with
+    the working tree kept. The user's files are byte-identical and now tracked; the four files both
+    sides changed differ only by the packaging lines. In this checkout: 228 JS and 587 Python tests
+    (the changed packaging files) passed.
+  - Desktop, restarted through `desktop_app.py`: it runs the new code; 48 of 48 versioned assets
+    match `index.html`; the packaging files are served byte-identical; the six new capabilities are
+    listed. In Packaging (opened from the workflow selector, closed again afterwards): the editor runs
+    the contents guard; Rates shows "Key mode not recorded ... Nothing is sent until then"; the Carrier
+    account dialog offers Not recorded, Test key and Production key and starts unrecorded. Nothing was
+    saved or recorded, no carrier request was made, and no recovery draft was left.
+  - Synthetic document pkg_7f1cf9dcaa45431db77d3c38972200b8: contents basis set to test assumption
+    (evidence "Synthetic connection-test parcel; not a real product"), with the user's instruction as
+    the confirmation. Revision 0 -> 1; nothing else changed and the name keeps its SYNTHETIC label.
+    The rack is unchanged (revision 2, contents unconfirmed). The key mode is still unrecorded.
+  - EasyPost, documentation only (nothing was sent): the Parcel page shows `"mode": "test"` in its
+    example object, but the field is not in the property table or described, and the page does not
+    say whether creating a Parcel is billed. The API addendum (v4.3, effective 2026-10-30) allows
+    three free Rating API calls per purchased label and charges $0.02 for each one beyond that, without
+    defining a Rating API call or mentioning test mode or Parcels; the authentication page describes
+    test keys as testing at no cost. A Parcel request would send the key to EasyPost, so it needs the
+    user's approval, and its mode reporting and billing would have to be confirmed first.
+  Ready to deploy and test the software does not mean the rack package is qualified to ship.
+
 ## Unsupported inputs (first release)
 
 Mixed products in one design; arbitrary contour or fitted inserts; dielines; pallets, crates
@@ -397,6 +515,49 @@ and freight; hazardous or special-handling contents as ordinary parcels; interna
 shipments; verified CAD material mass; GLB as physical volume evidence; label or postage
 purchase, pickups and payment; future ship dates (until provider semantics are verified).
 PO Box addresses; US territories and military (APO/FPO/DPO) addresses, which need customs data.
+
+## Open implementation gaps (required before the workflow is called complete)
+
+Set by the user on 2026-11-07, after the first desktop rack estimate. A passing fit check is not
+validated protection: drop, vibration, compression and stacking stay "not evaluated" until transport
+testing, and no report or UI text may suggest otherwise.
+
+Status 2026-11-08: all five are implemented and, since 14:07 that day, in this checkout and the
+regular desktop at `7a85d5d`: `f54939d` (backend, report and Sage), `a01df41` (the packaging UI
+controls and guards), `74df54d` (the contents guard) and `7a85d5d` (a browser-check fix), on top of
+`56459f1`, a checkpoint of the user's UI work (2026-11-08 port log entry and "Desktop port" below).
+The notes are in `docs/packaging-gaps-2026-11-07.md`. The "Today" sentences below describe the code
+before the port (`dc6c199`) and are kept as the record of what changed. Implemented is not
+qualified: the rack package is not cleared to ship (see the live gates under "Desktop port").
+
+1. Saved quotes record the weight basis: whether each mass (product, inserts, carton, allowance) is
+   estimated or measured, and the exclusions (for the rack: magnets, adhesive, finish, manufacturing
+   variation). Today a quote keeps only the parcel sent and the design hash.
+2. Product mass beyond the CAD estimate: added items such as magnets and adhesive, each with its own
+   basis (measured, estimate or unknown) and evidence. Unknown items stay listed as unknown and are
+   never folded into the packing allowance. Today the CAD estimate is volume times one density.
+3. Explicit account mode: show and record whether the saved key is Test or Production, and send
+   nothing while it is unrecorded. EasyPost reports the mode only in a response, so a wrong record
+   shows only after the first request has been sent; that request cannot be undone. The mismatch stops
+   that quote and refuses every later request, and nothing is retried. Recording the right mode is the
+   user's check in the EasyPost dashboard. Today the mode is learned from the first response, and the
+   account alias is only a label the user typed.
+4. Carrier-specific contents handling: classify contents per carrier and service (air or ground).
+   When special handling is required, either send the supported carrier option (EasyPost's `hazmat`
+   option, for example `CLASS_9_MAGNETIZED`, which returns rates only from carriers that support that
+   type) or report the shipment as unsupported, and list any markings the carrier requires (for
+   example USPS "Surface Only"). A local classification is not carrier acceptance.
+   Today no contents information is sent, and "Special handling required" yields "Confirm ordinary
+   non-hazardous contents" instead of "unsupported". Eligibility rules wait for a USPS ruling:
+   Publication 52 349.42 allows domestic air for magnetized material of 0.002 gauss or more at 7 ft (up
+   to 0.00525 gauss at 15 ft) with Packaging Instruction 9B, the label and a shipping paper, while
+   349.6 (and 327.12) bar from air material that deflects a compass at 7 ft. Do not hard-code "ground
+   only"; until the ruling, such contents are reported as unsupported.
+5. Movement and restraint validation: the predicted translational clearance of each product in all six
+   directions under the bounding-box model, separation between products, and what each direction
+   meets. Rotation, foam compression and shipping protection remain unverified, so a pass is not a
+   protection result. Today validation covers envelope fit, overlap, cushion thickness and support
+   contact only, so a fit pass says nothing about movement.
 
 ## Retention decision (2026-11-06, implemented)
 
@@ -433,6 +594,22 @@ are reused.
   used (sleeves, bags or dividers between pairs, tape, labels) with their weights, or one weighed
   packed carton; the protection to design for (the offline runs used 1 in Ethafoam 220 as a labelled
   test assumption); and the carton actually used.
+- For the connection test: confirmation in the EasyPost dashboard that the saved key is a Test key,
+  recorded by the user as the key's mode (Rates > Carrier account > Record key mode); then separate
+  approval of the connection test itself; then an origin and one to three destinations typed into the
+  Rates panel of the synthetic test document only. Since the 2026-11-08 port no quote is sent while
+  the mode is unrecorded, and it is unrecorded. The synthetic document's contents basis was set to
+  test assumption on 2026-11-08 (revision 1), so it can be quoted only with a key recorded as test.
+  The key's prefix is not proof of its mode. A request that might show the mode before any rating
+  (EasyPost's documented Parcel example carries a `mode` field) is still a request with the key, and
+  its behaviour and billing are undocumented (2026-11-08 port log entry); it needs the same approval.
+- A USPS ruling on magnetized material between 0.002 gauss at 7 ft and 0.00525 gauss at 15 ft
+  (Publication 52 349.42 against 349.6 and 327.12), requested from the PCSC (PCSC@usps.gov,
+  Publication 52 213) as 215.2 describes. Sending it is the user's call.
+- A magnetic field reading of the packed carton, as it will ship, 7 ft (2.1 m) from every face:
+  a compass deviation under 0.5 degrees, or under 0.002 gauss, means it is not magnetized material
+  under USPS Publication 52; a stronger field limits the air services and can require USPS surface
+  markings (2026-11-07 log entry).
 - Done 2026-11-07: the isolated live Sage test profile was signed in (the desktop's sign-in is not
   reused), and promotion of this branch was approved.
 - Permission for a bounded live Sage research turn, with the questions to research. With a
@@ -447,6 +624,10 @@ are reused.
 - Decided 2026-11-07, start without Packaging and say why: implemented (see the P5 table).
 
 ## Promotion (planned and approved 2026-11-07; run the same day)
+
+Superseded rollback: since the 2026-11-08 port, step 7 below (`git reset --keep
+before-packaging-completion-20261107`) must not be used. It would delete files the user's checkpoint
+`56459f1` now tracks. Use the rollback under "Desktop port" at the end.
 
 Result, 2026-11-07: all pre-checks held (checkout clean at `4c37436`, fast-forward, no untracked
 collisions, desktop closed so nothing was unsaved, Sage's dependency bundle free of bytecode folders).
@@ -494,3 +675,49 @@ Steps, each only after approval:
 
 Not covered by the promotion: live Sage (isolated profile), live rates (account, addresses and
 budget), and the clean-Windows install.
+
+## Desktop port of the packaging release candidate (2026-11-08)
+
+Deployed 2026-11-08 at 14:07 with the user's approval. The regular checkout on
+`ui-bridge-telemetry-unified-2026-05-18` is at `7a85d5d`, and the regular desktop runs it (closed
+normally with nothing unsaved, then restarted through `desktop_app.py`). On top of `dc6c199`:
+`56459f1` (checkpoint of the user's uncommitted UI work, byte for byte), `f54939d` (gaps backend,
+report and Sage), `a01df41` (gaps UI), `74df54d` (contents guard) and `7a85d5d` (browser-check
+seeding). Results are in the 2026-11-08 port log entry.
+
+Backup: `C:\Users\might\Documents\InspectorPro-Backups\2026-11-08-before-packaging-gaps-port`
+holds the user's 24 modified and 109 untracked files as they were, this checklist, the uncommitted
+patch, SHA-256 hashes, and the packaging store as it was before the port (without carrier
+credentials). Branch `before-packaging-gaps-20261108` marks `dc6c199`.
+
+Rollback, only on the user's word:
+
+1. Close the desktop normally. First preserve everything made since the port: copy the current
+   packaging store aside and list the documents, revisions and drafts that differ from the backup's
+   store, so new designs are kept separately. Nothing is discarded silently.
+2. Code: `git revert --no-edit 7a85d5d 74df54d a01df41 f54939d` removes the packaging changes and
+   keeps the user's checkpointed work. Never `git reset --hard` or `--keep` to `dc6c199`, and do not
+   use the 2026-11-07 promotion's step 7: both would delete files the checkpoint now tracks.
+3. Data: the store's schema version stays 2 (the port only added the `carrier_account_modes` table),
+   but the pre-port models reject fields saved since the port, such as `contents_basis`. After a
+   code rollback, documents saved with them (today the synthetic document's revision 1) cannot be
+   opened until the port is reapplied. Restore the backup's store only after the user has seen
+   exactly what it would replace.
+
+Live gates still open. Deploying and testing the software does not mean the rack package is
+qualified to ship.
+
+- EasyPost connection test: the user confirms in the EasyPost dashboard that the saved key is a Test
+  key and records that mode (Rates > Carrier account > Record key mode). The connection test then
+  needs its own approval, on the synthetic document only. The mode is unrecorded today, so nothing
+  is sent. No Production requests, purchases, label or pickup bookings, or USPS submissions are
+  approved.
+- USPS ruling on magnetized material: the request is drafted; sending it is the user's call.
+- Field evidence for the rack: a magnetic field reading of the packed carton at 7 ft, a scale weight
+  of one finished pair (or the magnet details) and of one packed carton, and the packing materials
+  actually used. The rack's contents stay unconfirmed until then.
+- Protection: restraint is a bounding-box prediction. Rotation, foam compression, drop, vibration,
+  compression and stacking are not evaluated until transport testing.
+- Unchanged: the clean-Windows install test and the STEP runtime's redistribution decisions.
+- `tests/verify_packaging_browser.py` is stale since `15965c1`: it expects the product form open on
+  load. It fails identically before and after the port and was not changed.

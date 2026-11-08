@@ -4783,6 +4783,12 @@ select.ip-flw-site-input {
     color: var(--ip-flw-muted);
 }
 
+/* The building centre readout follows a drag: fixed-width digits keep it still, and it can be copied. */
+.ip-flw-site-centre {
+    font-variant-numeric: tabular-nums;
+    user-select: text;
+}
+
 .ip-flw-site-progress {
     position: absolute;
     bottom: 58px;

@@ -1,4 +1,5 @@
-"""Browser check: placing the Site footprint by hand (select, drag, turn), against an ISOLATED test server.
+"""Browser check: placing the Site footprint by hand (select, drag, turn, nudge, centre readout), against an ISOLATED
+test server.
 
 Usage: python tests/verify_facility_site_footprint_browser.py --base http://127.0.0.1:PORT [--out DIR] [--photo]
     [--headed]
@@ -71,6 +72,31 @@ def geo(page, x, z):
 
 def count(page, selector):
     return page.locator(selector).count()
+
+
+def body_point(page):
+    """A screen point on the footprint's own body, not under a street label, to press it."""
+    point = page.evaluate("""() => { const poly=document.querySelector('.ip-flw-site-building');
+        const r=poly.getBoundingClientRect();
+        for (let ring=0; ring<5; ring+=1) for (const fx of [0.5-ring*0.08, 0.5+ring*0.08])
+            for (const fy of [0.5-ring*0.08, 0.5+ring*0.08]) {
+                const x=r.left+r.width*fx, y=r.top+r.height*fy;
+                if (document.elementFromPoint(x, y)===poly) return [x, y];
+            }
+        return null; }""")
+    assert point, 'no free point on the footprint'
+    return point
+
+
+def centre_readout(page):
+    """The Building settings' centre readout as signed latitude and longitude, and its text."""
+    text = page.locator('.ip-flw-site-centre').text_content()
+    parts = text.split(': ', 1)[1].split(', ')
+    values = []
+    for part in parts:
+        number, hemisphere = part.split(DEGREE + ' ')
+        values.append(float(number) * (1 if hemisphere in ('N', 'E') else -1))
+    return values, text
 
 
 def empty_point(page):
@@ -229,44 +255,121 @@ def main():
         page.screenshot(path=str(out / '06-deselected.png'))
         report['checks'].append('a click on empty map deselects and folds the pane back')
 
-        # 5. Navigation: dragging empty map or the unselected footprint pans; the wheel zooms; the pose never changes.
+        # 5. Navigation: dragging empty map pans; the wheel zooms; neither moves the footprint.
         page.mouse.move(*empty)
         page.mouse.down()
         page.mouse.move(empty[0] - 90, empty[1] - 40, steps=8)
         page.mouse.up()
         panned = footprint(page)
         assert panned['viewBox'] != snapped['viewBox'] and panned['pose'] == snapped['pose'], 'pan'
-        middle = screen(page, panned['centre']['x'], panned['centre']['z'])
-        page.mouse.move(*middle)
-        page.mouse.down()
-        page.mouse.move(middle[0] + 70, middle[1] + 30, steps=8)
-        page.mouse.up()
-        idle(page)
-        dragged = footprint(page)
-        assert dragged['viewBox'] != panned['viewBox'] and dragged['pose'] == snapped['pose'], 'unselected drag'
-        assert count(page, '.ip-flw-site-selection') == 0
+        assert count(page, '.ip-flw-site-selection') == 0, 'a pan selected the footprint'
         page.mouse.wheel(0, -400)
         page.wait_for_timeout(300)
         zoomed = footprint(page)
-        assert zoomed['mpp'] < dragged['mpp'] and zoomed['pose'] == snapped['pose'], 'wheel zoom'
+        assert zoomed['mpp'] < panned['mpp'] and zoomed['pose'] == snapped['pose'], 'wheel zoom'
         for a, b in zip(zoomed['outline'], snapped['outline']):
             close(a['x'], b['x'], 1e-6, 'outline anchored after zoom')
-        report['checks'].append('dragging empty map or the unselected footprint pans; the wheel zooms; '
-                                'the footprint stays at the same place')
+        report['checks'].append('dragging empty map pans; the wheel zooms; the footprint stays at the same place')
 
-        # 6. Measuring ignores the footprint.
+        # 6. PowerPoint-style: a press on the unselected footprint selects it, and dragging on moves it at once.
+        # The drag carries it toward the middle of the map, so the nudges and measuring below stay on screen.
+        grab = body_point(page)
+        target = page.evaluate("""() => { const r=document.querySelector('#ip-flw-site-view').getBoundingClientRect();
+            return [r.left + r.width * 0.55, r.top + r.height * 0.6]; }""")
+        shift_x, shift_y = target[0] - grab[0], target[1] - grab[1]
+        if math.hypot(shift_x, shift_y) < 80:
+            shift_x, shift_y = shift_x - 120, shift_y + 60
+        page.mouse.move(*grab)
+        page.mouse.down()
+        assert count(page, '.ip-flw-site-selection') == 1, 'not selected on the press'
+        readout_before = centre_readout(page)[1]
+        page.mouse.move(grab[0] + shift_x, grab[1] + shift_y, steps=10)
+        readout_live = centre_readout(page)[1]
+        page.mouse.up()
+        idle(page)
+        carried = footprint(page)
+        assert carried['viewBox'] == zoomed['viewBox'], 'the map moved during a one-step drag'
+        close(carried['pose']['x'] - zoomed['pose']['x'], shift_x * zoomed['mpp'], 1.5 * zoomed['mpp'],
+              'one-step move east-west')
+        close(carried['pose']['z'] - zoomed['pose']['z'], -shift_y * zoomed['mpp'], 1.5 * zoomed['mpp'],
+              'one-step move north-south')
+        assert carried['pose']['bearingDegrees'] == zoomed['pose']['bearingDegrees']
+        assert readout_live != readout_before, 'the centre readout did not follow the drag'
+        report['checks'].append('a press on the unselected footprint selects it and a drag from there moves it in the '
+                                'same motion; the map stays still')
+
+        # 7. Arrow keys nudge the selected footprint: 1 m, Shift 10 m, north up; the burst saves as one undo step.
+        page.keyboard.press('ArrowRight')
+        page.keyboard.press('ArrowRight')
+        page.keyboard.press('Shift+ArrowUp')
+        close(float(page.get_by_label('Building X (m)', exact=True).input_value()), carried['pose']['x'] + 2, 1e-6,
+              'X field after nudging east 2 m')
+        close(float(page.get_by_label('Building Z (m)', exact=True).input_value()), carried['pose']['z'] + 10, 1e-6,
+              'Z field after nudging north 10 m')
+        page.wait_for_function(SITE + '.buildingPose.z > ' + repr(carried['pose']['z'] + 9.5), timeout=10000)
+        idle(page)
+        nudged = footprint(page)
+        assert nudged['viewBox'] == carried['viewBox'], 'the map moved during a nudge'
+        close(nudged['pose']['x'], carried['pose']['x'] + 2, 1e-6, 'saved east nudge')
+        close(nudged['pose']['z'], carried['pose']['z'] + 10, 1e-6, 'saved north nudge')
+        page.screenshot(path=str(out / '08-nudged.png'))
+        page.evaluate(APP + '.session.undo()')
+        idle(page)
+        assert page.evaluate(SITE + '.buildingPose') == carried['pose'], 'one undo takes back the whole burst'
+        page.evaluate(APP + '.session.redo()')
+        idle(page)
+        assert page.evaluate(SITE + '.buildingPose') == nudged['pose'], 'redo the nudges'
+        report['nudge'] = {'from': carried['pose'], 'to': nudged['pose']}
+        report['checks'].append('arrow keys nudge 1 m (Shift 10 m) north up; the burst saves as one undo step')
+
+        # 8. The centre readout: WGS84 as the site plan PDF gives it, and on the photo at the centre.
+        latlon, text = centre_readout(page)
+        expected = page.evaluate("""([x, z]) => { const s=""" + SITE + """; const S=window.InspectorProFacilitySite;
+            return 'Building centre: ' + S.formatLatLon(S.propertyToLatLon(x, z, s.georeference.originLatitude,
+                s.georeference.originLongitude)); }""", [nudged['centre']['x'], nudged['centre']['z']])
+        assert text == expected, (text, expected)
+        on_photo = geo(page, nudged['centre']['x'], nudged['centre']['z'])
+        if on_photo:
+            close(latlon[0], on_photo['latitude'], 2e-5, 'readout latitude against the photo')
+            close(latlon[1], on_photo['longitude'], 2e-5, 'readout longitude against the photo')
+        report['centreReadout'] = {'text': text, 'photo': on_photo}
+        report['checks'].append('the Building settings show the centre in WGS84, as the site plan PDF does'
+                                + (', matching the photo' if on_photo else ''))
+        # Esc from the real keyboard reaches the map after a press on the footprint, and deselects.
+        page.keyboard.press('Escape')
+        idle(page)
+        assert count(page, '.ip-flw-site-selection') == 0, 'Esc did not deselect'
+        assert page.locator('.ip-flw-site-expand').is_visible(), 'pane not folded back after Esc'
+        report['checks'].append('Esc from the keyboard deselects and folds the pane back')
+
+        # 9. Measuring ignores the footprint (and entering it deselects).
+        latest = footprint(page)
+        page.mouse.click(*body_point(page))  # selected again, so the measure button has a selection to clear
+        idle(page)
+        assert count(page, '.ip-flw-site-selection') == 1
         page.locator('.ip-flw-site-measure-toggle').click()
-        page.mouse.click(*screen(page, zoomed['centre']['x'], zoomed['centre']['z']))
-        page.mouse.click(*screen(page, zoomed['centre']['x'] + 10, zoomed['centre']['z']))
+        assert count(page, '.ip-flw-site-selection') == 0, 'measuring kept the selection'
+        ends = [screen(page, latest['centre']['x'], latest['centre']['z']),
+                screen(page, latest['centre']['x'] + 10, latest['centre']['z'])]
+        for end in ends:
+            assert page.evaluate("""([x, y]) => { const hit=document.elementFromPoint(x, y);
+                return !!(hit && hit.closest('svg.ip-flw-site-canvas')); }""", end), ('measure point off the map', end)
+        for end in ends:
+            page.mouse.click(*end)
         hint = page.locator('.ip-flw-site-measure-hint').inner_text()
+        if 'Distance: ' not in hint:
+            page.screenshot(path=str(out / 'fail-measure.png'))
+        assert 'Distance: ' in hint, ('no distance measured', hint)
         measured = float(hint.split('Distance: ')[1].split(' m')[0])
-        close(measured, 10, 3 * zoomed['mpp'], 'measured 10 m across the footprint')
+        close(measured, 10, 3 * latest['mpp'], 'measured 10 m across the footprint')
         assert count(page, '.ip-flw-site-selection') == 0, 'measuring selected the footprint'
+        assert page.evaluate(SITE + '.buildingPose') == latest['pose'], 'measuring moved the footprint'
         report['measured'] = hint
         page.keyboard.press('Escape')
-        report['checks'].append('measuring across the footprint measures and never selects it')
+        assert page.locator('.ip-flw-site-measure-toggle').get_attribute('aria-pressed') == 'false', 'Esc kept measuring'
+        report['checks'].append('measuring across the footprint measures and never selects or moves it; Esc ends it')
 
-        # 7. The typed fields still apply; undo and redo.
+        # 10. The typed fields still apply; undo and redo.
         page.locator('.ip-flw-site-expand').click()
         page.locator('.ip-flw-site-panel').get_by_role('button', name='Building', exact=True).click()
         assert count(page, '.ip-flw-site-selection') == 1, 'the Building settings select the footprint'
@@ -277,13 +380,13 @@ def main():
         typed = footprint(page)
         page.evaluate(APP + '.session.undo()')
         idle(page)
-        assert page.evaluate(SITE + '.buildingPose') == snapped['pose'], 'undo'
+        assert page.evaluate(SITE + '.buildingPose') == latest['pose'], 'undo'
         page.evaluate(APP + '.session.redo()')
         idle(page)
         assert page.evaluate(SITE + '.buildingPose') == typed['pose'], 'redo'
         report['checks'].append('typed bearing applies; undo and redo are exact')
 
-        # 8. Save, reopen: the same place and turn; the interior untouched.
+        # 11. Save, reopen: the same place and turn; the interior untouched.
         page.evaluate(APP + '.session.save()')
         idle(page)
         open_app(page, base, identity)

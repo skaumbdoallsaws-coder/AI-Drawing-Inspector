@@ -1,7 +1,8 @@
 'use strict';
 
-// Placing the footprint by hand on the Site tab, PowerPoint-style: click to select, drag to move, turn by the
-// round handle. It never resizes, the map stays still while it moves, and the typed fields keep working.
+// Placing the footprint by hand on the Site tab, PowerPoint-style: press to select (and drag on to move), turn by
+// the round handle, nudge with the arrow keys. It never resizes, the map stays still while it moves, the typed
+// fields keep working, and the Building settings show the centre's latitude and longitude.
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const Site = require('../static/facility_layout_site.js');
@@ -102,6 +103,16 @@ function harness(settings) {
         async clickBuilding() { const at = h.screen(h.center().x, h.center().z); await h.click(h.building(), at); },
         async clickEmptyMap() { const at = h.screen(55, 45); await h.click(svg, at); },
         escape: () => element.emit('keydown', { key: 'Escape', target: element }),
+        key(name, extra) {
+            const event = { key: name, target: element, defaultPrevented: false,
+                preventDefault() { event.defaultPrevented = true; }, stopPropagation() {}, ...(extra || {}) };
+            element.emit('keydown', event);
+            return event;
+        },
+        readout: () => (all(element, item => String(item.className || '').split(' ').includes('ip-flw-site-centre'))[0]
+            || {}).text,
+        typedPose: () => ({ x: Number(h.input('Building X (m)').value), z: Number(h.input('Building Z (m)').value),
+            bearingDegrees: Number(h.input('True bearing (degrees)').value) }),
     });
     return h;
 }
@@ -157,17 +168,31 @@ test('a click on empty map or Esc deselects and folds the pane back as it was', 
     assert.equal(h.saved.length, 0);
 });
 
-test('dragging the footprint before it is selected still pans the map and changes nothing', async () => {
+test('pressing the footprint selects it and a drag from there moves it in the same motion; empty map still pans', async () => {
     const h = harness();
-    const before = h.viewBox(), outline = JSON.stringify(h.outline());
+    const box = h.viewBox(), mpp = h.mpp();
     const at = h.screen(0, 0);
     await h.press(h.building(), at);
+    assert.equal(h.selected(), true, 'selected on the press, as in PowerPoint');
     await h.move({ clientX: at.clientX + 80, clientY: at.clientY + 20 });
+    close(h.outline()[0].x, -24 + 80 * mpp);
+    close(h.outline()[0].z, -16 - 20 * mpp);
+    assert.equal(h.viewBox(), box, 'the map stays still');
     await h.release({ clientX: at.clientX + 80, clientY: at.clientY + 20 });
-    assert.notEqual(h.viewBox(), before, 'the map panned');
+    assert.equal(h.saved.length, 1, 'one undoable edit');
+    close(h.saved[0].x, -24 + 80 * mpp);
+    close(h.saved[0].z, -16 - 20 * mpp);
+    assert.equal(h.selected(), true);
+    // A drag that starts on empty map pans, leaves the building where it is, and keeps the selection.
+    const outline = JSON.stringify(h.outline());
+    const empty = h.screen(55, 45);
+    await h.press(h.svg, empty);
+    await h.move({ clientX: empty.clientX - 60, clientY: empty.clientY + 30 });
+    await h.release({ clientX: empty.clientX - 60, clientY: empty.clientY + 30 });
+    assert.notEqual(h.viewBox(), box, 'the map panned');
     assert.equal(JSON.stringify(h.outline()), outline);
-    assert.equal(h.selected(), false, 'a drag is not a click');
-    assert.equal(h.saved.length, 0);
+    assert.equal(h.saved.length, 1);
+    assert.equal(h.selected(), true, 'a pan is not a click');
 });
 
 test('the selected footprint drags as one rigid piece while the map stays still, and saves once on release', async () => {
@@ -302,6 +327,121 @@ test('measuring and read-only proposals never select or move the footprint', asy
     assert.equal(r.selected(), false);
     assert.doesNotMatch(r.building().attrs.class, /editable/);
     assert.equal(r.saved.length, 0);
+});
+
+test('arrow keys nudge the selected footprint 1 m (Shift: 10 m), north up, and save together once the keys rest', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const h = harness();
+    assert.equal(h.key('ArrowRight').defaultPrevented, false, 'nothing selected: arrows are left alone');
+    await h.clickBuilding();
+    const box = h.viewBox();
+    h.key('ArrowRight'); h.key('ArrowRight'); h.key('ArrowUp', { shiftKey: true }); h.key('ArrowLeft'); h.key('ArrowDown');
+    // Live: 2 - 1 m east, 10 - 1 m north. The fields and the outline follow; the map stays; nothing is saved yet.
+    assert.equal(h.input('Building X (m)').value, '-23');
+    assert.equal(h.input('Building Z (m)').value, '-7');
+    close(h.outline()[0].x, -23); close(h.outline()[0].z, -7);
+    assert.equal(h.viewBox(), box);
+    t.mock.timers.tick(599); await settle();
+    assert.equal(h.saved.length, 0, 'still waiting for the keys to rest');
+    h.key('ArrowRight');  // another press restarts the wait
+    t.mock.timers.tick(599); await settle();
+    assert.equal(h.saved.length, 0);
+    t.mock.timers.tick(1);
+    // A press while that save is under way is kept from the page (no scroll, no 3D walk key) but moves nothing.
+    assert.equal(h.key('ArrowRight').defaultPrevented, true);
+    await settle();
+    assert.equal(h.saved.length, 1, 'one undo step for the whole burst');
+    assert.deepEqual(h.saved[0], { x: -22, z: -7, bearingDegrees: 0 });
+    assert.equal(h.input('Building X (m)').value, '-22');
+    t.mock.timers.tick(1000); await settle();
+    assert.equal(h.saved.length, 1, 'the press during the save was dropped, not saved later');
+    assert.equal(h.selected(), true);
+});
+
+test('arrows typed into the fields stay there; Esc before the save puts nudges back; deselecting saves them at once', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const h = harness();
+    await h.clickBuilding();
+    const field = h.input('Building X (m)');
+    assert.equal(h.key('ArrowUp', { target: field }).defaultPrevented, false);
+    h.key('ArrowRight', { ctrlKey: true }); h.key('ArrowRight', { altKey: true });
+    assert.equal(h.input('Building X (m)').value, '-24', 'no nudge from a field, nor with Ctrl or Alt');
+    h.key('ArrowRight');
+    assert.equal(h.input('Building X (m)').value, '-23');
+    await h.escape();
+    assert.equal(h.input('Building X (m)').value, '-24');
+    close(h.outline()[0].x, -24);
+    assert.equal(h.selected(), true, 'the first Esc only undoes the nudge');
+    t.mock.timers.tick(1000); await settle();
+    assert.equal(h.saved.length, 0);
+    // A click on empty map right after a nudge saves it at once, and the pane folds back as usual.
+    h.key('ArrowUp', { shiftKey: true });
+    await h.clickEmptyMap();
+    assert.equal(h.saved.length, 1);
+    assert.deepEqual(h.saved[0], { x: -24, z: -6, bearingDegrees: 0 });
+    assert.equal(h.selected(), false);
+    assert.ok(h.button('Site') && !h.button('Hide'), 'folded again');
+    close(h.outline()[0].z, -6);
+    t.mock.timers.tick(1000); await settle();
+    assert.equal(h.saved.length, 1, 'not saved twice');
+});
+
+test('a drag straight after a nudge carries it: one save, nothing left waiting', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const h = harness();
+    await h.clickBuilding();
+    const mpp = h.mpp();
+    h.key('ArrowRight');
+    const at = h.screen(0, 0);
+    await h.press(h.building(), at);
+    await h.move({ clientX: at.clientX + 40, clientY: at.clientY });
+    t.mock.timers.tick(600); await settle();  // the nudge's wait ends mid-drag: it waits for the drag
+    assert.equal(h.saved.length, 0);
+    await h.release({ clientX: at.clientX + 40, clientY: at.clientY });
+    assert.equal(h.saved.length, 1);
+    close(h.saved[0].x, -23 + 40 * mpp);
+    t.mock.timers.tick(600); await settle();
+    assert.equal(h.saved.length, 1, 'nothing left to save');
+});
+
+test('the Building settings show the centre as latitude and longitude, live, as the site plan PDF writes it', async () => {
+    const h = harness();
+    await h.clickBuilding();
+    assert.equal(h.readout(), 'Building centre: 45.000000' + DEGREE + ' N, 93.000000' + DEGREE + ' W');
+    const expected = () => {
+        const centre = Site.buildingToProperty(h.typedPose(), 24, 16);
+        return 'Building centre: ' + Site.formatLatLon(Site.propertyToLatLon(centre.x, centre.z, 45, -93));
+    };
+    const at = h.screen(0, 0);
+    await h.press(h.building(), at);
+    await h.move({ clientX: at.clientX + 50, clientY: at.clientY - 25 });
+    assert.equal(h.readout(), expected(), 'follows the drag');
+    assert.notEqual(h.readout(), 'Building centre: 45.000000' + DEGREE + ' N, 93.000000' + DEGREE + ' W');
+    await h.release({ clientX: at.clientX + 50, clientY: at.clientY - 25 });
+    assert.equal(h.readout(), expected());
+    const typed = h.input('Building X (m)');
+    typed.value = '100'; await typed.emit('input');
+    assert.equal(h.readout(), expected(), 'follows typing');
+    typed.value = ''; await typed.emit('input');
+    assert.equal(h.readout(), 'Building centre: -', 'nothing to show for an empty field');
+});
+
+test('latitude and longitude come from the same earth-centred conversion as the server (geo.from_property)', () => {
+    // [x, z, origin latitude, origin longitude, latitude, longitude], printed by ai_inspector/facility_layout/geo.py.
+    const cases = [
+        [0, 0, 45, -93, 45.0, -93.0],
+        [100, -50, 44.9778, -93.265, 44.97735007487209, -93.26373221766684],
+        [-1234.5, 2500.25, -33.8688, 151.2093, -33.84625822151549, 151.1959613935883],
+        [3000, -4000, 64.1466, -21.9426, 64.11070590961022, -21.88104646181376],
+        [24, 16, 45, -93, 45.00014397281399, -92.99969561162378],
+    ];
+    for (const [x, z, latitude0, longitude0, latitude, longitude] of cases) {
+        const point = Site.propertyToLatLon(x, z, latitude0, longitude0);
+        close(point.latitude, latitude, 1e-11);
+        close(point.longitude, longitude, 1e-11);
+    }
+    assert.equal(Site.formatLatLon({ latitude: -33.84625822151549, longitude: 151.1959613935883 }),
+        '33.846258' + DEGREE + ' S, 151.195961' + DEGREE + ' E');
 });
 
 test('pose helpers: a move keeps the bearing and the server limit, a turn keeps the centre', () => {

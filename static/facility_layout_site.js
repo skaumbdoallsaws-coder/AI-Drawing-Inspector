@@ -167,6 +167,45 @@
         return (Math.round(Number(bearing) * 10) / 10).toFixed(1) + DEGREE_SIGN;
     }
 
+    // Arrow keys nudge the selected footprint across the north-up map: 1 m a press, 10 m with Shift. Presses in
+    // quick succession save together, as one undo step, once the keys have rested this long.
+    const NUDGE_KEYS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+    const NUDGE_METERS = 1;
+    const NUDGE_SHIFT_METERS = 10;
+    const NUDGE_SAVE_MS = 600;
+
+    // The server's geo.from_property, for the building centre readout: a property point (+X east, +Z north, metres
+    // on the east-north-up plane at the site origin) as WGS84 latitude and longitude, exact through earth-centred
+    // coordinates, so the readout agrees with the site plan PDF. The same steps in the same order as the server.
+    const WGS84_A = 6378137.0;
+    const WGS84_F = 1 / 298.257223563;
+    const WGS84_E2 = WGS84_F * (2 - WGS84_F);
+    const RADIANS = Math.PI / 180;
+    function propertyToLatLon(x, z, originLatitude, originLongitude) {
+        const phi = originLatitude * RADIANS, lam = originLongitude * RADIANS;
+        const sp = Math.sin(phi), cp = Math.cos(phi), sl = Math.sin(lam), cl = Math.cos(lam);
+        const n0 = WGS84_A / Math.sqrt(1 - WGS84_E2 * sp * sp);
+        // The origin, then x metres along east (-sl, cl, 0) and z metres along north (-sp cl, -sp sl, cp).
+        const px = n0 * cp * cl + x * -sl + z * (-sp * cl);
+        const py = n0 * cp * sl + x * cl + z * (-sp * sl);
+        const pz = n0 * (1 - WGS84_E2) * sp + z * cp;
+        const p = Math.hypot(px, py);
+        let latitude = Math.atan2(pz, p * (1 - WGS84_E2));
+        for (let step = 0; step < 8; step += 1) {
+            const sinLatitude = Math.sin(latitude);
+            const n = WGS84_A / Math.sqrt(1 - WGS84_E2 * sinLatitude * sinLatitude);
+            const height = p / Math.cos(latitude) - n;
+            latitude = Math.atan2(pz, p * (1 - WGS84_E2 * n / (n + height)));
+        }
+        return { latitude: latitude * (180 / Math.PI), longitude: Math.atan2(py, px) * (180 / Math.PI) };
+    }
+
+    // As the site plan PDF writes a position: 44.977397 degrees N, 93.263581 degrees W.
+    function formatLatLon(point) {
+        return Math.abs(point.latitude).toFixed(6) + DEGREE_SIGN + ' ' + (point.latitude >= 0 ? 'N' : 'S') + ', '
+            + Math.abs(point.longitude).toFixed(6) + DEGREE_SIGN + ' ' + (point.longitude >= 0 ? 'E' : 'W');
+    }
+
     // The rotation handle's mark: a clockwise arrow around (cx, cy), in SVG units (y down).
     function rotateGlyph(cx, cy, r) {
         const end = 210 * Math.PI / 180;
@@ -385,7 +424,9 @@
             section: 'location', propertyDraft: null, poseDraft: null, sketch: [],
             // The footprint selected on the map: outline, rotation handle, and dragging it moves it.
             // selectionReturn: how the pane was before a click on the map selected it, to restore on deselect.
-            buildingSelected: false, selectionReturn: null, poseFields: null,
+            buildingSelected: false, selectionReturn: null, poseFields: null, centreReadout: null,
+            // Arrow-key nudges not yet saved: they save together when this timer fires (or sooner, see flushNudge).
+            nudgeTimer: null,
             // The settings pane folds away once the site is placed (null: folded whenever a site is placed).
             collapsed: null,
             areaDraft: null,
@@ -507,10 +548,12 @@
         }
 
         function openSection(section) {
+            const draft = state.poseDraft;
+            const saving = flushNudge();  // nudges still waiting are saved first, and stay on show while they save
             const site = state.site;
             state.section = section; state.mode = 'idle'; state.sketch = []; state.notice = '';
             state.propertyDraft = site.property ? copy(site.property) : null;
-            state.poseDraft = copy(site.buildingPose);
+            state.poseDraft = saving ? draft : copy(site.buildingPose);
         }
 
         // The footprint takes clicks and drags only between other tasks: never while measuring, drawing, picking
@@ -531,10 +574,12 @@
 
         // Deselecting puts the pane back as the selecting click found it, unless typed values wait to be applied.
         function clearSelection() {
-            const back = state.selectionReturn;
+            const back = state.selectionReturn, draft = state.poseDraft;
+            const saving = flushNudge();  // nudges still waiting are saved now, not dropped
             state.buildingSelected = false; state.selectionReturn = null;
-            if (!back || !state.site || !samePose(state.poseDraft, state.site.buildingPose)) return;
+            if (!back || !state.site || (!saving && !samePose(state.poseDraft, state.site.buildingPose))) return;
             if (back.section !== state.section) openSection(back.section);
+            if (saving) state.poseDraft = draft;  // shown where it is being saved until the save comes back
             state.collapsed = back.collapsed;
         }
 
@@ -542,6 +587,47 @@
             if (!state.buildingSelected) return;
             clearSelection();
             renderPanel(); renderCanvas();
+        }
+
+        // The map takes the keys unless something inside it, such as a field of the pane, has them already.
+        function focusMap() {
+            if (state.destroyed || typeof element.focus !== 'function') return;
+            const active = documentRef.activeElement;
+            if (!active || !element.contains(active)) element.focus({ preventScroll: true });
+        }
+
+        // Arrow-key nudges move the draft at once and save together, as one undo step, once the keys rest.
+        function nudgeBuilding(direction, meters) {
+            state.poseDraft = movedPose(state.poseDraft || state.site.buildingPose, direction[0] * meters, direction[1] * meters);
+            syncPoseFields(); renderCanvas();
+            clearTimeout(state.nudgeTimer);
+            state.nudgeTimer = setTimeout(saveNudge, NUDGE_SAVE_MS);
+        }
+
+        function saveNudge() {
+            state.nudgeTimer = null;
+            if (state.destroyed || !state.site) return;
+            // Mid-drag, wait for it to end: a footprint drag saves the nudged pose along with its own move.
+            if (state.drag) { state.nudgeTimer = setTimeout(saveNudge, NUDGE_SAVE_MS); return; }
+            // Nudges are refused while a save is under way, so a save under way already carries them.
+            if (state.busy || samePose(state.poseDraft, state.site.buildingPose)) return;
+            commitDraggedPose();
+        }
+
+        // Before the selection or the pane changes, nudges still waiting are saved at once. True if a save began.
+        function flushNudge() {
+            if (!state.nudgeTimer) return false;
+            clearTimeout(state.nudgeTimer); state.nudgeTimer = null;
+            if (state.busy || state.destroyed || !state.site || samePose(state.poseDraft, state.site.buildingPose)) return false;
+            commitDraggedPose();
+            return true;
+        }
+
+        // Esc before the save puts the nudges back.
+        function cancelNudge() {
+            clearTimeout(state.nudgeTimer); state.nudgeTimer = null;
+            state.poseDraft = copy(state.site.buildingPose);
+            syncPoseFields(); renderCanvas();
         }
 
         // The user's own Hide or Site click wins over the pane state a deselect would restore.
@@ -817,7 +903,7 @@
             element.setAttribute('aria-busy', String(state.busy));
             panel.textContent = '';
             state.metricsHost = null;
-            state.poseFields = null;
+            state.poseFields = null; state.centreReadout = null;
             const site = state.site;
             const folding = Boolean(site) && !state.changing && !state.readOnly;
             const collapsed = folding && (state.collapsed === null ? true : state.collapsed);
@@ -990,11 +1076,28 @@
             renderCanvas();
         }
 
-        // While dragging, the typed fields follow the footprint.
+        // While dragging or nudging, the typed fields and the centre readout follow the footprint.
         function syncPoseFields() {
             const fields = state.poseFields;
-            if (!fields || !state.poseDraft) return;
-            Object.keys(fields).forEach(function (key) { fields[key].value = String(state.poseDraft[key]); });
+            if (fields && state.poseDraft) {
+                Object.keys(fields).forEach(function (key) { fields[key].value = String(state.poseDraft[key]); });
+            }
+            syncCentreReadout();
+        }
+
+        function syncCentreReadout() {
+            if (state.centreReadout) state.centreReadout.textContent = centreText(state.poseDraft);
+        }
+
+        // The building centre as latitude and longitude, written as the site plan PDF writes it.
+        function centreText(pose) {
+            const reference = state.site && state.site.georeference;
+            const ready = reference && pose && ['x', 'z', 'bearingDegrees'].every(key => Number.isFinite(Number(pose[key])));
+            if (!ready) return 'Building centre: -';
+            const size = planSize(state.layout);
+            const centre = buildingToProperty(pose, size.width / 2, size.depth / 2);
+            return 'Building centre: ' + formatLatLon(propertyToLatLon(centre.x, centre.z,
+                Number(reference.originLatitude), Number(reference.originLongitude)));
         }
 
         function numberField(label, value, change, min, max) {
@@ -1039,16 +1142,20 @@
             // Typed values edit the current draft, so a drag after typing keeps them, and a drag updates the fields.
             const edit = key => value => {
                 state.poseDraft = Object.assign({}, state.poseDraft || state.site.buildingPose, { [key]: value });
-                renderCanvas();
+                syncCentreReadout(); renderCanvas();
             };
             state.poseFields = {
                 x: numberField('Building X (m)', pose.x, edit('x'), -MAX_OFFSET_METERS, MAX_OFFSET_METERS),
                 z: numberField('Building Z (m)', pose.z, edit('z'), -MAX_OFFSET_METERS, MAX_OFFSET_METERS),
                 bearingDegrees: numberField('True bearing (degrees)', pose.bearingDegrees, edit('bearingDegrees'), -360, 360),
             };
+            state.centreReadout = node('p', { className: 'ip-flw-site-note ip-flw-site-centre',
+                title: 'Latitude and longitude (WGS84) of the building centre, as the site plan PDF gives them' }, centreText(pose));
+            panel.appendChild(state.centreReadout);
             panel.appendChild(node('p', { className: 'ip-flw-site-hint' }, state.buildingSelected
-                ? 'Drag the building on the photo to move it, or its round handle to turn it (Shift: 15 degree steps).'
-                : 'Click the building on the photo to move or turn it by hand.'));
+                ? 'Drag the building on the photo to move it, or its round handle to turn it (Shift: 15 degree steps). '
+                    + 'Arrow keys nudge it 1 m (Shift: 10 m).'
+                : 'Drag the building on the photo to move it, or click it for the handle that turns it.'));
             panel.appendChild(button('Apply building position', commitPose));
             if (typeof options.onOpenWalls === 'function') panel.appendChild(button('Walls and dock openings', options.onOpenWalls));
             renderMetrics();
@@ -1604,6 +1711,11 @@
 
         svg.addEventListener('pointerdown', function (event) {
             if (!state.site || !state.view || state.busy || event.button !== 0) return;
+            // Keys (Esc, Enter, arrow nudges) go to the map once it is pressed. A press that selects the footprint
+            // redraws it, and the browser then drops focus along with the removed shape, so focus is taken back
+            // once the press has been handled.
+            focusMap();
+            setTimeout(focusMap, 0);
             state.drag = { x: event.clientX, y: event.clientY, cx: state.view.cx, cz: state.view.cz, moved: false };
             if (state.mode === 'trace' && !state.readOnly) {
                 state.drag.kind = 'trace'; state.drag.start = screenToProperty(event.clientX, event.clientY);
@@ -1625,12 +1737,12 @@
                 if (selected) { state.areaDraft = copy(selected); renderPanel(); renderCanvas(); }
             } else if (vertex !== null && state.section === 'property' && state.mode !== 'boundary') {
                 state.drag.kind = 'vertex'; state.drag.index = Number(vertex); state.drag.property = copy(state.propertyDraft);
-            } else if (poseMode && state.buildingSelected && buildingEditable()) {
-                // The selected footprint: its body moves it, the round handle turns it.
+            } else if (poseMode && buildingEditable() && (poseMode === 'move' || state.buildingSelected)) {
+                // PowerPoint-style: pressing the footprint selects it, and a drag from there moves it in the same
+                // motion; the round handle, shown once it is selected, turns it.
+                selectBuilding();
                 state.drag.kind = poseMode; state.drag.pose = copy(state.poseDraft || state.site.buildingPose);
                 state.drag.start = screenToProperty(event.clientX, event.clientY);
-            } else if (poseMode === 'move' && buildingEditable()) {
-                state.drag.selects = true;  // a click selects the footprint; a drag across it still pans the map
             }
             if (typeof svg.setPointerCapture === 'function') svg.setPointerCapture(event.pointerId);
         });
@@ -1701,18 +1813,25 @@
                 moveBuildingTo(screenToProperty(event.clientX, event.clientY));
                 return;
             }
-            // A click: on the footprint selects it; anywhere else on the map deselects it.
-            if (drag && !drag.moved && state.mode === 'idle') {
-                if (drag.selects) selectBuilding();
-                else if (!drag.kind && state.buildingSelected) deselectBuilding();
-            }
+            // A click on the map off the footprint deselects it (a press on the footprint has selected it already).
+            if (drag && !drag.moved && !drag.kind && state.mode === 'idle' && state.buildingSelected) deselectBuilding();
         });
         element.addEventListener('keydown', function (event) {
             if (event.key === 'Escape' && state.flight) { state.flight.cancel(); return; }
             if (event.key === 'Escape' && state.drag && (state.drag.kind === 'move' || state.drag.kind === 'rotate')) {
-                // Esc mid-drag puts the footprint back where it was saved and keeps it selected.
+                // Esc mid-drag puts the footprint back where it was saved (nudges too) and keeps it selected.
                 state.drag = null; state.poseDraft = copy(state.site.buildingPose);
+                clearTimeout(state.nudgeTimer); state.nudgeTimer = null;
                 renderPanel(); renderCanvas(); return;
+            }
+            if (event.key === 'Escape' && state.nudgeTimer && state.site) { cancelNudge(); return; }
+            const nudge = NUDGE_KEYS[event.key];
+            if (nudge && state.buildingSelected && buildingEditable()
+                    && !event.altKey && !event.ctrlKey && !event.metaKey && !panel.contains(event.target)) {
+                event.preventDefault(); event.stopPropagation();  // not a scroll, nor a 3D walk key
+                // A press during a save or a drag is dropped: a save under way already carries the nudges before it.
+                if (!state.busy && !state.drag) nudgeBuilding(nudge, event.shiftKey ? NUDGE_SHIFT_METERS : NUDGE_METERS);
+                return;
             }
             if (event.key === 'Escape' && state.buildingSelected && state.mode === 'idle' && !state.drag
                 && !panel.contains(event.target)) { deselectBuilding(); return; }
@@ -1737,6 +1856,8 @@
                 if (state.readOnly !== readOnly || (state.layout && state.layout.layoutId !== (layout && layout.layoutId))) {
                     state.areaDraft = null;
                     state.buildingSelected = false; state.selectionReturn = null;
+                    // Nudges of the layout left behind are dropped: saving now would write them into this one.
+                    clearTimeout(state.nudgeTimer); state.nudgeTimer = null;
                     state.sketch = []; state.drag = null; state.mode = 'idle';
                     if (state.flight) state.flight.cancel();
                     if (state.request) state.request.abort();
@@ -1764,6 +1885,7 @@
                     state.view = null;
                     state.mode = 'idle';
                     state.buildingSelected = false; state.selectionReturn = null;
+                    clearTimeout(state.nudgeTimer); state.nudgeTimer = null;
                     state.confirmRemove = false;
                 } else if (!previous || firstImageId(previous) !== firstImageId(site)) {
                     state.view = null;
@@ -1807,6 +1929,7 @@
             },
             destroy: function () {
                 state.destroyed = true;
+                clearTimeout(state.nudgeTimer); state.nudgeTimer = null;
                 if (state.flight) state.flight.cancel();
                 if (state.request) state.request.abort();
                 if (state.analysisRequest) state.analysisRequest.abort();
@@ -1824,6 +1947,8 @@
         movedPose: movedPose,
         turnedPose: turnedPose,
         formatBearing: formatBearing,
+        propertyToLatLon: propertyToLatLon,
+        formatLatLon: formatLatLon,
         imageRect: imageRect,
         latLonAt: latLonAt,
         geoPoint: geoPoint,

@@ -698,8 +698,10 @@ Rollback, only on the user's word:
 2. Code: `git revert --no-edit 7a85d5d 74df54d a01df41 f54939d` removes the packaging changes and
    keeps the user's checkpointed work. Never `git reset --hard` or `--keep` to `dc6c199`, and do not
    use the 2026-11-07 promotion's step 7: both would delete files the checkpoint now tracks.
-3. Data: the store's schema version stays 2 (the port only added the `carrier_account_modes` table),
-   but the pre-port models reject fields saved since the port, such as `contents_basis`. After a
+3. Data: the packaging store's schema is unchanged (version 2). Key modes go in a separate
+   `carrier_account_modes` table of the carrier key store, created only when a mode is recorded, and
+   older code ignores it. But the pre-port models reject fields saved since the port, such as
+   `contents_basis`. After a
    code rollback, documents saved with them (today the synthetic document's revision 1) cannot be
    opened until the port is reapplied. Restore the backup's store only after the user has seen
    exactly what it would replace.

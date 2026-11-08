@@ -90,7 +90,7 @@ def verify(url, output, *, live=False, headed=False):
             frame.get_by_role('button', name='Fit view', exact=True).click()
             expect(frame.locator('#scene-message')).to_have_text('', timeout=20000)
             page.screenshot(path=str(output / 'after-chat.png'))
-            frame.locator('#viewport canvas').screenshot(path=str(output / 'canvas.png'))
+            frame.locator('#viewport canvas.packaging-model-canvas').screenshot(path=str(output / 'canvas.png'))
             frame.get_by_role('button', name='Undo', exact=True).click()
             expect(frame.locator('#validation-panel')).to_contain_text('0 / 6 products placed')
             frame.get_by_role('button', name='Redo', exact=True).click()

@@ -511,7 +511,7 @@ test('native menu has an outside-document Close Packaging command and the profil
     assert.equal(url.searchParams.get('packagingPilot'), config ? '1' : null);
     assert.equal(url.searchParams.get('facilityLayoutId'), 'fl-local');
   }
-  assert.match(html, /menu\('facilityExportPdf', 'Document', \['new', 'open', 'undo', 'redo', 'reload', 'pdf', 'close'\]\)/);
+  assert.match(html, /menu\('packagingDocument', 'Document', \['new', 'open', 'undo', 'redo', 'reload', 'pdf', 'close'\]\)/);
 });
 
 test('backend interruption notice explains how to reveal the native menu while the document is inert', () => {

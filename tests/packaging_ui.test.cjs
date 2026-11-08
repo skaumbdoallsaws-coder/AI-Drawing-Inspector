@@ -18,6 +18,7 @@ before(async () => {
   THREE = await import(threeUrl);
   const boundsSource = sceneSource.replace("from 'three'", `from '${threeUrl}'`)
     .replace(/^import .* from 'three\/addons\/.*';$/gm, '')
+    .replace("import './cad_viewport.js'", `import '${pathToFileURL(path.join(root, 'static/cad_viewport.js')).href}'`)
     .replace("from './packaging.js'", `from '${uiUrl}'`);
   scene = await import('data:text/javascript;base64,' + Buffer.from(boundsSource).toString('base64'));
 });
@@ -99,7 +100,11 @@ test('changing display state never edits the design, document revision or undo h
 
 test('ribbon commands use local icons and carton edits preserve additive physical and appearance records', () => {
   assert.deepEqual(ui.PANEL_COMMANDS.map(command => command.id), ['product', 'carton', 'contents', 'arrange', 'appearance', 'graphics', 'validation', 'rates']);
-  for (const command of ui.PANEL_COMMANDS) assert.ok(fs.existsSync(path.join(root, 'static/assets/facility-layout-ribbon-icons/svg', command.icon + '.svg')));
+  for (const command of ui.PANEL_COMMANDS) {
+    assert.equal(command.icon, `packaging${command.label}`);
+    const asset = `static/assets/packaging-ribbon-icons/${command.id}-glossy-v1.png`;
+    assert.ok(fs.existsSync(path.join(root, asset)));
+  }
   const original = { ...ui.defaultCarton(), appearance: { color: '#909090', opacity: .8 },
     board_blank: { dimensions_m: [1, 2], quantity: 1, mass_per_area_kg_m2: .2, evidence: 'Supplier' } };
   const fields = { carton_name: 'Edited carton', inner_0: '400', inner_1: '300', inner_2: '250', outer_0: '410', outer_1: '310', outer_2: '260',
@@ -651,7 +656,13 @@ test('assets, icons, and Three imports stay local; server strings never enter HT
   const map = JSON.parse(html.match(/<script type="importmap">\s*([\s\S]+?)\s*<\/script>/)[1]);
   assert.equal(map.imports.three, '/static/vendor/three/0.184.0/build/three.module.min.js');
   for (const value of Object.values(map.imports)) assert.ok(fs.existsSync(path.join(root, value)));
-  for (const match of source.matchAll(/symbol:\s*'([^']+)'/g)) assert.ok(fs.existsSync(path.join(root, 'static/assets/facility-layout-ribbon-icons/svg', match[1] + '.svg')), match[1]);
+  for (const match of source.matchAll(/symbol:\s*'([^']+)'/g)) {
+    const name = match[1];
+    const asset = name.startsWith('packaging')
+      ? `static/assets/packaging-ribbon-icons/${name.slice('packaging'.length).toLowerCase()}-glossy-v1.png`
+      : `static/assets/facility-layout-ribbon-icons/svg/${name}.svg`;
+    assert.ok(fs.existsSync(path.join(root, asset)), name);
+  }
   assert.doesNotMatch(source + sceneSource, /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
   assert.doesNotMatch(html + source + sceneSource + css, /https?:\/\//);
   assert.doesNotMatch(css, /gradient\(/);

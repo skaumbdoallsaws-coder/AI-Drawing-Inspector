@@ -23,6 +23,8 @@ ALL_ICON_NAMES = {
     *TOP_COMMANDS.values(),
     "drawing.svg",
     "model_3d.svg",
+    "structure.svg",
+    "appearance_library.svg",
 }
 
 
@@ -50,7 +52,8 @@ def test_shell_commands_keep_stable_ids_and_use_premium_svg_assets() -> None:
 def test_shell_rail_keeps_navigation_targets_and_switches_theme_assets() -> None:
     source = _source()
 
-    for panel, filename in (("explorer", "drawing.svg"), ("model", "model_3d.svg")):
+    for panel, name, title in (("explorer", "drawing", "Drawing"), ("model", "model", "3D Model"),
+                               ("structure", "structure", "Structure"), ("library", "appearance", "Appearances")):
         item = re.search(
             rf'<div class="activity-bar-icon[^"]*" data-panel="{panel}"[^>]*>(.*?)</div>',
             source,
@@ -58,10 +61,37 @@ def test_shell_rail_keeps_navigation_targets_and_switches_theme_assets() -> None
         )
         assert item, f"missing activity rail target {panel}"
         markup = item.group(1)
-        assert f'/static/assets/shell-icons/dark/{filename}' in markup
-        assert f'/static/assets/shell-icons/light/{filename}' in markup
+        assert markup.count(f'/static/assets/sidebar-icons/{name}-dimensional-v1.png') == 2
+        assert f'<span class="activity-tooltip">{title}</span>' in markup
+        for theme in ("dark", "light"):
+            assert f'shell-rail-icon-image shell-rail-icon-{theme}' in markup
 
     assert 'querySelectorAll(\'.activity-bar-icon[data-panel]\')' in source
+
+
+def test_sidebar_assets_have_alpha_channels() -> None:
+    for name in ("drawing", "model", "structure", "appearance", "results", "sage", "browser"):
+        image = (ROOT / f"static/assets/sidebar-icons/{name}-dimensional-v1.png").read_bytes()
+        assert image[:8] == b"\x89PNG\r\n\x1a\n", name
+        assert image[12:16] == b"IHDR", name
+        assert image[25] == 6, f"{name} artwork must be RGBA, not an opaque background"
+
+
+def test_right_sidebar_preserves_commands_and_tooltips() -> None:
+    source = _source()
+    for command, name, title in (("rightRailResults", "results", "Results"), ("rightRailAgent", "sage", "Agent")):
+        button = re.search(rf'<div class="right-rail-icon[^"]*" id="{command}" title="{title}">(.*?)</div>', source, re.DOTALL)
+        assert button
+        assert f'/static/assets/sidebar-icons/{name}-dimensional-v1.png' in button.group(1)
+        assert f'<span class="right-rail-tooltip">{title}</span>' in button.group(1)
+        assert f"document.getElementById('{command}')" in source
+    assert re.search(r"\.right-rail-icon-image\s*\{[^}]*width:\s*24px;[^}]*height:\s*24px;", source, re.DOTALL)
+    preload = (ROOT / "desktop/src/application-preload.cjs").read_text(encoding="utf-8")
+    assert "/static/assets/sidebar-icons/browser-dimensional-v1.png" in preload
+    assert "width:22px;height:22px" in preload
+    assert re.search(r"button\.title\s*=\s*'Browser'", preload)
+    assert "tooltip.textContent = 'Browser'" in preload
+    assert "button.addEventListener('click', () => browserCommand({ action: 'toggle' }))" in preload
 
 
 def test_shell_icon_assets_are_crisp_flat_svgs_for_both_themes() -> None:

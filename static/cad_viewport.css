@@ -1,0 +1,40 @@
+/* Shared Assembly viewport tokens, also used by isolated 3D workflow frames. */
+:root, :root[data-theme="dark"] {
+  --viewport-bg: #22272F;
+  --viewport-bg-secondary: #1B1F26;
+  --viewport-bg-center: #1c232c;
+  --viewport-bg-mid: #2b333e;
+  --viewport-bg-edge: #343c47;
+  --viewport-bg-gradient: linear-gradient(180deg, var(--viewport-bg-edge) 0%, var(--viewport-bg-mid) 27%, var(--viewport-bg-center) 50%, var(--viewport-bg-mid) 73%, var(--viewport-bg-edge) 100%);
+}
+:root[data-theme="light"] {
+  --viewport-bg: #bbc5ce;
+  --viewport-bg-secondary: #aeb9c3;
+  --viewport-bg-center: #98a4af;
+  --viewport-bg-mid: #c4ced7;
+  --viewport-bg-edge: #f3f7fa;
+  --viewport-bg-gradient:
+    radial-gradient(ellipse at 50% 43%, rgba(68,82,96,0.28) 0%, rgba(105,120,134,0.16) 34%, rgba(255,255,255,0.00) 68%),
+    linear-gradient(180deg, var(--viewport-bg-edge) 0%, var(--viewport-bg-mid) 26%, var(--viewport-bg-center) 50%, var(--viewport-bg-mid) 74%, var(--viewport-bg-edge) 100%);
+}
+
+/* Screen-space orientation, intentionally separate from the model canvas/origin. */
+.orientation-gizmo,
+.viewport canvas.orientation-gizmo {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  width: 80px;
+  height: 80px;
+  z-index: 15;
+  pointer-events: none;
+  border-radius: 4px;
+  background: transparent !important;
+}
+.viewport canvas.orientation-gizmo { z-index: 2; }
+.diff-viewer-pane canvas.orientation-gizmo,
+.viewport-assembly canvas.orientation-gizmo,
+#three-container canvas.orientation-gizmo,
+#assy-3d-container canvas.orientation-gizmo {
+  background: transparent !important;
+}

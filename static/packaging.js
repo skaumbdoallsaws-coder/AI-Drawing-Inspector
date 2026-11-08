@@ -1,14 +1,14 @@
 export const ORIENTATION_ORDERS = [[0, 1, 2], [1, 0, 2], [1, 2, 0], [2, 1, 0], [2, 0, 1], [0, 2, 1]];
 export const ORIENTATION_LABELS = ['XYZ', 'YXZ', 'YZX', 'ZYX', 'ZXY', 'XZY'];
 export const PANEL_COMMANDS = [
-  { id: 'product', label: 'Product', icon: 'cube', group: 'editor-tabs' },
-  { id: 'carton', label: 'Carton', icon: 'bounding-box', group: 'editor-tabs' },
-  { id: 'contents', label: 'Contents', icon: 'stack', group: 'editor-tabs' },
-  { id: 'arrange', label: 'Arrange', icon: 'grid-four', group: 'editor-tabs' },
-  { id: 'appearance', label: 'Appearance', icon: 'sphere', group: 'editor-tabs' },
-  { id: 'graphics', label: 'Graphics', icon: 'rectangle', group: 'editor-tabs' },
-  { id: 'validation', label: 'Validation', icon: 'cube-focus', group: 'review-tabs' },
-  { id: 'rates', label: 'Rates', icon: 'navigation-arrow', group: 'review-tabs' },
+  { id: 'product', label: 'Product', icon: 'packagingProduct', group: 'editor-tabs' },
+  { id: 'carton', label: 'Carton', icon: 'packagingCarton', group: 'editor-tabs' },
+  { id: 'contents', label: 'Contents', icon: 'packagingContents', group: 'editor-tabs' },
+  { id: 'arrange', label: 'Arrange', icon: 'packagingArrange', group: 'editor-tabs' },
+  { id: 'appearance', label: 'Appearance', icon: 'packagingAppearance', group: 'editor-tabs' },
+  { id: 'graphics', label: 'Graphics', icon: 'packagingGraphics', group: 'editor-tabs' },
+  { id: 'validation', label: 'Validation', icon: 'packagingValidation', group: 'review-tabs' },
+  { id: 'rates', label: 'Rates', icon: 'packagingRates', group: 'review-tabs' },
 ];
 export const clone = value => structuredClone(value);
 export const mmToM = value => Number(value) / 1000;
@@ -393,7 +393,11 @@ function element(tag, text, className) {
 
 function icon(name) {
   const span = element('span', null, 'icon');
-  span.style.setProperty('--icon', `url('/static/assets/facility-layout-ribbon-icons/svg/${name}.svg')`);
+  if (/^packaging(Product|Carton|Contents|Arrange|Appearance|Graphics|Validation|Rates|Document|Undo|Redo|Save)$/.test(name)) {
+    span.classList.add('packaging-ribbon-icon');
+    span.dataset.packagingIcon = name.slice('packaging'.length).toLowerCase();
+  }
+  else span.style.setProperty('--icon', `url('/static/assets/facility-layout-ribbon-icons/svg/${name}.svg')`);
   span.setAttribute('aria-hidden', 'true');
   return span;
 }
@@ -821,11 +825,11 @@ function updateHeader() {
   const actions = $('document-actions'); actions.replaceChildren();
   actions.append(
     button('New', newDocument), button('Open', openDocuments),
-    button('Save', saveDocument, { symbol: 'floppy-disk', primary: true, disabled: state.busy || (!!doc && !hasDraft()) }),
-    button('Undo', () => historyAction('undo'), { symbol: 'arrow-u-up-left', compact: true, disabled: !state.formDirty && !draft.past.length && !doc?.can_undo }),
-    button('Redo', () => historyAction('redo'), { symbol: 'arrow-u-up-right', compact: true, disabled: state.formDirty || (!draft.future.length && (draft.dirty || !doc?.can_redo)) }),
+    button('Save', saveDocument, { symbol: 'packagingSave', primary: true, disabled: state.busy || (!!doc && !hasDraft()) }),
+    button('Undo', () => historyAction('undo'), { symbol: 'packagingUndo', compact: true, disabled: !state.formDirty && !draft.past.length && !doc?.can_undo }),
+    button('Redo', () => historyAction('redo'), { symbol: 'packagingRedo', compact: true, disabled: state.formDirty || (!draft.future.length && (draft.dirty || !doc?.can_redo)) }),
     button('Reload saved document', reloadDocument, { symbol: 'arrow-clockwise', compact: true, disabled: !doc }),
-    button('Download PDF', downloadPDF, { symbol: 'file-export', compact: true, disabled: !doc || hasDraft() })
+    button('Download PDF', downloadPDF, { symbol: 'packagingDocument', compact: true, disabled: !doc || hasDraft() })
   );
   [...actions.children].forEach((node, index) => { node.id = `document-${DOCUMENT_COMMANDS[index]}`; });
   if (state.busy || state.sage?.locked) for (const node of actions.querySelectorAll('button')) node.disabled = true;

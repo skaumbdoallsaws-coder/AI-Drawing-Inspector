@@ -8,6 +8,9 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/static/logo_192.png">
     <link rel="apple-touch-icon" href="/static/logo_192.png">
     <title>InspectorPro</title>
+    <link rel="stylesheet" href="/static/cad_viewport.css">
+    <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
+    <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
         // so the page never paints with the wrong theme tokens. Reads
@@ -82,12 +85,6 @@
             --severity-minor: #FFD600;
             --severity-info: #666666;
             /* viewport / 3D chrome */
-            --viewport-bg: #22272F;
-            --viewport-bg-secondary: #1B1F26;
-            --viewport-bg-center: #1c232c;
-            --viewport-bg-mid: #2b333e;
-            --viewport-bg-edge: #343c47;
-            --viewport-bg-gradient: linear-gradient(180deg, var(--viewport-bg-edge) 0%, var(--viewport-bg-mid) 27%, var(--viewport-bg-center) 50%, var(--viewport-bg-mid) 73%, var(--viewport-bg-edge) 100%);
             --viewport-frame: rgba(255,255,255,0.10);
             --overlay-bg: rgba(18,22,30,0.92);
             --overlay-border: rgba(255,255,255,0.10);
@@ -140,14 +137,6 @@
             --severity-minor: #d6a400;
             --severity-info: #707782;
             /* viewport */
-            --viewport-bg: #bbc5ce;
-            --viewport-bg-secondary: #aeb9c3;
-            --viewport-bg-center: #98a4af;
-            --viewport-bg-mid: #c4ced7;
-            --viewport-bg-edge: #f3f7fa;
-            --viewport-bg-gradient:
-                radial-gradient(ellipse at 50% 43%, rgba(68,82,96,0.28) 0%, rgba(105,120,134,0.16) 34%, rgba(255,255,255,0.00) 68%),
-                linear-gradient(180deg, var(--viewport-bg-edge) 0%, var(--viewport-bg-mid) 26%, var(--viewport-bg-center) 50%, var(--viewport-bg-mid) 74%, var(--viewport-bg-edge) 100%);
             --viewport-frame: #b8c2ca;
             --overlay-bg: rgba(245,248,250,0.92);
             --overlay-border: rgba(38,52,66,0.14);
@@ -199,12 +188,6 @@
             --severity-major: #FF6D00;
             --severity-minor: #FFD600;
             --severity-info: #666666;
-            --viewport-bg: #22272F;
-            --viewport-bg-secondary: #1B1F26;
-            --viewport-bg-center: #1c232c;
-            --viewport-bg-mid: #2b333e;
-            --viewport-bg-edge: #343c47;
-            --viewport-bg-gradient: linear-gradient(180deg, var(--viewport-bg-edge) 0%, var(--viewport-bg-mid) 27%, var(--viewport-bg-center) 50%, var(--viewport-bg-mid) 73%, var(--viewport-bg-edge) 100%);
             --viewport-frame: rgba(255,255,255,0.10);
             --overlay-bg: rgba(18,22,30,0.92);
             --overlay-border: rgba(255,255,255,0.10);
@@ -622,6 +605,15 @@
         .right-rail-icon svg {
             width: 24px;
             height: 24px;
+        }
+        .right-rail-icon-image {
+            width: 24px;
+            height: 24px;
+            display: block;
+            object-fit: contain;
+            pointer-events: none;
+            user-select: none;
+            -webkit-user-drag: none;
         }
         .right-rail-icon .right-rail-tooltip {
             display: none;
@@ -4859,23 +4851,6 @@
         }
 
         /* Orientation Gizmo — corner axis overlay for 3D viewports */
-        .orientation-gizmo {
-            position: absolute;
-            bottom: 12px;
-            left: 12px;
-            width: 80px;
-            height: 80px;
-            z-index: 15;
-            pointer-events: none;
-            border-radius: 4px;
-            background: transparent !important;
-        }
-        .diff-viewer-pane canvas.orientation-gizmo,
-        .viewport-assembly canvas.orientation-gizmo,
-        #three-container canvas.orientation-gizmo,
-        #assy-3d-container canvas.orientation-gizmo {
-            background: transparent !important;
-        }
 
         /* Window Control Buttons — minimize, maximize, close */
         .window-controls {
@@ -5321,6 +5296,30 @@
             height: var(--ribbon-btn-h);
         }
 
+        /* Keep Packaging's 32px artwork and readable labels inside the existing band. */
+        .packaging-ribbon-commandbar .documentation-ribbon-command.is-medium {
+            position: relative;
+            gap: 1px;
+            padding: 0 4px;
+        }
+        .packaging-ribbon-commandbar .documentation-ribbon-command .documentation-command-label {
+            flex-shrink: 0;
+            font-size: 10px;
+            line-height: 13px;
+            font-weight: 500;
+            letter-spacing: 0;
+        }
+        .packaging-ribbon-commandbar .documentation-ribbon-command.is-compact {
+            height: 22px;
+            min-height: 22px;
+        }
+        .packaging-ribbon-commandbar .documentation-ribbon-menu-trigger.is-medium::after {
+            position: absolute;
+            top: 29px;
+            right: 3px;
+            margin: 0;
+        }
+
         /* ---- Ribbon density: .ribbon-btn (Usage, findings, training) -------
            Process Map builds on this system too and overrides the icon box
            further down the file; its sizes are tokenised at that rule.      */
@@ -5370,9 +5369,8 @@
         .facility-overflow-section + .facility-overflow-section {
             border-top: 1px solid #e1e6ea;
         }
-        /* The full ribbon needs about 1700px (the workflow selector plus every group). With Sage's pane open the
-           shell is about 1550px wide, so Patterns, Cells and Stack go to More first; Save and More stay in view. */
-        @container facility-ribbon (max-width: 1710px) {
+        /* Hide whole groups at measured widths; their existing commands remain in More. */
+        @container facility-ribbon (max-width: 1400px) {
             [data-facility-ribbon-group="build"],
             [data-facility-separator-for="build"] {
                 display: none !important;
@@ -5381,7 +5379,7 @@
                 display: block;
             }
         }
-        @container facility-ribbon (max-width: 1500px) {
+        @container facility-ribbon (max-width: 1160px) {
             [data-facility-ribbon-group="surfaces"],
             [data-facility-separator-for="surfaces"],
             [data-facility-ribbon-group="build"],
@@ -5393,7 +5391,7 @@
                 display: block;
             }
         }
-        @container facility-ribbon (max-width: 1380px) {
+        @container facility-ribbon (max-width: 960px) {
             .facility-ribbon-shell .facility-workflow-selector {
                 width: 244px;
                 min-width: 244px;
@@ -5414,7 +5412,7 @@
                 display: block;
             }
         }
-        @container facility-ribbon (max-width: 1120px) {
+        @container facility-ribbon (max-width: 820px) {
             [data-facility-ribbon-group="create"],
             [data-facility-separator-for="create"] {
                 display: none !important;
@@ -5423,7 +5421,7 @@
                 display: block;
             }
         }
-        @container facility-ribbon (max-width: 820px) {
+        @container facility-ribbon (max-width: 600px) {
             .facility-ribbon-shell .facility-workflow-selector {
                 width: 210px;
                 min-width: 210px;
@@ -20763,6 +20761,8 @@
         }
     }
     </script>
+    <link rel="stylesheet" href="/static/facility_ribbon_icons.css">
+    <script src="/static/facility_ribbon_icons.js"></script>
 </head>
 <body>
     <svg width="0" height="0" style="position:absolute;left:-9999px;overflow:hidden" aria-hidden="true" focusable="false">
@@ -21048,29 +21048,29 @@
             <div class="activity-bar" id="activityBar">
                 <div class="activity-bar-icon active" data-panel="explorer" title="Drawing">
                     <span class="shell-rail-icon" aria-hidden="true">
-                        <img class="shell-rail-icon-image shell-rail-icon-dark" src="/static/assets/shell-icons/dark/drawing.svg" alt="" draggable="false">
-                        <img class="shell-rail-icon-image shell-rail-icon-light" src="/static/assets/shell-icons/light/drawing.svg" alt="" draggable="false">
+                        <img class="shell-rail-icon-image shell-rail-icon-dark" src="/static/assets/sidebar-icons/drawing-dimensional-v1.png" alt="" draggable="false">
+                        <img class="shell-rail-icon-image shell-rail-icon-light" src="/static/assets/sidebar-icons/drawing-dimensional-v1.png" alt="" draggable="false">
                     </span>
                     <span class="activity-tooltip">Drawing</span>
                 </div>
                 <div class="activity-bar-icon" data-panel="model" title="3D Model">
                     <span class="shell-rail-icon" aria-hidden="true">
-                        <img class="shell-rail-icon-image shell-rail-icon-dark" src="/static/assets/shell-icons/dark/model_3d.svg" alt="" draggable="false">
-                        <img class="shell-rail-icon-image shell-rail-icon-light" src="/static/assets/shell-icons/light/model_3d.svg" alt="" draggable="false">
+                        <img class="shell-rail-icon-image shell-rail-icon-dark" src="/static/assets/sidebar-icons/model-dimensional-v1.png" alt="" draggable="false">
+                        <img class="shell-rail-icon-image shell-rail-icon-light" src="/static/assets/sidebar-icons/model-dimensional-v1.png" alt="" draggable="false">
                     </span>
                     <span class="activity-tooltip">3D Model</span>
                 </div>
                 <div class="activity-bar-icon" data-panel="structure" title="Structure">
                     <span class="shell-rail-icon" aria-hidden="true">
-                        <img class="shell-rail-icon-image shell-rail-icon-dark" src="/static/assets/shell-icons/dark/structure.svg" alt="" draggable="false">
-                        <img class="shell-rail-icon-image shell-rail-icon-light" src="/static/assets/shell-icons/light/structure.svg" alt="" draggable="false">
+                        <img class="shell-rail-icon-image shell-rail-icon-dark" src="/static/assets/sidebar-icons/structure-dimensional-v1.png" alt="" draggable="false">
+                        <img class="shell-rail-icon-image shell-rail-icon-light" src="/static/assets/sidebar-icons/structure-dimensional-v1.png" alt="" draggable="false">
                     </span>
                     <span class="activity-tooltip">Structure</span>
                 </div>
                 <div class="activity-bar-icon" data-panel="library" title="Appearances, Scenes and Decals">
                     <span class="shell-rail-icon" aria-hidden="true">
-                        <img class="shell-rail-icon-image shell-rail-icon-dark" src="/static/assets/shell-icons/dark/appearance_library.svg" alt="" draggable="false">
-                        <img class="shell-rail-icon-image shell-rail-icon-light" src="/static/assets/shell-icons/light/appearance_library.svg" alt="" draggable="false">
+                        <img class="shell-rail-icon-image shell-rail-icon-dark" src="/static/assets/sidebar-icons/appearance-dimensional-v1.png" alt="" draggable="false">
+                        <img class="shell-rail-icon-image shell-rail-icon-light" src="/static/assets/sidebar-icons/appearance-dimensional-v1.png" alt="" draggable="false">
                     </span>
                     <span class="activity-tooltip">Appearances</span>
                 </div>
@@ -21532,28 +21532,11 @@
             <!-- Right Activity Rail -->
             <div class="right-activity-rail" id="rightActivityRail">
                 <div class="right-rail-icon" id="rightRailResults" title="Results">
-                    <svg viewBox="0 0 96 96" aria-hidden="true">
-                        <rect x="12" y="10" width="66" height="72" rx="2" fill="#FFFFFF" stroke="#2A2A2A" stroke-width="1.5"/>
-                        <rect x="12" y="10" width="66" height="13" rx="2" fill="#1E88E5" stroke="#2A2A2A" stroke-width="1.3"/>
-                        <rect x="12" y="18" width="66" height="5" fill="#1E88E5"/>
-                        <rect x="18" y="30" width="10" height="10" rx="1.5" fill="#33AADD" stroke="#2A2A2A" stroke-width="1"/>
-                        <line x1="34" y1="35" x2="68" y2="35" stroke="#B0B0B0" stroke-width="2" stroke-linecap="round"/>
-                        <rect x="18" y="46" width="10" height="10" rx="1.5" fill="#33AADD" stroke="#2A2A2A" stroke-width="1"/>
-                        <line x1="34" y1="51" x2="68" y2="51" stroke="#B0B0B0" stroke-width="2" stroke-linecap="round"/>
-                        <rect x="18" y="62" width="10" height="10" rx="1.5" fill="#33AADD" stroke="#2A2A2A" stroke-width="1"/>
-                        <line x1="34" y1="67" x2="58" y2="67" stroke="#B0B0B0" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
+                    <img class="right-rail-icon-image" src="/static/assets/sidebar-icons/results-dimensional-v1.png" alt="" draggable="false">
                     <span class="right-rail-tooltip">Results</span>
                 </div>
                 <div class="right-rail-icon active" id="rightRailAgent" title="Agent">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <g stroke-width="0.85" stroke-linejoin="round" stroke-linecap="round">
-                            <path d="M7.1 18.7v-2.1A3.7 3.7 0 0 1 10.8 13h2.4a3.7 3.7 0 0 1 3.7 3.6v2.1" fill="#4A5E73" stroke="#A6BACD"/>
-                            <circle cx="12" cy="8.5" r="3.1" fill="#D8A766" stroke="#E7C183"/>
-                            <path d="M8.5 8.6h.01M15.5 8.6h.01" stroke="#334150" stroke-width="1.1"/>
-                            <path d="M10.2 11.1c.5.35 1.03.52 1.8.52s1.3-.17 1.8-.52" stroke="#334150" stroke-width="0.7" fill="none"/>
-                        </g>
-                    </svg>
+                    <img class="right-rail-icon-image" src="/static/assets/sidebar-icons/sage-dimensional-v1.png" alt="" draggable="false">
                     <span class="right-rail-tooltip">Agent</span>
                 </div>
             </div>
@@ -28014,84 +27997,7 @@
 
         // Orientation Gizmo — camera-synced XYZ axis overlay for 3D viewports
         function createOrientationGizmo(container) {
-            const size = 80;
-            const canvas = document.createElement('canvas');
-            canvas.className = 'orientation-gizmo';
-            canvas.width = size * 2;  // retina
-            canvas.height = size * 2;
-            canvas.style.width = size + 'px';
-            canvas.style.height = size + 'px';
-            container.appendChild(canvas);
-
-            const gizmoScene = new THREE.Scene();
-            const gizmoCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
-            gizmoCamera.position.set(0, 0, 3);
-            const gizmoRenderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-            gizmoRenderer.setClearColor(0x000000, 0);
-            gizmoRenderer.setSize(size * 2, size * 2);
-            gizmoRenderer.setPixelRatio(1);
-
-            // Create axis lines
-            const axisLen = 0.8;
-            const axes = new THREE.Group();
-
-            // X axis — Red
-            const xGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(axisLen,0,0)]);
-            axes.add(new THREE.Line(xGeo, new THREE.LineBasicMaterial({ color: 0xff4444, linewidth: 2 })));
-
-            // Y axis — Green
-            const yGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,axisLen,0)]);
-            axes.add(new THREE.Line(yGeo, new THREE.LineBasicMaterial({ color: 0x44ff44, linewidth: 2 })));
-
-            // Z axis — Blue
-            const zGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,axisLen)]);
-            axes.add(new THREE.Line(zGeo, new THREE.LineBasicMaterial({ color: 0x4488ff, linewidth: 2 })));
-
-            // Axis labels using sprites
-            function makeLabel(text, color, pos) {
-                const c = document.createElement('canvas');
-                c.width = 64; c.height = 64;
-                const ctx = c.getContext('2d');
-                ctx.font = 'bold 40px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillStyle = color;
-                ctx.fillText(text, 32, 32);
-                const tex = new THREE.CanvasTexture(c);
-                const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
-                const sprite = new THREE.Sprite(mat);
-                sprite.position.copy(pos);
-                sprite.scale.set(0.3, 0.3, 0.3);
-                return sprite;
-            }
-
-            axes.add(makeLabel('X', '#ff4444', new THREE.Vector3(axisLen + 0.15, 0, 0)));
-            axes.add(makeLabel('Y', '#44ff44', new THREE.Vector3(0, axisLen + 0.15, 0)));
-            axes.add(makeLabel('Z', '#4488ff', new THREE.Vector3(0, 0, axisLen + 0.15)));
-
-            // Center sphere
-            const centerGeo = new THREE.SphereGeometry(0.06, 12, 12);
-            const centerMat = new THREE.MeshBasicMaterial({ color: 0x888888 });
-            axes.add(new THREE.Mesh(centerGeo, centerMat));
-
-            gizmoScene.add(axes);
-
-            return {
-                canvas,
-                update(mainCamera) {
-                    // Sync gizmo camera orientation with main camera
-                    const dir = new THREE.Vector3();
-                    mainCamera.getWorldDirection(dir);
-                    gizmoCamera.position.copy(dir.multiplyScalar(-3));
-                    gizmoCamera.lookAt(0, 0, 0);
-                    gizmoCamera.up.copy(mainCamera.up);
-                    gizmoRenderer.render(gizmoScene, gizmoCamera);
-                },
-                dispose() {
-                    gizmoRenderer.dispose();
-                    if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
-                }
-            };
+            return InspectorProCadViewport.createOrientationGizmo(THREE, container);
         }
 
         // Contextual Ribbon — renders tab-specific command groups
@@ -45698,6 +45604,12 @@
 
         function _documentationCommandIcon(icon) {
             const wrap = document.createElement('span');
+            if (/^packaging(Product|Carton|Contents|Arrange|Appearance|Graphics|Validation|Rates|Document|Undo|Redo|Save)$/.test(icon)) {
+                wrap.className = 'documentation-system-icon packaging-ribbon-icon';
+                wrap.dataset.packagingIcon = icon.slice('packaging'.length).toLowerCase();
+                wrap.setAttribute('aria-hidden', 'true');
+                return wrap;
+            }
             if (DOCUMENTATION_PREMIUM_ICONS.has(icon)) {
                 wrap.className = 'documentation-command-icon premium';
                 wrap.dataset.documentationIcon = icon;
@@ -46884,6 +46796,8 @@
             );
             button.classList.add('facility-ribbon-command');
             button.setAttribute('data-facility-ribbon-command', command);
+            FacilityRibbonIcons.apply(button, command, Boolean(options.compact));
+            if (options.iconOnly) button.classList.add('facility-icon-only');
             return button;
         }
 
@@ -46908,10 +46822,12 @@
             const trigger = wrap.querySelector('.documentation-ribbon-menu-trigger');
             trigger.classList.add('facility-ribbon-menu-trigger');
             trigger.dataset.facilityCommandMenu = commands.join(',');
+            FacilityRibbonIcons.apply(trigger, iconCommand, Boolean(options.compact));
             wrap.querySelectorAll('.documentation-menu-item').forEach((button, index) => {
                 const command = commands[index];
                 button.classList.add('facility-ribbon-command');
                 button.setAttribute('data-facility-ribbon-command', command);
+                FacilityRibbonIcons.apply(button, command, true);
             });
             return wrap;
         }
@@ -46935,6 +46851,7 @@
             if (command) {
                 proxy.classList.add('facility-ribbon-command');
                 proxy.setAttribute('data-facility-ribbon-command', command);
+                FacilityRibbonIcons.apply(proxy, command, true);
             }
             return proxy;
         }
@@ -46973,6 +46890,7 @@
                 });
                 item.classList.add('facility-ribbon-command');
                 item.setAttribute('data-facility-ribbon-command', command);
+                FacilityRibbonIcons.apply(item, command, true);
                 section.appendChild(item);
             });
             return section;
@@ -46997,11 +46915,12 @@
             trigger.setAttribute('aria-expanded', 'false');
             const menu = document.createElement('div');
             menu.className = 'documentation-ribbon-menu facility-ribbon-overflow-menu right-aligned';
+            FacilityRibbonIcons.apply(trigger, 'more', true);
             menu.setAttribute('role', 'menu');
             menu.setAttribute('data-ribbon-dropdown', 'true');
             const content = document.createElement('div');
             content.className = 'documentation-menu-items';
-            ['selection', 'create', 'edit', 'surfaces', 'position', 'build', 'history']
+            ['selection', 'create', 'edit', 'surfaces', 'position', 'build', 'history', 'layout']
                 .forEach(key => {
                     const entry = groups.get(key);
                     if (entry) content.appendChild(
@@ -47135,6 +47054,14 @@
                 groups.set(key, { key, label, group });
                 return group;
             };
+            const iconGrid = commands => {
+                const grid = document.createElement('div');
+                grid.className = 'facility-ribbon-icon-grid';
+                commands.forEach(command => grid.appendChild(_trainFacilityRibbonButton(
+                    command, { compact: true, size: 'compact', iconOnly: true }
+                )));
+                return grid;
+            };
 
             // Select and Pan live in the plan viewport's heads-up toolbar, which
             // is always on screen and reaches the same executeCommand path. A
@@ -47146,23 +47073,22 @@
                     { size: 'medium' }
                 ),
                 _trainFacilityRibbonButton('aisle', { size: 'medium' }),
-                _trainFacilityRibbonButton('floor-marking', { size: 'medium' }),
-                _trainFacilityRibbonButton('motion-path', { size: 'medium' }),
+                _documentationRibbonStack([
+                    _trainFacilityRibbonButton('floor-marking', { compact: true, size: 'compact' }),
+                    _trainFacilityRibbonButton('motion-path', { compact: true, size: 'compact' }),
+                ]),
             ]);
             appendGroup('edit', 'Edit', [
-                _documentationRibbonStack([
-                    _trainFacilityRibbonButton('rotate', { compact: true, size: 'compact' }),
-                    _trainFacilityRibbonButton('duplicate', { compact: true, size: 'compact' }),
-                    _trainFacilityRibbonButton('delete', { compact: true, size: 'compact' }),
-                ]),
-                _trainFacilityRibbonButton('lock', { size: 'medium' }),
-                _trainFacilityRibbonMenu('appearance', 'Appearance', 'Edit object and component finishes',
-                    ['appearance', 'component-materials'], { size: 'medium' }),
-                _trainFacilityRibbonButton('replace-asset', { size: 'medium' }),
+                iconGrid(['rotate', 'duplicate', 'delete', 'lock']),
             ]);
             appendGroup('surfaces', 'Surfaces', [
-                _trainFacilityRibbonMenu('decals', 'Wall Art', 'Add artwork and lettering',
-                    ['decals', 'lettering'], { size: 'medium' }),
+                _trainFacilityRibbonMenu('appearance', 'Appearance', 'Edit object and component finishes',
+                    ['appearance', 'component-materials'], { size: 'medium' }),
+                _documentationRibbonStack([
+                    _trainFacilityRibbonButton('replace-asset', { compact: true, size: 'compact' }),
+                    _trainFacilityRibbonMenu('decals', 'Wall Art', 'Add artwork and lettering',
+                        ['decals', 'lettering'], { compact: true, size: 'compact' }),
+                ]),
                 _trainFacilityRibbonMenu('interior-walls', 'Walls / Floors',
                     'Edit partitions, columns and floor finishes, or trace a DXF floor plan',
                     ['interior-walls', 'floor-surfaces', 'floor-plan', 'columns'], { size: 'medium' }),
@@ -47192,11 +47118,7 @@
                 ),
             ]);
             appendGroup('history', 'History', [
-                _documentationRibbonStack([
-                    _trainFacilityRibbonButton('undo', { compact: true, size: 'compact' }),
-                    _trainFacilityRibbonButton('redo', { compact: true, size: 'compact' }),
-                    _trainFacilityRibbonButton('fit', { compact: true, size: 'compact' }),
-                ]),
+                iconGrid(['undo', 'redo', 'fit']),
             ]);
             appendGroup('layout', 'Layout', [
                 _trainFacilityRibbonButton('auto-arrange', { size: 'medium' }),
@@ -48236,23 +48158,23 @@
             const bar = document.createElement('div');
             bar.className = 'documentation-ribbon-commandbar packaging-ribbon-commandbar';
             const definitions = {
-                product: ['3dmodel', 'Product', 'Product'],
-                carton: ['facilityAlign', 'Carton', 'Carton'],
-                contents: ['facilityVerticalStack', 'Contents', 'Contents'],
-                arrange: ['facilityAutoArrange', 'Arrange', 'Arrange'],
-                appearance: ['facilityAppearance', 'Appearance', 'Appearance'],
-                graphics: ['facilityDecals', 'Graphics', 'Graphics'],
-                validation: ['facilityFit', 'Validation', 'Validation'],
-                rates: ['facilityFloorMarking', 'Rates', 'Rates'],
-                new: ['properties', 'New', 'New packaging document'],
-                open: ['facilityExportPdf', 'Open', 'Open packaging document'],
-                save: ['facilitySave', 'Save', 'Save packaging document'],
-                undo: ['facilityUndo', 'Undo', 'Undo packaging change'],
-                redo: ['facilityRedo', 'Redo', 'Redo packaging change'],
+                product: ['packagingProduct', 'Product', 'Product'],
+                carton: ['packagingCarton', 'Carton', 'Carton'],
+                contents: ['packagingContents', 'Contents', 'Contents'],
+                arrange: ['packagingArrange', 'Arrange', 'Arrange'],
+                appearance: ['packagingAppearance', 'Appearance', 'Appearance'],
+                graphics: ['packagingGraphics', 'Graphics', 'Graphics'],
+                validation: ['packagingValidation', 'Validation', 'Validation'],
+                rates: ['packagingRates', 'Rates', 'Rates'],
+                new: ['packagingDocument', 'New', 'New packaging document'],
+                open: ['packagingDocument', 'Open', 'Open packaging document'],
+                save: ['packagingSave', 'Save', 'Save packaging document'],
+                undo: ['packagingUndo', 'Undo', 'Undo packaging change'],
+                redo: ['packagingRedo', 'Redo', 'Redo packaging change'],
                 reload: ['facilityRotate', 'Reload', 'Reload saved packaging document'],
-                pdf: ['facilityExportPdf', 'Export PDF', 'Download packaging review PDF'],
+                pdf: ['packagingDocument', 'Export PDF', 'Download packaging review PDF'],
                 resume: ['facilityLock', 'Resume', 'Resume packaging editing'],
-                close: ['facilityExportPdf', 'Close Packaging', 'Close Packaging & Shipping'],
+                close: ['packagingDocument', 'Close Packaging', 'Close Packaging & Shipping'],
             };
             const panels = ['product', 'carton', 'contents', 'arrange', 'appearance', 'graphics', 'validation', 'rates'];
             const tag = (node, id) => {
@@ -48282,9 +48204,9 @@
             _documentationAppendRibbonGroup(bar, 'Design', panels.slice(0, 4).map(id => command(id)));
             _documentationAppendRibbonGroup(bar, 'Finish', panels.slice(4, 6).map(id => command(id)));
             _documentationAppendRibbonGroup(bar, 'Review', panels.slice(6).map(id => command(id)));
-            _documentationAppendRibbonGroup(bar, 'More', [menu('facilityAutoArrange', 'More', panels.slice(3))]);
+            _documentationAppendRibbonGroup(bar, 'More', [menu('packagingArrange', 'More', panels.slice(3))]);
             _documentationAppendRibbonGroup(bar, 'Document', [
-                menu('facilityExportPdf', 'Document', ['new', 'open', 'undo', 'redo', 'reload', 'pdf', 'close']),
+                menu('packagingDocument', 'Document', ['new', 'open', 'undo', 'redo', 'reload', 'pdf', 'close']),
                 _documentationRibbonStack([command('undo', true), command('redo', true)]),
                 command('save'), command('resume'),
             ]);
@@ -63524,67 +63446,8 @@
             const t = document.documentElement.getAttribute('data-theme');
             return new THREE.Color(t === 'light' ? '#c9d2da' : '#22272F');
         }
-        function _themeCssColorToken(name, fallback) {
-            try {
-                const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-                if (v) return v;
-            } catch (_) {}
-            return fallback;
-        }
         function _makeCadViewportBackgroundTexture(threeRuntime = THREE) {
-            if (typeof document === 'undefined' || !threeRuntime || typeof threeRuntime.CanvasTexture !== 'function') {
-                const color = _themeViewportBgColor();
-                return threeRuntime && typeof threeRuntime.Color === 'function'
-                    ? new threeRuntime.Color(color.getHex()) : color;
-            }
-            const canvas = document.createElement('canvas');
-            canvas.width = 1024;
-            canvas.height = 768;
-            const ctx = canvas.getContext('2d');
-            const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-            const center = _themeCssColorToken('--viewport-bg-center', isLight ? '#98a4af' : '#1c232c');
-            const mid = _themeCssColorToken('--viewport-bg-mid', isLight ? '#c4ced7' : '#2b333e');
-            const edge = _themeCssColorToken('--viewport-bg-edge', isLight ? '#f3f7fa' : '#343c47');
-
-            const band = ctx.createLinearGradient(0, 0, 0, canvas.height);
-            band.addColorStop(0.00, edge);
-            band.addColorStop(0.27, mid);
-            band.addColorStop(0.50, center);
-            band.addColorStop(0.73, mid);
-            band.addColorStop(1.00, edge);
-            ctx.fillStyle = band;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            // Keep the side fields clean and brighter while the center
-            // band stays slightly darker, matching the SolidWorks studio
-            // feel without changing InspectorPro's viewport colour family.
-            const wash = ctx.createLinearGradient(0, 0, canvas.width, 0);
-            wash.addColorStop(0.00, isLight ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.04)');
-            wash.addColorStop(0.50, 'rgba(255,255,255,0.00)');
-            wash.addColorStop(1.00, isLight ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.04)');
-            ctx.fillStyle = wash;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            if (isLight) {
-                const centerFalloff = ctx.createRadialGradient(
-                    canvas.width * 0.50, canvas.height * 0.43, canvas.width * 0.05,
-                    canvas.width * 0.50, canvas.height * 0.43, canvas.width * 0.55
-                );
-                centerFalloff.addColorStop(0.00, 'rgba(54,68,82,0.24)');
-                centerFalloff.addColorStop(0.36, 'rgba(84,100,116,0.14)');
-                centerFalloff.addColorStop(0.72, 'rgba(255,255,255,0.00)');
-                ctx.fillStyle = centerFalloff;
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-            }
-
-            const tex = new threeRuntime.CanvasTexture(canvas);
-            if (threeRuntime.SRGBColorSpace !== undefined) {
-                tex.colorSpace = threeRuntime.SRGBColorSpace;
-            } else if (threeRuntime.sRGBEncoding !== undefined) {
-                tex.encoding = threeRuntime.sRGBEncoding;
-            }
-            tex.needsUpdate = true;
-            return tex;
+            return InspectorProCadViewport.createBackgroundTexture(threeRuntime, document);
         }
         function _applyCadViewportBackground(scene) {
             if (!scene) return;

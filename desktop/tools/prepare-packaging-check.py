@@ -29,6 +29,8 @@ def main():
     parser.add_argument('--dependencies', type=Path, required=True)
     parser.add_argument('--geometry-python', type=Path, required=True)
     parser.add_argument('--step-source', type=Path, required=True)
+    parser.add_argument('--ribbon-only', action='store_true', help='Verify ribbon presentation without creating documents')
+    parser.add_argument('--facility-ribbon-only', action='store_true', help='Verify Facility ribbon using disposable geometry only')
     parser.add_argument('--withhold', action='append', choices=sorted(WITHHELD), default=[])
     parser.add_argument('--expect-missing', action='append', choices=['arrangement', 'pdf_report', 'step_worker'], default=[])
     parser.add_argument('--remove', choices=PACKAGES)
@@ -72,6 +74,8 @@ def main():
     (output / 'profile.json').write_text(json.dumps(profile, indent=2), encoding='utf-8')
     (Path(stores['dataRoot']) / 'packaging-check.json').write_text(json.dumps({
         'disposable': True, 'stepSource': str(args.step_source.resolve()), 'store': stores['dataRoot'],
+        'ribbonOnly': args.ribbon_only,
+        'facilityRibbonOnly': args.facility_ribbon_only,
         'expectMissing': sorted(set(args.expect_missing)),
         'expectUnavailable': 'package:' + args.remove if args.remove else 'step-python' if args.unusable_step_python else None,
     }), encoding='utf-8')

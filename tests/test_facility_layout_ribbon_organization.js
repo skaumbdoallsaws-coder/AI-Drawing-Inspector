@@ -34,9 +34,9 @@ const facilityCss = index.slice(facilityCssStart, facilityCssEnd);
 assert.ok(facilityCss.includes('overflow: visible;'));
 assert.ok(!facilityCss.includes('overflow-x: auto'));
 assert.ok(index.includes('container-name: facility-ribbon'));
-assert.ok(index.includes('@container facility-ribbon (max-width: 1710px)'));
-assert.ok(index.includes('@container facility-ribbon (max-width: 1500px)'));
-assert.ok(index.includes('@container facility-ribbon (max-width: 1120px)'));
+assert.ok(index.includes('@container facility-ribbon (max-width: 1400px)'));
+assert.ok(index.includes('@container facility-ribbon (max-width: 1160px)'));
+assert.ok(index.includes('@container facility-ribbon (max-width: 820px)'));
 assert.ok(index.includes("facilityQuery.get('facilityAssets') === '1'"));
 assert.ok(index.includes('appInstance.workspace.openAssetBrowser()'));
 
@@ -69,4 +69,4 @@ assert.ok(index.includes('appInstance.workspace.openAssetBrowser()'));
 console.log(`Facility ribbon organization: ${commandIds.length} commands remain reachable`);
 assert.ok(index.includes('[data-facility-ribbon-group="surfaces"]'));
 assert.ok(index.includes('[data-overflow-group="surfaces"]'));
-assert.ok(index.includes("['selection', 'create', 'edit', 'surfaces', 'position', 'build', 'history']"));
+assert.ok(index.includes("['selection', 'create', 'edit', 'surfaces', 'position', 'build', 'history', 'layout']"));

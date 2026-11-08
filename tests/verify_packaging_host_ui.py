@@ -79,7 +79,7 @@ def verify(url: str, output: Path, preview_document: str | None = None):
             page.set_viewport_size({"width": 1600, "height": 1000})
             for mode in ["Shaded with edges", "Wireframe"]:
                 frame.get_by_role("button", name=mode, exact=True).click()
-                frame.locator("#viewport canvas").screenshot(path=str(output / f"{mode}.png"))
+                frame.locator("#viewport canvas.packaging-model-canvas").screenshot(path=str(output / f"{mode}.png"))
             shaded = Image.open(output / "Shaded with edges.png").convert("RGB")
             wire = Image.open(output / "Wireframe.png").convert("RGB")
             assert max(ImageStat.Stat(shaded).stddev) > 3, "Blank 3D viewport"

@@ -4942,6 +4942,51 @@ async function main() {
             };
             const data = fixture({ planPreferenceStorage: storage });
             const layoutBefore = clone(data.session.getState().layout);
+            const planCommands = ['select', 'pan', 'zoom-out', 'zoom-in',
+                'fit-facility', 'fit-layout', 'reset-view', 'grid', 'snap',
+                'layers', 'unit'];
+            assert.deepStrictEqual(
+                data.workspace.planNavigation.children.map(button =>
+                    button.getAttribute('data-plan-command')),
+                planCommands
+            );
+            planCommands.forEach(command => {
+                const button = data.workspace.planNavigation.querySelector(
+                    '[data-plan-command="' + command + '"]'
+                );
+                assert.ok(button.getAttribute('title'));
+                assert.ok(button.getAttribute('aria-label'));
+                if (command === 'unit') {
+                    assert.equal(button.getAttribute('data-icon-source'), 'text');
+                    assert.equal(button.querySelector('img'), null);
+                } else {
+                    assert.equal(button.getAttribute('data-icon-source'), 'facility-dimensional');
+                    assert.equal(button.querySelector('img').getAttribute('src'),
+                        '/static/assets/facility-viewport-icons/' + command + '.svg');
+                    const threeButton = data.workspace.threeNavigation.querySelector(
+                        '[data-three-command="' + command + '"]'
+                    );
+                    if (threeButton) assert.equal(
+                        threeButton.querySelector('img').getAttribute('src'),
+                        button.querySelector('img').getAttribute('src')
+                    );
+                }
+            });
+            ['pan', 'select'].forEach(command => {
+                const button = data.workspace.planNavigation.querySelector(
+                    '[data-plan-command="' + command + '"]'
+                );
+                button.dispatch('click');
+                assert.equal(data.workspace.toolMode, command);
+                assert.equal(button.getAttribute('aria-pressed'), 'true');
+            });
+            ['fit-facility', 'fit-layout', 'reset-view'].forEach(command =>
+                data.workspace.planNavigation.querySelector(
+                    '[data-plan-command="' + command + '"]'
+                ).dispatch('click')
+            );
+            assert.equal(data.top.fitFacilityCount, 2);
+            assert.equal(data.top.fitLayoutCount, 1);
             assert.ok(data.workspace.planTopRuler.children.length > 0);
             assert.ok(data.workspace.planLeftRuler.children.length > 0);
             assert.strictEqual(data.workspace.planScaleLabel.textContent, '5 m');
@@ -5164,10 +5209,15 @@ async function main() {
                     assert.ok(icon);
                     const source = icon.getAttribute('src');
                     assert.ok(source.endsWith('/view-iso.png'));
+                } else if (commandName === 'appearance') {
+                    assert.ok(icon.getAttribute('src').endsWith('/appearance-glossy-v1.png'));
+                    assert.equal(button.getAttribute('data-icon-source'), 'facility-dimensional');
                 } else {
                     assert.ok(icon);
                     const source = icon.getAttribute('src');
                     assert.ok(source.endsWith('.svg'));
+                    assert.ok(source.includes('/facility-viewport-icons/'));
+                    assert.equal(button.getAttribute('data-icon-source'), 'facility-dimensional');
                 }
                 assert.ok(button.getAttribute('title'));
             });

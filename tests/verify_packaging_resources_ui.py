@@ -146,7 +146,7 @@ def verify(url: str, output: Path):
             page.get_by_role("button", name="Top", exact=True).click()
             expect(page.locator("#scene-message")).to_have_text("", timeout=30000)
             page.locator("#close-panel").click()
-            page.locator("#viewport canvas").screenshot(path=str(output / "image-top.png"))
+            page.locator("#viewport canvas.packaging-model-canvas").screenshot(path=str(output / "image-top.png"))
             assert max(ImageStat.Stat(Image.open(output / "image-top.png").convert("RGB")).stddev) > 8
             assert sum(r > 130 and r > g * 1.5 and r > b * 1.3 for r, g, b in Image.open(output / "image-top.png").convert("RGB").getdata()) > 100, "Uploaded red artwork must render in the canvas"
             page.get_by_role("button", name="Reload saved document", exact=True).click()

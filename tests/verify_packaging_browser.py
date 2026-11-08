@@ -30,7 +30,7 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
 
         page.goto(url + "/packaging", wait_until="networkidle")
         expect(page.locator("#provider-status")).to_contain_text("not configured")
-        expect(page.locator("#viewport canvas")).to_be_visible()
+        expect(page.locator("#viewport canvas.packaging-model-canvas")).to_be_visible()
         phase("1/7: Creating a six-item test package with documented input assumptions.")
         name = f"TEST browser package {int(time())}"
         page.locator("#document-name").fill(name)
@@ -73,11 +73,11 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
         page.get_by_role("button", name="Save", exact=True).click()
         expect(page.locator("#validation-panel")).to_contain_text("Eligible for a rate request")
         page.get_by_role("button", name="Fit view", exact=True).click()
-        page.locator("#viewport canvas").screenshot(path=str(output / "canvas-orbit.png"))
+        page.locator("#viewport canvas.packaging-model-canvas").screenshot(path=str(output / "canvas-orbit.png"))
         page.screenshot(path=str(output / "desktop.png"))
         phase("4/7: Inspecting top, section and exploded views; testing Undo and Redo.")
         page.get_by_role("button", name="Top", exact=True).click()
-        page.locator("#viewport canvas").screenshot(path=str(output / "canvas-top.png"))
+        page.locator("#viewport canvas.packaging-model-canvas").screenshot(path=str(output / "canvas-top.png"))
         page.get_by_label("Section", exact=True).check()
         page.get_by_label("Section", exact=True).uncheck()
         page.get_by_label("Exploded", exact=True).check()
@@ -105,7 +105,7 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
         page.get_by_role("button", name="Fit view", exact=True).click()
         page.screenshot(path=str(output / "mobile.png"), full_page=True)
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), "Horizontal overflow"
-        page.locator("#viewport canvas").screenshot(path=str(output / "canvas-mobile.png"))
+        page.locator("#viewport canvas.packaging-model-canvas").screenshot(path=str(output / "canvas-mobile.png"))
 
         # Import an existing CAD-derived repository asset through the actual UI.
         page.set_viewport_size(desktop)
@@ -119,7 +119,7 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
         assert page.locator('[name="product_dim_0"]').get_attribute("readonly") is not None
         page.get_by_role("button", name="Fit view", exact=True).click()
         page.screenshot(path=str(output / "imported-model.png"))
-        page.locator("#viewport canvas").screenshot(path=str(output / "canvas-imported.png"))
+        page.locator("#viewport canvas.packaging-model-canvas").screenshot(path=str(output / "canvas-imported.png"))
         assert "Only the source envelope" not in page.locator("#scene-message").inner_text()
         assert "unknown" in page.locator("#message").inner_text().lower()
         page.locator("#document-name").fill(name + " CAD source")
@@ -143,7 +143,7 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
         expect(page.locator("#scene-message")).to_have_text("")
         page.get_by_role("button", name="Fit view", exact=True).click()
         page.screenshot(path=str(output / "six-imported-products.png"))
-        page.locator("#viewport canvas").screenshot(path=str(output / "canvas-six-imported.png"))
+        page.locator("#viewport canvas.packaging-model-canvas").screenshot(path=str(output / "canvas-six-imported.png"))
         phase("7/7: Six imported models packed. Missing mass remains unknown and blocks rate requests.")
         assert not errors, errors
         if headed and hold_seconds:

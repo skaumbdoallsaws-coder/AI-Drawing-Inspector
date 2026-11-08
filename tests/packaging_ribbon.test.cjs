@@ -13,6 +13,41 @@ const block = (source, start, end) => {
   return source.slice(first, last);
 };
 
+test('Packaging uses a complete local RGBA icon set without changing command dimensions', () => {
+  const css = fs.readFileSync(path.join(root, 'static/packaging_ribbon_icons.css'), 'utf8');
+  const names = ['Product', 'Carton', 'Contents', 'Arrange', 'Appearance', 'Graphics', 'Validation', 'Rates', 'Document', 'Undo', 'Redo', 'Save'];
+  for (const name of names) {
+    const id = name.toLowerCase(), file = `${id}-glossy-v1.png`;
+    const png = fs.readFileSync(path.join(root, 'static/assets/packaging-ribbon-icons', file));
+    assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', file);
+    assert.equal(png[25], 6, `${file}: RGBA PNG required`);
+    assert.equal(png.readUInt32BE(16), png.readUInt32BE(20), `${file}: square canvas required`);
+    assert.ok(css.includes(`[data-packaging-icon="${id}"]`));
+    assert.ok(css.includes(`/static/assets/packaging-ribbon-icons/${file}`));
+    assert.ok(host.includes(`'packaging${name}'`));
+    assert.ok(child.includes(`'packaging${name}'`));
+  }
+  assert.match(host, /documentation-system-icon packaging-ribbon-icon/);
+  assert.match(child, /classList.add\('packaging-ribbon-icon'\)/);
+  assert.match(css, /background-image: var\(--packaging-ribbon-art\)/);
+  assert.match(css, /\.packaging-ribbon-icon::before/);
+  assert.match(css, /background-size: contain/);
+  for (const [name, size] of [['contents', 103.125], ['rates', 103.125], ['save', 112.5]]) {
+    assert.ok(css.includes(`[data-packaging-icon="${name}"] { --packaging-ribbon-size: ${size}%; }`));
+  }
+  assert.match(css, /mask: none/);
+  const slotRule = css.split('.icon.packaging-ribbon-icon {')[1].split('}')[0];
+  assert.doesNotMatch(slotRule, /(?:^|\n)\s*(?:width|height|padding|margin):/);
+  const hostAllowlist = host.match(/\/\^packaging\(([^)]+)\)\$\//)[1];
+  const childAllowlist = child.match(/\/\^packaging\(([^)]+)\)\$\//)[1];
+  assert.deepEqual(hostAllowlist.split('|'), names);
+  assert.equal(childAllowlist, hostAllowlist);
+  assert.equal((css.match(/--packaging-ribbon-art: url/g) || []).length, names.length);
+  for (const file of ['index.html', 'packaging.html']) {
+    assert.match(fs.readFileSync(path.join(root, 'static', file), 'utf8'), /href="\/static\/packaging_ribbon_icons.css"/);
+  }
+});
+
 function editor() {
   const nodes = new Map();
   for (const id of ['command-product', 'document-new', 'document-save', 'packaging-resume-editing']) {

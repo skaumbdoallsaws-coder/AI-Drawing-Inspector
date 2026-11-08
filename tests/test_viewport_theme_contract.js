@@ -18,7 +18,10 @@ function test(name, fn) {
 }
 
 test('dark viewport scenes use the shared studio gradient', function () {
-    assert(source.includes('--viewport-bg-gradient: linear-gradient('));
+    const sharedCss = fs.readFileSync(path.resolve(__dirname, '..', 'static', 'cad_viewport.css'), 'utf8');
+    assert(sharedCss.includes('--viewport-bg-gradient: linear-gradient('));
+    assert(source.includes('href="/static/cad_viewport.css"'));
+    assert(source.includes('InspectorProCadViewport.createBackgroundTexture(threeRuntime, document)'));
     assert(source.includes('_applyCadViewportBackground(scene);'));
     assert(source.includes(
         'var(--viewport-bg-gradient, var(--viewport-bg, var(--bg-main)))'

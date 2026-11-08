@@ -43,7 +43,7 @@ def verify(url: str, output: Path):
         def canvas(name):
             page.wait_for_timeout(150)
             path = output / f"canvas-{name}.png"
-            page.locator("#viewport canvas").screenshot(path=str(path))
+            page.locator("#viewport canvas.packaging-model-canvas").screenshot(path=str(path))
             screenshots.append(path)
 
         def layout():
@@ -58,7 +58,7 @@ def verify(url: str, output: Path):
 
         try:
             page.goto(url + "/packaging", wait_until="networkidle")
-            expect(page.locator("#viewport canvas")).to_be_visible()
+            expect(page.locator("#viewport canvas.packaging-model-canvas")).to_be_visible()
             expect(page.locator("#document-status")).not_to_contain_text("Working")
             expect(page.locator("#tool-panel")).to_be_hidden()
             initial = layout()

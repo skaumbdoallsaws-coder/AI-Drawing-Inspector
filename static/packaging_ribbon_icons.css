@@ -1,0 +1,41 @@
+/* Shared full-color artwork; command sizes and states remain owned by each ribbon. */
+.documentation-system-icon.packaging-ribbon-icon { flex: 0 0 auto; }
+.documentation-system-icon.packaging-ribbon-icon,
+.icon.packaging-ribbon-icon {
+  position: relative;
+  background-color: transparent;
+  -webkit-mask: none;
+  mask: none;
+}
+.packaging-ribbon-icon::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--packaging-ribbon-size, 100%);
+  height: var(--packaging-ribbon-size, 100%);
+  transform: translate(-50%, -50%);
+  background-image: var(--packaging-ribbon-art);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  pointer-events: none;
+}
+
+.packaging-ribbon-icon[data-packaging-icon="product"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/product-glossy-v1.png'); }
+.packaging-ribbon-icon[data-packaging-icon="carton"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/carton-glossy-v1.png'); }
+.packaging-ribbon-icon[data-packaging-icon="contents"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/contents-glossy-v1.png'); }
+.packaging-ribbon-icon[data-packaging-icon="arrange"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/arrange-glossy-v1.png'); }
+.packaging-ribbon-icon[data-packaging-icon="appearance"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/appearance-glossy-v1.png'); }
+.packaging-ribbon-icon[data-packaging-icon="graphics"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/graphics-glossy-v1.png'); }
+.packaging-ribbon-icon[data-packaging-icon="validation"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/validation-glossy-v1.png'); }
+.packaging-ribbon-icon[data-packaging-icon="rates"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/rates-glossy-v1.png'); }
+.packaging-ribbon-icon[data-packaging-icon="document"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/document-glossy-v1.png'); }
+.packaging-ribbon-icon[data-packaging-icon="undo"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/undo-glossy-v1.png'); }
+.packaging-ribbon-icon[data-packaging-icon="redo"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/redo-glossy-v1.png'); }
+.packaging-ribbon-icon[data-packaging-icon="save"] { --packaging-ribbon-art: url('/static/assets/packaging-ribbon-icons/save-glossy-v1.png'); }
+
+/* Optical compensation for detail and transparent padding, without resizing the icon slot. */
+.packaging-ribbon-icon[data-packaging-icon="contents"] { --packaging-ribbon-size: 103.125%; }
+.packaging-ribbon-icon[data-packaging-icon="rates"] { --packaging-ribbon-size: 103.125%; }
+.packaging-ribbon-icon[data-packaging-icon="save"] { --packaging-ribbon-size: 112.5%; }

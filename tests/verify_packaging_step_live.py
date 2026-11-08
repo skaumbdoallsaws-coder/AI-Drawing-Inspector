@@ -71,7 +71,7 @@ def verify(url, source, output):
             page.get_by_role("button", name=view, exact=True).click()
             page.wait_for_timeout(300)
             page.screenshot(path=str(output/(view.lower()+".png")))
-        page.locator("#viewport canvas").screenshot(path=str(output/"canvas.png"))
+        page.locator("#viewport canvas.packaging-model-canvas").screenshot(path=str(output/"canvas.png"))
         deviations = ImageStat.Stat(Image.open(output/"canvas.png").convert("RGB")).stddev
         assert max(deviations) > 8, deviations
         page.set_viewport_size({"width": 390, "height": 844})

@@ -34,8 +34,10 @@ document.addEventListener('DOMContentLoaded', () => {
     button.id = 'rightRailBrowser'; button.className = 'right-rail-icon'; button.title = 'Browser';
     button.setAttribute('aria-label', 'Toggle browser'); button.setAttribute('aria-expanded', 'false');
     button.style.cssText = 'padding:0;background:transparent;color:inherit;font:inherit;';
-    const icon = document.createElement('span'); icon.setAttribute('aria-hidden', 'true');
-    icon.style.cssText = 'width:22px;height:22px;display:block;background:currentColor;mask:url(/static/assets/desktop-browser-globe.svg) center/contain no-repeat;';
+    const icon = document.createElement('img'); icon.setAttribute('aria-hidden', 'true');
+    icon.src = '/static/assets/sidebar-icons/browser-dimensional-v1.png';
+    icon.alt = ''; icon.draggable = false;
+    icon.style.cssText = 'width:22px;height:22px;display:block;object-fit:contain;pointer-events:none;user-select:none;';
     const tooltip = document.createElement('span'); tooltip.className = 'right-rail-tooltip'; tooltip.textContent = 'Browser';
     button.append(icon, tooltip); agent.after(button);
     button.addEventListener('click', () => browserCommand({ action: 'toggle' }));

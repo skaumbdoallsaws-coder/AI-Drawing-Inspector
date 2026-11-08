@@ -58,6 +58,18 @@
         '/static/assets/facility-layout-ribbon-icons/svg/';
     const VIEW_ORIENTATION_ICON_ROOT =
         '/static/assets/view-toolbar-icons/';
+    const VIEWPORT_DIMENSIONAL_ICON_ROOT =
+        '/static/assets/facility-viewport-icons/';
+    const PLAN_DIMENSIONAL_ICON_COMMANDS = new Set([
+        'select', 'pan', 'zoom-out', 'zoom-in', 'fit-facility',
+        'fit-layout', 'reset-view', 'grid', 'snap', 'layers',
+    ]);
+    const THREE_DIMENSIONAL_ICON_COMMANDS = new Set([
+        'fit-layout', 'zoom-out', 'zoom-in', 'pan', 'display-settings',
+        'layers', 'orbit', 'walkthrough', 'avatar-view', 'drone',
+        'switch-immersive', 'walk-to-selected', 'camera-settings',
+        'viewpoints', 'fit-facility', 'grid',
+    ]);
     const THREE_VIEW_ORIENTATIONS = Object.freeze([
         Object.freeze({ key: 'front', label: 'Front' }),
         Object.freeze({ key: 'top', label: 'Top' }),
@@ -3833,8 +3845,8 @@
             className: 'ip-flw-plan-nav-icon',
             'aria-hidden': 'true',
         });
-        // Same source the 3D toolbar draws from, so both viewports share one
-        // icon family rather than the flat outline set this used to load.
+        const dimensionalSource = PLAN_DIMENSIONAL_ICON_COMMANDS.has(command)
+            ? VIEWPORT_DIMENSIONAL_ICON_ROOT + command + '.svg' : null;
         const iconFactory = this.options.viewerToolbarIconMarkup
             || (root && root.InspectorProViewerToolbarIconMarkup);
         let markup = '';
@@ -3845,7 +3857,13 @@
                 markup = '';
             }
         }
-        if (markup) {
+        if (dimensionalSource) {
+            iconHost.appendChild(element(this.document, 'img', {
+                src: dimensionalSource,
+                alt: '', draggable: 'false', 'aria-hidden': 'true',
+            }));
+            button.setAttribute('data-icon-source', 'facility-dimensional');
+        } else if (markup) {
             iconHost.innerHTML = markup;
             button.setAttribute('data-icon-source', 'cad-viewer');
         } else {
@@ -3889,7 +3907,17 @@
                 markup = '';
             }
         }
-        if (icon === 'settings') {
+        const dimensionalSource = command === 'appearance'
+            ? '/static/assets/packaging-ribbon-icons/appearance-glossy-v1.png'
+            : THREE_DIMENSIONAL_ICON_COMMANDS.has(command)
+                ? VIEWPORT_DIMENSIONAL_ICON_ROOT + command + '.svg' : null;
+        if (dimensionalSource) {
+            iconHost.appendChild(element(this.document, 'img', {
+                src: dimensionalSource,
+                alt: '', draggable: 'false', 'aria-hidden': 'true',
+            }));
+            button.setAttribute('data-icon-source', 'facility-dimensional');
+        } else if (icon === 'settings') {
             iconHost.appendChild(element(this.document, 'img', {
                 src: '/static/assets/global-toolbar-icons/gear.png',
                 alt: '', draggable: 'false', 'aria-hidden': 'true',
@@ -10809,8 +10837,8 @@
         });
         [
             // [command, label, shortcut, viewerIconKind, flatFallbackFile].
-            // The kinds are the same rich CAD icons the 3D toolbar renders;
-            // the fallback file is only used if that factory is unavailable.
+            // Known commands use the shared dimensional viewport artwork;
+            // the viewer kinds and files remain available as fallbacks.
             // A null kind keeps the glyph as the face: the unit control shows
             // its current value rather than an action.
             ['select', 'Select and move assets', 'V', 'pointer', 'cursor-click'],
@@ -10822,8 +10850,7 @@
             ['reset-view', 'Reset Plan view', 'R', 'reset', 'arrow-clockwise'],
             ['grid', 'Show grid', 'G', 'grid-lines', 'grid-four'],
             ['snap', 'Snap to grid', '#', 'snap-grid', 'cell-layout'],
-            // The viewer set's 'grid' kind draws stacked sheets, which is the
-            // layers metaphor; its name is a legacy of the 3D toolbar.
+            // The legacy viewer factory calls its stacked-sheet icon 'grid'.
             ['layers', 'Layer visibility', 'L', 'grid', 'copy'],
             ['unit', 'Display distances in feet', 'm', null, null],
         ].forEach(function (item) {

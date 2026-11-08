@@ -46,7 +46,7 @@ function pdfText(bytes) {
   return strings.join(' ');
 }
 
-require.cache[driver].exports = { run: async ({ window, profile, output, observe, runtime, change, network }) => {
+require.cache[driver].exports = { run: async ({ window, profile, output, observe, runtime, change, network, ensureBrowser }) => {
   const fixture = JSON.parse(await fs.readFile(path.join(profile.dataRoot, 'packaging-check.json'), 'utf8'));
   assert.equal(fixture.disposable, true);
   assert.equal(fixture.store, profile.dataRoot);
@@ -54,7 +54,7 @@ require.cache[driver].exports = { run: async ({ window, profile, output, observe
   const expectedFile = path.join(profile.dataRoot, 'packaging-recovery-expected.json');
   const expected = await fs.readFile(expectedFile, 'utf8').then(JSON.parse, () => null);
   const mode = fixture.expectUnavailable ? 'unavailable' : fixture.expectMissing?.length ? 'missing'
-    : expected && !expected.recovered ? 'recover' : 'full';
+    : fixture.facilityRibbonOnly ? 'facility' : fixture.ribbonOnly ? 'ribbon' : expected && !expected.recovered ? 'recover' : 'full';
   const hash = bytes => createHash('sha256').update(bytes).digest('hex');
   const original = fixture.stepSource ? hash(await fs.readFile(fixture.stepSource)) : null;
   const report = { status: 'running', mode, checks: [], captures: [], sourceUnchanged: false, liveQuotes: false, liveInference: false };
@@ -170,7 +170,14 @@ require.cache[driver].exports = { run: async ({ window, profile, output, observe
     for (const [field, typedValue] of Object.entries(typed)) assert.equal(await value(field), String(typedValue), 'Typed value not restored: ' + field);
     await click(button('Reset fields'));
     await command('save'); await saved();
-    const drafts = (await api('/drafts')).drafts;
+    // Saving publishes its revision before the queued checkpoint cleanup completes.
+    let drafts;
+    const deadline = Date.now() + 10000;
+    do {
+      drafts = (await api('/drafts')).drafts;
+      if (!drafts.some(draft => draft.name === name)) break;
+      await pause(100);
+    } while (Date.now() < deadline);
     assert.deepEqual(drafts.filter(draft => draft.name === name), [], 'Recovery draft kept after the save');
   }
   async function downloadPdf(file) {
@@ -204,6 +211,98 @@ require.cache[driver].exports = { run: async ({ window, profile, output, observe
   async function full() {
     const stepName = 'TEST native straight rack and pusher ' + Date.now();
     report.stage = 'mount'; await persist(); await mount();
+    if (mode === 'ribbon') {
+      report.sidebarDrawing = await require('./sidebar-drawing-check.cjs')({ window, output });
+      report.sidebarIcons = await require('./sidebar-icons-check.cjs')({ window, output, ensureBrowser });
+      await persist();
+    }
+    const iconEvidence = await js(`(async()=>{
+      const originals={product:'3dmodel',carton:'facilityAlign',contents:'facilityVerticalStack',arrange:'facilityAutoArrange',
+        appearance:'facilityAppearance',graphics:'facilityDecals',validation:'facilityFit',rates:'facilityFloorMarking',
+        document:'facilityExportPdf',undo:'facilityUndo',redo:'facilityRedo',save:'facilitySave'};
+      const evidence={};
+      const dimensions=el=>{const r=el.getBoundingClientRect();return [r.width,r.height]};
+      for(const [name,original] of Object.entries(originals)){
+        const button=name==='document'?document.querySelector('[aria-label="Document packaging commands"]'):document.getElementById('packaging-ribbon-'+name);
+        const icon=button.querySelector('[data-packaging-icon="'+name+'"]');
+        if(!icon) throw Error('Glossy icon missing: '+name);
+        const buttonSize=dimensions(button),iconSize=dimensions(icon);
+        const old=_documentationCommandIcon(original);icon.replaceWith(old);
+        const originalButton=dimensions(button),originalIcon=dimensions(old);old.replaceWith(icon);
+        const image=new Image();image.src='/static/assets/packaging-ribbon-icons/'+name+'-glossy-v1.png';await image.decode();
+        const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+        const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);const rgba=ctx.getImageData(0,0,image.width,image.height).data;
+        let clear=0,solid=0,left=image.width,top=image.height,right=0,bottom=0;
+        for(let i=3;i<rgba.length;i+=4){
+          if(rgba[i]===0)clear++;if(rgba[i]>=250)solid++;
+          if(rgba[i]>=128){const p=(i-3)/4,x=p%image.width,y=Math.floor(p/image.width);
+            left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x+1);bottom=Math.max(bottom,y+1);}
+        }
+        const scale=(parseFloat(getComputedStyle(icon).getPropertyValue('--packaging-ribbon-size'))||100)/100;
+        const inkBounds=[(left/image.width-.5)*scale+.5,(top/image.height-.5)*scale+.5,
+          (right/image.width-.5)*scale+.5,(bottom/image.height-.5)*scale+.5];
+        evidence[name]={buttonSize,iconSize,originalButton,originalIcon,clear,solid,mask:getComputedStyle(icon).maskImage,
+          background:getComputedStyle(icon,'::before').backgroundImage,inkBounds,scale};
+        const childIcon=document.getElementById('packagingWorkspaceFrame').contentDocument.querySelector('[data-packaging-icon="'+name+'"]');
+        if(!childIcon) throw Error('Standalone icon missing: '+name);
+        evidence[name].childBackground=getComputedStyle(childIcon,'::before').backgroundImage;
+        evidence[name].childMask=getComputedStyle(childIcon).maskImage;
+      }
+      return evidence;
+    })()`);
+    report.ribbonIcons = iconEvidence;
+    await persist();
+    for (const [name, evidence] of Object.entries(iconEvidence)) {
+      assert.deepEqual(evidence.buttonSize, evidence.originalButton, name + ' button dimensions changed');
+      const size = ['undo', 'redo'].includes(name) ? 20 : 32;
+      assert.deepEqual(evidence.iconSize, [size, size], name + ' must retain the ribbon icon slot without flex distortion');
+      assert.ok(evidence.clear > 1000 && evidence.solid > 1000, name + ' requires transparent margins and a solid interior (alpha >= 250)');
+      assert.equal(evidence.mask, 'none'); assert.equal(evidence.childMask, 'none');
+      assert.ok(evidence.background.includes(name + '-glossy-v1.png'));
+      assert.ok(evidence.childBackground.includes(name + '-glossy-v1.png'));
+      assert.ok(evidence.inkBounds.every(edge => edge >= 0 && edge <= 1), name + ' artwork clipped by optical sizing');
+    }
+    report.ribbonReadability = [];
+    for (const theme of ['dark', 'light']) {
+      await js(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+      const initialZoom = window.webContents.getZoomFactor();
+      try {
+        for (const zoom of [1, 1.25]) {
+          window.webContents.setZoomFactor(zoom);
+          await pause(300);
+          const labels=await js(`(()=>[...document.querySelectorAll('.packaging-ribbon-commandbar .documentation-ribbon-command')]
+            .filter(b=>b.checkVisibility()).map(b=>{
+              const label=b.querySelector('.documentation-command-label'),icon=b.querySelector('.documentation-system-icon');
+              const br=b.getBoundingClientRect(),ir=icon.getBoundingClientRect(),range=document.createRange();
+              range.selectNodeContents(label);const r=range.getBoundingClientRect();
+              return {text:label.textContent,fontSize:parseFloat(getComputedStyle(label).fontSize),
+                button:[br.x,br.y,br.width,br.height],label:[r.x,r.y,r.width,r.height],icon:[ir.x,ir.y,ir.width,ir.height],
+                fits:r.left>=br.left&&r.right<=br.right&&r.top>=br.top&&r.bottom<=br.bottom,
+                separated:b.classList.contains('is-compact')?r.left>=ir.right:r.top>=ir.bottom};
+            }))()`);
+          report.ribbonReadability.push({theme,zoom,labels});
+          await persist();
+          for (const label of labels) {
+            assert.equal(label.fontSize, 10, label.text + ' label size');
+            assert.ok(label.fits && label.separated, label.text + ' label is clipped or overlaps its icon at ' + zoom);
+          }
+          // capturePage uses window DIPs; DOM rectangles are CSS pixels before page zoom.
+          const region=await js(`(()=>{const r=document.querySelector('.packaging-ribbon-commandbar').getBoundingClientRect(),z=${zoom};return{x:Math.floor(r.x*z),y:Math.floor(r.y*z),width:Math.ceil(r.width*z),height:Math.ceil(r.height*z)};})()`);
+          const image=await window.webContents.capturePage(region);
+          const name='glossy-ribbon-'+theme+(zoom===1?'':'-125');
+          await fs.writeFile(path.join(output,name+'.png'),image.toPNG());
+          report.captures.push(name);
+        }
+      } finally { window.webContents.setZoomFactor(initialZoom); }
+    }
+    await js(`document.documentElement.dataset.theme='dark'`);
+    await panel('product'); await closePanel();
+    report.checks.push('all 12 glossy icons: alpha, square 32px/20px slots, unchanged button dimensions, light/dark native ribbon, shared standalone rendering');
+    report.checks.push('10px labels fit without icon overlap at 100% and 125%; optical icon sizing preserves visible artwork');
+    if (mode === 'ribbon') {
+      report.sourceUnchanged = original === hash(await fs.readFile(fixture.stepSource));
+      return;
+    }
     const status = await api('/status');
     for (const capability of ['step_import', 'draft_recovery', 'surface_graphics']) assert.ok(status.capabilities.includes(capability), capability);
     report.checks.push('native authenticated iframe; STEP, recovery and artwork capabilities');
@@ -457,7 +556,13 @@ require.cache[driver].exports = { run: async ({ window, profile, output, observe
 
   try {
     window.maximize(); window.webContents.setBackgroundThrottling(false);
-    await ({ full, recover, missing, unavailable })[mode]();
+    await ({ full, ribbon: full, recover, missing, unavailable, facility: async () => {
+      await mount();
+      report.facilityRibbon = await require('./facility-ribbon-check.cjs')({ window, output });
+      report.facilityToolbar = await require('./facility-toolbar-check.cjs')({ window, output });
+      report.sourceUnchanged = !original || hash(await fs.readFile(fixture.stepSource)) === original;
+      assert.equal(report.sourceUnchanged, true);
+    } })[mode]();
     await prompts();
     report.status = 'passed'; report.stage = 'complete';
   } catch (error) {

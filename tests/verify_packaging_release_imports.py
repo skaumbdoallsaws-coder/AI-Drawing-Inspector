@@ -116,14 +116,14 @@ assert writer.Write(sys.argv[1])==IFSelect_RetDone
                 page.get_by_role('button', name='Fit view', exact=True).click()
                 page.wait_for_timeout(500)
                 canvas = output / (kind + '-canvas.png')
-                page.locator('#viewport canvas').screenshot(path=str(canvas))
+                page.locator('#viewport canvas.packaging-model-canvas').screenshot(path=str(canvas))
                 deviations = ImageStat.Stat(Image.open(canvas).convert('RGB')).stddev
                 assert max(deviations) > 8, deviations
                 page.screenshot(path=str(output / (kind + '-desktop.png')))
                 page.get_by_role('button', name='Top', exact=True).click()
                 page.wait_for_timeout(200)
                 top = output / (kind + '-top.png')
-                page.locator('#viewport canvas').screenshot(path=str(top))
+                page.locator('#viewport canvas.packaging-model-canvas').screenshot(path=str(top))
                 difference = ImageChops.difference(Image.open(canvas).convert('RGB'), Image.open(top).convert('RGB'))
                 assert max(ImageStat.Stat(difference).mean) > .1
                 page.set_viewport_size({'width': 390, 'height': 844})

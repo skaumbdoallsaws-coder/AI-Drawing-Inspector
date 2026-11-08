@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { ORIENTATION_ORDERS, orientationRows, placementCenter } from './packaging.js';
+import './cad_viewport.js';
+
+const { createBackgroundTexture, createOrientationGizmo } = globalThis.InspectorProCadViewport;
 
 export const PACKAGING_TOLERANCE_M = 1e-6;
 
@@ -154,10 +157,11 @@ export class PackagingScene {
     this.images = new Map(); this.imageQueue = Promise.resolve();
     this.scene = new THREE.Scene();
     const updateTheme = () => {
-      this.scene.background = new THREE.Color(document.documentElement.dataset.theme === 'light' ? 0xf4f7f9 : 0x363f4a);
+      this.scene.background?.dispose?.();
+      this.scene.background = createBackgroundTexture(THREE, host.ownerDocument);
       this.invalidate();
     };
-    this.scene.background = new THREE.Color(document.documentElement.dataset.theme === 'light' ? 0xf4f7f9 : 0x363f4a);
+    this.scene.background = createBackgroundTexture(THREE, host.ownerDocument);
     this.camera = new THREE.PerspectiveCamera(40, 1, .0001, 1000);
     this.camera.position.set(1, .8, 1.2);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -165,9 +169,11 @@ export class PackagingScene {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.25;
     this.renderer.domElement.tabIndex = 0;
+    this.renderer.domElement.className = 'packaging-model-canvas';
     this.renderer.domElement.setAttribute('aria-label', '3D package model. Orbit and zoom controls.');
     this.renderer.domElement.setAttribute('role', 'img');
     host.prepend(this.renderer.domElement);
+    this.orientationGizmo = createOrientationGizmo(THREE, host);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false; this.controls.screenSpacePanning = true; this.controls.maxPolarAngle = Math.PI;
     this.controls.listenToKeyEvents(this.renderer.domElement);
@@ -218,7 +224,13 @@ export class PackagingScene {
 
   invalidate() {
     if (this.frame || this.disposed) return;
-    this.frame = requestAnimationFrame(() => { this.frame = 0; if (!this.disposed) this.renderer.render(this.scene, this.camera); });
+    this.frame = requestAnimationFrame(() => {
+      this.frame = 0;
+      if (!this.disposed) {
+        this.renderer.render(this.scene, this.camera);
+        this.orientationGizmo.update(this.camera);
+      }
+    });
   }
 
   setDesign(design, packageId, componentId, graphicId = null) {
@@ -449,14 +461,6 @@ export class PackagingScene {
     }
     this.bounds = new THREE.Box3().setFromObject(this.content);
     if (this.bounds.isEmpty()) this.bounds.set(new THREE.Vector3(), new THREE.Vector3(...dims));
-    const grid = new THREE.GridHelper(extent * 3, 20, 0x737e85, 0x424b51); grid.position.set(dims[0] / 2, -extent * .015, dims[2] / 2);
-    this.own(grid.geometry); for (const material of Array.isArray(grid.material) ? grid.material : [grid.material]) this.own(material);
-    this.content.add(grid);
-    const axisLength = extent * .23;
-    const axes = new THREE.AxesHelper(axisLength); this.own(axes.geometry); this.own(axes.material); this.content.add(axes);
-    this.label('X', [axisLength * 1.12, 0, 0], extent * .19, '#f4a4a4');
-    this.label('Y', [0, axisLength * 1.12, 0], extent * .19, '#b5dfad');
-    this.label('Z', [0, 0, axisLength * 1.12], extent * .19, '#9ecdf5');
     this.cutHeight = dims[1] / 2;
     this.applySection();
     this.onStatus(this.sourceLoading ? 'Loading imported source geometry...' : this.sourceError ? `${this.sourceError} Only the source envelope is shown.` : pocketWarning || graphicWarning ? [pocketWarning, graphicWarning].filter(Boolean).join(' ') :
@@ -500,6 +504,7 @@ export class PackagingScene {
   dispose() {
     this.disposed = true; this.loadVersion++; this.abortController?.abort(); cancelAnimationFrame(this.frame);
     this.resizeObserver.disconnect(); this.themeObserver.disconnect(); this.controls.dispose(); this.clear(); this.disposeSource();
+    this.orientationGizmo.dispose(); this.scene.background?.dispose?.();
     this.renderer.domElement.removeEventListener('pointerdown', this.pointerDown);
     this.renderer.domElement.removeEventListener('pointerup', this.pointerUp);
     this.renderer.domElement.removeEventListener('webglcontextlost', this.contextLost);

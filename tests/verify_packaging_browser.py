@@ -38,6 +38,17 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
         def fill(field, value):
             page.locator(f'[name="{field}"]').fill(str(value))
 
+        def panel(name):
+            # Since 15965c1 the editor and review panels open from their ribbon buttons (#command-<name>)
+            # instead of a tab strip. Open the panel, then wait until its body is visible.
+            command = page.locator(f"#command-{name}")
+            if command.get_attribute("aria-expanded") != "true":
+                command.click()
+            expect(command).to_have_attribute("aria-expanded", "true")
+            body = {"validation": "#validation-panel", "rates": "#rates-panel"}.get(name, "#editor")
+            expect(page.locator(body)).to_be_visible()
+
+        panel("product")
         fill("product_name", "TEST machined component envelope")
         for axis, value in enumerate([100, 60, 40]):
             fill(f"product_dim_{axis}", value)
@@ -50,7 +61,7 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
         page.get_by_role("button", name="Save", exact=True).click()
         expect(page.locator("#document-status")).to_contain_text("Saved")
         phase("2/7: Comparing carton arrangements and applying a feasible candidate.")
-        page.get_by_role("tab", name="Arrange", exact=True).click()
+        panel("arrange")
         fill("tare", .2)
         fill("tare_evidence", "TEST carton scale")
         fill("payload", 10)
@@ -66,7 +77,7 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
         phase("3/7: Adding a foam pad and checking the updated gross mass.")
 
         # Add a real solid pad below the product envelopes without colliding.
-        page.get_by_role("tab", name="Contents", exact=True).click()
+        panel("contents")
         page.get_by_role("button", name="Add pad", exact=True).click()
         fill("material_evidence", "TEST supplier density 30 kg/m3")
         page.locator("#editor form").get_by_role("button", name="Add pad", exact=True).click()
@@ -93,7 +104,7 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
         with page.expect_download() as downloaded:
             page.get_by_role("button", name="Download PDF", exact=True).click()
         downloaded.value.save_as(str(output / "packaging-review.pdf"))
-        page.get_by_role("tab", name="Rates", exact=True).click()
+        panel("rates")
         expect(page.get_by_role("button", name="Compare rates", exact=True)).to_be_disabled()
         expect(page.locator("#rates-panel")).to_contain_text("Not configured")
         page.get_by_role("button", name="Open", exact=True).click()
@@ -111,6 +122,7 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
         page.set_viewport_size(desktop)
         phase("6/7: Importing the existing CAD-derived model without changing its dimensions.")
         page.get_by_role("button", name="New", exact=True).click()
+        panel("product")
         asset = Path(__file__).resolve().parents[1] / "generated/training/racing-bike/part_glb/RB-001_viewer.glb"
         page.locator('[name="source_file"]').set_input_files(str(asset))
         page.get_by_role("button", name="Import GLB", exact=True).click()
@@ -129,7 +141,7 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
         page.get_by_role("button", name="Apply product", exact=True).click()
         page.get_by_role("button", name="Save", exact=True).click()
         expect(page.locator("#document-status")).to_contain_text("Saved")
-        page.get_by_role("tab", name="Arrange", exact=True).click()
+        panel("arrange")
         for axis, value in enumerate([30, 40, 30]):
             fill(f"inner_{axis}", value)
             fill(f"outer_{axis}", value + 4)
@@ -137,7 +149,7 @@ def verify(url, output, *, headed=False, slow_mo=0, hold_seconds=0):
         page.get_by_role("button", name="Generate candidates", exact=True).click()
         page.get_by_role("button", name="Apply candidate", exact=True).first.click()
         page.get_by_role("button", name="Save", exact=True).click()
-        page.get_by_role("tab", name="Validation", exact=True).click()
+        panel("validation")
         expect(page.locator("#validation-panel")).to_contain_text("6 / 6 products placed")
         expect(page.locator("#validation-panel")).to_contain_text("Unknown")
         expect(page.locator("#scene-message")).to_have_text("")

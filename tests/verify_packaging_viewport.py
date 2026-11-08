@@ -41,7 +41,7 @@ def verify(url, output):
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.set_default_timeout(20000)
         design = designs()[1]
-        created = context.request.post(url + "/api/packaging/documents", data=design, headers=HEADERS)
+        created = context.request.post(url + "/api/packaging/documents?contents_confirmed=true", data=design, headers=HEADERS)
         assert created.ok, created.text()
         doc = created.json()
         endpoint = url + "/api/packaging/documents/" + doc["id"]

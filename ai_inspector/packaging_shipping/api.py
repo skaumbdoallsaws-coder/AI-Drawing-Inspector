@@ -17,7 +17,7 @@ from .geometry import assess, digest
 from .admission import PackagingAdmission
 from .library import InspectionLibrary
 from .models import LibrarySourceRequest, RemoveUnused, StorageLimits
-from .models import Design, Edit, PackingRequest, QuoteRequest, RevisionCommand, DensityRequest, AlternativeSave, BaselineSelect, ScenarioAuthorization, EvidenceReview, DraftCheckpoint
+from .models import Design, UserEdit, PackingRequest, QuoteRequest, UserRevisionCommand, DensityRequest, AlternativeSave, BaselineSelect, ScenarioAuthorization, EvidenceReview, DraftCheckpoint
 from .evidence import NOTICE as EVIDENCE_NOTICE
 from .quoting import QuoteDesk
 from .comparison import compare as compare_designs, scenarios as quoted_scenarios
@@ -223,24 +223,26 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         return {"documents": service.list(s)}
 
     @router.post("/api/packaging/documents")
-    def create(design: Design, request: Request, s=Depends(scope)):
-        return service.create(s, design, request_id=request.headers.get("idempotency-key"))
+    def create(design: Design, request: Request, contents_confirmed: bool = Query(False), s=Depends(scope)):
+        # Every route here is the user's editor: a contents change needs the user's explicit confirmation.
+        return service.create(s, design, request_id=request.headers.get("idempotency-key"), author="user",
+                              contents_confirmed=contents_confirmed)
 
     @router.get("/api/packaging/documents/{doc_id}")
     def get(doc_id: str, s=Depends(scope)):
         return service.get(s, doc_id)
 
     @router.put("/api/packaging/documents/{doc_id}")
-    def edit(doc_id: str, body: Edit, s=Depends(scope)):
-        return service.change(s, doc_id, body)
+    def edit(doc_id: str, body: UserEdit, s=Depends(scope)):
+        return service.change(s, doc_id, body, author="user", contents_confirmed=body.contents_confirmed)
 
     @router.post("/api/packaging/documents/{doc_id}/undo")
-    def undo(doc_id: str, body: RevisionCommand, s=Depends(scope)):
-        return service.change(s, doc_id, body, "undo")
+    def undo(doc_id: str, body: UserRevisionCommand, s=Depends(scope)):
+        return service.change(s, doc_id, body, "undo", author="user", contents_confirmed=body.contents_confirmed)
 
     @router.post("/api/packaging/documents/{doc_id}/redo")
-    def redo(doc_id: str, body: RevisionCommand, s=Depends(scope)):
-        return service.change(s, doc_id, body, "redo")
+    def redo(doc_id: str, body: UserRevisionCommand, s=Depends(scope)):
+        return service.change(s, doc_id, body, "redo", author="user", contents_confirmed=body.contents_confirmed)
 
     @router.get("/api/packaging/documents/{doc_id}/alternatives")
     def alternatives(doc_id: str, s=Depends(scope)):
@@ -248,7 +250,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
 
     @router.post("/api/packaging/documents/{doc_id}/alternatives")
     def save_alternative(doc_id: str, body: AlternativeSave, s=Depends(scope)):
-        return service.save_alternative(s, doc_id, body)
+        return service.save_alternative(s, doc_id, body, author="user", contents_confirmed=body.contents_confirmed)
 
     @router.post("/api/packaging/documents/{doc_id}/arrangements")
     async def arrangements(doc_id: str, body: PackingRequest, s=Depends(scope)):

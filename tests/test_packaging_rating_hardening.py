@@ -206,7 +206,7 @@ def test_identical_requests_reuse_the_saved_quote_and_refresh_is_explicit(tmp_pa
 
     app = create_app(storage=tmp_path / "pilot", rating=adapter(handle))
     with TestClient(app, headers=HEADERS) as client:
-        doc = client.post("/api/packaging/documents", json=make_design().model_dump(mode="json")).json()
+        doc = client.post("/api/packaging/documents?contents_confirmed=true", json=make_design().model_dump(mode="json")).json()
         url = f"/api/packaging/documents/{doc['id']}"
         body = quote_request().model_dump(mode="json")
         first = client.post(url + "/quotes", json=body).json()
@@ -235,7 +235,7 @@ def test_refused_and_failed_requests_are_audited_without_saving_quotes(tmp_path)
 
     app = create_app(storage=tmp_path / "pilot", rating=adapter(handle))
     with TestClient(app, headers=HEADERS) as client:
-        doc = client.post("/api/packaging/documents", json=make_design().model_dump(mode="json")).json()
+        doc = client.post("/api/packaging/documents?contents_confirmed=true", json=make_design().model_dump(mode="json")).json()
         url = f"/api/packaging/documents/{doc['id']}"
         body = quote_request().model_dump(mode="json")
         po_box = {**body, "destinations": [{**body["destinations"][0], "street1": "PO Box 9"}]}
@@ -260,7 +260,7 @@ def test_requests_without_a_response_are_reported_as_unconfirmed(tmp_path):
 
     app = create_app(storage=tmp_path / "pilot", rating=adapter(handle))
     with TestClient(app, headers=HEADERS) as client:
-        doc = client.post("/api/packaging/documents", json=make_design(2).model_dump(mode="json")).json()
+        doc = client.post("/api/packaging/documents?contents_confirmed=true", json=make_design(2).model_dump(mode="json")).json()
         url = f"/api/packaging/documents/{doc['id']}"
         failed = client.post(url + "/quotes", json=quote_request().model_dump(mode="json"))
         assert failed.status_code == 502 and failed.json()["error"]["code"] == "carrier_unavailable"
@@ -316,7 +316,7 @@ def test_replacing_or_removing_the_account_makes_saved_quotes_stale(tmp_path, mo
     with TestClient(app, headers=HEADERS) as client:
         client.put("/api/packaging/account", json={"api_key": "EZTK_TEST_ONLY_FIRST", "account_alias": "TEST first", "mode": "test"})
         first_ref = client.get("/api/packaging/account").json()["account_ref"]
-        doc = client.post("/api/packaging/documents", json=make_design().model_dump(mode="json")).json()
+        doc = client.post("/api/packaging/documents?contents_confirmed=true", json=make_design().model_dump(mode="json")).json()
         url = f"/api/packaging/documents/{doc['id']}"
         body = quote_request().model_dump(mode="json")
         quoted = client.post(url + "/quotes", json=body).json()

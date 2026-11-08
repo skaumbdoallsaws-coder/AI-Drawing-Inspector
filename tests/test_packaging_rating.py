@@ -390,7 +390,7 @@ def test_quote_changed_during_provider_call_is_not_saved(tmp_path):
 
     app = create_app(storage=service.root, rating=adapter(handle))
     with TestClient(app, headers={"x-inspectorpro-request": "packaging"}) as client:
-        created = client.post("/api/packaging/documents", json=make_design().model_dump(mode="json"))
+        created = client.post("/api/packaging/documents?contents_confirmed=true", json=make_design().model_dump(mode="json"))
         assert created.status_code == 200
         document_id = created.json()["id"]
         url = f"/api/packaging/documents/{document_id}/quotes"
@@ -411,7 +411,7 @@ def test_partial_carrier_failure_never_saves_partial_quote(tmp_path):
 
     app = create_app(storage=tmp_path / "pilot", rating=adapter(handle))
     with TestClient(app, headers={"x-inspectorpro-request": "packaging"}) as client:
-        created = client.post("/api/packaging/documents", json=make_design(2).model_dump(mode="json"))
+        created = client.post("/api/packaging/documents?contents_confirmed=true", json=make_design(2).model_dump(mode="json"))
         assert created.status_code == 200
         url = f"/api/packaging/documents/{created.json()['id']}/quotes"
         result = client.post(url, json=quote_request().model_dump(mode="json"))
@@ -453,7 +453,7 @@ def test_total_quote_timeout_cancels_provider_releases_lock_and_saves_nothing(tm
         app = create_app(storage=tmp_path / "timeout-pilot", rating=provider)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver",
                                      headers={"x-inspectorpro-request": "packaging"}) as client:
-            created = await client.post("/api/packaging/documents", json=make_design().model_dump(mode="json"))
+            created = await client.post("/api/packaging/documents?contents_confirmed=true", json=make_design().model_dump(mode="json"))
             assert created.status_code == 200
             url = f"/api/packaging/documents/{created.json()['id']}/quotes"
             response = await client.post(url, json=quote_request().model_dump(mode="json"))

@@ -108,7 +108,7 @@ def start_pilot(storage, calls, replies):
 
 
 def verify(url, output, calls, replies, store):
-    errors, external, checks, dialogs = [], [], [], []
+    errors, external, checks, dialogs, answers = [], [], [], [], []
     seeded = design()
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True, args=["--enable-unsafe-swiftshader"])
@@ -117,9 +117,9 @@ def verify(url, output, calls, replies, store):
         page.set_default_timeout(20000)
         page.on("pageerror", lambda error: errors.append(str(error)))
 
-        def on_dialog(dialog):
+        def on_dialog(dialog):  # Accepts unless the next queued answer is False.
             dialogs.append(dialog.message)
-            dialog.accept()
+            (dialog.dismiss if answers and answers.pop(0) is False else dialog.accept)()
         page.on("dialog", on_dialog)
 
         def local_only(route):
@@ -131,7 +131,8 @@ def verify(url, output, calls, replies, store):
 
         context.route("**/*", local_only)
         api = context.request
-        created = api.post(url + "/api/packaging/documents", data=seeded, headers=HEADERS)
+        # Seeded as the user would declare them, so the classified contents carry the user's confirmation.
+        created = api.post(url + "/api/packaging/documents?contents_confirmed=true", data=seeded, headers=HEADERS)
         assert created.ok, created.text()
         base = f"{url}/api/packaging/documents/{created.json()['id']}"
         checks.append("seeded one TEST document through the API; the TEST key is saved with no mode recorded")
@@ -193,7 +194,14 @@ def verify(url, output, calls, replies, store):
             panel("product")
             page.locator('[name="contents_basis"]').select_option("test_assumption")
             page.locator('[name="contents_evidence"]').fill("TEST synthetic connection-test parcel; not a real product")
+            answers.append(False)  # Cancel the confirmation first: nothing is saved.
+            save.click()
+            expect(message).to_contain_text("Not saved: the contents change was not confirmed.")
+            assert api.get(base, headers=HEADERS).json()["revision"] == 0
+            assert "sets the contents to Ordinary, non-hazardous, test assumption" in dialogs[-1], dialogs[-1]
+            assert "Confirm this contents classification as your own?" in dialogs[-1], dialogs[-1]
             saved_as(1)
+            assert len(dialogs) == 2 and "Only you can classify the contents" in dialogs[-1], dialogs
             record_mode("production")
             expect(page.locator("#account-mode")).to_contain_text("Recorded as a production key, from your check.")
             expect(page.locator("#quote-block-reason")).to_contain_text("contents are a test assumption, so it can be quoted only with a key recorded as a test key")
@@ -206,6 +214,7 @@ def verify(url, output, calls, replies, store):
             record_mode("test")
             expect(page.locator("#account-mode")).to_contain_text("Recorded as a test key, from your check. EasyPost has not answered with this key yet.")
             expect(page.locator("#quote-block-reason")).to_be_hidden()
+            checks.append("contents confirmation: a contents change asked first, naming the change; Cancel saved nothing, OK saved it")
             checks.append("mode selection: the dialog starts unrecorded each time and PUT /account/mode carried exactly the chosen mode")
 
             # 4. Added masses, a movement requirement and a weighed carton; then save and reopen.
@@ -301,12 +310,15 @@ def verify(url, output, calls, replies, store):
             refused(quote_api(4), 422, "package_not_rate_ready")
             assert len(calls) == 1, calls
             page.screenshot(path=str(output / "6-magnetized-blocked.png"))
+            confirmations = [d for d in dialogs if "Only you can classify the contents" in d]
+            assert len(confirmations) == 3 and "sets the contents to Magnetized material" in confirmations[-1], confirmations
             checks.append("magnetized contents: the Rates panel names the reason, Compare rates is disabled and the API refused with no request")
 
             # 7. A reply in the other mode: that request was already sent; nothing after it, and no retry.
             panel("product")
             page.locator('[name="contents"]').select_option("ordinary_nonhazardous")
             saved_as(5)
+            assert "sets the contents to Ordinary, non-hazardous, declaration about the real product" in dialogs[-1], dialogs[-1]
             replies["mode"] = "production"
             panel("rates")
             with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/quotes")) as answered:

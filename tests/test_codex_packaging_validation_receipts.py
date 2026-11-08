@@ -95,8 +95,8 @@ def test_unknown_write_cannot_reuse_validation_of_the_last_known_revision(env, m
     assert invoke(gw, "validate_packaging")["ok"]
     change = env[0].change
 
-    def lost_response(*args):
-        change(*args)
+    def lost_response(*args, **kwargs):
+        change(*args, **kwargs)
         raise RuntimeError("synthetic response lost after commit")
 
     monkeypatch.setattr(env[0], "change", lost_response)

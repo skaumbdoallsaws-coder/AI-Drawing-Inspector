@@ -13,6 +13,7 @@ from uuid import uuid4
 from pydantic import TypeAdapter, ValidationError
 
 from .geometry import assess, digest
+from .handling import BASIS_LABELS, CONTENTS_LABELS
 from .models import Design, Product, MassCalculation, Identity
 from .storage import DEFAULT_LIMITS, KINDS as STORAGE_KINDS, NOTICE as STORAGE_NOTICE, RECENT_SECONDS, REFERENCE, \
     REFERENCED_BY, SCHEMA as STORAGE_SCHEMA, size_text, unused_digest
@@ -30,6 +31,47 @@ class PackagingError(Exception):
 
 def now():
     return datetime.now(timezone.utc).isoformat()
+
+
+# The contents declaration (classification, basis, evidence) belongs to the user. "direct" is an in-process caller
+# (tests, tools); the HTTP routes pass "user" with the user's explicit confirmation, and Sage passes "sage".
+CONTENTS_FIELDS = ("contents", "contents_basis", "contents_evidence")
+AUTHORS = ("direct", "user", "sage")
+SAGE_CONTENTS = ("Only the user can classify the contents or change their basis or evidence. Keep them as saved "
+                 "and recommend a classification in your reply instead. Nothing was saved.")
+
+
+def contents_record(design):
+    return tuple(getattr(design.constraints, name) for name in CONTENTS_FIELDS)
+
+
+def contents_text(record):
+    contents, basis, _evidence = record
+    text = CONTENTS_LABELS.get(contents, contents)
+    return f"{text}, {BASIS_LABELS[basis]}" if basis in BASIS_LABELS else text
+
+
+def guard_contents(before, after, author, confirmed):
+    """Refuses a contents change Sage makes, and one the user has not explicitly confirmed. Runs before any write."""
+    if author not in AUTHORS:
+        raise ValueError(f"unknown author {author!r}")
+    old, new = contents_record(before), contents_record(after)
+    if old == new or author == "direct":
+        return
+    if author == "sage":
+        raise PackagingError("contents_change_needs_user", SAGE_CONTENTS, 403)
+    if confirmed is not True:
+        change = (f"This change sets the contents to {contents_text(new)}; they are now {contents_text(old)}."
+                  if old[:2] != new[:2] else f"This change replaces the evidence for the contents ({contents_text(new)}).")
+        raise PackagingError("contents_confirmation_required", change + " Only you can classify the contents, so the "
+                             "change needs your explicit confirmation. Nothing was saved.", 409)
+
+
+def fingerprinted(command):
+    """A command's content for idempotency receipts; the user's confirmation is not part of what is saved."""
+    dumped = command.model_dump(mode="json")
+    dumped.pop("contents_confirmed", None)
+    return dumped
 
 
 def encode(value):
@@ -168,7 +210,7 @@ class PackagingService:
         except ValidationError:
             raise PackagingError("mass_out_of_range", "The calculated product mass exceeds the supported packaging range. Review source units and material density.", 422) from None
 
-    def create(self, scope, design=None, *, request_id=None):
+    def create(self, scope, design=None, *, request_id=None, author="direct", contents_confirmed=False):
         design = design or Design()
         if request_id is not None:
             try:
@@ -185,6 +227,7 @@ class PackagingService:
                     if prior[0] != fingerprint:
                         raise PackagingError("request_id_reused", "This request ID was already used for different content.")
                     return json.loads(prior[1])
+            guard_contents(Design(), design, author, contents_confirmed)
             self._check_sources(db, scope, design)
             doc_id = "pkg_" + uuid4().hex
             db.execute("INSERT INTO documents VALUES(?,?,?,?,?,?,?)", (scope, doc_id, 0, design.model_dump_json(), "[]", "[]", now()))
@@ -210,10 +253,10 @@ class PackagingService:
                 raise PackagingError("revision_conflict", "The document changed. Refresh before applying this operation.")
             return self._result(row)
 
-    def change(self, scope, doc_id, command, action="edit"):
+    def change(self, scope, doc_id, command, action="edit", *, author="direct", contents_confirmed=False):
         if action not in {"edit", "undo", "redo"}:
             raise PackagingError("invalid_operation", "Unsupported packaging operation.", 400)
-        fingerprint = digest({"action": action, "command": command.model_dump(mode="json")})
+        fingerprint = digest({"action": action, "command": fingerprinted(command)})
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
             prior = db.execute("SELECT fingerprint,result FROM receipts WHERE scope=? AND document_id=? AND request_id=?",
@@ -239,6 +282,7 @@ class PackagingService:
                     raise PackagingError("nothing_to_redo", "No edit is available to redo.")
                 design = Design.model_validate(future.pop())
                 past = (past + [current])[-30:]
+            guard_contents(Design.model_validate(current), design, author, contents_confirmed)
             self._check_sources(db, scope, design)
             db.execute("UPDATE documents SET revision=?,design=?,past=?,future=?,updated=? WHERE scope=? AND id=?",
                        (row["revision"] + 1, design.model_dump_json(), encode(past), encode(future), now(), scope, doc_id))
@@ -376,8 +420,8 @@ class PackagingService:
                 raise PackagingError("image_not_found", "Artwork is unavailable in this workspace.", 404)
             return json.loads(row[0]), bytes(row[1])
 
-    def save_alternative(self, scope, doc_id, command):
-        fingerprint = digest(command)
+    def save_alternative(self, scope, doc_id, command, *, author="direct", contents_confirmed=False):
+        fingerprint = digest(fingerprinted(command))
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
             prior = db.execute("SELECT * FROM alternatives WHERE scope=? AND document_id=? AND request_id=?", (scope, doc_id, command.request_id)).fetchone()
@@ -391,6 +435,7 @@ class PackagingService:
             if db.execute("SELECT COUNT(*) FROM alternatives WHERE scope=? AND document_id=?", (scope, doc_id)).fetchone()[0] >= 20:
                 raise PackagingError("alternative_limit", "A document supports at most 20 saved alternatives.", 422)
             design = command.design or Design.model_validate_json(row["design"])
+            guard_contents(Design.model_validate_json(row["design"]), design, author, contents_confirmed)
             self._check_sources(db, scope, design)
             alt_id = "alt_" + uuid4().hex
             db.execute("INSERT INTO alternatives VALUES(?,?,?,?,?,?,?,?,?)", (scope, doc_id, alt_id, command.name, row["revision"], design.model_dump_json(), now(), command.request_id, fingerprint))

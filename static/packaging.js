@@ -1338,7 +1338,21 @@ export const CONTENTS_OPTIONS = [['unconfirmed', 'Unconfirmed'], ['ordinary_nonh
   ['magnetized_material', 'Magnetized material (not supported for rating)'], ['special_handling', 'Special handling required (not supported for rating)']];
 export const CONTENTS_BASIS_OPTIONS = [['', 'Not recorded'], ['product_declaration', 'Declaration about the real product'],
   ['test_assumption', 'Test assumption (synthetic test parcel; test-key quotes only)']];
-export const CONTENTS_NOTICE = 'A classification here is never carrier acceptance and is not sent to carriers. Magnetized and special-handling contents are not supported for rating. A test assumption is only for a synthetic connection-test parcel: it cannot be quoted with a key recorded as production, and its rates are not clearance to ship any product.';
+export const CONTENTS_NOTICE = 'A classification here is never carrier acceptance and is not sent to carriers. Magnetized and special-handling contents are not supported for rating. A test assumption is only for a synthetic connection-test parcel: it cannot be quoted with a key recorded as production, and its rates are not clearance to ship any product. Only you can set or change the contents: saving a change asks you to confirm it, and Sage can only recommend one.';
+
+// The server refuses a contents change the user has not confirmed (contents_confirmation_required) and names the
+// change. Ask, and resend once with the user's confirmation; Cancel leaves the change unsaved. Sage never sends it.
+export const CONTENTS_CONFIRMATION = 'contents_confirmation_required';
+export async function sendWithContentsConfirmation(send, ask = message => window.confirm(message)) {
+  try { return await send(false); }
+  catch (error) {
+    if (error?.code !== CONTENTS_CONFIRMATION) throw error;
+    if (!ask(`${error.message}\n\nConfirm this contents classification as your own? Cancel leaves the change unsaved.`)) {
+      throw new Error('Not saved: the contents change was not confirmed.');
+    }
+    return send(true);
+  }
+}
 export const MASS_BASIS_OPTIONS = [['unknown', 'Unknown (left out of the weight)'], ['user_measured', 'Measured'], ['estimate', 'Estimate']];
 export const MOVEMENT_DIRECTIONS = ['-x', '+x', '-y', '+y', '-z', '+z'];
 const STOP_LABELS = { insert: 'packing material', product: 'another product', carton_wall: 'carton wall' };
@@ -2133,14 +2147,17 @@ async function saveDocument() {
       const fingerprint = JSON.stringify({ create: state.draft.design });
       if (state.mutationReceipt?.fingerprint !== fingerprint) { const id = uid('create'); state.mutationReceipt = { fingerprint, id, pending: { kind: 'create', request_id: id } }; }
       await checkpoint();
-      result = await request('/documents', { method: 'POST', body: state.draft.design, idempotencyKey: state.mutationReceipt.id });
+      result = await sendWithContentsConfirmation(confirmed => request(confirmed ? '/documents?contents_confirmed=true' : '/documents',
+        { method: 'POST', body: state.draft.design, idempotencyKey: state.mutationReceipt.id }));
     }
     else {
       // Keep the receipt on network failure so an exact retry is idempotent.
       const fingerprint = JSON.stringify({ revision: state.draft.document.revision, design: state.draft.design });
       if (state.mutationReceipt?.fingerprint !== fingerprint) { const id = uid('edit'); state.mutationReceipt = { fingerprint, id, pending: { kind: 'edit', request_id: id } }; }
       await checkpoint();
-      result = await request(docPath(), { method: 'PUT', body: { expected_revision: state.draft.document.revision, request_id: state.mutationReceipt.id, design: state.draft.design } });
+      result = await sendWithContentsConfirmation(confirmed => request(docPath(), { method: 'PUT', body: {
+        expected_revision: state.draft.document.revision, request_id: state.mutationReceipt.id, design: state.draft.design,
+        ...(confirmed ? { contents_confirmed: true } : {}) } }));
     }
     state.draft.accept(result); state.mutationReceipt = null; state.quoteError = ''; notify(`Saved revision ${result.revision}.`);
   });
@@ -2154,7 +2171,8 @@ async function historyAction(action) {
   await working(`${action === 'undo' ? 'Undoing' : 'Redoing'} saved edit...`, async () => {
     const fingerprint = `${action}:${state.draft.document.id}:${state.draft.document.revision}`;
     if (state.mutationReceipt?.fingerprint !== fingerprint) state.mutationReceipt = { fingerprint, id: uid(action) };
-    const result = await request(`${docPath()}/${action}`, { method: 'POST', body: { expected_revision: state.draft.document.revision, request_id: state.mutationReceipt.id } });
+    const result = await sendWithContentsConfirmation(confirmed => request(`${docPath()}/${action}`, { method: 'POST', body: {
+      expected_revision: state.draft.document.revision, request_id: state.mutationReceipt.id, ...(confirmed ? { contents_confirmed: true } : {}) } }));
     state.draft.accept(result); state.mutationReceipt = null; notify(`Saved revision ${result.revision}.`);
   });
   render();

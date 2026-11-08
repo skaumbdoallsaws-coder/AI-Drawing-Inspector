@@ -92,6 +92,8 @@ _MESSAGES = {
     "account_mode_mismatch": ("EasyPost answered in a different mode than the key is recorded as. A request that revealed "
                               "this was already sent and cannot be undone; later requests are refused. Do not retry; ask the "
                               "user to check the key in the EasyPost dashboard."),
+    "contents_change_needs_user": ("Only the user can classify the contents or change their basis or evidence. Nothing "
+                                   "was saved. Keep them exactly as saved and recommend a classification in your reply."),
     "test_assumption_needs_test_key": ("This design's contents are a test assumption, so it can be quoted only with a key "
                                        "recorded as a test key. No request was sent. Do not change the contents to get a quote."),
     "quote_budget_exceeded": "At most 12 package/destination combinations can be quoted per request.",
@@ -756,9 +758,9 @@ _TOOLS = {
     "inspect_packaging": (InspectArguments, _InspectSuccess, "Inspect the bound saved packaging document. package_limit must be 1 or 2, not a findings limit. Follow next_package_offset to read further pages."),
     "validate_packaging": (ValidateArguments, _ValidateSuccess, "Assess saved or proposed design envelopes and provenance without saving. Not transport certification."),
     "propose_packaging": (ProposeArguments, _ProposeSuccess, "Propose bounded orthogonal arrangements of the saved product without saving or requesting rates. Dimensions are numeric metre arrays, e.g. inner_m: [0.3, 0.2, 0.1], never quoted numbers or unit strings. Candidates rebuild the design's cushion requirement as a foam lining; a design with inserts and no cushion requirement is refused."),
-    "edit_packaging": (EditArguments, _ChangeSuccess, "Replace the complete saved design at the expected revision, using a unique request_id. Read all package pages first. Requires admitted direct-edit authority."),
-    "undo_packaging": (HistoryArguments, _ChangeSuccess, "Undo the latest saved packaging edit at the expected revision. May undo a human edit; requires direct-edit authority."),
-    "redo_packaging": (HistoryArguments, _ChangeSuccess, "Redo the latest undone packaging edit at the expected revision. Requires direct-edit authority."),
+    "edit_packaging": (EditArguments, _ChangeSuccess, "Replace the complete saved design at the expected revision, using a unique request_id. Read all package pages first. Requires admitted direct-edit authority. Keep the contents classification, basis and evidence exactly as saved: only the user can change them, so recommend a change in your reply."),
+    "undo_packaging": (HistoryArguments, _ChangeSuccess, "Undo the latest saved packaging edit at the expected revision. May undo a human edit; requires direct-edit authority. Refused if it would change the contents classification, basis or evidence."),
+    "redo_packaging": (HistoryArguments, _ChangeSuccess, "Redo the latest undone packaging edit at the expected revision. Requires direct-edit authority. Refused if it would change the contents classification, basis or evidence."),
     "packaging_quote_scenarios": (ScenarioArguments, _ScenariosSuccess, "List the quote scenarios the user authorized for Sage in the Rates panel (IDs, city and state, remaining provider-shipment budget, expiry) and the scenarios that already have saved quotes. Contacts no provider."),
     "quote_packaging": (QuoteArguments, _QuoteSuccess, "Request carrier rates for the saved design, or a saved alternative_id, and one authorized scenario_id, through the same service as the Rates panel. Pass the design_hash from the latest inspection or alternatives listing. Reuses an identical saved quote unless refresh is true; new rates create provider shipments within the scenario budget and may be billed. Never buys postage or labels."),
     "compare_packaging": (CompareArguments, _CompareSuccess, "Compare saved quotes of the current and saved designs against the user's baseline for one scenario_id or scenario_hash, on the account rate for the same account, mode and service. Reads saved quotes only. Report its differences and claim text as given."),
@@ -1132,7 +1134,8 @@ class PackagingGateway:
                 self._active()
                 mutation["outcome"] = "unknown"
                 try:
-                    changed = self.service.change(self._scope, self._document_id, args, mutation["action"])
+                    # Sage never changes the contents declaration; the service refuses it before writing.
+                    changed = self.service.change(self._scope, self._document_id, args, mutation["action"], author="sage")
                 except PackagingError:
                     mutation["outcome"] = "not_started"
                     raise

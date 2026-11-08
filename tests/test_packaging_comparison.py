@@ -88,7 +88,7 @@ def test_fixture_designs_are_valid_and_differ_in_price():
 class Pilot:
     def __init__(self, client, baseline_design):
         self.client = client
-        doc = client.post("/api/packaging/documents", json=baseline_design.model_dump(mode="json")).json()
+        doc = client.post("/api/packaging/documents?contents_confirmed=true", json=baseline_design.model_dump(mode="json")).json()
         self.url, self.revision = f"/api/packaging/documents/{doc['id']}", doc["revision"]
 
     def save(self, name, design):

@@ -85,7 +85,7 @@ def verify(url: str, output: Path):
                 "tare_kg": .2, "tare_evidence": "TEST scale measurement"}, "placements": [{"id": "test_item", "position_m": [.02, .02, .02], "orientation": 0}],
                 "inserts": [], "allowance_kg": 0, "allowance_evidence": "TEST allowance"}],
         }
-        created = context.request.post(url + "/api/packaging/documents", data=seed, headers=headers)
+        created = context.request.post(url + "/api/packaging/documents?contents_confirmed=true", data=seed, headers=headers)
         assert created.ok, created.text()
         document_id = created.json()["id"]
         try:

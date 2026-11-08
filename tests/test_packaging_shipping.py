@@ -794,7 +794,7 @@ def test_pilot_document_source_quote_scope_and_stale_quotes(pilot, box_glb):
     source_id = uploaded.json()["id"]
     source_url = f"/api/packaging/sources/{source_id}.glb"
     assert client.get(source_url).headers["content-type"] == "model/gltf-binary"
-    document = client.post("/api/packaging/documents", json=design_data()).json()
+    document = client.post("/api/packaging/documents?contents_confirmed=true", json=design_data()).json()
     assert document["schema_version"] == SCHEMA_VERSION
     assert document["units"] == {"length": "m", "mass": "kg", "up": "Y"}
     url = f"/api/packaging/documents/{document['id']}"

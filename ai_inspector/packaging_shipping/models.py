@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
-from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_serializer, model_validator
 
 Scalar = Annotated[float, Field(ge=0, le=10000, allow_inf_nan=False, strict=True)]
 Length = Annotated[float, Field(gt=0, le=5, allow_inf_nan=False, strict=True)]
@@ -421,6 +421,16 @@ class RevisionCommand(Closed):
     request_id: Identity
 
 
+# The user's editor only. contents_confirmed is the user's explicit confirmation of a contents change; Sage's
+# arguments subclass Edit and RevisionCommand, never these, so the field is not in Sage's tool schema.
+class UserEdit(Edit):
+    contents_confirmed: StrictBool = False
+
+
+class UserRevisionCommand(RevisionCommand):
+    contents_confirmed: StrictBool = False
+
+
 class LibrarySourceRequest(Closed):
     """An InspectorPro library entry, named only: the host reads the model from its own library folder."""
     kind: Literal["part", "assembly"]
@@ -528,6 +538,7 @@ class AlternativeSave(Closed):
     request_id: Identity
     name: Text
     design: Design | None = None
+    contents_confirmed: StrictBool = False
 
 
 class Address(Closed):

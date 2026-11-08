@@ -549,8 +549,9 @@ test('recovery drafts restore unsaved work, drop work already saved and ask befo
   assert.match(source, /await beginImport\(\{ kind: step \? 'step' : 'glb', name \}\);\s+try \{/);
   assert.match(source, /state\.activity = 'save';/);
   // Every save records its request in a checkpoint before sending it, so an interrupted save can be reconciled.
-  assert.match(source, /await checkpoint\(\);\s+result = await request\('\/documents'/);
-  assert.match(source, /await checkpoint\(\);\s+result = await request\(docPath\(\)/);
+  // (A contents change is resent once with the user's confirmation, under the same checkpointed request ID.)
+  assert.match(source, /await checkpoint\(\);\s+result = await sendWithContentsConfirmation\(confirmed => request\(confirmed \? '\/documents\?contents_confirmed=true' : '\/documents'/);
+  assert.match(source, /await checkpoint\(\);\s+result = await sendWithContentsConfirmation\(confirmed => request\(docPath\(\)/);
   assert.deepEqual(ui.testState.recovery.offered, false);
 });
 

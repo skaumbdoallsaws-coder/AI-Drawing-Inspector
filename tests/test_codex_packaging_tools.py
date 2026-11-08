@@ -17,7 +17,7 @@ from ai_inspector.codex_runtime import packaging_tools as tools
 from ai_inspector.codex_runtime.policy import PilotError
 from ai_inspector.facility_layout.authorization import FacilityPrincipal
 from ai_inspector.packaging_shipping.geometry import digest
-from ai_inspector.packaging_shipping.models import Design, Edit
+from ai_inspector.packaging_shipping.models import Design, Edit, RevisionCommand
 from ai_inspector.packaging_shipping.service import PackagingService
 from ai_inspector.packaging_shipping.sources import import_glb
 
@@ -413,9 +413,9 @@ def test_external_revision_changes_close_turn_and_prevent_stale_write(env):
 def test_cas_race_between_precheck_and_transaction_does_not_overwrite(env, monkeypatch):
     gw = gateway(env, editing=True)
     original = env[0].change
-    def racing(scope, doc_id, command, action):
+    def racing(scope, doc_id, command, action, **kwargs):
         original(scope, doc_id, Edit.model_validate(edit_args("Raced", request_id="race")))
-        return original(scope, doc_id, command, action)
+        return original(scope, doc_id, command, action, **kwargs)
     monkeypatch.setattr(env[0], "change", racing)
     result = invoke(gw, "edit_packaging", edit_args())
     assert_error(result, "revision_conflict")
@@ -711,3 +711,57 @@ def test_missing_arrangement_solver_is_reported_to_sage(env, monkeypatch):
         "cartons": [sample_design().packages[0].carton.model_dump(mode="json")]})
     assert_error(result, "arrangement_unavailable")
     assert "Manual packing still works" in result["error"]["message"]
+
+
+# The contents declaration is the user's: Sage may recommend a classification in its reply, never save one.
+
+@pytest.mark.parametrize("change", [
+    {"contents": "unconfirmed"},
+    {"contents_basis": "test_assumption", "contents_evidence": "TEST synthetic parcel"},
+    {"contents": "magnetized_material", "contents_basis": "product_declaration", "contents_evidence": "TEST supplier sheet"},
+])
+def test_sage_edit_never_changes_the_contents_declaration(env, change):
+    before = snapshot(env)
+    args = edit_args(request_id="contents-1")
+    args["design"]["constraints"].update(change)
+    result = invoke(gateway(env, editing=True), "edit_packaging", args)
+    assert_error(result, "contents_change_needs_user")
+    assert "recommend a classification in your reply" in result["error"]["message"]
+    assert snapshot(env) == before  # Nothing written: no revision, no receipt.
+
+
+def test_sage_edits_that_keep_the_contents_still_save(env):
+    service, scope, context, _ = env
+    assert invoke(gateway(env, editing=True), "edit_packaging", edit_args("Renamed by Sage"))["ok"]
+    saved = service.get(scope, context[0].document_id)["design"]
+    assert saved["name"] == "Renamed by Sage" and saved["constraints"]["contents"] == "ordinary_nonhazardous"
+
+
+@pytest.mark.parametrize("action", ["undo", "redo"])
+def test_sage_undo_and_redo_cannot_change_the_contents(env, action):
+    service, scope, context, _ = env
+    doc = context[0].document_id
+    unclassified = sample_design().model_dump(mode="json")
+    unclassified["constraints"]["contents"] = "unconfirmed"
+    service.change(scope, doc, Edit(expected_revision=0, request_id="user-1", design=unclassified),
+                   author="user", contents_confirmed=True)
+    revision = 1
+    if action == "redo":
+        service.change(scope, doc, RevisionCommand(expected_revision=1, request_id="user-undo"), "undo",
+                       author="user", contents_confirmed=True)
+        revision = 2
+    context[0] = replace(context[0], revision=revision)
+    before = snapshot(env)
+    result = invoke(gateway(env, editing=True), f"{action}_packaging",
+                    {"expected_revision": revision, "request_id": f"sage-{action}"})
+    assert_error(result, "contents_change_needs_user")
+    assert snapshot(env) == before
+
+
+def test_sage_has_no_way_to_send_a_contents_confirmation(env):
+    for name in ("edit_packaging", "undo_packaging", "redo_packaging"):
+        assert "contents_confirmed" not in tools._TOOLS[name][0].model_fields
+    args = edit_args(request_id="contents-2")
+    args["design"]["constraints"]["contents"] = "unconfirmed"
+    args["contents_confirmed"] = True
+    assert_error(invoke(gateway(env, editing=True), "edit_packaging", args), "codex_tool_arguments_invalid")

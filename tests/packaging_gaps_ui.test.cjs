@@ -33,6 +33,24 @@ test('contents keep a basis only once classified, and basis and evidence go toge
   assert.ok(ui.CONTENTS_OPTIONS.some(([value]) => value === 'magnetized_material'));
   assert.match(ui.CONTENTS_NOTICE, /never carrier acceptance/);
   assert.match(ui.CONTENTS_NOTICE, /cannot be quoted with a key recorded as production/);
+  assert.match(ui.CONTENTS_NOTICE, /Only you can set or change the contents/);
+});
+
+test('a contents change the server refuses is resent only with the user\'s confirmation', async () => {
+  const refused = Object.assign(new Error('This change sets the contents to Ordinary, non-hazardous; they are now Not confirmed.'),
+    { code: 'contents_confirmation_required' });
+  const calls = [], asked = [];
+  const send = async confirmed => { calls.push(confirmed); if (!confirmed) throw refused; return 'saved'; };
+  assert.equal(await ui.sendWithContentsConfirmation(send, message => { asked.push(message); return true; }), 'saved');
+  assert.deepEqual(calls, [false, true]);
+  assert.match(asked[0], /sets the contents to Ordinary, non-hazardous/);
+  assert.match(asked[0], /Confirm this contents classification as your own\? Cancel leaves the change unsaved/);
+  calls.length = 0;
+  await assert.rejects(ui.sendWithContentsConfirmation(send, () => false), /not confirmed/);
+  assert.deepEqual(calls, [false]);  // Cancelled: never resent.
+  assert.equal(await ui.sendWithContentsConfirmation(async () => 'ok', () => assert.fail('asked')), 'ok');
+  const other = Object.assign(new Error('The document changed.'), { code: 'revision_conflict' });
+  await assert.rejects(ui.sendWithContentsConfirmation(async () => { throw other; }, () => assert.fail('asked')), /document changed/);
 });
 
 test('a movement requirement needs its reason; blank means none', () => {

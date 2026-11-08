@@ -46,7 +46,7 @@ def verify(url, output):
                 route.continue_()
 
         context.route("**/*", local_only)
-        created = context.request.post(url + "/api/packaging/documents", data=design, headers=HEADERS)
+        created = context.request.post(url + "/api/packaging/documents?contents_confirmed=true", data=design, headers=HEADERS)
         assert created.ok, created.text()
         doc_url = f"{url}/api/packaging/documents/{created.json()['id']}"
 

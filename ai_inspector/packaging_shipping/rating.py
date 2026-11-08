@@ -218,10 +218,16 @@ def _account(raw):
             "billing_type": billing if isinstance(billing, str) and re.fullmatch(r"[a-z_]{1,40}", billing) else None}
 
 
+TEST_ONLY_CONTENTS = ("This design's contents are a test assumption, so it can be quoted only with a key recorded as a test "
+                      "key. No request was sent. Test-mode rates are not clearance to ship any product.")
+
+
 def mode_mismatch(observed, declared):
     return PackagingError("account_mode_mismatch", f"EasyPost answered in {observed} mode, but this key is recorded as a {declared} "
-                          "key. No quote was saved and no further shipments were requested. Check the key in the EasyPost "
-                          "dashboard, then record its mode again or replace the key.", 409)
+                          "key. The request that returned this answer was already sent and created one provider shipment; "
+                          "that cannot be undone, and a production shipment may be billed. Nothing was saved, no further "
+                          "shipments were requested and nothing is retried. Check the key in the EasyPost dashboard, then "
+                          "record its mode again or replace the key.", 409)
 
 
 class EasyPostRating:
@@ -247,8 +253,11 @@ class EasyPostRating:
 
     def status(self):
         return {"provider": "EasyPost", "configured": bool(self._key), "purchases_enabled": False,
-                "account_ref": self.account_ref, "declared_mode": self.declared_mode,
-                "notice": "Quotes use the configured account, recorded as a test or production key; every response's mode is checked against it. No labels are purchased."}
+                "account_ref": self.account_ref, "declared_mode": self.declared_mode, "observed_mode": self.observed_mode,
+                "mode_mismatch": bool(self.declared_mode and self.observed_mode and self.declared_mode != self.observed_mode),
+                "notice": "Quotes need the key recorded as a test or production key. Each response's mode is checked against "
+                          "that record; a mismatch stops further requests but cannot undo the request that revealed it. "
+                          "No labels are purchased."}
 
     def fingerprint(self, assessment, request):
         return quote_fingerprint(assessment["design_hash"], digest(request.scenario()), self.account_ref)
@@ -272,6 +281,9 @@ class EasyPostRating:
             raise PackagingError("provider_not_configured", "Carrier credentials are not configured. Local packaging remains available.", 503)
         if not assessment["rate_ready"]:
             raise PackagingError("package_not_rate_ready", "Resolve the validation errors before requesting rates.", 422)
+        if design.constraints.contents_basis == "test_assumption" and self.declared_mode != "test":
+            # A synthetic parcel is never priced on a key recorded as production (or not recorded at all).
+            raise PackagingError("test_assumption_needs_test_key", TEST_ONLY_CONTENTS, 409)
         if request.ship_date is not None:
             raise PackagingError("ship_date_unsupported", "A specific ship date is not supported: EasyPost does not document that rates honor a later date. Leave the ship date empty to rate as of today.", 422)
         origin_notes = check_address(request.origin, "origin")

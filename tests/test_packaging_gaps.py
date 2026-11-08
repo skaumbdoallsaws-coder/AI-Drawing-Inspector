@@ -57,7 +57,7 @@ def lining(x=0.14):
 
 
 def base():
-    """One 100 x 80 x 40 mm TEST product held by a 20 mm lining on every side: no free travel, ready to rate."""
+    """One 100 x 80 x 40 mm TEST product held by a 20 mm lining on every side: zero predicted clearance, ready to rate."""
     return {
         "name": "TEST gaps", "quantity": 1,
         "product": {"name": "TEST product", "dimensions_m": [0.1, 0.08, 0.04], "mass_kg": 0.5,
@@ -207,7 +207,7 @@ def test_contents_basis_needs_evidence_and_a_classification(fields):
 
 # Movement and restraint.
 
-def test_a_fully_lined_product_has_no_free_travel():
+def test_a_fully_lined_product_has_zero_predicted_clearance():
     d = base()
     a = run(d)
     row = a["restraint"][0]
@@ -482,8 +482,127 @@ def test_the_report_shows_contents_requirements_movement_and_each_quote_basis():
                      "A USPS ruling is needed before any eligibility rule is applied.",
                      "No contents or hazardous-materials information is sent to carriers.",
                      "Added mass magnets: TEST magnets | unknown (left out of rated weights)",
-                     "Movement and restraint (bounding boxes; geometry only)", "+x 5.0 mm to insert",
+                     "Predicted translational clearance (bounding-box model)", "+x 5.0 mm to insert",
+                     "Rotation, foam compression and shipping protection remain unverified",
                      "Gross mass basis: estimate (sum of component masses",
                      "Weight basis: Estimate: sum of component masses; excludes 1 item(s) of unknown mass: TEST magnets",
                      "Key mode: recorded test; EasyPost answered test."):
         assert expected in text, expected
+
+
+# A mismatch is known only from a response: the request that revealed it was sent and cannot be undone.
+# What the guard does is stop that quote there, never retry, and refuse every later request.
+
+def quote_with(desk, service, doc, destinations=1, refresh=False):
+    current = service.get(SCOPE, doc)
+    body = quote_request(destinations).model_copy(update={"refresh": refresh})
+    return asyncio.run(desk.price(SCOPE, doc, 0, Design.model_validate(current["design"]), current["assessment"], body, None,
+                                  lambda fingerprint: service.find_quote(SCOPE, doc, 0, fingerprint),
+                                  lambda result: service.save_quotes(SCOPE, doc, 0, result)))
+
+
+def test_after_a_mismatch_the_direct_key_sends_nothing_more(tmp_path):
+    service, doc = saved_doc(tmp_path, base())
+    calls = []
+    provider = EasyPostRating(key=TEST_KEY, transport=httpx.MockTransport(handler(calls, "production")), declared_mode="test")
+    desk = QuoteDesk(service, rating=provider)
+    with pytest.raises(PackagingError) as first:
+        quote_with(desk, service, doc, destinations=3)
+    assert first.value.code == "account_mode_mismatch" and len(calls) == 1
+    assert "already sent" in first.value.message and "cannot be undone" in first.value.message
+    assert provider.status()["mode_mismatch"] is True
+    for refresh in (False, True):
+        with pytest.raises(PackagingError) as later:
+            quote_with(desk, service, doc, destinations=3, refresh=refresh)
+        assert later.value.code == "account_mode_mismatch" and "No request was sent" in later.value.message
+    with pytest.raises(PackagingError) as listing:
+        asyncio.run(desk.carrier_accounts(None))
+    assert listing.value.code == "account_mode_mismatch"
+    assert len(calls) == 1  # no retry and no continuation
+    attempts = service.quote_attempts(SCOPE, doc)["attempts"]
+    assert len(attempts) == 1 and attempts[0]["requests_sent"] == 1 and attempts[0]["shipments_created"] == 1
+    assert service.quote_history(SCOPE, doc) == []
+
+
+def production_replies(monkeypatch, calls, mode="production"):
+    real = EasyPostRating.__init__
+
+    def mocked(self, *args, **kwargs):
+        real(self, *args, **{**kwargs, "transport": httpx.MockTransport(handler(calls, mode))})
+    monkeypatch.setattr(EasyPostRating, "__init__", mocked)
+
+
+def test_after_a_mismatch_the_saved_key_is_refused_even_if_the_store_write_fails(tmp_path, codec, monkeypatch):
+    store = store_at(tmp_path, codec)
+    store.replace(TEST_KEY, account_alias="TEST account", mode="test")
+    service, doc = saved_doc(tmp_path, base())
+    calls = []
+    production_replies(monkeypatch, calls)
+
+    def unwritable(*args, **kwargs):
+        raise OSError("TEST store write failure")
+    monkeypatch.setattr(store, "observe_mode", unwritable)
+    desk = QuoteDesk(service, credential_factory=lambda resolved: store)
+    with pytest.raises(PackagingError) as first:
+        quote_with(desk, service, doc, destinations=2)
+    assert first.value.code == "account_mode_mismatch" and len(calls) == 1
+    assert store.status()["observed_mode"] is None  # nothing reached the store
+    for refresh in (False, True):
+        with pytest.raises(PackagingError) as later:
+            quote_with(desk, service, doc, destinations=2, refresh=refresh)
+        assert later.value.code == "account_mode_mismatch"
+    assert len(calls) == 1 and len(service.quote_attempts(SCOPE, doc)["attempts"]) == 1
+
+
+def test_recording_the_mode_again_does_not_clear_what_easypost_reported(tmp_path, codec, monkeypatch):
+    store = store_at(tmp_path, codec)
+    store.replace(TEST_KEY, account_alias="TEST account", mode="test")
+    service, doc = saved_doc(tmp_path, base())
+    calls = []
+    production_replies(monkeypatch, calls)
+    desk = QuoteDesk(service, credential_factory=lambda resolved: store)
+    with pytest.raises(PackagingError):
+        quote_with(desk, service, doc)
+    assert store.status()["mode_mismatch"] is True and len(calls) == 1
+    store.declare_mode("test")
+    with pytest.raises(PackagingError) as refused:
+        quote_with(desk, service, doc)
+    assert refused.value.code == "account_mode_mismatch" and len(calls) == 1
+    store.declare_mode("production")  # Mock only: the mode the mock reported, recorded by the user.
+    saved = quote_with(desk, service, doc)
+    assert saved["account_mode"] == {"declared": "production", "observed": "production"} and len(calls) == 2
+
+
+# Test assumptions are for synthetic connection-test parcels: never priced on a production key.
+
+def assumed(basis="test_assumption"):
+    d = base()
+    d["constraints"].update(contents_basis=basis, contents_evidence="TEST synthetic parcel for a connection test")
+    return d
+
+
+@pytest.mark.parametrize("mode", ["production", None])
+def test_test_assumption_contents_are_refused_unless_the_key_is_recorded_as_test(tmp_path, mode):
+    service, doc = saved_doc(tmp_path, assumed())
+    calls = []
+    provider = EasyPostRating(key=TEST_KEY, transport=httpx.MockTransport(handler(calls, mode or "test")), declared_mode=mode)
+    with pytest.raises(PackagingError) as refused:
+        quote_with(QuoteDesk(service, rating=provider), service, doc)
+    assert refused.value.code == ("test_assumption_needs_test_key" if mode else "account_mode_unconfirmed") and calls == []
+    assert service.quote_attempts(SCOPE, doc)["attempts"] == []
+    current = service.get(SCOPE, doc)
+    with pytest.raises(PackagingError) as direct:
+        provider.preflight(Design.model_validate(current["design"]), current["assessment"], quote_request())
+    assert direct.value.code == "test_assumption_needs_test_key"
+
+
+def test_test_assumption_contents_rate_on_a_test_key_and_declarations_on_any_key(tmp_path):
+    service, doc = saved_doc(tmp_path / "assumed", assumed())
+    calls = []
+    test_key = EasyPostRating(key=TEST_KEY, transport=httpx.MockTransport(handler(calls)), declared_mode="test")
+    saved = quote_with(QuoteDesk(service, rating=test_key), service, doc)
+    assert saved["contents"]["basis"] == "test_assumption" and saved["mode"] == "test" and len(calls) == 1
+    declared_service, declared_doc = saved_doc(tmp_path / "declared", assumed("product_declaration"))
+    production = EasyPostRating(key=TEST_KEY, transport=httpx.MockTransport(handler(calls, "production")), declared_mode="production")
+    saved = quote_with(QuoteDesk(declared_service, rating=production), declared_service, declared_doc)
+    assert saved["contents"]["basis"] == "product_declaration" and len(calls) == 2

@@ -22,7 +22,7 @@ from ai_inspector.codex_runtime.packaging_pilot import INSTRUCTIONS, NO_QUOTES, 
 from ai_inspector.facility_layout.authorization import FacilityPrincipal
 from ai_inspector.packaging_shipping.api import create_router
 from ai_inspector.packaging_shipping.geometry import assess, digest
-from ai_inspector.packaging_shipping.models import AlternativeSave, ScenarioAuthorization
+from ai_inspector.packaging_shipping.models import AlternativeSave, Design, ScenarioAuthorization
 from ai_inspector.packaging_shipping.quoting import QuoteDesk, ScenarioStore
 from ai_inspector.packaging_shipping.service import PackagingError, PackagingService
 from tests.test_packaging_comparison import expected_shipping, one_box, priced, two_boxes
@@ -320,3 +320,30 @@ def test_manual_and_sage_quotes_share_one_lock(env):
         response = client.post(f"/api/packaging/documents/{env.doc}/quotes", json=body, headers=HEADERS)
     assert response.status_code == 429 and response.json()["error"]["code"] == "quote_in_progress"
     assert env.calls == [] and env.desk.scenarios.remaining(env.scope, env.doc, "engineer", sid) == 4
+
+
+def test_after_a_mode_mismatch_sage_is_refused_and_nothing_more_is_sent(env):
+    env.state["mode"] = "production"  # A mock reply field only; the TEST key stays recorded as test.
+    gw = gateway(env)
+    sid = scenario(env, shipments=8)
+    args = {"expected_revision": 0, "scenario_id": sid, "expected_design_hash": env.hash}
+    assert_error(invoke(gw, "quote_packaging", args), "account_mode_mismatch")
+    assert len(env.calls) == 1  # the request that revealed the mismatch was sent; nothing after it
+    for again in (args, {**args, "refresh": True}):
+        assert_error(invoke(gw, "quote_packaging", again), "account_mode_mismatch")
+    assert len(env.calls) == 1 and env.desk.scenarios.remaining(env.scope, env.doc, "engineer", sid) == 4
+    assert [a["outcome"] for a in env.service.quote_attempts(env.scope, env.doc)["attempts"]] == ["failed"]
+    assert env.service.quote_history(env.scope, env.doc) == []
+
+
+def test_sage_cannot_quote_test_assumption_contents_on_a_production_key(env):
+    data = two_boxes().model_dump(mode="json")
+    data["constraints"].update(contents_basis="test_assumption", contents_evidence="TEST synthetic connection-test parcel")
+    saved = env.service.create(env.scope, Design.model_validate(data))
+    env.doc, env.hash = saved["id"], saved["assessment"]["design_hash"]
+    env.state["mode"] = "production"
+    env.desk.provider.declared_mode = "production"  # Mock only.
+    sid = scenario(env, shipments=4)
+    result = invoke(gateway(env), "quote_packaging", {"expected_revision": 0, "scenario_id": sid, "expected_design_hash": env.hash})
+    assert_error(result, "test_assumption_needs_test_key")
+    assert env.calls == [] and env.service.quote_attempts(env.scope, env.doc)["attempts"] == []

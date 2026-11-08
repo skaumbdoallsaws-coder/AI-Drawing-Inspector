@@ -271,7 +271,9 @@ def test_production_quotes_name_the_saving_and_mixed_modes_are_refused(tmp_path,
         mixed = pilot.save("TEST test-mode quote", one_box(cost=1.5, product={"mass_evidence": "TEST scale, rechecked"}))
         assert pilot.quote().status_code == 200 and pilot.quote(alt).status_code == 200
         state["mode"] = "test"
-        provider.declared_mode = "test"  # Mock only: one TEST key recorded first as production, then as test.
+        # Mock only: as if the key were replaced by a test key. Re-recording the same key as test after EasyPost
+        # answered production is refused (test_recording_the_mode_again_does_not_clear_what_easypost_reported).
+        provider.declared_mode, provider.observed_mode = "test", None
         assert pilot.quote(mixed).status_code == 200
         result = pilot.compare()
         by_name = rows(result)

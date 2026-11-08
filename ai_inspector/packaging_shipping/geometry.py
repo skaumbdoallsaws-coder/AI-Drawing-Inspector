@@ -248,20 +248,21 @@ def assess(design: Design) -> dict:
         moving = [r for r in restraint_rows if r["max_travel_m"] is not None and r["max_travel_m"] > limit + TOLERANCE_M]
         touching = [r for r in restraint_rows if r["reaches_products"]]
         if unverified:
-            issue("restraint_not_verified", f"Movement could not be checked within the analysis limit for {len(unverified)} product(s). "
-                  "Simplify the inserts or review them manually.", (unverified[0]["item_id"],), "warning")
+            issue("restraint_not_verified", f"Translational clearance could not be predicted within the analysis limit for "
+                  f"{len(unverified)} product(s). Simplify the inserts or review them manually.", (unverified[0]["item_id"],), "warning")
         if moving:
             worst = max(moving, key=lambda r: r["max_travel_m"])
-            text = (f"{len(moving)} of {len(restraint_rows)} products can move before meeting packing material, another product or a "
-                    f"carton wall (up to {worst['max_travel_m'] * 1000:.1f} mm, {worst['max_travel_direction']}, {worst['item_id']})")
+            text = (f"Under the bounding-box model, {len(moving)} of {len(restraint_rows)} products have predicted translational "
+                    f"clearance before they meet packing material, another product or a carton wall (up to "
+                    f"{worst['max_travel_m'] * 1000:.1f} mm, {worst['max_travel_direction']}, {worst['item_id']})")
             if requirement:
                 issue("restraint_insufficient", f"{text}; the restraint requirement allows {requirement.max_travel_m * 1000:.1f} mm.", (worst["item_id"],))
             else:
-                issue("restraint_movement", f"{text}. Bounding boxes only; restraint is not validated.", (worst["item_id"],), "warning")
+                issue("restraint_movement", f"{text}. Rotation, foam compression and shipping protection remain unverified.", (worst["item_id"],), "warning")
         if touching:
             first = touching[0]
-            issue("products_can_touch", f"{len(touching)} products can move into another product with no packing material between them "
-                  f"({first['item_id']} reaches {', '.join(first['reaches_products'])}).", (first["item_id"], first["reaches_products"][0]),
+            issue("products_can_touch", f"Under the bounding-box model, {len(touching)} products meet another product, not packing "
+                  f"material, in at least one direction ({first['item_id']} reaches {', '.join(first['reaches_products'])}).", (first["item_id"], first["reaches_products"][0]),
                   "error" if requirement and requirement.separate_products else "warning")
     contents = design.constraints.contents
     if contents == "unconfirmed":

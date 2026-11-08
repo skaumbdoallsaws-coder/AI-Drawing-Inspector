@@ -17,17 +17,17 @@ def restraint_row(design, assessment, codes, placed):
     requirement = (design.get("constraints") or {}).get("restraint")
     rows = assessment.get("restraint") or []
     worst = max((r["max_travel_m"] for r in rows if r.get("max_travel_m") is not None), default=None)
-    found = "" if worst is None else f"; largest free travel {worst * 1000:.1f} mm"
+    found = "" if worst is None else f"; largest predicted clearance {worst * 1000:.1f} mm"
     if not placed:
         return "not_evaluated", "No placed products"
     if not rows:
         return "not_evaluated", "No product geometry to check"
     if not requirement:
-        return "needs_review", "No restraint requirement recorded" + found + " (bounding boxes, rigid translation)"
+        return "needs_review", "No restraint requirement recorded" + found + " (bounding-box model, translation only)"
     state = ("failed" if codes & {"restraint_insufficient", "products_can_touch"}
              else "needs_review" if codes & {"restraint_not_verified"} else "passed")
-    return state, (f"Free travel of at most {requirement['max_travel_m'] * 1000:.1f} mm in six directions" + found
-                   + "; bounding boxes, rigid translation; not a transport-performance result")
+    return state, (f"Predicted translational clearance of at most {requirement['max_travel_m'] * 1000:.1f} mm in six directions"
+                   + found + "; bounding-box model; rotation, foam compression and shipping protection unverified")
 STALE = {"revision_changed": "revision changed", "design_changed": "design changed",
          "account_changed": "carrier account changed", "account_removed": "carrier account removed"}
 KINDS = {"carton_sku": "Carton SKU", "material_density": "Material density", "cushioning_guidance": "Cushioning guidance",
@@ -64,7 +64,8 @@ def check_rows(design, assessment):
         ("Support of elevated products", "needs_review",
          "Elevated products without detected insert contact" if "support_not_verified" in codes
          else "Contact detection only; load support is not verified"),
-        ("Movement and restraint: free travel before a product meets packing material, another product or a carton wall",
+        ("Movement and restraint: predicted translational clearance (bounding-box model) before a product meets packing "
+         "material, another product or a carton wall",
          *restraint_row(design, assessment, codes, placed)),
         ("Packing and removal access", "needs_review", "Not evaluated; see each package's proposed packing order"),
         ("Drop, vibration, compression and stacking performance", "not_evaluated",
@@ -309,7 +310,7 @@ def render_report(document, quotes=(), evidence=(), source=None):
             para(f"{placement['id']}: minimum-corner position X/Y/Z (mm): {position(placement['position_m'])}; orthogonal orientation {placement['orientation']}.")
         movement = [r for r in assessment.get("restraint") or [] if r["package_id"] == box["id"]]
         if movement:
-            para("Movement and restraint (bounding boxes; geometry only)", "Heading3", keep_with_next=True)
+            para("Predicted translational clearance (bounding-box model)", "Heading3", keep_with_next=True)
             for row in movement:
                 parts = []
                 for name in DIRECTION_ORDER:
@@ -317,8 +318,9 @@ def render_report(document, quotes=(), evidence=(), source=None):
                     parts.append(f"{name} not checked" if found is None else
                                  f"{name} {found['travel_m'] * 1000:.1f} mm to {'/'.join(found['stops'])}")
                 para(f"{row['item_id']}: " + "; ".join(parts))
-            para("Free travel is the distance a bounding box can translate before it meets something. Product shape, rotation, "
-                 "friction and foam compression are not modelled; this is not a protective-performance result.")
+            para("Predicted translational clearance is the distance each product's bounding box can slide along an axis before it "
+                 "meets packing material, another product or a carton wall. Product shape and friction are not modelled. Rotation, "
+                 "foam compression and shipping protection remain unverified; this is not a protective-performance result.")
         para("Proposed packing order (derived from saved positions; not verified)", "Heading3", keep_with_next=True)
         steps = packing_order(box)
         for n, (where, _, kind, item) in enumerate(steps, 1):

@@ -1,10 +1,11 @@
-"""Free travel of each placed product before it meets something: geometry only, never protection.
+"""Predicted translational clearance of each placed product under the bounding-box model; never protection.
 
 For every product envelope and each of six directions, the distance the envelope can translate before any
 part of its face meets insert material, another product's envelope or a carton wall, and what it meets.
 Envelopes are bounding boxes and move rigidly without rotating; product shape, friction and foam
 compression are not modelled. A cylindrical pocket counts as its square prism, so material is undercounted
-and travel overstated, never the reverse. A passing result is not validated transport protection.
+and travel overstated, never the reverse. Rotation, foam compression and shipping protection remain
+unverified; a passing result is not validated transport protection.
 """
 from __future__ import annotations
 
@@ -80,7 +81,7 @@ def _distance(spans, face, toward_max):
 
 
 def travel(bounds, axis, toward_max, inner, materials, others, budget=None):
-    """Free travel of one envelope in one direction.
+    """Predicted translational clearance of one envelope in one direction (bounding-box model).
 
     materials: [(id, insert box, pocket boxes)], others: [(id, product box)], budget: an optional one-item list
     of work left, shared across faces. Returns a dict with travel_m, stops (kinds met at that distance:

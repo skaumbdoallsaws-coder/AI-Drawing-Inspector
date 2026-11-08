@@ -336,8 +336,8 @@ class NoContactRegion(Closed):
 
 
 class RestraintRequirement(Closed):
-    """Largest free travel allowed for any product, in any of six directions, before it meets packing
-    material, another product or a carton wall. Bounding boxes and rigid translation only: product
+    """Largest predicted translational clearance allowed for any product, in any of six directions, before
+    it meets packing material, another product or a carton wall, under the bounding-box model. Bounding boxes and rigid translation only: product
     shape, rotation, friction and foam compression are not modelled. Not a transport-performance rating.
     """
     max_travel_m: Annotated[float, Field(ge=0, le=0.05, strict=True)]

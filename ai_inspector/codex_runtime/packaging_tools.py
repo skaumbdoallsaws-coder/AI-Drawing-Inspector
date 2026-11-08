@@ -87,6 +87,13 @@ _MESSAGES = {
     "carrier_credentials_invalid": "The carrier rejected the configured account. Ask the user to check it in the Rates panel.",
     "carrier_credentials_changed": "The carrier account changed during the request. No quote was saved.",
     "package_not_rate_ready": "Validation reports errors, so this design cannot be rated.",
+    "account_mode_unconfirmed": ("The carrier key is not recorded as a test or production key, so no request was sent. Ask "
+                                 "the user to check the key in the EasyPost dashboard and record its mode in the Rates panel."),
+    "account_mode_mismatch": ("EasyPost answered in a different mode than the key is recorded as. A request that revealed "
+                              "this was already sent and cannot be undone; later requests are refused. Do not retry; ask the "
+                              "user to check the key in the EasyPost dashboard."),
+    "test_assumption_needs_test_key": ("This design's contents are a test assumption, so it can be quoted only with a key "
+                                       "recorded as a test key. No request was sent. Do not change the contents to get a quote."),
     "quote_budget_exceeded": "At most 12 package/destination combinations can be quoted per request.",
     "quote_timeout": "Rating exceeded its time budget. No quote was saved; some provider shipments may already exist.",
     "carrier_unavailable": "Carrier rates could not be verified. No quote was saved; some provider shipments may already exist.",

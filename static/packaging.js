@@ -732,7 +732,9 @@ function createForm(onApply, label = 'Apply changes') {
   };
   state.editorForm = { form, apply };
   form.addEventListener('input', () => { state.formDirty = true; updateHeader(); updateFreshness(); });
-  form.addEventListener('change', () => { state.formDirty = true; updateHeader(); updateFreshness(); });
+  // A text field's change fires on blur, often from the press on Save. Rebuilding the header again then would
+  // replace the Save button under the pointer and swallow that click; typing already marked the form dirty.
+  form.addEventListener('change', () => { const already = state.formDirty; state.formDirty = true; if (!already) updateHeader(); updateFreshness(); });
   form.addEventListener('submit', event => { event.preventDefault(); invoke(() => { apply(); render(); notify('Changes applied to draft.'); }); });
   const actions = element('div', null, 'actions');
   const submit = button(label, () => form.requestSubmit(), { primary: true });
@@ -1137,12 +1139,17 @@ function renderProduct(host) {
     if (estimatedProduct || 'mass_calculation' in updated) updated.mass_calculation = basis === 'estimate' && updated.mass_kg === estimate.mass_kg ? clone(estimate.mass_calculation || null) : null;
     const allowed = [...form.querySelectorAll('[name="orientation"]:checked')].map(x => Number(x.value));
     if (!allowed.length) throw new Error('Allow at least one product orientation.');
-    const protection = readProtection(form);
+    const protection = readProtection(form), contents = readContents(form), restraint = readRestraint(form);
+    const additional = readMassItems([...form.querySelectorAll('fieldset[data-mass-id]')].map(row => {
+      const id = row.dataset.massId, value = key => row.querySelector(`[name="added_${id}_${key}"]`)?.value ?? '';
+      return { id, name: value('name'), basis: value('basis'), mass: value('mass'), evidence: value('evidence') };
+    }));
+    if (additional.length) updated.additional_mass = additional; else delete updated.additional_mass;
     edit(d => {
       d.product = updated; d.quantity = numeric(form, 'quantity');
       // Spread first: constraint fields this form does not edit must survive an Apply.
       d.constraints = compactConstraints({ ...d.constraints, clearance_m: mmToM(numeric(form, 'clearance')), gap_m: mmToM(numeric(form, 'gap')),
-        allowed_orientations: allowed, contents: textValue(form, 'contents'), ...protection });
+        allowed_orientations: allowed, ...contents, ...protection, restraint });
     });
   }, product ? 'Apply product' : 'Add manual product');
   field(form, 'Product name', 'product_name', p.name, { maxLength: 160, required: true });
@@ -1164,6 +1171,7 @@ function renderProduct(host) {
     state.formDirty = true; updateHeader(); updateFreshness();
   };
   if (p.source_id && state.capabilities.includes('cad_volume_density_estimate')) form.append(button('Estimate from volume and density', openMassEstimate, { symbol: 'cube' }));
+  if (state.capabilities.includes('added_product_mass')) addedMassFields(form, p.additional_mass || []);
   form.append(element('h3', 'Packing restrictions'));
   const dims = element('div', null, 'two-cols');
   field(dims, 'Wall clearance (mm)', 'clearance', mToMm(state.draft.design.constraints.clearance_m), { type: 'number', min: 0, max: 200, required: true });
@@ -1172,8 +1180,9 @@ function renderProduct(host) {
   const checks = element('div', null, 'checks');
   ORIENTATION_LABELS.forEach((label, i) => { const input = checkbox(checks, label, state.draft.design.constraints.allowed_orientations.includes(i), () => {}); input.name = 'orientation'; input.value = i; });
   orientations.append(checks); form.append(orientations);
-  field(form, 'Contents declaration', 'contents', state.draft.design.constraints.contents, { options: [['unconfirmed', 'Unconfirmed'], ['ordinary_nonhazardous', 'Ordinary, non-hazardous'], ['special_handling', 'Special handling required']] });
+  contentsFields(form, state.draft.design.constraints);
   protectionFields(form, state.draft.design.constraints);
+  if (state.capabilities.includes('restraint_check')) restraintFields(form, state.draft.design.constraints);
   form.append(element('h3', 'No-contact regions'));
   const regions = state.draft.design.constraints.no_contact || [];
   form.append(element('p', regions.length ? regions.map(regionText).join('; ') : 'No regions set.', 'metadata'));
@@ -1221,6 +1230,87 @@ export function readProtection(form) {
   return { cushion, package_allowance: allowance === null ? null : { allowance_kg: allowance, evidence: allowanceEvidence } };
 }
 
+function addedMassFields(form, items) {
+  form.append(element('h3', 'Added mass per product'));
+  form.append(element('p', 'Magnets, adhesive, finish or anything else each product carries beyond the mass above. An unknown item stays listed and is left out of the rated weight, never folded into the packing allowance.', 'notice'));
+  const rows = element('div', null, 'form-grid'); rows.id = 'added-mass-rows'; form.append(rows);
+  const changed = () => { state.formDirty = true; updateHeader(); updateFreshness(); };
+  const addRow = item => {
+    const row = element('fieldset', null, 'form-grid'); row.dataset.massId = item.id; row.append(element('legend', 'Added mass item'));
+    field(row, 'Item', `added_${item.id}_name`, item.name, { maxLength: 160, required: true });
+    const basis = field(row, 'Mass basis', `added_${item.id}_basis`, item.basis, { options: MASS_BASIS_OPTIONS });
+    const mass = field(row, 'Mass per product (kg)', `added_${item.id}_mass`, item.mass_kg ?? '', { type: 'number', min: .000001, max: 100 });
+    const evidence = field(row, 'Mass evidence', `added_${item.id}_evidence`, item.evidence, { multiline: true, maxLength: 500 });
+    const sync = () => { const known = basis.value !== 'unknown'; mass.disabled = !known; mass.required = evidence.required = known; if (!known) mass.value = ''; };
+    basis.addEventListener('change', sync); sync();
+    row.append(button('Remove this added mass item', () => { row.remove(); changed(); }, { symbol: 'trash', compact: true }));
+    rows.append(row);
+  };
+  items.forEach(addRow);
+  form.append(button('Add mass item', () => {
+    if (rows.children.length >= 12) throw new Error('Record at most 12 added mass items.');
+    addRow({ id: uid('mass'), name: '', mass_kg: null, basis: 'unknown', evidence: '' }); changed();
+  }));
+}
+
+function contentsFields(form, constraints) {
+  form.append(element('h3', 'Contents'));
+  const basisEnabled = state.capabilities.includes('contents_basis');
+  const contents = field(form, 'Contents declaration', 'contents', constraints.contents,
+    { options: basisEnabled ? CONTENTS_OPTIONS : CONTENTS_OPTIONS.filter(([value]) => value !== 'magnetized_material') });
+  if (!basisEnabled) return;
+  const basis = field(form, 'Contents basis', 'contents_basis', constraints.contents_basis || '', { options: CONTENTS_BASIS_OPTIONS });
+  const evidence = field(form, 'Who classified the contents, and on what evidence', 'contents_evidence', constraints.contents_evidence || '', { multiline: true, maxLength: 500 });
+  form.append(element('p', CONTENTS_NOTICE, 'notice'));
+  const sync = () => {
+    const classified = contents.value !== 'unconfirmed';
+    basis.disabled = evidence.disabled = !classified;
+    basis.required = evidence.required = classified && (basis.value !== '' || evidence.value.trim() !== '');
+  };
+  contents.addEventListener('change', sync); basis.addEventListener('change', sync); evidence.addEventListener('input', sync); sync();
+}
+
+function restraintFields(form, constraints) {
+  const requirement = constraints.restraint || null;
+  form.append(element('h3', 'Movement requirement (optional)'));
+  form.append(element('p', 'The largest predicted translational clearance you accept in any of six directions, under the bounding-box model. Leave blank for no requirement. Rotation, foam compression and shipping protection remain unverified.', 'notice'));
+  const max = field(form, 'Largest allowed clearance (mm)', 'restraint_max', requirement ? mToMm(requirement.max_travel_m) : '', { type: 'number', min: 0, max: 50 });
+  const separate = checkbox(form, 'Products must not reach each other', requirement ? requirement.separate_products : true, () => {}); separate.name = 'restraint_separate';
+  const evidence = field(form, 'Why this requirement applies', 'restraint_evidence', requirement?.evidence ?? '', { multiline: true, maxLength: 500 });
+  const sync = () => { evidence.required = max.value !== ''; separate.disabled = max.value === ''; };
+  max.addEventListener('input', sync); sync();
+}
+
+function weighedFields(form, pkg) {
+  form.append(element('h3', 'Weighed packed carton'));
+  form.append(element('p', 'A scale reading of this carton packed with everything that ships in it. It becomes the rated weight; the component estimate stays beside it. Leave both fields empty until the carton has been weighed, and never enter an estimate here.', 'notice'));
+  const kg = field(form, 'Weighed gross mass (kg)', 'measured_gross', pkg.measured_gross_kg ?? '', { type: 'number', min: .000001, max: 1000 });
+  const record = field(form, 'Weighing record (scale, date, who)', 'measured_gross_evidence', pkg.measured_gross_evidence ?? '', { multiline: true, maxLength: 500 });
+  const sync = () => { record.required = kg.value !== ''; kg.required = record.value.trim() !== ''; };
+  kg.addEventListener('input', sync); record.addEventListener('input', sync); sync();
+  const saved = state.draft.document?.assessment?.packages?.find(x => x.package_id === pkg.id);
+  if (saved && 'estimated_gross_kg' in saved) form.append(element('p', `Component estimate at the last save: ${massText(saved.estimated_gross_kg)}.`, 'metadata'));
+}
+
+function renderMovement(host, rows) {
+  const group = section(host, 'Predicted translational clearance'); group.id = 'movement-results';
+  group.append(element('p', MOVEMENT_NOTICE, 'notice'));
+  for (const row of rows) {
+    const wrap = element('div', null, 'rate-table-wrap'), table = element('table');
+    table.setAttribute('aria-label', `Predicted translational clearance of ${row.item_id}`);
+    table.append(element('caption', row.verified ? row.item_id : `${row.item_id} (not fully checked)`));
+    const head = element('thead'), hr = element('tr');
+    for (const title of ['Direction', 'Clearance', 'Meets']) { const th = element('th', title); th.scope = 'col'; hr.append(th); }
+    head.append(hr);
+    const body = element('tbody');
+    for (const cells of movementRows(row)) {
+      const tr = element('tr'), direction = element('th', cells.direction); direction.scope = 'row';
+      tr.append(direction, element('td', cells.clearance), element('td', cells.meets)); body.append(tr);
+    }
+    table.append(head, body); wrap.append(table); group.append(wrap);
+  }
+}
+
 export function preservationText(preservation) {
   if (!preservation) return 'packing allowance and pads require review';
   const cushion = preservation.cushion === 'rebuilt_from_requirement' ? 'foam lining rebuilt from the cushion requirement' : 'no cushion requirement';
@@ -1238,9 +1328,122 @@ export const FACE_AXES = { x: ['Y', 'Z'], y: ['X', 'Z'], z: ['X', 'Y'] };
 // The server leaves unset optional protections out of a design; match it so an unchanged Apply is not an edit.
 export function compactConstraints(constraints) {
   const next = { ...constraints };
-  for (const key of ['cushion', 'package_allowance']) if (next[key] == null) delete next[key];
+  for (const key of ['cushion', 'package_allowance', 'restraint']) if (next[key] == null) delete next[key];
+  for (const key of ['contents_basis', 'contents_evidence']) if (!next[key]) delete next[key];
   if (!next.no_contact?.length) delete next.no_contact;
   return next;
+}
+
+export const CONTENTS_OPTIONS = [['unconfirmed', 'Unconfirmed'], ['ordinary_nonhazardous', 'Ordinary, non-hazardous'],
+  ['magnetized_material', 'Magnetized material (not supported for rating)'], ['special_handling', 'Special handling required (not supported for rating)']];
+export const CONTENTS_BASIS_OPTIONS = [['', 'Not recorded'], ['product_declaration', 'Declaration about the real product'],
+  ['test_assumption', 'Test assumption (synthetic test parcel; test-key quotes only)']];
+export const CONTENTS_NOTICE = 'A classification here is never carrier acceptance and is not sent to carriers. Magnetized and special-handling contents are not supported for rating. A test assumption is only for a synthetic connection-test parcel: it cannot be quoted with a key recorded as production, and its rates are not clearance to ship any product.';
+export const MASS_BASIS_OPTIONS = [['unknown', 'Unknown (left out of the weight)'], ['user_measured', 'Measured'], ['estimate', 'Estimate']];
+export const MOVEMENT_DIRECTIONS = ['-x', '+x', '-y', '+y', '-z', '+z'];
+const STOP_LABELS = { insert: 'packing material', product: 'another product', carton_wall: 'carton wall' };
+export const MOVEMENT_NOTICE = 'Predicted translational clearance under the bounding-box model: how far each product\'s bounding box can slide before it meets packing material, another product or a carton wall. Rotation, foam compression and shipping protection remain unverified; this is not a protection result.';
+export const TEST_ASSUMPTION_ONLY = 'This design\'s contents are a test assumption, so it can be quoted only with a key recorded as a test key.';
+
+// Contents, basis and evidence, checked as the server checks them. Unconfirmed contents carry no basis.
+export function readContents(form) {
+  const contents = textValue(form, 'contents');
+  if (contents === 'unconfirmed') return { contents, contents_basis: '', contents_evidence: '' };
+  const basis = textValue(form, 'contents_basis'), evidence = textValue(form, 'contents_evidence');
+  if (Boolean(basis) !== Boolean(evidence)) throw new Error('Record the contents basis together with who classified the contents and on what evidence.');
+  return { contents, contents_basis: basis, contents_evidence: evidence };
+}
+
+// The optional movement requirement; blank means none.
+export function readRestraint(form) {
+  const raw = textValue(form, 'restraint_max'), evidence = textValue(form, 'restraint_evidence');
+  if (raw === '') {
+    if (evidence) throw new Error('Enter the largest allowed clearance, or clear the requirement evidence.');
+    return null;
+  }
+  if (!evidence) throw new Error('Record why this movement requirement applies.');
+  const max = numeric(form, 'restraint_max');
+  if (max < 0 || max > 50) throw new Error('The largest allowed clearance must be between 0 and 50 mm.');
+  return { max_travel_m: mmToM(max), separate_products: form.elements.namedItem('restraint_separate')?.checked !== false, evidence };
+}
+
+// Added masses from the product form's rows, in the server's field order; an unknown item keeps no mass.
+export function readMassItems(rows) {
+  if (rows.length > 12) throw new Error('Record at most 12 added mass items.');
+  return rows.map(row => {
+    const name = String(row.name ?? '').trim(), basis = row.basis || 'unknown', evidence = String(row.evidence ?? '').trim();
+    if (!name) throw new Error('Name each added mass item, or remove the empty row.');
+    if (basis === 'unknown') return { id: row.id, name, mass_kg: null, basis, evidence };
+    const raw = String(row.mass ?? '').trim(), mass = Number(raw);
+    if (raw === '' || !Number.isFinite(mass) || mass <= 0 || mass > 100) throw new Error(`Enter the mass of ${name} in kg (more than 0, at most 100), or mark it unknown.`);
+    if (!evidence) throw new Error(`Record the source of the mass of ${name}, including estimates.`);
+    return { id: row.id, name, mass_kg: mass, basis, evidence };
+  });
+}
+
+// A weighed packed carton: the reading and its record together, or neither.
+export function readWeighed(form) {
+  const raw = textValue(form, 'measured_gross'), evidence = textValue(form, 'measured_gross_evidence');
+  if (raw === '' && !evidence) return null;
+  if (raw === '' || !evidence) throw new Error('Enter the weighed gross mass together with its weighing record, or leave both empty.');
+  const kg = numeric(form, 'measured_gross');
+  if (!(kg > 0) || kg > 1000) throw new Error('The weighed gross mass must be more than 0 and at most 1000 kg.');
+  return { measured_gross_kg: kg, measured_gross_evidence: evidence };
+}
+
+const modeMismatch = provider => Boolean(provider?.mode_mismatch
+  || (provider?.declared_mode && provider?.observed_mode && provider.declared_mode !== provider.observed_mode));
+
+// What the app knows about the saved key's mode. It cannot tell a key's mode before a request; the alias is only a label.
+export function accountModeText(provider) {
+  if (!provider?.configured) return null;
+  const declared = provider.declared_mode, observed = provider.observed_mode;
+  const where = provider.secure_store_enabled ? ' under Carrier account' : '';
+  if (modeMismatch(provider)) return { level: 'error', text: `Recorded as a ${declared} key, but EasyPost last answered in ${observed} mode. Quotes are refused until you check the key in the EasyPost dashboard, then record its mode again or replace the key. The request that showed this was already sent and cannot be undone.` };
+  if (!declared) return { level: 'warning', text: `Key mode not recorded. Check the key in the EasyPost dashboard, then record it as a test or production key${where}. Nothing is sent until then; the account alias is only a label.` };
+  return { level: declared === 'test' ? 'notice' : 'warning', text: `Recorded as a ${declared} key, from your check. ${observed ? `EasyPost last answered in ${observed} mode.` : 'EasyPost has not answered with this key yet.'} A wrong record shows only in EasyPost's answer, after the first request has been sent.` };
+}
+
+// Why the saved design (or a saved alternative: { design, assessment }) cannot be quoted now, or null. The server still decides.
+export function quoteBlock(provider, saved) {
+  if (!saved) return { code: 'unsaved', message: 'Save the document before requesting rates.' };
+  if (!provider?.configured) return { code: 'not_configured', message: 'Carrier provider is not configured. No rates are available.' };
+  if (!provider.declared_mode) return { code: 'mode_unrecorded', message: 'Record whether the saved key is a test or production key before requesting rates. Check it in the EasyPost dashboard; the account alias is only a label.' };
+  if (modeMismatch(provider)) return { code: 'mode_mismatch', message: `EasyPost last answered in ${provider.observed_mode} mode, but the key is recorded as a ${provider.declared_mode} key. Quotes are refused until the key is checked.` };
+  const unsupported = (saved.assessment?.findings || []).find(f => f.code === 'contents_unsupported' && f.severity === 'error');
+  if (unsupported) return { code: 'contents_unsupported', message: `Quotes are blocked: ${unsupported.message}` };
+  if (!saved.assessment?.rate_ready) return { code: 'validation', message: 'Resolve the validation errors before requesting rates.' };
+  if (saved.design?.constraints?.contents_basis === 'test_assumption' && provider.declared_mode !== 'test') return { code: 'test_assumption', message: TEST_ASSUMPTION_ONLY };
+  return null;
+}
+
+// One row per direction: the predicted clearance and what the bounding box meets there.
+export function movementRows(row) {
+  return MOVEMENT_DIRECTIONS.map(name => {
+    const found = row?.directions?.[name];
+    return { direction: name.toUpperCase(), clearance: found == null ? 'not checked' : `${(found.travel_m * 1000).toFixed(1)} mm`,
+      meets: found == null ? '-' : (found.stops || []).map(stop => STOP_LABELS[stop] || stop).join(' / ') };
+  });
+}
+
+// What a saved quote's rates rest on: the weight basis, the contents at quote time and the key mode.
+export function quoteProvenance(quote) {
+  const lines = [], weight = quote?.weight_basis, contents = quote?.contents, mode = quote?.account_mode;
+  lines.push(weight ? { level: weight.status === 'measured' ? 'metadata' : 'warning', text: `Weight basis: ${weight.summary}.` }
+    : { level: 'warning', text: 'Weight basis: not recorded with this quote.' });
+  if (contents) lines.push({ level: contents.basis === 'test_assumption' ? 'warning' : 'metadata',
+    text: `Contents at quote time: ${contents.label}, ${contents.basis ? contents.basis_label : 'basis not recorded'}. ${contents.notice || ''}`.trim() });
+  if (mode) lines.push({ level: mode.declared && mode.declared === mode.observed ? 'metadata' : 'warning',
+    text: `Key mode: recorded ${mode.declared || 'not recorded'}; EasyPost answered ${mode.observed || 'nothing'}.` });
+  return lines;
+}
+
+export function parcelWeightText(quote, packageId) {
+  const found = quote?.weight_basis?.packages?.find(item => item.package_id === packageId);
+  if (!found) return null;
+  return found.basis === 'weighed_packed_carton'
+    ? `Rated weight ${massText(found.rated_kg)} from the weighed packed carton; component estimate ${massText(found.estimated_kg)}.`
+    : `Rated weight ${massText(found.rated_kg)}: sum of component masses (estimate).`;
 }
 
 export function regionText(region) {
@@ -1386,13 +1589,18 @@ function renderCarton(host) {
   if (state.capabilities.includes('material_catalog')) group.append(button('Carton catalog', () => openCartonCatalog(false), { symbol: 'stack' }));
   const { form, actions } = createForm(form => {
     const carton = readCarton(form, p.carton), allowance = numeric(form, 'allowance', true), evidence = textValue(form, 'allowance_evidence');
-    edit(d => { const target = d.packages.find(x => x.id === p.id); target.carton = carton; target.allowance_kg = allowance; target.allowance_evidence = evidence; });
+    const weighed = readWeighed(form);
+    edit(d => {
+      const target = d.packages.find(x => x.id === p.id); target.carton = carton; target.allowance_kg = allowance; target.allowance_evidence = evidence;
+      if (weighed) Object.assign(target, weighed); else { delete target.measured_gross_kg; delete target.measured_gross_evidence; }
+    });
   }, 'Apply carton');
   cartonFields(form, p.carton);
   form.append(element('h3', 'Other packing materials'));
   const allowance = field(form, 'Tape / packing allowance (kg)', 'allowance', p.allowance_kg, { type: 'number', min: 0, max: 20 });
   const evidence = field(form, 'Allowance evidence (including zero)', 'allowance_evidence', p.allowance_evidence, { multiline: true, maxLength: 500 });
   const check = () => { evidence.required = allowance.value !== ''; }; allowance.addEventListener('input', check); check();
+  if (state.capabilities.includes('weighed_packed_mass')) weighedFields(form, p);
   form.append(actions); group.append(form);
 }
 
@@ -1683,13 +1891,21 @@ async function setBaseline(ref) {
 
 async function quoteSavedDesign(alternative) {
   state.addresses = captureAddresses(); state.quoteOptions = captureQuoteOptions();
-  if (!state.provider?.configured) throw new Error('Carrier provider is not configured. No rates are available.');
+  const blocked = quoteBlock(state.provider, alternative);
+  if (blocked && ['not_configured', 'mode_unrecorded', 'mode_mismatch'].includes(blocked.code)) throw new Error(blocked.message);
   if (!scenarioComplete(state.addresses)) throw new Error('Enter the origin and destinations in Rates first. Saved designs are quoted under the same scenario as the current design.');
-  if (!alternative.assessment.rate_ready) throw new Error('This saved design has validation errors and cannot be rated.');
+  if (blocked?.code === 'validation') throw new Error('This saved design has validation errors and cannot be rated.');
+  if (blocked) throw new Error(blocked.message);
   const shipments = alternative.design.packages.length * state.addresses.destinations.length;
   if (!confirm(`Request rates for "${alternative.name}"? Unless this exact scenario was already priced, this creates ${shipments} provider shipment(s) for rating, which can be billed for a production account. No postage is purchased.`)) return;
-  const result = await working('Requesting carrier estimates for the saved design...', () => request(`${docPath()}/alternatives/${encodeURIComponent(alternative.id)}/quotes`, {
-    method: 'POST', body: quoteBody(state.draft.document.revision, state.addresses, state.quoteAccounts, state.quoteOptions, false) }));
+  let result;
+  try {
+    result = await working('Requesting carrier estimates for the saved design...', () => request(`${docPath()}/alternatives/${encodeURIComponent(alternative.id)}/quotes`, {
+      method: 'POST', body: quoteBody(state.draft.document.revision, state.addresses, state.quoteAccounts, state.quoteOptions, false) }));
+  } finally {
+    // EasyPost's answer may change what the server records about the key. A local read; nothing is sent.
+    await reloadProviderStatus(); state.addresses = captureAddresses(); renderRates();
+  }
   await loadQuoteAttempts();
   notify(result.reused ? 'This saved design was already priced for this scenario. No provider request was made.'
     : `Carrier quote received for the saved design (${result.provider_shipments_created ?? 0} provider shipment(s) created). No postage was purchased.`);
@@ -1824,10 +2040,17 @@ function renderValidation() {
   if (mass) {
     const dl = element('dl', null, 'mass-grid');
     for (const [label, val] of [['Products', mass.product_kg], ['Pads / inserts', mass.insert_kg], ['Carton', mass.carton_kg], ['Packing allowance', mass.allowance_kg], ['Package gross', mass.gross_kg]]) dl.append(element('dt', label), element('dd', massText(val)));
+    if ('gross_basis' in mass) {
+      dl.append(element('dt', 'Gross basis'), element('dd', mass.gross_basis === 'measured' ? 'Weighed packed carton' : mass.gross_basis === 'estimated' ? 'Sum of components (estimate)' : 'Unknown'));
+      if (mass.gross_basis === 'measured') dl.append(element('dt', 'Component estimate'), element('dd', massText(mass.estimated_gross_kg)));
+    }
     dl.append(element('dt', 'Materials cost'), element('dd', mass.materials_cost_usd == null ? 'Unknown' : `USD ${numberText(mass.materials_cost_usd, 2)}`));
     summary.append(dl);
   }
-  summary.append(element('p', !pending && assessment.rate_ready ? 'Eligible for a rate request. Engineering review remains required.' : 'Rates require a saved, validated package.', !pending && assessment.rate_ready ? 'good' : 'notice'));
+  const testOnly = state.draft.document.design?.constraints?.contents_basis === 'test_assumption';
+  summary.append(element('p', !pending && assessment.rate_ready ? (testOnly ? 'Eligible for a rate request with a key recorded as a test key only (test assumption). Engineering review remains required.' : 'Eligible for a rate request. Engineering review remains required.') : 'Rates require a saved, validated package.', !pending && assessment.rate_ready ? 'good' : 'notice'));
+  const movement = (assessment.restraint || []).filter(row => row.package_id === state.packageId);
+  if (movement.length) renderMovement(host, movement);
   const findings = section(host, `Findings (${assessment.findings.length})`), list = element('ul', null, 'findings');
   assessment.findings.forEach(f => {
     const row = element('li', null, `finding ${f.severity === 'error' ? 'error' : ''}`);
@@ -2010,6 +2233,8 @@ function renderRates() {
   provider.append(element('p', providerNotice(state.provider), 'notice'), button('Refresh provider status', refreshProvider, { symbol: 'arrow-clockwise' }));
   if (state.provider?.secure_store_enabled) provider.append(button('Carrier account', openCarrierAccount, { symbol: 'cube' }));
   if (state.provider?.account_alias) provider.append(element('p', `${state.provider.account_alias} | ${state.provider.validation || 'Not validated'}`, 'metadata'));
+  const keyMode = accountModeText(state.provider);
+  if (keyMode) { const line = element('p', keyMode.text, keyMode.level); line.id = 'account-mode'; provider.append(line); }
   if (state.quoteRules) {
     const rules = element('details'); rules.append(element('summary', 'Quote rules and provider fees'));
     for (const text of [state.quoteRules.ship_date, ...Object.values(state.quoteRules.destinations || {}), state.quoteRules.fees]) rules.append(element('p', text, 'notice'));
@@ -2033,6 +2258,7 @@ function renderRates() {
   const saturday = checkbox(options, 'Saturday delivery', state.quoteOptions.saturday_delivery, () => {}); saturday.name = 'saturday_delivery';
   form.append(options);
   form.append(element('p', 'Compare rates shows the saved quote when this exact scenario was already priced. Otherwise each package and destination creates one provider shipment for rating; production rating can be billed (see Quote rules). No postage is purchased.', 'metadata'));
+  const blockReason = element('p', '', 'warning'); blockReason.id = 'quote-block-reason'; blockReason.hidden = true; form.append(blockReason);
   const quoteButton = button('Compare rates', () => requestQuotes(false), { primary: true }); quoteButton.id = 'quote-button'; form.append(quoteButton);
   const refreshButton = button('Refresh rates', () => requestQuotes(true), { symbol: 'arrow-clockwise' }); refreshButton.id = 'quote-refresh-button'; form.append(refreshButton);
   form.addEventListener('submit', event => { event.preventDefault(); invoke(() => requestQuotes(false)); });
@@ -2064,7 +2290,7 @@ function renderScenarios(host) {
   const actions = element('div', null, 'actions');
   actions.append(button('Allow Sage to quote these addresses', openSageScenario, { symbol: 'lock-simple', disabled: hasDraft() }),
     button('Refresh quotes and Sage scenarios', async () => {
-      await working('Refreshing quotes...', loadQuotes); state.addresses = captureAddresses(); renderRates();
+      await working('Refreshing quotes...', loadQuotes); await reloadProviderStatus(); state.addresses = captureAddresses(); renderRates();
       notify('Saved quotes and Sage scenarios refreshed. No provider request was made.');
     }, { symbol: 'arrow-clockwise', compact: true }));
   box.append(actions); host.append(box);
@@ -2075,6 +2301,8 @@ async function openSageScenario() {
   flushEditor();
   if (!state.draft.document || state.draft.dirty) { render(); throw new Error('Save the document before allowing Sage to quote.'); }
   if (!state.provider?.configured) throw new Error('Carrier provider is not configured. Sage cannot request rates.');
+  const blocked = quoteBlock(state.provider, state.draft.document);
+  if (blocked) throw new Error(`${blocked.message} Sage cannot request rates either.`);
   state.addresses = captureAddresses(); state.quoteOptions = captureQuoteOptions();
   const addresses = state.addresses, accounts = [...state.quoteAccounts], options = { ...state.quoteOptions };
   const perQuote = state.draft.document.design.packages.length * addresses.destinations.length;
@@ -2107,6 +2335,11 @@ async function revokeScenario(id) {
   await loadScenarios(); state.addresses = captureAddresses(); renderRates(); notify(`Sage can no longer quote scenario ${id}.`);
 }
 
+// What the server now records about the key, after a quote attempt. A local read; nothing is sent to EasyPost.
+async function reloadProviderStatus() {
+  try { state.provider = (await request('/status')).rating; } catch { /* the refusal already shown stands */ }
+}
+
 async function refreshProvider() {
   await working('Checking carrier provider...', async () => {
     try { const data = await request('/status'); state.provider = data.rating; state.capabilities = data.capabilities || []; state.permissions = data.permissions || []; state.quoteRules = data.quote_rules || null; state.providerError = ''; notify('Provider status updated.'); }
@@ -2122,21 +2355,38 @@ async function openCarrierAccount() {
   const account = await working('Loading carrier account status...', () => request('/account'));
   resourceDialog('Carrier account', (body, dialog) => {
     body.append(element('p', `${account.account_alias || 'No account'} | ${account.validation || 'Not validated'}`, 'metadata'));
+    const modes = state.capabilities.includes('declared_account_mode'), modeText = modes ? accountModeText(account) : null;
+    if (modeText) { const line = element('p', modeText.text, modeText.level); line.id = 'carrier-account-mode'; body.append(line); }
     const form = element('form', null, 'form-grid'); form.autocomplete = 'off'; form.addEventListener('submit', event => event.preventDefault());
     const alias = field(form, 'Account alias', 'carrier_alias', account.account_alias || '', { required: true, maxLength: 80 });
     const secret = field(form, 'EasyPost API key', 'carrier_key', '', { type: 'password', required: true, maxLength: 4096 }); secret.autocomplete = 'new-password';
     secret.spellcheck = false; alias.autocomplete = 'off';
+    // Always starts unrecorded: a new key never inherits the record of the key it replaces.
+    const mode = modes ? field(form, 'Key mode, as the EasyPost dashboard shows it', 'carrier_mode', '',
+      { options: [['', 'Not recorded'], ['test', 'Test key'], ['production', 'Production key']] }) : null;
+    if (mode) form.append(element('p', 'Choose the mode each time: Save account records it for the key you enter, Record key mode for the saved key. The app cannot tell a key\'s mode before a request, and the account alias is only a label. Each EasyPost answer is checked against your record; a wrong record shows only after EasyPost answers the first request, which cannot be undone.', 'notice'));
     const failure = element('p', '', 'error'); failure.setAttribute('role', 'alert');
     const actions = element('div', null, 'actions');
     actions.append(button('Save account', async () => {
       if (!form.reportValidity()) return;
-      const body = { api_key: secret.value, account_alias: alias.value.trim() }; secret.value = ''; failure.textContent = '';
+      const body = { api_key: secret.value, account_alias: alias.value.trim(), ...(mode?.value ? { mode: mode.value } : {}) }; secret.value = ''; failure.textContent = '';
       try {
         state.provider = await working('Updating carrier account...', () => request('/account', { method: 'PUT', body }));
         state.quoteScenario = null; dialog.close(); state.addresses = captureAddresses(); renderRates(); notify('Carrier account saved. No rate request was made.');
       } catch { failure.textContent = 'Carrier account could not be saved. Check the key, alias and secure-store availability.'; }
       finally { body.api_key = ''; secret.value = ''; }
-    }, { primary: true }), button('Remove account', async () => {
+    }, { primary: true }));
+    if (mode) actions.append(button('Record key mode', async () => {
+      secret.value = '';
+      if (!mode.value) { failure.textContent = 'Choose Test key or Production key first, as the EasyPost dashboard shows it.'; return; }
+      failure.textContent = '';
+      try {
+        state.provider = await working('Recording the key mode...', () => request('/account/mode', { method: 'PUT', body: { mode: mode.value } }));
+        state.quoteScenario = null; dialog.close(); state.addresses = captureAddresses(); renderRates();
+        notify(`Key recorded as a ${state.provider.declared_mode} key. Nothing was sent to EasyPost.`);
+      } catch { failure.textContent = 'The key mode could not be recorded. Check that a key is saved and the secure store is available.'; }
+    }, { disabled: !account.configured }));
+    actions.append(button('Remove account', async () => {
       if (!confirm('Remove the configured carrier account for future requests?')) return;
       secret.value = ''; failure.textContent = '';
       try {
@@ -2206,8 +2456,8 @@ async function requestQuotes(refresh = false) {
   if (!state.quoteForm.reportValidity()) return;
   flushEditor();
   if (!state.draft.document || state.draft.dirty) { render(); throw new Error('Save the document before requesting rates.'); }
-  if (!state.provider?.configured) throw new Error('Carrier provider is not configured. No rates are available.');
-  if (!state.draft.document.assessment.rate_ready) throw new Error('Resolve the validation errors before requesting rates.');
+  const blocked = quoteBlock(state.provider, state.draft.document);
+  if (blocked) throw new Error(blocked.message);
   state.addresses = captureAddresses(); state.quoteOptions = captureQuoteOptions(); const scenario = quoteScenarioValue();
   const shipments = state.draft.document.design.packages.length * state.addresses.destinations.length;
   if (refresh && !confirm(`Request new rates? This creates ${shipments} new provider shipment(s) for rating. With a production account EasyPost bills each one ($0.02 when no labels are bought). No postage is purchased.`)) return;
@@ -2221,7 +2471,10 @@ async function requestQuotes(refresh = false) {
       notify(result.reused ? 'Showing the saved quote for this exact scenario. No provider request was made; use Refresh rates for new rates.'
         : `Carrier quote response received (${result.provider_shipments_created ?? 0} provider shipment(s) created). No postage was purchased.`);
     } catch (error) { state.quoteError = `Latest request failed: ${error.message}`; throw error; }
-    finally { await loadQuoteAttempts(); renderQuoteResults(); }
+    finally {
+      // EasyPost's answer may change what the server records about the key. A local read; nothing is sent.
+      await loadQuoteAttempts(); await reloadProviderStatus(); state.addresses = captureAddresses(); renderRates();
+    }
   });
 }
 
@@ -2233,8 +2486,11 @@ function updateFreshness() {
     label.textContent = `${state.quoteError ? 'Previous quote | ' : ''}${quoteFreshness(quote, state.draft.document?.revision, hasDraft(), sameScenario)}`;
     label.className = !hasDraft() && sameScenario && quote?.revision === state.draft.document?.revision && !quote?.stale ? 'good' : 'warning';
   }
+  const blocked = hasDraft() ? { message: 'Save the document before requesting rates.' } : quoteBlock(state.provider, state.draft.document);
+  const reason = $('quote-block-reason');
+  if (reason) { reason.textContent = blocked?.message || ''; reason.hidden = !blocked; }
   for (const b of [$('quote-button'), $('quote-refresh-button')]) {
-    if (b) b.disabled = state.busy || !state.provider?.configured || !state.draft.document?.assessment.rate_ready || hasDraft();
+    if (b) b.disabled = state.busy || !!blocked;
   }
   const assessment = $('validation-panel');
   if (assessment) assessment.setAttribute('data-stale', String(hasDraft()));
@@ -2271,6 +2527,9 @@ function renderQuoteResults() {
   const freshness = element('p'); freshness.id = 'quote-freshness'; host.append(freshness);
   host.append(element('p', `${quote.provider} | ${quote.ship_date_basis || ''}`, 'notice'));
   if (quote.mode) host.append(element('p', quote.mode === 'test' ? 'Test mode: these are not live carrier quotes.' : 'Production account rates.', quote.mode === 'test' ? 'warning' : 'notice'));
+  const provenance = element('div'); provenance.id = 'quote-provenance';
+  for (const line of quoteProvenance(quote)) provenance.append(element('p', line.text, line.level));
+  host.append(provenance);
   if (quote.provider_shipments_created != null) host.append(element('p', `${quote.provider_shipments_created} provider shipment(s) were created to rate this quote. No postage was purchased.`, 'metadata'));
   if (quote.price_bases) host.append(element('p', Object.values(quote.price_bases).join(' '), 'metadata'));
   for (const note of quote.origin_notes || []) host.append(element('p', `Origin: ${note.message}`, 'warning'));
@@ -2284,6 +2543,8 @@ function renderQuoteResults() {
     for (const parcel of result.parcels) {
       const details = element('details'); details.append(element('summary', `${parcel.package_id} | ${parcel.mode} | ${parcel.rates.length} rates${parcel.carrier_error_count ? ` | ${parcel.carrier_error_count} carrier messages` : ''}`));
       if (parcel.parcel_sent) details.append(element('p', `Rated as ${parcel.parcel_sent.length_in} x ${parcel.parcel_sent.width_in} x ${parcel.parcel_sent.height_in} in, ${parcel.parcel_sent.weight_oz} oz (outside size and gross weight, rounded up).`, 'metadata'));
+      const weightText = parcelWeightText(quote, parcel.package_id);
+      if (weightText) details.append(element('p', weightText, 'metadata'));
       if (parcel.carrier_error_count) details.append(element('p', `${parcel.carrier_error_count} carrier messages reported. Some services may be unavailable.`, 'warning'));
       for (const line of messageSummary(parcel.carrier_messages)) details.append(element('p', line, 'warning'));
       if (parcel.excluded_rate_count) details.append(element('p', `${parcel.excluded_rate_count} rates outside the selected accounts or services were left out.`, 'notice'));

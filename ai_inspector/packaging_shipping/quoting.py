@@ -142,6 +142,9 @@ class QuoteDesk:
         self.credential_factory = credential_factory
         self.lock = asyncio.Lock()
         self.scenarios = ScenarioStore(clock)
+        # account_ref -> the mode EasyPost last reported in this process, so a contradiction blocks later
+        # requests even if writing it to the credential store failed.
+        self.observed = {}
 
     def account(self, resolved):
         if self.credential_factory is None:
@@ -156,11 +159,14 @@ class QuoteDesk:
         return EasyPostRating(key=credential.api_key.get_secret_value(), account_ref=credential.account_ref,
                               declared_mode=credential.declared_mode), credential
 
-    @staticmethod
-    def require_mode(selected, credential):
-        """Every provider request needs a recorded key mode that EasyPost has not contradicted."""
+    def require_mode(self, selected, credential):
+        """Every provider request needs a recorded key mode that EasyPost has not contradicted. A contradiction is
+        known only from a response, so this refuses the requests after it, never the one that revealed it."""
         declared = credential.declared_mode if credential else selected.declared_mode
-        observed = credential.observed_mode if credential else None
+        if credential:
+            observed = self.observed.get(credential.account_ref) or credential.observed_mode
+        else:
+            observed = selected.observed_mode
         if declared is None and selected.status().get("configured"):
             raise PackagingError("account_mode_unconfirmed", MODE_UNCONFIRMED, 409)
         if declared is not None and observed is not None and observed != declared:
@@ -170,9 +176,12 @@ class QuoteDesk:
 
     def observe(self, resolved, selected, credential):
         """Keep the mode EasyPost reported, so a contradicted record blocks later requests. Never masks the outcome
-        and never stops the attempt audit: a failure here leaves the record as it was, and the next response checks again."""
+        and never stops the attempt audit: if the store cannot be written its record stays as it was, and this process
+        still refuses later requests from its own record of the observation."""
         if credential is None or selected.observed_mode is None:
-            return
+            return  # The direct provider keeps its last observed mode itself.
+        if credential.account_ref:
+            self.observed[credential.account_ref] = selected.observed_mode
         try:
             self.account(resolved).observe_mode(credential.account_ref, selected.observed_mode)
         except Exception:

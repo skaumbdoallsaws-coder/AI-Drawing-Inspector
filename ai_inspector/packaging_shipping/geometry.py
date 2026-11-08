@@ -7,6 +7,8 @@ import math
 from decimal import Decimal, ROUND_HALF_UP
 from .models import Design
 from .components import insert_geometry, intersects_insert_material, contact_evidence, foam_along
+from .handling import UNSUPPORTED_CONTENTS
+from .restraint import TOTAL_WORK_LIMIT, package_restraint
 
 # Matches py3dbp's six orthogonal orientations. These are dimension orders,
 # not arbitrary part scaling or reflections; the viewer supplies rigid rotations.
@@ -24,6 +26,14 @@ def digest(value) -> str:
     if hasattr(value, "model_dump"):
         value = value.model_dump(mode="json")
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def unit_mass(product):
+    """Rated mass of one product item: its main mass plus every added mass that is known; None if the main mass is unknown.
+    Unknown added items are left out here and reported by assess() and with every quote."""
+    if product is None or product.mass_kg is None:
+        return None
+    return product.mass_kg + sum(item.mass_kg for item in product.additional_mass if item.mass_kg is not None)
 
 
 def oriented(dimensions, orientation):
@@ -99,8 +109,20 @@ def assess(design: Design) -> dict:
         issue("product_required", "Select a product and confirm its dimensions.")
     elif product.mass_kg is None:
         issue("mass_unknown", "Product mass is unknown. Provide a measured mass or a documented estimate.")
-    if product and product.mass_basis == "estimate":
+    # A weighed packed carton is the rated weight, so component estimates no longer condition the price.
+    weighed = bool(design.packages) and all(p.measured_gross_kg is not None for p in design.packages)
+    if product and product.mass_basis == "estimate" and not weighed:
         issue("estimated_mass", "Product mass is an estimate; shipping costs are conditional on it.", severity="warning")
+    if product and not weighed:
+        unknown = [m for m in product.additional_mass if m.mass_kg is None]
+        if unknown:
+            issue("added_mass_unknown", f"Product mass leaves out {len(unknown)} item(s) of unknown mass: "
+                  f"{', '.join(m.name for m in unknown)}. Rated weights exclude them; weigh them or one packed carton.",
+                  [m.id for m in unknown], "warning")
+        estimated = [m.id for m in product.additional_mass if m.basis == "estimate"]
+        if estimated:
+            issue("added_mass_estimated", "Some added product mass is an estimate; shipping costs are conditional on it.", estimated, "warning")
+    restraint_rows, restraint_budget = [], [TOTAL_WORK_LIMIT]
     if not design.packages:
         issue("packages_required", "Add a carton and place the products.")
     count = sum(len(p.placements) for p in design.packages)
@@ -200,19 +222,55 @@ def assess(design: Design) -> dict:
                       f"{len(package.placements)} products (least found: {'; '.join(parts)}).", (package.id, short[0]))
             cushion_rows.append({"package_id": package.id, "verified": not unverified,
                                  **{field: None if least[field] is None else round(least[field], 9) for field, _ in CUSHION_LABELS}})
-        product_mass = product.mass_kg * len(package.placements) if product and product.mass_kg is not None else None
+        if product is not None and package.placements:
+            restraint_rows.extend(package_restraint(
+                package.id, [(item.id, envelope(item.position_m, oriented(product.dimensions_m, item.orientation))) for item in package.placements],
+                [x for x, shape in zip(package.inserts, shapes) if shape["valid"]], carton.inner_m, restraint_budget))
+        unit = unit_mass(product)
+        product_mass = unit * len(package.placements) if unit is not None else None
         insert_mass = sum(shape["net_volume_m3"] * x.density_kg_m3 for shape, x in zip(shapes, package.inserts)) if all(s["valid"] for s in shapes) else None
         allowance = package.allowance_kg
-        gross = None if product_mass is None or insert_mass is None or carton.tare_kg is None or allowance is None else product_mass + insert_mass + carton.tare_kg + allowance
+        estimate = None if product_mass is None or insert_mass is None or carton.tare_kg is None or allowance is None else product_mass + insert_mass + carton.tare_kg + allowance
+        gross = package.measured_gross_kg if package.measured_gross_kg is not None else estimate
         if product_mass is not None and insert_mass is not None and allowance is not None and carton.max_payload_kg is not None:
             if product_mass + insert_mass + allowance > carton.max_payload_kg + 1e-9:
                 issue("payload_exceeded", "Contents exceed the declared carton payload limit.", ids)
         known_cost = carton.cost_usd is not None and all(x.cost_usd is not None for x in package.inserts)
         masses.append({"package_id": package.id, "product_kg": product_mass, "insert_kg": insert_mass,
                        "carton_kg": carton.tare_kg, "allowance_kg": allowance, "gross_kg": gross,
+                       "estimated_gross_kg": estimate,
+                       "gross_basis": None if gross is None else "measured" if package.measured_gross_kg is not None else "estimated",
                        "outer_m": list(carton.outer_m), "materials_cost_usd": float((Decimal(str(carton.cost_usd)) + sum((Decimal(str(x.cost_usd)) for x in package.inserts), Decimal(0))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if known_cost else None})
-    if design.constraints.contents != "ordinary_nonhazardous":
+    if restraint_rows:
+        requirement = design.constraints.restraint
+        limit = requirement.max_travel_m if requirement else 0.0
+        unverified = [r for r in restraint_rows if not r["verified"]]
+        moving = [r for r in restraint_rows if r["max_travel_m"] is not None and r["max_travel_m"] > limit + TOLERANCE_M]
+        touching = [r for r in restraint_rows if r["reaches_products"]]
+        if unverified:
+            issue("restraint_not_verified", f"Movement could not be checked within the analysis limit for {len(unverified)} product(s). "
+                  "Simplify the inserts or review them manually.", (unverified[0]["item_id"],), "warning")
+        if moving:
+            worst = max(moving, key=lambda r: r["max_travel_m"])
+            text = (f"{len(moving)} of {len(restraint_rows)} products can move before meeting packing material, another product or a "
+                    f"carton wall (up to {worst['max_travel_m'] * 1000:.1f} mm, {worst['max_travel_direction']}, {worst['item_id']})")
+            if requirement:
+                issue("restraint_insufficient", f"{text}; the restraint requirement allows {requirement.max_travel_m * 1000:.1f} mm.", (worst["item_id"],))
+            else:
+                issue("restraint_movement", f"{text}. Bounding boxes only; restraint is not validated.", (worst["item_id"],), "warning")
+        if touching:
+            first = touching[0]
+            issue("products_can_touch", f"{len(touching)} products can move into another product with no packing material between them "
+                  f"({first['item_id']} reaches {', '.join(first['reaches_products'])}).", (first["item_id"], first["reaches_products"][0]),
+                  "error" if requirement and requirement.separate_products else "warning")
+    contents = design.constraints.contents
+    if contents == "unconfirmed":
         issue("contents_unconfirmed", "Confirm ordinary non-hazardous contents before requesting parcel rates.")
+    elif contents != "ordinary_nonhazardous":
+        issue("contents_unsupported", UNSUPPORTED_CONTENTS[contents])
+    elif design.constraints.contents_basis == "test_assumption":
+        issue("contents_test_assumption", "Ordinary contents are a test assumption for this design, not a declaration about a real "
+              "product. Its rates are not clearance to ship any product.", severity="warning")
     issue("protection_not_evaluated", "Envelope fit only. Cushioning, support, removal and transport performance need engineering review.", severity="warning")
     errors = [f for f in findings if f["severity"] == "error"]
     result = {"design_hash": digest(design), "status": "failed" if errors else "needs_review",
@@ -224,4 +282,7 @@ def assess(design: Design) -> dict:
         result["cushion"] = cushion_rows
     if design.constraints.no_contact:
         result["no_contact"] = region_rows
+    if restraint_rows:
+        # Free travel per product and direction on bounding boxes (geometry only, never a protection result).
+        result["restraint"] = restraint_rows
     return result

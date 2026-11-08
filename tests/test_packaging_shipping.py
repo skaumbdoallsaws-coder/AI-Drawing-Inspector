@@ -245,7 +245,7 @@ def test_mass_budget_separates_contents_tare_and_external_dimensions(design):
     assert result["rate_ready"] is True
     assert result["status"] == "needs_review"
     assert result["validation_level"] == "conservative_bounding_envelopes"
-    assert codes(result) == {"protection_not_evaluated", "support_not_verified"}
+    assert codes(result) == {"protection_not_evaluated", "support_not_verified", "restraint_movement"}
     mass = result["packages"][0]
     assert mass["product_kg"] == 2
     assert mass["insert_kg"] == pytest.approx(0.01)
@@ -363,7 +363,7 @@ def test_py3dbp_respects_orientation_quantity_capacity_and_candidate_readiness()
     assert candidate["package_count"] == 2
     assert all(p.orientation == 1 for box in packed.packages for p in box.placements)
     assert candidate["assessment"] == assess(packed)
-    assert codes(candidate["assessment"]) == {"allowance_unknown", "protection_not_evaluated"}
+    assert codes(candidate["assessment"]) == {"allowance_unknown", "protection_not_evaluated", "restraint_movement"}
     assert not candidate["assessment"]["rate_ready"]
     assert candidate["shipping_volume_m3"] == pytest.approx(2 * 0.11 * 0.17 * 0.09)
     assert design.model_dump() == before
@@ -741,7 +741,7 @@ def pilot(tmp_path, monkeypatch):
         requests.append(request)
         return httpx.Response(200, json={"id": "shp_TEST", "mode": "test", "rates": []})
 
-    rating = EasyPostRating(key="EZTK_TEST_ONLY_NOT_A_CREDENTIAL", transport=httpx.MockTransport(carrier))
+    rating = EasyPostRating(key="EZTK_TEST_ONLY_NOT_A_CREDENTIAL", transport=httpx.MockTransport(carrier), declared_mode="test")
     app = create_app(storage=tmp_path / "pilot-only", rating=rating)
     with TestClient(app, base_url="http://127.0.0.1:8179", headers={"x-inspectorpro-request": "packaging"}) as client:
         yield client, principal, requests

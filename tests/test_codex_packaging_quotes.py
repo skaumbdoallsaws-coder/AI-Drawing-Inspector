@@ -264,6 +264,7 @@ def test_a_failed_provider_request_keeps_its_reservation_and_audit(env):
 
 def test_sage_quotes_alternatives_and_compares_saved_quotes(env):
     env.state["mode"] = "production"  # A mock reply field only; this is still MockTransport.
+    env.desk.provider.declared_mode = "production"  # The TEST key recorded to match the mock replies.
     gw = gateway(env)
     alt = env.service.save_alternative(env.scope, env.doc, AlternativeSave(expected_revision=0, request_id="alt-1",
                                                                            name="TEST one box", design=one_box()))

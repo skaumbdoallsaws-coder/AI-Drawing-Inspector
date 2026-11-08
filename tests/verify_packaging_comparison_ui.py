@@ -67,7 +67,7 @@ def start_pilot(storage):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    rating = EasyPostRating(key="EZTK_TEST_ONLY_BROWSER_CHECK", transport=httpx.MockTransport(priced))
+    rating = EasyPostRating(key="EZTK_TEST_ONLY_BROWSER_CHECK", transport=httpx.MockTransport(priced), declared_mode="test")
     server = uvicorn.Server(uvicorn.Config(create_app(storage, rating=rating), host="127.0.0.1", port=port,
                                            access_log=False, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)

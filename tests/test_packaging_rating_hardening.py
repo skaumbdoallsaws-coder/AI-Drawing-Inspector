@@ -147,7 +147,7 @@ def test_account_and_service_filters_exclude_other_rates_and_count_them():
 def test_mixed_test_and_production_responses_are_rejected():
     replies = iter((shipment(), {**shipment(), "mode": "production", "rates": [rate(mode="production")]}))
     with pytest.raises(PackagingError) as caught:
-        run_quote(adapter(lambda r: httpx.Response(200, json=next(replies))), make_design(2))
+        run_quote(adapter(lambda r: httpx.Response(200, json=next(replies)), mode=None), make_design(2))
     assert caught.value.code == "carrier_unavailable"
 
 
@@ -285,8 +285,8 @@ def test_interrupted_attempts_stay_visible(tmp_path):
 class MockedRating(EasyPostRating):
     transport = None
 
-    def __init__(self, key=None, *, transport=None, account_ref=None):
-        super().__init__(key, transport=self.transport, account_ref=account_ref)
+    def __init__(self, key=None, *, transport=None, account_ref=None, declared_mode=None):
+        super().__init__(key, transport=self.transport, account_ref=account_ref, declared_mode=declared_mode)
 
 
 def store_app(tmp_path, monkeypatch, handle):
@@ -314,7 +314,7 @@ def test_replacing_or_removing_the_account_makes_saved_quotes_stale(tmp_path, mo
 
     app = store_app(tmp_path, monkeypatch, handle)
     with TestClient(app, headers=HEADERS) as client:
-        client.put("/api/packaging/account", json={"api_key": "EZTK_TEST_ONLY_FIRST", "account_alias": "TEST first"})
+        client.put("/api/packaging/account", json={"api_key": "EZTK_TEST_ONLY_FIRST", "account_alias": "TEST first", "mode": "test"})
         first_ref = client.get("/api/packaging/account").json()["account_ref"]
         doc = client.post("/api/packaging/documents", json=make_design().model_dump(mode="json")).json()
         url = f"/api/packaging/documents/{doc['id']}"
@@ -322,7 +322,7 @@ def test_replacing_or_removing_the_account_makes_saved_quotes_stale(tmp_path, mo
         quoted = client.post(url + "/quotes", json=body).json()
         assert quoted["account_ref"] == first_ref and quoted["reused"] is False
         assert client.get(url + "/quotes").json()["quotes"][0]["stale"] is False
-        client.put("/api/packaging/account", json={"api_key": "EZTK_TEST_ONLY_SECOND", "account_alias": "TEST second"})
+        client.put("/api/packaging/account", json={"api_key": "EZTK_TEST_ONLY_SECOND", "account_alias": "TEST second", "mode": "test"})
         history = client.get(url + "/quotes").json()["quotes"][0]
         assert history["stale"] is True and history["stale_reason"] == "account_changed"
         assert client.post(url + "/quotes", json=body).json()["reused"] is False and len(calls) == 2
@@ -350,7 +350,7 @@ def test_carrier_account_discovery_returns_only_allowlisted_fields(tmp_path, mon
 
     app = store_app(tmp_path, monkeypatch, handle)
     with TestClient(app, headers=HEADERS) as client:
-        client.put("/api/packaging/account", json={"api_key": "EZAK_TEST_ONLY_PRODUCTION", "account_alias": "TEST prod"})
+        client.put("/api/packaging/account", json={"api_key": "EZAK_TEST_ONLY_PRODUCTION", "account_alias": "TEST prod", "mode": "production"})
         assert client.get("/api/packaging/account/carrier-accounts").status_code == 405
         listed = client.post("/api/packaging/account/carrier-accounts")
         assert listed.status_code == 200
@@ -372,11 +372,11 @@ def test_carrier_account_discovery_returns_only_allowlisted_fields(tmp_path, mon
     (401, None, "carrier_credentials_invalid"), (500, "INTERNAL_SERVER_ERROR", "carrier_request_failed")])
 def test_carrier_account_discovery_errors_are_explained(status, provider_code, code):
     body = {"error": {"code": provider_code, "message": "TEST private diagnostic"}}
-    provider = adapter(lambda request: httpx.Response(status, json=body))
+    provider = adapter(lambda request: httpx.Response(status, json=body), mode="production")
     with pytest.raises(PackagingError) as caught:
         asyncio.run(provider.carrier_accounts())
     assert caught.value.code == code and "TEST" not in caught.value.message
-    oversize = adapter(lambda request: httpx.Response(200, content=b"[" + b" " * 1000001 + b"]"))
+    oversize = adapter(lambda request: httpx.Response(200, content=b"[" + b" " * 1000001 + b"]"), mode="production")
     with pytest.raises(PackagingError) as large:
         asyncio.run(oversize.carrier_accounts())
     assert large.value.code == "carrier_response_invalid"

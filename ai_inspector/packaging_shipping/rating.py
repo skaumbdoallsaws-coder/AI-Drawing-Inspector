@@ -19,9 +19,10 @@ import os
 import re
 import httpx
 
-from .credentials import account_reference
+from .credentials import ACCOUNT_MODES, MODE_ENVIRONMENT, account_reference
 from .destinations import check_address
 from .geometry import digest
+from .provenance import contents_record, weight_basis
 from .service import PackagingError, now
 
 API = "https://api.easypost.com/v2"
@@ -217,8 +218,18 @@ def _account(raw):
             "billing_type": billing if isinstance(billing, str) and re.fullmatch(r"[a-z_]{1,40}", billing) else None}
 
 
+def mode_mismatch(observed, declared):
+    return PackagingError("account_mode_mismatch", f"EasyPost answered in {observed} mode, but this key is recorded as a {declared} "
+                          "key. No quote was saved and no further shipments were requested. Check the key in the EasyPost "
+                          "dashboard, then record its mode again or replace the key.", 409)
+
+
 class EasyPostRating:
-    def __init__(self, key=None, *, transport=None, account_ref=None):
+    def __init__(self, key=None, *, transport=None, account_ref=None, declared_mode=None):
+        """declared_mode: the mode the user recorded for this key. When given, a response in another mode stops
+        the quote at that response with no further request or retry. The request that revealed the mismatch was
+        already sent; this cannot prevent or undo it. Without a credential store the development environment
+        may record the mode in INSPECTORPRO_PACKAGING_EASYPOST_MODE."""
         self._key = key if key is not None else os.environ.get("INSPECTORPRO_PACKAGING_EASYPOST_KEY", "")
         self._transport = transport
         self._lock = asyncio.Lock()
@@ -226,11 +237,18 @@ class EasyPostRating:
             account_ref = account_reference("environment" if key is None else "direct",
                                             hashlib.sha256(self._key.encode()).hexdigest())
         self.account_ref = account_ref if self._key else None
+        if declared_mode is None and key is None:
+            environment = os.environ.get(MODE_ENVIRONMENT, "")
+            declared_mode = environment if environment in ACCOUNT_MODES else None
+        if declared_mode not in (None, *ACCOUNT_MODES):
+            raise ValueError("declared_mode must be test, production or None")
+        self.declared_mode = declared_mode if self._key else None
+        self.observed_mode = None  # The mode of the last provider response, for the account record.
 
     def status(self):
         return {"provider": "EasyPost", "configured": bool(self._key), "purchases_enabled": False,
-                "account_ref": self.account_ref,
-                "notice": "Quotes use the configured account. Test/live mode comes from each provider response. No labels are purchased."}
+                "account_ref": self.account_ref, "declared_mode": self.declared_mode,
+                "notice": "Quotes use the configured account, recorded as a test or production key; every response's mode is checked against it. No labels are purchased."}
 
     def fingerprint(self, assessment, request):
         return quote_fingerprint(assessment["design_hash"], digest(request.scenario()), self.account_ref)
@@ -300,6 +318,9 @@ class EasyPostRating:
                             mode = raw.get("mode")
                             if mode not in ("test", "production"):
                                 raise ValueError("mode")
+                            self.observed_mode = mode
+                            if self.declared_mode is not None and mode != self.declared_mode:
+                                raise mode_mismatch(mode, self.declared_mode)
                             modes.add(mode)
                             if len(modes) > 1:
                                 raise ValueError("mixed modes")
@@ -334,12 +355,18 @@ class EasyPostRating:
                 "request": {"carrier_accounts": sorted(accounts), "services": sorted([c, s] for c, s in services), "options": options},
                 "price_bases": PRICE_BASES, "origin_notes": origin_notes, "results": output, "ship_date_basis": SHIP_DATE_BASIS,
                 "provider_shipments_created": attempt["shipments_created"], "fees_notice": FEES_NOTICE,
+                # What these rates rest on: the weight basis, the contents classification (never sent) and the key mode.
+                "weight_basis": weight_basis(design, assessment), "contents": contents_record(design),
+                "account_mode": {"declared": self.declared_mode, "observed": next(iter(modes), None)},
                 "notice": "Estimates only. Carrier adjustments and API fees may apply. No postage was purchased."}
 
     async def carrier_accounts(self):
         """Sanitized carrier-account discovery. Production keys only, per EasyPost."""
         if not self._key:
             raise PackagingError("provider_not_configured", "Carrier credentials are not configured. Local packaging remains available.", 503)
+        if self.declared_mode == "test":
+            raise PackagingError("carrier_discovery_refused", "Carrier-account listing needs a production key, and this key is recorded "
+                                 "as a test key, so no request was sent. Without a selection, rates are requested with no account filter.", 403)
         if self._lock.locked():
             raise PackagingError("quote_in_progress", "A provider request is already running. Wait before retrying.", 429)
         async with self._lock:

@@ -46,6 +46,27 @@ class MassCalculation(Closed):
     exclusions: Annotated[str, Field(max_length=500)] = ""
 
 
+class MassItem(Closed):
+    """Mass each product item carries beyond its main mass: magnets, adhesive, finish.
+
+    Per product item. An unknown item stays listed without a mass; it is reported with every
+    assessment and quote and is never folded into the packing allowance.
+    """
+    id: Identity
+    name: Text
+    mass_kg: Annotated[float, Field(gt=0, le=100, strict=True)] | None = None
+    basis: Literal["unknown", "user_measured", "estimate"] = "unknown"
+    evidence: Annotated[str, Field(max_length=500)] = ""
+
+    @model_validator(mode="after")
+    def documented(self):
+        if (self.mass_kg is None) != (self.basis == "unknown"):
+            raise ValueError("An added mass and its basis must be supplied together; leave an unknown item without a mass.")
+        if self.mass_kg is not None and not self.evidence.strip():
+            raise ValueError("Record the source of each added mass, including estimates.")
+        return self
+
+
 class Product(Closed):
     name: Text
     dimensions_m: Dimensions
@@ -55,6 +76,8 @@ class Product(Closed):
     source_id: Identity | None = None
     source_revision: Annotated[str, Field(max_length=128)] = ""
     mass_calculation: MassCalculation | None = None
+    # Mass the main value leaves out (for a CAD estimate: magnets, adhesive, finish). Per item.
+    additional_mass: Annotated[list[MassItem], Field(max_length=12)] = Field(default_factory=list)
     appearance: Appearance | None = None
 
     @model_validator(mode="after")
@@ -67,7 +90,17 @@ class Product(Closed):
             calculated = self.mass_calculation.volume_m3 * self.mass_calculation.material.density_kg_m3
             if self.mass_basis != "estimate" or self.mass_kg is None or abs(self.mass_kg - calculated) > max(1e-9, calculated * 1e-8):
                 raise ValueError("Density-based mass must match the documented calculation and remain an estimate.")
+        if len({m.id for m in self.additional_mass}) != len(self.additional_mass):
+            raise ValueError("Added mass IDs must be unique.")
         return self
+
+    @model_serializer(mode="wrap")
+    def compact(self, handler) -> dict:
+        """An unused added-mass list is left out, so existing designs keep their hash and saved quotes."""
+        data = handler(self)
+        if not data.get("additional_mass"):
+            data.pop("additional_mass", None)
+        return data
 
 
 class BoardBlank(Closed):
@@ -197,6 +230,9 @@ class Package(Closed):
     allowance_kg: Annotated[float, Field(ge=0, le=20, strict=True)] | None = None
     allowance_evidence: Annotated[str, Field(max_length=500)] = ""
     graphics: Annotated[list[SurfaceGraphic], Field(max_length=16)] = Field(default_factory=list)
+    # A weighed packed carton. When present it is the rated weight; the component sum stays an estimate beside it.
+    measured_gross_kg: Annotated[float, Field(gt=0, le=1000, strict=True)] | None = None
+    measured_gross_evidence: Annotated[str, Field(max_length=500)] = ""
 
     @model_validator(mode="after")
     def unique(self):
@@ -209,7 +245,19 @@ class Package(Closed):
             raise ValueError("An insert graphic must refer to an existing insert in this carton.")
         if self.allowance_kg is not None and not self.allowance_evidence.strip():
             raise ValueError("Record what the packing allowance includes, even when zero.")
+        if (self.measured_gross_kg is None) != (not self.measured_gross_evidence.strip()):
+            raise ValueError("Enter a weighed packed-carton mass together with how and when it was weighed, or leave both empty.")
         return self
+
+    @model_serializer(mode="wrap")
+    def compact(self, handler) -> dict:
+        """An unset weighed mass is left out, so existing designs keep their hash and saved quotes."""
+        data = handler(self)
+        if data.get("measured_gross_kg") is None:
+            data.pop("measured_gross_kg", None)
+            if not data.get("measured_gross_evidence"):
+                data.pop("measured_gross_evidence", None)
+        return data
 
 
 class CushionRequirement(Closed):
@@ -287,19 +335,45 @@ class NoContactRegion(Closed):
         return self
 
 
+class RestraintRequirement(Closed):
+    """Largest free travel allowed for any product, in any of six directions, before it meets packing
+    material, another product or a carton wall. Bounding boxes and rigid translation only: product
+    shape, rotation, friction and foam compression are not modelled. Not a transport-performance rating.
+    """
+    max_travel_m: Annotated[float, Field(ge=0, le=0.05, strict=True)]
+    # True: a product whose nearest obstacle in some direction is another product fails, even at zero travel.
+    separate_products: Annotated[bool, Field(strict=True)] = True
+    evidence: Annotated[str, Field(min_length=1, max_length=500)]
+
+    @model_validator(mode="after")
+    def documented(self):
+        if not self.evidence.strip():
+            raise ValueError("Record why this restraint is required.")
+        return self
+
+
 class Constraints(Closed):
     clearance_m: Annotated[float, Field(ge=0, le=0.2, strict=True)] = 0.02
     gap_m: Annotated[float, Field(ge=0, le=0.2, strict=True)] = 0.01
     allowed_orientations: Annotated[list[Orientation], Field(min_length=1, max_length=6)] = Field(default_factory=lambda: [0])
-    contents: Literal["unconfirmed", "ordinary_nonhazardous", "special_handling"] = "unconfirmed"
+    # A classification recorded here is never carrier acceptance; no contents information is sent to carriers.
+    contents: Literal["unconfirmed", "ordinary_nonhazardous", "magnetized_material", "special_handling"] = "unconfirmed"
+    # Whether the classification declares the real product's contents or is a test assumption (a synthetic parcel).
+    contents_basis: Literal["", "product_declaration", "test_assumption"] = ""
+    contents_evidence: Annotated[str, Field(max_length=500)] = ""
     cushion: CushionRequirement | None = None
     package_allowance: AllowanceRule | None = None
     no_contact: Annotated[list[NoContactRegion], Field(max_length=12)] = Field(default_factory=list)
+    restraint: RestraintRequirement | None = None
 
     @model_validator(mode="after")
     def distinct_regions(self):
         if len({r.id for r in self.no_contact}) != len(self.no_contact):
             raise ValueError("No-contact region IDs must be unique.")
+        if (not self.contents_basis) != (not self.contents_evidence.strip()):
+            raise ValueError("Record the contents basis together with who classified the contents and on what evidence.")
+        if self.contents == "unconfirmed" and self.contents_basis:
+            raise ValueError("Leave the contents basis empty until the contents are classified.")
         return self
 
     @model_serializer(mode="wrap")
@@ -307,11 +381,14 @@ class Constraints(Closed):
         """Unset optional protections are left out, so a design that never used them keeps the
         hash, and with it the saved quotes, it had before these fields existed."""
         data = handler(self)
-        for key in ("cushion", "package_allowance"):
+        for key in ("cushion", "package_allowance", "restraint"):
             if data.get(key) is None:
                 data.pop(key, None)
         if not data.get("no_contact"):
             data.pop("no_contact", None)
+        for key in ("contents_basis", "contents_evidence"):
+            if not data.get(key):
+                data.pop(key, None)
         return data
 
 

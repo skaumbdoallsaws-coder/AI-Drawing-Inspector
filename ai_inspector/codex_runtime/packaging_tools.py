@@ -618,9 +618,16 @@ class QuoteSnapshot(ResultBase):
     shipments_remaining: Count
     destinations: Annotated[list[QuotedDestination], Field(max_length=3)]
     fees_notice: Annotated[str, Field(max_length=1000)]
+    # What the rates rest on, as saved with the quote: report these with the prices, never drop them.
+    weight_basis: Literal["estimated", "measured", "not_recorded"] = "not_recorded"
+    weight_summary: Annotated[str, Field(max_length=600)] = ""
+    unknown_mass_items: Annotated[list[Annotated[str, Field(max_length=160)]], Field(max_length=12)] = Field(default_factory=list)
+    contents: Annotated[str, Field(max_length=40)] = "not_recorded"
+    contents_basis: Annotated[str, Field(max_length=40)] = "not_recorded"
     notice: str = ("Saved estimates only; no postage or label was bought. Per-service totals are sums of separate parcel "
-                   "estimates, cheapest first. Test-mode prices are not live carrier prices. Use compare_packaging for "
-                   "differences against the baseline.")
+                   "estimates, cheapest first. Test-mode prices are not live carrier prices. A rate is not carrier "
+                   "acceptance of the contents, and a design whose contents are a test assumption is not cleared to ship "
+                   "any product. Use compare_packaging for differences against the baseline.")
 
 
 class ServiceRef(Closed):
@@ -698,6 +705,7 @@ class _CompareSuccess(Closed):
 
 def _quote_view(saved, scenario_id, design_ref, remaining):
     """A saved quote for Sage: city-level destinations and per-service totals; no address lines or provider IDs."""
+    weight, contents = saved.get("weight_basis") or {}, saved.get("contents") or {}
     destinations = []
     for result in saved["results"]:
         totals = result["totals"]
@@ -713,7 +721,10 @@ def _quote_view(saved, scenario_id, design_ref, remaining):
             "account_ref": saved.get("account_ref"), "mode": saved.get("mode"), "reused": saved["reused"],
             "provider_shipments_created": 0 if saved["reused"] else saved.get("provider_shipments_created", 0),
             "shipments_remaining": remaining, "destinations": destinations,
-            "fees_notice": saved.get("fees_notice", FEES_NOTICE)}
+            "fees_notice": saved.get("fees_notice", FEES_NOTICE),
+            "weight_basis": weight.get("status", "not_recorded"), "weight_summary": weight.get("summary", "")[:600],
+            "unknown_mass_items": [name[:160] for name in weight.get("unknown_items", [])][:12],
+            "contents": contents.get("classification", "not_recorded"), "contents_basis": contents.get("basis") or "not_recorded"}
 
 
 def _comparison_view(result):

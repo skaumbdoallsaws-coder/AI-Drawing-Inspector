@@ -95,7 +95,8 @@ def no_network(monkeypatch):
 def test_check_status_separates_geometric_passes_from_review_and_unevaluated_checks():
     document = document_for(design_data())
     rows = {check: status for check, status, _ in check_rows(document["design"], document["assessment"])}
-    assert list(rows.values()) == ["passed"] * 6 + ["needs_review", "needs_review", "not_evaluated"]
+    # Support, movement (no restraint requirement recorded) and packing access need review; transport is not evaluated.
+    assert list(rows.values()) == ["passed"] * 6 + ["needs_review", "needs_review", "needs_review", "not_evaluated"]
     overlapping = design_data()
     overlapping["packages"][0]["placements"][0]["position_m"] = [0.035, 0.02, 0.04]
     overlapping["constraints"].pop("cushion")

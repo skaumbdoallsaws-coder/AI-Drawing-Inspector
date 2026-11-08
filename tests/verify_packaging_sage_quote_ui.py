@@ -51,7 +51,8 @@ def start_pilot(storage, calls):
         return priced(request)
 
     service = PackagingService(storage)
-    desk = QuoteDesk(service, rating=EasyPostRating(key="EZTK_TEST_ONLY_BROWSER_CHECK", transport=httpx.MockTransport(handle)))
+    desk = QuoteDesk(service, rating=EasyPostRating(key="EZTK_TEST_ONLY_BROWSER_CHECK", transport=httpx.MockTransport(handle),
+                                                declared_mode="test"))
     principal = local_facility_principal(site_id="packaging-pilot")
     app = FastAPI()
     app.include_router(create_router(service, principal_resolver=lambda request: principal, static_root=ROOT / "static",

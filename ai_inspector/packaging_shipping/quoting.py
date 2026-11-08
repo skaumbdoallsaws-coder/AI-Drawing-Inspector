@@ -22,6 +22,8 @@ from .service import PackagingError
 
 SCENARIOS_PER_DOCUMENT = 8
 SCENARIOS_TOTAL = 200
+MODE_UNCONFIRMED = ("Record whether the saved EasyPost key is a test or production key before requesting anything from "
+                    "EasyPost. Check the key in the EasyPost dashboard; the account alias is only a label. No request was sent.")
 
 
 def place(address):
@@ -151,7 +153,30 @@ class QuoteDesk:
         if self.credential_factory is None:
             return self.provider, None
         credential = self.account(resolved).resolve()
-        return EasyPostRating(key=credential.api_key.get_secret_value(), account_ref=credential.account_ref), credential
+        return EasyPostRating(key=credential.api_key.get_secret_value(), account_ref=credential.account_ref,
+                              declared_mode=credential.declared_mode), credential
+
+    @staticmethod
+    def require_mode(selected, credential):
+        """Every provider request needs a recorded key mode that EasyPost has not contradicted."""
+        declared = credential.declared_mode if credential else selected.declared_mode
+        observed = credential.observed_mode if credential else None
+        if declared is None and selected.status().get("configured"):
+            raise PackagingError("account_mode_unconfirmed", MODE_UNCONFIRMED, 409)
+        if declared is not None and observed is not None and observed != declared:
+            raise PackagingError("account_mode_mismatch", f"EasyPost last answered this key in {observed} mode, but it is recorded as "
+                                 f"a {declared} key. Check the key in the EasyPost dashboard, then record its mode again or replace "
+                                 "the key. No request was sent.", 409)
+
+    def observe(self, resolved, selected, credential):
+        """Keep the mode EasyPost reported, so a contradicted record blocks later requests. Never masks the outcome
+        and never stops the attempt audit: a failure here leaves the record as it was, and the next response checks again."""
+        if credential is None or selected.observed_mode is None:
+            return
+        try:
+            self.account(resolved).observe_mode(credential.account_ref, selected.observed_mode)
+        except Exception:
+            pass
 
     def current_account(self, resolved):
         """(account_ref, known) for staleness; unknown when the store cannot be read."""
@@ -180,6 +205,7 @@ class QuoteDesk:
             selected, credential = self.current_provider(resolved)
             if credential:
                 credential.check()
+            self.require_mode(selected, credential)
             selected.preflight(design, assessment, body)
             fingerprint = selected.fingerprint(assessment, body)
             if not body.refresh:
@@ -205,6 +231,7 @@ class QuoteDesk:
                 outcome = "cancelled"
                 raise
             finally:
+                self.observe(resolved, selected, credential)
                 self.service.finish_quote_attempt(scope, doc_id, attempt_id, outcome, counts, error_code=error_code, quote_id=quote_id)
 
     async def carrier_accounts(self, resolved):
@@ -213,4 +240,5 @@ class QuoteDesk:
             selected, credential = self.current_provider(resolved)
             if credential:
                 credential.check()
+            self.require_mode(selected, credential)
             return await selected.carrier_accounts()

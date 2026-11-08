@@ -5,7 +5,29 @@ from xml.sax.saxutils import escape
 STATUS = {"passed": "PASSED (geometric)", "failed": "FAILED", "needs_review": "NEEDS REVIEW",
           "not_evaluated": "NOT EVALUATED", "not_required": "NOT REQUIRED"}
 CONTENTS = {"unconfirmed": "Not confirmed", "ordinary_nonhazardous": "Ordinary, non-hazardous (declared by the user)",
+            "magnetized_material": "Magnetized material (not supported for rating)",
             "special_handling": "Special handling (not supported as ordinary parcels)"}
+TEST_CONTENTS = ("Ordinary, non-hazardous (TEST ASSUMPTION for a synthetic or test design; not a declaration about a "
+                 "real product; its rates are not shipping clearance)")
+DIRECTION_ORDER = ("-x", "+x", "-y", "+y", "-z", "+z")
+
+
+def restraint_row(design, assessment, codes, placed):
+    """The movement row: PASSED only against a recorded requirement, on bounding boxes; otherwise review."""
+    requirement = (design.get("constraints") or {}).get("restraint")
+    rows = assessment.get("restraint") or []
+    worst = max((r["max_travel_m"] for r in rows if r.get("max_travel_m") is not None), default=None)
+    found = "" if worst is None else f"; largest free travel {worst * 1000:.1f} mm"
+    if not placed:
+        return "not_evaluated", "No placed products"
+    if not rows:
+        return "not_evaluated", "No product geometry to check"
+    if not requirement:
+        return "needs_review", "No restraint requirement recorded" + found + " (bounding boxes, rigid translation)"
+    state = ("failed" if codes & {"restraint_insufficient", "products_can_touch"}
+             else "needs_review" if codes & {"restraint_not_verified"} else "passed")
+    return state, (f"Free travel of at most {requirement['max_travel_m'] * 1000:.1f} mm in six directions" + found
+                   + "; bounding boxes, rigid translation; not a transport-performance result")
 STALE = {"revision_changed": "revision changed", "design_changed": "design changed",
          "account_changed": "carrier account changed", "account_removed": "carrier account removed"}
 KINDS = {"carton_sku": "Carton SKU", "material_density": "Material density", "cushioning_guidance": "Cushioning guidance",
@@ -42,6 +64,8 @@ def check_rows(design, assessment):
         ("Support of elevated products", "needs_review",
          "Elevated products without detected insert contact" if "support_not_verified" in codes
          else "Contact detection only; load support is not verified"),
+        ("Movement and restraint: free travel before a product meets packing material, another product or a carton wall",
+         *restraint_row(design, assessment, codes, placed)),
         ("Packing and removal access", "needs_review", "Not evaluated; see each package's proposed packing order"),
         ("Drop, vibration, compression and stacking performance", "not_evaluated",
          "Requires engineering review and transport testing"),
@@ -67,6 +91,7 @@ def render_report(document, quotes=(), evidence=(), source=None):
                              "component is missing. The saved design is unchanged.", 503) from None
     from .components import insert_geometry, pocket_volume
     from .geometry import oriented
+    from .handling import BASIS_LABELS, requirements as handling_requirements
     from .models import Insert
     output = BytesIO()
     styles = getSampleStyleSheet()
@@ -123,6 +148,10 @@ def render_report(document, quotes=(), evidence=(), source=None):
         para("Product", "Heading2")
         para(f"{p['name']} | Quantity: {design['quantity']} | Dimensions X/Y/Z (mm): {millimetres(p['dimensions_m'])}")
         para(f"Mass per item: {number(p['mass_kg'])} kg | Basis: {p['mass_basis']} | Evidence: {p['mass_evidence'] or 'Missing'}")
+        for item in p.get("additional_mass") or []:
+            amount = "unknown (left out of rated weights)" if item.get("mass_kg") is None else f"{number(item['mass_kg'])} kg"
+            para(f"Added mass {item['id']}: {item['name']} | {amount} per item | Basis: {item['basis']} | "
+                 f"Evidence: {item.get('evidence') or 'None recorded'}")
         para(f"Source: {p['source_id'] or 'Manual geometry'} | Source revision: {p['source_revision'] or 'Not available'}")
         library = (source or {}).get("library") if (source or {}).get("id") == p["source_id"] else None
         if library:
@@ -141,7 +170,22 @@ def render_report(document, quotes=(), evidence=(), source=None):
             para("This is a documented estimate, not a measured item mass. The source revision and exclusions remain part of its basis.")
     constraints = design.get("constraints") or {}
     para("Protection requirements", "Heading2")
-    para(f"Contents declaration: {CONTENTS.get(constraints.get('contents'), 'Not recorded')}")
+    contents = constraints.get("contents")
+    test_contents = contents == "ordinary_nonhazardous" and constraints.get("contents_basis") == "test_assumption"
+    para(f"Contents declaration: {TEST_CONTENTS if test_contents else CONTENTS.get(contents, 'Not recorded')}")
+    if constraints.get("contents_basis"):
+        para(f"Contents basis: {BASIS_LABELS.get(constraints['contents_basis'], 'not recorded')} | "
+             f"Evidence: {constraints.get('contents_evidence') or 'None recorded'}")
+    needs = handling_requirements(contents)
+    if needs:
+        para(f"Handling requirements ({needs['status']}, sources checked {needs['checked']}): {needs['eligibility']}")
+        para(f"Evidence needed: {needs['evidence_needed']}")
+        para(f"Carrier option: {needs['carrier_option']}")
+        for carrier in needs["carriers"]:
+            para(f"{carrier['carrier']} ({carrier['transport']}): {carrier['services']}. {carrier['requirement']}")
+        if needs["sources"]:
+            para("Sources: " + "; ".join(needs["sources"]))
+    para("A recorded classification is not carrier acceptance. No contents or hazardous-materials information is sent to carriers.")
     para("Allowed product orientations (orthogonal index; 0 is the product as modelled): "
          + ", ".join(str(o) for o in constraints.get("allowed_orientations", [0])))
     if "clearance_m" in constraints:
@@ -194,6 +238,11 @@ def render_report(document, quotes=(), evidence=(), source=None):
              f"Allowance: {number(totals.get('allowance_kg'))} kg")
         if totals.get("insert_kg") is None:
             para("Insert mass is unavailable. Resolve invalid cutout geometry or missing assessment evidence before using a gross shipping mass.")
+        if box.get("measured_gross_kg") is not None:
+            para(f"Gross mass basis: weighed packed carton, {number(box['measured_gross_kg'])} kg (the rated weight) | "
+                 f"Component estimate: {number(totals.get('estimated_gross_kg'))} kg | Weighing record: {box.get('measured_gross_evidence')}")
+        else:
+            para("Gross mass basis: estimate (sum of component masses; no weighed packed carton recorded).")
         para(f"Carton mass source: {carton['tare_evidence'] or 'Missing'}")
         para(f"Allowance source: {box['allowance_evidence'] or 'Missing'}")
         para(f"Catalog supplier: {carton.get('supplier') or 'Not recorded'} | SKU: {carton.get('sku') or 'Not recorded'}")
@@ -258,6 +307,18 @@ def render_report(document, quotes=(), evidence=(), source=None):
         para("Placement schedule", "Heading3")
         for placement in box["placements"]:
             para(f"{placement['id']}: minimum-corner position X/Y/Z (mm): {position(placement['position_m'])}; orthogonal orientation {placement['orientation']}.")
+        movement = [r for r in assessment.get("restraint") or [] if r["package_id"] == box["id"]]
+        if movement:
+            para("Movement and restraint (bounding boxes; geometry only)", "Heading3", keep_with_next=True)
+            for row in movement:
+                parts = []
+                for name in DIRECTION_ORDER:
+                    found = row["directions"].get(name)
+                    parts.append(f"{name} not checked" if found is None else
+                                 f"{name} {found['travel_m'] * 1000:.1f} mm to {'/'.join(found['stops'])}")
+                para(f"{row['item_id']}: " + "; ".join(parts))
+            para("Free travel is the distance a bounding box can translate before it meets something. Product shape, rotation, "
+                 "friction and foam compression are not modelled; this is not a protective-performance result.")
         para("Proposed packing order (derived from saved positions; not verified)", "Heading3", keep_with_next=True)
         steps = packing_order(box)
         for n, (where, _, kind, item) in enumerate(steps, 1):
@@ -325,6 +386,16 @@ def render_report(document, quotes=(), evidence=(), source=None):
              f"Design hash: {quote.get('design_hash') or 'not recorded'} | Scenario hash: {quote.get('scenario_hash') or 'not recorded'} | "
              f"Account reference: {quote.get('account_ref') or 'not recorded'} | Fingerprint: {quote.get('fingerprint') or 'not recorded'}",
              keep_with_next=True)
+        weight = quote.get("weight_basis")
+        para(("Weight basis: " + weight["summary"] + (f" | Mass exclusions: {weight['exclusions']}" if weight.get("exclusions") else ""))
+             if weight else "Weight basis: not recorded (saved before weight provenance was recorded).", keep_with_next=True)
+        recorded = quote.get("contents")
+        if recorded:
+            para(f"Contents at quote time: {recorded['label']} | Basis: {recorded['basis_label']} | {recorded['notice']}", keep_with_next=True)
+        mode = quote.get("account_mode")
+        if mode:
+            para(f"Key mode: recorded {mode.get('declared') or 'not recorded'}; EasyPost answered {mode.get('observed') or 'not recorded'}.",
+                 keep_with_next=True)
         if quote.get("stale"):
             para(f"STALE ({STALE.get(quote.get('stale_reason'), 'no longer current')}): amounts are not shown. This snapshot is not a current price.")
             continue

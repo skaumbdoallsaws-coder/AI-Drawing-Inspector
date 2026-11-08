@@ -50,8 +50,9 @@ def shipment(rates=None):
     return {"id": "shp_TEST", "mode": "test", "rates": [rate()] if rates is None else rates}
 
 
-def adapter(handler, key=TEST_KEY):
-    return EasyPostRating(key=key, transport=httpx.MockTransport(handler))
+def adapter(handler, key=TEST_KEY, mode="test"):
+    """A MockTransport provider whose TEST key is recorded in `mode` (None: not recorded)."""
+    return EasyPostRating(key=key, transport=httpx.MockTransport(handler), declared_mode=mode)
 
 
 def run_quote(provider, design=None, request=None):

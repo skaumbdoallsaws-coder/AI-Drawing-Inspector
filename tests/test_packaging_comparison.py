@@ -211,13 +211,13 @@ def test_stale_design_and_changed_accounts_never_match(tmp_path, monkeypatch):
     calls = []
     app = store_app(tmp_path, monkeypatch, priced(calls))
     with TestClient(app, headers=HEADERS) as client:
-        client.put("/api/packaging/account", json={"api_key": "EZTK_TEST_ONLY_FIRST", "account_alias": "TEST first"})
+        client.put("/api/packaging/account", json={"api_key": "EZTK_TEST_ONLY_FIRST", "account_alias": "TEST first", "mode": "test"})
         pilot = Pilot(client, two_boxes())
         alt = pilot.save("TEST one box", one_box())
         assert pilot.quote().status_code == 200 and pilot.quote(alt).status_code == 200
         result = pilot.compare()
         assert result["ranking"] == [alt, "current"]
-        client.put("/api/packaging/account", json={"api_key": "EZTK_TEST_ONLY_SECOND", "account_alias": "TEST second"})
+        client.put("/api/packaging/account", json={"api_key": "EZTK_TEST_ONLY_SECOND", "account_alias": "TEST second", "mode": "test"})
         replaced = pilot.compare(scenario_hash=result["scenario_hash"])
         assert replaced["ranking"] == [] and all("not_quoted" in r["reasons"] for r in replaced["rows"])
         assert replaced["baseline"]["ready"] is False
@@ -264,12 +264,14 @@ def test_production_quotes_name_the_saving_and_mixed_modes_are_refused(tmp_path,
     calls, state = [], {"mode": "production", "currency": "USD", "express_max_oz": None}
     times = iter(["2026-11-01T09:00:00+00:00", "2026-11-03T09:00:00+00:00", "2026-11-03T10:00:00+00:00"])
     monkeypatch.setattr(rating_module, "now", lambda: next(times))
-    with TestClient(create_app(storage=tmp_path / "pilot", rating=adapter(priced(calls, state))), headers=HEADERS) as client:
+    provider = adapter(priced(calls, state), mode="production")
+    with TestClient(create_app(storage=tmp_path / "pilot", rating=provider), headers=HEADERS) as client:
         pilot = Pilot(client, two_boxes(cost=1.5))
         alt = pilot.save("TEST one box", one_box(cost=1.5))
         mixed = pilot.save("TEST test-mode quote", one_box(cost=1.5, product={"mass_evidence": "TEST scale, rechecked"}))
         assert pilot.quote().status_code == 200 and pilot.quote(alt).status_code == 200
         state["mode"] = "test"
+        provider.declared_mode = "test"  # Mock only: one TEST key recorded first as production, then as test.
         assert pilot.quote(mixed).status_code == 200
         result = pilot.compare()
         by_name = rows(result)

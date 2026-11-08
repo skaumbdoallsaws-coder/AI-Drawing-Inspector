@@ -179,7 +179,7 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         return {"workflow": "packaging_shipping", "pilot": True,
                 "rating": desk.status(resolved),
                 "permissions": granted(resolved),
-                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios", "draft_recovery", "research_evidence", "storage_limits"] + (["library_sources"] if library else []) + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
+                "capabilities": ["glb_import", "manual_dimensions", "mass_provenance", "cartons", "solid_pads", "top_open_pockets", "surface_graphics", "material_catalog", "saved_alternatives", "orthogonal_arrangements", "undo", "redo", "quote_only", "pdf_report", "proposal_protection", "quote_reuse", "quote_attempt_audit", "carrier_account_discovery", "cost_comparison", "sage_quote_scenarios", "draft_recovery", "research_evidence", "storage_limits", "weight_provenance", "added_product_mass", "weighed_packed_mass", "declared_account_mode", "contents_basis", "restraint_check"] + (["library_sources"] if library else []) + (["step_import", "cad_volume_density_estimate"] if step else []) + (["sage_chat_execution"] if sage else []),
                 "quote_rules": {"destinations": DESTINATION_RULES, "ship_date": SHIP_DATE_BASIS, "fees": FEES_NOTICE,
                                 "price_bases": PRICE_BASES},
                 "unsupported": ["verified_cad_material_mass", "arbitrary_contour_cutouts", "transport_certification", "freight", "future_ship_dates"] + ([] if step else ["step_runtime_not_configured"]) + ([] if sage else ["sage_chat_execution"]) + missing_components(source_runtime.dependency_root)}
@@ -197,11 +197,22 @@ def create_router(service: PackagingService, *, principal_resolver, static_root:
         try:
             raw = await bounded_body(request, 8192)
             body = json.loads(raw)
-            if not isinstance(body, dict) or set(body) != {"api_key", "account_alias"}:
+            if not isinstance(body, dict) or not {"api_key", "account_alias"} <= set(body) <= {"api_key", "account_alias", "mode"}:
                 raise ValueError()
         except (ValueError, UnicodeError):
             raise PackagingError("carrier_account_invalid", "Enter a carrier key and account alias in the account form.", 422) from None
-        return account(resolved).replace(body["api_key"], account_alias=body["account_alias"])
+        return account(resolved).replace(body["api_key"], account_alias=body["account_alias"], mode=body.get("mode"))
+
+    @router.put("/api/packaging/account/mode")
+    async def declare_account_mode(request: Request, _=Depends(account_scope), resolved=Depends(principal)):
+        """Records the saved key as a test or production key, as the user checked it. Never contacts the provider."""
+        try:
+            body = json.loads(await bounded_body(request, 1024))
+            if not isinstance(body, dict) or set(body) != {"mode"} or not isinstance(body["mode"], str):
+                raise ValueError()
+        except (ValueError, UnicodeError):
+            raise PackagingError("carrier_mode_invalid", "Record the carrier key as a test or production key.", 422) from None
+        return account(resolved).declare_mode(body["mode"])
 
     @router.delete("/api/packaging/account")
     def remove_account(_=Depends(account_scope), resolved=Depends(principal)):

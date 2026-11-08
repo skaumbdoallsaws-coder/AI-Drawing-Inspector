@@ -37,7 +37,12 @@ import uuid
 
 from pydantic import SecretStr
 
-from .service import PackagingError
+from .service import PackagingError, now
+
+# The user records whether the configured key is a Test or Production key (checked in the EasyPost dashboard).
+# EasyPost reports a mode only in responses, so the recorded mode is checked against every response.
+ACCOUNT_MODES = ("test", "production")
+MODE_ENVIRONMENT = "INSPECTORPRO_PACKAGING_EASYPOST_MODE"
 
 
 def account_reference(source, generation):
@@ -64,6 +69,7 @@ _ERRORS = {
     "carrier_account_disabled": ("The carrier account is disabled. Contact the provider or select another account.", 403),
     "carrier_validation_unavailable": ("Carrier access could not be verified. Explicitly validate again before requesting rates.", 503),
     "carrier_credentials_changed": ("Carrier credentials changed during validation. Validate the current selection again.", 409),
+    "carrier_mode_invalid": ("Record the carrier key as a test or production key.", 422),
 }
 
 
@@ -106,6 +112,9 @@ class EasyPostCredential:
     _check: Callable[[], None] = field(repr=False, compare=False)
     # Opaque, non-secret identity; changes whenever the stored key is replaced or removed.
     account_ref: str | None = None
+    # The mode the user recorded for this key, and the mode EasyPost last reported for it.
+    declared_mode: str | None = None
+    observed_mode: str | None = None
 
     def check(self):
         """Recheck removal, replacement, and any explicit validation denial."""
@@ -138,6 +147,7 @@ class EasyPostCredentialStore:
         self.path = self.root / ("easypost-" + self._owner + ".sqlite")
         self._protect, self._unprotect = protect, unprotect
         self._environment_validation = None
+        self._environment_mode = None  # (generation, mode fields): process-local, like environment validation
         self._lock = threading.RLock()
 
     def _codec(self):
@@ -222,6 +232,27 @@ class EasyPostCredentialStore:
             _alias(data["account_alias"], _key(data["key"]))
         return data
 
+    @staticmethod
+    def _ensure_modes(db):
+        # Not sealed: a mode is not secret. A separate table, so an older build that reads only
+        # carrier_credentials still opens this store unchanged.
+        db.execute("CREATE TABLE IF NOT EXISTS carrier_account_modes (account_ref TEXT PRIMARY KEY, "
+                   "declared TEXT NOT NULL, observed TEXT, observed_at TEXT)")
+
+    @staticmethod
+    def _mode_row(db, account_ref):
+        if account_ref is None or not db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='carrier_account_modes'").fetchone():
+            return None
+        row = db.execute("SELECT declared, observed, observed_at FROM carrier_account_modes WHERE account_ref=?",
+                         (account_ref,)).fetchone()
+        if row is None:
+            return None
+        declared, observed, at = row
+        if declared not in ACCOUNT_MODES or observed not in (None, *ACCOUNT_MODES) or not (at is None or isinstance(at, str)):
+            raise ValueError("Invalid account mode record")
+        return {"declared_mode": declared, "observed_mode": observed, "observed_at": at}
+
     @contextmanager
     def _write_connection(self):
         if not self.enabled:
@@ -257,7 +288,10 @@ class EasyPostCredentialStore:
             if not self.path.exists():
                 return None
             db = self._connect(readonly=True)
-            return self._read(db)
+            data = self._read(db)
+            if data["key"] is not None:  # Mode fields ride along for status/resolve only; they are never sealed.
+                data = {**data, **(self._mode_row(db, account_reference("secure_store", data["generation"])) or {})}
+            return data
         except Exception:
             raise _error("carrier_credentials_unavailable") from None
         finally:
@@ -279,9 +313,13 @@ class EasyPostCredentialStore:
             raise _error("carrier_credentials_unavailable") from None
         generation = hashlib.sha256(key.encode()).hexdigest()
         cached = self._environment_validation
+        declared = os.environ.get(MODE_ENVIRONMENT, "")
+        mode = {"declared_mode": declared if declared in ACCOUNT_MODES else None, "observed_mode": None, "observed_at": None}
+        if self._environment_mode and self._environment_mode[0] == generation:
+            mode = self._environment_mode[1]
         return {"key": key, "source": "environment", "account_alias": "Development environment",
                 "validation": cached[1] if cached and cached[0] == generation else "not_validated",
-                "generation": generation, "environment_fallback_suppressed": False}
+                "generation": generation, "environment_fallback_suppressed": False, **mode}
 
     @staticmethod
     def _require_key(selection, *, validating=False):
@@ -301,24 +339,34 @@ class EasyPostCredentialStore:
             except PackagingError as exc:
                 return {"provider": "EasyPost", "configured": False, "source": "unavailable", "account_alias": None,
                         "validation": "unavailable", "account_disabled": False, "quote_enabled": False,
-                        "secure_store_enabled": self.enabled, "purchases_enabled": False, "error_code": exc.code}
+                        "secure_store_enabled": self.enabled, "purchases_enabled": False, "error_code": exc.code,
+                        "declared_mode": None, "observed_mode": None, "observed_at": None, "mode_mismatch": False}
             configured = selected["key"] is not None
             state = selected["validation"] if configured else "not_configured"
+            declared = selected.get("declared_mode") if configured else None
+            observed = selected.get("observed_mode") if configured else None
             return {"provider": "EasyPost", "configured": configured, "source": selected["source"],
                     "account_alias": selected["account_alias"], "validation": state,
                     "account_ref": account_reference(selected["source"], selected["generation"]) if configured else None,
                     "account_disabled": state == "account_disabled",
                     "quote_enabled": configured and state in {"not_validated", "valid"},
                     "secure_store_enabled": self.enabled, "purchases_enabled": False,
-                    "environment_fallback_suppressed": selected["environment_fallback_suppressed"]}
+                    "environment_fallback_suppressed": selected["environment_fallback_suppressed"],
+                    # Recorded by the user; observed from EasyPost's last response. The alias is only a label.
+                    "declared_mode": declared, "observed_mode": observed,
+                    "observed_at": selected.get("observed_at") if configured else None,
+                    "mode_mismatch": bool(declared and observed and declared != observed)}
 
-    def replace(self, api_key: str, *, account_alias="EasyPost account"):
-        """Explicit local save/replace; never contacts the provider or other auth."""
+    def replace(self, api_key: str, *, account_alias="EasyPost account", mode=None):
+        """Explicit local save/replace; never contacts the provider or other auth. mode records the key as a
+        test or production key; without it the mode stays unrecorded and quotes are refused until it is recorded."""
         if not self.enabled:
             raise _error("carrier_secure_store_disabled")
         key = _key(api_key)
         alias = _alias(account_alias, key)
-        return self._replace(key, alias)
+        if mode is not None and mode not in ACCOUNT_MODES:
+            raise _error("carrier_mode_invalid")
+        return self._replace(key, alias, mode)
 
     def remove(self):
         """Persist a removal tombstone, including when an environment key exists."""
@@ -326,13 +374,63 @@ class EasyPostCredentialStore:
             raise _error("carrier_secure_store_disabled")
         return self._replace(None, None)
 
-    def _replace(self, key, alias):
+    def _replace(self, key, alias, mode=None):
         with self._lock:
             data = {"version": 1, "owner": self._owner, "generation": uuid.uuid4().hex, "key": key,
                     "account_alias": alias, "validation": "not_validated"}
             sealed = self._seal(data)
             with self._write_connection() as db:
                 db.execute("INSERT OR REPLACE INTO carrier_credentials VALUES (1,?)", (sealed,))
+                self._ensure_modes(db)
+                db.execute("DELETE FROM carrier_account_modes")  # Only the current key's mode is kept.
+                if key is not None and mode is not None:
+                    db.execute("INSERT INTO carrier_account_modes VALUES (?,?,NULL,NULL)",
+                               (account_reference("secure_store", data["generation"]), mode))
+            return self.status()
+
+    def declare_mode(self, mode):
+        """Record the configured key as a test or production key, as the user checked it. Never contacts the provider.
+        The mode EasyPost last reported is kept, so a recorded mode that contradicts it still blocks quotes."""
+        if mode not in ACCOUNT_MODES:
+            raise _error("carrier_mode_invalid")
+        with self._lock:
+            selected = self._selection()
+            self._require_key(selected, validating=True)
+            ref = account_reference(selected["source"], selected["generation"])
+            if selected["source"] == "secure_store":
+                with self._write_connection() as db:
+                    if self._read(db)["generation"] != selected["generation"]:
+                        raise _error("carrier_credentials_changed")
+                    self._ensure_modes(db)
+                    previous = self._mode_row(db, ref) or {}
+                    db.execute("DELETE FROM carrier_account_modes WHERE account_ref<>?", (ref,))
+                    db.execute("INSERT OR REPLACE INTO carrier_account_modes VALUES (?,?,?,?)",
+                               (ref, mode, previous.get("observed_mode"), previous.get("observed_at")))
+            else:
+                self._environment_mode = (selected["generation"], {"declared_mode": mode,
+                                          "observed_mode": selected.get("observed_mode"), "observed_at": selected.get("observed_at")})
+            return self.status()
+
+    def observe_mode(self, account_ref, observed):
+        """Record the mode EasyPost reported for this key; ignored when the key changed since the request."""
+        if observed not in ACCOUNT_MODES:
+            return self.status()
+        with self._lock:
+            selected = self._selection()
+            if (selected["key"] is None or not selected.get("declared_mode")
+                    or account_reference(selected["source"], selected["generation"]) != account_ref):
+                return self.status()
+            at = now()
+            if selected["source"] == "secure_store":
+                with self._write_connection() as db:
+                    if self._read(db)["generation"] != selected["generation"]:
+                        return self.status()
+                    self._ensure_modes(db)
+                    db.execute("UPDATE carrier_account_modes SET observed=?, observed_at=? WHERE account_ref=?",
+                               (observed, at, account_ref))
+            else:
+                self._environment_mode = (selected["generation"], {"declared_mode": selected["declared_mode"],
+                                          "observed_mode": observed, "observed_at": at})
             return self.status()
 
     def resolve(self) -> EasyPostCredential:
@@ -350,7 +448,8 @@ class EasyPostCredentialStore:
                     self._require_key(current)
 
             return EasyPostCredential(SecretStr(selected["key"]), source, selected["account_alias"], check,
-                                      account_reference(source, generation))
+                                      account_reference(source, generation), selected.get("declared_mode"),
+                                      selected.get("observed_mode"))
 
     async def validate(self, validator: CredentialValidator, *, timeout_seconds=15):
         """Explicit, bounded host-supplied account check; no implicit network client.
@@ -395,4 +494,4 @@ class EasyPostCredentialStore:
         credential = self.resolve()
         credential.check()
         return EasyPostRating(key=credential.api_key.get_secret_value(), transport=transport,
-                              account_ref=credential.account_ref)
+                              account_ref=credential.account_ref, declared_mode=credential.declared_mode)

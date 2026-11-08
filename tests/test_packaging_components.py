@@ -263,8 +263,9 @@ def test_assess_uses_net_insert_volume_and_keeps_protection_warning(shape, remov
     assert result["total_gross_kg"] == pytest.approx(mass["gross_kg"])
     assert result["rate_ready"] and result["status"] == "needs_review"
     assert result["validation_level"] == "conservative_bounding_envelopes"
-    assert finding_codes(result) == {"protection_not_evaluated"}
-    assert result["findings"][0]["severity"] == "warning"
+    # The product sits in its pocket with clearance, so it can move: a movement warning, not an error.
+    assert finding_codes(result) == {"protection_not_evaluated", "restraint_movement"}
+    assert all(f["severity"] == "warning" for f in result["findings"])
 
 
 @pytest.mark.parametrize("bad_insert,code", [

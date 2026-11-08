@@ -507,6 +507,14 @@ non-native hosts built as `--system-site-packages` venvs. Logs: `.runtime/pc-tes
     test keys as testing at no cost. A Parcel request would send the key to EasyPost, so it needs the
     user's approval, and its mode reporting and billing would have to be confirmed first.
   Ready to deploy and test the software does not mean the rack package is qualified to ship.
+- 2026-11-08, stale browser check fixed (`5c26d2f`, at the user's request): `tests/verify_packaging_browser.py`
+  now opens each panel through its ribbon button (`#command-product` and the others) and waits until the
+  panel body is visible, where it used to click the tab strip that `15965c1` removed. No assertion, input or
+  application code changed. It passed twice against isolated servers (a fresh store each, no carrier key,
+  outbound connections refused except loopback, the desktop's dependency bundle; each server confirmed by
+  its owning process before testing), with browser requests outside loopback blocked: 7 phases and 12
+  checks, no page errors, no external request attempted. No desktop restart and no EasyPost request; the
+  live gates are unchanged.
 
 ## Unsupported inputs (first release)
 
@@ -721,5 +729,6 @@ qualified to ship.
 - Protection: restraint is a bounding-box prediction. Rotation, foam compression, drop, vibration,
   compression and stacking are not evaluated until transport testing.
 - Unchanged: the clean-Windows install test and the STEP runtime's redistribution decisions.
-- `tests/verify_packaging_browser.py` is stale since `15965c1`: it expects the product form open on
-  load. It fails identically before and after the port and was not changed.
+
+Not a live gate: `tests/verify_packaging_browser.py`, stale since `15965c1`, was fixed on 2026-11-08
+(`5c26d2f`) and passes against isolated servers (2026-11-08 log entry).

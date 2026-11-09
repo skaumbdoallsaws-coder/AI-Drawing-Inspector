@@ -14,14 +14,19 @@ writer that takes no lock is left as it is.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import stat
 import tempfile
 import threading
 import time
+from typing import Any, Mapping
 
 from .primitives import verify
 from .shape_families import FOLDER
@@ -222,4 +227,178 @@ def install(root: str | Path, built: dict) -> dict:
             old.unlink()
         replace_file(catalog, updated, unchanged=original)
     return {"assetId": entry["assetId"], "added": True, "modelWritten": written,
+            "backup": backup.relative_to(root).as_posix()}
+
+
+BUNDLE_FILES = {"model.glb": 30 * 1024 * 1024, "thumbnail.webp": 64 * 1024,
+                "CREDITS.txt": 16 * 1024, "bundle.json": 64 * 1024}
+BUNDLE_FOLDER = Path(FOLDER) / "imports"
+
+
+def _bundle_json(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, ensure_ascii=True, allow_nan=False,
+                      separators=(",", ":")).encode("utf-8")
+
+
+def _bundle_object(payload: bytes) -> dict[str, Any]:
+    def unique(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("Duplicate bundle field")
+            value[key] = item
+        return value
+    value = json.loads(payload.decode("utf-8"), object_pairs_hook=unique,
+                       parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Non-finite bundle value")))
+    if not isinstance(value, dict):
+        raise ValueError("The bundle manifest must be an object")
+    return value
+
+
+def _validate_bundle(entry: dict, files: Mapping[str, bytes]) -> dict[str, bytes]:
+    """Freeze and verify all incoming data before the first filesystem mutation."""
+    from ai_inspector.facility_layout.private_catalog import private_asset_spec
+    from .model_import.credit import credits_text
+    from .model_import.identity import asset_identity, SEMANTIC_FIELDS
+
+    private_asset_spec(entry)
+    asset_id = entry["assetId"]
+    if not re.fullmatch(r"asset-import-[a-z0-9-]{1,40}-[0-9a-f]{24}", asset_id):
+        raise ValueError("Only model-import asset IDs go into an imported bundle")
+    expected_path = (BUNDLE_FOLDER / asset_id / "model.glb").as_posix()
+    if entry["artifact"] != expected_path:
+        raise ValueError("The imported model must use its own bundle folder")
+    if entry["sourceToCanonical"] != [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]:
+        raise ValueError("Imported models must already be in the canonical frame")
+    if not isinstance(files, Mapping) or set(files) != set(BUNDLE_FILES):
+        raise ValueError("A bundle needs model.glb, thumbnail.webp, CREDITS.txt and bundle.json")
+    frozen = dict(files)
+    for name, maximum in BUNDLE_FILES.items():
+        if not isinstance(frozen[name], bytes) or not 0 < len(frozen[name]) <= maximum:
+            raise ValueError(f"Bundle file {name} must be bounded non-empty bytes")
+    verified = verify(frozen["model.glb"], entry["dimensions"])
+    if verified["triangles"] > 250000:
+        raise ValueError("The imported model exceeds 250000 output triangles")
+    thumbnail = frozen["thumbnail.webp"]
+    if (len(thumbnail) < 20 or thumbnail[:4] != b"RIFF" or thumbnail[8:12] != b"WEBP"
+            or int.from_bytes(thumbnail[4:8], "little") + 8 != len(thumbnail)):
+        raise ValueError("The bundle thumbnail must be a bounded WebP file")
+    if "attribution" not in entry or frozen["CREDITS.txt"] != credits_text(entry["attribution"]).encode("utf-8"):
+        raise ValueError("The bundle credit must match its catalog attribution")
+    manifest = _bundle_object(frozen["bundle.json"])
+    if (set(manifest) != {"schemaVersion", "assetId", "identity", "files"}
+            or type(manifest["schemaVersion"]) is not int or manifest["schemaVersion"] != 1
+            or manifest["assetId"] != asset_id):
+        raise ValueError("The bundle manifest identity is invalid")
+    hashes = {name: {"sha256": sha256(data).hexdigest(), "bytes": len(data)}
+              for name, data in frozen.items() if name != "bundle.json"}
+    if manifest["files"] != hashes:
+        raise ValueError("The bundle manifest file hashes or sizes differ")
+    identity = manifest["identity"]
+    if (not isinstance(identity, dict) or set(identity) != {"engine", "source", "recipe", "model", "entry"}
+            or not isinstance(identity["engine"], str) or not 1 <= len(identity["engine"]) <= 128
+            or not isinstance(identity["source"], str) or not re.fullmatch(r"[0-9a-f]{64}", identity["source"])
+            or identity["model"] != hashes["model.glb"]["sha256"]
+            or not isinstance(identity["recipe"], dict) or not isinstance(identity["recipe"].get("name"), str)
+            or not all(key in entry for key in SEMANTIC_FIELDS)
+            or identity["entry"] != {key: entry[key] for key in SEMANTIC_FIELDS}):
+        raise ValueError("The bundle identity does not describe this model and entry")
+    expected = asset_identity({"engineVersion": identity["engine"], "sourceSha256": identity["source"],
+                               "recipe": identity["recipe"], "outputSha256": identity["model"]}, entry)
+    if expected["assetId"] != asset_id or expected["identity"] != identity:
+        raise ValueError("The bundle assetId does not match its complete identity")
+    frozen["bundle.json"] = _bundle_json(manifest)
+    _bundle_json(entry)  # Reject non-JSON/NaN metadata before writing a folder.
+    return frozen
+
+
+def _bundle_conflict(asset_id: str) -> None:
+    from ai_inspector.facility_layout.errors import FacilityLayoutError
+    raise FacilityLayoutError("asset_identity_conflict", f"The existing bundle for {asset_id} differs.",
+                              status_code=409)
+
+
+def _same_bundle(folder: Path, files: Mapping[str, bytes], asset_id: str) -> None:
+    """No repair or overwrite on reuse: even a missing/corrupted file is a conflict."""
+    if not folder.is_dir() or folder.is_symlink() or {p.name for p in folder.iterdir()} != set(files):
+        _bundle_conflict(asset_id)
+    for name, payload in files.items():
+        file = folder / name
+        if file.is_symlink() or not file.is_file():
+            _bundle_conflict(asset_id)
+        if name == "bundle.json":
+            if file.stat().st_size > BUNDLE_FILES[name]:
+                _bundle_conflict(asset_id)
+            try:
+                identical = _bundle_json(_bundle_object(file.read_bytes())) == payload
+            except (ValueError, UnicodeError, RecursionError):
+                identical = False
+            if not identical:
+                _bundle_conflict(asset_id)
+        elif file.stat().st_size != len(payload) or sha256(file.read_bytes()).digest() != sha256(payload).digest():
+            _bundle_conflict(asset_id)
+
+
+def install_bundle(root: str | Path, entry: dict, files: Mapping[str, bytes]) -> dict[str, Any]:
+    """Publish immutable import bytes before their entry (D5), reusing exact orphans.
+
+    files maps the four BUNDLE_FILES names to bytes. bundle.json is
+    {schemaVersion: 1, assetId, identity: <D6 identity.asset_identity(...)["identity"]>,
+     files: {<each of the other three names>: {sha256, bytes}}}.
+    Its own hash is intentionally excluded. Returns the same receipt keys as install.
+    The caller performs layout.edit and import-scope authorization before calling.
+    """
+    from ai_inspector.facility_layout.errors import FacilityLayoutError
+
+    root = Path(root).resolve()
+    entry = deepcopy(entry)
+    try:
+        frozen = _validate_bundle(entry, files)
+    except (ValueError, TypeError, KeyError, UnicodeError, OverflowError, RecursionError) as error:
+        raise FacilityLayoutError("asset_bundle_invalid", str(error)) from None
+    asset_id = entry["assetId"]
+    folder = root / BUNDLE_FOLDER / asset_id
+    if folder.resolve() != folder or root not in folder.parents:
+        raise FacilityLayoutError("asset_bundle_invalid", "The bundle path leaves its authored folder.")
+    catalog = root / CATALOG
+    with LOCK, CatalogLock(catalog):
+        original = catalog.read_bytes()
+        payload = json.loads(original.decode("utf-8-sig"))
+        if (not isinstance(payload, dict) or payload.get("schemaVersion") != 1
+                or not isinstance(payload.get("assets"), list)
+                or any(not isinstance(item, dict) for item in payload["assets"])):
+            raise FacilityLayoutError("asset_bundle_invalid", "The private catalog format is invalid.")
+        known = [item for item in payload["assets"] if item.get("assetId") == asset_id]
+        if known:
+            if len(known) != 1 or _bundle_json(known[0]) != _bundle_json(entry):
+                _bundle_conflict(asset_id)
+            _same_bundle(folder, frozen, asset_id)
+            return {"assetId": asset_id, "added": False, "modelWritten": False, "backup": None}
+        # Check that catalog publication is possible before staging any files.
+        updated = appended(original, entry)
+        written = False
+        if folder.exists() or folder.is_symlink():
+            _same_bundle(folder, frozen, asset_id)
+        else:
+            folder.parent.mkdir(parents=True, exist_ok=True)
+            temporary = Path(tempfile.mkdtemp(prefix="." + asset_id + "-", dir=folder.parent))
+            try:
+                for name, data in frozen.items():
+                    (temporary / name).write_bytes(data)
+                temporary.rename(folder)
+                written = True
+            finally:
+                # Only our fresh staging directory is ever removed, never a published bundle.
+                if temporary.exists():
+                    if temporary.is_symlink() or temporary.resolve().parent != folder.parent.resolve():
+                        raise FacilityLayoutError("asset_bundle_invalid", "The bundle staging path changed.")
+                    shutil.rmtree(temporary)
+        backups = root / BACKUPS
+        backups.mkdir(parents=True, exist_ok=True)
+        backup = backups / f"catalog-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}.json"
+        backup.write_bytes(original)
+        for old in sorted(backups.glob("catalog-*.json"))[:-KEEP_BACKUPS]:
+            old.unlink()
+        replace_file(catalog, updated, unchanged=original)
+    return {"assetId": asset_id, "added": True, "modelWritten": written,
             "backup": backup.relative_to(root).as_posix()}

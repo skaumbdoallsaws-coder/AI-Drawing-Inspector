@@ -91,7 +91,7 @@ def read_authoring(runtime, principal, reference, name, arguments):
         definition = runtime.service._resolve_asset_definition(principal, reference["siteId"], asset_id, revision)
         fields = ("assetId", "displayName", "category", "description", "tags", "geometry", "coordinateFrame",
                   "connectors", "clearances", "capabilities", "facilitySemantics", "utilities", "mounting",
-                  "supportSurfaces")
+                  "supportSurfaces", "attribution")
         selected = {k: deepcopy(definition[k]) for k in fields if k in definition}
         # Reviewed sides live on the catalog record, beside the revisioned definition.
         record = next((a for a in candidates if a.get("assetDefinitionRevision") == revision), None)

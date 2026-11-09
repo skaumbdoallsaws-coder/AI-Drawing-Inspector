@@ -155,6 +155,7 @@ def build_request_identity_v1(
     action_parameters: Optional[Mapping[str, Any]],
     image_sha256: Sequence[str],
     cross_agent_context: Optional[str],
+    attachments: Sequence[Mapping[str, str]] = (),
     memory_schema_version: str = MEMORY_SCHEMA_VERSION,
     request_hash_version: int = REQUEST_HASH_VERSION,
     require_client_context: bool = True,
@@ -198,6 +199,7 @@ def build_request_identity_v1(
             else None
         ),
         "memorySchemaVersion": memory_schema_version,
+        **({"attachments": [dict(item) for item in attachments]} if attachments else {}),
     }
     try:
         identity, request_sha256 = request_identity_sha256_v1(raw)

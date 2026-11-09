@@ -223,6 +223,10 @@ def create_facility_layout_router(
     router.include_router(create_floor_plan_import_router(
         service=service, principal_resolver=principal_resolver, feature_gate=feature_gate))
 
+    from .model_imports import create_model_import_router
+    router.include_router(create_model_import_router(
+        service=service, principal_resolver=principal_resolver, feature_gate=feature_gate))
+
     @router.get("/api/facility-layouts/{site_id}")
     async def list_layouts(
         site_id: str,

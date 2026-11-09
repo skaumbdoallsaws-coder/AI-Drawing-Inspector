@@ -6,7 +6,7 @@ import stat
 from .errors import ModelImportError
 from .validation import require
 
-OUTPUT_NAMES = ("summary.json", "cache.json", "parts.npz", "result.json", "preview.png", "error.json")
+OUTPUT_NAMES = ("summary.json", "cache.json", "parts.npz", "result.json", "preview.png", "error.json", "inspection.json")
 
 
 def local_directory(value) -> Path:

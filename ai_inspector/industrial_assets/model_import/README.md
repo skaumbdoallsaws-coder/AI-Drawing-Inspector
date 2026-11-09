@@ -353,3 +353,19 @@ Selector failures additionally retain selector and closest, and report their
 rule/pivot path. Details are capped at 6 KiB so complete refusals fit the 8 KiB
 worker error limit; untrusted text is cleaned and bounded. MI1's
 FacilityLayoutError adaptation and MI3 tool replies must preserve these details.
+
+
+## MI1 store metadata
+
+A trusted inspect request may set storeMetadata=true. In that case inspection.json
+contains the complete scalar part list and original licence evidence (including a
+UTF-8 excerpt of at most 2048 bytes), bounded to 32 MiB. The completion manifest is
+version 3 and includes that file. Source part and licence fields use the same
+validators as public summaries. Version 1/2 inputs and the default version-2
+inspect output remain supported. This file is metadata only; no numpy arrays are
+loaded in the host.
+
+The facility model-import store retains summary.json, inspection.json and
+preview.png, and discards the numerical cache after inspection. Preparation
+rebuilds its cache in a reserved isolated job. See the MI1 report for scoped
+storage, reservations, the HTTP contract and receipt/registration lease hooks.

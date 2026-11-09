@@ -3,7 +3,7 @@ import math
 import re
 
 from .errors import ModelImportError
-from .limits import CACHE_BYTES, CACHE_METADATA_BYTES, SUMMARY_BYTES, PREVIEW_BYTES
+from .limits import CACHE_BYTES, CACHE_METADATA_BYTES, SUMMARY_BYTES, PREVIEW_BYTES, INSPECTION_BYTES
 from .validation import clean_text, json_bytes, parse_json
 
 SUMMARY_KEYS = {
@@ -81,6 +81,31 @@ def _material(value):
             _int(dimension, 1, 2048)
 
 
+def validate_source_part(part):
+    _keys(part, (MATERIAL_KEYS - {"name"}) | {"key", "name", "node", "mesh", "material", "triangles", "bounds"})
+    _ok(isinstance(part["key"], str) and re.fullmatch(r"p[0-9]{1,4}", part["key"]))
+    for key in ("name", "node", "mesh", "material"):
+        _text(part[key], 80)
+    _int(part["triangles"], 1, 2_000_000)
+    _bounds(part["bounds"])
+    _material({key: part[key] for key in MATERIAL_KEYS})
+
+
+def validate_licence(licence, excerpt_limit=600):
+    _keys(licence, {"class", "title", "author", "authorUrl", "sourceUrl", "license", "licenseUrl", "excerpt", "conflicts"})
+    _ok(licence["class"] in ("cc0", "cc-by", "cc-by-sa", "cc-by-nc", "cc-by-nd",
+                            "cc-by-nc-sa", "cc-by-nc-nd", "other", "unknown"))
+    for key in ("title", "author", "authorUrl", "sourceUrl", "license", "licenseUrl", "excerpt"):
+        _text(licence[key], excerpt_limit if key == "excerpt" else 300)
+    _list(licence["conflicts"], 6)
+    for conflict in licence["conflicts"]:
+        _keys(conflict, {"field", "values"})
+        _ok(conflict["field"] in ("title", "author", "authorUrl", "sourceUrl", "license", "licenseUrl"))
+        _list(conflict["values"], 4)
+        for item in conflict["values"]:
+            _text(item, 300)
+
+
 def validate_summary(value: dict) -> dict:
     try:
         _keys(value, SUMMARY_KEYS)
@@ -107,30 +132,12 @@ def validate_summary(value: dict) -> dict:
         _text(hint["generator"], 300)
         _text(hint["note"], 300)
         _bounds(hint["bounds"])
-        licence = value["licence"]
-        _keys(licence, {"class", "title", "author", "authorUrl", "sourceUrl", "license", "licenseUrl", "excerpt", "conflicts"})
-        _ok(licence["class"] in ("cc0", "cc-by", "cc-by-sa", "cc-by-nc", "cc-by-nd",
-                                "cc-by-nc-sa", "cc-by-nc-nd", "other", "unknown"))
-        for key in ("title", "author", "authorUrl", "sourceUrl", "license", "licenseUrl", "excerpt"):
-            _text(licence[key], 600 if key == "excerpt" else 300)
-        _list(licence["conflicts"], 6)
-        for conflict in licence["conflicts"]:
-            _keys(conflict, {"field", "values"})
-            _ok(conflict["field"] in ("title", "author", "authorUrl", "sourceUrl", "license", "licenseUrl"))
-            _list(conflict["values"], 4)
-            for item in conflict["values"]:
-                _text(item, 300)
+        validate_licence(value["licence"])
         _int(value["partsTotal"], 1, 4096)
         _int(value["partsOffset"], 0, value["partsTotal"])
         _list(value["parts"], 64)
         for part in value["parts"]:
-            _keys(part, (MATERIAL_KEYS - {"name"}) | {"key", "name", "node", "mesh", "material", "triangles", "bounds"})
-            _ok(isinstance(part["key"], str) and re.fullmatch(r"p[0-9]{1,4}", part["key"]))
-            for key in ("name", "node", "mesh", "material"):
-                _text(part[key], 80)
-            _int(part["triangles"], 1, 2_000_000)
-            _bounds(part["bounds"])
-            _material({key: part[key] for key in MATERIAL_KEYS})
+            validate_source_part(part)
         _ok(value["partsOffset"] + len(value["parts"]) <= value["partsTotal"])
         expected = value["partsOffset"] + len(value["parts"])
         _ok(value["nextPartsOffset"] == (expected if expected < value["partsTotal"] else None))
@@ -162,10 +169,12 @@ def read_summary(payload: bytes) -> dict:
 
 def validate_manifest(value) -> dict:
     _keys(value, {"schemaVersion", "files"})
-    _ok(type(value["schemaVersion"]) is int and value["schemaVersion"] in (1, 2))
+    _ok(type(value["schemaVersion"]) is int and value["schemaVersion"] in (1, 2, 3))
     files = {"summary.json": SUMMARY_BYTES, "cache.json": CACHE_METADATA_BYTES, "parts.npz": CACHE_BYTES}
-    if value["schemaVersion"] == 2:
+    if value["schemaVersion"] >= 2:
         files["preview.png"] = PREVIEW_BYTES
+    if value["schemaVersion"] == 3:
+        files["inspection.json"] = INSPECTION_BYTES
     _keys(value["files"], files)
     for name, maximum in files.items():
         entry = value["files"][name]

@@ -45,7 +45,7 @@ def _result(job: Path, *, require_preview: bool = False) -> dict:
             file = regular_file(job, name)
             require(file.stat().st_size == entry["bytes"] and file_digest(file) == entry["sha256"],
                     "model_worker_failed")
-        require(not require_preview or manifest["schemaVersion"] == 2, "model_worker_failed")
+        require(not require_preview or manifest["schemaVersion"] >= 2, "model_worker_failed")
         if "preview.png" in manifest["files"]:
             validate_picture(bounded_read(job, "preview.png", PREVIEW_BYTES), "preview")
         return read_summary(bounded_read(job, "summary.json", 48 * 1024))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import re
 import unicodedata
 from typing import Any, Dict, Mapping, Optional, Tuple
 
@@ -74,6 +75,7 @@ def normalize_request_identity_v1(raw: Mapping[str, Any]) -> Dict[str, Any]:
     if memory_schema_version != MEMORY_SCHEMA_VERSION:
         raise ValueError("unsupported memory schema version")
 
+    attachments = _normalize_attachments(raw.get("attachments", []))
     return {
         "requestHashVersion": REQUEST_HASH_VERSION,
         "message": message,
@@ -89,7 +91,22 @@ def normalize_request_identity_v1(raw: Mapping[str, Any]) -> Dict[str, Any]:
             raw.get("crossAgentProjectionSha256"), "crossAgentProjectionSha256"
         ),
         "memorySchemaVersion": memory_schema_version,
+        # Preserve the frozen v1 hash for turns without attachments.
+        **({"attachments": attachments} if attachments else {}),
     }
+
+
+def _normalize_attachments(value: Any) -> list[Dict[str, str]]:
+    if not isinstance(value, list) or len(value) > 3:
+        raise ValueError("attachments must be an array of at most three model imports")
+    normalized = []
+    for item in value:
+        if (not isinstance(item, Mapping) or set(item) != {"kind", "importId"}
+                or item["kind"] != "model-import" or not isinstance(item["importId"], str)
+                or not re.fullmatch(r"mi-[0-9a-f]{24}", item["importId"])):
+            raise ValueError("attachments must contain only kind and a valid model importId")
+        normalized.append({"kind": "model-import", "importId": item["importId"]})
+    return normalized
 
 
 def request_identity_sha256_v1(raw: Mapping[str, Any]) -> Tuple[Dict[str, Any], str]:

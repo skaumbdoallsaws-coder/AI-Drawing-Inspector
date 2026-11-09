@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from .api import create_facility_layout_router
 from .asset_orientation import attach_registered_semantics
 from .model_axes import mirror_catalog_record
+from .private_catalog import private_asset_spec
 from .authority_repository import (
     FacilityShellRepository,
     PolicySetRepository,
@@ -400,224 +401,7 @@ def _private_manifest_specs(root: Path) -> tuple[dict[str, Any], ...]:
         for item in _PRIVATE_LOCAL_ASSET_SPECS
     }
     for index, raw in enumerate(assets):
-        if not isinstance(raw, dict):
-            raise ValueError(f"Private asset manifest entry {index} is invalid")
-        asset_id = str(raw.get("assetId", "")).strip()
-        if (
-            not asset_id.startswith("asset-")
-            or asset_id in seen
-            or asset_id in reserved
-        ):
-            raise ValueError(
-                f"Private asset manifest assetId is invalid: {asset_id!r}"
-            )
-        seen.add(asset_id)
-        display_name = str(raw.get("displayName", "")).strip()
-        category = str(raw.get("category", "")).strip()
-        description = str(raw.get("description", "")).strip()
-        if not display_name or not category or not description:
-            raise ValueError(
-                f"Private asset manifest metadata is incomplete: {asset_id}"
-            )
-        dimensions = raw.get("dimensions")
-        if not isinstance(dimensions, dict):
-            raise ValueError(
-                f"Private asset manifest dimensions are missing: {asset_id}"
-            )
-        measured = []
-        for field in ("width", "depth", "height"):
-            value = dimensions.get(field)
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise ValueError(
-                    f"Private asset manifest {field} is invalid: {asset_id}"
-                )
-            number = float(value)
-            if not math.isfinite(number) or number <= 0:
-                raise ValueError(
-                    f"Private asset manifest {field} is invalid: {asset_id}"
-                )
-            measured.append(number)
-
-        artifact = Path(str(raw.get("artifact", "")))
-        if (
-            artifact.is_absolute()
-            or ".." in artifact.parts
-            or artifact.suffix.lower() != ".glb"
-        ):
-            raise ValueError(
-                f"Private asset manifest artifact is invalid: {asset_id}"
-            )
-        matrix = raw.get("sourceToCanonical")
-        if (
-            not isinstance(matrix, list)
-            or len(matrix) != 16
-            or any(
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(float(value))
-                for value in matrix
-            )
-        ):
-            raise ValueError(
-                f"Private asset manifest transform is invalid: {asset_id}"
-            )
-        tags = raw.get("tags", [])
-        if not isinstance(tags, list) or any(
-            not isinstance(value, str) or not value.strip()
-            for value in tags
-        ):
-            raise ValueError(
-                f"Private asset manifest tags are invalid: {asset_id}"
-            )
-        footprint_polygons = None
-        if "footprintPolygons" in raw:
-            from .spatial import _convex_hull, _polygon, _polygon_is_convex, polygon_area
-
-            polygons = raw["footprintPolygons"]
-            if not isinstance(polygons, list) or not 1 <= len(polygons) <= 64:
-                raise ValueError(f"Private asset footprint polygons are invalid: {asset_id}")
-            footprint_polygons = []
-            for polygon in polygons:
-                if (
-                    not isinstance(polygon, list) or not 3 <= len(polygon) <= 32
-                    or any(not isinstance(p, dict) or set(p) != {"x", "z"} for p in polygon)
-                ):
-                    raise ValueError(f"Private asset footprint polygon is invalid: {asset_id}")
-                points = _polygon(polygon, "private asset footprint")
-                if (
-                    len(set(points)) != len(points)
-                    or not _polygon_is_convex(points)
-                    or abs(abs(polygon_area(points)) - abs(polygon_area(_convex_hull(points)))) > 1e-8
-                    or any(abs(x) > measured[0] / 2 + 1e-8 or abs(z) > measured[1] / 2 + 1e-8 for x, z in points)
-                ):
-                    raise ValueError(f"Private asset footprint must be convex and inside its bounds: {asset_id}")
-                footprint_polygons.append([{"x": x, "z": z} for x, z in points])
-        raw_surfaces = raw.get("supportSurfaces", [])
-        if not isinstance(raw_surfaces, list):
-            raise ValueError(
-                f"Private asset support surfaces are invalid: {asset_id}"
-            )
-        support_surfaces: list[dict[str, Any]] = []
-        surface_ids: set[str] = set()
-        for surface_index, raw_surface in enumerate(raw_surfaces):
-            if not isinstance(raw_surface, dict):
-                raise ValueError(
-                    f"Private asset support surface is invalid: {asset_id}"
-                )
-            fields = {
-                "surfaceId",
-                "label",
-                "localFrame",
-                "bounds",
-                "allowedSides",
-                "evidenceStatus",
-            }
-            if set(raw_surface) != fields:
-                raise ValueError(
-                    f"Private asset support surface fields are invalid: {asset_id}"
-                )
-            surface_id = str(raw_surface.get("surfaceId", "") or "").strip()
-            label = str(raw_surface.get("label", "") or "").strip()
-            if not surface_id or surface_id in surface_ids or not label:
-                raise ValueError(
-                    f"Private asset support surface identity is invalid: {asset_id}"
-                )
-            surface_ids.add(surface_id)
-            frame = raw_surface.get("localFrame")
-            bounds = raw_surface.get("bounds")
-            if not isinstance(frame, dict) or set(frame) != {
-                "origin", "xAxis", "zAxis", "normal"
-            }:
-                raise ValueError(
-                    f"Private asset support surface frame is invalid: {asset_id}"
-                )
-            normalized_frame: dict[str, dict[str, float]] = {}
-            for vector_name in ("origin", "xAxis", "zAxis", "normal"):
-                vector = frame.get(vector_name)
-                if not isinstance(vector, dict) or set(vector) != {"x", "y", "z"}:
-                    raise ValueError(
-                        f"Private asset support surface vector is invalid: {asset_id}"
-                    )
-                normalized_vector = {}
-                for axis in ("x", "y", "z"):
-                    value = vector.get(axis)
-                    if isinstance(value, bool) or not isinstance(value, (int, float)):
-                        raise ValueError(
-                            f"Private asset support surface vector is invalid: {asset_id}"
-                        )
-                    number = float(value)
-                    if not math.isfinite(number):
-                        raise ValueError(
-                            f"Private asset support surface vector is invalid: {asset_id}"
-                        )
-                    normalized_vector[axis] = number
-                normalized_frame[vector_name] = normalized_vector
-            bound_fields = {"minimumX", "maximumX", "minimumZ", "maximumZ"}
-            if not isinstance(bounds, dict) or set(bounds) != bound_fields:
-                raise ValueError(
-                    f"Private asset support surface bounds are invalid: {asset_id}"
-                )
-            normalized_bounds = {}
-            for field in sorted(bound_fields):
-                value = bounds.get(field)
-                if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise ValueError(
-                        f"Private asset support surface bounds are invalid: {asset_id}"
-                    )
-                number = float(value)
-                if not math.isfinite(number):
-                    raise ValueError(
-                        f"Private asset support surface bounds are invalid: {asset_id}"
-                    )
-                normalized_bounds[field] = number
-            if (
-                normalized_bounds["minimumX"] >= normalized_bounds["maximumX"]
-                or normalized_bounds["minimumZ"] >= normalized_bounds["maximumZ"]
-            ):
-                raise ValueError(
-                    f"Private asset support surface bounds are empty: {asset_id}"
-                )
-            allowed_sides = raw_surface.get("allowedSides")
-            if (
-                not isinstance(allowed_sides, list)
-                or not allowed_sides
-                or len(allowed_sides) != len(set(allowed_sides))
-                or any(side not in {"above", "below"} for side in allowed_sides)
-            ):
-                raise ValueError(
-                    f"Private asset support surface sides are invalid: {asset_id}"
-                )
-            evidence_status = str(
-                raw_surface.get("evidenceStatus", "") or ""
-            ).strip()
-            if evidence_status not in {
-                "authored", "derived", "inferred", "unverified", "unknown"
-            }:
-                raise ValueError(
-                    f"Private asset support surface evidence is invalid: {asset_id}"
-                )
-            support_surfaces.append({
-                "surfaceId": surface_id,
-                "label": label,
-                "localFrame": normalized_frame,
-                "bounds": normalized_bounds,
-                "allowedSides": list(allowed_sides),
-                "evidenceStatus": evidence_status,
-            })
-        specs.append({
-            "asset_id": asset_id,
-            "display_name": display_name,
-            "category": category,
-            "width": measured[0],
-            "depth": measured[1],
-            "height": measured[2],
-            "description": description,
-            "artifact": artifact.as_posix(),
-            "source_to_canonical": tuple(float(value) for value in matrix),
-            "tags": tuple(value.strip() for value in tags),
-            "support_surfaces": tuple(support_surfaces),
-            "footprint_polygons": footprint_polygons,
-        })
+        specs.append(private_asset_spec(raw, index=index, seen=seen, reserved=reserved))
     return tuple(specs)
 
 
@@ -668,6 +452,9 @@ def build_private_local_asset_catalog(
         if support_surfaces:
             entry["supportSurfaces"] = support_surfaces
             entry["definition"]["supportSurfaces"] = support_surfaces
+        if "attribution" in spec:
+            entry["attribution"] = deepcopy(spec["attribution"])
+            entry["definition"]["attribution"] = deepcopy(spec["attribution"])
         entry["assetDefinitionRevision"] = _revision(entry["definition"])
         tags = [str(value) for value in spec.get("tags", ())]
         if tags:
@@ -888,13 +675,15 @@ class LocalFacilityLayoutHost:
         )
         self._component_visual_root = (Path(private_asset_root).resolve()
             if private_asset_root is not None else Path(__file__).resolve().parents[2])
+        self._catalog_generation = 0
+        self._catalog_disk_state = self._catalog_file_state() if use_private_assets else (0, 0)
         catalog_source = (
             build_private_local_asset_catalog(private_asset_root)
             if use_private_assets
             else LOCAL_ASSET_CATALOG
         )
         self._private_assets_enabled = bool(use_private_assets)
-        self._authoring_lock = threading.Lock()
+        self._authoring_lock = threading.RLock()
         # Model-space data (footprints, support surfaces, reviewed sides and
         # seats) is authored in each model file's own axes; the catalog carries
         # it in the layout's model space, mirrored once across x = 0 (model_axes).
@@ -1163,6 +952,77 @@ class LocalFacilityLayoutHost:
 
         return deepcopy(list(self._asset_versions.values()))
 
+    def _catalog_file_state(self) -> tuple[int, int]:
+        """Cheap disk marker; take it before binding so a later write stays dirty."""
+        try:
+            info = (self._component_visual_root / PRIVATE_ASSET_MANIFEST).stat()
+            return info.st_mtime_ns, info.st_size
+        except FileNotFoundError:
+            return 0, 0
+
+    def _private_catalog_snapshot(self) -> tuple[tuple[dict[str, Any], ...], tuple[int, int]]:
+        from ai_inspector.industrial_assets.authored_library import LOCK, CatalogLock
+
+        catalog = self._component_visual_root / PRIVATE_ASSET_MANIFEST
+        if not catalog.is_file():
+            return build_private_local_asset_catalog(self._component_visual_root), (0, 0)
+        with LOCK, CatalogLock(catalog):
+            before = self._catalog_file_state()
+            entries = build_private_local_asset_catalog(self._component_visual_root)
+            if self._catalog_file_state() != before:
+                raise ValueError("The private catalog changed while it was being bound; try again.")
+            return entries, before
+
+    def _swap_catalog_entries(self, entries: tuple[dict[str, Any], ...], *, replace: bool = False) -> None:
+        """Caller holds _authoring_lock; old readers and placed revisions keep their dictionaries."""
+        current = {} if replace else dict(self._catalog)
+        versions = dict(self._asset_versions)
+        for fresh in entries:
+            current[fresh["assetId"]] = mirror_catalog_record(attach_registered_semantics(fresh))
+            versions[(fresh["assetId"], fresh["assetDefinitionRevision"])] = mirror_catalog_record(fresh)
+        self._catalog, self._asset_versions = current, versions
+        self._catalog_generation += 1
+
+    def bind_installed_asset(self, asset_id: str) -> dict[str, Any]:
+        """Bind a published asset for MI2b; the caller authorizes publication first.
+
+        This method does no installation and does not assert import ownership.
+        It also serves basic shapes. A later list reconciles the entire disk
+        snapshot, including any assets another publisher installed meanwhile.
+        """
+        if not self._private_assets_enabled:
+            raise FacilityLayoutError("authored_assets_unavailable",
+                "Authored assets need the private asset library; it is off in this app.", status_code=409)
+        with self._authoring_lock:
+            try:
+                entries, _state = self._private_catalog_snapshot()
+                fresh = next((item for item in entries if item["assetId"] == asset_id), None)
+                if fresh is None:
+                    raise ValueError(f"{asset_id} is not in the private catalog after it was added.")
+                self._swap_catalog_entries((fresh,))
+            except (ValueError, TypeError, OSError) as error:
+                raise FacilityLayoutError("authored_asset_unbound", str(error)) from None
+            return deepcopy(self._catalog[asset_id])
+
+    def list_assets(self) -> dict[str, Any]:
+        """Reconcile published-but-unbound entries before reporting catalogVersion.
+
+        A failed bind leaves the old dictionaries and disk marker intact so the
+        next read retries. Old definition revisions remain available to placements.
+        """
+        with self._authoring_lock:
+            try:
+                if self._private_assets_enabled and self._catalog_file_state() != self._catalog_disk_state:
+                    entries, disk_state = self._private_catalog_snapshot()
+                    self._swap_catalog_entries(entries, replace=True)
+                    self._catalog_disk_state = disk_state
+            except (ValueError, TypeError, OSError) as error:
+                raise FacilityLayoutError("asset_catalog_unavailable",
+                    "The published asset catalog could not be bound; try again.", status_code=503) from error
+            modified, size = self._catalog_disk_state if self._private_assets_enabled else (0, 0)
+            return {"siteId": LOCAL_SITE_ID, "assets": deepcopy(list(self._catalog.values())),
+                    "catalogVersion": f"{self._catalog_generation}:{modified}:{size}"}
+
     def register_authored_asset(self, family: str, parameters: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Build a basic shape (shape_families) and add it to the shared private library and to this running host,
         so placements of it bind at once (docs/sage-basic-shapes-plan.md, BS2).
@@ -1191,16 +1051,7 @@ class LocalFacilityLayoutHost:
             except ValueError as error:
                 raise FacilityLayoutError("authored_asset_not_added", str(error), status_code=409) from None
             if result["added"] or asset_id not in self._catalog:
-                fresh = next((item for item in build_private_local_asset_catalog(self._component_visual_root)
-                              if item["assetId"] == asset_id), None)
-                if fresh is None:
-                    raise FacilityLayoutError(
-                        "authored_asset_unbound", f"{asset_id} is not in the private catalog after it was added.")
-                # New dicts, not edits: a request already reading the old ones finishes with them.
-                self._catalog = {**self._catalog,
-                                 asset_id: mirror_catalog_record(attach_registered_semantics(fresh))}
-                self._asset_versions = {**self._asset_versions,
-                                        (asset_id, fresh["assetDefinitionRevision"]): mirror_catalog_record(fresh)}
+                self.bind_installed_asset(asset_id)
             entry = self._catalog[asset_id]
         return {"assetId": asset_id, "assetDefinitionRevision": entry["assetDefinitionRevision"],
                 "displayName": entry["displayName"], "category": entry["category"], "tags": list(entry.get("tags", [])),
@@ -2123,10 +1974,10 @@ class LocalFacilityLayoutHost:
                     detail="Facility resource was not found.",
                 )
             self.ensure_bootstrap()
-            return {
-                "siteId": LOCAL_SITE_ID,
-                "assets": deepcopy(list(self._catalog.values())),
-            }
+            try:
+                return self.list_assets()
+            except FacilityLayoutError as error:
+                raise HTTPException(status_code=error.status_code, detail={"error": error.to_dict()}) from error
 
         @router.post(
             "/api/facility-layout-agent/{site_id}/{layout_id}/read/{tool_name}"

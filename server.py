@@ -38,6 +38,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -22522,8 +22523,16 @@ class AgentMessage(BaseModel):
     content: Optional[str] = None
     text: Optional[str] = None  # Frontend sends 'text' field
 
+class ModelImportChatAttachment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["model-import"]
+    importId: str = Field(pattern=r"^mi-[0-9a-f]{24}$", min_length=27, max_length=27)
+
+
 class AgentChatRequest(BaseModel):
     message: str
+    attachments: List[ModelImportChatAttachment] = Field(default_factory=list, max_length=3)
     history: Optional[List[Dict[str, Any]]] = []
     inspection_context: Optional[Dict[str, Any]] = None
     context: Optional[Dict[str, Any]] = None  # Alternative name from frontend
@@ -41496,11 +41505,43 @@ def _require_subscription_chat_route(request):
         }})
 
 
+def _require_model_attachment_route(request: AgentChatRequest) -> None:
+    from ai_inspector.codex_runtime.chat_attachments import require_supported
+    from ai_inspector.codex_runtime.policy import enabled, PilotError
+    try:
+        require_supported(request, facility_pilot=(enabled() and request.agent_type == "deviation-analyst"
+                          and _chat_stream_active_mode(request) == "facility_layout"))
+    except PilotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"error": {
+            "code": exc.code, "message": str(exc), "retryable": False,
+        }}) from None
+
+
+def _resolve_model_chat_attachments(request: AgentChatRequest, http_request: Request) -> List[Dict[str, Any]]:
+    """Revalidate scope before a memory replay, and again when a fresh pilot starts."""
+    _require_model_attachment_route(request)
+    if not request.attachments:
+        return []
+    from ai_inspector.codex_runtime.chat_attachments import resolve_model_attachments
+    from ai_inspector.codex_runtime.pilot import saved_layout_reference
+    from ai_inspector.codex_runtime.policy import PilotError
+    try:
+        normalized = normalize_agent_context(request.inspection_context or request.context or {})["flat"]
+        reference = saved_layout_reference(normalized)
+        return resolve_model_attachments(request, _FACILITY_LAYOUT_HOST.agent_runtime,
+                                         _FACILITY_LAYOUT_HOST.resolve_principal(http_request), reference)
+    except PilotError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"error": {
+            "code": exc.code, "message": str(exc), "retryable": False,
+        }}) from None
+
+
 async def agent_chat(
     request: AgentChatRequest,
     http_request: Request,
 ):
     """Freeze gateway configuration for the whole authorized Facility turn."""
+    attached_models = _resolve_model_chat_attachments(request, http_request)
     _require_subscription_chat_route(request)
     from ai_inspector.codex_runtime.policy import enabled as codex_pilot_enabled, PilotError
     if _chat_stream_active_mode(request) == "packaging_shipping":
@@ -41537,7 +41578,8 @@ async def agent_chat(
             return await inspect_facility(request, _FACILITY_LAYOUT_HOST, http_request,
                 normalize_agent_context(request.inspection_context or request.context or {})["flat"],
                 text_sink=_AGENT_CHAT_STREAM_SINK.get(), status_sink=_AGENT_CHAT_STATUS_SINK.get(),
-                step_sink=_AGENT_CHAT_STEP_SINK.get(), memory_context=memory_context)
+                step_sink=_AGENT_CHAT_STEP_SINK.get(), memory_context=memory_context,
+                attached_models=attached_models)
         except PilotError as exc:
             raise HTTPException(status_code=exc.status_code, detail={"error": {
                 "code": exc.code, "message": str(exc), "retryable": False,
@@ -44896,6 +44938,7 @@ async def _execute_agent_chat_with_memory(
     ] = None,
 ) -> Dict[str, Any]:
     execute_chat = executor or agent_chat
+    _resolve_model_chat_attachments(payload, http_request)
     _require_subscription_chat_route(payload)
     memory_request_started = time.perf_counter()
     memory_mode = memory_mode_from_environment()
@@ -44998,6 +45041,7 @@ async def _execute_agent_chat_with_memory(
             request_context=payload.request_context,
             action_parameters=payload.action_parameters,
             image_sha256=image_sha256_values(payload.image),
+            attachments=[item.model_dump() for item in payload.attachments],
             cross_agent_context=payload.cross_agent_context,
             memory_schema_version=str(payload.memory_schema_version or ""),
             request_hash_version=int(payload.request_hash_version or 0),
@@ -45351,6 +45395,8 @@ async def _execute_agent_chat_with_memory(
                 "role": "user",
                 "content": payload.message,
                 "agentType": payload.agent_type,
+                **({"attachments": [item.model_dump() for item in payload.attachments]}
+                   if payload.attachments else {}),
             },
             trusted_context=trusted_context,
             classification=classification,
@@ -45519,6 +45565,7 @@ async def agent_chat_endpoint(
     request: AgentChatRequest,
     http_request: Request,
 ):
+    _require_model_attachment_route(request)
     from ai_inspector.codex_runtime.policy import enabled as codex_pilot_enabled
     if (codex_pilot_enabled() and request.agent_type == "deviation-analyst"
             and _chat_stream_active_mode(request) == "facility_layout") or _codex_documentation_turn(request) or _codex_packaging_turn(request):
@@ -45643,7 +45690,8 @@ def _stream_provider_error_payload(exc: Exception) -> Dict[str, Any]:
 
     detail = getattr(exc, "detail", None)
     gateway_error = detail.get("error", {}) if isinstance(detail, dict) else {}
-    if str(gateway_error.get("code", "")).startswith(("codex_", "chatgpt_")):
+    if str(gateway_error.get("code", "")).startswith(
+            ("codex_", "chatgpt_", "attachments_", "model_import_", "model_registration_")):
         return {"code": gateway_error["code"], "message": gateway_error.get("message", "The read-only pilot is unavailable."),
                 "retryable": False,
                 **({"codex_packaging": gateway_error["codex_packaging"]}
@@ -45851,6 +45899,7 @@ def _agent_stream_json_default(value: Any) -> Any:
 @app.post("/api/agent/chat/v2/stream")
 async def agent_chat_v2_stream(payload: AgentChatRequest, http_request: Request):
     """Provider-token streaming with authoritative terminal commit."""
+    _require_model_attachment_route(payload)
     import anyio
     from ai_inspector.codex_runtime.policy import enabled as codex_pilot_enabled
 

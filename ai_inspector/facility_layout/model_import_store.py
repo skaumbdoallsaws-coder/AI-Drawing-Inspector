@@ -46,12 +46,38 @@ PREPARE_OUTPUT_BYTES = INSPECT_OUTPUT_BYTES + sum(DRAFT_FILES.values()) + MARGIN
 IMPORT_ID = re.compile(r"mi-[0-9a-f]{24}")
 DRAFT_ID = re.compile(r"md-[0-9a-f]{24}")
 HASH = re.compile(r"[0-9a-f]{64}")
-TOKEN = re.compile(r"[0-9a-f]{32}")
+# Folder names are kept short: Windows refuses paths over 259 characters unless long paths are turned on, and a
+# prepare job nests scope/jobs/<token>/.model-prepare-*/output/<file> below the app's data folder (2026-11-09: the
+# desktop's OneDrive data folder plus 64 + 32 character names reached 261 and every prepare failed).
+SCOPE_KEY = re.compile(r"[0-9a-f]{24}")
+TOKEN = re.compile(r"[0-9a-f]{16}")
+# The deepest path below the store folder: scope (24) / jobs / token (16) / .model-prepare-XXXXXXXX / output / a file
+# name of up to 32 characters (".atomic-" temporaries included), with the separators.
+DEEPEST_BELOW_STORE = 1 + 24 + 1 + 4 + 1 + 16 + 1 + 23 + 1 + 6 + 1 + 32
+WINDOWS_MAX_PATH = 259
 STALE_SECONDS = 210
 DAY = 86400
 _OPERATIONS: dict[tuple[str, str], "_Lease"] = {}
 _OPERATIONS_LOCK = threading.RLock()
 _STORES_LOCK = threading.Lock()
+
+
+def _long_paths_enabled() -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as key:
+            return winreg.QueryValueEx(key, "LongPathsEnabled")[0] == 1
+    except (ImportError, OSError):
+        return False
+
+
+def require_path_budget(root: Path) -> None:
+    """Refuse clearly, before any worker starts, when Windows could not open the deepest job path."""
+    if os.name == "nt" and len(str(root)) + DEEPEST_BELOW_STORE > WINDOWS_MAX_PATH and not _long_paths_enabled():
+        raise FacilityLayoutError(
+            "model_store_path_too_long",
+            "This app's data folder path is too long for Windows to prepare models. Move the app's data to a "
+            "shorter folder, or turn on Windows long paths.", status_code=507)
 
 
 def missing() -> FacilityNotFoundError:
@@ -110,13 +136,13 @@ class ModelImportScope:
 
     @property
     def key(self) -> str:
-        return sha256((self.principal.tenant_id + "\0" + self.site_id).encode()).hexdigest()
+        return sha256((self.principal.tenant_id + "\0" + self.site_id).encode()).hexdigest()[:24]
 
 
 class _Lease:
     def __init__(self, store, scope, import_id, amount, cancel=None):
         self.store, self.scope, self.import_id = store, scope, import_id
-        self.token = uuid.uuid4().hex
+        self.token = uuid.uuid4().hex[:16]
         self.cancel = cancel if cancel is not None else threading.Event()
         self.done = threading.Event()
         self.ending = False
@@ -282,7 +308,7 @@ class ModelImportStore:
             value = disk.read_json(file)
             if not isinstance(value, dict) or not TOKEN.fullmatch(str(value.get("token", ""))):
                 raise FacilityLayoutError("model_store_invalid", "An import reservation is invalid.", status_code=503)
-            if (file.stem != value["token"] or not HASH.fullmatch(str(value.get("scope", "")))
+            if (file.stem != value["token"] or not SCOPE_KEY.fullmatch(str(value.get("scope", "")))
                     or not IMPORT_ID.fullmatch(str(value.get("importId", "")))
                     or not HASH.fullmatch(str(value.get("user", "")))
                     or type(value.get("reserved")) is not int or not 0 <= value["reserved"] <= SITE_BYTES
@@ -332,6 +358,7 @@ class ModelImportStore:
 
     def _claim(self, scope, import_id, amount, cancel=None) -> _Lease:
         # Caller holds coordinator. Reconciliation occurs before admission, not while a live worker owns files.
+        require_path_budget(self.root)
         lease = _Lease(self, scope, import_id, amount, cancel)
         active = self._active()
         if (self.root / "active" / (lease.token + ".json")).exists():
@@ -886,7 +913,7 @@ class ModelImportStore:
                 disk.remove(self.root / "active" / (lease["token"] + ".json"))
             active = self._active()
             for folder in self.root.iterdir():
-                if not folder.is_dir() or not HASH.fullmatch(folder.name):
+                if not folder.is_dir() or not SCOPE_KEY.fullmatch(folder.name):
                     continue
                 disk.safe(folder)
                 scope = self._scope_stub(folder.name)
@@ -964,7 +991,7 @@ class ModelImportStore:
         now = time.time() if now is None else now
         with disk.coordinator(self.root):
             for folder in self.root.iterdir():
-                if not folder.is_dir() or not HASH.fullmatch(folder.name):
+                if not folder.is_dir() or not SCOPE_KEY.fullmatch(folder.name):
                     continue
                 scope = self._scope_stub(folder.name)
                 for file in (folder / "imports").glob("mi-*.json"):

@@ -573,3 +573,22 @@ def test_import_nonce_collision_does_not_overwrite_a_record(tmp_path, monkeypatc
     monkeypatch.setattr(module.uuid, "uuid4", lambda: SimpleNamespace(hex=record["id"][3:] + "0" * 8))
     refusal(lambda: instance.begin_upload(scope(), "replacement", 1), "model_import_busy", 429)
     assert instance.get(scope(), record["id"]) == original
+
+
+def test_store_construction_and_idle_sweep_are_filesystem_free(tmp_path):
+    from types import SimpleNamespace
+    from tests.model_import_store_support import layout_reader
+
+    layout_root = tmp_path / "not-created" / "layouts"
+    service = SimpleNamespace(layout_repository=SimpleNamespace(root=layout_root), get_layout=layout_reader)
+    instance = module.get_model_import_store(service)
+    assert module.get_model_import_store(service) is instance
+    instance.reconcile()
+    instance.sweep()
+    instance.close()
+    assert not layout_root.exists()
+    # Even the first unauthorized call cannot create the store.
+    refusal(lambda: instance.begin_upload(scope(role="viewer"), "x", 1), "role_not_authorized", 403)
+    assert not layout_root.exists()
+    assert instance.list(scope()) == []
+    assert (instance.root / "active").is_dir()

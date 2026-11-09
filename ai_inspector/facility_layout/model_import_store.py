@@ -223,19 +223,18 @@ class ModelImportStore:
     """One app root, injectable workers for tests; all public lookups recheck scope."""
     def __init__(self, layout_root, *, layout_reader, runtime=None, inspect_worker=None, prepare_worker=None,
                  site_bytes=SITE_BYTES):
-        self.root = disk.mkdir(Path(layout_root).absolute() / STORE_FOLDER)
-        disk.mkdir(self.root / "active")
+        self.root = disk.safe(Path(layout_root).absolute() / STORE_FOLDER)
         self.layout_reader = layout_reader
         self.runtime = runtime
         self.inspect_worker = inspect_worker or run_inspect
         self.prepare_worker = prepare_worker or prepare_draft
         self.site_bytes = site_bytes
-        self.reconcile()
 
     def _authorize(self, scope: ModelImportScope, write=False) -> None:
         require_facility_action(scope.principal, tenant_id=scope.principal.tenant_id, site_id=scope.site_id,
                                 action="layout.edit" if write else "layout.read")
         self.layout_reader(scope.principal, scope.site_id, scope.layout_id)
+        disk.mkdir(self.root / "active")
 
     def _folder(self, scope) -> Path:
         return disk.safe(self.root / scope.key)
@@ -378,12 +377,12 @@ class ModelImportStore:
         return path
 
     def _dependencies(self):
-        # Same trusted native-release binding as packaging; no request field or user-site discovery.
+        # Explicit test/native runtime wins; otherwise discover only host-installed packages.
         if self.runtime is not None:
             from ..industrial_assets.model_import.job_io import local_directory
             return local_directory(self.runtime().dependency_root)
-        from ..packaging_shipping.sources import glb_runtime
-        return glb_runtime().dependency_root
+        from .model_import_runtime import model_import_runtime
+        return model_import_runtime().dependency_root
 
     def _start_inspect(self, lease):
         thread = threading.Thread(target=self._check_job, args=(lease,), name="model-import-check", daemon=True)
@@ -476,6 +475,43 @@ class ModelImportStore:
             records.sort(key=lambda r: (r["created"], r["id"]), reverse=True)
             return [{k: r[k] for k in ("id", "importId", "name", "bytes", "format", "state", "created", "refusal")}
                     for r in records[:20]]
+
+    @host_errors
+    def describe_model_attachment(self, scope, import_id):
+        """Read attachment metadata only; do not reconcile or transition its record."""
+        self._authorize(scope)
+        with disk.coordinator(self.root):
+            try:
+                record = self._record(scope, import_id)
+            except FacilityNotFoundError:
+                return None
+            refusal = record.get("refusal")
+            if isinstance(refusal, dict):
+                refusal = {"code": clean_text(refusal.get("code"), 80),
+                           "message": clean_text(refusal.get("message"), 1000)}
+            else:
+                refusal = None
+            return {"importId": record["id"], "name": clean_source_name(record["name"]),
+                    "format": clean_text(record["format"], 32), "megabytes": record["bytes"] / MIB,
+                    "state": record["state"], "refusal": refusal}
+
+    @host_errors
+    def registrations_since(self, scope, started_at):
+        """Receipt times, not import state or a duplicated registration index, are authoritative."""
+        self._authorize(scope)
+        if type(started_at) not in (int, float) or not 0 <= started_at < 1e12:
+            raise FacilityLayoutError("model_registration_time_invalid", "Supply a finite registration start time.")
+        with disk.coordinator(self.root):
+            rows = []
+            for path in (self._folder(scope) / "registrations").glob("md-*.json"):
+                if not DRAFT_ID.fullmatch(path.stem):
+                    continue
+                receipt = self._receipt(scope, path.stem)
+                if receipt is not None and receipt["at"] >= started_at:
+                    self._draft(scope, path.stem)  # Recheck tenant/site/source ownership.
+                    rows.append((receipt["at"], path.stem, receipt["assetId"]))
+            # Turn notifications are bounded information; catalogVersion drives refresh.
+            return list(dict.fromkeys(row[2] for row in sorted(rows, reverse=True)))[:256]
 
     @host_errors
     def inspect(self, scope, import_id=None, offset=0, limit=64):
@@ -724,7 +760,14 @@ class ModelImportStore:
                     raise FacilityLayoutError("asset_identity_conflict", "This draft already has a different registration.")
                 self._compact(scope, draft_id)
                 return existing
-            self._capacity(scope, 4096)
+            if _lease is None:
+                self._capacity(scope, 4096)
+            else:
+                # hold_draft already reserved the receipt and its atomic copy.
+                # Do not charge another 4 KiB on top of that peak reservation.
+                needed = self._owned_size(_lease.data) + 4096
+                if needed > _lease.data["reserved"]:
+                    self._resize(_lease, needed)
             result = {"assetId": asset_id, "revision": revision, "at": time.time()}
             disk.atomic(self._folder(scope) / "registrations" / (draft_id + ".json"), result)
             self._compact(scope, draft_id)
@@ -755,6 +798,8 @@ class ModelImportStore:
 
     def reconcile(self):
         """Dead identities can be reclaimed; old live work must first be cancelled and joined."""
+        if not self.root.exists():
+            return
         with _OPERATIONS_LOCK:
             overdue = [v for (root, _), v in _OPERATIONS.items()
                        if root == str(self.root) and (v.ending or time.time() - v.data["created"] > STALE_SECONDS)]
@@ -855,6 +900,8 @@ class ModelImportStore:
                 disk.remove(source)
 
     def sweep(self, *, now=None):
+        if not self.root.exists():
+            return
         self.reconcile()
         now = time.time() if now is None else now
         with disk.coordinator(self.root):

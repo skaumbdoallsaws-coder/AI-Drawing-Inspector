@@ -741,6 +741,13 @@ class LocalFacilityLayoutHost:
         self.agent_runtime.sage_shots = self.sage_shots
         # Sage's basic-shape tools (docs/sage-basic-shapes-plan.md, BS3) add their models to the shared library here.
         self.agent_runtime.author_shape = self.register_authored_asset
+        from .model_import_registration import ModelImportHooks
+        self._model_import_hooks = ModelImportHooks(self)
+        self.agent_runtime.model_import_inspect = self._model_import_hooks.inspect
+        self.agent_runtime.model_import_prepare = self._model_import_hooks.prepare
+        self.agent_runtime.model_import_register = self._model_import_hooks.register
+        self.agent_runtime.describe_model_attachment = self._model_import_hooks.describe_model_attachment
+        self.agent_runtime.registrations_since = self._model_import_hooks.registrations_since
         self.construction_service = FacilityConstructionService(
             service=self.service, agent_runtime=self.agent_runtime,
             repository=self.design_repository, capability_gate=self.feature_flags.require,
@@ -800,6 +807,9 @@ class LocalFacilityLayoutHost:
         bounded background spatial workers."""
 
         self.sage_shots.shutdown(2.0)
+        store = getattr(self.service, "_model_import_store", None)
+        if store is not None:
+            store.close()
         self.service.spatial_executor.close(wait=True)
 
     def _agent_generation_layout(
@@ -1022,6 +1032,11 @@ class LocalFacilityLayoutHost:
             modified, size = self._catalog_disk_state if self._private_assets_enabled else (0, 0)
             return {"siteId": LOCAL_SITE_ID, "assets": deepcopy(list(self._catalog.values())),
                     "catalogVersion": f"{self._catalog_generation}:{modified}:{size}"}
+
+    def register_imported_asset(self, principal: FacilityPrincipal, site_id: str, layout_id: str,
+                                draft_id: str) -> dict[str, Any]:
+        """Publish the frozen, authorized draft; MI2b keeps receipts and retries immutable."""
+        return self._model_import_hooks.register_imported_asset(principal, site_id, layout_id, draft_id)
 
     def register_authored_asset(self, family: str, parameters: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Build a basic shape (shape_families) and add it to the shared private library and to this running host,
@@ -1868,6 +1883,7 @@ class LocalFacilityLayoutHost:
         else:
             principal = self.principal()
         self.ensure_bootstrap()
+        self._model_import_hooks.remember_principal(principal)
         return principal
 
     def _lighting_coverage(

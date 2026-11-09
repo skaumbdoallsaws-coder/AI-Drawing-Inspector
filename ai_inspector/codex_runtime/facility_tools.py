@@ -5,6 +5,7 @@ import asyncio
 from copy import deepcopy
 import hashlib
 import json
+import threading
 import time
 
 from anyio import CancelScope
@@ -13,6 +14,7 @@ from ai_inspector.facility_layout.observation import facility_layout_read_tool_s
 from ai_inspector.facility_layout.errors import FacilityLayoutError
 from ai_inspector.facility_layout.agent_runtime import FacilityLayoutAgentRuntimeError
 from .policy import PilotError
+from . import model_import_tools
 
 
 READ_NAMES = frozenset({"inspect_facility_entities", "inspect_facility_semantics",
@@ -53,7 +55,7 @@ def tool_specs():
             parking_tool_spec(), workstation_tool_spec(), light_positions_tool_spec(), light_coverage_tool_spec(),
             *pattern_tool_specs(), position_tool_spec(), stack_tool_spec(), views_tool_spec(),
             *research_tool_specs(),
-            *site_tool_specs(), *floor_plan_tool_specs()]
+            *site_tool_specs(), *floor_plan_tool_specs(), *model_import_tools.tool_specs()]
 
 
 def read_bound_layout(runtime, principal, reference):
@@ -86,6 +88,7 @@ class FacilityReadGateway:
         self.floor_plan_packages = {}
         self.pdf, self.pdfs = None, []  # the PDFs prepared this turn, shown as file cards under the reply
         self.shot_sets = []  # Sage's 3D shots this turn (SV2), shown as rows of pictures under the reply: (block, ids)
+        self.model_import_cancel = None  # one event per serialized model-import call
         self.credential_check = None
         self.receipts = []
         # Set by the pilot from what the app window sent with the turn: whether it has this layout open (Sage's
@@ -117,6 +120,8 @@ class FacilityReadGateway:
             step = await self.progress.tool_started(name, arguments) if self.progress else None
             started = time.monotonic()
             self.calls += 1
+            model_import = name in model_import_tools.NAMES
+            self.model_import_cancel = threading.Event() if model_import else None
             try:
                 if self.calls > self.max_calls:
                     self.closed = True
@@ -124,6 +129,8 @@ class FacilityReadGateway:
                 self.check()
                 if name not in self.validators:
                     raise PilotError("codex_tool_denied", "This tool is not authorized in the read-only pilot.", 403)
+                if model_import:
+                    model_import_tools.check_request_size(arguments)
                 errors = argument_errors(self.validators[name], arguments)
                 if errors:
                     error = PilotError("codex_tool_arguments_invalid", "Arguments do not match the tool schema. Correct the listed fields and retry.", 422)
@@ -136,7 +143,9 @@ class FacilityReadGateway:
                 try:
                     data = await asyncio.shield(work)
                 except asyncio.CancelledError:
-                    # A read already executing cannot be interrupted safely. Join it before releasing the host.
+                    # Model prepares can stop their worker; every dispatch is joined before releasing the host.
+                    if self.model_import_cancel is not None:
+                        self.model_import_cancel.set()
                     self.closed = True
                     # Shield level cancellation; asyncio.shield also protects against direct Task.cancel().
                     with CancelScope(shield=True):
@@ -149,6 +158,8 @@ class FacilityReadGateway:
                                 break
                         if not work.cancelled():
                             work.exception()
+                    if model_import:
+                        self.last_image = None
                     raise
                 if name == "show_facility_views":
                     data = await self._take_shots(data, step)
@@ -157,6 +168,8 @@ class FacilityReadGateway:
                 if len(json.dumps(result, allow_nan=False).encode()) > 65536:
                     raise PilotError("codex_result_too_large", "Narrow the inspection or request a smaller page.", 422)
             except Exception as error:
+                if model_import:
+                    self.last_image = None
                 code = getattr(error, "code", "codex_tool_failed")
                 # Domain errors have controlled public messages. Never expose arbitrary exceptions or paths.
                 message = str(error) if isinstance(error, (PilotError, FacilityLayoutError, FacilityLayoutAgentRuntimeError)) else "The inspection could not be completed."
@@ -164,11 +177,14 @@ class FacilityReadGateway:
                 if isinstance(error, PilotError) and getattr(error, "argument_findings", None):
                     result["error"]["details"] = {"findings": error.argument_findings}
                 if isinstance(error, (FacilityLayoutError, FacilityLayoutAgentRuntimeError)) and isinstance(getattr(error, "details", None), dict):
-                    details = {key: deepcopy(value[:10] if isinstance(value, list) else value)
-                        for key, value in error.details.items()
-                        if key in {"findings", "currentRevision", "operationIndex", "references", "targetId"}}
+                    details = (deepcopy(error.details) if model_import else
+                        {key: deepcopy(value[:10] if isinstance(value, list) else value)
+                         for key, value in error.details.items()
+                         if key in {"findings", "currentRevision", "operationIndex", "references", "targetId"}})
                     if details and len(json.dumps(details, allow_nan=False).encode()) <= 16000:
                         result["error"]["details"] = details
+            finally:
+                self.model_import_cancel = None
             self.receipts.append({"tool": name if name in self.validators else "denied", "ok": result["ok"],
                 "argumentHash": hashlib.sha256(json.dumps(arguments, sort_keys=True).encode()).hexdigest(),
                 "durationMs": round((time.monotonic() - started) * 1000),
@@ -423,6 +439,8 @@ class FacilityReadGateway:
         self.shot_sets.append((block, ids))
 
     def _read_data(self, name, arguments):
+        if name == model_import_tools.INSPECT:
+            return model_import_tools.inspect(self, arguments)
         from .site_tools import CATALOG_TOOLS, NAMES as SITE_NAMES, STEP_TOOLS, read_site
         from .floor_plan_tools import NAMES as FLOOR_PLAN_NAMES, read as read_floor_plan
         if name in FLOOR_PLAN_NAMES:

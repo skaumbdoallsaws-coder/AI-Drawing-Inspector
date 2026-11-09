@@ -358,10 +358,13 @@ def install_bundle(root: str | Path, entry: dict, files: Mapping[str, bytes]) ->
         raise FacilityLayoutError("asset_bundle_invalid", str(error)) from None
     asset_id = entry["assetId"]
     folder = root / BUNDLE_FOLDER / asset_id
-    if folder.resolve() != folder or root not in folder.parents:
-        raise FacilityLayoutError("asset_bundle_invalid", "The bundle path leaves its authored folder.")
     catalog = root / CATALOG
     with LOCK, CatalogLock(catalog):
+        # Resolve only while publication is serialized. On Windows, resolving a
+        # missing path while another installer renames it can yield a transient
+        # non-canonical result, incorrectly rejecting an identical bundle.
+        if folder.resolve() != folder or root not in folder.parents:
+            raise FacilityLayoutError("asset_bundle_invalid", "The bundle path leaves its authored folder.")
         original = catalog.read_bytes()
         payload = json.loads(original.decode("utf-8-sig"))
         if (not isinstance(payload, dict) or payload.get("schemaVersion") != 1

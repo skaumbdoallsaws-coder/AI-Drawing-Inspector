@@ -165,3 +165,14 @@ def test_feature_gate_denies_writes_before_receive(tmp_path):
     calls, messages = asgi_request(app)
     assert calls == []
     assert next(m for m in messages if m["type"] == "http.response.start")["status"] == 403
+
+
+def test_router_mount_startup_and_shutdown_do_not_create_unused_store(tmp_path):
+    root = tmp_path / "unused-layouts"
+    service = SimpleNamespace(layout_repository=SimpleNamespace(root=root), get_layout=layout_reader)
+    app = FastAPI()
+    app.include_router(create_model_import_router(service=service, principal_resolver=lambda _: principal()))
+    assert not root.exists()
+    with TestClient(app) as client:
+        assert client.get("/unrelated-route").status_code == 404
+    assert not root.exists()

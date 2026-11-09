@@ -398,3 +398,25 @@ def test_whole_model_hull_drives_collision_and_surface_fit(host, kind):
         support["definition"]["supportSurfaces"][0]["bounds"].update({"minimum" + axis: -2, "maximum" + axis: 2})
     resolved = resolve_placement_intents([operation], catalog=[asset, support], layout={"placements": [holder]})
     assert resolved[0]["placement"]["snapRelationship"]["surfaceId"] == "top"
+
+
+def test_bundle_destination_resolution_is_inside_publication_lock(tmp_path, built, monkeypatch):
+    """Reproduce the transient Windows resolve result if a writer is not serialized."""
+    root = project(tmp_path)
+    entry, files = built
+    folder = root / library.BUNDLE_FOLDER / entry["assetId"]
+    original = Path.resolve
+    checks = []
+
+    def racing_resolve(path, *args, **kwargs):
+        if path == folder:
+            checks.append(library.LOCK.locked())
+            if not library.LOCK.locked():
+                return path.parent / "transient-rename"
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", racing_resolve)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        results = list(pool.map(lambda _: library.install_bundle(root, entry, files), range(12)))
+    assert sum(result["added"] for result in results) == 1
+    assert checks and all(checks)

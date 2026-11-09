@@ -53,6 +53,9 @@ SIMPLE = {
     "prepare_layout_pdf": (CHECK, "the printable layout sheets"),
     "suggest_emergency_teams": (CHECK, "emergency teams and meeting points"),
     "inspect_floor_plan_import": (READ, "the imported floor plan drawing"),
+    "inspect_model_import": (READ, "the imported 3D model"),
+    "prepare_model_asset": (PREPARE, "the 3D model draft"),
+    "register_model_asset": (RECORD, "the model in the shared library"),
     "align_floor_plan_import": (MEASURE, "where the drawing sits on the plan"),
     "plan_floor_plan_conversion": (CHECK, "the walls, doors and rooms in the drawing"),
     "preview_floor_plan_import": (STAGE, "the drawing's change for your review"),  # a review in either mode

@@ -22,7 +22,8 @@ def setup(tmp_path):
 def test_contract_has_no_commit_approval_or_shell_capability(setup):
     _, gateway, _ = setup
     assert {s["name"] for s in edit_tool_specs()} == {"preview_facility_operations", "preview_facility_undo",
-                                                      "preview_planned_design", "preview_floor_plan_import"}
+                                                      "preview_planned_design", "preview_floor_plan_import",
+                                                      "prepare_model_asset", "register_model_asset"}
     for spec in gateway.specs:
         Draft202012Validator.check_schema(spec["input_schema"])
 

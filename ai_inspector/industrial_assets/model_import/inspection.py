@@ -2,7 +2,7 @@
 from copy import deepcopy
 
 from .errors import ModelImportError
-from .limits import INSPECTION_BYTES, SUMMARY_BYTES
+from .limits import DEFAULT_LIMITS, INSPECTION_BYTES, SUMMARY_BYTES
 from .protocol import validate_summary, validate_source_part, validate_licence
 from .validation import clean_text, json_bytes, require
 
@@ -11,9 +11,17 @@ def validate_inspection(value, summary):
     require(isinstance(value, dict) and set(value) == {"parts", "licence"}, "model_worker_failed")
     require(isinstance(value["parts"], list) and len(value["parts"]) == summary["partsTotal"],
             "model_worker_failed")
-    for index, part in enumerate(value["parts"]):
+    previous = -1
+    for part in value["parts"]:
         validate_source_part(part)
-        require(part["key"] == f"p{index}", "model_worker_failed")
+        index = int(part["key"][1:])
+        # Keys name source primitives, including omitted points/lines. Offsets
+        # count retained parts; neither inspection nor paging renumbers them.
+        require(part["key"] == f"p{index}" and previous < index < DEFAULT_LIMITS.primitives,
+                "model_worker_failed")
+        previous = index
+    offset = summary["partsOffset"]
+    require(summary["parts"] == value["parts"][offset:offset + len(summary["parts"])], "model_worker_failed")
     require(sum(p["triangles"] for p in value["parts"]) == summary["triangles"], "model_worker_failed")
     licence = value["licence"]
     require(isinstance(licence, dict) and isinstance(licence.get("excerpt"), str), "model_worker_failed")

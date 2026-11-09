@@ -86,6 +86,18 @@ def host_errors(method):
     return call
 
 
+def job_failure(error: BaseException) -> FacilityLayoutError:
+    """Keep storage refusals intact while recording failures before worker handoff."""
+    if isinstance(error, ModelImportError):
+        return translate(error)
+    if isinstance(error, FacilityLayoutError):
+        return error
+    if isinstance(error, OSError):
+        return (quota() if error.errno == errno.ENOSPC else FacilityLayoutError(
+            "model_store_unavailable", "Model storage is unavailable. Retry shortly.", status_code=503))
+    return translate(ModelImportError("model_worker_failed"))
+
+
 def clean_source_name(raw: str) -> str:
     return clean_text(str(raw or "").replace("\\", "/").rsplit("/", 1)[-1], 80) or "model.glb"
 
@@ -141,10 +153,10 @@ class Upload:
         self.name, self.declared, self.size = name, declared, 0
         self.path = disk.safe(store.root / scope.key / "uploads" / (lease.import_id + ".part"))
         disk.mkdir(self.path.parent)
-        self.stream = self.path.open("xb")
         self.digest, self.prefix = sha256(), b""
         self.lock = threading.RLock()
         self.finished = False
+        self.stream = self.path.open("xb")
         lease.cancel_upload = self.abort
 
     def write(self, chunk: bytes) -> None:
@@ -165,15 +177,15 @@ class Upload:
 
     def finish(self) -> dict:
         with self.lock:
-            self.lease.check()
-            if self.finished:
-                raise translate(ModelImportError("model_cancelled"))
-            if not self.size:
-                raise FacilityLayoutError("model_empty", "The uploaded file is empty.")
-            self.stream.flush()
-            os.fsync(self.stream.fileno())
-            self.stream.close()
             try:
+                self.lease.check()
+                if self.finished:
+                    raise translate(ModelImportError("model_cancelled"))
+                if not self.size:
+                    raise FacilityLayoutError("model_empty", "The uploaded file is empty.")
+                self.stream.flush()
+                os.fsync(self.stream.fileno())
+                self.stream.close()
                 with disk.coordinator(self.store.root):
                     self.lease.check()
                     record = self.store._record(self.scope, self.lease.import_id)
@@ -191,13 +203,15 @@ class Upload:
                                   state="queued", updated=time.time())
                     self.store._save(self.scope, record)
                     self.store._resize(self.lease, MARGIN)
-                    self.finished = True
-                    self.lease.cancel_upload = None
                     result = deepcopy(record)
                 self.store._start_inspect(self.lease)
+                self.finished = True
+                self.lease.cancel_upload = None
                 return result
-            except BaseException:
-                self.abort()
+            except BaseException as error:
+                self.abort(job_failure(error))
+                if isinstance(error, Exception):
+                    raise job_failure(error) from None
                 raise
 
     def abort(self, error=None):
@@ -207,12 +221,14 @@ class Upload:
             self.lease.cancel.set()
             self.finished = True
             try:
-                self.stream.close()
-                with disk.coordinator(self.store.root):
-                    record = self.store._record(self.scope, self.lease.import_id)
-                    self.store._fail(self.scope, record, error or FacilityLayoutError(
-                        "interrupted", "The upload was interrupted. Retry or upload it again."),
-                        "refused" if error and error.code in {"model_too_large", "model_empty"} else "failed")
+                try:
+                    self.stream.close()
+                finally:
+                    with disk.coordinator(self.store.root):
+                        record = self.store._record(self.scope, self.lease.import_id)
+                        self.store._fail(self.scope, record, error or FacilityLayoutError(
+                            "interrupted", "The upload was interrupted. Retry or upload it again."),
+                            "refused" if error and error.code in {"model_too_large", "model_empty"} else "failed")
             except (OSError, FacilityLayoutError):
                 pass  # Reconciliation retries the terminal transition; preserve the HTTP refusal.
             finally:
@@ -326,16 +342,30 @@ class ModelImportStore:
         if lock.exists():
             raise busy()
         self._capacity(scope, amount)
-        disk.atomic(self.root / "active" / (lease.token + ".json"), lease.data)
         try:
+            disk.atomic(self.root / "active" / (lease.token + ".json"), lease.data)
             disk.atomic(lock, lease.data)
             disk.mkdir(lease.job)
+            with _OPERATIONS_LOCK:
+                _OPERATIONS[(str(self.root), lease.token)] = lease
         except BaseException:
-            (self.root / "active" / (lease.token + ".json")).unlink(missing_ok=True)
-            lock.unlink(missing_ok=True)
+            # The caller cannot release a claim that never returned. Roll back
+            # here without reacquiring the coordinator; failed cleanup is marked
+            # ending so reconciliation retries it immediately, never waits on it.
+            lease.ending = True
+            with _OPERATIONS_LOCK:
+                _OPERATIONS[(str(self.root), lease.token)] = lease
+            try:
+                disk.remove(lease.job)
+                lock.unlink(missing_ok=True)
+                (self.root / "active" / (lease.token + ".json")).unlink(missing_ok=True)
+            except (OSError, FacilityLayoutError):
+                pass
+            else:
+                with _OPERATIONS_LOCK:
+                    _OPERATIONS.pop((str(self.root), lease.token), None)
+                lease.done.set()
             raise
-        with _OPERATIONS_LOCK:
-            _OPERATIONS[(str(self.root), lease.token)] = lease
         return lease
 
     @host_errors
@@ -346,24 +376,26 @@ class ModelImportStore:
         if content_length is not None and content_length > MAX_UPLOAD_BYTES:
             raise translate(ModelImportError("model_too_large"))
         self.reconcile()
-        with disk.coordinator(self.root):
-            import_id = "mi-" + uuid.uuid4().hex[:24]
-            if (self._folder(scope) / "imports" / (import_id + ".json")).exists():
-                raise busy()  # Even a nonce collision must never overwrite an older import.
-            lease = self._claim(scope, import_id, (MAX_UPLOAD_BYTES if content_length is None else content_length) + MARGIN)
-            record = {"schemaVersion": 1, "id": import_id, "importId": import_id, "scope": scope.key,
-                      "name": clean_source_name(name), "sha256": None, "bytes": 0, "format": None,
-                      "sourceFormat": None, "created": time.time(), "updated": time.time(),
-                      "createdBy": scope.principal.principal_id, "state": "queued", "refusal": None,
-                      "summary": None, "licence": None, "warnings": [], "drafts": []}
-            try:
+        lease = None
+        try:
+            with disk.coordinator(self.root):
+                import_id = "mi-" + uuid.uuid4().hex[:24]
+                if (self._folder(scope) / "imports" / (import_id + ".json")).exists():
+                    raise busy()  # Even a nonce collision must never overwrite an older import.
+                lease = self._claim(scope, import_id, (MAX_UPLOAD_BYTES if content_length is None else content_length) + MARGIN)
+                record = {"schemaVersion": 1, "id": import_id, "importId": import_id, "scope": scope.key,
+                          "name": clean_source_name(name), "sha256": None, "bytes": 0, "format": None,
+                          "sourceFormat": None, "created": time.time(), "updated": time.time(),
+                          "createdBy": scope.principal.principal_id, "state": "queued", "refusal": None,
+                          "summary": None, "licence": None, "warnings": [], "drafts": []}
                 self._save(scope, record)
                 return Upload(self, scope, lease, record["name"], content_length)
-            except BaseException:
-                # Release outside the coordinator (OS locks are not recursively acquired).
-                pass
-        lease.release()
-        raise FacilityLayoutError("model_store_unavailable", "The upload could not be started.", status_code=503)
+        except BaseException as error:
+            if lease is not None:
+                self._fail_start(lease, job_failure(error))
+            if isinstance(error, Exception):
+                raise job_failure(error) from None
+            raise
 
     def _source(self, scope, record) -> Path:
         digest, kind = record.get("sha256"), record.get("sourceFormat")
@@ -384,16 +416,21 @@ class ModelImportStore:
         from .model_import_runtime import model_import_runtime
         return model_import_runtime().dependency_root
 
-    def _start_inspect(self, lease):
-        thread = threading.Thread(target=self._check_job, args=(lease,), name="model-import-check", daemon=True)
+    def _fail_start(self, lease, error):
+        """Caller has left the coordinator; state-write failure must not bypass release."""
         try:
-            thread.start()
-        except BaseException:
             with disk.coordinator(self.root):
-                self._fail(lease.scope, self._record(lease.scope, lease.import_id),
-                           translate(ModelImportError("model_worker_failed")), "failed")
+                self._fail(lease.scope, self._record(lease.scope, lease.import_id), error, "failed")
+        except (OSError, FacilityLayoutError):
+            pass  # A persistently unwritable record is reconciled once storage recovers.
+        finally:
             lease.release()
-            raise
+
+    def _start_inspect(self, lease):
+        # Until start succeeds, the upload/retry caller owns cleanup, including
+        # exceptions while constructing the thread or recording its failure.
+        thread = threading.Thread(target=self._check_job, args=(lease,), name="model-import-check", daemon=True)
+        thread.start()
 
     def _check_job(self, lease):
         scope = lease.scope
@@ -442,17 +479,25 @@ class ModelImportStore:
     def retry(self, scope, import_id):
         self._authorize(scope, True)
         self.reconcile()
-        with disk.coordinator(self.root):
-            record = self._record(scope, import_id)
-            self._source(scope, record)
-            if record["state"] != "failed":
-                raise FacilityLayoutError("model_import_not_retryable", "Only a failed import can be retried.", status_code=409)
-            lease = self._claim(scope, import_id, record["bytes"] + INSPECT_OUTPUT_BYTES)
-            record.update(state="queued", refusal=None, updated=time.time())
-            self._save(scope, record)
-            result = deepcopy(record)
-        self._start_inspect(lease)
-        return result
+        lease = None
+        try:
+            with disk.coordinator(self.root):
+                record = self._record(scope, import_id)
+                self._source(scope, record)
+                if record["state"] != "failed":
+                    raise FacilityLayoutError("model_import_not_retryable", "Only a failed import can be retried.", status_code=409)
+                lease = self._claim(scope, import_id, record["bytes"] + INSPECT_OUTPUT_BYTES)
+                record.update(state="queued", refusal=None, updated=time.time())
+                self._save(scope, record)
+                result = deepcopy(record)
+            self._start_inspect(lease)
+            return result
+        except BaseException as error:
+            if lease is not None:
+                self._fail_start(lease, job_failure(error))
+            if isinstance(error, Exception):
+                raise job_failure(error) from None
+            raise
 
     @host_errors
     def get(self, scope, import_id):
@@ -632,27 +677,31 @@ class ModelImportStore:
         if cancel is not None and cancel.is_set():
             raise translate(ModelImportError("model_cancelled"))
         self.reconcile()
-        with disk.coordinator(self.root):
-            record = self._record(scope, normalized["importId"])
-            if record["state"] != "ready":
-                raise FacilityLayoutError("model_import_not_ready", "Wait for this model to finish checking.", status_code=409)
-            for item in record["drafts"]:
-                existing = self._draft(scope, item["id"])
-                if existing["recipe"] == normalized:
-                    if cancel is not None and cancel.is_set():
-                        raise translate(ModelImportError("model_cancelled"))
-                    return {key: existing[key] for key in PUBLIC_FIELDS}
-            source = self._source(scope, record)
-            lease = self._claim(scope, record["id"], record["bytes"] + PREPARE_OUTPUT_BYTES, cancel)
-            record.update(state="checking", updated=time.time())
-            self._save(scope, record)
+        lease = None
         published = None
         committed = False
+        worker_started = False
         try:
+            with disk.coordinator(self.root):
+                record = self._record(scope, normalized["importId"])
+                if record["state"] != "ready":
+                    raise FacilityLayoutError("model_import_not_ready", "Wait for this model to finish checking.", status_code=409)
+                for item in record["drafts"]:
+                    existing = self._draft(scope, item["id"])
+                    if existing["recipe"] == normalized:
+                        if cancel is not None and cancel.is_set():
+                            raise translate(ModelImportError("model_cancelled"))
+                        return {key: existing[key] for key in PUBLIC_FIELDS}
+                source = self._source(scope, record)
+                lease = self._claim(scope, record["id"], record["bytes"] + PREPARE_OUTPUT_BYTES, cancel)
+                record.update(state="checking", updated=time.time())
+                self._save(scope, record)
             lease.check()
             destination = lease.job / "prepared"
+            dependencies = self._dependencies()
+            worker_started = True
             result = self.prepare_worker(source, normalized, destination, lease.cancel,
-                                         dependency_root=self._dependencies())
+                                         dependency_root=dependencies)
             value = read_draft_output(destination)
             if value["recipe"] != normalized or value["sourceSha256"] != record["sha256"]:
                 raise ModelImportError("model_worker_failed")
@@ -680,21 +729,28 @@ class ModelImportStore:
                 self._save(scope, record)
                 committed = True
             return {key: value[key] for key in PUBLIC_FIELDS}
-        except Exception as error:
-            if isinstance(error, ModelImportError):
-                error = translate(error)
-            if not isinstance(error, FacilityLayoutError):
-                error = translate(ModelImportError("model_worker_failed"))
-            with disk.coordinator(self.root):
-                if published is not None and not committed:
-                    disk.remove(published)
-                # A bad adaptation does not invalidate a checked source.
-                record = self._record(scope, normalized["importId"])
-                record.update(state="ready", updated=time.time(), lastPrepareError=error.to_dict())
-                self._save(scope, record)
-            raise error from None
+        except BaseException as error:
+            if lease is None or (worker_started and not isinstance(error, Exception)):
+                # Preserve completed orphan output on simulated/process interruption;
+                # reconciliation recovers it. The lease still releases in finally.
+                raise
+            failure = job_failure(error)
+            try:
+                with disk.coordinator(self.root):
+                    if published is not None and not committed:
+                        disk.remove(published)
+                    # A bad adaptation does not invalidate a checked source.
+                    record = self._record(scope, normalized["importId"])
+                    record.update(state="ready", updated=time.time(), lastPrepareError=failure.to_dict())
+                    self._save(scope, record)
+            except (OSError, FacilityLayoutError):
+                pass  # Cleanup still runs; reconciliation repairs an unwritable record later.
+            if isinstance(error, Exception):
+                raise failure from None
+            raise
         finally:
-            lease.release()
+            if lease is not None:
+                lease.release()
             if committed and lease.cancel.is_set():
                 if published is not None:
                     with disk.coordinator(self.root):
@@ -729,17 +785,19 @@ class ModelImportStore:
         """MI2 holds this lease across bundle publication/live binding/receipt creation."""
         self._authorize(scope, True)
         self.reconcile()
-        with disk.coordinator(self.root):
-            value = self._draft(scope, draft_id)
-            import_id = value["recipe"]["importId"]
-            metadata_bytes = disk.size(self._folder(scope) / "imports" / (import_id + ".json")) + 16 * 1024
-            lease = self._claim(scope, import_id, metadata_bytes, cancel)
-            directory = self._folder(scope) / "drafts" / draft_id
+        lease = None
         try:
+            with disk.coordinator(self.root):
+                value = self._draft(scope, draft_id)
+                import_id = value["recipe"]["importId"]
+                metadata_bytes = disk.size(self._folder(scope) / "imports" / (import_id + ".json")) + 16 * 1024
+                lease = self._claim(scope, import_id, metadata_bytes, cancel)
+                directory = self._folder(scope) / "drafts" / draft_id
             lease.check()
             yield value, directory, lease
         finally:
-            lease.release()
+            if lease is not None:
+                lease.release()
 
     @host_errors
     def record_receipt(self, scope, draft_id, asset_id, revision, *, _lease=None):

@@ -15,6 +15,7 @@ import argparse
 from collections import Counter
 from contextlib import contextmanager
 import importlib
+import gc
 import json
 import os
 from pathlib import Path
@@ -430,7 +431,12 @@ def browser_page(browser, base: str, evidence: Evidence, *, baseline: bool):
                 evidence.data["importResponses"].append({"path": urlsplit(response.url).path,
                     "method": response.request.method, "httpStatus": response.status, "record": record})
             except Exception as error:
-                evidence.data["routeErrors"].append("Import response: " + str(error))
+                # Chromium may evict a body before the listener reads it (seen on Windows); the send check still
+                # requires the ready and refused records it needs, so an evicted body is a note, not a failure.
+                if "evicted" in str(error):
+                    evidence.data.setdefault("responseNotes", []).append("Body unavailable: " + urlsplit(response.url).path)
+                else:
+                    evidence.data["routeErrors"].append("Import response: " + str(error))
         page.on("response", imported)
     return context, page
 
@@ -720,10 +726,18 @@ def main(argv: list[str] | None = None) -> int:
              "paidInferenceEnabled": False, "optionalModelLifespanStarted": False})
         os.chdir(old_cwd)
         if temporary is not None:
-            try:
-                temporary.cleanup()
-            except Exception as error:
-                cleanup_errors.append("Temporary store cleanup: " + str(error))
+            # The app's telemetry store leaves sqlite connections to the garbage collector (`with connect()` commits but
+            # does not close), and Windows refuses to delete an open file: collect, then retry briefly.
+            for attempt in range(5):
+                gc.collect()
+                try:
+                    temporary.cleanup()
+                    break
+                except Exception as error:
+                    if attempt == 4:
+                        cleanup_errors.append("Temporary store cleanup: " + str(error))
+                    else:
+                        time.sleep(0.5)
         if guard is not None:
             guard.active = False
         os.environ.clear()

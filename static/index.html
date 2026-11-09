@@ -20749,6 +20749,26 @@
         }
     };
     </script>
+    <style>
+        .agent-attachment-options { position: relative; }
+        .agent-attachment-menu { position: absolute; bottom: 36px; left: 0; z-index: 30; min-width: 230px; padding: 6px;
+            border: 1px solid var(--border-color, #475569); border-radius: 10px; background: var(--bg-panel, #202633); box-shadow: 0 6px 22px #0005; }
+        .agent-attachment-menu button { width: 100%; padding: 10px; border: 0; border-radius: 6px; text-align: left;
+            color: var(--text-primary, #eee); background: transparent; cursor: pointer; }
+        .agent-attachment-menu button:hover, .agent-attachment-menu button:focus-visible { background: #ffffff18; }
+        .agent-model-chips { display: grid; gap: 6px; padding: 8px 12px 0; }
+        .agent-model-chip { display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid #66758b;
+            border-radius: 8px; font-size: 12px; }
+        .agent-model-chip-copy { display: grid; flex: 1; min-width: 0; gap: 3px; overflow-wrap: anywhere; }
+        .agent-model-chip-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .agent-model-chip[data-state="failed"], .agent-model-chip[data-state="refused"], .agent-model-chip[data-state="busy"] { border-color: #ba8e53; }
+        .agent-model-chip button { flex: none; color: inherit; background: transparent; border: 1px solid #66758b; border-radius: 4px; cursor: pointer; }
+        .agent-model-chip progress { width: 48px; }
+        .agent-model-drop-target { position: absolute; inset: 8px; z-index: 40; display: grid; place-items: center; padding: 24px;
+            border: 2px dashed #85b8ff; border-radius: 12px; background: #172b46ed; color: #fff; pointer-events: none; text-align: center; }
+        .agent-model-drop-target[hidden], .agent-model-chips[hidden], .agent-attachment-menu[hidden], #agentCameraBtn[hidden] { display: none; }
+        #agentSendBtn.model-upload-pending { width: auto; min-width: 90px; padding: 0 8px; font-size: 12px; }
+    </style>
     <link rel="stylesheet" href="/static/facility_layout_workspace.css?v=20261107-site-footprint-2">
     <link rel="stylesheet" href="/static/facility_layout_library_panel.css?v=20261101-cc3-2">
     <link rel="stylesheet" href="/static/walkthrough_camera_settings.css?v=20260927-1">
@@ -21412,6 +21432,7 @@
 
             <!-- Agent Panel -->
             <div class="agent-panel" id="agentPanel">
+                <div id="agentModelDropTarget" class="agent-model-drop-target" hidden>Drop a 3D model (.glb, .zip) to attach it</div>
                 <div class="agent-panel-inner">
                     <div class="agent-panel-header">
                         <svg viewBox="0 0 32 32" fill="none">
@@ -21470,6 +21491,7 @@
                         </div>
                     </div>
                     <div class="agent-icons-strip" id="agentIconsStrip"></div>
+                    <div id="agentModelChips" class="agent-model-chips" aria-live="polite" hidden></div>
                     <div class="agent-panel-input">
                         <div class="agent-composer-shell">
                             <!-- Pre-hydration text only. _syncAgentInputPlaceholder() replaces this
@@ -21477,7 +21499,13 @@
                                  cannot go stale if the default agent or a display name changes. -->
                             <textarea id="agentInput" placeholder="Message your agent..." autocomplete="off" rows="1"></textarea>
                             <div class="agent-composer-footer">
-                                <button class="agent-camera-btn" id="agentCameraBtn" type="button" title="Attachment options coming soon">+</button>
+                                <div class="agent-attachment-options">
+                                    <button class="agent-camera-btn" id="agentCameraBtn" type="button" title="Attach a model" aria-label="Attachment options" aria-expanded="false" hidden>+</button>
+                                    <div id="agentAttachmentMenu" class="agent-attachment-menu" role="menu" hidden>
+                                        <button type="button" role="menuitem">Attach 3D model (.glb, .zip)</button>
+                                    </div>
+                                    <input id="agentModelFileInput" type="file" accept=".glb,.zip" multiple hidden>
+                                </div>
                                 <select id="agentFacilityEditMode" class="agent-model-btn" aria-label="Layout edit mode"
                                     title="Apply routine reversible edits directly, or preview every edit first">
                                     <option value="direct">Apply directly</option>
@@ -21679,9 +21707,10 @@
     <script src="/static/facility_layout_patterns.js?v=20261101-cell-facing"></script>
     <script src="/static/facility_layout_command_adapter.js?v=20260912-contract-v1-retry-fix"></script>
     <script src="/static/facility_layout_session.js?v=20261104-columns-1"></script>
-    <script src="/static/facility_layout_transport.js?v=20261104-floor-plan-2"></script>
+    <script src="/static/facility_layout_transport.js?v=20261109-model-import-1"></script>
+    <script src="/static/facility_layout_chat_attachments.js?v=20261109-model-import-1"></script>
     <script src="/static/facility_layout_generation_view.js?v=20260917-generation-research"></script>
-    <script src="/static/facility_layout_workspace.js?v=20261104-columns-1"></script>
+    <script src="/static/facility_layout_workspace.js?v=20261109-model-import-1"></script>
     <script src="/static/facility_layout_app.js?v=20261104-fp-authored-1"></script>
     <script src="/static/desktop_workflow_observation.js?v=20260915-workflow-coverage"></script>
     <script src="/static/desktop_runtime_bridge.js?v=20260915-workflow-coverage"></script>
@@ -46951,6 +46980,7 @@
         }
 
         function _trainSyncFacilityLayoutRibbon(nextStates) {
+            window._syncModelChatAttachments?.();
             const commandStates = nextStates || _trainFacilityCommandStates();
             document.querySelectorAll('[data-facility-ribbon-command]')
                 .forEach(button => {
@@ -57111,6 +57141,13 @@
         }
 
         let _trainFacilityLayoutAuthoringApp = null;
+        function _trainCheckFacilityAssetCatalog(app, force) {
+            const workspace = (app || _trainFacilityLayoutAuthoringApp)?.workspace;
+            if (!workspace || workspace.destroyed) return Promise.resolve(false);
+            return (force ? workspace.refreshAssetCatalog() : workspace.checkAssetCatalogVersion())
+                .catch(error => { console.warn('Facility asset catalog refresh failed:', error); return false; });
+        }
+        window.addEventListener('online', () => { void _trainCheckFacilityAssetCatalog(); });
         let _trainFacilitySheets = null;
         let _trainFacilitySheetOptions = null;
         let _trainFacilitySheetError = '';
@@ -57220,6 +57257,8 @@
                     throw new Error('Layout switching was interrupted by a workspace change.');
                 }
                 _trainFacilityLayoutAuthoringApp = next;
+                window._syncModelChatAttachments?.();
+                void _trainCheckFacilityAssetCatalog(next);
                 const motionHost = document.getElementById('trainFacilityMotionPlaybackHost');
                 if (motionHost && next.workspace.motionPanel?.getAttribute('data-motion-docked') === 'true') {
                     motionHost.appendChild(next.workspace.motionPanel);
@@ -57239,6 +57278,8 @@
                 } else if (next) next.destroy();
                 host.prepend(oldRoot); previous.resume(oldRoot);
                 _trainFacilityLayoutAuthoringApp = previous;
+                window._syncModelChatAttachments?.();
+                void _trainCheckFacilityAssetCatalog(previous);
                 _trainBindStructureTree(previous);
                 throw error;
             }
@@ -59059,6 +59100,7 @@
                 _trainFacilitySheets = null;
             }
             _trainFacilityLayoutAuthoringApp = null;
+            window._syncModelChatAttachments?.();
         }
 
         function _trainActivateDesktopFacilityWorkspace(authorizedDocument) {
@@ -59121,6 +59163,8 @@
                             && typeof _trainFacilityLayoutAuthoringApp.resume
                                 === 'function') {
                         _trainFacilityLayoutAuthoringApp.resume(retainedRoot);
+                        void _trainCheckFacilityAssetCatalog(_trainFacilityLayoutAuthoringApp);
+                        window._syncModelChatAttachments?.();
                     }
                     _trainRenderFacilitySheets();
                     return true;
@@ -59201,8 +59245,8 @@
                         layoutId: activeLayoutId,
                         initialReceipt: initialLayoutReceipt,
                         assetCatalog: bootstrap.assetCatalog || [],
-                        // Sage's basic shapes (docs/sage-basic-shapes-plan.md, BS2): the workspace asks again when a
-                        // layout places an asset added since the page opened.
+                        // Keep the catalog version with the entries so turn completion can
+                        // discover newly registered assets even when none were placed.
                         loadAssetCatalog: async function () {
                             const response = await fetch('/api/industrial-assets?siteId='
                                 + encodeURIComponent(bootstrap.siteId), { cache: 'no-store' });
@@ -59213,7 +59257,7 @@
                             if (!body || body.siteId !== bootstrap.siteId || !Array.isArray(body.assets)) {
                                 throw new Error('The asset catalog answer is not for this site');
                             }
-                            return body.assets;
+                            return body;
                         },
                         capabilities: bootstrap.capabilities || {},
                         externalCommandSurface: true,
@@ -59319,6 +59363,8 @@
                     .createFacilityLayoutApp(preparedFacilityOptions);
                 _trainFacilityLayoutAuthoringApp = appInstance;
                 await appInstance.ready;
+                void _trainCheckFacilityAssetCatalog(appInstance);
+                window._syncModelChatAttachments?.();
                 _trainBindStructureTree(appInstance);
                 if (mountGeneration !== _trainFacilityLayoutMountGeneration
                         || !_trainIsFacilityLayoutMode()) {
@@ -81353,6 +81399,8 @@
             const _agentSendDefaultMarkup = agentSendBtn ? agentSendBtn.innerHTML : '';
             const agentMessages = $('agentMessages');
             const agentCameraBtn = $('agentCameraBtn');
+            const _modelAttachmentRuntime = window.InspectorProModelImportAttachments;
+            let _modelChatAttachments = null;
             const agentModelBtn = $('agentModelBtn');
             const agentModelLabel = $('agentModelLabel');
             const agentModelMenu = $('agentModelMenu');
@@ -82226,6 +82274,7 @@
             }
 
             function restoreSessionFromSnapshot(agentKey, rawSession) {
+                _modelChatAttachments?.clear();
                 const session = getAgentSession(agentKey);
                 const serverBacked = !!(_currentConversationRecord()
                     && _currentConversationRecord().backing === 'server'
@@ -82391,6 +82440,7 @@
             }
 
             function restoreConversationSnapshot(conv) {
+                _modelChatAttachments?.clear();
                 if (!conv || !conv.state || !conv.state.sessions) return false;
                 for (const key of ['inspector', 'deviation-analyst', 'parts-finder']) {
                     if (conv.state.sessions[key]) {
@@ -82662,6 +82712,7 @@
                         throw new Error('Server conversation memory is not enabled.');
                     }
                     _setServerMemoryState('ready');
+                    void _trainCheckFacilityAssetCatalog();
                     return true;
                 } catch (error) {
                     _setServerMemoryState(
@@ -82675,6 +82726,7 @@
             let chatUiEpoch = 0;
 
             function _clearChatTransientState() {
+                _modelChatAttachments?.clear();
                 removeSuggestions();
                 const loading = document.getElementById('agentSuggestionsLoading');
                 if (loading) loading.remove();
@@ -84973,6 +85025,7 @@
                     const narrationActive = state.narrationState !== 'idle';
                     voiceMicBtn.disabled = narrationActive ? false : waiting;
                     if (!waiting) agentInput.focus();
+                    updateSendButtonState();
                 }
             }
 
@@ -85019,19 +85072,25 @@
             }
 
             function updateSendButtonState() {
-                // Allow send if there's text OR a captured image
-                const hasText = agentInput.value.trim().length > 0;
-                const hasImage = !!agentCapturedImage;
+                _modelChatAttachments?.sync();
+                const modelSend = _modelAttachmentRuntime.buildPayload(
+                    _modelChatAttachments?.snapshot().chips || [], agentInput.value, !!agentCapturedImage
+                );
                 const _w = getCurrentAgentSession().waiting;
                 const _streaming = !!getCurrentAgentSession().activeStream;
                 const _memoryBlocked = _currentConversationIsLegacyArchive()
                     || ['initializing', 'unavailable'].includes(_serverMemoryState);
                 agentSendBtn.disabled = _streaming
-                    ? false : (_memoryBlocked || _w || (!hasText && !hasImage));
+                    ? false : (_memoryBlocked || _w || !modelSend.canSend);
+                agentSendBtn.classList.toggle('model-upload-pending', !_streaming && modelSend.blocked);
                 if (_streaming) {
                     agentSendBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="#fff"></rect></svg>';
                     agentSendBtn.title = 'Stop generating';
                     agentSendBtn.setAttribute('aria-label', 'Stop generating');
+                } else if (modelSend.blocked) {
+                    agentSendBtn.textContent = 'Uploading...';
+                    agentSendBtn.title = 'Wait for the model checks to finish';
+                    agentSendBtn.setAttribute('aria-label', 'Uploading...');
                 } else {
                     agentSendBtn.innerHTML = _agentSendDefaultMarkup;
                     agentSendBtn.title = 'Send message';
@@ -85182,10 +85241,28 @@
                 return await _renderPdfPageOnServer();
             }
 
-            agentCameraBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                closeAgentModelMenu();
+            function _modelChatContext() {
+                const app = _trainFacilityLayoutAuthoringApp;
+                const facility = app?.session?.getState();
+                return {
+                    conversationId: _currentConversationId,
+                    siteId: app?.transport?.siteId, layoutId: app?.transport?.layoutId,
+                    transport: app?.transport,
+                    enabled: currentAgent === 'deviation-analyst' && state.activeTab === 'training'
+                        && _trainIsFacilityLayoutMode() && !!facility?.loaded && !!facility.baseRevision
+                        && !!app?.workspace?.capabilities.manualAuthoring && !app.workspace.destroyed
+                        && !app.workspace.suspended && !_currentConversationIsLegacyArchive(),
+                };
+            }
+            _modelChatAttachments = _modelAttachmentRuntime.mount({
+                document, panel: $('agentPanel'), button: agentCameraBtn,
+                host: $('agentModelChips'), menu: $('agentAttachmentMenu'),
+                input: $('agentModelFileInput'), drop: $('agentModelDropTarget'),
+                getContext: _modelChatContext, onChange: updateSendButtonState,
+                onNotice: text => { if (window._toast) window._toast(text, 'info'); },
             });
+            window._syncModelChatAttachments = () => { _modelChatAttachments.sync(); updateSendButtonState(); };
+            agentCameraBtn.addEventListener('click', closeAgentModelMenu);
 
             if (agentModelBtn && agentModelMenu) {
                 agentModelBtn.addEventListener('click', function(e) {
@@ -94551,11 +94628,30 @@
                     : agentInput.value.trim();
                 const hasImage = retry
                     ? !!retry.frozenRequest.image : !!agentCapturedImage;
-                if ((!text && !hasImage) || (originSession.waiting && !isBargeIn)) return;
+                _modelChatAttachments.sync();
+                const modelAttachmentSnapshot = _modelChatAttachments.snapshot();
+                const modelSend = _modelAttachmentRuntime.buildPayload(modelAttachmentSnapshot.chips, text, hasImage);
+                const modelAttachments = retry ? (retry.frozenRequest.attachments || []) : modelSend.attachments;
+                if (retry && modelAttachments.length) {
+                    const bound = retry.frozenRequest.inspection_context?.attachments?.facility_layout;
+                    const current = _modelChatContext();
+                    if (!current.enabled || bound?.siteId !== current.siteId || bound?.layoutId !== current.layoutId) {
+                        addMessage('Open the layout this model request belongs to before retrying.', 'system', originAgent);
+                        return;
+                    }
+                    // A frozen retry sends the original IDs, even if the composer changed.
+                    modelAttachmentSnapshot.chips = modelAttachmentSnapshot.chips.filter(chip =>
+                        modelAttachments.some(attachment => attachment.importId === chip.importId));
+                }
+                if (modelSend.blocked || (!text && !hasImage && !modelAttachments.length)
+                        || (originSession.waiting && !isBargeIn)) return;
+                const originFacilityApp = originAgent === 'deviation-analyst' && state.activeTab === 'training'
+                    && _trainIsFacilityLayoutMode() ? _trainFacilityLayoutAuthoringApp : null;
                 const turnId = ++originSession.requestId;
                 let workingAssistant = null;
 
-                const displayText = text || (hasImage ? '\uD83D\uDCF7 [Screenshot attached]' : '');
+                const displayText = (text || (hasImage ? '\uD83D\uDCF7 [Screenshot attached]' : ''))
+                    + (modelAttachments.length ? (text ? '\n\n' : '') + '[3D model attachments: ' + modelAttachments.length + ']' : '');
                 if (!retry) {
                     originSession.pendingInput = '';
                     addMessage(displayText, 'user', originAgent);
@@ -94567,8 +94663,14 @@
                 const imageToSend = packagingRequested ? null : retry
                     ? (retry.frozenRequest.image || null)
                     : await _resolveAutoImage();
+                // A layout or conversation switch also invalidates unsent model attachments.
+                _modelChatAttachments.sync();
+                const modelAttachmentContextChanged = () => modelAttachments.length && (
+                    _modelChatAttachments.snapshot().key !== modelAttachmentSnapshot.key
+                    || _modelChatAttachments.snapshot().epoch !== modelAttachmentSnapshot.epoch
+                );
                 // Stale-turn guard: bail if another send happened during image resolution
-                if (originSession.requestId !== turnId) {
+                if (originSession.requestId !== turnId || modelAttachmentContextChanged()) {
                     if (workingAssistant.uiState === RESPONSE_UI_STATES.WORKING) workingAssistant.cancel();
                     return;
                 }
@@ -94581,7 +94683,7 @@
                 setWaiting(true, originAgent);
 
                 // Use a fallback message if text is empty but image is present
-                const messageText = text || 'What can you see in this screenshot?';
+                const messageText = text || (modelAttachments.length ? '' : 'What can you see in this screenshot?');
 
                 let response = '';
                 let toolCalls = [];
@@ -94598,6 +94700,7 @@
                 let streamTrace = null;
                 let packagingTurn = null;
                 let packagingTerminal = null;
+                let modelSendSucceeded = false;
                 try {
                     if (packagingRequested) {
                         if (_packagingActiveTurn || _packagingReleasePromise) throw new Error('A packaging turn is already active.');
@@ -94659,7 +94762,11 @@
                     // POST to /api/agent/chat
                     // Wait for any in-flight cross-agent summarize to finish
                     await crossContextReady;
-                    if (originSession.requestId !== turnId) return; // stale after await
+                    _modelChatAttachments.sync();
+                    if (originSession.requestId !== turnId || modelAttachmentContextChanged()) {
+                        setWaiting(false, originAgent);
+                        return;
+                    } // stale after await
                     if (packagingTurn?.cancelled) throw Object.assign(new Error('Packaging request cancelled'), { streamCancelled: true });
                     let payload;
                     if (retry) {
@@ -94669,6 +94776,7 @@
                     } else {
                         payload = {
                             message: messageText,
+                            ...(modelAttachments.length ? { attachments: modelAttachments } : {}),
                             history: _serverMemoryAuthoritative()
                                 ? [] : historyForApi,
                             inspection_context: inspCtx,
@@ -94772,6 +94880,9 @@
                         data = await res.json();
                     }
                         terminalResponseData = data;
+                        if (originFacilityApp && Array.isArray(data.registeredAssets) && data.registeredAssets.length) {
+                            void _trainCheckFacilityAssetCatalog(originFacilityApp, true);
+                        }
                         if (packagingTurn) {
                             packagingTerminal = data.codex_packaging;
                             if (data.tool_source !== 'codex_packaging' || !packagingTerminal) {
@@ -95159,6 +95270,7 @@
                         if (data._isNarration) {
                             response = data;
                         }
+                        modelSendSucceeded = true;
                 } catch (err) {
                     if (packagingRequested) {
                         err.packagingTurn = true;
@@ -95268,6 +95380,10 @@
                     }
                     }
                 } finally {
+                    // A registered asset survives a failed or cancelled reply. Always
+                    // recheck the version, independently of registeredAssets receipts.
+                    if (originFacilityApp) void _trainCheckFacilityAssetCatalog(originFacilityApp);
+                    if (modelSendSucceeded) _modelChatAttachments.sent(modelAttachmentSnapshot);
                     if (packagingTurn) {
                         try {
                             await window.InspectorProPackagingHost.finish(packagingTerminal);
@@ -96592,6 +96708,7 @@
             }
 
             function refreshAgentContextBar() {
+                _modelChatAttachments?.sync();
                 if (!agentContextShell) return;
                 facilityEditModeSelect.hidden = currentAgent !== 'deviation-analyst' || !_trainIsFacilityLayoutMode();
                 const mode = _agentContextModeLabel();

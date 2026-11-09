@@ -716,6 +716,64 @@
             return result;
         }
 
+        // Raw uploads use XHR when available so the composer gets actual byte progress.
+        // The fetch fallback keeps the transport injectable in non-browser consumers.
+        async function importModel(file, requestOptions) {
+            if (!file || typeof file.size !== 'number' || !/\.(glb|zip)$/i.test(file.name || '')) {
+                throw new TypeError('Choose a GLB or ZIP model.');
+            }
+            if (file.size > 128 * 1024 * 1024) throw new TypeError('The model is larger than 128 MiB.');
+            const config = requestOptions || {};
+            const uploadHeaders = Object.assign({}, headers, {
+                'Content-Type': 'application/octet-stream',
+                'X-InspectorPro-Session': sessionId,
+                'X-Model-Name': encodeURIComponent(String(file.name || 'model.glb').slice(0, 240)),
+            });
+            const Xhr = options.XMLHttpRequest || (typeof XMLHttpRequest === 'function' ? XMLHttpRequest : null);
+            if (Xhr && typeof config.onProgress === 'function') {
+                return new Promise(function (resolve, reject) {
+                    const xhr = new Xhr();
+                    const abort = function () { xhr.abort(); };
+                    const finish = function (error, result) {
+                        if (config.signal) config.signal.removeEventListener('abort', abort);
+                        if (error) reject(error); else resolve(result);
+                    };
+                    xhr.open('POST', layoutUrl + '/model-imports');
+                    xhr.withCredentials = options.credentials === 'include';
+                    Object.keys(uploadHeaders).forEach(key => xhr.setRequestHeader(key, uploadHeaders[key]));
+                    xhr.upload.onprogress = function (event) {
+                        if (event.lengthComputable && event.total) config.onProgress(event.loaded / event.total * 100);
+                    };
+                    xhr.onload = function () {
+                        let result = {};
+                        try { result = JSON.parse(xhr.responseText); } catch (_) { /* Report invalid records in the chip. */ }
+                        finish(xhr.status >= 200 && xhr.status < 300 ? null : errorFromResponse(xhr, result), result);
+                    };
+                    xhr.onerror = function () { finish(new Error('The model upload could not reach the server.')); };
+                    xhr.onabort = function () { finish(Object.assign(new Error('Model upload cancelled.'), { name: 'AbortError' })); };
+                    if (config.signal) {
+                        if (config.signal.aborted) { finish(Object.assign(new Error('Model upload cancelled.'), { name: 'AbortError' })); return; }
+                        config.signal.addEventListener('abort', abort, { once: true });
+                    }
+                    xhr.send(file);
+                });
+            }
+            const response = await fetchImpl(layoutUrl + '/model-imports', {
+                method: 'POST', cache: 'no-store', credentials: options.credentials || 'same-origin',
+                headers: uploadHeaders, body: file, signal: config.signal,
+            });
+            const result = await response.json().catch(function () { return {}; });
+            if (!response.ok) throw errorFromResponse(response, result);
+            if (config.onProgress) config.onProgress(100);
+            return result;
+        }
+
+        function modelImportPath(importId, suffix) {
+            const id = String(importId || '');
+            if (!/^mi-[a-f0-9]{24}$/.test(id)) throw new TypeError('A model import id is required.');
+            return '/model-imports/' + id + (suffix || '');
+        }
+
         function floorPlanPath(importId, suffix) {
             const id = String(importId || '');
             if (!/^fpi-[a-f0-9]{32}$/.test(id)) throw new TypeError('A floor-plan import id is required.');
@@ -1400,6 +1458,13 @@
             },
             importDecalImage: importDecalImage,
             importFloorPlan: importFloorPlan,
+            importModel: importModel,
+            getModelImport: function (importId, requestOptions) {
+                return request(modelImportPath(importId), 'GET', undefined, requestOptions);
+            },
+            retryModelImport: function (importId, requestOptions) {
+                return request(modelImportPath(importId, '/retry'), 'POST', undefined, requestOptions);
+            },
             floorPlanGeometry: function (importId, requestOptions) {
                 return request(floorPlanPath(importId, '/geometry'), 'GET', undefined, requestOptions);
             },

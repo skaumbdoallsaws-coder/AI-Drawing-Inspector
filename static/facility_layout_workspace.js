@@ -1012,6 +1012,7 @@
                     return cleanString(value, '');
                 }).filter(Boolean) : [],
                 thumbnailUrl: thumbnailUrl,
+                attribution: clone(record.attribution || source.attribution || definition.attribution || null),
                 width: Number.isFinite(width) && width > 0 ? width : 1.2,
                 depth: Number.isFinite(depth) && depth > 0 ? depth : 0.8,
                 height: Number.isFinite(height) && height > 0 ? height : 1,
@@ -2653,6 +2654,10 @@
         this.assetCatalogLookups = new Set();
         this.assetCatalogRefresh = null;
         this.assetCatalogRefreshAgain = false;
+        this.assetCatalogVersion = undefined;
+        this.assetCatalogRequestSequence = 0;
+        this.assetCatalogVersionCheck = null;
+        this.assetCatalogVersionCheckAgain = false;
         this.capabilities = Object.assign({
             assetLibrary: true,
             manualAuthoring: true,
@@ -12730,6 +12735,14 @@
                 className: 'ip-flw-asset-card-description',
             }, boundedText(record.description, 110)));
         }
+        if (record.attribution) {
+            const credit = ['title', 'author', 'license'].map(function (key) {
+                return boundedText(record.attribution[key], 300);
+            }).filter(Boolean).join(' | ');
+            if (credit) copy.appendChild(element(this.document, 'small', {
+                className: 'ip-flw-asset-card-credit',
+            }, 'Credit: ' + credit));
+        }
         append(toggle, visual, copy);
         if (selected) {
             toggle.appendChild(element(this.document, 'span', {
@@ -18443,6 +18456,45 @@
         this._renderAssetBrowser();
     };
 
+    // The version is checked even after a failed/interrupted turn: a tool may have
+    // published an asset before the reply failed. The response already contains
+    // the catalog, so consume it without a second download when it changed.
+    Workspace.prototype.refreshAssetCatalog = async function (catalog, requestSequence) {
+        if (this.destroyed || (!catalog && !this.assetCatalogLoader)) return false;
+        const sequence = requestSequence === undefined
+            ? (this.assetCatalogRequestSequence = (this.assetCatalogRequestSequence || 0) + 1) : requestSequence;
+        const result = catalog || await this.assetCatalogLoader();
+        if (this.destroyed || sequence !== this.assetCatalogRequestSequence) return false;
+        this.setAssetCatalog(catalogArray(result));
+        if (result && result.catalogVersion !== undefined) this.assetCatalogVersion = result.catalogVersion;
+        return true;
+    };
+
+    Workspace.prototype.checkAssetCatalogVersion = function () {
+        if (this.destroyed || !this.assetCatalogLoader) return Promise.resolve(false);
+        if (this.assetCatalogVersionCheck) {
+            this.assetCatalogVersionCheckAgain = true;
+            return this.assetCatalogVersionCheck;
+        }
+        const self = this;
+        this.assetCatalogVersionCheck = Promise.resolve().then(async function () {
+            let changed = false;
+            do {
+                self.assetCatalogVersionCheckAgain = false;
+                const sequence = self.assetCatalogRequestSequence = (self.assetCatalogRequestSequence || 0) + 1;
+                const result = await self.assetCatalogLoader();
+                if (self.destroyed) return false;
+                if (sequence !== self.assetCatalogRequestSequence) continue;
+                if (!result || result.catalogVersion === undefined
+                        || result.catalogVersion !== self.assetCatalogVersion) {
+                    changed = await self.refreshAssetCatalog(result, sequence) || changed;
+                }
+            } while (self.assetCatalogVersionCheckAgain && !self.destroyed);
+            return changed;
+        }).finally(function () { self.assetCatalogVersionCheck = null; });
+        return this.assetCatalogVersionCheck;
+    };
+
     // Assets added while the page is open (Sage's basic shapes, docs/sage-basic-shapes-plan.md BS2): a layout that
     // places an asset this page has not heard of fetches the catalog again, once for each such asset. One fetch at a
     // time; a layout that comes during it is checked again after. A failed fetch is tried again with the next layout.
@@ -18465,10 +18517,8 @@
         unknown.forEach(function (assetId) { this.assetCatalogLookups.add(assetId); }, this);
         const self = this;
         this.assetCatalogRefresh = Promise.resolve().then(function () {
-            return self.assetCatalogLoader();
-        }).then(function (catalog) {
-            if (!self.destroyed && Array.isArray(catalog)) self.setAssetCatalog(catalog);
-        }, function (error) {
+            return self.refreshAssetCatalog();
+        }).catch(function (error) {
             unknown.forEach(function (assetId) { self.assetCatalogLookups.delete(assetId); });
             if (root && root.console && typeof root.console.warn === 'function') {
                 root.console.warn('The asset catalog could not be loaded again:', error);

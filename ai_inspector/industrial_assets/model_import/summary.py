@@ -5,7 +5,7 @@ import numpy as np
 
 from .limits import SUMMARY_BYTES
 from .model import Model
-from .validation import integer, json_bytes, require
+from .validation import clean_text, integer, json_bytes, require
 
 
 def bounds(positions: np.ndarray) -> dict:
@@ -62,9 +62,9 @@ def build_summary(model: Model, *, parts_offset: int = 0, parts_limit: int = 64)
     box = raw_bounds(model)
     size = [high - low for low, high in zip(box["minimum"], box["maximum"])]
     licence = deepcopy(model.licence)
-    licence["excerpt"] = licence["excerpt"][:600]
+    licence["excerpt"] = clean_text(licence["excerpt"], 600)
     for conflict in licence["conflicts"]:
-        conflict["values"] = [v[:80] for v in conflict["values"][:2]]
+        conflict["values"] = [clean_text(v, 80) for v in conflict["values"][:2]]
     summary = {
         "schemaVersion": 1, "name": model.name, "format": model.format, "state": "ready", "refusal": None,
         "sourceBytes": model.source_bytes, "sourceSha256": model.source_sha256,

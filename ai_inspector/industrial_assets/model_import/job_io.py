@@ -22,7 +22,7 @@ def local_directory(value) -> Path:
 
 
 def regular_file(job: Path, name: str) -> Path:
-    require(name in {*OUTPUT_NAMES, "source.bin", "request.json"}, "model_worker_failed")
+    require(name in {*OUTPUT_NAMES, "source.bin", "request.json", "recipe.json", "model.glb", "draft.json", "CREDITS.txt", "parts.jsonl", "manifest.json"}, "model_worker_failed")
     target = job / name
     require(target.resolve().parent == job.resolve(), "model_worker_failed")
     if target.exists() or target.is_symlink():

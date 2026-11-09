@@ -50,7 +50,7 @@ def reference(value, values: list) -> int:
 def clean_text(value, limit: int = 80) -> str:
     if not isinstance(value, str):
         return ""
-    return " ".join("".join(c for c in value if not unicodedata.category(c).startswith("C")).split())[:limit]
+    return " ".join("".join(c for c in value if not unicodedata.category(c).startswith("C")).split())[:limit].rstrip()
 
 
 def _object(pairs):

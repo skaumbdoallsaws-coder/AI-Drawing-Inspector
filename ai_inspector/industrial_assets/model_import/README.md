@@ -144,3 +144,126 @@ The tests load this package without importing the application. Most parsing
 runs in-process; worker startup, actual parsing, dependency failure, timeout,
 cancellation and environment isolation also have real subprocess coverage.
 Windows and POSIX limit probes run only on their respective platforms.
+
+
+## MI0b: recipes and frozen draft output
+
+The public schema is recipe.RECIPE_SCHEMA (Draft 2020-12). MI3 should reuse
+that exact object. normalize_recipe validates the schema's closed objects and
+caps, performs semantic checks, fills defaults, cleans names and rounds numbers
+to 1e-6. It needs only the standard library. The tests compare this contract
+with jsonschema; the worker does not import jsonschema.
+
+Catalog categories are open strings, matching host._private_manifest_specs;
+there is no fixed category enum in that binder. Extra numerical ceilings for
+fields without explicit plan limits: angles -360..360 degrees, translations
+and rectangle coordinates -100..100 m, support heights 0..100 m, added sizes
+0.0001..30 m and radii 0.0001..15 m. Hollow thickness must be positive and
+smaller than both radii and height. The result must have finite positive
+dimensions <=10,000 m and a footprint above the catalog's 1e-9 area tolerance.
+These are schema/validation ceilings, not recommended object sizes.
+
+D11 is implemented in transforms.transform_model. Selectors refer to stable
+source keys and source material/mesh/node names, even after rename/material
+rules. Dropped parts stop matching subsequent selectors. Only indexed vertex
+rows contribute to the prepared solid; unused source vertices are discarded
+before sizing, pivot calculation and copies. Copies retain the original part
+name. Output keys are assigned anew as p0, p1, ... in copy/source order, then
+added parts. Sizes are meters after the global size step.
+
+Hex colours are converted from sRGB to linear RGB, matching primitives.Finish;
+a colour patch replaces the complete factor with that RGB and alpha 1. Other
+omitted material properties retain source values. Source UV transforms have
+already been baked by MI0a and are not written a second time. Original image
+bytes are decoded again after material patches, under all MI0a image budgets,
+so increased texture resolution or a new alpha mask can recover information
+discarded by the inspect cache. PNG is used when actual alpha is retained,
+otherwise metadata-free JPEG at quality 85.
+
+footprint.footprint uses every output part, including overhangs and elevated
+parts. A hull of more than 32 points is enlarged by retaining 28 selected hull
+half-planes and the four bounding-rectangle planes. It remains convex, contains
+the actual hull, and stays within the exact model bounds. Explicit support
+rectangles must be inside those bounds; the exported origin is their centre
+with symmetric minimumX/maximumX/minimumZ/maximumZ bounds and authored evidence.
+
+writer.write_glb emits deterministic GLB bytes, at most 30 MiB and 250,000
+triangles. It preserves each output part as a node, shares identical accessor
+and mesh data, embeds only used base-colour PNG/JPEG images, and marks every
+material with facilityAuthoredFinish and facilityMaterialRole. The material
+role equals the part name. Emission above 1 uses KHR_materials_emissive_strength;
+unlit materials retain KHR_materials_unlit. Source limits of 4096 parts/64
+materials do not apply to *output*: copies may produce 49,160 parts, and
+differently named authored finishes may need more materials. Public summaries
+contain at most 64 material records, with materialsTotal giving the full count.
+
+Worker CLI:
+
+    python -I -S -B worker.py <dependency_root> <job_dir> prepare
+
+Inputs are source.bin, recipe.json (<=32 KiB), and optionally the complete,
+unchanged MI0a cache files (summary.json, cache.json, parts.npz, result.json).
+Without that cache, inspect runs first within the same limited worker. Cache
+source SHA must match source.bin. Output is a new job_dir/output folder:
+
+- model.glb: <=30 MiB, deterministic bytes.
+- draft.json: <=128 KiB, normalized recipe, engine/source/output identities and
+  bounded public fields. The full recipe is metadata, not returned to Sage.
+- parts.jsonl: <=32 MiB, every output part in order, one bounded JSON record
+  {key, name, triangles} per line. This is the future draft paging source.
+- CREDITS.txt: <=16 KiB UTF-8 with LF, factual attribution and changes.
+- manifest.json: written last; fixed filenames, byte sizes and SHA-256 hashes.
+
+prepare.build_draft(source_model, recipe, original_bytes) returns
+(draft_metadata, glb_bytes, prepared_model) for generated-fixture tests and the
+MI0c renderer hook. No numerical output cache is required: MI0c can render the
+returned model in the same worker before publication. Output model.glb can
+exceed the MI0a source scene/JSON budgets, so do not feed a many-part prepared
+GLB back through the source reader with its default limits.
+
+prepare.prepare_summary returns <=48 KiB: draftId, dimensions, triangles,
+partsTotal, a prefix of at most 64 part records, nextPartsOffset, materialsTotal,
+up to 64 materials, surfaces, footprint, up to 20 warnings, attribution, changes.
+Normal inputs include all first 64 parts/materials. Very long escaped Unicode
+metadata can shorten the prefix/material list/warnings to meet the byte cap.
+The complete part ledger is retained. Full draft metadata is bounded separately
+so a near-32-KiB normalized recipe does not consume the public result budget.
+
+Host API (available from runner and prepare_runner):
+
+    prepare_draft(source_path, recipe, out_dir, cancel=None,
+                  dependency_root=None, cache_dir=None, timeout=70)
+    await prepare_draft_async(source_path, recipe, out_dir, cancel=None, ...)
+
+Paths must be absolute, local, and without symlink/junction ancestors.
+dependency_root and cache_dir are trusted host configuration, never recipe
+fields. With no dependency root, the current interpreter's installed numpy
+package location is used without importing it. The host makes a fresh temporary
+job under out_dir's existing parent, copies bounded inputs, runs the isolated
+worker, checks every output hash/size and the draft/part-ledger schema, then
+renames the output into the absent destination. It returns the public summary.
+It never replaces a pre-existing destination. A short-lived exclusive sibling
+.prepare-lock serializes cooperating attempts at that destination; MI1 owns
+crash recovery, scope, quotas and admission. A host-process crash can leave a
+job/lock for MI1 reconciliation. Successful and failed regular calls remove
+their temporary job/lock. Account for source plus the MI0a cache, draft output
+and metadata when reserving job capacity; do not reserve only the public JSON.
+
+Both tasks wait in 0.2-second process steps, kill and join on cancellation or
+timeout, and map stable worker exits. Async cancellation waits for the owning
+thread and removes even a completed output whose delivery lost the race.
+Pre-existing files and destinations are preserved. Resource limits still
+precede all third-party imports. The host imports no numerical/image modules;
+MI1 translates ModelImportError to FacilityLayoutError.
+
+identity.asset_identity(draft, optional_catalog_entry) returns assetId, the
+full identity SHA and the complete D6 identity object for MI2 conflict checks.
+Artifact paths and assetId are excluded from catalog semantics. Draft IDs are
+deterministic md-<24 hex> prefixes of the same complete identity digest.
+credits_text and changes_text are deterministic; the bounded changes string
+reserves space for changesNote. Attribution overrides require statedBy=user;
+whether the user actually stated them is the MI3 conversation policy.
+
+No preview, import store, catalog registration, Sage tool or frontend behavior
+is introduced by MI0b. primitives.verify and artifacts.inspect_glb are used by
+host-side tests; MI2 must call them before library registration.

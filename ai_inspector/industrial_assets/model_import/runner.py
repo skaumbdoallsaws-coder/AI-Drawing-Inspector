@@ -53,31 +53,17 @@ def _result(job: Path) -> dict:
         raise ModelImportError("model_worker_failed") from None
 
 
-def run_inspect(job_dir: str | Path, dependency_root: str | Path, *,
-                cancel_event: threading.Event | None = None, timeout: float = WALL_SECONDS) -> dict:
-    """Inspect source.bin in a fresh caller-owned job directory.
-
-    dependency_root comes from trusted host configuration (later glb_runtime().
-    dependency_root), never the uploaded model. Successful caches remain for MI0b.
-    Failed/cancelled output files are removed; the caller owns source/job cleanup.
-    """
+def _launch(job, dependency_root, task, event, timeout):
+    """One process and one wall clock for either task; always kill and join on failure."""
     if not 0 < timeout <= WALL_SECONDS:
         raise ValueError("Worker timeout must be positive and at most 70 seconds")
-    event = cancel_event if cancel_event is not None else threading.Event()
     if event.is_set():
         raise ModelImportError("model_cancelled")
-    try:
-        job = local_directory(job_dir)
-        dependency_root = local_directory(dependency_root)
-        require(regular_file(job, "source.bin").is_file(), "model_worker_failed")
-        require(not any(regular_file(job, name).exists() for name in OUTPUT_NAMES), "model_worker_failed")
-    except OSError:
-        raise ModelImportError("model_worker_failed") from None
-    process, success = None, False
+    process = None
     try:
         started = time.monotonic()
         process = subprocess.Popen(
-            [sys.executable, "-I", "-S", "-B", str(_WORKER), str(dependency_root), str(job), "inspect"],
+            [sys.executable, "-I", "-S", "-B", str(_WORKER), str(dependency_root), str(job), task],
             cwd=job, env=worker_environment(job, sys.executable), stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
@@ -100,45 +86,89 @@ def run_inspect(job_dir: str | Path, dependency_root: str | Path, *,
             raise ModelImportError("model_runtime_unavailable")
         if code == 2:
             try:
-                error = parse_json(bounded_read(job, "error.json", 2048), 2048)
+                error = parse_json(bounded_read(job, "error.json", 8192), 8192)
                 require(isinstance(error.get("code"), str) and error["code"] in MESSAGES, "model_worker_failed")
-                refusal = ModelImportError(error["code"])
+                refusal = ModelImportError(error["code"], error.get("details"))
                 require(error == refusal.to_dict(), "model_worker_failed")
-            except (ModelImportError, OSError):
+            except (ModelImportError, OSError, ValueError):
                 raise ModelImportError("model_worker_failed") from None
             raise refusal
         require(code == 0, "model_worker_failed")
-        result = _result(job)
-        if event.is_set():
-            raise ModelImportError("model_cancelled")
-        success = True
-        return result
     except OSError:
         raise ModelImportError("model_worker_failed") from None
     finally:
         if process is not None:
             _join(process)
+
+
+def run_inspect(job_dir: str | Path, dependency_root: str | Path, *,
+                cancel_event: threading.Event | None = None, timeout: float = WALL_SECONDS,
+                _owned: threading.Event | None = None) -> dict:
+    """Inspect source.bin in a fresh caller-owned job; retain successful MI0a caches."""
+    event = cancel_event if cancel_event is not None else threading.Event()
+    if event.is_set():
+        raise ModelImportError("model_cancelled")
+    try:
+        job = local_directory(job_dir)
+        dependency_root = local_directory(dependency_root)
+        require(regular_file(job, "source.bin").is_file(), "model_worker_failed")
+        require(not any(regular_file(job, name).exists() for name in OUTPUT_NAMES), "model_worker_failed")
+    except OSError:
+        raise ModelImportError("model_worker_failed") from None
+    if _owned is not None:
+        _owned.set()
+    success = False
+    try:
+        _launch(job, dependency_root, "inspect", event, timeout)
+        result = _result(job)
+        if event.is_set():
+            raise ModelImportError("model_cancelled")
+        success = True
+        return result
+    finally:
         if not success:
             _clean_outputs(job)
 
 
+async def _cancel_and_join(work, event):
+    event.set()
+    while not work.done():
+        try:
+            await asyncio.wait({work})
+        except asyncio.CancelledError:
+            continue
+        except Exception:
+            break
+    if work.done() and not work.cancelled():
+        work.exception()
+
+
 async def run_inspect_async(job_dir: str | Path, dependency_root: str | Path, *,
                             cancel_event: threading.Event | None = None, timeout: float = WALL_SECONDS) -> dict:
-    """Propagate task cancellation to the synchronous runner, then join its thread."""
+    """Cancellation owns cleanup even when it wins delivery of a successful result."""
     event = cancel_event if cancel_event is not None else threading.Event()
+    owned = threading.Event()
     work = asyncio.create_task(asyncio.to_thread(run_inspect, job_dir, dependency_root,
-                                               cancel_event=event, timeout=timeout))
+                                               cancel_event=event, timeout=timeout, _owned=owned))
     try:
-        return await asyncio.shield(work)
+        await asyncio.wait({work})
+        return work.result()
     except asyncio.CancelledError:
-        event.set()
-        while not work.done():
+        await _cancel_and_join(work, event)
+        if owned.is_set():
             try:
-                await asyncio.shield(work)
-            except asyncio.CancelledError:
-                continue
-            except Exception:
-                break
-        if work.done() and not work.cancelled():
-            work.exception()
+                _clean_outputs(local_directory(job_dir))
+            except (OSError, ModelImportError):
+                pass
         raise
+
+
+def prepare_draft(source_path, recipe, out_dir, cancel=None, **options):
+    """Public convenience entry; see prepare_runner for runtime/cache options."""
+    from .prepare_runner import prepare_draft as prepare
+    return prepare(source_path, recipe, out_dir, cancel, **options)
+
+
+async def prepare_draft_async(source_path, recipe, out_dir, cancel=None, **options):
+    from .prepare_runner import prepare_draft_async as prepare
+    return await prepare(source_path, recipe, out_dir, cancel, **options)

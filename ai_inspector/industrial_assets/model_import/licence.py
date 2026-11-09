@@ -41,8 +41,17 @@ def license_class(value: str) -> str:
     return "other" if text.strip() else "unknown"
 
 
-def _text_fields(text: str) -> dict:
-    result = {}
+def _signature(value: str):
+    category = license_class(value)
+    if category in {"other", "unknown"}:
+        return category, value.casefold()
+    versions = tuple(sorted(set(re.findall(r"\b[1-4]\.0\b", value))))
+    return category, versions
+
+
+def _text_fields(text: str) -> list[tuple[str, str]]:
+    # Assertions are a sequence: repeated fields must never overwrite evidence.
+    result = []
     for line in text.splitlines():
         match = re.match(r"^\s*[*#-]*\s*([^:]{1,40}):\s*(.+)$", line)
         if not match:
@@ -50,55 +59,63 @@ def _text_fields(text: str) -> dict:
         field = _FIELDS.get(match.group(1).strip().casefold())
         if not field:
             continue
-        value = clean_text(match.group(2).strip().strip('"'), 300)
-        if field == "author":
-            urls = _URL.findall(value)
-            if urls:
-                result["authorUrl"] = https_url(urls[0])
-                value = clean_text(value.replace(urls[0], "").rstrip(" ()"), 300)
-        if field == "license":
-            urls = _URL.findall(value)
-            if urls:
-                result["licenseUrl"] = https_url(urls[0])
-        result[field] = https_url(value) if field.endswith("Url") else value
+        raw_value = match.group(2).strip().strip('"')
+        value = clean_text(raw_value, len(raw_value))
+        urls = _URL.findall(value)
+        if field in {"author", "license"}:
+            result.extend((field + "Url", https_url(url)) for url in urls)
+            # Classify the written label independently of any embedded URL.
+            for url in urls:
+                value = value.replace(url, "")
+            value = clean_text(value.rstrip(" ()"), len(value))
+        result.append((field, https_url(value) if field.endswith("Url") else
+                       value if field == "license" else clean_text(value, 300)))
     return result
 
 
 def parse_licence(texts: list[tuple[str, str]], asset: dict) -> dict:
-    """Parse Sketchfab's '* title/source/author/license type:' format and glTF facts."""
-    records = [_text_fields(text) for _, text in texts]
+    """Parse Sketchfab facts, retaining contradictory labels and URLs independently."""
+    assertions = [item for _, text in texts for item in _text_fields(text)]
     extras = asset.get("extras")
     if isinstance(extras, dict):
-        fields = {}
         for source, target in (("title", "title"), ("author", "author"), ("license", "license"),
                                ("source", "sourceUrl"), ("authorUrl", "authorUrl"), ("licenseUrl", "licenseUrl")):
             value = clean_text(extras.get(source), 300)
             if value:
-                fields[target] = https_url(value) if target.endswith("Url") else value
-        if fields:
-            records.append(fields)
-    copyright_text = clean_text(asset.get("copyright"), 2048)
+                if target == "license":
+                    assertions.extend(_text_fields("License: " + extras[source]))
+                else:
+                    assertions.append((target, https_url(value) if target.endswith("Url") else value))
+    copyright_text = asset.get("copyright") if isinstance(asset.get("copyright"), str) else ""
     if copyright_text:
         fields = _text_fields(copyright_text)
-        if license_class(copyright_text) not in {"other", "unknown"}:
-            fields.setdefault("license", clean_text(copyright_text, 300))
-        records.append(fields)
+        assertions.extend(fields)
+        if (not any(k in {"license", "licenseUrl"} for k, _ in fields)
+                and license_class(copyright_text) not in {"other", "unknown"}):
+            assertions.extend(_text_fields("License: " + copyright_text))
     result = {key: "" for key in ("title", "author", "authorUrl", "sourceUrl", "license", "licenseUrl")}
     conflicts = []
     for key in result:
-        values = list(dict.fromkeys(r[key] for r in records if r.get(key)))
+        values = list(dict.fromkeys(v for k, v in assertions if k == key and v))
         if values:
-            result[key] = values[0]
-        # Equivalent license spellings/URLs do not manufacture a conflict.
-        distinct = {license_class(v) for v in values} if key == "license" else set(values)
+            result[key] = clean_text(values[0], 300)
+        distinct = {_signature(v) for v in values} if key == "license" else set(values)
         if len(distinct) > 1:
-            conflicts.append({"field": key, "values": values[:4]})
-    classes = {license_class(r.get("license", "") or r.get("licenseUrl", "")) for r in records
-               if r.get("license") or r.get("licenseUrl")}
-    if len(classes) > 1 and not any(c["field"] == "license" for c in conflicts):
-        conflicts.append({"field": "license", "values": sorted(classes)})
+            shown = values[:3] + values[-1:] if len(values) > 4 else values
+            conflicts.append({"field": key, "values": [clean_text(v, 300) for v in shown]})
+    evidence = list(dict.fromkeys(v for k, v in assertions if k in {"license", "licenseUrl"} and v))
+    classes = {license_class(v) for v in evidence}
+    versions = {version for value in evidence for version in re.findall(r"\b[1-4]\.0\b", value)}
+    if len(classes) > 1 or len(versions) > 1:
+        # Representatives retain independent label/URL contradictions within the cap.
+        representatives = {}
+        for value in evidence:
+            representatives.setdefault(_signature(value), value)
+        conflicts = [c for c in conflicts if c["field"] != "license"]
+        conflicts.append({"field": "license",
+                          "values": [clean_text(v, 300) for v in list(representatives.values())[:4]]})
     result["class"] = "unknown" if conflicts or not classes else next(iter(classes))
     excerpt = clean_text(" ".join(text for _, text in texts) + " " + copyright_text, 2048)
-    result["excerpt"] = excerpt.encode("utf-8")[:2048].decode("utf-8", errors="ignore")
+    result["excerpt"] = clean_text(excerpt.encode("utf-8")[:2048].decode("utf-8", errors="ignore"), 2048)
     result["conflicts"] = conflicts
     return result

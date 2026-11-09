@@ -1,4 +1,4 @@
-"""Isolated CLI: python -I -S -B worker.py <dependency_root> <job_dir> inspect.
+"""Isolated CLI: python -I -S -B worker.py <dependency_root> <job_dir> inspect|prepare.
 
 Only stdlib imports precede limits. No app package or site startup is executed.
 """
@@ -73,7 +73,7 @@ def main(argv=None) -> int:
     if not limit_resources():
         return 4
     argv = sys.argv[1:] if argv is None else argv
-    if len(argv) != 3 or argv[2] != "inspect":
+    if len(argv) != 3 or argv[2] not in {"inspect", "prepare"}:
         return 1
     dependencies, job = Path(argv[0]), Path(argv[1])
     if not dependencies.is_absolute() or not job.is_absolute():
@@ -92,7 +92,11 @@ def main(argv=None) -> int:
         # Append directly: no .pth, sitecustomize, PYTHONPATH or cwd lookup.
         sys.path.append(str(dependencies))
         task = importlib.import_module(".worker_task", spec.name)
-        task.execute_inspect(job)
+        if argv[2] == "inspect":
+            task.execute_inspect(job)
+        else:
+            prepare = importlib.import_module(".prepare", spec.name)
+            prepare.execute_prepare(job)
     except ImportError:
         return 3
     except module.ModelImportError as error:

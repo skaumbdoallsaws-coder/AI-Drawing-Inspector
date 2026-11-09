@@ -1,0 +1,23 @@
+{
+  "trackedPrerequisites": {
+    "ai_inspector/assembly_knowledge/documentation_assembly_registry.json": false,
+    "docs/operations-manual/source-register.json": false,
+    "docs/operations-manual/evidence-register.json": false,
+    "docs/operations-manual/mmle-50d-prototype-plan.example.json": false,
+    "docs/operations-manual/safety-symbol-register.json": false,
+    "docs/specification-sheet/profiles/mmle-50d.json": false
+  },
+  "mmleGoldenTracked": true,
+  "fixtures": {
+    "parts": "tests/test_parts_manual.py::_assembly_profile (synthetic manual-fixture)",
+    "specification": "same synthetic assembly; generic open-slot compiler, no reviewed MMLE claims",
+    "inspection": "tests/test_inspection_sheet.py::_document (synthetic ASM-1)",
+    "table": "synthetic cited table; scene API and operations _edited_block only"
+  },
+  "notBuildableFromTrackedInputsAlone": {
+    "tricycle": "No tracked tricycle assembly extraction/model found; test scene labels are not CAD data.",
+    "operations_and_maintenance_manual": "MMLE registry/profile/model and evidence JSON are not tracked.",
+    "work_instructions": "MMLE assembly and process-map evidence package are not tracked.",
+    "reviewed_mmle_specification": "Golden text alone cannot reconstruct evidence/profile/CAD inputs."
+  }
+}

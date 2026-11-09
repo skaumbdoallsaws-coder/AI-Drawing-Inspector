@@ -1,0 +1,1150 @@
+{
+  "apiLayer": "server.app via TestClient; synthetic captures, no browser/live CAD proof",
+  "fixtureKind": "authorized_ignored_local_mmle_inputs",
+  "inputCount": 148,
+  "inputsSha256": "4baa964400e708eb74d530343c3141da7dbd491e2ac1514072fbffe68962e6b2",
+  "inputsUnchanged": true,
+  "operations": {
+    "before": "3dac06efcfef878d97429e5d3ed7f1600a8d337e84d139491774843f7f81ae00",
+    "citationDefect": {
+      "before": {
+        "cells": [
+          "Rated capacity",
+          "1,100 lb"
+        ],
+        "claimCitations": [
+          {
+            "authority": "OEM_CURRENT",
+            "sourceId": "SRC-OEM-MMLE-WEB-2026",
+            "title": "Lift Products Maxx-Mini Electric Mobile Lift product page",
+            "url": "https://www.liftproducts.com/liftcarts/mmle.html"
+          }
+        ],
+        "evidenceClaimIds": [
+          "CLM-SPEC-001",
+          "CLM-SPEC-002",
+          "CLM-SPEC-003",
+          "CLM-SPEC-004",
+          "CLM-SPEC-005",
+          "CLM-SPEC-006",
+          "CLM-ELECTRICAL-001",
+          "CLM-ELECTRICAL-002",
+          "CLM-RUNNING-001"
+        ],
+        "rowKeys": [
+          "cells"
+        ]
+      },
+      "blockId": "spec-table-1",
+      "changedValueKeepsBlockClaimIds": true,
+      "changedValueKeepsCitationAuthorities": true,
+      "claimId": "CLM-SPEC-001",
+      "compiledAfter": {
+        "cells": [
+          "Rated capacity",
+          "1,100 lb"
+        ],
+        "claimCitations": [
+          {
+            "authority": "OEM_CURRENT",
+            "sourceId": "SRC-OEM-MMLE-WEB-2026",
+            "title": "Lift Products Maxx-Mini Electric Mobile Lift product page",
+            "url": "https://www.liftproducts.com/liftcarts/mmle.html"
+          }
+        ],
+        "evidenceClaimIds": [
+          "CLM-SPEC-001",
+          "CLM-SPEC-002",
+          "CLM-SPEC-003",
+          "CLM-SPEC-004",
+          "CLM-SPEC-005",
+          "CLM-SPEC-006",
+          "CLM-ELECTRICAL-001",
+          "CLM-ELECTRICAL-002",
+          "CLM-RUNNING-001"
+        ],
+        "rowKeys": [
+          "cells"
+        ]
+      },
+      "compiledBlockKeepsCapacityClaim": true,
+      "effectiveAfter": {
+        "cells": [
+          "Rated capacity",
+          "1,000 lb"
+        ],
+        "claimCitations": [
+          {
+            "authority": "OEM_CURRENT",
+            "sourceId": "SRC-OEM-MMLE-WEB-2026",
+            "title": "Lift Products Maxx-Mini Electric Mobile Lift product page",
+            "url": "https://www.liftproducts.com/liftcarts/mmle.html"
+          }
+        ],
+        "evidenceClaimIds": [
+          "CLM-SPEC-001",
+          "CLM-SPEC-002",
+          "CLM-SPEC-003",
+          "CLM-SPEC-004",
+          "CLM-SPEC-005",
+          "CLM-SPEC-006",
+          "CLM-ELECTRICAL-001",
+          "CLM-ELECTRICAL-002",
+          "CLM-RUNNING-001"
+        ],
+        "rowKeys": [
+          "cells"
+        ]
+      },
+      "exports": {
+        "before": {
+          "docx": {
+            "rowPresent": true,
+            "valuePresent": true
+          },
+          "pdf": {
+            "rowPageNumbers": [
+              10
+            ],
+            "valuePageNumbers": [
+              6,
+              10
+            ]
+          },
+          "sourceRegister": [
+            {
+              "authority": "OEM_CURRENT",
+              "blockId": "sources-table-1",
+              "cells": [
+                "Lift Products Maxx-Mini Electric Mobile Lift product page",
+                "Current manufacturer source; cited by 15 claims; involved in 4 blocking conflicts: battery and charging configuration, parking brake configuration, and 2 more"
+              ],
+              "docxRowPresent": true,
+              "pageId": "page-sources-1",
+              "pdfPageNumbers": [
+                32
+              ],
+              "sourceId": "SRC-OEM-MMLE-WEB-2026"
+            }
+          ]
+        },
+        "edited": {
+          "docx": {
+            "rowPresent": true,
+            "valuePresent": true
+          },
+          "pdf": {
+            "rowPageNumbers": [
+              10
+            ],
+            "valuePageNumbers": [
+              10
+            ]
+          },
+          "sourceRegister": [
+            {
+              "authority": "OEM_CURRENT",
+              "blockId": "sources-table-1",
+              "cells": [
+                "Lift Products Maxx-Mini Electric Mobile Lift product page",
+                "Current manufacturer source; cited by 15 claims; involved in 4 blocking conflicts: battery and charging configuration, parking brake configuration, and 2 more"
+              ],
+              "docxRowPresent": true,
+              "pageId": "page-sources-1",
+              "pdfPageNumbers": [
+                32
+              ],
+              "sourceId": "SRC-OEM-MMLE-WEB-2026"
+            }
+          ]
+        }
+      },
+      "pageId": "page-specifications-1",
+      "targetId": "spec-table-1.r0.c1"
+    },
+    "edited": "372751a7cb273e936f360a88085680a5fe8f13c9d755c766c2359bc3e74fd84c",
+    "exports": {
+      "before": {
+        "docx": {
+          "characters": 29311,
+          "paragraphs": 468,
+          "textSha256": "b6005ae390d7197ae435e711c144a56dd79938159adb28c787426cff01ca7bed"
+        },
+        "pdf": {
+          "pages": [
+            {
+              "characters": 154,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "d68b33b893bdbd09ee11d19b403ee8b5772512cf463193119bcd434672ae38e8"
+            },
+            {
+              "characters": 601,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "eabf96d16b44f16697304ac41ae3878e1151ed1a508cdda1b1d92c9ff5fc9c14"
+            },
+            {
+              "characters": 662,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "a74de932fe85b6ae8b9111c8877af068021c2653d026858f95c6a3b26fb7777a"
+            },
+            {
+              "characters": 1269,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "18234b12de6521c20a103916b03d4ae2f6f63bc352567ae7e75ef32ed880f63d"
+            },
+            {
+              "characters": 821,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "033cea2896c6cb5db2df1e3f88a7df6db98007eab8b3bfdf0ab5f86ea90f5a40"
+            },
+            {
+              "characters": 954,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "92eec0e4f7728ba303f2cb04eff79fbb98ff42703e699244e9840b91f85361d0"
+            },
+            {
+              "characters": 1275,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "79950898160694d3503a9100dd6be84d795e9fbfd62aa75f90906463aac38dbc"
+            },
+            {
+              "characters": 453,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "0f398066bfbb2e09852cd98eb4b70ee6123b4c433bd75603112cadd6cef52bbe"
+            },
+            {
+              "characters": 1374,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "bb64226b53d9a1532c8f48cac71b6a49c580e2f8929bcf082f7801b5b17452b5"
+            },
+            {
+              "characters": 686,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "302ea4c15351c558f015f2b2cd661813dd681e4994952ac6d5b4432646cf2ea5"
+            },
+            {
+              "characters": 993,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "57a077c69e62e31e4f3b2dcf58191aaeb142e67c06a0f41e5065864ebe48bd4f"
+            },
+            {
+              "characters": 608,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "9b3569d2c2bb99cab6d4430a566f14084a95f29b9f39acd9a652a695aa737ba1"
+            },
+            {
+              "characters": 1082,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "e6b8ceb45fbae13af706f9a3b44ac4b905283f04896000c060f490da96dd687b"
+            },
+            {
+              "characters": 1410,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "ae805f5d72474cf7d6327b561bbc080f0f559871a1b69033efaf84ee1af1935b"
+            },
+            {
+              "characters": 2028,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "98634e4cbd6eda23b9eb9ccc60fb0ac6fea2eca525f999c75ddf06026394150a"
+            },
+            {
+              "characters": 1483,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "73a443ad117d98e091d4c2a256441f17c07ad5f4433166ff739b6d6c07738b8a"
+            },
+            {
+              "characters": 923,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "ea5770bfd23fe0df6b0662b64af9b4cb5374e95bb72d8827f1b8591bc8044e39"
+            },
+            {
+              "characters": 1250,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "28dd5587c5ee9c33e59c55d6771395641f38dea37acccea89d7392bd2c282ac3"
+            },
+            {
+              "characters": 812,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "5d1f0a29229d6521b03a0fd633ee860ac80715a9569888270ed6d1e74ae4f9e2"
+            },
+            {
+              "characters": 1468,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "8ccc97125ca8c65314fecb4fcb7b4b3425af61e20e8651844558f65d6e39f25c"
+            },
+            {
+              "characters": 1283,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "581f5dbe4da42b5bf6dce35b67e2a23220ef31dab4f20b9076d83525cfd943ce"
+            },
+            {
+              "characters": 1537,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "2f7c35b4ec59d0b329e20aee53e126340b9f0b418253a0abdac68d17da399c27"
+            },
+            {
+              "characters": 848,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "92fcf3d59d6da2dbf9c97ce8b979ebf22273c0d4b84f55c04963fcd0024d6492"
+            },
+            {
+              "characters": 984,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "38c9f3c627a127525fcaf24097f3f31c7f86e2d6b785d971d9d311f91691a4c0"
+            },
+            {
+              "characters": 441,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "bafe4f5506546747306065b6a2bf7118e9ab594d8c1b60aa728266e51c030294"
+            },
+            {
+              "characters": 421,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "2b8320cfc6150aa44aa4c937068e6dac6273a74383e254b039e7ffb07aee2e6c"
+            },
+            {
+              "characters": 493,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "fcc4877bfb483971d05ef694a8eef18d00882a2c8e88cd5727cfe2fff99a7c9b"
+            },
+            {
+              "characters": 1911,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "d007ed46e84826b1cec4837bd6ca2bc57b448b3a4c146aa00cba599560aec59b"
+            },
+            {
+              "characters": 452,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "6a8f8ccb91fe2923b4f9c15a4f4aa05a462ee198c9eea6b6ec5b02f3401d7ecf"
+            },
+            {
+              "characters": 599,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "947cc8d17ceb775240d4bdd0d830a59efb67c74d81f2b4b2befaea24f0a011e1"
+            },
+            {
+              "characters": 941,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "b2192e07696b089f82f3e16d1a840eaa43a8728b28ad469e2b4118ca479bae11"
+            },
+            {
+              "characters": 1762,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "df9d8406d0f6aeb9e3786952c1394302386745d0ac25795a9cba724e1946d946"
+            },
+            {
+              "characters": 653,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "976cdd4810a33aeff8fae9e472ccfbd8c78a0441bd9ae8f3820e9027e6bbd0f6"
+            }
+          ]
+        }
+      },
+      "edited": {
+        "docx": {
+          "characters": 29311,
+          "paragraphs": 468,
+          "textSha256": "8ac7e7b866ba7cfe3e2b3d01ed098070709605674861ccbc7ff07750751b6fd3"
+        },
+        "pdf": {
+          "pages": [
+            {
+              "characters": 154,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "d68b33b893bdbd09ee11d19b403ee8b5772512cf463193119bcd434672ae38e8"
+            },
+            {
+              "characters": 601,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "eabf96d16b44f16697304ac41ae3878e1151ed1a508cdda1b1d92c9ff5fc9c14"
+            },
+            {
+              "characters": 662,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "a74de932fe85b6ae8b9111c8877af068021c2653d026858f95c6a3b26fb7777a"
+            },
+            {
+              "characters": 1269,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "18234b12de6521c20a103916b03d4ae2f6f63bc352567ae7e75ef32ed880f63d"
+            },
+            {
+              "characters": 821,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "033cea2896c6cb5db2df1e3f88a7df6db98007eab8b3bfdf0ab5f86ea90f5a40"
+            },
+            {
+              "characters": 954,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "92eec0e4f7728ba303f2cb04eff79fbb98ff42703e699244e9840b91f85361d0"
+            },
+            {
+              "characters": 1275,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "79950898160694d3503a9100dd6be84d795e9fbfd62aa75f90906463aac38dbc"
+            },
+            {
+              "characters": 453,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "0f398066bfbb2e09852cd98eb4b70ee6123b4c433bd75603112cadd6cef52bbe"
+            },
+            {
+              "characters": 1374,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "bb64226b53d9a1532c8f48cac71b6a49c580e2f8929bcf082f7801b5b17452b5"
+            },
+            {
+              "characters": 686,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "0347ba8648bb8806d4d49cc036bd88512bffb912af44acb2e12791f5ce25867f"
+            },
+            {
+              "characters": 993,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "57a077c69e62e31e4f3b2dcf58191aaeb142e67c06a0f41e5065864ebe48bd4f"
+            },
+            {
+              "characters": 608,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "9b3569d2c2bb99cab6d4430a566f14084a95f29b9f39acd9a652a695aa737ba1"
+            },
+            {
+              "characters": 1082,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "e6b8ceb45fbae13af706f9a3b44ac4b905283f04896000c060f490da96dd687b"
+            },
+            {
+              "characters": 1410,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "ae805f5d72474cf7d6327b561bbc080f0f559871a1b69033efaf84ee1af1935b"
+            },
+            {
+              "characters": 2028,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "98634e4cbd6eda23b9eb9ccc60fb0ac6fea2eca525f999c75ddf06026394150a"
+            },
+            {
+              "characters": 1483,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "73a443ad117d98e091d4c2a256441f17c07ad5f4433166ff739b6d6c07738b8a"
+            },
+            {
+              "characters": 923,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "ea5770bfd23fe0df6b0662b64af9b4cb5374e95bb72d8827f1b8591bc8044e39"
+            },
+            {
+              "characters": 1250,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "28dd5587c5ee9c33e59c55d6771395641f38dea37acccea89d7392bd2c282ac3"
+            },
+            {
+              "characters": 812,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "5d1f0a29229d6521b03a0fd633ee860ac80715a9569888270ed6d1e74ae4f9e2"
+            },
+            {
+              "characters": 1468,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "8ccc97125ca8c65314fecb4fcb7b4b3425af61e20e8651844558f65d6e39f25c"
+            },
+            {
+              "characters": 1283,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "581f5dbe4da42b5bf6dce35b67e2a23220ef31dab4f20b9076d83525cfd943ce"
+            },
+            {
+              "characters": 1537,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "2f7c35b4ec59d0b329e20aee53e126340b9f0b418253a0abdac68d17da399c27"
+            },
+            {
+              "characters": 848,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "92fcf3d59d6da2dbf9c97ce8b979ebf22273c0d4b84f55c04963fcd0024d6492"
+            },
+            {
+              "characters": 984,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "38c9f3c627a127525fcaf24097f3f31c7f86e2d6b785d971d9d311f91691a4c0"
+            },
+            {
+              "characters": 441,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "bafe4f5506546747306065b6a2bf7118e9ab594d8c1b60aa728266e51c030294"
+            },
+            {
+              "characters": 421,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "2b8320cfc6150aa44aa4c937068e6dac6273a74383e254b039e7ffb07aee2e6c"
+            },
+            {
+              "characters": 493,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "fcc4877bfb483971d05ef694a8eef18d00882a2c8e88cd5727cfe2fff99a7c9b"
+            },
+            {
+              "characters": 1911,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "d007ed46e84826b1cec4837bd6ca2bc57b448b3a4c146aa00cba599560aec59b"
+            },
+            {
+              "characters": 452,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "6a8f8ccb91fe2923b4f9c15a4f4aa05a462ee198c9eea6b6ec5b02f3401d7ecf"
+            },
+            {
+              "characters": 599,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "947cc8d17ceb775240d4bdd0d830a59efb67c74d81f2b4b2befaea24f0a011e1"
+            },
+            {
+              "characters": 941,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "b2192e07696b089f82f3e16d1a840eaa43a8728b28ad469e2b4118ca479bae11"
+            },
+            {
+              "characters": 1762,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "df9d8406d0f6aeb9e3786952c1394302386745d0ac25795a9cba724e1946d946"
+            },
+            {
+              "characters": 653,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "976cdd4810a33aeff8fae9e472ccfbd8c78a0441bd9ae8f3820e9027e6bbd0f6"
+            }
+          ]
+        }
+      }
+    },
+    "readDidNotWrite": true,
+    "reopenUnchanged": true,
+    "reopened": "372751a7cb273e936f360a88085680a5fe8f13c9d755c766c2359bc3e74fd84c",
+    "undo": {
+      "canUndoAfterEdit": true,
+      "httpStatus": 200,
+      "redoRestoresScenePages": true,
+      "restoresScenePages": true
+    }
+  },
+  "reviewedSpecification": {
+    "before": "df13253d2389cba8ad7efee97364494fef1f28669229b04c9eb79f4a90fa4b6b",
+    "beforeMatchesTrackedGolden": true,
+    "edited": "11d5897a95fd7ef9fb0cd00d8703f37ff4a0b84df60eef38f93df6aa44776184",
+    "exports": {
+      "before": {
+        "docx": {
+          "characters": 728,
+          "paragraphs": 26,
+          "textSha256": "b084d293d0c665336bac9d0b2bc41105779fe58a2c136abd4a05969046e99f2b"
+        },
+        "pdf": {
+          "pages": [
+            {
+              "characters": 817,
+              "sizePt": [
+                612.0,
+                792.0
+              ],
+              "textSha256": "d1544f49712142be6ee240d3917cf301c30f3d1265e9693afc3df30168c93423"
+            }
+          ]
+        }
+      },
+      "edited": {
+        "docx": {
+          "characters": 728,
+          "paragraphs": 26,
+          "textSha256": "14085bfb934b769142778639ce66713ed13ce16caea9114eebe21b699680eefd"
+        },
+        "pdf": {
+          "pages": [
+            {
+              "characters": 817,
+              "sizePt": [
+                612.0,
+                792.0
+              ],
+              "textSha256": "8e2480c32aab453ed21f15593f1162882088074d0ee057e07dda4507631f6740"
+            }
+          ]
+        }
+      }
+    },
+    "readDidNotWrite": true,
+    "reopenUnchanged": true,
+    "reopened": "11d5897a95fd7ef9fb0cd00d8703f37ff4a0b84df60eef38f93df6aa44776184",
+    "trackedGoldenTextSha256": "d1544f49712142be6ee240d3917cf301c30f3d1265e9693afc3df30168c93423",
+    "undo": {
+      "canUndoAfterEdit": false,
+      "error": "specification_sheet_validation",
+      "httpStatus": 422,
+      "slotValueSurvivesUndoAttempt": true
+    }
+  },
+  "schemaVersion": 1,
+  "status": "captured",
+  "workInstructions": {
+    "before": "0cffceb4032aa5351360bac19f1651accf79bc8cafb6d2b6a31817a421c573da",
+    "edited": "8beac87d8758edbbaff06888b7d700f72ff5f4ffc7f13e08d87ed4d67220cc2e",
+    "exports": {
+      "before": {
+        "docx": {
+          "characters": 24172,
+          "paragraphs": 345,
+          "textSha256": "3ed71fc3512ad7b80e7b0e6f08d06073f35352328254608b2ad456d2ed05b573"
+        },
+        "pdf": {
+          "pages": [
+            {
+              "characters": 218,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "5a5eeb6ebcc65d1520440280281f3029d824b24aa9799eaef02a4bcfae2df42d"
+            },
+            {
+              "characters": 1812,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "34c3b5392a293293af2b1074d1010a7c74861e6fec43ca1b8961cb465c7ea5ca"
+            },
+            {
+              "characters": 1146,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "fc46ea44984e7a314d31b418cf9c11e6b1c1fff275bee16a73b1e4f7a4d55548"
+            },
+            {
+              "characters": 1078,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "b641f4079a3912b26bdece2012a4b2afa65bda9364d3a2bde0d00915efe8e93f"
+            },
+            {
+              "characters": 1639,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "5ffd77983e32350a85be5c296fa8fa3aa725446749bb4db5e7166a733ecd3197"
+            },
+            {
+              "characters": 1813,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "8f999d9e4ae76c45a11bf9a904af58e3041d07a46334a946c0dd96a447de97db"
+            },
+            {
+              "characters": 1837,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "bf0bfe8594376267545fae8d12ed8cf83c4ed2ea704d0e457a78c13b109cf53c"
+            },
+            {
+              "characters": 2239,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "07ea982de4d7c779d8bdc0c4f1cd50513ebb75c169410b6c77adefa5b3bcf867"
+            },
+            {
+              "characters": 2262,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "a9d4f362a51855b8373fcdd11ec38ecd110f374570259d3cb37d563d98db4876"
+            },
+            {
+              "characters": 930,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "33b6311c552ecea1e2f0071e026fc51fc61896ea37432ba8142589a3e1ed76f2"
+            },
+            {
+              "characters": 1119,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "936b67b8fc5f5d773ff22880f01a5247e7584d39fafa3cf80d21e69ff5e871c4"
+            },
+            {
+              "characters": 1076,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "d1c08610d66afc4bb6792e5953d76dab93d57f4155bec6df34fb76882fd629c1"
+            },
+            {
+              "characters": 1259,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "51d7e38e25c973d9ea8f853f8d10d1f767d766c9a159606678609f0fd79a5d67"
+            },
+            {
+              "characters": 966,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "79edfa0c6af4b61344f43a3a99ee17bebfa77c1100c346914e5973c3c8a3fecc"
+            },
+            {
+              "characters": 1107,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "753ecc0f30f5439244a60c2ba8e735ebaab20ef9da3cfa019c878f0240b083fc"
+            },
+            {
+              "characters": 1104,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "e8cd6d4db6ec54cb2345d92c01890dac420f2ec1a25dd5c705c01f7bce237280"
+            },
+            {
+              "characters": 1075,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "97dbdefac32058c1d457d53d86b3a893ad75eaeef8344a5cfb00f972b7110072"
+            },
+            {
+              "characters": 1190,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "0881e2acc77e42dee84b3a9be02c16dde8819c1e0ceebea1eaa7c5fd009b2fef"
+            },
+            {
+              "characters": 1587,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "3d1c19079ceab7568aafefab1bcaacc6ed33f568aee19742624a84c8d9d96878"
+            },
+            {
+              "characters": 1239,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "09630effe2944a3e70b1cbb0214ed8e7099fa875b3154b4505c7d8744671cc53"
+            }
+          ]
+        }
+      },
+      "edited": {
+        "docx": {
+          "characters": 24172,
+          "paragraphs": 345,
+          "textSha256": "3ed71fc3512ad7b80e7b0e6f08d06073f35352328254608b2ad456d2ed05b573"
+        },
+        "pdf": {
+          "pages": [
+            {
+              "characters": 192,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "c806c48b1de1381733b5f9c6056ea902c93ba1746b36ffc8291bdcac461ecbf7"
+            },
+            {
+              "characters": 1812,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "34c3b5392a293293af2b1074d1010a7c74861e6fec43ca1b8961cb465c7ea5ca"
+            },
+            {
+              "characters": 1146,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "fc46ea44984e7a314d31b418cf9c11e6b1c1fff275bee16a73b1e4f7a4d55548"
+            },
+            {
+              "characters": 1078,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "b641f4079a3912b26bdece2012a4b2afa65bda9364d3a2bde0d00915efe8e93f"
+            },
+            {
+              "characters": 1639,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "5ffd77983e32350a85be5c296fa8fa3aa725446749bb4db5e7166a733ecd3197"
+            },
+            {
+              "characters": 1813,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "8f999d9e4ae76c45a11bf9a904af58e3041d07a46334a946c0dd96a447de97db"
+            },
+            {
+              "characters": 1837,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "bf0bfe8594376267545fae8d12ed8cf83c4ed2ea704d0e457a78c13b109cf53c"
+            },
+            {
+              "characters": 2239,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "07ea982de4d7c779d8bdc0c4f1cd50513ebb75c169410b6c77adefa5b3bcf867"
+            },
+            {
+              "characters": 2262,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "a9d4f362a51855b8373fcdd11ec38ecd110f374570259d3cb37d563d98db4876"
+            },
+            {
+              "characters": 930,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "33b6311c552ecea1e2f0071e026fc51fc61896ea37432ba8142589a3e1ed76f2"
+            },
+            {
+              "characters": 1119,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "936b67b8fc5f5d773ff22880f01a5247e7584d39fafa3cf80d21e69ff5e871c4"
+            },
+            {
+              "characters": 1076,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "d1c08610d66afc4bb6792e5953d76dab93d57f4155bec6df34fb76882fd629c1"
+            },
+            {
+              "characters": 1259,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "51d7e38e25c973d9ea8f853f8d10d1f767d766c9a159606678609f0fd79a5d67"
+            },
+            {
+              "characters": 966,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "79edfa0c6af4b61344f43a3a99ee17bebfa77c1100c346914e5973c3c8a3fecc"
+            },
+            {
+              "characters": 1107,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "753ecc0f30f5439244a60c2ba8e735ebaab20ef9da3cfa019c878f0240b083fc"
+            },
+            {
+              "characters": 1104,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "e8cd6d4db6ec54cb2345d92c01890dac420f2ec1a25dd5c705c01f7bce237280"
+            },
+            {
+              "characters": 1075,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "97dbdefac32058c1d457d53d86b3a893ad75eaeef8344a5cfb00f972b7110072"
+            },
+            {
+              "characters": 1190,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "0881e2acc77e42dee84b3a9be02c16dde8819c1e0ceebea1eaa7c5fd009b2fef"
+            },
+            {
+              "characters": 1587,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "3d1c19079ceab7568aafefab1bcaacc6ed33f568aee19742624a84c8d9d96878"
+            },
+            {
+              "characters": 1239,
+              "sizePt": [
+                960.0,
+                540.0
+              ],
+              "textSha256": "09630effe2944a3e70b1cbb0214ed8e7099fa875b3154b4505c7d8744671cc53"
+            }
+          ]
+        }
+      }
+    },
+    "pagesNeedingCaptureAfterTextEdit": [
+      "page-work-instructions-cover"
+    ],
+    "readDidNotWrite": true,
+    "recapturedPageIds": [
+      "page-work-instructions-cover"
+    ],
+    "reopenUnchanged": true,
+    "reopened": "8beac87d8758edbbaff06888b7d700f72ff5f4ffc7f13e08d87ed4d67220cc2e",
+    "textEditExportHttpStatus": 422,
+    "textEditInvalidatesPageCapture": true,
+    "undo": {
+      "canUndoAfterEdit": true,
+      "httpStatus": 200,
+      "redoRestoresScenePages": true,
+      "restoresScenePages": true
+    }
+  }
+}

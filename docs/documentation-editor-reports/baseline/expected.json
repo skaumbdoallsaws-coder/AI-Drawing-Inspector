@@ -1,0 +1,294 @@
+{
+  "apiLayer": "production Python repositories and exporters; no HTTP or live CAD proof",
+  "fixtureKind": "synthetic_tracked_test_data",
+  "inspection": {
+    "before": "4db47c592452a76d6ae532b8083c9a90852c734fc4dcf928c87b149282691b8f",
+    "docx": "unsupported",
+    "edited": "b4ecc2c49358dde2b2b9e54192e5a86d3784ecdb5989fb211b100e51da38d0d6",
+    "pdf": {
+      "before": {
+        "pages": [
+          {
+            "characters": 1186,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "4e5100c313aba43c7e4b48a4ec6abfa19a6481cbe9e89625352c5efada9199f7"
+          },
+          {
+            "characters": 231,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "382bb59a5da7ad43b15504b4a36f8fe35ddbdb0bccb0efdcc250878f6bddff13"
+          },
+          {
+            "characters": 1372,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "bce575d33b1e336f997a5aa80712870460f15fd1251e531b00dd4a94ba30b548"
+          },
+          {
+            "characters": 337,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "44d92692a8b8430b2b3a7fdfed6526ff8422f1ec994e9e969308193ab60782db"
+          }
+        ]
+      },
+      "edited": {
+        "pages": [
+          {
+            "characters": 1178,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "046373b8177ca0e57bcd6ec1eee9750a882557fbc3664d0a0fba9c4ba7671efc"
+          },
+          {
+            "characters": 231,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "f8277e6f4ad187b75b137b5b4e3b7161f5dafc2ef53f790910605741ac856b84"
+          },
+          {
+            "characters": 1372,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "d6044bd85dae63b88c4f1cd4fb1e6cfb9bd7f3def5f41c64f2f643bd8825a4b9"
+          },
+          {
+            "characters": 337,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "a6868c4493c3dcf29ba7456ec3e24ab4e30e3d657dee0e3b97290ec82a7a1827"
+          }
+        ]
+      }
+    },
+    "readDidNotWrite": true,
+    "reopenUnchanged": true,
+    "reopened": "b4ecc2c49358dde2b2b9e54192e5a86d3784ecdb5989fb211b100e51da38d0d6",
+    "undoMethod": false
+  },
+  "inventory": {
+    "fixtures": {
+      "inspection": "tests/test_inspection_sheet.py::_document (synthetic ASM-1)",
+      "parts": "tests/test_parts_manual.py::_assembly_profile (synthetic manual-fixture)",
+      "specification": "same synthetic assembly; generic open-slot compiler, no reviewed MMLE claims",
+      "table": "synthetic cited table; scene API and operations _edited_block only"
+    },
+    "mmleGoldenTracked": true,
+    "notBuildableFromTrackedInputsAlone": {
+      "operations_and_maintenance_manual": "MMLE registry/profile/model and evidence JSON are not tracked.",
+      "reviewed_mmle_specification": "Golden text alone cannot reconstruct evidence/profile/CAD inputs.",
+      "tricycle": "No tracked tricycle assembly extraction/model found; test scene labels are not CAD data.",
+      "work_instructions": "MMLE assembly and process-map evidence package are not tracked."
+    },
+    "trackedPrerequisites": {
+      "ai_inspector/assembly_knowledge/documentation_assembly_registry.json": false,
+      "docs/operations-manual/evidence-register.json": false,
+      "docs/operations-manual/mmle-50d-prototype-plan.example.json": false,
+      "docs/operations-manual/safety-symbol-register.json": false,
+      "docs/operations-manual/source-register.json": false,
+      "docs/specification-sheet/profiles/mmle-50d.json": false
+    }
+  },
+  "parts": {
+    "before": "6a0a8de8a359b17965dc377f6914f1e3a3936a9d7b81a2330df65d4e2a168397",
+    "docx": "unsupported",
+    "edited": "d7c90dea9b21ab6c58f35ed39c83ad01532092e5696a4fdc20c889d25e2456f3",
+    "pdf": {
+      "before": {
+        "pages": [
+          {
+            "characters": 140,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "2acb03b92377845fc732a00b5cd4e0180880ddd3f75cdf472ad9037efd225f96"
+          },
+          {
+            "characters": 477,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "cc4d5e992c3ce73c68f1521a9126761774fb4015cc4abbe2ad351b60faa17d4e"
+          },
+          {
+            "characters": 279,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "33df27ab5b84a2fcc7b27fc9495ae0d59f2ccfe767e088e205b5c572894dbd7c"
+          },
+          {
+            "characters": 279,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "584578c9a8799a240de254c9bb684f30a411fc23691b95e71eb4d20e5c03808f"
+          },
+          {
+            "characters": 296,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "4f42f6db89839464392e9f3dbdbaf895f92ede9540591f0ed9a5487cadc06618"
+          },
+          {
+            "characters": 258,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "c6be4cbc4659e9b57bf050a042e6444f655917ec6bea4f104066a39df287a432"
+          }
+        ]
+      },
+      "edited": {
+        "pages": [
+          {
+            "characters": 137,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "cfb78bdf8c738466c22af4921416624a9aff9636ef396633909e0b52962a83aa"
+          },
+          {
+            "characters": 477,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "cc4d5e992c3ce73c68f1521a9126761774fb4015cc4abbe2ad351b60faa17d4e"
+          },
+          {
+            "characters": 279,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "33df27ab5b84a2fcc7b27fc9495ae0d59f2ccfe767e088e205b5c572894dbd7c"
+          },
+          {
+            "characters": 279,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "584578c9a8799a240de254c9bb684f30a411fc23691b95e71eb4d20e5c03808f"
+          },
+          {
+            "characters": 302,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "7476d5fdfb19b1d0826cb649378276ee1233b393c2bae0cd38420c9bf98306ef"
+          },
+          {
+            "characters": 264,
+            "sizePt": [
+              792.0,
+              612.0
+            ],
+            "textSha256": "d28ac406d7fb61d808720fa8c84596333936cb046028ca79e3e620997b55251b"
+          }
+        ]
+      }
+    },
+    "readDidNotWrite": true,
+    "reopenUnchanged": true,
+    "reopened": "d7c90dea9b21ab6c58f35ed39c83ad01532092e5696a4fdc20c889d25e2456f3",
+    "undo": {
+      "commandsForTwoEdits": 2,
+      "oneUndoPreservesFirstEdit": true,
+      "rebaselineDropsHistory": true,
+      "rebaselineDropsOverrides": true,
+      "redoRestoresBoth": true
+    }
+  },
+  "schemaVersion": 1,
+  "specification": {
+    "before": "c40c90c8ca8254154262b9920f306aec63c18b63f93f7d78f58a72d9d3f872ce",
+    "edited": "d7f41a7d2dde7db85942891eae0baf8d5088c62bc97a4cb432a670106c240242",
+    "exports": {
+      "before": {
+        "docx": {
+          "characters": 97,
+          "paragraphs": 8,
+          "textSha256": "c98996c54459b76037712d18a5442e65979fe72f2f2f15ce514fd0b8879a720d"
+        },
+        "pdf": {
+          "pages": [
+            {
+              "characters": 184,
+              "sizePt": [
+                612.0,
+                792.0
+              ],
+              "textSha256": "b7ff15c27b1f9d2bc7ee463da69939fca8e91407e2df2127d8cb1db4d20731a2"
+            }
+          ]
+        }
+      },
+      "edited": {
+        "docx": {
+          "characters": 108,
+          "paragraphs": 8,
+          "textSha256": "fc786db27098c50c274ec2d9f7b07a358fbff9a7b102db0e68bd9eccbc94b333"
+        },
+        "pdf": {
+          "pages": [
+            {
+              "characters": 197,
+              "sizePt": [
+                612.0,
+                792.0
+              ],
+              "textSha256": "ad03a0e14f203545ffd2f88cf0fb4db37f22559ad895037044e319adf5e14ffe"
+            }
+          ]
+        }
+      }
+    },
+    "readDidNotWrite": true,
+    "reopenUnchanged": true,
+    "reopened": "d7f41a7d2dde7db85942891eae0baf8d5088c62bc97a4cb432a670106c240242",
+    "undo": {
+      "slotEditCreatesSceneUndo": false,
+      "slotStoreHasUndoMethod": false
+    }
+  },
+  "status": "captured",
+  "table": {
+    "editedBlock": "ca61264f4554c12b722b9f6690bb550fa793052312bd87031a23b11a21f601a7",
+    "editedCellKeepsOriginalClaimIds": true,
+    "editedCellKeepsOriginalSourceIds": true,
+    "oneUndoRestoresCell": true,
+    "readDidNotWrite": true,
+    "reopenUnchanged": true,
+    "scene": "10ae7d006c4fbdca0a72c2a24c87a6f91812c9748cbf0188c29c442697004ea9",
+    "scope": "isolated table adapter, not a generated operations manual or citation-status UI test"
+  }
+}

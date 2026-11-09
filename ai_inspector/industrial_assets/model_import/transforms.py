@@ -7,13 +7,14 @@ import math
 import numpy as np
 
 from .errors import ModelImportError
+from .diagnostics import problem_details
 from .model import Model, Part
 from .validation import json_bytes, require
 
 OUTPUT_TRIANGLES = 250_000
 
 
-def select_parts(parts: list[Part], materials: list[dict], selector: dict) -> list[Part]:
+def select_parts(parts: list[Part], materials: list[dict], selector: dict, *, path: str = "select") -> list[Part]:
     key, value = next(iter(selector.items()))
     def field(part):
         return part.key if key == "part" else materials[part.material]["name"] if key == "material" else getattr(part, key, "")
@@ -21,7 +22,9 @@ def select_parts(parts: list[Part], materials: list[dict], selector: dict) -> li
     if not matches:
         candidates = sorted({field(p) for p in parts}) if key != "all" else []
         closest = get_close_matches(str(value), candidates, n=4, cutoff=0)[:4]
-        raise ModelImportError("recipe_selector_empty", {"selector": f"{key}: {value}", "closest": closest})
+        problem = f"no part matches {key} {value!r}; closest: " + (", ".join(closest) or "none")
+        raise ModelImportError("recipe_selector_empty", problem_details(
+            [(path + "." + key, problem)], selector=f"{key}: {value}", closest=closest))
     return matches
 
 
@@ -99,8 +102,8 @@ def transform_model(source: Model, recipe: dict) -> Model:
     low, high = bounds(parts)
     pivot = np.array([(low[0] + high[0]) / 2, low[1], (low[2] + high[2]) / 2])
     if recipe["pivot"] != "base":
-        chosen = {p.key: p for selector in recipe["pivot"]["parts"]
-                  for p in select_parts(parts, source.materials, selector)}
+        chosen = {p.key: p for i, selector in enumerate(recipe["pivot"]["parts"])
+                  for p in select_parts(parts, source.materials, selector, path=f"pivot.parts[{i}]")}
         points = np.concatenate([p.positions for p in chosen.values()])
         threshold = points[:, 1].min() + np.ptp(points[:, 1]) * .1
         feet = points[points[:, 1] <= threshold]
@@ -125,8 +128,8 @@ def transform_model(source: Model, recipe: dict) -> Model:
     for part in parts:
         if part.uv0 is None:
             finishes[part.key]["texture"] = None
-    for rule in recipe["parts"]:
-        selected = {p.key for p in select_parts(parts, source.materials, rule["select"])}
+    for i, rule in enumerate(recipe["parts"]):
+        selected = {p.key for p in select_parts(parts, source.materials, rule["select"], path=f"parts[{i}].select")}
         output = []
         for part in parts:
             if part.key not in selected:

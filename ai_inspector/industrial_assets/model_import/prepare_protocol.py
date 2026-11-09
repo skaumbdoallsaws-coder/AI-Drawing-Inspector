@@ -6,13 +6,16 @@ from .errors import ModelImportError
 from .identity import asset_identity
 from .job_io import bounded_read, file_digest, local_directory, regular_file
 from .licence import https_url
+from .limits import PREVIEW_BYTES, THUMBNAIL_BYTES
+from .pictures import validate_picture
 from .protocol import _int, _keys, _list, _material, _num, _ok, _size, _text
 from .recipe import LICENSE_CLASSES, MODEL_IMPORT_ENGINE_VERSION, normalize_recipe
 from .validation import json_bytes, parse_json
 
 DRAFT_BYTES = 128 * 1024
 DRAFT_FILES = {"model.glb": 30 * 1024 * 1024, "draft.json": DRAFT_BYTES,
-               "CREDITS.txt": 16 * 1024, "parts.jsonl": 32 * 1024 * 1024}
+               "CREDITS.txt": 16 * 1024, "parts.jsonl": 32 * 1024 * 1024,
+               "preview.png": PREVIEW_BYTES, "thumbnail.webp": THUMBNAIL_BYTES}
 PUBLIC_FIELDS = ("draftId", "dimensions", "triangles", "partsTotal", "parts", "nextPartsOffset",
                  "materialsTotal", "materials", "surfaces", "footprint", "warnings", "attribution", "changes")
 
@@ -119,7 +122,7 @@ def read_draft_output(directory):
         _ok({p.name for p in directory.iterdir()} == {*DRAFT_FILES, "manifest.json"})
         manifest = parse_json(bounded_read(directory, "manifest.json", 4096), 4096)
         _keys(manifest, {"schemaVersion", "files"})
-        _ok(type(manifest["schemaVersion"]) is int and manifest["schemaVersion"] == 1)
+        _ok(type(manifest["schemaVersion"]) is int and manifest["schemaVersion"] == 2)
         _keys(manifest["files"], DRAFT_FILES)
         for name, maximum in DRAFT_FILES.items():
             entry = manifest["files"][name]
@@ -128,6 +131,8 @@ def read_draft_output(directory):
             _ok(isinstance(entry["sha256"], str) and re.fullmatch("[0-9a-f]{64}", entry["sha256"]))
             file = regular_file(directory, name)
             _ok(file.stat().st_size == entry["bytes"] and file_digest(file) == entry["sha256"])
+        validate_picture(bounded_read(directory, "preview.png", PREVIEW_BYTES), "preview")
+        validate_picture(bounded_read(directory, "thumbnail.webp", THUMBNAIL_BYTES), "thumbnail")
         draft = validate_draft(parse_json(bounded_read(directory, "draft.json", DRAFT_BYTES), DRAFT_BYTES))
         _ok(draft["outputSha256"] == manifest["files"]["model.glb"]["sha256"])
         _ok(bounded_read(directory, "CREDITS.txt", DRAFT_FILES["CREDITS.txt"]) ==

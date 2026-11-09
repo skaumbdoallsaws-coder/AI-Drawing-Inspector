@@ -8,9 +8,12 @@ import threading
 import time
 
 from .errors import MESSAGES, ModelImportError
+from .cleanup import retry_cleanup
+from .process_tree import ProcessTree, base_executable
 from .job_io import OUTPUT_NAMES, bounded_read, file_digest, local_directory, regular_file
-from .limits import WALL_SECONDS
+from .limits import PREVIEW_BYTES, WALL_SECONDS
 from .protocol import read_summary, validate_manifest
+from .pictures import validate_picture
 from .validation import parse_json, require
 
 _WORKER = Path(__file__).with_name("worker.py")
@@ -27,27 +30,24 @@ def worker_environment(job: Path, executable: str) -> dict[str, str]:
     return environment
 
 
-def _join(process) -> None:
-    if process.poll() is None:
-        process.kill()
-    process.wait()
-
-
 def _clean_outputs(job: Path) -> None:
     for name in OUTPUT_NAMES:
         try:
-            regular_file(job, name).unlink(missing_ok=True)
+            retry_cleanup(lambda: regular_file(job, name).unlink(missing_ok=True))
         except (OSError, ModelImportError):
             pass
 
 
-def _result(job: Path) -> dict:
+def _result(job: Path, *, require_preview: bool = False) -> dict:
     try:
         manifest = validate_manifest(parse_json(bounded_read(job, "result.json", 4096), 4096))
         for name, entry in manifest["files"].items():
             file = regular_file(job, name)
             require(file.stat().st_size == entry["bytes"] and file_digest(file) == entry["sha256"],
                     "model_worker_failed")
+        require(not require_preview or manifest["schemaVersion"] == 2, "model_worker_failed")
+        if "preview.png" in manifest["files"]:
+            validate_picture(bounded_read(job, "preview.png", PREVIEW_BYTES), "preview")
         return read_summary(bounded_read(job, "summary.json", 48 * 1024))
     except (ModelImportError, OSError, ValueError, TypeError, KeyError):
         raise ModelImportError("model_worker_failed") from None
@@ -59,14 +59,21 @@ def _launch(job, dependency_root, task, event, timeout):
         raise ValueError("Worker timeout must be positive and at most 70 seconds")
     if event.is_set():
         raise ModelImportError("model_cancelled")
+    executable = base_executable()
     process = None
+    try:
+        tree = ProcessTree()
+    except (OSError, AttributeError):
+        raise ModelImportError("model_limits_unavailable") from None
     try:
         started = time.monotonic()
         process = subprocess.Popen(
-            [sys.executable, "-I", "-S", "-B", str(_WORKER), str(dependency_root), str(job), task],
-            cwd=job, env=worker_environment(job, sys.executable), stdin=subprocess.DEVNULL,
+            [executable, "-I", "-S", "-B", str(_WORKER), str(dependency_root), str(job), task],
+            cwd=job, env=worker_environment(job, executable), stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            start_new_session=os.name != "nt")
+        tree.attach(process)
         while True:
             if event.is_set():
                 raise ModelImportError("model_cancelled")
@@ -97,8 +104,15 @@ def _launch(job, dependency_root, task, event, timeout):
     except OSError:
         raise ModelImportError("model_worker_failed") from None
     finally:
-        if process is not None:
-            _join(process)
+        active_error = sys.exc_info()[0] is not None
+        try:
+            if process is not None:
+                tree.stop(process)
+        except OSError:
+            if not active_error:
+                raise ModelImportError("model_worker_failed") from None
+        finally:
+            tree.close()
 
 
 def run_inspect(job_dir: str | Path, dependency_root: str | Path, *,
@@ -120,7 +134,7 @@ def run_inspect(job_dir: str | Path, dependency_root: str | Path, *,
     success = False
     try:
         _launch(job, dependency_root, "inspect", event, timeout)
-        result = _result(job)
+        result = _result(job, require_preview=True)
         if event.is_set():
             raise ModelImportError("model_cancelled")
         success = True

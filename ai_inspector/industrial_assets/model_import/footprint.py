@@ -2,6 +2,7 @@
 import numpy as np
 
 from .transforms import bounds
+from .diagnostics import recipe_error
 from .validation import require
 
 
@@ -73,11 +74,12 @@ def footprint(parts, mode="hull"):
 
 def support_surfaces(recipe, dimensions):
     output = []
-    for surface in recipe["surfaces"]:
+    for i, surface in enumerate(recipe["surfaces"]):
         x0, z0, x1, z1 = surface["rect"]
-        require(-dimensions["width"] / 2 - 1e-7 <= x0 < x1 <= dimensions["width"] / 2 + 1e-7
+        if not (-dimensions["width"] / 2 - 1e-7 <= x0 < x1 <= dimensions["width"] / 2 + 1e-7
                 and -dimensions["depth"] / 2 - 1e-7 <= z0 < z1 <= dimensions["depth"] / 2 + 1e-7
-                and 0 <= surface["height"] <= dimensions["height"] + 1e-7, "recipe_invalid")
+                and 0 <= surface["height"] <= dimensions["height"] + 1e-7):
+            raise recipe_error([(f"surfaces[{i}]", "height and rectangle must be inside the final model bounds")])
         output.append({
             "surfaceId": surface["id"], "label": surface["label"],
             "localFrame": {"origin": {"x": (x0 + x1) / 2, "y": surface["height"], "z": (z0 + z1) / 2},

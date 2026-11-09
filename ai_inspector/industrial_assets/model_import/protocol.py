@@ -3,7 +3,7 @@ import math
 import re
 
 from .errors import ModelImportError
-from .limits import CACHE_BYTES, CACHE_METADATA_BYTES, SUMMARY_BYTES
+from .limits import CACHE_BYTES, CACHE_METADATA_BYTES, SUMMARY_BYTES, PREVIEW_BYTES
 from .validation import clean_text, json_bytes, parse_json
 
 SUMMARY_KEYS = {
@@ -162,10 +162,12 @@ def read_summary(payload: bytes) -> dict:
 
 def validate_manifest(value) -> dict:
     _keys(value, {"schemaVersion", "files"})
-    _ok(type(value["schemaVersion"]) is int and value["schemaVersion"] == 1)
-    _keys(value["files"], {"summary.json", "cache.json", "parts.npz"})
-    for name, maximum in (("summary.json", SUMMARY_BYTES), ("cache.json", CACHE_METADATA_BYTES),
-                          ("parts.npz", CACHE_BYTES)):
+    _ok(type(value["schemaVersion"]) is int and value["schemaVersion"] in (1, 2))
+    files = {"summary.json": SUMMARY_BYTES, "cache.json": CACHE_METADATA_BYTES, "parts.npz": CACHE_BYTES}
+    if value["schemaVersion"] == 2:
+        files["preview.png"] = PREVIEW_BYTES
+    _keys(value["files"], files)
+    for name, maximum in files.items():
         entry = value["files"][name]
         _keys(entry, {"bytes", "sha256"})
         _int(entry["bytes"], 1, maximum)

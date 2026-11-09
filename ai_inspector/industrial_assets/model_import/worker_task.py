@@ -5,6 +5,7 @@ from .cache import save_cache
 from .job_io import bounded_read, file_digest, local_directory, regular_file
 from .limits import DEFAULT_LIMITS
 from .protocol import validate_summary
+from .preview import render_previews
 from .reader import read_model
 from .summary import build_summary
 from .validation import json_bytes, parse_json, require
@@ -23,13 +24,16 @@ def execute_inspect(job_dir: str | Path) -> dict:
     payload = bounded_read(job, "source.bin", DEFAULT_LIMITS.upload_bytes)
     model = read_model(payload, name, texture_max_px=request.get("textureMaxPx", 1024))
     summary = validate_summary(build_summary(model))
+    picture = render_previews(model, source=True, thumbnail=False)
     save_cache(model, job)
+    with regular_file(job, "preview.png").open("xb") as stream:
+        stream.write(picture.preview)
     with regular_file(job, "summary.json").open("xb") as stream:
         stream.write(json_bytes(summary))
     files = {name: {"bytes": regular_file(job, name).stat().st_size,
                     "sha256": file_digest(regular_file(job, name))}
-             for name in ("summary.json", "cache.json", "parts.npz")}
+             for name in ("summary.json", "cache.json", "parts.npz", "preview.png")}
     # Last file is the completion marker. A killed worker never yields a usable partial cache.
     with regular_file(job, "result.json").open("xb") as stream:
-        stream.write(json_bytes({"schemaVersion": 1, "files": files}))
+        stream.write(json_bytes({"schemaVersion": 2, "files": files}))
     return summary

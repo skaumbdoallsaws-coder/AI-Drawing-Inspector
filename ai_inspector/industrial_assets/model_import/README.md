@@ -267,3 +267,89 @@ whether the user actually stated them is the MI3 conversation policy.
 No preview, import store, catalog registration, Sage tool or frontend behavior
 is introduced by MI0b. primitives.verify and artifacts.inspect_glb are used by
 host-side tests; MI2 must call them before library registration.
+
+
+## MI0c: previews, process trees and repairable refusals
+
+Both worker tasks now render software previews without importing application
+code. preview.render_previews(model, source=False, thumbnail=True) returns
+PreviewImages(preview, thumbnail, triangles_shown, triangles_total).
+preview.render_view is a small unlabelled RGB-array seam for pixel tests.
+
+- Four orthographic views: front (+z), side (+x), back (-z), and from above
+  (+x,+y,+z). Each cell is 384 square; the labelled PNG sheet is 768 square.
+- The floor grid is at y=0 after centering the source's x/z bounds and rebasing
+  its minimum y. Spacing is 0.1 m below 1.5 m overall size, otherwise 0.5 m.
+  Grid sampling is analytic, with no loop over physical grid lines; a grid
+  smaller than two screen pixels is hidden. Frontal views see its edge.
+- RGB textures are sampled bilinearly using per-pixel barycentric UVs, with
+  repeat/clamp/mirrored-repeat wrapping. glTF UV (0,0) is the image's top left.
+  Texture transforms were already baked by MI0a. RGB is decoded from sRGB,
+  shaded and composited in linear light, then encoded to sRGB.
+- Fixed Lambert + ambient illumination uses averaged source normals or face
+  normals. Both faces are drawn with normals facing the camera. Unlit finishes
+  bypass illumination. Emissive RGB is added; this is an LDR preview with
+  display-clamped colour, not an exposure/HDR pipeline.
+- MASK rejects pixels below the material cutoff. OPAQUE ignores alpha.
+  BLEND is composited after opaque geometry, in far-to-near centroid order.
+  Intersecting transparent surfaces remain approximate. A half-open triangle
+  edge rule avoids blending the common edge of a triangulated quad twice.
+- A projected triangle whose width AND height are <=2 pixels is represented
+  by one centroid splat. Splat shading, nearest-depth selection and segmented
+  alpha composition are vectorized. Larger triangles use a per-triangle loop
+  with numpy operations inside the pixel box. Blend splat runs are interleaved
+  with larger triangles in the same global depth order.
+- Source previews select at most the 250,000 largest-area triangles, with
+  deterministic source-order ties, before allocating render arrays. The sheet
+  says "largest 250k triangles shown" when capped. Prepared geometry is already
+  limited to 250,000 triangles.
+- The decoded texture LRU holds at most four 2048-square RGBA arrays (64 MiB).
+  It is shared across the four views.
+- PNG output is <=1.5 MiB. Rare high-entropy sheets use a 256-colour PNG fallback.
+  The 256-square WebP thumbnail comes from the unlabelled fourth view, with
+  bounded quality fallback to stay <=64 KiB. No source image metadata survives.
+
+inspect writes preview.png alongside its existing cache. result.json now uses
+schemaVersion 2 and includes its bytes/hash. The geometry cache schema stays
+at version 1. Legacy version-1 inspect manifests remain valid cache inputs for
+prepare; a *new* run_inspect result must be version 2 with a validated picture.
+Only files named by a verified cache manifest are copied into a prepare job.
+
+prepare writes preview.png and thumbnail.webp into its frozen output folder.
+Its manifest.json is now version 2 and requires both pictures. draft.json
+schema/identity inputs are unchanged; preview bytes are covered by the output
+manifest. Legacy preview-less drafts are not new complete MI0c outputs. The
+host checks fixed dimensions and PNG chunks/CRCs or the single lossy WebP frame
+header, as well as file caps and hashes, without importing Pillow or numpy.
+MI1 must reserve storage for these additional files. The renderer can consume
+the prepared Model directly, so the many-part output never needs to be fed
+back through the source reader.
+
+The timing tests exercise a full sheet (including thumbnail encoding), with
+5,000 larger triangles and 250,000 subpixel triangles. Their limits are 2 and
+20 seconds respectively. MODEL_IMPORT_SKIP_TIMING=1 skips just these gates on
+a slow machine. Performance and pixel assertions need the real dependency
+environment; they could not be measured in the builder sandbox.
+
+The host runner now selects sys._base_executable (falling back to
+sys.executable), requiring an absolute existing interpreter file. This bypasses
+the Windows venv launcher; -I -S and the explicit dependency root retain the
+isolated dependency contract. A host Windows Job Object, created before spawn
+and assigned immediately after Popen, adds KILL_ON_JOB_CLOSE tree containment.
+It is terminated before joining and closed on every exit. The worker's own
+CPU/memory/process limits remain nested inside it. POSIX uses a new session
+and kills the process group before joining. Both inspect and prepare use this
+common launch path. A containment setup failure fails closed.
+
+Cleanup retries transient file locks for up to 0.9 seconds. It never replaces
+a timeout/cancellation or other primary error. A remaining owned temporary
+folder is left for MI1's sweep rather than producing a misleading refusal;
+pre-existing paths are preserved. Job cleanup validates the exact temporary
+directory and its parent before recursive removal.
+
+recipe_invalid now carries details.problems: up to five {path, problem}
+records. Schema, normalization and semantic errors name the relevant field.
+Selector failures additionally retain selector and closest, and report their
+rule/pivot path. Details are capped at 6 KiB so complete refusals fit the 8 KiB
+worker error limit; untrusted text is cleaned and bounded. MI1's
+FacilityLayoutError adaptation and MI3 tool replies must preserve these details.

@@ -18,6 +18,7 @@ from .summary import material_summary
 from .transforms import bounds, transform_model
 from .validation import json_bytes, parse_json, require, warn
 from .writer import write_glb
+from .preview import render_previews
 
 PARTS_BYTES = DRAFT_FILES["parts.jsonl"]
 
@@ -80,12 +81,14 @@ def execute_prepare(job_dir: str | Path) -> dict:
     payload = bounded_read(job, "source.bin", DEFAULT_LIMITS.upload_bytes)
     draft, output, model = build_draft(source, recipe, payload)
     validate_draft(draft)
+    pictures = render_previews(model)
     directory = job / "output"
     require(not directory.exists() and not directory.is_symlink(), "model_worker_failed")
     directory.mkdir()
     directory = local_directory(directory)
     for name, content in (("model.glb", output), ("draft.json", json_bytes(draft)),
-                          ("CREDITS.txt", credits_text(draft["attribution"]).encode("utf-8"))):
+                          ("CREDITS.txt", credits_text(draft["attribution"]).encode("utf-8")),
+                          ("preview.png", pictures.preview), ("thumbnail.webp", pictures.thumbnail)):
         require(len(content) <= DRAFT_FILES[name], "model_output_too_large")
         with regular_file(directory, name).open("xb") as stream:
             stream.write(content)
@@ -96,5 +99,5 @@ def execute_prepare(job_dir: str | Path) -> dict:
     files = {name: {"bytes": regular_file(directory, name).stat().st_size,
                    "sha256": file_digest(regular_file(directory, name))} for name in DRAFT_FILES}
     with regular_file(directory, "manifest.json").open("xb") as stream:
-        stream.write(json_bytes({"schemaVersion": 1, "files": files}))
+        stream.write(json_bytes({"schemaVersion": 2, "files": files}))
     return prepare_summary(draft)

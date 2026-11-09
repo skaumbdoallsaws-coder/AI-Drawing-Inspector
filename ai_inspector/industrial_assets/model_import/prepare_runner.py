@@ -8,16 +8,17 @@ import asyncio
 import importlib.util
 from pathlib import Path
 import stat
-import tempfile
 import threading
 
 from .errors import ModelImportError
-from .job_io import OUTPUT_NAMES, file_digest, local_directory, regular_file
+from .cleanup import retry_cleanup, temporary_job
+from .job_io import bounded_read, file_digest, local_directory, regular_file
+from .protocol import validate_manifest
 from .limits import DEFAULT_LIMITS, WALL_SECONDS
 from .prepare_protocol import DRAFT_FILES, PUBLIC_FIELDS, read_draft_output
 from .recipe import normalize_recipe
 from .runner import _cancel_and_join, _launch, _result
-from .validation import json_bytes, require
+from .validation import json_bytes, parse_json, require
 
 
 def _cancelled(event):
@@ -58,8 +59,8 @@ def _remove_owned_draft(destination):
     try:
         directory = local_directory(destination)
         for name in {*DRAFT_FILES, "manifest.json"}:
-            regular_file(directory, name).unlink(missing_ok=True)
-        directory.rmdir()
+            retry_cleanup(lambda: regular_file(directory, name).unlink(missing_ok=True))
+        retry_cleanup(directory.rmdir)
     except (ModelImportError, OSError):
         pass
 
@@ -92,7 +93,7 @@ def prepare_draft(source_path: str | Path, recipe: dict, out_dir: str | Path,
             lock_owned = True
         except FileExistsError:
             raise ModelImportError("model_destination_exists") from None
-        with tempfile.TemporaryDirectory(prefix=".model-prepare-", dir=parent) as temporary:
+        with temporary_job(parent) as temporary:
             job = local_directory(temporary)
             require(job.parent == parent, "model_worker_failed")
             _copy(source, job / "source.bin", event, DEFAULT_LIMITS.upload_bytes)
@@ -102,9 +103,10 @@ def prepare_draft(source_path: str | Path, recipe: dict, out_dir: str | Path,
                 cached = local_directory(cache_dir)
                 summary = _result(cached)
                 require(summary["sourceSha256"] == source_hash, "model_cache_invalid")
-                for name in OUTPUT_NAMES:
-                    if name != "error.json":
-                        _copy(_source_file(cached / name), job / name, event, 384 * 1024 * 1024)
+                manifest = validate_manifest(parse_json(bounded_read(cached, "result.json", 4096), 4096))
+                for name in (*manifest["files"], "result.json"):
+                    maximum = 4096 if name == "result.json" else manifest["files"][name]["bytes"]
+                    _copy(_source_file(cached / name), job / name, event, maximum)
             _launch(job, dependencies, "prepare", event, timeout)
             draft = read_draft_output(job / "output")
             require(draft["recipe"] == normalized and draft["sourceSha256"] == source_hash, "model_worker_failed")
@@ -125,7 +127,7 @@ def prepare_draft(source_path: str | Path, recipe: dict, out_dir: str | Path,
         if published and not success:
             _remove_owned_draft(destination)
         if lock_owned:
-            lock.unlink(missing_ok=True)
+            retry_cleanup(lambda: lock.unlink(missing_ok=True))
 
 
 async def prepare_draft_async(source_path: str | Path, recipe: dict, out_dir: str | Path,

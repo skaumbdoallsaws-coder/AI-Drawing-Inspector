@@ -187,7 +187,7 @@ def test_real_prepare_timeout_or_cancel_kills_joins_and_cleans(tmp_path, monkeyp
 def rewrite_manifest(directory):
     files = {name: {"bytes": (directory / name).stat().st_size,
                     "sha256": sha256((directory / name).read_bytes()).hexdigest()} for name in protocol.DRAFT_FILES}
-    (directory / "manifest.json").write_bytes(module("validation").json_bytes({"schemaVersion": 1, "files": files}))
+    (directory / "manifest.json").write_bytes(module("validation").json_bytes({"schemaVersion": 2, "files": files}))
 
 
 @pytest.mark.parametrize("corruption", ["hash", "schema", "parts", "credit", "unexpected", "size", "path"])

@@ -1,5 +1,7 @@
 """Stable public refusals with bounded, typed diagnostics for recipe repair."""
 
+import json
+
 MESSAGES = {
     "model_format_unsupported": "Choose a GLB or a zip containing one glTF or GLB model.",
     "model_too_large": "The model exceeds the 128 MiB upload limit.",
@@ -17,6 +19,7 @@ MESSAGES = {
     "model_worker_failed": "The model worker stopped or returned an invalid result.",
     "model_timeout": "Model import exceeded its time limit. Try a smaller static model.",
     "model_cancelled": "Model import was cancelled.",
+    "model_preview_failed": "The model preview could not be rendered within its image limits.",
     "model_cache_invalid": "The prepared model cache is incomplete or invalid.",
     "recipe_invalid": "Check the recipe fields, ranges, support rectangles and vessel wall thickness.",
     "recipe_selector_empty": "A part selector matched nothing. Use a listed key or exact source name.",
@@ -55,8 +58,21 @@ def valid_details(code, details):
         return isinstance(value, str) and len(value) <= maximum and not any(ord(c) < 32 for c in value)
     if not isinstance(details, dict):
         return False
-    if code == "recipe_selector_empty":
-        return (set(details) == {"selector", "closest"} and text(details["selector"], 100)
+    if code in {"recipe_invalid", "recipe_selector_empty"}:
+        problems = details.get("problems")
+        if (not isinstance(problems, list) or not 1 <= len(problems) <= 5
+                or not all(isinstance(p, dict) and set(p) == {"path", "problem"}
+                           and text(p["path"], 120) and text(p["problem"], 240)
+                           and p["path"] and p["problem"] for p in problems)):
+            return False
+        try:
+            if len(json.dumps(details, ensure_ascii=True, separators=(",", ":")).encode("utf-8")) > 6144:
+                return False
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if code == "recipe_invalid":
+            return set(details) == {"problems"}
+        return (set(details) == {"selector", "closest", "problems"} and text(details["selector"], 100)
                 and isinstance(details["closest"], list) and len(details["closest"]) <= 4
                 and all(text(v, 80) for v in details["closest"]))
     if code == "model_output_too_complex":

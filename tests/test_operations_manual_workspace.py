@@ -1014,11 +1014,10 @@ def test_generate_can_explicitly_rebaseline_an_obsolete_operations_scene(
     profile, catalog = _mmle()
     del profile
     root = tmp_path / "operations"
-    DocumentationSceneRepository(root).rebaseline(
-        "MMLE-50D",
-        catalog["sourceRevision"],
-        "obsolete-six-page-plan",
-    )
+    # Install an obsolete saved shape; regeneration now refreshes, never resets.
+    repository = DocumentationSceneRepository(root, "operations_and_maintenance_manual")
+    scene = repository.new_scene("MMLE-50D", catalog["sourceRevision"], "obsolete-six-page-plan")
+    repository._save("MMLE-50D", scene)
     monkeypatch.setattr(server, "OPERATIONS_MANUAL_ROOT", root)
     client = TestClient(server.app)
 
@@ -1033,7 +1032,7 @@ def test_generate_can_explicitly_rebaseline_an_obsolete_operations_scene(
     )
     assert generated.status_code == 200
     result = generated.json()
-    assert result["rebaselined"] is True
+    assert result["refreshReceipt"]["fromBinding"]["manualPlanRevision"] == "obsolete-six-page-plan"
     assert result["sourceCurrent"] is True
     assert result["manualPlanCurrent"] is True
     assert result["document"]["pageCount"] >= 24

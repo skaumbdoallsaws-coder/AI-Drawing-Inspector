@@ -1,4 +1,4 @@
-"""P1c-1 identities only. No refresh/conflict policy is implemented in this round."""
+"""Stable identities and owner-persisted three-way refresh contracts."""
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -703,3 +703,626 @@ def test_work_instruction_cover_keeps_owner_composition_policy(mmle_client):
     for composition in (rebuilt["documentationComposition"], rebuilt["renderRequest"]["composition"]):
         assert "occurrenceOverrides" not in composition and "manualGroupOverrides" not in composition
         assert composition["figureOverride"]["cameraPreset"] == "front"
+
+
+# P1c-2a: pure policy, owning-store transactions and real route recovery.
+from ai_inspector.documentation.refresh import (
+    inventory, refresh, three_way, exposure, REFRESH_RECEIPT_LIMIT,
+)
+from ai_inspector.documentation.commands import digest
+
+
+def generated(value, evidence=None):
+    payload = {"text": value}
+    return {"payload": payload, "hash": digest(payload), "evidence": evidence or {}}
+
+
+@pytest.mark.parametrize("old,current,new,policy", [
+    ("B", "B", "N", "adopted"),
+    ("B", "C", "B", "preserved"),
+    ("B", "N", "N", "kept"),
+    ("B", "C", "N", "value"),
+    ("B", "B", "B", "kept"),
+    (None, "C", "N", "missing_baseline"),
+    ("B", "C", None, "orphan"),
+])
+def test_three_way_policy(old, current, new, policy):
+    assert three_way(generated(old) if old is not None else None, {"text": current},
+                     generated(new) if new is not None else None) == policy
+
+
+def test_three_way_evidence_change_is_not_source_acceptance():
+    assert three_way(generated("B", {"claimIds": ["old"]}), {"text": "C"},
+                     generated("B", {"claimIds": ["new"]})) == "evidence"
+
+
+def write_text(repo, doc, alias="table.r0.c1", text="Manual value"):
+    doc = compile_identities(doc)
+    loaded = load(repo, doc)
+    key = doc["aliasMap"][PAGE][alias]["targetId"]
+    return repo.apply_command(NUMBER, doc["sourceRevision"], doc["manualPlanRevision"],
+        base_revision=loaded["revision"], identity_document=doc,
+        page_targets={PAGE: {"page_element": [alias, key]}}, command={"operation": "update_text",
+        "pageId": PAGE, "targetType": "page_element", "targetId": key, "text": text})
+
+
+def next_source(doc, value="200"):
+    result = deepcopy(doc)
+    result["sourceRevision"] = "source-b"
+    result["pages"][0]["layoutBlocks"][0]["rows"][0]["cells"][1] = value
+    result["pages"][0]["layoutBlocks"][0]["rows"].reverse()
+    return compile_identities(result)
+
+
+def refresh_repo(repo, doc, **kwargs):
+    return repo.refresh(NUMBER, doc["sourceRevision"], doc["manualPlanRevision"],
+        base_revision=load(repo, doc)["revision"], identity_document=doc, **kwargs)
+
+
+def test_first_baseline_is_retained_and_old_shape_read_does_not_save(tmp_path):
+    doc = compile_identities(source_document())
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    first = write_text(repo, doc)
+    key = compiled_target(doc, "table.r0.c1")
+    original = deepcopy(first["scene"]["generatedBaseline"][key])
+    second = write_text(repo, doc, text="Later manual value")
+    assert second["scene"]["generatedBaseline"][key] == original
+    path = repo._scene_path(NUMBER)
+    old = json.loads(path.read_bytes())
+    old.pop("generatedBaseline")
+    path.write_text(json.dumps(old), encoding="ascii")
+    raw = path.read_bytes()
+    assert load(repo, doc)["scene"]["generatedBaseline"][key] == original
+    assert path.read_bytes() == raw
+    assert not list(path.parent.glob("sr-*.json"))
+
+
+def test_conflict_persists_on_reopen(tmp_path):
+    doc = source_document()
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    original = write_text(repo, doc)
+    new = next_source(doc)
+    refreshed = refresh_repo(repo, new)
+    conflict = refreshed["conflicts"][0]
+    assert conflict["kind"] == "value" and conflict["status"] == "open"
+    assert [conflict[side]["payload"]["text"] for side in ("B", "C", "N")] == ["100", "Manual value", "200"]
+    assert refreshed["openConflictCount"] == 1
+    identity._CATALOGS.clear()
+    reopened = load(DocumentationSceneRepository(tmp_path, KIND), new)
+    assert reopened["conflicts"] == refreshed["conflicts"]
+    assert reopened["revision"] == refreshed["revision"]
+    key = compiled_target(doc, "table.r0.c1")
+    bound, _ = bind_document(new, reopened["scene"])
+    assert bound["pages"][0]["identityOverrides"][key]["text"] == "Manual value"
+    # An old named inverse cannot bypass a current refresh conflict.
+    with pytest.raises(DocumentEditError) as error:
+        repo.undo_change(NUMBER, new["sourceRevision"], PLAN,
+            change_id=original["command"]["commandId"], expected_revision=reopened["scene"]["editRevision"],
+            request_id="blocked-inverse", identity_document=new)
+    assert error.value.code == "manual_edit_conflict"
+
+
+def test_refresh_is_idempotent_and_later_refresh_updates_only_proposal(tmp_path):
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    doc = source_document()
+    write_text(repo, doc)
+    new = next_source(doc)
+    first = refresh_repo(repo, new)
+    path = repo._scene_path(NUMBER)
+    raw = path.read_bytes()
+    repeat = refresh_repo(repo, new)
+    assert repeat["refreshReceipt"] is None and path.read_bytes() == raw
+    later = next_source(doc, "300")
+    later["sourceRevision"] = "source-c"
+    second = refresh_repo(repo, later)
+    left, right = first["conflicts"][0], second["conflicts"][0]
+    assert right["B"] == left["B"] and right["C"] == left["C"]
+    assert right["conflictId"] == left["conflictId"]
+    assert right["N"]["payload"]["text"] == "300"
+    assert len(second["scene"]["refreshReceipts"]) == 2
+
+
+def test_missing_baseline_preserves_orphan(tmp_path):
+    doc = source_document()
+    path, raw = install_old(tmp_path, doc)
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    new = next_source(doc)
+    loaded = load(repo, new)
+    assert path.read_bytes() == raw
+    result = refresh_repo(repo, new)
+    assert result["orphans"]
+    orphan = result["orphans"][0]
+    assert orphan["C"]["payload"]["text"] == "Manual value"
+    assert orphan["link"]["status"] == "stale"
+
+
+def test_stale_stable_edit_without_baseline_is_a_conflict(tmp_path):
+    doc = source_document()
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    write_text(repo, doc)
+    path = repo._scene_path(NUMBER)
+    old = json.loads(path.read_bytes())
+    old.pop("generatedBaseline")
+    path.write_text(json.dumps(old), encoding="ascii")
+    result = refresh_repo(repo, next_source(doc))
+    conflict = result["conflicts"][0]
+    assert conflict["kind"] == "missing_baseline" and conflict["B"] is None
+    assert conflict["targetId"] not in result["scene"].get("generatedBaseline", {})
+    assert conflict["C"]["payload"]["text"] == "Manual value"
+
+
+@pytest.mark.parametrize("change,deleted", [(False, False), (True, False), (False, True)])
+def test_revision_scoped_refresh_uses_exact_value_only(tmp_path, change, deleted):
+    doc = source_document()
+    doc["pages"][0]["layoutBlocks"][1]["items"] = [{"text": "Exact original action"}]
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    original = write_text(repo, doc, alias="steps.i0")
+    new = next_source(doc, "100")
+    if change:
+        new["pages"][0]["layoutBlocks"][1]["items"][0]["text"] += " "
+    if deleted:
+        new["pages"][0]["layoutBlocks"][1]["items"] = []
+    refreshed = refresh_repo(repo, new)
+    if deleted:
+        assert refreshed["orphans"][0]["reason"] == "parent_or_ordinal_deleted"
+    elif change:
+        assert refreshed["conflicts"][0]["kind"] == "revision_scoped"
+    else:
+        assert refreshed["openConflictCount"] == 0
+        assert refreshed["refreshReceipt"]["counts"]["carriedRevisionScoped"] == 1
+        key = compile_identities(new)["aliasMap"][PAGE]["steps.i0"]["targetId"]
+        assert refreshed["scene"]["pages"][PAGE]["pageElementOverrides"][key]["text"] == "Manual value"
+        assert original["command"]["targetId"] != key
+
+
+def test_deleted_part_keeps_commentary(tmp_path):
+    doc = source_document()
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    write_text(repo, doc)
+    current = load(repo, doc)
+    note = {"objectId": "document-object-note", "type": "text", "name": "Service note", "content": "Keep my note",
+            "frame": {"x": .1, "y": .2, "width": .3, "height": .1}}
+    repo.apply_command(NUMBER, SOURCE, PLAN, base_revision=current["revision"], identity_document=doc,
+        page_targets={PAGE: {"document_object": []}}, command={"operation": "add_object", "pageId": PAGE,
+        "targetType": "document_object", "targetId": note["objectId"], "documentObject": note})
+    before = load(repo, doc)["scene"]["pages"][PAGE]["documentObjects"]
+    new = next_source(doc)
+    new["pages"][0]["layoutBlocks"][0]["rows"] = []
+    result = refresh_repo(repo, new)
+    assert result["orphans"][0]["C"]["payload"]["text"] == "Manual value"
+    assert result["scene"]["pages"][PAGE]["documentObjects"] == before
+    # If the containing page disappears, frame, order and identity are unplaced intact.
+    newer = {**new, "sourceRevision": "source-c", "pages": []}
+    gone = refresh_repo(repo, newer)
+    orphan = next(o for o in gone["orphans"] if o.get("targetId") == note["objectId"])
+    assert orphan["C"]["payload"] == before[note["objectId"]]
+
+
+def test_failed_generation_commits_nothing(tmp_path):
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    doc = source_document()
+    write_text(repo, doc)
+    path = repo._scene_path(NUMBER)
+    raw = path.read_bytes()
+    def failed(candidate):
+        raise ValueError("Compiler failed after staging")
+    with pytest.raises(ValueError, match="Compiler failed"):
+        refresh_repo(repo, next_source(doc), validate_candidate=failed)
+    assert path.read_bytes() == raw
+
+
+@pytest.mark.parametrize("operation", ["command", "batch", "confirmation", "named_undo", "history"])
+def test_open_conflict_refuses_every_scene_write(tmp_path, operation):
+    doc = source_document()
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    original = write_text(repo, doc)
+    new = next_source(doc)
+    current = refresh_repo(repo, new)
+    key = compiled_target(doc, "table.r0.c1")
+    command = {"operation": "update_text", "pageId": PAGE, "targetType": "page_element", "targetId": key, "text": "Blocked"}
+    raw = repo._scene_path(NUMBER).read_bytes()
+    with pytest.raises(DocumentEditError) as error:
+        if operation == "command":
+            repo.apply_command(NUMBER, new["sourceRevision"], PLAN, base_revision=current["revision"], command=command,
+                page_targets={PAGE: {"page_element": [key]}}, identity_document=new)
+        elif operation in {"batch", "confirmation"}:
+            repo.apply_batch(NUMBER, new["sourceRevision"], PLAN, base_revision=current["revision"],
+                expected_revision=current["scene"]["editRevision"], request_id=operation,
+                commands=[command], page_targets={PAGE: {"page_element": [key]}},
+                expected_hashes={key: "hash"}, current_hashes={key: "hash"}, hashes_revision=current["revision"],
+                allow_confirmation=operation == "confirmation", identity_document=new)
+        elif operation == "named_undo":
+            repo.undo_change(NUMBER, new["sourceRevision"], PLAN, change_id=original["command"]["commandId"],
+                expected_revision=current["scene"]["editRevision"], request_id="blocked", identity_document=new)
+        else:
+            repo.move_history(NUMBER, new["sourceRevision"], PLAN, base_revision=current["revision"], direction="undo", identity_document=new)
+    assert error.value.code == "manual_edit_conflict"
+    assert repo._scene_path(NUMBER).read_bytes() == raw
+
+
+def test_reset_requires_preview_and_user_and_keeps_recovery(tmp_path):
+    doc = source_document()
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    write_text(repo, doc)
+    preview = repo.reset_preview(NUMBER, SOURCE, PLAN, identity_document=doc)
+    assert preview["counts"]["targets"] == 1
+    raw = repo._scene_path(NUMBER).read_bytes()
+    options = dict(base_revision=preview["expectedRevision"], preview_hash=preview["previewHash"], identity_document=doc)
+    with pytest.raises(DocumentEditError):
+        repo.rebaseline(NUMBER, SOURCE, PLAN, **options)
+    result = repo.rebaseline(NUMBER, SOURCE, PLAN, user_authorized=True, **options)
+    assert result["scene"]["pages"] == {} and result["scene"]["commands"] == []
+    backup = repo._scene_path(NUMBER).with_name("sr-" + result["recoveryId"] + ".json")
+    assert backup.read_bytes() == raw
+
+
+def test_refresh_receipts_are_bounded():
+    doc = compile_identities(source_document())
+    state = DocumentationSceneRepository.new_scene(NUMBER, "old", PLAN)
+    for index in range(REFRESH_RECEIPT_LIMIT + 2):
+        doc["sourceRevision"] = str(index)
+        state, receipt = refresh(state, doc, refresh_id="r-" + str(index), actor="user", at="time")
+    assert len(state["refreshReceipts"]) == REFRESH_RECEIPT_LIMIT
+    assert state["refreshReceipts"][0]["refreshId"] == "r-2"
+
+
+def slot_document(value="Generated title", source=SOURCE):
+    return compile_identities({"schemaVersion": 3, "documentType": "product_specification_sheet",
+        "product": {"assemblyNumber": NUMBER}, "sourceRevision": source, "manualPlanRevision": PLAN,
+        "slots": {"title": {"value": value, "source": "library", "default": {"value": value, "source": "library"}}},
+        "pages": [{"pageId": "page-product-specification", "pageNumber": 1, "layoutBlocks": [
+            {"blockId": "spec-title", "blockType": "paragraph", "slot": "title", "text": value}]}]})
+
+
+def test_p1c1_slot_shape_derives_baseline_without_writing(tmp_path):
+    store = SlotStore(tmp_path, NUMBER)
+    store.path.parent.mkdir(parents=True)
+    raw = (FIXTURE.parent / "slots-v3-pre-refresh.json").read_bytes()
+    store.path.write_bytes(raw)
+    doc = slot_document()
+    state = store.read(identity_document=doc, binding_is_current=True)
+    assert state["values"]["title"]["value"] == "Old manual title"
+    assert state["generatedBaseline"]["slot:title"]["payload"] == {"value": "Generated title"}
+    assert store.path.read_bytes() == raw
+    store.identity_document, store.binding = doc, {"sourceRevision": SOURCE, "manualPlanRevision": PLAN}
+    store.set_values([{"slot": "title", "value": "Second title"}], "workspace")
+    assert store.read()["generatedBaseline"]["slot:title"]["payload"] == {"value": "Generated title"}
+
+
+@pytest.mark.parametrize("operation", ["value", "batch", "accept", "confirmation", "undo", "redo", "rows"])
+def test_specification_slot_conflict_blocks_all_mutations(tmp_path, operation):
+    doc = slot_document()
+    store = SlotStore(tmp_path, NUMBER)
+    store.identity_document, store.binding = doc, {"sourceRevision": SOURCE, "manualPlanRevision": PLAN}
+    store.set_values([{"slot": "title", "value": "Manual title"}], "sage_draft")
+    change = store.last_receipt["changeId"]
+    new = slot_document("New generated title", "source-b")
+    store.refresh(new, expected_revision=store.read()["editRevision"])
+    store.identity_document, store.binding = new, {"sourceRevision": "source-b", "manualPlanRevision": PLAN}
+    raw = store.path.read_bytes()
+    conflict = store.read()["conflicts"][0]
+    assert conflict["B"]["payload"] == {"value": "Generated title"}
+    assert conflict["C"]["payload"] == {"value": "Manual title"}
+    assert SlotStore(tmp_path, NUMBER).read()["conflicts"] == [conflict]
+    with pytest.raises(DocumentEditError) as error:
+        if operation == "value":
+            store.set_values([{"slot": "title", "value": "Blocked"}], "workspace")
+        elif operation == "batch":
+            store.apply_batch([{"slot": "title", "value": "Blocked"}], "sage_draft",
+                expected_revision=store.read()["editRevision"], request_id="blocked-slot",
+                expected_hashes={"slot:title": "hash"}, current_hashes={"slot:title": "hash"})
+        elif operation == "accept":
+            store.accept(["title"], "user")
+        elif operation == "confirmation":
+            store.confirm_values([], by="user", expected_revision=store.read()["editRevision"], request_id="confirm-blocked",
+                expected_hashes={"slot:title": "hash"}, current_hashes={"slot:title": "hash"}, payload={})
+        elif operation in {"undo", "redo"}:
+            # Both named undo and redo are the same guarded inverse API. Supply
+            # the selected record even when its old source binding has changed.
+            store.undo_change(change, expected_revision=store.read()["editRevision"], request_id=operation)
+        else:
+            store.set_rows([])
+    assert error.value.code == "manual_edit_conflict"
+    assert store.path.read_bytes() == raw
+
+
+def workspace_edit(client, url, state, page, target, text):
+    result = client.post(url + "/commands", json={"baseRevision": state["revision"],
+        "sourceRevision": state["document"]["sourceRevision"], "manualPlanRevision": state["document"]["manualPlanRevision"],
+        "pageId": page, "targetType": "page_element", "operation": "update_text", "targetId": target, "text": text})
+    assert result.status_code == 200, result.text
+    return result.json()
+
+
+def test_parts_route_refresh_keeps_note_and_persists_description_conflict(mmle_client, monkeypatch):
+    import server
+    if not (server.PARTS_MANUAL_ROOT / "mmle-50d" / "manual-plan.json").is_file():
+        pytest.skip("needs the local approved MMLE manual plan")
+    url = "/api/parts-manual/MMLE-50D/documentation-scene"
+    state = mmle_client.get(url).json()
+    page, row = next((p, r) for p in state["document"]["pages"] for r in p.get("bom", []) if r.get("definitionId"))
+    target = row["cellIds"]["description"]
+    state = workspace_edit(mmle_client, url, state, page["pageId"], target, "Manual service description")
+    note_page = state["document"]["pages"][0]["pageId"]
+    note_target = state["document"]["aliasMap"][note_page]["cover_subtitle"]["targetId"]
+    state = workspace_edit(mmle_client, url, state, note_page, note_target, "Unrelated service note")
+    old_source = state["document"]["sourceRevision"]
+    assembly, catalog = server._parts_manual_catalog_for_assembly("MMLE-50D")
+    catalog = deepcopy(catalog)
+    # Parts plans require a SHA-256 source revision.
+    catalog["sourceRevision"] = __import__("hashlib").sha256(b"fixture-refreshed-source").hexdigest()
+    catalog["occurrences"].reverse()
+    for occurrence in catalog["occurrences"]:
+        if occurrence.get("definitionId") == row["definitionId"]:
+            occurrence["description"] = "Changed generated description"
+            occurrence["displayPartNumber"] = "ZZZ-reordered-definition"
+            occurrence["partNumber"] = "ZZZ-reordered-definition"
+    monkeypatch.setattr(server, "_parts_manual_catalog_for_assembly", lambda number: (assembly, deepcopy(catalog)))
+    assert mmle_client.get(url).status_code == 409
+    preview = mmle_client.get(url + "/refresh")
+    assert preview.status_code == 200, preview.text
+    binding = {key: preview.json()[key] for key in ("expectedRevision", "expectedPlanRevision")}
+    result = mmle_client.post(url + "/refresh", json=binding)
+    assert result.status_code == 200, result.text
+    refreshed = result.json()
+    conflict = next(c for c in refreshed["conflicts"] if c["targetId"] == target)
+    assert conflict["kind"] == "value" and conflict["C"]["payload"]["text"] == "Manual service description"
+    assert conflict["N"]["payload"]["text"] == "Changed generated description"
+    assert refreshed["refreshReceipt"]["fromBinding"]["sourceRevision"] == old_source
+    identity._CATALOGS.clear()
+    monkeypatch.setattr(server, "_DOCUMENTATION_READ_BINDINGS", {})
+    reopened = mmle_client.get(url)
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["conflicts"] == refreshed["conflicts"]
+    snapshot = server._DocumentationAgentHost().document_snapshot("MMLE-50D", "illustrated_parts_manual")
+    assert snapshot["targets"][note_target]["text"] == "Unrelated service note"
+    assert snapshot["targets"][target]["text"] == "Manual service description"
+    read = read_targets(snapshot["state"], snapshot["targets"], [{"targetId": target}])
+    assert read["openConflictCount"] == 1 and read["targets"][0]["hasOpenConflict"]
+    raw = (server.PARTS_MANUAL_ROOT / "mmle-50d" / "documentation-scene.json").read_bytes()
+    again = mmle_client.get(url + "/refresh").json()
+    repeat = mmle_client.post(url + "/refresh", json={k: again[k] for k in binding})
+    assert repeat.status_code == 200 and repeat.json()["refreshReceipt"] is None
+    assert (server.PARTS_MANUAL_ROOT / "mmle-50d" / "documentation-scene.json").read_bytes() == raw
+
+
+def test_parts_plan_carry_refuses_missing_occurrences_without_partial_write(mmle_client, monkeypatch):
+    import server
+    plan_path = server.PARTS_MANUAL_ROOT / "mmle-50d" / "manual-plan.json"
+    if not plan_path.is_file():
+        pytest.skip("needs the local approved MMLE manual plan")
+    raw = plan_path.read_bytes()
+    plan = json.loads(raw)
+    missing = plan["sections"][0]["occurrenceIds"][0]
+    assembly, catalog = server._parts_manual_catalog_for_assembly("MMLE-50D")
+    catalog = deepcopy(catalog)
+    catalog["sourceRevision"] = "missing-source"
+    catalog["occurrences"] = [row for row in catalog["occurrences"] if row["occurrenceId"] != missing]
+    monkeypatch.setattr(server, "_parts_manual_catalog_for_assembly", lambda number: (assembly, catalog))
+    response = mmle_client.post("/api/parts-manual/MMLE-50D/documentation-scene/refresh", json={})
+    assert response.status_code == 409
+    assert missing in response.json()["details"]["missingOccurrences"]
+    assert plan_path.read_bytes() == raw
+    assert not (plan_path.parent / "documentation-scene.json").exists()
+
+
+def test_rebind_manual_plan_still_preserves_captures(tmp_path, monkeypatch):
+    from tests.test_parts_manual import test_moving_parts_between_sections_recaptures_only_the_figures_it_changes
+    test_moving_parts_between_sections_recaptures_only_the_figures_it_changes(tmp_path, monkeypatch)
+
+
+def test_reset_route_requires_user_boundary_and_preview(mmle_client, monkeypatch):
+    import server
+    from types import SimpleNamespace
+    kind = KIND
+    scene_url = "/api/operations-manual/MMLE-50D/documentation-scene"
+    state = mmle_client.get(scene_url).json()
+    page, alias = next((page, alias) for page, entries in state["document"]["aliasMap"].items()
+                       for alias, info in entries.items() if info.get("safe") and alias.endswith(".r0.c1"))
+    workspace_edit(mmle_client, scene_url, state, page, alias, "Reset this manual value")
+    url = "/api/documentation/" + kind + "/MMLE-50D/reset"
+    preview = mmle_client.get(url)
+    assert preview.status_code == 200, preview.text
+    body = {key: preview.json()[key] for key in ("expectedRevision", "previewHash")}
+    assert mmle_client.post(url, json=body, headers={"origin": "https://untrusted.invalid"}).status_code == 403
+    assert mmle_client.post(url, json={**body, "actor": "sage"}).status_code == 422
+    monkeypatch.setattr(server, "_FACILITY_PRINCIPAL_RESOLVER", lambda request: SimpleNamespace(principal_id="reviewer"))
+    result = mmle_client.post(url, json=body)
+    assert result.status_code == 200, result.text
+    assert result.json()["resetBy"] == "reviewer" and result.json()["recoveryId"]
+    assert not hasattr(server._DocumentationAgentHost(), "reset_document")
+
+
+def test_real_specification_slot_refresh_and_sage_batch_refusal(mmle_client, monkeypatch):
+    import server
+    from ai_inspector.specification_sheet import document as compiler
+    url = "/api/specification-sheet/MMLE-50D"
+    response = mmle_client.post(url + "/values", json={"values": [{"slot": "feature.1.text", "value": "Manual feature value"}]})
+    assert response.status_code == 200, response.text
+    original_profile = compiler._read_profile
+    def changed_profile(*args, **kwargs):
+        profile = deepcopy(original_profile(*args, **kwargs))
+        profile["features"][0]["text"] = "New generated feature value"
+        return profile
+    monkeypatch.setattr(compiler, "_read_profile", changed_profile)
+    refreshed = mmle_client.post(url + "/generate?rebaseline=true")
+    assert refreshed.status_code == 200, refreshed.text
+    payload = refreshed.json()
+    conflict = next(c for c in payload["conflicts"] if c["targetId"] == "slot:feature.1.text")
+    assert conflict["kind"] == "value"
+    assert conflict["C"]["payload"] == {"value": "Manual feature value"}
+    assert conflict["N"]["payload"] == {"value": "New generated feature value"}
+    assert payload["document"]["slots"]["feature.1.text"]["value"] == "Manual feature value"
+    identity._CATALOGS.clear()
+    assert mmle_client.get(url + "/documentation-scene").json()["conflicts"] == payload["conflicts"]
+    refused = mmle_client.post(url + "/values", json={"values": [{"slot": "feature.1.text", "value": "Blocked"}]})
+    assert refused.status_code == 409 and refused.json()["error"] == "manual_edit_conflict"
+    # The old viewport command is an alternate address for the same native slot.
+    current = mmle_client.get(url + "/documentation-scene").json()
+    page = current["document"]["pages"][0]
+    block = next(b for b in page["layoutBlocks"] if (b.get("slots") or {}).get("text") == "feature.1.text")
+    refused = mmle_client.post(url + "/documentation-scene/commands", json={
+        "baseRevision": current["revision"], "sourceRevision": current["document"]["sourceRevision"],
+        "manualPlanRevision": current["document"]["manualPlanRevision"], "pageId": page["pageId"],
+        "operation": "update_text", "targetType": "page_element", "targetId": block["blockId"], "text": "Blocked"})
+    assert refused.status_code == 409 and refused.json()["error"] == "manual_edit_conflict"
+    host, kind = server._DocumentationAgentHost(), "product_specification_sheet"
+    snapshot = host.document_snapshot("MMLE-50D", kind)
+    read = read_targets(snapshot["state"], snapshot["targets"], [{"targetId": "slot:feature.1.text"}])
+    assert read["openConflictCount"] == 1 and read["targets"][0]["hasOpenConflict"]
+    reader = ReadBindings("refresh-conflict")
+    reader.record(kind, read)
+    observed = reader.bind_operations(kind, {"documentId": read["documentId"], "expectedRevision": read["revision"],
+        "requestId": "blocked-refresh-batch", "operations": [{"operation": "set_slot_value", "targetId": "slot:feature.1.text",
+        "value": "Blocked", "expectedContentHash": read["targets"][0]["contentHash"]}]})
+    with pytest.raises(DocumentEditError) as error:
+        host.apply_document_edits("MMLE-50D", kind, observed)
+    assert error.value.code == "manual_edit_conflict"
+
+
+@pytest.mark.parametrize("route,kind", [("operations-manual", KIND), ("work-instructions", "work_instructions")])
+def test_failed_regeneration_route_keeps_original_bytes(mmle_client, monkeypatch, route, kind):
+    import server
+    url = "/api/" + route + "/MMLE-50D"
+    state = mmle_client.get(url + "/documentation-scene").json()
+    page, alias = next((p, a) for p, entries in state["document"]["aliasMap"].items() for a, entry in entries.items()
+                       if entry.get("safe") and (a.endswith(".r0.c1") if route == "operations-manual" else "-actions.i0" in a))
+    workspace_edit(mmle_client, url + "/documentation-scene", state, page, alias, "Keep on failed generation")
+    repository = server._DocumentationAgentHost()._edit_repository(kind)
+    path = repository._scene_path("MMLE-50D")
+    raw = path.read_bytes()
+    assembly, catalog = server._parts_manual_catalog_for_assembly("MMLE-50D")
+    catalog = deepcopy(catalog)
+    catalog["sourceRevision"] = "changed-fixture-source"
+    monkeypatch.setattr(server, "_parts_manual_catalog_for_assembly", lambda number: (assembly, catalog))
+    name = "build_operations_manual_document" if route == "operations-manual" else "_work_instruction_document_for_scene"
+    compiler = getattr(server, name)
+    def fail_after_baseline(*args, **kwargs):
+        if kwargs.get("documentation_scene") is not None or kwargs.get("scene") is not None:
+            raise ValueError("fixture compiler validation failed")
+        return compiler(*args, **kwargs)
+    monkeypatch.setattr(server, name, fail_after_baseline)
+    response = mmle_client.post(url + "/generate?rebaseline=true")
+    assert response.status_code == 422, response.text
+    assert path.read_bytes() == raw
+
+
+def test_refresh_adopts_generated_payload_but_preserves_formatting(tmp_path):
+    doc = source_document()
+    table = doc["pages"][0]["layoutBlocks"][0]
+    table["evidenceBindingVersion"] = 1
+    table["rows"][0].update(claimIds=["capacity-claim"], sourceIds=["capacity-source"])
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    first = write_text(repo, doc, text="100")
+    key = compiled_target(doc, "table.r0.c1")
+    repo.apply_command(NUMBER, SOURCE, PLAN, base_revision=first["revision"], identity_document=doc,
+        page_targets={PAGE: {"page_element": [key]}}, command={"operation": "update_style", "pageId": PAGE,
+        "targetType": "page_element", "targetId": key, "style": {"fontWeight": 700}})
+    refreshed = refresh_repo(repo, next_source(doc))
+    override = refreshed["scene"]["pages"][PAGE]["pageElementOverrides"][key]
+    assert "text" not in override and override["style"]["fontWeight"] == 700
+    assert refreshed["scene"]["generatedBaseline"][key]["payload"] == {"text": "200"}
+    assert not refreshed["conflicts"]
+    compiled, scene = bind_document(next_source(doc), refreshed["scene"])
+    projected = project_document(compiled, scene)
+    row = next(r for r in projected["pages"][0]["layoutBlocks"][0]["rows"] if r["sourceKey"] == "capacity")
+    # Adoption takes exactly the generated row: the same projection as the new source with no scene.
+    generated_compiled, generated_scene = bind_document(next_source(doc), None)
+    generated = next(r for r in project_document(generated_compiled, generated_scene)["pages"][0]["layoutBlocks"][0]["rows"]
+                     if r["sourceKey"] == "capacity")
+    for key in ("cells", "claimIds", "sourceIds", "activeEvidenceClaimIds", "provenance"):
+        assert row.get(key) == generated.get(key), key
+
+
+@pytest.mark.parametrize("route,kind", [("operations-manual", KIND), ("work-instructions", "work_instructions")])
+def test_real_regeneration_preserves_edits(mmle_client, monkeypatch, route, kind):
+    import server
+    url = "/api/" + route + "/MMLE-50D"
+    state = mmle_client.get(url + "/documentation-scene").json()
+    page, alias = next((p, a) for p, entries in state["document"]["aliasMap"].items() for a, entry in entries.items()
+                       if entry.get("safe") and (a == "spec-table-1.r0.c1" if route == "operations-manual"
+                                                 else "-actions.i" in a and entry.get("scope") == "revision"))
+    workspace_edit(mmle_client, url + "/documentation-scene", state, page, alias, "Survives regeneration")
+    assembly, catalog = server._parts_manual_catalog_for_assembly("MMLE-50D")
+    catalog = deepcopy(catalog)
+    catalog["sourceRevision"] = "new-fixture-source"
+    monkeypatch.setattr(server, "_parts_manual_catalog_for_assembly", lambda number: (assembly, catalog))
+    response = mmle_client.post(url + "/generate?rebaseline=true")
+    assert response.status_code == 200, response.text
+    identity._CATALOGS.clear()
+    snapshot = server._DocumentationAgentHost().document_snapshot("MMLE-50D", kind)
+    key = snapshot["document"]["aliasMap"][page][alias]["targetId"]
+    assert snapshot["targets"][key]["text"] == "Survives regeneration"
+    assert response.json()["openConflictCount"] == 0
+    if kind == "work_instructions":
+        assert response.json()["refreshReceipt"]["counts"]["carriedRevisionScoped"] >= 1
+
+
+def test_refresh_validation_failure_and_denied_replace_are_atomic(tmp_path, monkeypatch):
+    import ai_inspector.parts_manual.documentation as owner
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    doc = source_document()
+    write_text(repo, doc)
+    raw = repo._scene_path(NUMBER).read_bytes()
+    original = owner._write_atomic
+    def denied(path, payload):
+        if path == repo._scene_path(NUMBER):
+            raise PermissionError("fixture denied replace")
+        return original(path, payload)
+    monkeypatch.setattr(owner, "_write_atomic", denied)
+    with pytest.raises(PermissionError):
+        refresh_repo(repo, next_source(doc))
+    assert repo._scene_path(NUMBER).read_bytes() == raw
+
+
+def test_invalid_refresh_metadata_refuses_without_rewriting(tmp_path):
+    doc = source_document()
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    write_text(repo, doc)
+    path = repo._scene_path(NUMBER)
+    stored = json.loads(path.read_bytes())
+    key = next(iter(stored["generatedBaseline"]))
+    stored["generatedBaseline"][key]["hash"] = "corrupt"
+    path.write_text(json.dumps(stored), encoding="ascii")
+    raw = path.read_bytes()
+    with pytest.raises(DocumentEditError) as error:
+        load(repo, doc)
+    assert error.value.code == "unsupported_document_schema" and path.read_bytes() == raw
+
+
+def test_refresh_advances_baseline_after_earlier_undo(tmp_path):
+    doc = source_document()
+    repo = DocumentationSceneRepository(tmp_path, KIND)
+    changed = write_text(repo, doc)
+    repo.move_history(NUMBER, SOURCE, PLAN, base_revision=changed["revision"], direction="undo", identity_document=doc)
+    new = next_source(doc)
+    refreshed = refresh_repo(repo, new)
+    key = compiled_target(doc, "table.r0.c1")
+    assert refreshed["scene"]["generatedBaseline"][key]["payload"] == {"text": "200"}
+    assert refreshed["openConflictCount"] == 0
+
+
+def test_slot_reset_keeps_recovery_and_refuses_stale_preview(tmp_path):
+    store = SlotStore(tmp_path, NUMBER)
+    store.set_values([{"slot": "title", "value": "Manual"}], "workspace")
+    preview = store.reset_preview()
+    raw = store.path.read_bytes()
+    with pytest.raises(DocumentEditError):
+        store.reset(expected_revision=preview["expectedRevision"], preview_hash=preview["previewHash"])
+    with pytest.raises(DocumentEditError):
+        store.reset(expected_revision=preview["expectedRevision"] - 1, preview_hash=preview["previewHash"], user_authorized=True)
+    result = store.reset(expected_revision=preview["expectedRevision"], preview_hash=preview["previewHash"], user_authorized=True)
+    assert store.read()["values"] == {} and store.read()["journal"] == []
+    assert store.path.with_name("sl-" + result["recoveryId"] + ".json").read_bytes() == raw
+
+
+def test_authored_slot_rows_keep_values_and_order_without_generated_baseline(tmp_path):
+    store = SlotStore(tmp_path, NUMBER)
+    store.transaction(lambda candidate: (candidate.set_rows([{"key": "note", "label": "Service note", "source": "workspace"}]),
+        candidate.set_values([{"slot": "spec.note.value", "value": "Authored value"}], "workspace")))
+    before = store.read()
+    assert "generatedBaseline" not in before
+    store.refresh(slot_document(source="source-b"), expected_revision=before["editRevision"])
+    after = store.read()
+    assert after["rows"] == before["rows"] and after["values"] == before["values"]
+    assert not after["conflicts"] and after["identities"]["slot:spec.note.value"]["ownership"] == "authored"

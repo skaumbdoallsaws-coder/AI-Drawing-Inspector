@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 3,
+  "assemblyNumber": "IDENTITY",
+  "values": {
+    "title": {
+      "value": "Old manual title",
+      "source": "workspace",
+      "at": "2026-01-01T00:00:00Z"
+    }
+  },
+  "rows": null,
+  "type": null,
+  "units": null,
+  "updatedAt": "2026-01-01T00:00:00Z",
+  "editRevision": 1,
+  "editEpoch": 0,
+  "fieldVersions": {
+    "slot:title": 1
+  },
+  "fieldMeta": {},
+  "receipts": {},
+  "receiptOrder": [],
+  "journal": [],
+  "identities": {}
+}

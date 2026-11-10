@@ -107,6 +107,8 @@ def _write_atomic(path: Path, payload: bytes) -> None:
 
 
 class PartsManualRepository:
+    transaction_lock = _WRITE_LOCK
+
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
 
@@ -187,6 +189,62 @@ class PartsManualRepository:
             "persisted": path.is_file(),
             "sourceCurrent": source_current,
         }
+
+    def prepare_source_refresh(self, assembly_number, source_revision, *, catalog, base_revision):
+        """Carry only unchanged grouping with a closed set of occurrence references."""
+        from ai_inspector.documentation.commands import DocumentEditError
+
+        rows = list(catalog)
+        known = {str(row["occurrenceId"]) for row in rows if row.get("occurrenceId")}
+        loaded = self.read(assembly_number, source_revision, known_occurrence_ids=known)
+        self._assert_revision(loaded["plan"], base_revision)
+        plan = copy.deepcopy(loaded["plan"])
+        references = set()
+        def collect(value):
+            if isinstance(value, Mapping):
+                for key, child in value.items():
+                    if key == "occurrenceId" and isinstance(child, str):
+                        references.add(child)
+                    elif key in {"occurrenceIds", "occurrenceOrder", "excludedOccurrences"} and isinstance(child, list):
+                        references.update(item for item in child if isinstance(item, str))
+                    collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+        collect(plan)
+        missing = sorted(references - known)
+        if missing:
+            raise DocumentEditError("document_binding_changed", "The manual plan references missing occurrences.",
+                                    missingOccurrences=missing)
+        if not loaded["sourceCurrent"]:
+            plan["sourceRevision"] = source_revision
+            for section in plan["sections"]:
+                section["itemAssignments"] = self._item_assignments(rows, section["occurrenceIds"],
+                                                                   section.get("itemAssignments", []))
+        require_valid_manual_plan(plan, known_occurrence_ids=known)
+        return {"plan": plan, "revision": manual_plan_revision(plan), "sourceCurrent": True,
+                "knownOccurrenceIds": sorted(known)}
+
+    def commit_source_refresh(self, assembly_number, candidate, *, base_revision, publish):
+        """The caller compiles before entry; compensate a failed scene replace."""
+        with _WRITE_LOCK:
+            current = self.read(assembly_number, candidate["plan"]["sourceRevision"],
+                                known_occurrence_ids=candidate.get("knownOccurrenceIds", ()))
+            self._assert_revision(current["plan"], base_revision)
+            path = self._plan_path(assembly_number)
+            original = path.read_bytes() if path.is_file() else None
+            changed = candidate["revision"] != current["revision"]
+            if changed:
+                _write_atomic(path, canonical_manual_bytes(candidate["plan"]))
+            try:
+                return publish()
+            except Exception:
+                if changed:
+                    if original is not None:
+                        _write_atomic(path, original)
+                    else:
+                        path.unlink(missing_ok=True)
+                raise
 
     @staticmethod
     def _assert_revision(current: Dict[str, Any], base_revision: str) -> None:

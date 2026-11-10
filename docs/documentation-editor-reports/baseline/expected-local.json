@@ -238,7 +238,7 @@
       "rowBindingsPresent": true,
       "targetId": "spec-table-1.r0.c1"
     },
-    "edited": "452309abe0fb67ad5dcaa1c864bafb838e13501dc335cc201a7b136b19cef035",
+    "edited": "f9f9ef77bed0ff76dd87eb79444485b01dd7f2d78a9efb3f8f832e2fd24dcffb",
     "exports": {
       "before": {
         "docx": {
@@ -793,7 +793,7 @@
     },
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "reopened": "452309abe0fb67ad5dcaa1c864bafb838e13501dc335cc201a7b136b19cef035",
+    "reopened": "f9f9ef77bed0ff76dd87eb79444485b01dd7f2d78a9efb3f8f832e2fd24dcffb",
     "undo": {
       "canUndoAfterEdit": true,
       "httpStatus": 200,
@@ -804,7 +804,7 @@
   "reviewedSpecification": {
     "before": "08c4dab19ffc881ad1f0aa20123c981fd700bed448fea9658cc26c8303a3f043",
     "beforeMatchesTrackedGolden": true,
-    "edited": "da97cc4f2468286c50d6fdc389e3740622f7b551b6fca6ff0a5f0fcc88b5df9d",
+    "edited": "4c7c060fe16902f889cc448c87efdf65b9830882a2f5fcc750bf16402ce7d7df",
     "exports": {
       "before": {
         "docx": {
@@ -847,7 +847,7 @@
     },
     "readDidNotWrite": true,
     "reopenUnchanged": true,
-    "reopened": "da97cc4f2468286c50d6fdc389e3740622f7b551b6fca6ff0a5f0fcc88b5df9d",
+    "reopened": "4c7c060fe16902f889cc448c87efdf65b9830882a2f5fcc750bf16402ce7d7df",
     "trackedGoldenTextSha256": "d1544f49712142be6ee240d3917cf301c30f3d1265e9693afc3df30168c93423",
     "undo": {
       "canUndoAfterEdit": true,
@@ -862,7 +862,7 @@
   "status": "captured",
   "workInstructions": {
     "before": "e1e495461cc0381498ef0903e769d32adfde74468bfd0be76a822073c38e4692",
-    "edited": "da3df7b578c45756bc60caf492788c74e2c9cee7edae5fa3c8a98b8fe14722df",
+    "edited": "fa50632dea35c4e3393a1bab0302415a6bf4812b1291e73dc2470d7a3a8d8dbc",
     "exports": {
       "before": {
         "docx": {
@@ -1211,7 +1211,7 @@
     "readDidNotWrite": true,
     "recapturedPageIds": [],
     "reopenUnchanged": true,
-    "reopened": "da3df7b578c45756bc60caf492788c74e2c9cee7edae5fa3c8a98b8fe14722df",
+    "reopened": "fa50632dea35c4e3393a1bab0302415a6bf4812b1291e73dc2470d7a3a8d8dbc",
     "textEditExportHttpStatus": 200,
     "textEditInvalidatesPageCapture": false,
     "undo": {

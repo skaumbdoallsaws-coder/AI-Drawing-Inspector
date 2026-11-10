@@ -1623,7 +1623,7 @@ def _is_facility_authority_path(path: str) -> bool:
 
 @app.middleware("http")
 async def _documentation_confirmation_origin_boundary(request: Request, call_next):
-    if request.url.path.startswith("/api/documentation/") and request.url.path.endswith("/confirm-values") \
+    if request.url.path.startswith("/api/documentation/") and (request.url.path.endswith("/confirm-values") or request.url.path.endswith("/reset")) \
             and not _request_origin_is_trusted(request):
         return JSONResponse(status_code=403, content={"ok": False, "error": {
             "code": "documentation_origin_forbidden", "message": "Untrusted document origin."}})
@@ -16086,6 +16086,10 @@ def _operations_manual_base_document(
     )
 
 
+from ai_inspector.parts_manual.documentation import documentation_scene_revision
+from ai_inspector.documentation.refresh import exposure as documentation_refresh_exposure
+
+
 class _DocumentationDocument(dict):
     """Request-local baseline handoff; attributes are not document JSON fields."""
 
@@ -16101,6 +16105,17 @@ def _documentation_identity_document(document):
     return baseline
 
 
+def _documentation_store_lock(method):
+    from functools import wraps
+
+    @wraps(method)
+    def locked(*args, **kwargs):
+        with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+            return method(*args, **kwargs)
+    return locked
+
+
+@_documentation_store_lock
 def _operations_manual_build_document_with_scene(
     *,
     assembly_data: Mapping[str, Any],
@@ -16116,16 +16131,14 @@ def _operations_manual_build_document_with_scene(
         plan_revision,
         identity_document=baseline,
     )
-    if rebaseline_stale and (
-        not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]
-    ):
-        loaded_scene = repository.rebaseline(
-            str(catalog["assemblyNumber"]),
-            str(catalog["sourceRevision"]),
-            plan_revision,
-            preserve_theme=True,
-            identity_document=baseline,
-        )
+    refresh_revision = loaded_scene["revision"]
+    refresh_receipt = None
+    if rebaseline_stale:
+        candidate, refresh_receipt = repository.prepare_refresh(
+            str(catalog["assemblyNumber"]), str(catalog["sourceRevision"]), plan_revision,
+            base_revision=refresh_revision, identity_document=baseline)
+        loaded_scene = {**loaded_scene, "scene": candidate, "revision": documentation_scene_revision(candidate),
+                        "sourceCurrent": True, "manualPlanCurrent": True}
     if not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]:
         scene = loaded_scene["scene"]
         raise DocumentationSceneBindingError(
@@ -16146,6 +16159,9 @@ def _operations_manual_build_document_with_scene(
         str(catalog["assemblyNumber"]),
         document,
     )
+    if rebaseline_stale:
+        loaded_scene = repository.commit_refresh(str(catalog["assemblyNumber"]), loaded_scene["scene"],
+            refresh_receipt, base_revision=refresh_revision, identity_document=baseline)
     return _DocumentationDocument(document, baseline), loaded_scene
 
 
@@ -16259,7 +16275,9 @@ def _operations_manual_error_response(
 
 
 def _specification_sheet_scene_repository() -> DocumentationSceneRepository:
-    return DocumentationSceneRepository(SPECIFICATION_SHEET_ROOT, "product_specification_sheet")
+    repository = DocumentationSceneRepository(SPECIFICATION_SHEET_ROOT, "product_specification_sheet")
+    repository.conflict_reader = lambda number: SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, number).read()
+    return repository
 
 
 _SPECIFICATION_SHEET_EXTENTS_CACHE: Dict[Tuple[Any, ...], Optional[Dict[str, float]]] = {}
@@ -16299,6 +16317,7 @@ def _specification_sheet_compile(
     documentation_scene: Optional[Mapping[str, Any]] = None,
     documentation_scene_revision: Optional[str] = None,
     identity_document: Optional[Mapping[str, Any]] = None,
+    stored_slots: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     document = build_specification_sheet_document(
         assembly_data,
@@ -16309,6 +16328,7 @@ def _specification_sheet_compile(
         cad=_specification_sheet_cad(assembly_data, catalog),
         documentation_scene=documentation_scene,
         identity_document=identity_document,
+        stored_slots=stored_slots,
         documentation_scene_revision=documentation_scene_revision,
         appearance_revision=_specification_sheet_appearance_revision(str(catalog.get("assemblyNumber") or "")),
     )
@@ -16350,6 +16370,7 @@ def _specification_sheet_base_document(
     return _specification_sheet_compile(assembly_data, catalog)
 
 
+@_documentation_store_lock
 def _specification_sheet_build_document_with_scene(
     *,
     assembly_data: Mapping[str, Any],
@@ -16357,6 +16378,16 @@ def _specification_sheet_build_document_with_scene(
     rebaseline_stale: bool = False,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     baseline = _specification_sheet_base_document(assembly_data, catalog)
+    slot_store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"]))
+    slot_revision = slot_store.read()["editRevision"]
+    slot_candidate, slot_refresh_receipt = None, None
+    if rebaseline_stale:
+        scene_binding = _specification_sheet_scene_repository().read(str(catalog["assemblyNumber"]),
+            str(catalog["sourceRevision"]), str(baseline["manualPlanRevision"]), identity_document=baseline)
+        slot_candidate, slot_refresh_receipt = slot_store.prepare_refresh(baseline, expected_revision=slot_revision,
+            binding_is_current=(scene_binding["persisted"] and scene_binding["sourceCurrent"]
+                                and scene_binding["manualPlanCurrent"]) or not slot_store.read()["values"])
+        baseline = _specification_sheet_compile(assembly_data, catalog, stored_slots=slot_candidate)
     plan_revision = str(baseline["manualPlanRevision"])
     repository = _specification_sheet_scene_repository()
     loaded_scene = repository.read(
@@ -16365,16 +16396,14 @@ def _specification_sheet_build_document_with_scene(
         plan_revision,
         identity_document=baseline,
     )
-    if rebaseline_stale and (
-        not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]
-    ):
-        loaded_scene = repository.rebaseline(
-            str(catalog["assemblyNumber"]),
-            str(catalog["sourceRevision"]),
-            plan_revision,
-            preserve_theme=True,
-            identity_document=baseline,
-        )
+    refresh_revision = loaded_scene["revision"]
+    refresh_receipt = None
+    if rebaseline_stale:
+        candidate, refresh_receipt = repository.prepare_refresh(
+            str(catalog["assemblyNumber"]), str(catalog["sourceRevision"]), plan_revision,
+            base_revision=refresh_revision, identity_document=baseline)
+        loaded_scene = {**loaded_scene, "scene": candidate, "revision": documentation_scene_revision(candidate),
+                        "sourceCurrent": True, "manualPlanCurrent": True}
     if not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]:
         scene = loaded_scene["scene"]
         raise DocumentationSceneBindingError(
@@ -16388,8 +16417,23 @@ def _specification_sheet_build_document_with_scene(
         catalog,
         documentation_scene=loaded_scene["scene"],
         identity_document=baseline,
+        stored_slots=slot_candidate,
         documentation_scene_revision=str(loaded_scene["revision"]),
     )
+    if rebaseline_stale:
+        # Both candidates have compiled and validated before either owner commits.
+        def publish_refresh():
+            slot_store.commit_refresh(slot_candidate, slot_refresh_receipt, expected_revision=slot_revision)
+            return repository.commit_refresh(str(catalog["assemblyNumber"]), loaded_scene["scene"],
+                refresh_receipt, base_revision=refresh_revision, identity_document=baseline)
+        loaded_scene = slot_store.publish_with_rollback(publish_refresh)
+        loaded_scene["slotRefreshReceipt"] = slot_refresh_receipt
+    slot_state = slot_store.read(identity_document=baseline, binding_is_current=True)
+    scene_exposure = documentation_refresh_exposure(loaded_scene["scene"])
+    slot_exposure = documentation_refresh_exposure(slot_state)
+    loaded_scene.update(openConflictCount=scene_exposure["openConflictCount"] + slot_exposure["openConflictCount"],
+        conflicts=scene_exposure["conflicts"] + slot_exposure["conflicts"],
+        orphans=scene_exposure["orphans"] + slot_exposure["orphans"])
     snapshot = _documentation_snapshot_payload({**loaded_scene, "document": document}, "product_specification_sheet",
                                                 identity_document=baseline)
     from ai_inspector.documentation.changes import history_choices
@@ -16544,6 +16588,7 @@ def _work_instruction_document_for_scene(
     )
 
 
+@_documentation_store_lock
 def _work_instruction_build_document_with_scene(
     *,
     assembly_data: Mapping[str, Any],
@@ -16566,16 +16611,14 @@ def _work_instruction_build_document_with_scene(
         plan_revision,
         identity_document=baseline,
     )
-    if rebaseline_stale and (
-        not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]
-    ):
-        loaded_scene = repository.rebaseline(
-            str(catalog["assemblyNumber"]),
-            str(catalog["sourceRevision"]),
-            plan_revision,
-            preserve_theme=True,
-            identity_document=baseline,
-        )
+    refresh_revision = loaded_scene["revision"]
+    refresh_receipt = None
+    if rebaseline_stale:
+        candidate, refresh_receipt = repository.prepare_refresh(
+            str(catalog["assemblyNumber"]), str(catalog["sourceRevision"]), plan_revision,
+            base_revision=refresh_revision, identity_document=baseline)
+        loaded_scene = {**loaded_scene, "scene": candidate, "revision": documentation_scene_revision(candidate),
+                        "sourceCurrent": True, "manualPlanCurrent": True}
     if not loaded_scene["sourceCurrent"] or not loaded_scene["manualPlanCurrent"]:
         scene = loaded_scene["scene"]
         raise DocumentationSceneBindingError(
@@ -16595,6 +16638,9 @@ def _work_instruction_build_document_with_scene(
         str(catalog["assemblyNumber"]),
         document,
     )
+    if rebaseline_stale:
+        loaded_scene = repository.commit_refresh(str(catalog["assemblyNumber"]), loaded_scene["scene"],
+            refresh_receipt, base_revision=refresh_revision, identity_document=baseline)
     return _DocumentationDocument(document, baseline), loaded_scene
 
 
@@ -17171,6 +17217,7 @@ def parts_manual_documentation_template_save(
         return _parts_manual_error_response(error, operation="documentation_template_save")
 
 
+@_documentation_store_lock
 def _parts_manual_build_document_with_scene(
     *,
     assembly_data: Mapping[str, Any],
@@ -18614,6 +18661,8 @@ def specification_slot_history(assembly_number: str, direction: str, body: Dict[
             if any(body.get(key) != state[key] for key in ("sourceRevision", "manualPlanRevision")):
                 raise DocumentEditError("document_binding_changed", "The sheet source changed.")
             store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number)
+            store.other_conflicts = documentation_refresh_exposure(state["scene"])["conflicts"]
+            store.identity_document = snapshot["identity_document"]
             store.binding = {key: state[key] for key in ("sourceRevision", "manualPlanRevision")}
             result = store.move_history(expected_revision=body.get("expectedRevision"), direction=direction)
             response = specification_sheet_documentation_scene_get(assembly_number)
@@ -18691,6 +18740,8 @@ def documentation_confirm_values(document_id: str, body: Dict[str, Any], request
                 command = documentation_confirmation_command(target, by=by)
                 commands.append(command)
             if store:
+                store.other_conflicts = documentation_refresh_exposure(state["scene"])["conflicts"]
+                store.identity_document = snapshot["identity_document"]
                 store.binding = {key: state[key] for key in ("sourceRevision", "manualPlanRevision")}
                 store.confirm_values([available[key] for key in expected], by=by,
                     expected_revision=body["expectedRevision"], request_id=body["requestId"],
@@ -18712,17 +18763,83 @@ def documentation_confirm_values(document_id: str, body: Dict[str, Any], request
         return _documentation_value_error(error)
 
 
+@app.get("/api/documentation/{document_type}/{assembly_number}/reset")
+def documentation_reset_preview(document_type: str, assembly_number: str):
+    try:
+        with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+            host = _DocumentationAgentHost()
+            snapshot = host.document_snapshot(assembly_number, document_type)
+            state = snapshot["state"]
+            repository = host._edit_repository(document_type)
+            preview = repository.reset_preview(assembly_number, state["sourceRevision"], state["manualPlanRevision"],
+                identity_document=snapshot["identity_document"])
+            if document_type == "product_specification_sheet":
+                preview["slots"] = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number).reset_preview()
+            return {"success": True, **preview}
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
+
+
+@app.post("/api/documentation/{document_type}/{assembly_number}/reset")
+def documentation_reset(document_type: str, assembly_number: str, body: Dict[str, Any], request: Request):
+    if not _request_origin_is_trusted(request):
+        return JSONResponse(status_code=403, content={"success": False, "error": "documentation_origin_forbidden"})
+    try:
+        allowed = {"expectedRevision", "previewHash"} | ({"slots"} if document_type == "product_specification_sheet" else set())
+        if set(body) != allowed:
+            raise DocumentEditError("invalid_document_operation", "Execute the reset preview with its revision and hash only.")
+        by = _FACILITY_PRINCIPAL_RESOLVER(request).principal_id
+        with DocumentationSceneRepository.transaction_lock, SpecificationSlotStore.transaction_lock:
+            host = _DocumentationAgentHost()
+            snapshot = host.document_snapshot(assembly_number, document_type)
+            state = snapshot["state"]
+            repository = host._edit_repository(document_type)
+            preview = repository.reset_preview(assembly_number, state["sourceRevision"], state["manualPlanRevision"],
+                identity_document=snapshot["identity_document"])
+            if any(body[key] != preview[key] for key in ("expectedRevision", "previewHash")):
+                raise DocumentEditError("stale_revision", "Preview the current reset before executing it.")
+            def reset_scene():
+                return repository.rebaseline(assembly_number, state["sourceRevision"], state["manualPlanRevision"],
+                    base_revision=body["expectedRevision"], preview_hash=body["previewHash"], user_authorized=True,
+                    identity_document=snapshot["identity_document"])
+            if document_type == "product_specification_sheet":
+                slots = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number)
+                slot_preview = slots.reset_preview()
+                if body["slots"] != {key: slot_preview[key] for key in ("expectedRevision", "previewHash")}:
+                    raise DocumentEditError("stale_revision", "Preview the current slot reset before executing it.")
+                def reset_both():
+                    slot_result = slots.reset(expected_revision=body["slots"]["expectedRevision"],
+                        preview_hash=body["slots"]["previewHash"], user_authorized=True)
+                    return {**reset_scene(), "slotRecoveryId": slot_result["recoveryId"]}
+                result = slots.publish_with_rollback(reset_both)
+            else:
+                result = reset_scene()
+            reopened = globals()[host._TEXT_ROUTES[document_type][0]](assembly_number)
+            if isinstance(reopened, JSONResponse):
+                return reopened
+            return {**reopened, "resetBy": by, "recoveryId": result["recoveryId"],
+                    **({"slotRecoveryId": result["slotRecoveryId"]} if "slotRecoveryId" in result else {})}
+    except DocumentEditError as error:
+        return _documentation_value_error(error)
+
+
 def _documentation_snapshot_payload(payload, document_type, *, identity_document=None):
     document, scene = payload["document"], payload["scene"]
     baseline = identity_document if identity_document is not None else _documentation_identity_document(document)
     number = str(scene["assemblyNumber"])
-    stored = (SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, number).read()
+    stored = (SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, number).read(identity_document=baseline, binding_is_current=True)
               if document_type == "product_specification_sheet" else scene)
     state = {"documentId": documentation_document_id(document_type, number),
              "revision": stored["editRevision"], "sourceRevision": str(document["sourceRevision"]),
              "manualPlanRevision": str(document["manualPlanRevision"]), "sceneRevision": payload["revision"],
              "fieldVersions": stored["fieldVersions"], "editEpoch": stored["editEpoch"], "scene": scene,
-             "aliasRevision": baseline.get("aliasRevision")}
+             "aliasRevision": baseline.get("aliasRevision"),
+             **documentation_refresh_exposure(stored)}
+    if document_type == "product_specification_sheet":
+        scene_review = documentation_refresh_exposure(scene)
+        state["conflicts"] += scene_review["conflicts"]
+        state["orphans"] += scene_review["orphans"]
+        state["openConflictCount"] += scene_review["openConflictCount"]
     targets = documentation_text_targets(state, document)
     hashes = {key: documentation_content_hash(state, key, value)
               for key, value in documentation_hash_values(targets).items()}
@@ -18752,11 +18869,11 @@ def _specification_sheet_slot_change(assembly_number: str, change, *, observed=N
         store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, str(catalog["assemblyNumber"]))
         provenance_document = base
         if observed is None:
-            try:
-                provenance_document, _ = _specification_sheet_build_document_with_scene(
-                    assembly_data=assembly_data, catalog=catalog)
-            except DocumentationSceneBindingError:
-                pass
+            provenance_document, loaded_scene = _specification_sheet_build_document_with_scene(
+                assembly_data=assembly_data, catalog=catalog)
+        store.identity_document = (_documentation_identity_document(provenance_document)
+            if isinstance(provenance_document, _DocumentationDocument) else base)
+        store.other_conflicts = documentation_refresh_exposure(loaded_scene.get("scene", {}))["conflicts"]
         store.binding = {key: provenance_document[key] for key in ("sourceRevision", "manualPlanRevision")}
         store.provenance_defaults = copy.deepcopy(provenance_document.get("fieldMeta") or {})
         store.provenance_values = {key: item.get("value") for key, item in provenance_document.get("slots", {}).items()}
@@ -19873,6 +19990,58 @@ def parts_manual_documentation_scene_get(assembly_number: str):
         "document": document,
         "editableTargets": _parts_manual_editable_page_targets(document),
     }
+
+
+def _parts_refresh_inputs(assembly_number):
+    assembly_data, catalog = _parts_manual_catalog_for_assembly(assembly_number)
+    plans = _parts_manual_repository()
+    # A source-current plan is validated against the catalogue's occurrences (read()'s default is none).
+    old_plan = plans.read(assembly_number, catalog["sourceRevision"],
+                          known_occurrence_ids=[row["occurrenceId"] for row in catalog["occurrences"]])
+    candidate_plan = plans.prepare_source_refresh(assembly_number, catalog["sourceRevision"],
+        catalog=catalog["occurrences"], base_revision=old_plan["revision"])
+    baseline = build_manual_document(candidate_plan["plan"], catalog["occurrences"], assembly_data,
+                                     plan_revision=candidate_plan["revision"])
+    scenes = _documentation_scene_repository()
+    loaded = scenes.read(assembly_number, catalog["sourceRevision"], candidate_plan["revision"], identity_document=baseline)
+    return assembly_data, catalog, plans, old_plan, candidate_plan, baseline, scenes, loaded
+
+
+@app.get("/api/parts-manual/{assembly_number}/documentation-scene/refresh")
+def parts_manual_refresh_preview(assembly_number: str):
+    try:
+        with DocumentationSceneRepository.transaction_lock, PartsManualRepository.transaction_lock:
+            _, _, _, old_plan, candidate_plan, baseline, _, loaded = _parts_refresh_inputs(assembly_number)
+            return {"success": True, "expectedRevision": loaded["revision"], "expectedPlanRevision": old_plan["revision"],
+                    "fromBinding": {key: loaded["scene"][key] for key in ("sourceRevision", "manualPlanRevision")},
+                    "toBinding": {key: baseline[key] for key in ("sourceRevision", "manualPlanRevision")},
+                    "planCarried": candidate_plan["revision"] != old_plan["revision"]}
+    except (PartsManualRepositoryError, PartsManualValidationError, DocumentationSceneError, ValueError) as error:
+        return _parts_manual_error_response(error, operation="refresh_preview")
+
+
+@app.post("/api/parts-manual/{assembly_number}/documentation-scene/refresh")
+def parts_manual_refresh(assembly_number: str, body: Dict[str, Any]):
+    try:
+        with DocumentationSceneRepository.transaction_lock, PartsManualRepository.transaction_lock:
+            assembly_data, catalog, plans, old_plan, plan, baseline, scenes, loaded = _parts_refresh_inputs(assembly_number)
+            if set(body) != {"expectedRevision", "expectedPlanRevision"}:
+                raise DocumentEditError("document_read_required", "Preview the scene and plan revisions before refreshing.")
+            if body["expectedPlanRevision"] != old_plan["revision"]:
+                raise DocumentEditError("stale_revision", "The manual plan changed; preview refresh again.")
+            candidate, receipt = scenes.prepare_refresh(assembly_number, catalog["sourceRevision"], plan["revision"],
+                base_revision=body["expectedRevision"], identity_document=baseline)
+            # Real compiler validation precedes both owner writes.
+            document = build_manual_document(plan["plan"], catalog["occurrences"], assembly_data,
+                plan_revision=plan["revision"], documentation_scene=candidate,
+                documentation_scene_revision=documentation_scene_revision(candidate))
+            result = plans.commit_source_refresh(assembly_number, plan, base_revision=old_plan["revision"],
+                publish=lambda: scenes.commit_refresh(assembly_number, candidate, receipt,
+                    base_revision=body["expectedRevision"], identity_document=baseline))
+            return {"success": True, **result, "document": document,
+                    "editableTargets": _parts_manual_editable_page_targets(document)}
+    except (PartsManualRepositoryError, PartsManualValidationError, DocumentationSceneError, ValueError) as error:
+        return _parts_manual_error_response(error, operation="refresh")
 
 
 @app.post("/api/parts-manual/{assembly_number}/documentation-scene/commands")
@@ -41078,6 +41247,8 @@ class _DocumentationAgentHost:
                        "request_id": arguments["requestId"], "actor": "sage"}
             if document_type == "product_specification_sheet":
                 store = SpecificationSlotStore(SPECIFICATION_SHEET_ROOT, assembly_number)
+                store.other_conflicts = documentation_refresh_exposure(state["scene"])["conflicts"]
+                store.identity_document = snapshot["identity_document"]
                 store.binding = {key: state[key] for key in ("sourceRevision", "manualPlanRevision")}
                 result = store.undo_change(**options)
             else:

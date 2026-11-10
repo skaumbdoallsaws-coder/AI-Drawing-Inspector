@@ -54,6 +54,10 @@ def _text_history(scene, page_id, aliases):
     history = []
     from .changes import effective_commands
     for command in _leaves(effective_commands((scene.get("commands") or [])[:int(scene.get("historyCursor") or 0)])):
+        if command.get("refreshCheckpoint"):
+            adopted = set(command.get("adoptedTargets", []))
+            history = [item for item in history if item.get("targetId") not in adopted]
+            continue
         if command.get("pageId") != page_id and not (str(command.get("targetId", "")).startswith("gen-")
                 and command.get("targetId") in aliases):
             continue

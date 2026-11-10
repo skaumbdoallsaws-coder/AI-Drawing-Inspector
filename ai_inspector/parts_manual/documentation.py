@@ -33,6 +33,11 @@ from ai_inspector.documentation.commands import (
 )
 
 from ai_inspector.documentation.provenance import replay_field_meta
+from ai_inspector.documentation.refresh import (
+    derive_baselines, capture_baselines, command_targets, guard_command, guard_change,
+    validate_refresh_metadata, exposure as refresh_exposure, refresh as refresh_candidate,
+    reset_preview as preview_reset,
+)
 
 DOCUMENTATION_SCENE_SCHEMA_VERSION = 4
 DOCUMENTATION_TARGET_TYPES = frozenset(
@@ -1036,6 +1041,9 @@ def _scene_records(scene):
     records, prefix = [], []
     for index, command in enumerate(scene["commands"][:scene["historyCursor"]]):
         item = command.get("change")
+        if command.get("refreshCheckpoint"):
+            prefix.append(command)
+            continue
         if command.get("identityOrphan"):
             records.append({**copy.deepcopy(item or {}), "changeId": (item or {}).get("changeId") or legacy_id(command, index),
                             "migrationBlocked": True, "changes": [], "versionKeys": []})
@@ -1282,6 +1290,7 @@ def _upgrade_documentation_scene(scene: Dict[str, Any]) -> Dict[str, Any]:
         raise DocumentationSceneError("documentation history cursor is invalid")
     active_commands = commands[:cursor]
     transaction_defaults(scene)
+    validate_refresh_metadata(scene)
     scene["fieldMeta"] = replay_field_meta(active_commands)
     scene["schemaVersion"] = DOCUMENTATION_SCENE_SCHEMA_VERSION
     scene["pages"] = replay_documentation_commands(active_commands)
@@ -1303,6 +1312,7 @@ def validate_documentation_scene(scene: Mapping[str, Any]) -> None:
     if not str(scene.get("manualPlanRevision") or ""):
         raise DocumentationSceneError("documentation scene manual-plan revision is required")
     validate_transaction_metadata(scene)
+    validate_refresh_metadata(scene)
     commands = scene.get("commands")
     if not isinstance(commands, list) or len(commands) > _MAX_COMMANDS:
         raise DocumentationSceneError("documentation command history is invalid")
@@ -1527,6 +1537,7 @@ class DocumentationSceneRepository:
     def __init__(self, root: str | Path, document_type: str = "illustrated_parts_manual"):
         self.root = Path(root).resolve()
         self.document_type = document_type
+        self.conflict_reader = None
 
     def _scene_path(self, assembly_number: str) -> Path:
         value = str(assembly_number or "").strip()
@@ -1538,6 +1549,13 @@ class DocumentationSceneRepository:
         except ValueError as exc:
             raise DocumentationSceneNotFoundError("unknown assembly") from exc
         return directory / "documentation-scene.json"
+
+    def _conflict_state(self, scene, assembly_number):
+        if self.conflict_reader is None:
+            return scene
+        own = refresh_exposure(scene)["conflicts"]
+        other = refresh_exposure(self.conflict_reader(assembly_number))["conflicts"]
+        return {**scene, "conflicts": own + other}
 
     def _save(self, assembly_number, scene):
         # Authored object IDs are allocated by add_object once and never recycled.
@@ -1625,6 +1643,7 @@ class DocumentationSceneRepository:
             raise DocumentEditError("stale_revision", "The compiler catalogue does not match this read binding.")
         scene = _upgrade_documentation_scene(migrate_scene(scene, catalog))
         track_authored_identities(scene)
+        scene = derive_baselines(scene, identity_document)
         validate_documentation_scene(scene)
         source_current = str(scene.get("sourceRevision")) == str(source_revision)
         plan_current = str(scene.get("manualPlanRevision")) == str(manual_plan_revision)
@@ -1632,6 +1651,7 @@ class DocumentationSceneRepository:
         records = _scene_records(scene)
         undo, redo = history_choices(records)
         return {
+            **refresh_exposure(scene),
             "scene": copy.deepcopy(scene),
             "revision": documentation_scene_revision(scene),
             "identityBaseRevision": identity_base_revision,
@@ -1644,48 +1664,92 @@ class DocumentationSceneRepository:
                         for item in records[-50:]],
         }
 
-    def rebaseline(
-        self,
-        assembly_number: str,
-        source_revision: str,
-        manual_plan_revision: str,
-        *,
-        preserve_theme: bool = True,
-        identity_document: Optional[Mapping[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Replace stale page overrides while retaining reusable brand settings."""
+    def prepare_refresh(self, assembly_number, source_revision, manual_plan_revision, *,
+                        base_revision, identity_document, actor="user"):
+        """Caller holds transaction_lock through prepare, compilation and commit."""
+        loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
+        self._assert_revision(loaded["scene"], base_revision)
+        before = loaded["scene"]
+        candidate, receipt = refresh_candidate(before, identity_document,
+            refresh_id="r-" + secrets.token_hex(10), actor=actor, at=_utc_now())
+        if receipt is not None:
+            # A checkpoint uses the owner's existing replay format. It is not a
+            # user inverse; older named records remain guarded against this state.
+            paths = scene_paths(before, candidate, [])
+            if paths:
+                item = change_record(before, candidate, paths, change_id=receipt["refreshId"],
+                    actor=actor, created_at=receipt["at"])
+                before_text = {key for page in before["pages"].values()
+                               for key, value in page.get("pageElementOverrides", {}).items() if "text" in value}
+                after_text = {key for page in candidate["pages"].values()
+                              for key, value in page.get("pageElementOverrides", {}).items() if "text" in value}
+                candidate["commands"] = before["commands"][:before["historyCursor"]] + [{
+                    "operation": "restore_change", "actor": actor, "change": item, "refreshCheckpoint": True,
+                    "adoptedTargets": sorted(before_text - after_text)}]
+                candidate["historyCursor"] = len(candidate["commands"])
+            candidate = _upgrade_documentation_scene(candidate)
+            validate_documentation_scene(candidate)
+            if len(canonical_documentation_bytes(candidate)) > 16 * 1024 * 1024:
+                raise DocumentEditError("document_history_full", "The refreshed scene exceeds its storage limit.")
+        return candidate, receipt
+
+    def commit_refresh(self, assembly_number, candidate, receipt, *, base_revision, identity_document):
         with _WRITE_LOCK:
-            loaded = self.read(
-                assembly_number,
-                source_revision,
-                manual_plan_revision,
-                identity_document=identity_document,
-            )
+            current = self.read(assembly_number, identity_document["sourceRevision"],
+                identity_document["manualPlanRevision"], identity_document=identity_document)
+            self._assert_revision(current["scene"], base_revision)
+            if receipt is not None:
+                self._save(assembly_number, candidate)
+            return {**self.read(assembly_number, identity_document["sourceRevision"],
+                identity_document["manualPlanRevision"], identity_document=identity_document), "refreshReceipt": receipt}
+
+    def refresh(self, assembly_number, source_revision, manual_plan_revision, *,
+                base_revision, identity_document, actor="user", validate_candidate=None):
+        with _WRITE_LOCK:
+            candidate, receipt = self.prepare_refresh(assembly_number, source_revision, manual_plan_revision,
+                base_revision=base_revision, identity_document=identity_document, actor=actor)
+            if validate_candidate is not None:
+                validate_candidate(candidate)
+            return self.commit_refresh(assembly_number, candidate, receipt,
+                base_revision=base_revision, identity_document=identity_document)
+
+    def reset_preview(self, assembly_number, source_revision, manual_plan_revision, *, identity_document):
+        with _WRITE_LOCK:
+            loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
+            preview = preview_reset(loaded["scene"])
+            for field, default, target in (("theme", DEFAULT_DOCUMENT_THEME, "company-theme"),
+                                            ("pageMasters", DEFAULT_PAGE_MASTERS, "page-masters")):
+                if loaded["scene"].get(field) != default:
+                    preview["affectedIds"].append(target)
+            preview["affectedIds"] = sorted(set(preview["affectedIds"]))
+            preview["counts"]["targets"] = len(preview["affectedIds"])
+            return {**preview, "expectedRevision": loaded["revision"]}
+
+    def rebaseline(self, assembly_number, source_revision, manual_plan_revision, *,
+                   base_revision, preview_hash, user_authorized=False, identity_document=None):
+        """Explicit human reset only. Retain the exact prior file beside the store."""
+        if user_authorized is not True:
+            raise DocumentEditError("manual_edit_conflict", "A complete reset requires the user's reset action.")
+        with _WRITE_LOCK:
+            loaded = self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document)
+            self._assert_revision(loaded["scene"], base_revision)
             previous = loaded["scene"]
-            scene = self.new_scene(
-                assembly_number,
-                source_revision,
-                manual_plan_revision,
-            )
+            if preview_reset(previous)["previewHash"] != preview_hash:
+                raise DocumentEditError("stale_revision", "Preview the current reset before executing it.")
+            scene = self.new_scene(assembly_number, source_revision, manual_plan_revision)
             for key in ("receipts", "receiptOrder", "fieldVersions"):
                 scene[key] = copy.deepcopy(previous[key])
             scene["editRevision"] = previous["editRevision"] + 1
             scene["editEpoch"] = previous["editEpoch"] + 1
-            if preserve_theme:
-                scene["theme"] = copy.deepcopy(
-                    previous.get("theme") or DEFAULT_DOCUMENT_THEME
-                )
-                scene["pageMasters"] = copy.deepcopy(
-                    previous.get("pageMasters") or DEFAULT_PAGE_MASTERS
-                )
-            now = _utc_now()
-            scene["createdAt"] = now
-            scene["updatedAt"] = now
+            scene["createdAt"] = scene["updatedAt"] = _utc_now()
             validate_documentation_scene(scene)
+            path = self._scene_path(assembly_number)
+            reset_id = secrets.token_hex(4)
+            backup = path.with_name("sr-" + reset_id + ".json")
+            _write_atomic(backup, path.read_bytes() if path.is_file() else canonical_documentation_bytes(previous))
             self._save(assembly_number, scene)
-            # The same projection as read() (history choices, change list), so a write never returns another shape.
             return {**self.read(assembly_number, source_revision, manual_plan_revision, identity_document=identity_document),
-                    "rebaselined": True, "previousRevision": documentation_scene_revision(previous)}
+                    "rebaselined": True, "recoveryId": reset_id, "previousRevision": loaded["revision"]}
 
     def rebind_manual_plan(
         self,
@@ -1790,6 +1854,8 @@ class DocumentationSceneRepository:
             from ai_inspector.documentation.identity import normalize_command
 
             command, page_targets = normalize_command(scene, command, page_targets)
+            guard_command(self._conflict_state(scene, assembly_number), command)
+            capture_baselines(scene, identity_document, command_targets(command))
             candidate = apply_documentation_command_candidate(scene, command, page_targets)
             before = scene
             scene, persisted_command = candidate["scene"], candidate["command"]
@@ -1845,8 +1911,10 @@ class DocumentationSceneRepository:
                 try:
                     from ai_inspector.documentation.identity import normalize_command
 
-                    command, command_targets = normalize_command(candidate, command, page_targets)
-                    item = apply_documentation_command_candidate(candidate, {**command, "actor": actor}, command_targets)
+                    command, normalized_targets = normalize_command(candidate, command, page_targets)
+                    guard_command(self._conflict_state(candidate, assembly_number), command)
+                    capture_baselines(candidate, identity_document, command_targets(command))
+                    item = apply_documentation_command_candidate(candidate, {**command, "actor": actor}, normalized_targets)
                 except DocumentationSceneError as error:
                     raise DocumentEditError("invalid_document_operation", str(error), operationIndex=index, targetId=target) from error
                 # A text replacement that leaves the effective projection equal
@@ -1903,6 +1971,8 @@ class DocumentationSceneRepository:
             if type(expected_revision) is not int or not 0 <= expected_revision <= scene["editRevision"]:
                 raise DocumentEditError("stale_revision", "Read the current document revision.")
             chosen = find_change(_scene_records(scene), change_id)
+            guard_change(self._conflict_state(scene, assembly_number), chosen)
+            capture_baselines(scene, identity_document, chosen.get("versionKeys", []))
             changed = chosen.get("versionKeys") or ["/".join(c["path"]) for c in chosen["changes"]]
             receipt = make_receipt(scene, request_id=request_id, payload_hash=payload_hash,
                 document=document_id(self.document_type, assembly_number), expected_revision=expected_revision,
@@ -1943,6 +2013,7 @@ class DocumentationSceneRepository:
                 chosen = _scene_records(future)[-1]
                 reverse = {**chosen, "changes": [{**c, "before": c["after"], "after": c["before"]}
                                                 for c in chosen["changes"]]}
+                guard_change(self._conflict_state(scene, assembly_number), chosen)
                 inverse_change(scene, reverse, change_id="check", actor="user", created_at=_utc_now())
                 request_id = "legacy-redo-" + secrets.token_hex(16)
                 payload_hash = request_hash(request_id, {"changeId": chosen["changeId"], "direction": "redo"})

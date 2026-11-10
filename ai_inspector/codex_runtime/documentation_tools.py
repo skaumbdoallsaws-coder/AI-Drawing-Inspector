@@ -1237,6 +1237,7 @@ class DocumentationGateway:
                       "aliasMap": {page["pageId"]: page.get("aliasMap", {}) for page in chosen}}
         from ai_inspector.documentation.provenance import confirmation_targets
         result["sourceSupport"] = deepcopy(snapshot["document"].get("sourceSupportSummary") or {})
+        result["openConflictCount"] = state.get("openConflictCount", 0)
         visible = {(item["pageId"], key) for item in captured
                    for key in (item.get("legacyTargetId"), item["targetId"])}
         result["confirmationTargets"] = [target for target in confirmation_targets(state, snapshot["document"]).values()

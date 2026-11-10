@@ -472,6 +472,7 @@ def build_specification_sheet_document(
     documentation_scene_revision: Optional[str] = None,
     appearance_revision: Optional[str] = None,
     identity_document: Optional[Mapping[str, Any]] = None,
+    stored_slots: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     # Project addresses before the owner converts scene text to native slots.
     # The scene-free compilation also supplies row/slot aliases for old table edits.
@@ -482,12 +483,13 @@ def build_specification_sheet_document(
         if identity_baseline is None:
             identity_baseline = build_specification_sheet_document(
                 assembly_data, catalog, evidence_root=evidence_root, profile_root=profile_root,
-                slot_root=slot_root, cad=cad, library=library, appearance_revision=appearance_revision)
+                slot_root=slot_root, cad=cad, library=library, appearance_revision=appearance_revision,
+                stored_slots=stored_slots)
         _, documentation_scene = bind_document(identity_baseline, documentation_scene)
     assembly_number = str(catalog.get("assemblyNumber") or "").strip()
     profile = _read_profile(profile_root, assembly_number, required=False)
     snapshot = OperationsManualEvidenceRepository(evidence_root).snapshot() if profile else None
-    stored = (SlotStore(slot_root, assembly_number).read() if slot_root
+    stored = copy.deepcopy(stored_slots) if stored_slots is not None else (SlotStore(slot_root, assembly_number).read() if slot_root
               else {"values": {}, "rows": None, "type": None, "units": None})
     sheet_type = stored.get("type") or None
     templates = TemplateStore(slot_root) if slot_root else None

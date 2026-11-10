@@ -270,7 +270,9 @@ def parts_baseline(store, fixtures):
             store_render_artifact(store, assembly, document, page["pageId"], fixtures["_png"](), balloons=balloons)
         attached = attach_render_artifacts(store, assembly, document)
         exports[label] = pdf_fingerprint(build_manual_pdf_bytes(store, assembly, attached))
-    reset = scenes.rebaseline(*binding, identity_document=before)
+    preview = scenes.reset_preview(*binding, identity_document=before)
+    reset = scenes.rebaseline(*binding, identity_document=before, user_authorized=True,
+        base_revision=preview["expectedRevision"], preview_hash=preview["previewHash"])
     return {"before": fingerprint(semantic(before)), "edited": fingerprint(semantic(edited)),
             "reopened": fingerprint(semantic(reopened_doc)), "reopenUnchanged": True,
             "readDidNotWrite": True, "pdf": exports, "docx": "unsupported",

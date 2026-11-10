@@ -135,7 +135,7 @@ def test_the_tool_set_is_exact_typed_and_closed():
     assert next(s for s in specs if s["name"] == "propose_document_value_confirmation")["read_only"] is True
     assert next(s for s in specs if s["name"] == "inspect_document_change")["read_only"] is True
     assert next(s for s in specs if s["name"] == "undo_document_change")["read_only"] is False
-    assert "confirm_document_values" not in {s["name"] for s in specs}
+    assert not {"confirm_document_values", "reset_document", "read_document_conflicts", "resolve_document_conflicts"} & {s["name"] for s in specs}
     for spec in specs:
         schema = spec["input_schema"]
         assert schema["type"] == "object" and schema["additionalProperties"] is False, spec["name"]
@@ -779,3 +779,27 @@ def test_failed_oversize_read_does_not_create_a_write_binding():
     refused = call(reader, "edit_document_text", {"documentType": "work_instructions",
         "edits": [{"pageId": "p", "targetId": "note", "text": "cannot truncate unseen text"}]})
     assert refused["error"]["code"] == "document_read_required"
+
+
+def test_page_reads_mark_open_conflicts_without_new_tools():
+    class ConflictHost(Host):
+        def document_pages(self, number, document_type):
+            return [{"pageId": "page-one", "pageNumber": 1, "layoutBlocks": [
+                {"blockId": "intro", "blockType": "paragraph", "text": "Manual value"}]}]
+
+        def document_snapshot(self, number, document_type):
+            result = super().document_snapshot(number, document_type)
+            key = next(iter(result["targets"]))
+            result["state"].update(openConflictCount=1,
+                conflicts=[{"conflictId": "c-test", "targetId": key, "status": "open"}])
+            return result
+
+    host = ConflictHost()
+    reader = gateway(host)
+    kind = "work_instructions"
+    key = next(iter(host.document_snapshot("tricycle", kind)["targets"]))
+    result = call(reader, "read_document_pages", {"documentType": kind, "targets": [{"targetId": key}]})
+    assert result["ok"] and result["data"]["openConflictCount"] == 1
+    target = result["data"]["targets"][0]
+    assert target["text"] == "Manual value" and target["hasOpenConflict"] is True
+    assert target["conflictIds"] == ["c-test"]

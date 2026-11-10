@@ -27,6 +27,12 @@ from ai_inspector.documentation.changes import (
     find_change, inspect_change, history_choices, validate_record, MAX_CHANGES,
 )
 
+from ai_inspector.documentation.refresh import (
+    binding as refresh_binding, derive_baselines, capture_baselines, assert_writable, guard_change,
+    validate_refresh_metadata, refresh as refresh_candidate, reset_preview as preview_reset,
+)
+
+
 SLOT_SCHEMA_VERSION = 3
 # Storage metadata does not change the generated sheet's layout/source plan.
 SLOT_LAYOUT_VERSION = 1
@@ -95,6 +101,10 @@ def _slot_identities(state):
                             identities.setdefault(key, {"id": key})
     for key in active:
         identities.setdefault(key, {"id": key})
+    for row in state.get("rows") or []:
+        if row.get("source") in {"workspace", "chat"}:
+            for field in ("label", "value"):
+                identities["slot:spec." + row["key"] + "." + field]["ownership"] = "authored"
     for key, value in identities.items():
         value["state"] = "active" if key in active else "tombstone"
 
@@ -235,6 +245,8 @@ class SlotStore:
     def __init__(self, root: str | Path, assembly_number: str):
         self._candidate = None
         self.last_receipt = None
+        self.identity_document = None
+        self.other_conflicts = []
         self.provenance_defaults = {}
         self.provenance_values = {}
         number = str(assembly_number or "").strip()
@@ -248,7 +260,7 @@ class SlotStore:
         directory.relative_to(base)
         self.path = directory / "slots.json"
 
-    def read(self) -> Dict[str, Any]:
+    def read(self, *, identity_document=None, binding_is_current=False) -> Dict[str, Any]:
         if self._candidate is not None:
             return copy.deepcopy(self._candidate)
         payload = _read_json(self.path) or {}
@@ -266,7 +278,8 @@ class SlotStore:
             "units": payload.get("units") if payload.get("units") in UNITS else None,
             "updatedAt": payload.get("updatedAt"),
         }
-        for key in ("editRevision", "editEpoch", "fieldVersions", "fieldMeta", "receipts", "receiptOrder", "conflicts", "journal", "identities"):
+        for key in ("editRevision", "editEpoch", "fieldVersions", "fieldMeta", "receipts", "receiptOrder", "conflicts", "journal", "identities",
+                    "sourceRevision", "manualPlanRevision", "generatedBaseline", "orphans", "refreshReceipts"):
             if key in payload:
                 result[key] = copy.deepcopy(payload[key])
         transaction_defaults(result)
@@ -275,9 +288,22 @@ class SlotStore:
             raise DocumentEditError("unsupported_document_schema", "Invalid slot change history.")
         for item in result["journal"]:
             validate_record(item, {"values", "fieldMeta", "rows", "type", "units"})
+        validate_refresh_metadata(result)
         _slot_identities(result)
+        baseline = identity_document if identity_document is not None else self.identity_document
+        if baseline is not None:
+            old_binding = next((item["binding"] for item in reversed(result["journal"]) if item.get("binding")), None)
+            binding_is_current = binding_is_current or getattr(self, "binding", None) == refresh_binding(baseline)
+            if "sourceRevision" not in result and (old_binding or binding_is_current):
+                result.update(old_binding or refresh_binding(baseline))
+            result = derive_baselines(result, baseline, slots=True)
         validate_transaction_metadata(result)
+        validate_refresh_metadata(result)
         return result
+
+    def _conflict_state(self, state):
+        from ai_inspector.documentation.refresh import exposure
+        return {**state, "conflicts": exposure(state)["conflicts"] + copy.deepcopy(self.other_conflicts)}
 
     def _save(self, data: Dict[str, Any]) -> Dict[str, Any]:
         if self._candidate is None:
@@ -294,6 +320,9 @@ class SlotStore:
                 return change(self)
             before = self.read()
             self.last_receipt = None
+            if (getattr(self, "binding", None) and before.get("sourceRevision")
+                    and refresh_binding(before) != self.binding):
+                raise DocumentEditError("document_binding_changed", "Refresh the sheet before changing its slots.")
             payload_hash = None
             if request_id is not None:
                 payload_hash = request_hash(request_id, {"payload": payload, "actor": actor})
@@ -301,7 +330,7 @@ class SlotStore:
                 if prior is not None:
                     self.last_receipt = prior
                     return {"storedSlots": prior["changedIds"], "retried": True}
-                check_preconditions(before, expected_revision, expected_hashes or {}, current_hashes or {})
+                check_preconditions(self._conflict_state(before), expected_revision, expected_hashes or {}, current_hashes or {})
             self._candidate = copy.deepcopy(before)
             try:
                 result = change(self)
@@ -314,6 +343,10 @@ class SlotStore:
                 changed.extend(key for key in set(before["fieldMeta"]) | set(candidate["fieldMeta"])
                     if before["fieldMeta"].get(key) != candidate["fieldMeta"].get(key) and key not in changed)
                 changed.sort()
+                assert_writable(self._conflict_state(before), changed, whole=structural)
+                capture_baselines(candidate, self.identity_document, changed)
+                if changed and getattr(self, "binding", None):
+                    candidate.update(self.binding)
                 if changed and payload_hash is None:
                     request_id = "slot-" + uuid.uuid4().hex
                     expected_revision = before["editRevision"]
@@ -349,19 +382,10 @@ class SlotStore:
                     retain_receipt(candidate, self.last_receipt)
                 _slot_identities(candidate)
                 validate_transaction_metadata(candidate)
+                validate_refresh_metadata(candidate)
                 if len(json.dumps(candidate, ensure_ascii=False).encode("utf-8")) > 16 * 1024 * 1024:
                     raise DocumentEditError("document_history_full", "The slot change history exceeds its storage limit.")
-                if self.path.is_file():
-                    original = self.path.read_bytes()
-                    old_version = json.loads(original).get("schemaVersion", 1)
-                    if old_version in {1, 2}:
-                        backup = self.path.with_name(f"slots.v{old_version}.json")
-                        if backup.exists() and backup.read_bytes() != original:
-                            raise DocumentEditError("legacy_store_changed", "The slot rollback input changed.")
-                        if not backup.exists():
-                            # Preserve bytes, not a reserialized JSON copy.
-                            _write_bytes(backup, original)
-                _write_json(self.path, candidate)
+                self._persist(candidate)
                 # Preserve existing return shapes while returning the committed
                 # projection for methods that traditionally returned the store.
                 if isinstance(result, dict) and "schemaVersion" in result and "values" in result:
@@ -369,6 +393,87 @@ class SlotStore:
                 return result
             finally:
                 self._candidate = None
+
+    def _persist(self, candidate):
+        if self.path.is_file():
+            original = self.path.read_bytes()
+            old_version = json.loads(original).get("schemaVersion", 1)
+            if old_version in {1, 2}:
+                backup = self.path.with_name(f"slots.v{old_version}.json")
+                if backup.exists() and backup.read_bytes() != original:
+                    raise DocumentEditError("legacy_store_changed", "The slot rollback input changed.")
+                if not backup.exists():
+                    # Preserve bytes, not a reserialized JSON copy.
+                    _write_bytes(backup, original)
+        _write_json(self.path, candidate)
+
+    def publish_with_rollback(self, publish):
+        """Compensate the other owner's failure while both owner locks are held."""
+        with _SLOT_LOCK:
+            original = self.path.read_bytes() if self.path.is_file() else None
+            try:
+                return publish()
+            except Exception:
+                if original is not None:
+                    _write_bytes(self.path, original)
+                else:
+                    self.path.unlink(missing_ok=True)
+                raise
+
+    def prepare_refresh(self, identity_document, *, expected_revision, actor="user", binding_is_current=False):
+        before = self.read(identity_document=identity_document, binding_is_current=binding_is_current)
+        if expected_revision != before["editRevision"]:
+            raise DocumentEditError("stale_revision", "Read the current slot revision before refreshing.")
+        candidate, receipt = refresh_candidate(before, identity_document, refresh_id="r-" + uuid.uuid4().hex[:20],
+                                               actor=actor, at=now(), slots=True)
+        if len(json.dumps(candidate).encode("utf-8")) > 16 * 1024 * 1024:
+            raise DocumentEditError("document_history_full", "The refreshed slots exceed their storage limit.")
+        return candidate, receipt
+
+    def commit_refresh(self, candidate, receipt, *, expected_revision):
+        with _SLOT_LOCK:
+            if self.read()["editRevision"] != expected_revision:
+                raise DocumentEditError("stale_revision", "The slots changed before refresh.")
+            if receipt is not None:
+                validate_transaction_metadata(candidate)
+                validate_refresh_metadata(candidate)
+                if len(json.dumps(candidate).encode("utf-8")) > 16 * 1024 * 1024:
+                    raise DocumentEditError("document_history_full", "The refreshed slots exceed their storage limit.")
+                self._persist(candidate)
+            return {"store": self.read(), "refreshReceipt": receipt}
+
+    def refresh(self, identity_document, *, expected_revision, actor="user", validate_candidate=None):
+        with _SLOT_LOCK:
+            candidate, receipt = self.prepare_refresh(identity_document, expected_revision=expected_revision, actor=actor)
+            if validate_candidate is not None:
+                validate_candidate(candidate)
+            return self.commit_refresh(candidate, receipt, expected_revision=expected_revision)
+
+    def reset_preview(self):
+        with _SLOT_LOCK:
+            state = self.read()
+            return {**preview_reset(state), "expectedRevision": state["editRevision"]}
+
+    def reset(self, *, expected_revision, preview_hash, user_authorized=False):
+        if user_authorized is not True:
+            raise DocumentEditError("manual_edit_conflict", "A complete reset requires the user's reset action.")
+        with _SLOT_LOCK:
+            before = self.read()
+            if expected_revision != before["editRevision"] or preview_reset(before)["previewHash"] != preview_hash:
+                raise DocumentEditError("stale_revision", "Preview the current reset before executing it.")
+            candidate = copy.deepcopy(before)
+            candidate.update(values={}, rows=None, type=None, units=None, fieldMeta={}, journal=[],
+                             generatedBaseline={}, conflicts=[], orphans=[], refreshReceipts=[])
+            candidate["editRevision"] += 1
+            candidate["editEpoch"] += 1
+            candidate["updatedAt"] = now()
+            validate_refresh_metadata(candidate)
+            _slot_identities(candidate)
+            recovery_id = uuid.uuid4().hex[:8]
+            backup = self.path.with_name("sl-" + recovery_id + ".json")
+            _write_bytes(backup, self.path.read_bytes() if self.path.is_file() else json.dumps(before).encode("utf-8"))
+            self._persist(candidate)
+            return {"recoveryId": recovery_id, "store": candidate}
 
     def inspect_change(self, change_id):
         with _SLOT_LOCK:
@@ -386,6 +491,7 @@ class SlotStore:
             if type(expected_revision) is not int or not 0 <= expected_revision <= before["editRevision"]:
                 raise DocumentEditError("stale_revision", "Read the current document revision.")
             chosen = find_change(before["journal"], change_id)
+            guard_change(self._conflict_state(before), chosen)
             if chosen.get("binding") and chosen["binding"] != getattr(self, "binding", {}):
                 raise DocumentEditError("undo_conflict", "The sheet's source binding changed.", changeId=change_id)
             item = inverse_change(before, chosen, change_id="pending", actor=actor, created_at=now())
@@ -444,6 +550,7 @@ class SlotStore:
         data = self.read()
         for item in items:
             slot = str(item.get("slot") or "")
+            assert_writable(self._conflict_state(data), ["slot:" + slot])
             kind, _key, part = parse_slot(slot)
             limit = MAX_LABEL if part == "label" else MAX_VALUE
             value = _clean(item.get("value"), limit, slot_name(slot, {}))
@@ -462,6 +569,7 @@ class SlotStore:
         data = self.read()
         accepted = []
         for slot in slots:
+            assert_writable(self._conflict_state(data), ["slot:" + slot])
             entry = data["values"].get(slot)
             if entry and entry.get("source") in UNREVIEWED_SOURCES and not entry.get("accepted"):
                 entry["accepted"] = {"at": now(), "by": by}

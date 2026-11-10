@@ -586,3 +586,237 @@ Result: PASSED on the round 3 code; committed together with this section.
   a double compile. Routes pass theirs.
 - P1c-2: the 7 operations and 20 work-instruction revision-scoped identities follow the exact-value refresh rule
   recorded above.
+
+
+## P1c-2a
+
+Builder handoff, 2026-11-10. Uncommitted. Read the P1c-1 supervisor gate,
+plan section 3.5, the P1c slice of section 4 and section 3.3's conflict contracts.
+This slice stops at persisted refresh state, guarded writes and explicit reset.
+
+### CHANGED
+
+- Added ai_inspector/documentation/refresh.py. The shared transformation takes
+  stored state, a scene-free compiler baseline and owner-supplied refresh ID,
+  actor and time. It returns a candidate and receipt without store I/O. It
+  compares exact generated/authored payloads, carries reordered source IDs,
+  preserves manual status when C equals N, adopts N when C still equals B,
+  and retains divergent values as value/evidence/missing_baseline conflicts.
+  Revision-scoped values require a unique keyed parent/ordinal and exact old/new
+  generated payload equality. A changed value conflicts; a missing identity is
+  orphaned. No fuzzy/text search or positional fallback is used.
+- generatedBaseline entries contain payload/hash, source/plan binding, evidence,
+  display address, scope and identity metadata. The first target write captures
+  B from its request's scene-free baseline; later edits retain B. Matching older
+  stores derive missing B only in memory. A stale missing B remains missing in
+  its conflict, including after reopen. Refresh advances adopted baselines,
+  including targets whose earlier manual edit was undone.
+- ai_inspector/parts_manual/documentation.py integrates baseline capture,
+  validators, refresh preparation/commit, read-only conflict/orphan exposure and
+  mutation guards. Refresh uses the existing restore_change replay format as a
+  non-user checkpoint; older named inverses remain guarded. Scene commands,
+  batches, confirmation batches and history cannot overwrite an open conflict.
+  Deleted generated targets also refuse an older inverse with undo_conflict.
+- ai_inspector/documentation/provenance.py clears obsolete text-history effects
+  for values adopted by a refresh checkpoint. Adopted generated text can regain
+  its generated provenance; kept/preserved manual values retain manual status.
+  Authored objects retain content, frame, order and ID. Theme/page masters and
+  surviving figure/camera composition remain. Deleted page/target content is
+  retained in orphans with its value, address, reason and stale link. Numbered
+  callout overrides without a proven original source relation are orphaned,
+  never attached to whichever part now occupies that number.
+- ai_inspector/specification_sheet/slots.py adds the same optional metadata to
+  slots schema 3, native-slot baseline capture, guarded mutations/inverses,
+  refresh and reset. Generated slot defaults supply B/N; stored manual slot
+  values do not become their own generated baseline. Explicitly authored rows
+  retain their values and order. Legacy slot version byte backups also apply to
+  refresh writes. ai_inspector/specification_sheet/document.py accepts a private
+  staged slot state so compilation can validate a refresh before persistence.
+  Existing viewport text overrides remain in their existing scene owner; their
+  native-slot aliases are checked against both owners' conflicts. Native slot
+  values and their B/conflicts remain in slots.json.
+- server.py retains _DocumentationDocument.identity_document as the one
+  scene-free catalogue used by GETs, writes and response reads. The operations,
+  specification and work-instruction builders stage refresh when
+  rebaseline_stale / generate?rebaseline=true is requested, compile the candidate,
+  then commit through the owners. These parameters remain accepted. Reads,
+  opening and export do not refresh. Existing rebind_manual_plan is unchanged.
+- Parts recovery is GET then POST
+  /api/parts-manual/{assembly_number}/documentation-scene/refresh. GET compiles
+  the candidate and returns expectedRevision and expectedPlanRevision; POST
+  requires both. ai_inspector/parts_manual/repository.py carries the unchanged
+  plan grouping only when every referenced occurrence, including exclusions and
+  occurrence order, exists. Missing references return document_binding_changed
+  with missingOccurrences. Item assignments follow definitions. Both the plan
+  and scene candidates compile before writes; a scene write exception restores
+  the original plan bytes.
+- Each owner checks its revision under its lock and uses its existing atomic
+  replace. Coordinated specification writes stage both candidates first and
+  restore original slot bytes if the second owner fails. There is no new
+  cross-store envelope. Refreshing the same binding produces no receipt or
+  write. Later refreshes update proposed N while retaining original conflict
+  B/C and IDs, including conflicts whose targets became unplaced.
+- Refresh receipts retain the newest **100** entries. Each contains refreshId,
+  from/to binding, actor, time, adopted/preserved/kept/conflicts/orphans/
+  carriedRevisionScoped counts and conflictIds. Conflict/orphan counts describe
+  the retained open/unplaced state; adopted includes generated targets without
+  manual overrides. Manual content is not evicted with receipts.
+- Explicit reset is GET then POST
+  /api/documentation/{document_type}/{assembly_number}/reset. Preview returns
+  affected IDs/counts, expectedRevision and previewHash. Specification also
+  returns a slots preview; execute sends that preview's revision/hash pair.
+  POST uses the existing trusted-origin/user-principal boundary, rejects actor
+  input and has no Sage tool. It retains exact prior bytes as short
+  sr-<id>.json / sl-<id>.json siblings and returns recovery IDs. Destructive
+  rebaseline is now reachable only through this reset contract. Reset responses
+  reopen the current stored state so slot resets return the current catalogue.
+- ai_inspector/documentation/commands.py, targets.py and
+  codex_runtime/documentation_tools.py expose an open conflict count and per-read
+  target hasOpenConflict/conflictIds, retaining existing inputs and outputs.
+  Workspace payloads expose conflicts and orphans. No conflict-resolution tool,
+  HTTP conflict route, export-policy change or UI is included.
+- tests/test_documentation_refresh.py now covers every three-way row, missing
+  and derived baselines, persistence/restart, idempotence/later proposals,
+  revision-scoped exact-value carry/refusal, authored content, generated
+  provenance adoption, guarded writes, denied replaces, reset/recovery, real
+  operations/WI regeneration, real specification native/viewport/Sage refusal,
+  the parts description/note refresh route, missing-occurrence refusal, and the
+  existing real parts section-move/capture test under the requested rebind test
+  name. tests/test_codex_documentation_tools.py checks additive read markers and
+  pins the absence of reset/resolution tools. The operations obsolete-scene
+  test now expects refreshReceipt rather than destructive rebaselined.
+- tools/documentation_baseline.py uses the explicit reset preview/execute
+  contract for its existing reset probe. No expected*.json was edited.
+- Added tests/fixtures/documentation_editor/slots-v3-pre-refresh.json, a small
+  sanitized old shape. **It is ignored by the existing .gitignore rule *.json;
+  Claude must explicitly include this exact fixture in the commit.** No ignore
+  rules were changed and no index/history mutation was performed.
+
+### TESTS
+
+Builder execution is static only:
+
+- Python ast.parse passed for the 14 changed/added Python files through the
+  hidden pythonw.exe / tools/run_hidden.pyw launcher. No application imports.
+- git diff --check passed. Checked LF, server.py's UTF-8 BOM, ASCII-only server
+  additions, fixture JSON syntax and unchanged promoted baseline files.
+- Searched production rebaseline callers: the sole caller is the explicit
+  user reset endpoint. The baseline tool uses the same preview contract.
+- No pytest, server, PDF, baseline check/recording or browser was run. No network,
+  package installs, commits, branching or index writes. The existing .runtime/
+  directory was left alone.
+
+### NOT RUN
+
+Claude must run these outside the sandbox:
+
+~~~text
+python -m pytest -q tests/test_documentation_refresh.py tests/test_documentation_provenance.py tests/test_documentation_change_undo.py tests/test_documentation_transactions.py tests/test_operations_manual_workspace.py tests/test_specification_sheet_workflow.py tests/test_parts_manual.py tests/test_work_instruction_workflow.py tests/test_codex_documentation_tools.py tests/test_codex_readonly_pilot.py tests/test_codex_assisted_tools.py tests/test_documentation_baseline.py
+python -m pytest -q tests/test_documentation_store_chokepoint.py
+python tools/documentation_baseline.py --check
+python tools/documentation_baseline.py --local --check
+python tests/smoke_documentation_editor.py --phase P1a
+python tests/smoke_documentation_editor.py --phase P1b
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_documentation*.py','tests/test_parts_manual*.py','tests/test_operations_manual*.py','tests/test_specification_sheet*.py','tests/test_work_instruction*.py','tests/test_inspection_sheet*.py') for p in glob.glob(pattern)})))"
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_codex*.py','tests/test_facility*.py','tests/test_authored*.py','tests/test_sage*.py','tests/test_industrial*.py') for p in glob.glob(pattern)})))"
+~~~
+
+The known pre-existing failure
+ test_operations_manual_precoding_contracts.py::test_source_ids_references_and_local_hashes_are_closed
+was not changed.
+
+### Baseline expectation
+
+Expect stored-state fingerprints to move when B and refresh metadata are first
+persisted. Scene/document hashes may move in either baseline; neither expected
+file was edited. No generated/store version, identity-allocation rule, export
+text or geometry change is intended for documents without edits/conflicts.
+The baseline reset probe still measures explicit reset, not regeneration.
+Claude must review actual differences before promoting either baseline.
+
+### DEVIATIONS
+
+- No phase expansion. Scene 4 and slots 3 remain; generated versions remain
+  parts 6 and operations/specification/work instructions 3. No static JS/HTML or
+  Sage input/tool-list changes. Resolution, its undo, conflict HTTP/Sage APIs,
+  export marking/blocking and UI remain P1c-2b/P1c-3 work.
+- Multi-owner operations use existing owner locks and atomic replaces, with
+  compensation on a reported second-write failure. They do not introduce a
+  distributed transaction file. A process interruption between owner replaces
+  can leave a stale binding requiring another explicit refresh; no manual
+  payload is discarded by that interruption.
+- Reset preview currently requires an open/current document. A stale parts plan
+  must first pass the explicit source-carry check; reset cannot bypass missing
+  occurrence validation or infer a new grouping approval.
+
+### OPEN QUESTIONS
+
+No product decision is requested. Runtime gates are pending. In particular,
+Claude should verify the real parts source-refresh scenario, specification's two
+owners, and the unchanged P1a/P1b smokes before committing. The exact new fixture
+must be included despite the JSON ignore rule. Recovery copies are retained;
+restoring/detaching content and conflict resolution are deliberately not exposed
+in this round.
+
+## P1c-2a supervisor gate (Claude, 2026-11-10)
+
+Result: PASSED after supervisor fixes; committed together with this section.
+
+Codex's round took 44 minutes, with static checks only. My first run of the focused suites gave 70 failed and 407
+passed. After the fixes below, the targeted run gave 110 passed, and the full gate chain followed.
+
+### Supervisor fixes (Claude)
+
+- parts_manual/documentation.py, apply_batch: the local `command, command_targets = normalize_command(...)`
+  shadowed the imported refresh helper command_targets, so every batch crashed with "'dict' object is not
+  callable". The local is renamed normalized_targets.
+- refresh.command_targets / guard_command: route commands come from Pydantic model_dump with transforms,
+  fieldMeta or identityResetTargets set to None. Iterating them crashed every workspace edit made through the
+  routes, so None now reads as empty.
+- refresh.guard_change: refused undo of any tombstoned non-authored identity, which blocked undoing a user's own
+  slot-row rename (P1b test_compound_slot_row_undo_checks_dependencies). Refresh now marks the tombstones it
+  creates with tombstonedBy "refresh", and clears the mark when the identity returns. The guard refuses only
+  those.
+- Parts refresh: PartsManualRepository.read() defaults known_occurrence_ids to an empty tuple and validates a
+  source-current plan against it. _parts_refresh_inputs and commit_source_refresh called it without IDs, so any
+  preview on a current plan returned 422 manual_occurrence_unknown: before a source change, or on a repeat after
+  a refresh. Both now pass the catalogue's occurrence IDs; the prepared candidate carries knownOccurrenceIds.
+- Tests:
+  - The parts fixture's source revision must be SHA-256.
+  - Specification feature blocks carry slots.text, not slot.
+  - The work-instructions regeneration case now picks a revision-scoped action.
+  - The adoption test asserts that the adopted row equals the no-scene projection of N. The synthetic fixture
+    projects claimIds [] even without a scene.
+
+### Numbers
+
+- Baselines, each recorded twice, byte-identical, then reviewed and promoted:
+  - Synthetic: only the table scene hash.
+  - Local: only the edited/reopened hashes of operations, specification and work instructions, because an edit
+    now stores generatedBaseline.
+  - The before-edit hashes, exports and undo records are unchanged.
+- Smokes P1a 27/27 and P1b 46/46.
+- Documentation suites: 584 passed, plus the pre-existing failure
+  test_source_ids_references_and_local_hashes_are_closed. JS 5/5.
+- Wide suites: 3850 passed, 170 failed, 9 errors; no new failure against the base set.
+- Parts route scenario (test):
+  1. Edit a description and an unrelated note.
+  2. A source change reorders the BOM and changes that description.
+  3. Refresh. The note is kept and the description holds a value conflict that survives a restart.
+  4. A repeat refresh is a no-op, and the store stays byte-identical.
+- A source change alone, checked by me through the routes: 1020 identities adopted, the edited description
+  preserved, 0 conflicts.
+- Checked: the reset route sits behind the confirm-values origin boundary, requires the preview hash and
+  expected revision, and has no Sage tool.
+
+### For P1c-2b (deviations from plan 3.5 to correct)
+
+- three_way checks for a missing baseline before checking C == N. An edit that equals the new generated value
+  therefore still raises a missing_baseline conflict. The plan's "C == N: keep value" row does not depend on B.
+- An evidence-only change (B payload == N payload, evidence differs) on an edited value raises an "evidence"
+  conflict. The plan's row "C changed; N == B: preserve C exactly" calls for keeping C without a conflict, with B
+  then moving to N. My P1c-2a brief listed "evidence" as a conflict kind; that was my over-specification.
+- Notes:
+  - Refresh receipts are capped at 100.
+  - The two-owner parts refresh (plan, then scene) uses compensation rather than a joint transaction. An
+    interruption between the two owners may need another explicit refresh; manual payloads are retained.

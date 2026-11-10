@@ -94,6 +94,8 @@ def check_preconditions(state: dict, expected_revision: int, expected: dict, cur
         raise DocumentEditError("stale_revision", "The observed edit revision is invalid or in the future.")
     if not expected:
         raise DocumentEditError("document_read_required", "Read the complete targets before editing.")
+    from .refresh import assert_writable
+    assert_writable(state, expected, whole="@sheet" in expected)
     conflicts = state.get("conflicts") or {}
     conflicts = list(conflicts.values()) if isinstance(conflicts, dict) else conflicts
     for index, (target, value) in enumerate(expected.items()):

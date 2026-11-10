@@ -142,13 +142,17 @@ def read_targets(state: dict, targets: Mapping[str, dict], requested: list[dict]
     for item in requested:
         target = resolve_target(targets, item["targetId"], item.get("pageId"))
         stable = target["targetId"]
-        output.append({"targetId": stable, "legacyTargetId": target["alias"], "pageId": item.get("pageId") or target["pageId"],
+        from .refresh import open_conflicts
+        conflict_ids = [c.get("conflictId") for c in open_conflicts(state) if c.get("targetId") == stable
+                        or (c.get("scopeId") and c["scopeId"] == target["attributes"].get("provenance", {}).get("targetId"))]
+        output.append({"targetId": stable, "hasOpenConflict": bool(conflict_ids), "conflictIds": conflict_ids, "legacyTargetId": target["alias"], "pageId": item.get("pageId") or target["pageId"],
                        "text": target["text"], "isExcerpt": False, "fullLength": len(target["text"]),
                        "contentHash": content_hash(state, stable, values[stable]), "hashVersion": 1,
                        "aliasRevision": state.get("aliasRevision"),
                        "provenance": deepcopy(target["attributes"].get("provenance", target["attributes"])),
                        "capabilities": [] if target["operation"] == "read_only" else [target["operation"]], "binding": binding(state)})
-    result = {**binding(state), "sceneRevision": state.get("sceneRevision"), "targets": output,
+    from .refresh import open_conflicts
+    result = {**binding(state), "openConflictCount": len(open_conflicts(state)), "sceneRevision": state.get("sceneRevision"), "targets": output,
               "aliasRevision": state.get("aliasRevision"),
               "aliasMap": {item["pageId"]: {row["legacyTargetId"]: row["targetId"] for row in output
                            if row["pageId"] == item["pageId"]} for item in output}}

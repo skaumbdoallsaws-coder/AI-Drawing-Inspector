@@ -1,0 +1,35 @@
+/* Scoped editor UI only. No publication-page or flag-off style changes. */
+.documentation-rich-mounted { overflow: visible !important; cursor: text !important; }
+.documentation-rich-mounted > .documentation-resize-handle { display: none; }
+.documentation-rich-editor { pointer-events: auto; height: 100%; }
+.documentation-rich-editor .tiptap {
+    pointer-events: auto; cursor: text; user-select: text; white-space: pre-wrap;
+    height: 100%; min-height: 1em; overflow: auto; outline: 2px solid #1589c9;
+    background: #fff; color: inherit; box-sizing: border-box;
+}
+.documentation-rich-editor .tiptap p,
+.documentation-rich-editor .tiptap h1,
+.documentation-rich-editor .tiptap h2,
+.documentation-rich-editor .tiptap h3,
+.documentation-rich-editor .tiptap ul,
+.documentation-rich-editor .tiptap ol { margin: 0; }
+.documentation-rich-panel {
+    pointer-events: auto; position: absolute; z-index: 30; bottom: 42px; left: 260px;
+    max-width: min(680px, calc(100% - 280px)); padding: 9px 12px; border: 1px solid #4687ab;
+    border-radius: 5px; background: #122532; color: #eef6fc; font: 12px Arial, sans-serif;
+    box-shadow: 0 3px 14px #0005;
+}
+.documentation-rich-panel[data-conflict="true"] { border-color: #e6ad45; }
+.documentation-rich-actions, .documentation-rich-controls { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.documentation-rich-message { margin-bottom: 6px; }
+.documentation-rich-controls { pointer-events: auto; width: 350px; max-width: 350px; gap: 3px; }
+.documentation-rich-controls input, .documentation-rich-controls button,
+.documentation-rich-panel button {
+    pointer-events: auto; color: #edf6ff; background: #213b4c; border: 1px solid #547083;
+    border-radius: 3px; padding: 4px 7px; font: 12px Arial, sans-serif;
+}
+.documentation-rich-controls input[type="url"] { width: 150px; }
+.documentation-rich-controls input[type="color"] { width: 30px; height: 26px; padding: 2px; }
+.documentation-rich-controls button:hover, .documentation-rich-panel button:hover { background: #31566e; }
+.documentation-rich-controls button:focus-visible, .documentation-rich-panel button:focus-visible { outline: 2px solid #8ed5ff; }
+.documentation-rich-panel [hidden] { display: none; }

@@ -12,6 +12,9 @@
     <link rel="stylesheet" href="/static/packaging_ribbon_icons.css">
     <script src="/static/documentation_commands.js?v=20261109-p1b-3"></script>
     <script src="/static/documentation_conflicts.js?v=20261110-p2a-1"></script>
+    <script src="/static/documentation_rich_text_core.js?v=20261110-p2a-2"></script>
+    <script type="module" src="/static/documentation_rich_text.js?v=20261110-p2a-2"></script>
+    <link rel="stylesheet" href="/static/documentation_rich_text.css?v=20261110-p2a-2">
     <script src="/static/cad_viewport.js"></script>
     <script>
         // Theme bootstrap — set data-theme BEFORE the stylesheet is parsed
@@ -23789,6 +23792,12 @@
         // ---- Viewport Rendering ----
         function switchTab(tab) {
             const previousTab = state.activeTab;
+            if (window.DocumentationRichText?.active
+                    && !(tab === 'training' && trainingState.type === 'documentation')) {
+                // Save the open rich text draft first, then leave; a kept draft keeps the workspace.
+                DocumentationRichText.finish().then(closed => { if (closed) switchTab(tab); });
+                return false;
+            }
             if (previousTab === 'training' && tab !== 'training'
                     && !_packagingConfirmLeave(() => switchTab(tab))) return false;
             if (previousTab === 'training' && tab !== 'training' && _trainIsPlantProcessMode()) {
@@ -36473,8 +36482,8 @@
                 state.partsManualDocumentationInitializing
                 || state.partsManualDocumentationSageWork?.active
             ));
-            setDisabled('documentationUndoRibbon', !payload?.canUndo);
-            setDisabled('documentationRedoRibbon', !payload?.canRedo);
+            setDisabled('documentationUndoRibbon', Boolean(window.DocumentationRichText?.active) || !payload?.canUndo);
+            setDisabled('documentationRedoRibbon', Boolean(window.DocumentationRichText?.active) || !payload?.canRedo);
             setDisabled('documentationSlotUndoRibbon', !payload?.slotHistory?.canUndo);
             setDisabled('documentationSlotRedoRibbon', !payload?.slotHistory?.canRedo);
             setDisabled(
@@ -36762,7 +36771,10 @@
 
         function _documentationRenderDocumentObjects(page, layer) {
             if (!layer) return;
-            layer.replaceChildren();
+            const mounted = window.DocumentationRichText?.active;
+            // Never detach/reparent the editor: even a synchronous detach loses DOM selection.
+            const retained = mounted?.pageId === page?.pageId ? mounted.element : null;
+            for (const child of [...layer.childNodes]) if (child !== retained) child.remove();
             const objects = page?.documentationObjects || {};
             const publicationPage = _documentationPublicationLayout().page
                 || { width: 792, height: 612 };
@@ -36770,6 +36782,7 @@
             const publicationHeight = Number(publicationPage.height) || 612;
             Object.values(objects).forEach(value => {
                 if (!value?.objectId || !value?.frame) return;
+                if (retained?.dataset.documentationObjectId === value.objectId) return;
                 const frame = value.frame;
                 const element = document.createElement('div');
                 element.className = `documentation-object ${value.type || ''}`
@@ -36783,7 +36796,19 @@
                 const style = _documentationResolvedObjectStyle(value);
                 element.style.opacity = String(style.opacity ?? 1);
                 if (value.type === 'text') {
-                    element.textContent = value.content || '';
+                    const richField = _documentationRichField(page.pageId, value.objectId);
+                    if (richField?.richText && window.DocumentationRichText) {
+                        DocumentationRichText.render(element, richField.richText);
+                    } else element.textContent = value.content || '';
+                    if (value.isRichText || richField?.isRichText) {
+                        if (window.DocumentationRichText?.status?.ok === false
+                            && !document.querySelector('.documentation-rich-readonly')) {
+                            _documentationRichNotice(DocumentationRichText.status.reason);
+                        }
+                        element.dataset.richText = 'true';
+                        element.setAttribute('aria-label', richField?.richTextError
+                            ? 'Rich text unavailable: ' + richField.richTextError : 'Rich text');
+                    }
                     _documentationApplyElementStyle(element, style);
                     if (style.fill) element.style.background = style.fill;
                     if (Number(style.lineWidth) > 0 && value.styleOverrides?.outlineColor) {
@@ -36805,7 +36830,7 @@
                 }
                 const target = _documentationObjectTarget(value);
                 element.addEventListener('pointerdown', event => {
-                    if (element.isContentEditable) return;
+                    if (element.isContentEditable || element.classList.contains('documentation-rich-mounted')) return;
                     _documentationBeginDocumentObjectDrag(event, target, element);
                 });
                 const handle = document.createElement('button');
@@ -37126,7 +37151,7 @@
             }
             if (primary.targetType === 'document_object') {
                 return document.querySelector(
-                    `[data-documentation-object-id="${CSS.escape(primary.targetId)}"]`
+                    `#documentationPublicationSurface [data-documentation-object-id="${CSS.escape(primary.targetId)}"]`
                 )?.getBoundingClientRect?.() || null;
             }
             if (primary.targetType === 'balloon') {
@@ -37453,7 +37478,7 @@
                             'Edit text',
                             () => {
                                 const element = document.querySelector(
-                                    `[data-documentation-object-id="${CSS.escape(primary.targetId)}"]`
+                                    `#documentationPublicationSurface [data-documentation-object-id="${CSS.escape(primary.targetId)}"]`
                                 );
                                 if (element) _documentationBeginInlineTextEdit(
                                     null, primary, element
@@ -37953,6 +37978,7 @@
             event.preventDefault();
             event.stopPropagation();
             _documentationSelectTarget(target, { silent: true });
+            if (window.DocumentationRichText?.active) return;
             const composition = _partsManualDocumentationComposition(page);
             const current = kind === 'balloon'
                 ? composition.balloonOverrides?.[calloutId]?.translation
@@ -38005,6 +38031,7 @@
             event.preventDefault();
             event.stopPropagation();
             _documentationSelectTarget(target, { silent: true });
+            if (window.DocumentationRichText?.active) return;
             const surfaceRect = surface.getBoundingClientRect();
             const current = _documentationTranslationFor(page, target);
             state.partsManualDocumentationPageElementDrag = {
@@ -38031,6 +38058,7 @@
         }
 
         function _documentationBeginPageElementResize(event, targetId) {
+            if (window.DocumentationRichText?.active) return;
             if (event.button !== 0 || !document.getElementById('documentationWorkspace')) return;
             const page = _documentationActivePage();
             const target = _documentationPageElementTarget(page, targetId);
@@ -39003,6 +39031,7 @@
 
         function _documentationUpdatePayload(result, options = {}) {
             state.partsManualDocumentation = result;
+            if (Array.isArray(result.richTextFields)) window.DocumentationRichText?.active?.reconcile(result);
             if (options.revealAll) {
                 _documentationPreparePageGeneration(result, { revealAll: true });
             } else if (options.startBlank) {
@@ -39153,13 +39182,30 @@
                     // Refresh only the bound model. Keep the rejected draft on
                     // the canvas for copying/review; reopening redraws it.
                     state.partsManualDocumentation = latest;
+                    window.DocumentationRichText?.active?.reconcile(latest);
                     _documentationRenderPageRail();
                     _documentationUpdateToolbar();
                 } catch (_) {
                     if (!current()) return;
                 }
             }
-            _documentationSetStatus(AGENTS[currentAgent].name + ': ' + DocumentationCommands.message(error), 'error');
+            _documentationSetStatus(_documentationAgentName() + ': ' + DocumentationCommands.message(error), 'error');
+        }
+
+        function _documentationAgentName(key = window._getCurrentAgentKey?.() || DEFAULT_AGENT_KEY) {
+            // AGENTS is private to the agent panel, which exposes it through _getAgentConfig.
+            return window._getAgentConfig?.(key)?.name || window._getAgentConfig?.(DEFAULT_AGENT_KEY)?.name || 'Agent';
+        }
+
+        async function _documentationReadAfterMutation(result, apiBase) {
+            const previous = _documentationPayload();
+            const needsRead = previous?.documentationRichText
+                || previous?.richTextFields?.some(field => field.isRichText)
+                || result.document?.pages?.some(page => Object.values(page.documentationObjects || {})
+                    .some(object => object.isRichText));
+            if (!needsRead || Array.isArray(result.richTextFields)) return result;
+            const fresh = await _partsManualApi(apiBase + '/documentation-scene');
+            return { ...result, ...fresh };
         }
 
         async function _documentationDispatchCommand(operation, translation = null, options = {}) {
@@ -39210,7 +39256,7 @@
                 if (options.style) body.style = options.style;
                 if (options.theme) body.theme = options.theme;
                 if (options.pageMasters) body.pageMasters = options.pageMasters;
-                const result = await _partsManualApi(
+                let result = await _partsManualApi(
                     `${bound.apiBase}/documentation-scene/commands`,
                     {
                         method: 'POST',
@@ -39218,6 +39264,7 @@
                         body: JSON.stringify(body),
                     }
                 );
+                result = await _documentationReadAfterMutation(result, bound.apiBase);
                 if (!stillCurrent()) return true;
                 const appliedCommand = result.command || body;
                 _documentationUpdatePayload(result);
@@ -39416,8 +39463,124 @@
             input.click();
         }
 
-        function _documentationBeginInlineTextEdit(event, target, element) {
-            if (!target || !element || element.isContentEditable) return;
+        let documentationRichReadCache = null;
+        let documentationRichFields = new Map();
+        window.addEventListener('documentation-rich-ready', () => {
+            if (_documentationPayload()?.richTextFields?.some(field => field.isRichText)) {
+                _documentationRenderPublicationPage(_documentationActivePage());
+            }
+        });
+        function _documentationRichField(pageId, objectId, payload = _documentationPayload()) {
+            if (payload !== documentationRichReadCache) {
+                documentationRichReadCache = payload;
+                documentationRichFields = new Map();
+                for (const field of payload?.richTextFields || []) {
+                    for (const id of [field.targetId, field.legacyTargetId]) {
+                        documentationRichFields.set(field.pageId + ':' + id, field);
+                    }
+                }
+            }
+            return documentationRichFields.get(pageId + ':' + objectId);
+        }
+
+        function _documentationRichNotice(text) {
+            const workspace = document.getElementById('documentationWorkspace');
+            if (!workspace) return;
+            workspace.querySelector('.documentation-rich-readonly')?.remove();
+            const notice = document.createElement('div');
+            notice.className = 'documentation-rich-panel documentation-rich-readonly';
+            notice.setAttribute('role', 'status');
+            const message = document.createElement('span');
+            message.textContent = text + ' ';
+            notice.appendChild(message);
+            const dismiss = document.createElement('button');
+            dismiss.type = 'button'; dismiss.textContent = 'Dismiss';
+            dismiss.addEventListener('click', () => notice.remove());
+            notice.appendChild(dismiss);
+            workspace.appendChild(notice);
+        }
+
+        function _documentationRichObjectPressed(target, at) {
+            const page = _documentationActivePage();
+            if (!_documentationRichField(page?.pageId, target.targetId)) return;
+            const key = page.pageId + ':' + target.targetId;
+            const last = state.documentationRichLastPress;
+            state.documentationRichLastPress = { key, at };
+            if (!last || last.key !== key || at - last.at >= 500) return;
+            state.documentationRichLastPress = null;
+            const element = document.querySelector(
+                `#documentationPublicationSurface [data-documentation-object-id="${CSS.escape(target.targetId)}"]`);
+            if (element) _documentationBeginInlineTextEdit(null, target, element);
+        }
+
+        async function _documentationBeginRichEdit(target, element) {
+            const payload = _documentationPayload();
+            const page = _documentationActivePage();
+            const field = _documentationRichField(page?.pageId, target.targetId, payload);
+            const rich = field?.isRichText || page?.documentationObjects?.[target.targetId]?.isRichText;
+            if (!field || !payload.documentationRichText || !field.capabilities?.includes('replace_rich_text')) {
+                if (rich) _documentationRichNotice('This rich text field is read-only.'
+                    + (field?.richTextError ? ' ' + field.richTextError : ''));
+                return Boolean(rich);
+            }
+            const bound = DocumentationCommands.capture(payload, page, _documentationApiBase());
+            const readiness = await (window.DocumentationRichText?.ready || Promise.resolve({ ok: false }));
+            if (!DocumentationCommands.isCurrent(bound, _documentationPayload(), _documentationApiBase())
+                || _documentationActivePage()?.pageId !== page.pageId || !element.isConnected) return true;
+            if (!readiness.ok) {
+                if (rich) _documentationRichNotice(readiness.reason || 'The rich text editor is unavailable. This field is read-only.');
+                return Boolean(rich);
+            }
+            if (DocumentationRichText.active) return true;
+            const stillHere = () => bound.apiBase === _documentationApiBase()
+                && page.pageId === _documentationActivePage()?.pageId;
+            const controller = DocumentationRichText.mount(element, {
+                field, snapshot: payload, noticeHost: document.getElementById('documentationWorkspace'),
+                findField: snapshot => _documentationRichField(page.pageId, target.targetId, snapshot),
+                read: () => _partsManualApi(`${bound.apiBase}/documentation-scene`),
+                commit: (snapshot, current, richText) => {
+                    if (!stillHere()) throw new Error('The document or page changed.');
+                    // A fresh read may advance an unrelated scene revision, but only after the
+                    // adapter has checked this field's hash (or the user chose overwrite).
+                    const context = DocumentationCommands.capture(snapshot, page, bound.apiBase);
+                    return _partsManualApi(`${context.apiBase}/documentation-scene/commands`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            baseRevision: context.payload.revision,
+                            sourceRevision: context.payload.scene.sourceRevision,
+                            manualPlanRevision: context.payload.scene.manualPlanRevision,
+                            operation: 'replace_rich_text', pageId: page.pageId,
+                            targetType: 'document_object', targetId: target.targetId,
+                            expectedContentHash: current.contentHash, richText, actor: 'user',
+                        }),
+                    });
+                },
+                apply: snapshot => { if (bound.apiBase === _documentationApiBase()) _documentationUpdatePayload(snapshot); },
+                onClose: () => {
+                    if (bound.apiBase !== _documentationApiBase()) return;
+                    _documentationRenderPublicationPage(_documentationActivePage());
+                    _documentationRenderPageRail();
+                    const ribbon = document.getElementById('contextRibbon');
+                    if (ribbon?.classList.contains('documentation-workflow-ribbon')) _renderDocumentationWorkflowRibbon(ribbon);
+                    else _documentationSyncWorkflowRibbon();
+                },
+                onError: error => _documentationRichNotice(error.message),
+            });
+            if (controller) {
+                _documentationSelectTarget(target, { silent: true });
+                controller.editor.commands.focus();
+            }
+            return true;
+        }
+
+        async function _documentationBeginInlineTextEdit(event, target, element) {
+            if (!target || !element || element.isContentEditable || window.DocumentationRichText?.active) return;
+            if (target.targetType === 'document_object') {
+                event?.preventDefault?.();
+                event?.stopPropagation?.();
+                if (await _documentationBeginRichEdit(target, element)) return;
+                if (!element.isConnected || element.isContentEditable) return;
+            }
             if (DocumentationConflicts.blockEdit(_documentationActivePage()?.pageId, target.targetId)) return;
             event?.preventDefault?.();
             event?.stopPropagation?.();
@@ -39473,6 +39636,7 @@
             event.preventDefault();
             event.stopPropagation();
             _documentationSelectTarget(target, { silent: true });
+            if (window.DocumentationRichText?.active) return;
             const surfaceRect = surface.getBoundingClientRect();
             state.partsManualDocumentationPageElementDrag = {
                 pointerId: event.pointerId,
@@ -39494,6 +39658,7 @@
         }
 
         function _documentationBeginDocumentObjectResize(event, target, element) {
+            if (window.DocumentationRichText?.active) return;
             if (event.button !== 0) return;
             const page = _documentationActivePage();
             const value = page?.documentationObjects?.[target?.targetId];
@@ -39531,6 +39696,7 @@
         }
 
         function _documentationRemoveSelectedObject() {
+            if (window.DocumentationRichText?.active) return false;
             const selection = state.partsManualDocumentationSelection;
             if (selection?.targetType !== 'document_object') return false;
             return _documentationDispatchCommand('remove_object', null, { selection });
@@ -39774,6 +39940,7 @@
         }
 
         async function _documentationMoveHistory(direction, historyGroup = 'documentation-scene') {
+            if (window.DocumentationRichText?.active) return;
             const payload = _documentationPayload();
             if (!payload) return;
             const bound = DocumentationCommands.capture(payload, _documentationActivePage(), _documentationApiBase());
@@ -39785,19 +39952,21 @@
                 : commands[cursor];
             _documentationSetBusy(true, direction === 'undo' ? 'Undoing...' : 'Redoing...');
             try {
-                const result = await _partsManualApi(
+                let result = await _partsManualApi(
                     `${bound.apiBase}/${historyGroup}/${direction}`,
                     {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             baseRevision: payload.revision,
-                            expectedRevision: payload.slotBinding?.revision,
+                            // Only the slot journal binds the slot store; the scene history body refuses it.
+                            ...(historyGroup === 'slots' ? { expectedRevision: payload.slotBinding?.revision } : {}),
                             sourceRevision: payload.scene.sourceRevision,
                             manualPlanRevision: payload.scene.manualPlanRevision,
                         }),
                     }
                 );
+                result = await _documentationReadAfterMutation(result, bound.apiBase);
                 if (!stillCurrent()) return;
                 const selection = state.partsManualDocumentationSelection;
                 _documentationUpdatePayload(result);
@@ -39813,7 +39982,7 @@
                     )
                     : null;
                 _documentationSelectTarget(restored, { silent: true });
-                _documentationSetStatus(AGENTS[currentAgent].name + ': ' +
+                _documentationSetStatus(_documentationAgentName() + ': ' +
                     (direction === 'undo' ? 'Undid the document change.' : 'Redid the document change.'), 'success');
             } catch (error) {
                 await _documentationReportSaveError(bound, error);
@@ -40281,6 +40450,9 @@
         }
 
         async function _documentationActivatePage(pageId, preferredTarget = null, options = {}) {
+            // Leaving the page saves an open rich text draft first; a kept draft keeps this page.
+            if (pageId !== state.partsManualDocumentationPageId && window.DocumentationRichText?.active
+                && !(await DocumentationRichText.finish())) return;
             const page = _documentationPages().find(row => row.pageId === pageId);
             if (!page) return;
             state.partsManualDocumentationPageId = pageId;
@@ -40600,7 +40772,10 @@
             if (!list) return;
             const workspace = document.getElementById('documentationWorkspace');
             const generation = state.partsManualDocumentationGeneration;
-            const lightweight = options.lightweight === true
+            const editingRichText = Boolean(window.DocumentationRichText?.active);
+            const previews = editingRichText ? new Map([...list.querySelectorAll('.documentation-page-item')]
+                .map(item => [item.dataset.pageId, item.querySelector('.documentation-thumbnail-page')])) : null;
+            const lightweight = options.lightweight === true || editingRichText
                 || Boolean(state.partsManualDocumentationSageWork?.active);
             const visiblePages = _documentationPages();
             const activePage = _documentationActivePage();
@@ -40628,7 +40803,8 @@
                 const number = document.createElement('span');
                 number.className = 'documentation-page-number';
                 number.textContent = String(page.pageNumber);
-                const preview = lightweight ? null : _documentationBuildPageThumbnail(page);
+                const preview = editingRichText ? previews.get(String(page.pageId))?.cloneNode(true)
+                    : lightweight ? null : _documentationBuildPageThumbnail(page);
                 if (preview) {
                     thumbnail.classList.add('has-preview');
                     thumbnail.appendChild(preview);
@@ -40978,7 +41154,7 @@
                 for (const meta of pageEvidence) {
                     const label = document.createElement('p');
                     label.textContent = (meta.displayName || meta.alias || meta.targetId) + ': Edited - source does not verify this value';
-                    if (meta.actor === 'sage') label.textContent += ' (Edited by ' + AGENTS[currentAgent].name + ')';
+                    if (meta.actor === 'sage') label.textContent += ' (Edited by ' + _documentationAgentName(DEFAULT_AGENT_KEY) + ')';
                     evidence.appendChild(label);
                     const original = document.createElement('p');
                     original.textContent = 'Original source: ' + (meta.originalEvidence?.sourceIds || [])
@@ -41543,6 +41719,9 @@
                         _documentationRenderPublicationPage(_documentationActivePage());
                     }
                     // Time each press by when it happened, not after the redraw above (slow on heavy pages).
+                    if (drag.target?.targetType === 'document_object' && _documentationPayload()?.documentationRichText) {
+                        _documentationRichObjectPressed(drag.target, event.timeStamp);
+                    }
                     if (drag.specSlot) _specSheetSlotPressed(drag.specSlot, event.timeStamp);
                     else if (drag.textPart) _documentationTextPressed(drag.textPart, event.timeStamp);
                     return;
@@ -41656,6 +41835,13 @@
                 }
             };
             const onPointerDown = event => {
+                if (window.DocumentationRichText?.active) {
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    // A press on the figure ends text editing like Done; it does nothing else.
+                    void window.DocumentationRichText.active.commit();
+                    return;
+                }
                 if (event.button !== 0 || !document.getElementById('documentationWorkspace')) return;
                 const page = _documentationActivePage();
                 if (!page) return;
@@ -41825,7 +42011,8 @@
             };
             const onKeyDown = event => {
                 if (!document.getElementById('documentationWorkspace')) return;
-                if (event.defaultPrevented || event.target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+                if (event.defaultPrevented || window.DocumentationRichText?.active?.ownsFocus(event.target)
+                    || event.target?.closest('input, textarea, select, [contenteditable="true"]')) return;
                 if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
                     event.preventDefault();
                     _documentationMoveHistory(event.shiftKey ? 'redo' : 'undo');
@@ -43292,6 +43479,9 @@
         }
 
         function _documentationRenderPublicationPage(page, options = {}) {
+            const mounted = window.DocumentationRichText?.active;
+            // Thumbnail/capture callers must not borrow a live editor's page surface.
+            if (mounted && (options.thumbnail || page?.pageId !== mounted.pageId)) return;
             queueMicrotask(_documentationSyncReview);
             const surface = document.getElementById('documentationPublicationSurface');
             const header = document.getElementById('documentationPageHeader');
@@ -44052,6 +44242,10 @@
         }
 
         function _closeDocumentationWorkspace() {
+            window.DocumentationRichText?.dispose();
+            documentationRichReadCache = null;
+            documentationRichFields.clear();
+            state.documentationRichLastPress = null;
             state.partsManualDocumentationWorkspaceEpoch = Number(
                 state.partsManualDocumentationWorkspaceEpoch || 0
             ) + 1;
@@ -44534,7 +44728,7 @@
                         || target?.tagName === 'TEXTAREA'
                         || target?.tagName === 'SELECT'
                         || target?.isContentEditable;
-                    if (typing) return;
+                    if (typing || window.DocumentationRichText?.active?.ownsFocus(target)) return;
                     const modifier = event.ctrlKey || event.metaKey;
                     if (modifier && !event.shiftKey && event.key.toLowerCase() === 'z') {
                         event.preventDefault();
@@ -44616,6 +44810,10 @@
                 });
                 resizeObserver.observe(stage);
                 state.partsManualDocumentationCleanup = () => {
+                    window.DocumentationRichText?.dispose();
+                    documentationRichReadCache = null;
+                    documentationRichFields.clear();
+                    state.documentationRichLastPress = null;
                     detachInteractions();
                     detachRailSplitter();
                     detachPageNavigation();
@@ -46100,6 +46298,14 @@
                     + 'is offered for it.', 'info');
                 return false;
             }
+            if (window.DocumentationRichText?.active) {
+                // Save the open rich text draft first, then switch; a kept draft keeps this document.
+                if (nativeSelect) nativeSelect.value = state.documentationDocumentType;
+                DocumentationRichText.finish().then(closed => {
+                    if (closed) _documentationApplyDocumentTypeSelection(value, nativeSelect);
+                });
+                return false;
+            }
             _closeDocumentationWorkspace();
             state.documentationDocumentType = selected.value;
             state.inspectionSheetPayload = null;
@@ -46569,6 +46775,7 @@
         }
 
         function _documentationFormatRibbonControls() {
+            if (window.DocumentationRichText?.active) return DocumentationRichText.active.controls();
             const page = _documentationActivePage();
             const selection = state.partsManualDocumentationSelection;
             if (!page || !selection) return [];

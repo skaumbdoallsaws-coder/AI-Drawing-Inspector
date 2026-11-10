@@ -177,8 +177,9 @@ def write_json(path, value):
 
 
 class IsolatedDocumentationServer:
-    def __init__(self, output):
+    def __init__(self, output, phase=None):
         self.output = output
+        self.rich_text = phase == "P2a"
         self.temporary = self.process = self.log = None
         self.original = {}
 
@@ -210,6 +211,7 @@ class IsolatedDocumentationServer:
         # ignored data or generated trees.
         names.update(p.relative_to(ROOT).as_posix() for p in (ROOT / "ai_inspector/documentation").glob("*.py"))
         names.update(p.relative_to(ROOT).as_posix() for p in (ROOT / "static").glob("documentation_*.js"))
+        names.update(p.relative_to(ROOT).as_posix() for p in (ROOT / "static").glob("documentation_*.css"))
         names.update(inputs["inputFiles"])
         # Work instructions accept the function-ready MMLE package only in semantic-knowledge prototype mode, which
         # this ignored engineering contract defines (no credentials; its review receipt is in docs/semantic-knowledge).
@@ -263,6 +265,8 @@ class IsolatedDocumentationServer:
                            # Packages may live in the user site; keep it importable with APPDATA redirected.
                            PYTHONUSERBASE=site.getuserbase(),
                            INSPECTORPRO_FACILITY_LAYOUT_ROOT=str(self.scratch / "f"))
+        if self.rich_text:
+            environment["INSPECTORPRO_DOCUMENTATION_RICH_TEXT"] = "1"
         self.log = (self.output / "server.log").open("ab")
         self.process = subprocess.Popen([sys.executable, str(self.code / "smoke_server.py"), str(self.scratch), str(port)],
             cwd=self.code, env=environment, stdout=self.log, stderr=subprocess.STDOUT,
@@ -807,6 +811,369 @@ def run_p1c(page, request, server, output, report, record, begin_edit, tool, fre
     record("p1c_under_ten_minutes", time.monotonic() - started < 600, time.monotonic() - started)
 
 
+def run_p2a(page, request, server, output, report, record, begin_edit, tool, fresh_page):
+    """One real Chromium, shared scene writes, CDP IME, persisted rich rendering."""
+    from ai_inspector.documentation.rich_text import from_plain, plain_text, validate
+
+    spec = "product_specification_sheet"
+    routes = {spec: "specification-sheet", DOC_TYPE: "parts-manual"}
+    object_id = "document-object-p2a"
+    posts = []
+
+    def base(kind=spec):
+        return server.url + "/api/" + routes[kind] + "/" + ASSEMBLY
+
+    def scene(kind=spec):
+        response = request.get(base(kind) + "/documentation-scene", timeout=120000)
+        if not response.ok:
+            raise RuntimeError(response.text()[:1000])
+        return response.json()
+
+    def field(payload, key=object_id):
+        return next(row for row in payload["richTextFields"] if row["legacyTargetId"] == key)
+
+    def create(kind, key, value):
+        before = scene(kind)
+        page_id = before["document"]["pages"][0]["pageId"]
+        response = request.post(base(kind) + "/documentation-scene/commands", data={
+            "baseRevision": before["revision"], "sourceRevision": before["scene"]["sourceRevision"],
+            "manualPlanRevision": before["scene"]["manualPlanRevision"],
+            "operation": "add_object", "pageId": page_id, "targetType": "document_object", "targetId": key,
+            "documentObject": {"objectId": key, "type": "text", "name": "Rich text proof", "source": "user",
+                "content": value, "frame": {"x": 0.12, "y": 0.28, "width": 0.66, "height": 0.24},
+                "styleOverrides": {"fontSize": 16, "fill": "#FFFFFF", "color": "#18212A"}}}, timeout=120000)
+        if not response.ok:
+            raise RuntimeError(response.text()[:1000])
+        response.body()  # Consume writes before any reload or navigation.
+        return page_id
+
+    def observe(req):
+        if req.method == "POST" and "/documentation-scene/" in req.url:
+            posts.append({"url": req.url, "body": req.post_data_json})
+
+    def idle():
+        page.wait_for_function("() => !document.querySelector('#documentationWorkspace.busy')", timeout=120000)
+
+    def commands():
+        return sum(1 for row in posts if row["url"].endswith("/documentation-scene/commands"))
+
+    def saved_command():
+        return page.expect_response(lambda r: r.request.method == "POST"
+                                    and r.url.endswith("/documentation-scene/commands"), timeout=120000)
+
+    def switch(kind):
+        page.locator("#documentationTypeRibbonTrigger").click()
+        page.locator("#documentationTypeRibbonOption-" + kind).click()
+        page.wait_for_function("kind => window.__compareDbg.state.documentationDocumentType === kind && !document.querySelector('#documentationWorkspace.busy')",
+                               arg=kind, timeout=120000)
+
+    def navigate(page_id):
+        for _ in range(3):
+            page.locator(f'.documentation-page-item[data-page-id="{page_id}"]').click()
+            idle()
+            page.wait_for_timeout(250)
+            if page.evaluate("() => window.__compareDbg.state.partsManualDocumentationPageId") == page_id:
+                return
+        raise RuntimeError("Rich editor page activation did not settle")
+
+    def refresh():
+        # Use the real ribbon callback without moving focus; this is the same reload
+        # the Sage completion/poll paths perform while a user is still typing.
+        with page.expect_response(lambda r: r.request.method == "GET" and r.url.endswith("/documentation-scene"), timeout=120000) as response:
+            page.locator("#documentationRefreshRibbon").evaluate("button => button.click()")
+        response.value.finished()
+        idle()
+        page.wait_for_function("() => window.__compareDbg.documentationGenerationSnapshot().visiblePageCount > 0", timeout=120000)
+
+    def open_document(kind, page_id):
+        nonlocal page
+        page = fresh_page()
+        page.on("request", observe)
+        page.goto(server.url + "/?assemblyProfile=MMLE-50D", wait_until="domcontentloaded", timeout=90000)
+        page.wait_for_function("() => window.__compareDbg?.state.partNumber === 'MMLE-50D' && window.__compareDbg.state.assyLiveScene", timeout=90000)
+        page.evaluate("() => window.__compareDbg.openDocumentationWorkflow()")
+        page.locator("#documentationWorkspace").wait_for(state="visible", timeout=120000)
+        idle()
+        if page.evaluate("() => window.__compareDbg.state.documentationDocumentType") != kind:
+            switch(kind)
+        refresh()
+        navigate(page_id)
+        report["workspaceOpens"].append({"phase": "P2a", "documentType": kind, "pageId": page_id})
+
+    def box(key=object_id):
+        return page.locator(f'#documentationPublicationSurface [data-documentation-object-id="{key}"]')
+
+    def mount(key=object_id):
+        begin_edit(box(key))
+        page.wait_for_function("() => window.DocumentationRichText?.mountedCount === 1", timeout=30000)
+        return page.locator('.documentation-rich-editor [contenteditable="true"]')
+
+    def finish(blur=False):
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/commands"), timeout=120000) as saved:
+            if blur:
+                page.locator('.documentation-rich-editor [contenteditable="true"]').evaluate("node => node.blur()")
+            else:
+                page.locator('[data-rich-action="done"]').click()
+        saved.value.finished()
+        if not saved.value.ok:
+            raise RuntimeError(saved.value.text()[:1000])
+        page.wait_for_function("() => window.DocumentationRichText.mountedCount === 0", timeout=120000)
+        idle()
+        return saved.value.json()
+
+    def screenshot(name):
+        filename = "p2a-" + name + ".png"
+        page.screenshot(path=str(output / filename), full_page=True)
+        report.setdefault("visualArtifacts", {})[name] = {"path": (output / filename).relative_to(ROOT).as_posix()}
+
+    original = "Alpha beta gamma"
+    page_id = create(spec, object_id, original)
+    open_document(spec, page_id)
+    version = (ROOT / "static/vendor/tiptap/VERSIONS.md").read_text("utf-8")
+    expected_sha = re.search(r"SHA-256 `([0-9a-f]{64})`", version).group(1)
+    exports = sorted(re.findall(r"`(\w+)`", version.split("## Exports", 1)[1].split("## Rebuild", 1)[0]))
+    bundle = ROOT / "static/vendor/tiptap/tiptap.bundle.js"
+    export_block = re.search(r"export\s*\{([^}]+)\}", bundle.read_text("ascii")).group(1)
+    file_exports = sorted(item.strip().split(" as ")[-1] for item in export_block.split(",") if item.strip())
+    browser_vendor = page.evaluate("""async () => {
+        const url = '/static/vendor/tiptap/tiptap.bundle.js?v=c36fd989775f';
+        const bytes = await (await fetch(url)).arrayBuffer();
+        const digest = await crypto.subtle.digest('SHA-256', bytes);
+        return {sha: [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2,'0')).join(''),
+            exports: Object.keys(await import(url)).sort(), ready: await DocumentationRichText.ready};
+    }""")
+    record("p2a_01_vendor_and_ready", sha(bundle) == expected_sha == browser_vendor["sha"]
+           and file_exports == exports == browser_vendor["exports"] and browser_vendor["ready"]["ok"], browser_vendor)
+    editor = mount()
+    record("p2a_02_spec_text_box_mount", page.evaluate("() => DocumentationRichText.mountedCount") == 1
+           and field(scene())["owner"] == "scene")
+    screenshot("mounted-ribbon")
+
+    # Set a real DOM range, then use a real pointer click on the ribbon.
+    editor.evaluate("""node => {
+        const text = node.querySelector('p').firstChild;
+        const range = document.createRange(); range.setStart(text, 6); range.setEnd(text, 10);
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        window.__p2aMountedElement = DocumentationRichText.active.element;
+        window.__p2aEditor = DocumentationRichText.active.editor;
+    }""")
+    page.locator('.documentation-rich-controls [data-rich-action="bold"]').click()
+    record("p2a_03_selection_ribbon", page.evaluate("""() => {
+        const c = DocumentationRichText.active;
+        const runs = c.editor.getJSON().content[0].content;
+        return c.element === window.__p2aMountedElement && c.editor === window.__p2aEditor
+            && getSelection().toString() === 'beta'
+            && runs.filter(n => n.marks?.some(m => m.type === 'bold')).map(n => n.text).join('') === 'beta';
+    }"""))
+    # A workspace reload re-renders the page and its object layer while the editor is mounted.
+    refresh()
+    record("p2a_03_reload_preserves_editor_and_selection", page.evaluate("""() =>
+        DocumentationRichText.active?.element === window.__p2aMountedElement
+        && DocumentationRichText.active?.editor === window.__p2aEditor
+        && DocumentationRichText.active.editor.state.selection.from === 7
+        && DocumentationRichText.active.editor.state.selection.to === 11"""))
+    editor = page.locator('.documentation-rich-editor [contenteditable="true"]')
+    editor.press("Control+End")
+    pasted = "\nline two\n\n  \U0001f642 e\u0301\tend  "
+    # Dispatch a clipboard event at the actual editor; the production paste handler
+    # supplies inline JSON to ProseMirror (no direct editor-content mutation).
+    editor.evaluate("""(node, text) => {
+        const data = new DataTransfer(); data.setData('text/plain', text);
+        node.dispatchEvent(new ClipboardEvent('paste', {clipboardData:data, bubbles:true, cancelable:true}));
+    }""", pasted)
+    finish(blur=True)
+    current = field(scene())
+    record("p2a_04_multiline_unicode_blur_commit", current["isRichText"]
+           and validate(current["richText"]) == current["richText"]
+           and plain_text(current["richText"]) == current["text"] == original + pasted)
+
+    editor = mount()
+    editor.press("Control+End")
+    before_ime = len(posts)
+    cdp = page.context.new_cdp_session(page)
+    try:
+        cdp.send("Input.imeSetComposition", {"text": "\u6f22", "selectionStart": 1, "selectionEnd": 1})
+        page.wait_for_function("() => DocumentationRichText.active?.composing", timeout=5000)
+        # Request save without moving native IME focus (a focus change may itself
+        # legitimately finish composition before the click event reaches Done).
+        page.evaluate('() => DocumentationRichText.active.commit()')
+        page.wait_for_timeout(250)
+        record("p2a_05_ime_no_mid_composition_commit", len(posts) == before_ime
+               and page.evaluate("() => DocumentationRichText.mountedCount") == 1)
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/commands"), timeout=120000) as composed:
+            cdp.send("Input.insertText", {"text": "\u6f22\u5b57"})
+        composed.value.finished()
+        if not composed.value.ok:
+            raise RuntimeError(composed.value.text()[:1000])
+        page.wait_for_function("() => DocumentationRichText.mountedCount === 0", timeout=120000)
+    finally:
+        cdp.detach()
+    record("p2a_05_ime_saved", field(scene())["text"] == original + pasted + "\u6f22\u5b57")
+
+    unchanged = field(scene())["richText"]
+    editor = mount()
+    count = len(posts)
+    editor.press("Control+End")
+    page.keyboard.insert_text(" canceled")
+    editor.press("Escape")
+    page.wait_for_timeout(300)
+    record("p2a_06_escape_no_command", len(posts) == count and field(scene())["richText"] == unchanged
+           and page.evaluate("() => DocumentationRichText.mountedCount") == 0)
+
+    editor = mount()
+    count = len(posts)
+    editor.press("Control+End")
+    page.keyboard.insert_text(" local undo")
+    editor.press("Control+z")
+    record("p2a_07_local_undo_only", len(posts) == count
+           and page.evaluate("() => DocumentationRichTextCore.plainText(DocumentationRichText.active.editor.getJSON())")
+           == plain_text(unchanged))
+    editor.press("Control+y")
+    record("p2a_07_local_redo_only", len(posts) == count
+           and page.evaluate("() => DocumentationRichTextCore.plainText(DocumentationRichText.active.editor.getJSON())")
+           == plain_text(unchanged) + " local undo")
+    editor.press("Control+z")
+    page.keyboard.insert_text(" committed")
+    finish()
+    committed = field(scene())["richText"]
+    for direction, expected in (("undo", unchanged), ("redo", committed)):
+        with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/" + direction), timeout=120000) as moved:
+            page.locator("#documentation" + direction.title() + "Ribbon").click()
+        moved.value.finished()
+        if not moved.value.ok:
+            raise RuntimeError(moved.value.text()[:1000])
+        idle()
+        record("p2a_07_document_" + direction, field(scene())["richText"] == expected)
+
+    editor = mount()
+    editor.press("Control+End")
+    page.keyboard.insert_text(" retained draft")
+    draft = page.evaluate("() => DocumentationRichTextCore.plainText(DocumentationRichText.active.editor.getJSON())")
+    page.evaluate("() => { window.__p2aMountedElement = DocumentationRichText.active.element; }")
+    bound = tool("read_document_pages", {"documentType": spec, "targets": [{"pageId": page_id, "targetId": object_id}]})
+    if not bound.get("ok"):
+        raise RuntimeError(repr(bound))
+    observed = bound["data"]["targets"][0]
+    newer = from_plain("Sage newer value")
+    applied = tool("apply_document_edits", {"documentId": bound["data"]["documentId"],
+        "expectedRevision": observed["revision"], "requestId": "p2a-dirty-draft", "operations": [{
+            "operation": "replace_rich_text", "targetId": observed["targetId"],
+            "expectedContentHash": observed["contentHash"], "richText": newer}]})
+    if not applied.get("ok"):
+        raise RuntimeError(repr(applied))
+    count = len(posts)
+    refresh()
+    page.locator('.documentation-rich-panel[data-conflict="true"]').wait_for(state="visible")
+    record("p2a_08_concurrent_sage_draft_kept", len(posts) == count and field(scene())["richText"] == newer
+           and page.evaluate("() => DocumentationRichText.active.element === window.__p2aMountedElement")
+           and page.evaluate("() => DocumentationRichTextCore.plainText(DocumentationRichText.active.editor.getJSON())") == draft)
+    with page.expect_response(lambda r: r.request.method == "POST" and r.url.endswith("/documentation-scene/commands"), timeout=120000) as overwritten:
+        page.locator('[data-rich-action="overwrite"]').click()
+    overwritten.value.finished()
+    if not overwritten.value.ok:
+        raise RuntimeError(overwritten.value.text()[:1000])
+    page.wait_for_function("() => DocumentationRichText.mountedCount === 0", timeout=120000)
+    record("p2a_08_explicit_overwrite", field(scene())["text"] == draft)
+
+    before_keys = scene()
+    frame = before_keys["scene"]["pages"][page_id]["documentObjects"][object_id]["frame"]
+    editor = mount()
+    count = len(posts)
+    editor.press("Control+Home")
+    for key in ("ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp", "Backspace", "Delete"):
+        editor.press(key)
+    rect = editor.bounding_box()
+    page.mouse.move(rect["x"] + 12, rect["y"] + 10)
+    page.mouse.down()
+    page.mouse.move(rect["x"] + min(110, rect["width"] - 10), rect["y"] + 10, steps=8)
+    page.mouse.up()
+    selection = page.evaluate("() => getSelection().toString()")
+    after_keys = scene()
+    record("p2a_09_keys_and_pointer_select_text", len(posts) == count and bool(selection)
+           and after_keys["scene"]["pages"][page_id]["documentObjects"][object_id]["frame"] == frame
+           and field(after_keys)["richText"] == field(before_keys)["richText"])
+    editor.press("Escape")
+
+    # A press elsewhere on the page ends editing like Done: one save, and no other object is selected
+    # (keys must never go to this editor while another object looks selected).
+    editor = mount()
+    editor.press("Control+End")
+    page.keyboard.insert_text(" pressed away")
+    pressed_draft = page.evaluate("() => DocumentationRichTextCore.plainText(DocumentationRichText.active.editor.getJSON())")
+    rect = box().bounding_box()
+    surface_rect = page.locator("#documentationPublicationSurface").bounding_box()
+    away = [rect["x"] + rect["width"] / 2,
+            min(rect["y"] + rect["height"] + 24, surface_rect["y"] + surface_rect["height"] - 4)]
+    on_page = page.evaluate("([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest('#documentationPublicationSurface'))", away)
+    count = commands()
+    with saved_command() as pressed:
+        page.mouse.click(*away)
+    pressed.value.finished()
+    page.wait_for_function("() => DocumentationRichText.mountedCount === 0", timeout=120000)
+    idle()
+    selected = page.evaluate("() => window.__compareDbg.state.partsManualDocumentationSelection?.targetId || null")
+    pressed_field = field(scene())
+    record("p2a_09_press_elsewhere_commits", on_page and pressed.value.ok and commands() == count + 1
+           and pressed_field["text"] == pressed_draft and selected in (None, object_id, pressed_field["targetId"]),
+           {"selected": selected, "point": away, "onPage": on_page})
+
+    open_document(spec, page_id)
+    record("p2a_10_formatted_canvas_after_reload", page.evaluate("() => DocumentationRichText.mountedCount") == 0
+           and box().locator("strong").all_text_contents() == ["beta"])
+    screenshot("saved-reloaded")
+    # Switch to a second real parts page for the page-disposal check if the sheet
+    # has one page; no synthetic page is injected into the renderer.
+    parts_key = "document-object-p2a-parts"
+    parts_page = create(DOC_TYPE, parts_key, "Parts proof")
+    mount().press("Control+End")
+    page.keyboard.insert_text(" saved on switch")
+    switched_draft = page.evaluate("() => DocumentationRichTextCore.plainText(DocumentationRichText.active.editor.getJSON())")
+    count = commands()
+    switch(DOC_TYPE)
+    record("p2a_11_document_switch_saves_and_disposes", page.evaluate("() => DocumentationRichText.mountedCount") == 0
+           and commands() == count + 1 and field(scene())["text"] == switched_draft)
+    refresh()
+    navigate(parts_page)
+    editor = mount(parts_key)
+    editor.press("Control+End")
+    page.keyboard.insert_text(" kept")
+    next_page = next(p["pageId"] for p in scene(DOC_TYPE)["document"]["pages"] if p["pageId"] != parts_page)
+    count = commands()
+    with saved_command() as kept:
+        page.locator(f'.documentation-page-item[data-page-id="{next_page}"]').click()
+    kept.value.finished()
+    page.wait_for_function("id => window.__compareDbg.state.partsManualDocumentationPageId === id",
+                           arg=next_page, timeout=120000)
+    idle()
+    record("p2a_11_page_switch_saves_and_disposes", kept.value.ok
+           and page.evaluate("() => DocumentationRichText.mountedCount") == 0 and commands() == count + 1
+           and field(scene(DOC_TYPE), parts_key)["text"] == "Parts proof kept")
+    navigate(parts_page)
+    editor = mount(parts_key)
+    editor.press("Control+End")
+    page.keyboard.insert_text(" edited")
+    finish()
+    record("p2a_12_parts_shared_adapter", field(scene(DOC_TYPE), parts_key)["text"] == "Parts proof kept edited"
+           and field(scene(DOC_TYPE), parts_key)["isRichText"])
+
+    # Retain the exact disposable stores; restart without the flag, in the same Chromium.
+    page = fresh_page()  # Detach old-tab observers before stopping its server.
+    server.rich_text = False
+    server.restart()
+    open_document(spec, page_id)
+    count = len(posts)
+    box().dblclick()
+    page.wait_for_timeout(300)
+    record("p2a_13_flag_off_readonly", not scene()["documentationRichText"]
+           and page.evaluate("() => DocumentationRichText.mountedCount") == 0
+           and page.locator('.documentation-rich-controls').count() == 0
+           and not box().evaluate('node => node.isContentEditable')
+           and box().locator('[contenteditable="true"]').count() == 0
+           and box().locator('strong').all_text_contents() == ["beta"] and len(posts) == count)
+    screenshot("flag-off-readonly")
+    report["p2aScenePosts"] = posts
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", required=True, choices=PHASES)
@@ -816,7 +1183,7 @@ def main():
     report = {"phase": args.phase, "assembly": ASSEMBLY, "checks": {}, "editAttempts": [], "browserErrors": [],
               "consoleErrors": [], "networkFailures": [], "httpFailures": [], "outboundRequests": [], "passed": False,
               "knownFixtureLimitations": KNOWN_FIXTURE_LIMITATIONS, "failureScreenshots": [], "workspaceOpens": []}
-    server = IsolatedDocumentationServer(output)
+    server = IsolatedDocumentationServer(output, phase=args.phase)
     playwright = browser = context = page = None
     page_handlers = {}
     probe_session = {}
@@ -884,8 +1251,8 @@ def main():
         raise RuntimeError("Inline edit did not start after three double presses")
 
     try:
-        if args.phase not in {"P1a", "P1b", "P1c"}:
-            raise RuntimeError("Only the P1a, P1b and P1c gates are implemented.")
+        if args.phase not in {"P1a", "P1b", "P1c", "P2a"}:
+            raise RuntimeError("Only the P1a, P1b, P1c and P2a gates are implemented.")
         from playwright.sync_api import sync_playwright
         server.start()
         report["isolation"] = server.isolation
@@ -974,7 +1341,9 @@ def main():
                 raise RuntimeError(f"Tool HTTP {response.status}: {response.text()[:800]}")
             return response.json()
 
-        if args.phase == "P1c":
+        if args.phase == "P2a":
+            run_p2a(page, request, server, output, report, record, begin_edit, tool, fresh_page)
+        elif args.phase == "P1c":
             run_p1c(page, request, server, output, report, record, begin_edit, tool, fresh_page)
         else:
             copied_scene_hash = sha(server.manual / "documentation-scene.json")

@@ -260,3 +260,222 @@ receipt's zip(changed, persisted) stays aligned, because both lists skip _noChan
   - add_object refuses rich content, so duplicating a rich text box is not possible yet;
   - a malformed stored envelope freezes its object, including move and delete;
   - undo refuses to restore node IDs that another field has since reused (fail closed).
+
+## P2a-2
+
+### CHANGED
+
+- Added `static/documentation_rich_text_core.js`: schema-1 normalization, explicit
+  UUID assignment and re-keying against duplicate/reserved IDs, bounded colors,
+  HTTP(S)-only links, server-sized canonical JSON checks, and lossless plain
+  conversion/projection. Limits match the server: 512 nodes, three list levels,
+  depth 12, and 24 KiB including server-owned link attributes.
+- Added `static/documentation_rich_text.js` and its versioned CSS. The adapter
+  exposes `ready`, `mount`, `dispose`, `active`, and `mountedCount`. It supports
+  B/I/U, color, H1-H3, lists, in-page link controls, local history, composition-safe
+  commit, Escape cancellation, and explicit discard/overwrite conflict choices.
+  Failed bundle imports resolve readiness with an error; plain editing remains
+  available and rich fields remain read-only. Canvas rendering uses DOM elements
+  and textContent, with fixed link attributes and navigation suppressed.
+- Updated `static/index.html` with versioned assets and narrow workspace hooks.
+  Only eligible authored objects mount. The mounted element is never detached by
+  a page render; thumbnail previews are reused while editing. Page selections
+  preserve editor focus/range; drag, resize, scene history and object deletion are
+  guarded. Page/document switches, workspace cleanup and pagehide dispose the
+  editor and listeners. Incoming workspace reloads preserve dirty drafts and
+  expose hash conflicts. Whole-object formatting remains the existing behavior
+  when no editor is mounted.
+- No server changes. The existing full read supplies every required field.
+  Ordinary command/history responses omit richTextFields, so the client follows
+  those mutations with a full read when rich editing is enabled or rich content
+  exists. A rich commit normalizes locally, rereads, compares the captured field
+  hash, captures the current scene context, posts ONE replace_rich_text through
+  the existing scene route, consumes the response, then reloads fresh metadata.
+  Overwriting a changed field requires the explicit in-page choice and another
+  fresh read. Document undo/redo use the existing scene history endpoints.
+- Added `tests/documentation_rich_text.test.cjs` for normalization, colors/links,
+  split/paste/reserved IDs, bounds, and exact whitespace/Unicode vectors.
+- Extended `tests/smoke_documentation_editor.py --phase P2a` with the requested
+  spec/parts flow, file/browser vendor checks, selection/ribbon and redraw checks,
+  multiline paste, CDP IME, cancellation, local/document undo and redo, concurrent
+  Sage writes, input isolation, formatted reload, disposal, and flag-off restart.
+  It uses one Chromium, enables the flag only for P2a, includes new CSS in the
+  sanitized snapshot, and waits for POST response bodies before subsequent work.
+  P1a/P1b/P1c flows and failure classification are unchanged.
+
+Plain paste maps each LF to an inline hardBreak in the current paragraph. CR,
+including the CR in CRLF, tabs, spaces, emoji and combining marks stay literal.
+HTML paste passes through the restricted Tiptap schema, then commit normalization.
+Unsupported colors are dropped; supported hex, integer rgb() and the bounded
+named-color set become lowercase six-digit hex.
+
+The vendor bundle, conflict module, Three importmap, server contracts, Sage pins,
+and baseline expectations are unchanged. With the flag off, neither baseline is
+expected to move.
+
+### TESTS
+
+Static checks only; no test suite or browser was run:
+
+- JavaScript syntax parsed for both new JS files, the Node test file, and all four
+  executable inline scripts in index.html.
+- Python AST parsed for the modified smoke harness.
+- Pure file inspection: vendor SHA-256 matches
+  `c36fd989775f6ed6f6884333bd05d8e4f097b25e256e1e14a42c226f7b83b301`;
+  its 24 exports match VERSIONS.md.
+- LF verified in written implementation/test files; added index.html text is
+  ASCII. `git diff --check` passed.
+
+### NOT RUN
+
+Claude runs these with the existing hidden Windows launcher and isolated inputs:
+
+```text
+node --test tests/documentation*.test.cjs
+python -m pytest -q tests/test_documentation_rich_text.py
+python -m pytest -q tests/test_documentation_transactions.py tests/test_documentation_provenance.py tests/test_documentation_change_undo.py tests/test_documentation_refresh.py tests/test_documentation_store_chokepoint.py tests/test_documentation_editor_smoke.py tests/test_documentation_conflicts_ui.py tests/test_codex_documentation_tools.py tests/test_codex_specification_sheet_tools.py tests/test_codex_readonly_pilot.py tests/test_codex_assisted_tools.py
+python tools/documentation_baseline.py --inventory
+python tools/documentation_baseline.py --local --inventory
+python tools/documentation_baseline.py --check
+python tools/documentation_baseline.py --local --check
+python tests/smoke_documentation_editor.py --phase P1a
+python tests/smoke_documentation_editor.py --phase P1b
+python tests/smoke_documentation_editor.py --phase P1c
+python tests/smoke_documentation_editor.py --phase P2a
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_documentation*.py','tests/test_parts_manual*.py','tests/test_operations_manual*.py','tests/test_specification_sheet*.py','tests/test_work_instruction*.py','tests/test_inspection_sheet*.py') for p in glob.glob(pattern)})))"
+python -c "import glob,sys,pytest; sys.exit(pytest.main(['-q']+sorted({p for pattern in ('tests/test_codex*.py','tests/test_facility*.py','tests/test_authored*.py','tests/test_sage*.py','tests/test_industrial*.py') for p in glob.glob(pattern)})))"
+```
+
+The P2a smoke will write `.runtime/de/p2a-mounted-ribbon.png`,
+`.runtime/de/p2a-saved-reloaded.png`, `.runtime/de/p2a-flag-off-readonly.png`, and
+its JSON evidence. These PNGs have not been generated here. Compare suite failures
+against the P2a-1 supervisor gate's recorded base failures.
+
+### DEVIATIONS
+
+- Named exports are consumed through a caught dynamic import so a missing bundle
+  can resolve `ready` to `{ok:false, reason}`. The pinned 3.32.0 URL is unchanged;
+  BackgroundColor is not used. A small ID attribute extension retains authored
+  IDs in Tiptap; the core explicitly assigns/re-keys them at commit, as directed.
+- Thumbnail rendering borrows the live page surface in the existing app. While
+  mounted, its prior previews are reused instead of borrowing that surface;
+  normal thumbnail regeneration resumes after disposal.
+- Full browser reload disposes via pagehide. Incoming workspace refreshes retain
+  the editor/draft, as required for concurrent writes. These are distinct cases.
+- The IME smoke uses real CDP composition/input and requests the pending commit
+  through the controller while composition is active, avoiding a button focus
+  change that could itself legitimately finish the native composition.
+
+### OPEN QUESTIONS
+
+No specification decision is outstanding. Runtime gates and PNG visual review
+remain with Claude; syntax and file checks do not establish a browser pass.
+No commit, index/history mutation, network access or package installation was made.
+
+## P2a-2 supervisor gate (Claude, 2026-11-10)
+
+Result: PASSED after supervisor fixes; committed together with this section.
+
+Codex ran this round in 39 minutes (session 01a1c5c9, static checks only). I reviewed:
+- the core helpers line by line against rich_text.py;
+- the adapter: editor configuration, static renderer, commit, conflict and composition paths;
+- every index.html hunk;
+- the smoke flow.
+- The editor configuration is right: StarterKit runs with strike, code, code block, blockquote and horizontal rule
+  off, headings limited to levels 1-3, and fixed link attributes (no open on click, no autolink).
+- The canvas renderer uses createElement/textContent only. Colors pass through the validated #rrggbb helper. Link
+  activation (click, auxclick, keyboard) is suppressed.
+- canonical() matches the server's canonical_bytes: ensure_ascii=False, sorted keys, compact separators. So the
+  24 KiB pre-check counts the same bytes the server does.
+
+### Differential check (scratch script, not committed)
+
+The client core's output was fed to the server validator. 15 vectors:
+- 13 plain strings: "", "\n", "\n\n", CRLF, a lone CR, tabs, leading, trailing and repeated spaces, emoji with a
+  combining mark and CJK, HTML-like text, U+2028/U+2029, a zero-width space;
+- 2 Tiptap getJSON() shapes: orderedList type null, null IDs, paragraph/heading textAlign null, rgb() / named / null
+  colors, a javascript: link, an Enter-split duplicate ID, a reserved ID, and a nested list in a list item.
+Results:
+- the server accepts every normalized envelope unchanged, apart from the link attributes it owns;
+- projections are equal;
+- every plain round trip is lossless, on both sides.
+
+### Supervisor fixes (Claude)
+
+Pressing elsewhere on the page ends editing.
+- In Codex's version, a press elsewhere on the page kept keyboard focus in the editor while the page's own handlers
+  selected the pressed object. Delete or typing then edited the text while another object looked selected.
+- Now a press on the page outside the editor, or on the 3D figure, saves like Done and does nothing else. The draft
+  stays open on a conflict or error.
+- Smoke check p2a_09_press_elsewhere_commits covers it: one save, and no other object is selected.
+
+Navigation saves the draft first.
+- In Codex's version, a page switch, document switch or workflow exit called dispose(), which discarded a dirty
+  draft. It also abandoned a blur save already in flight at its next disposed check, because the rail press blurs
+  first.
+- Now the controller runs one save at a time (inflight) and exposes finish(): it waits for a running save, saves a
+  dirty draft, and resolves true once the editor has closed.
+  - _documentationActivatePage awaits it.
+  - The document type switch and leaving the Documentation tab (switchTab) save first, then retry.
+  - A kept draft (conflict, error, IME composition) cancels the navigation and keeps the notice.
+- Smoke steps p2a_11_document_switch_saves_and_disposes and p2a_11_page_switch_saves_and_disposes now navigate with
+  a dirty draft and expect exactly one save before the switch. Step 12 expects "Parts proof kept edited".
+
+Smoke harness.
+- The "selection elsewhere" step pressed the spec page's header title, which is empty on that page. Playwright waited
+  30 s for it to become visible.
+- That step is removed. Re-render preservation is covered by p2a_03_reload_preserves_editor_and_selection: a
+  workspace reload re-renders the page while the editor stays mounted, with the same element, editor and selection.
+
+Two P1b-3 defects (89bd454) surfaced once this smoke reached the spec sheet's scene undo:
+- _documentationMoveHistory sent the slot store revision (expectedRevision) to every history route. The scene
+  history body forbids it (extra_forbidden), so on the spec sheet the ribbon's scene Undo/Redo always answered 422.
+  P2a-1 made spec page text objects scene-owned, so this undo now matters. Only the slot journal gets
+  expectedRevision now.
+- Three documentation lines read AGENTS[currentAgent]. AGENTS is private to the agent panel's IIFE (setupAgentPanel),
+  so each one throws "AGENTS is not defined":
+  - the failed-command status;
+  - the failed undo/redo status (seen in this smoke after the 422);
+  - the "(Edited by ...)" label for a Sage-edited value.
+  _documentationAgentName() now reads the panel's own accessors (window._getAgentConfig, window._getCurrentAgentKey).
+  The Sage-edit label names Sage's entry (DEFAULT_AGENT_KEY), not whichever agent is selected.
+
+### Numbers
+
+- Node: documentation_conflicts.test.cjs 18/18, documentation_rich_text.test.cjs 20/20.
+- Focused documentation files: 670 passed, 0 failed.
+- Differential client/server check: 15/15 (above).
+- Smokes on the final code: P2a 23/23 (twice: alone, then in the gate chain), P1a 27/27, P1b 46/46, P1c 35/35.
+- Baselines: synthetic and local unchanged (both --check exit 0). Flag off, as Codex predicted.
+- Documentation suites: 735 passed, 1 failed. The failure is the pre-existing
+  test_operations_manual_precoding_contracts.py::test_source_ids_references_and_local_hashes_are_closed, as in P2a-1.
+- Wide suites: 170 failed, 9 errors, 3851 passed, the same totals as P2a-1. Every failure is in the base set.
+
+### Visual review
+
+- p2a-mounted-ribbon.png:
+  - the editor is outlined in the text box;
+  - the ribbon format group is replaced by the rich controls (B/I/U, color, H1-H3, Bullets, Numbering, link input,
+    Link/Unlink);
+  - ribbon Undo/Redo are disabled while editing;
+  - the Done/Cancel panel shows at the bottom left.
+- p2a-saved-reloaded.png: after a full reload, with no editor mounted, the field renders "beta" in bold. Its hard
+  breaks, blank line, leading spaces, emoji, combining mark, tab, IME text and every later commit appear in order.
+- p2a-flag-off-readonly.png: with the flag off, the stored rich field renders formatted, including the draft saved
+  by the document switch. A double-press shows "This rich text field is read-only." and no editor or rich controls.
+
+### Notes for P2b and later
+
+- The object selection toolbar stays visible over a mounted editor. Its Delete is guarded (no-op), but it overlaps
+  the box; hide it while editing.
+- Rarer closes still discard an open draft: loading another machine, error cleanup, pagehide. Escape and Cancel
+  discard by design.
+- Performance (P5a):
+  - the 451 KB Tiptap bundle is imported on every app load even with the flag off; rendering does not need it, so
+    load it on the first edit;
+  - with the flag on or rich content present, every scene command and undo/redo is followed by a full documentation
+    read, because command responses omit richTextFields (about 1 s on the parts manual).
+- Pasted Windows text keeps CR before LF, as the server's from_plain does. It renders as a space and round-trips
+  exactly.
+- mailto: links are dropped at commit (server allowlist). Unsupported pasted structure, such as an ordered list
+  start outside 1-9999, shows an in-page error and keeps the draft.
